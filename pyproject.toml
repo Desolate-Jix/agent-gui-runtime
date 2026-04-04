@@ -1,0 +1,27 @@
+[project]
+name = "agent-gui-runtime"
+version = "0.1.0"
+description = "Local Windows GUI automation runtime for AI agents"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "fastapi",
+  "uvicorn[standard]",
+  "pydantic>=2,<3",
+  "pywinauto",
+  "pywin32",
+  "mss",
+  "opencv-python",
+  "numpy",
+  "paddleocr",
+  "pillow",
+  "loguru",
+  "psutil",
+]
+
+[tool.uv]
+package = false
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
