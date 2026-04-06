@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -81,6 +82,30 @@ class WindowManager:
             logger.warning("Failed to refresh bound window state: {}", exc)
 
         return self._bound_window
+
+    def focus_bound_window(self) -> BoundWindow:
+        """Bring the currently bound window to the foreground and refresh its state."""
+        self._ensure_windows_backend()
+        bound = self.get_bound_window()
+        if bound is None:
+            raise ValueError("No bound window available to focus")
+
+        logger.info("Focusing bound window: handle={}, title={}", bound.handle, bound.title)
+        try:
+            win32gui.ShowWindow(bound.handle, 9)  # type: ignore[union-attr]
+        except Exception as exc:
+            logger.warning("ShowWindow failed for handle {}: {}", bound.handle, exc)
+
+        try:
+            win32gui.SetForegroundWindow(bound.handle)  # type: ignore[union-attr]
+        except Exception as exc:
+            logger.warning("SetForegroundWindow failed for handle {}: {}", bound.handle, exc)
+
+        time.sleep(0.25)
+        refreshed = self.get_bound_window()
+        if refreshed is None:
+            raise ValueError("Bound window disappeared after focus attempt")
+        return refreshed
 
     def list_visible_windows(self) -> list[dict[str, Optional[int | str]]]:
         """Return visible top-level candidate windows for debugging and matching."""

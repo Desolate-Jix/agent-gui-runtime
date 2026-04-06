@@ -56,7 +56,9 @@ class ClickTextRequest(BaseModel):
 
     text: str = Field(min_length=1)
     roi: Optional[ROIModel] = None
+    partial_match: bool = False
     enable_validation: bool = True
+    max_retries: int = Field(default=3, ge=1, le=6)
 
 
 class WaitForSceneRequest(BaseModel):

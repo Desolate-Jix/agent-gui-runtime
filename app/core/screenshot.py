@@ -35,9 +35,7 @@ class ScreenshotService:
         """Capture a screenshot for the bound window or a sub-region."""
         self._ensure_capture_backend()
 
-        bound = window_manager.get_bound_window()
-        if bound is None:
-            raise ValueError("No bound window available for capture")
+        bound = window_manager.focus_bound_window()
 
         capture_rect = self._resolve_capture_rect(
             left=bound.rect.left,
