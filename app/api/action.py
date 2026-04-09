@@ -10,13 +10,19 @@ from typing import Any, Callable, Optional
 from fastapi import APIRouter
 from loguru import logger
 
+from app.actions.known_action_runner import run_known_action
+from app.core.action_registry import action_registry
 from app.core.input_controller import input_controller
 from app.core.ocr_engine import ocr_engine
+from app.core.state_memory import state_memory
 from app.core.template_matcher import template_matcher
 from app.core.verifier import verifier
 from app.core.window_manager import window_manager
 from app.models.request import ClickTemplateRequest, ClickTextRequest, ROIModel
 from app.models.response import APIResponse, ActionResultData, ErrorModel
+from app.schemas.action_target import ActionTarget
+from app.schemas.state import AppState
+from app.schemas.validator_profile import ValidatorProfile
 
 router = APIRouter(prefix="/action", tags=["action"])
 
@@ -26,6 +32,8 @@ CACHE_DIR = Path("logs/region-click-cache")
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 CASES_DIR = Path("logs/region-click-cases")
 CASES_DIR.mkdir(parents=True, exist_ok=True)
+STATE_RECOGNITION_DIR = Path("logs/state-recognition")
+STATE_RECOGNITION_DIR.mkdir(parents=True, exist_ok=True)
 
 
 RegionClickPanelLocator = Callable[[Any], dict[str, Any]]
@@ -223,9 +231,22 @@ def _counter_value(texts: list[str]) -> Optional[int]:
 def _evaluate_counter_result(before_numeric_texts: list[str], after_numeric_texts: list[str]) -> dict[str, Any]:
     before_val = _counter_value(before_numeric_texts)
     after_val = _counter_value(after_numeric_texts)
-    strict_success = before_val is not None and after_val is not None and after_val > before_val
-    weak_success = before_numeric_texts != after_numeric_texts
-    return {"target_counter_before": before_val, "target_counter_after": after_val, "strict_success": strict_success, "weak_success": weak_success, "counter_changed": weak_success}
+    counter_changed = before_numeric_texts != after_numeric_texts
+    strict_score = 0
+    if before_val is not None and after_val is not None and after_val > before_val:
+        strict_score += 3
+    if counter_changed:
+        strict_score += 1
+    strict_success = strict_score >= 3
+    weak_success = counter_changed
+    return {
+        "target_counter_before": before_val,
+        "target_counter_after": after_val,
+        "strict_success": strict_success,
+        "weak_success": weak_success,
+        "counter_changed": counter_changed,
+        "strict_score": strict_score,
+    }
 
 
 def _normalized_point(zone: dict[str, Any], point: dict[str, Any]) -> dict[str, float]:
@@ -255,6 +276,105 @@ def _save_region_click_case(case_name: str, payload: dict[str, Any]) -> str:
     return str(path.resolve())
 
 
+def _capture_bound_window_image(bound: Any, name_prefix: str) -> Optional[str]:
+    try:
+        result = window_manager.capture_window(save_to_logs=True)
+    except Exception:
+        return None
+    image_path = result.get("image_path")
+    if not image_path:
+        return None
+    source = Path(image_path)
+    if not source.exists():
+        return image_path
+    target = STATE_RECOGNITION_DIR / f"{name_prefix}-{source.name}"
+    try:
+        if source.resolve() != target.resolve():
+            target.write_bytes(source.read_bytes())
+        return str(target.resolve())
+    except Exception:
+        return image_path
+
+
+def _ensure_mouse_tester_state_assets(bound: Any) -> tuple[Optional[AppState], list[ActionTarget], dict[str, ValidatorProfile]]:
+    rect = _window_rect(bound)
+    bucket = _window_size_bucket(rect)
+    state_id = f"mousetester_main_{bucket}"
+
+    state = state_memory.load(state_id)
+    if state is None:
+        screenshot_path = _capture_bound_window_image(bound, "bootstrap-state")
+        stable_regions = [
+            {"name": "main_panel", "coord_space": "window", "nx": 0.16, "ny": 0.48, "nw": 0.48, "nh": 0.40}
+        ]
+        if screenshot_path:
+            from app.vision.page_fingerprint import build_page_fingerprint
+            fingerprint = build_page_fingerprint(screenshot_path, stable_regions=stable_regions, patch_prefix=state_id)
+        else:
+            from app.schemas.state import PageFingerprint
+            fingerprint = PageFingerprint(stable_regions=stable_regions)
+        state = AppState(
+            state_id=state_id,
+            app_name="MouseTesterWeb",
+            state_name="main_page",
+            window_size_bucket=bucket,
+            fingerprint=fingerprint,
+            known_action_ids=["click_mouse_tester_left_region", "click_mouse_tester_left_region_alt"],
+            tags=["mouse_tester", "main_page"],
+        )
+        state_memory.save(state)
+
+    action_specs = [
+        {
+            "action_id": "click_mouse_tester_left_region",
+            "action_name": "Click MouseTester Left Region",
+            "zone": {"mode": "panel_relative_rect", "coord_space": "panel", "nx": 0.10, "ny": 0.15, "nw": 0.35, "nh": 0.40},
+            "validator_id": "validator_mouse_tester_left_counter",
+        },
+        {
+            "action_id": "click_mouse_tester_left_region_alt",
+            "action_name": "Click MouseTester Left Region Alt",
+            "zone": {"mode": "panel_relative_rect", "coord_space": "panel", "nx": 0.18, "ny": 0.22, "nw": 0.22, "nh": 0.26},
+            "validator_id": "validator_mouse_tester_left_counter_alt",
+        },
+    ]
+
+    actions: list[ActionTarget] = []
+    validators: dict[str, ValidatorProfile] = {}
+    for spec in action_specs:
+        action = action_registry.load_action(spec["action_id"])
+        if action is None:
+            action = ActionTarget(
+                action_id=spec["action_id"],
+                state_id=state.state_id,
+                action_name=spec["action_name"],
+                target_kind="region",
+                panel_locator_profile={"mode": "window_relative_rect", "coord_space": "window", "nx": 0.16, "ny": 0.48, "nw": 0.48, "nh": 0.40},
+                zone_resolver_profile=spec["zone"],
+                point_strategy_profile={"mode": "grid", "rows": 3, "cols": 3, "inset": 0.18, "prefer_memory": True},
+                validator_profile_id=spec["validator_id"],
+            )
+            action_registry.save_action(action)
+        actions.append(action)
+
+        validator_profile = action_registry.load_validator(spec["validator_id"])
+        if validator_profile is None:
+            validator_profile = ValidatorProfile(
+                validator_profile_id=spec["validator_id"],
+                target_name="left_counter",
+                target_roi={"coord_space": "panel", "nx": 0.02, "ny": 0.55, "nw": 0.22, "nh": 0.18},
+                ocr_roi={"coord_space": "panel", "nx": 0.02, "ny": 0.55, "nw": 0.22, "nh": 0.18},
+                roi_diff_threshold=0.01,
+                strict_rule={"type": "counter_increase_or_score", "score_threshold": 4},
+                weak_rule={"type": "roi_changed_or_global_changed"},
+                bad_click_signals=[{"type": "panel_disappeared"}, {"type": "unexpected_popup"}],
+            )
+            action_registry.save_validator(validator_profile)
+        validators[spec["action_id"]] = validator_profile
+
+    return state, actions, validators
+
+
 def _run_region_click(
     *,
     case_name: str,
@@ -263,6 +383,7 @@ def _run_region_click(
     zone_resolver: RegionClickZoneResolver,
     point_strategy: RegionClickPointStrategy,
     validator: RegionClickValidator,
+    validator_profile: Optional[ValidatorProfile] = None,
     settle_ms: int = 120,
     hold_ms: int = 70,
 ) -> dict[str, Any]:
@@ -272,9 +393,28 @@ def _run_region_click(
     panel = panel_locator(bound)
     zone = zone_resolver(panel)
     points = point_strategy(zone, memory.get("successful_point_norm") if memory else None)
-    counter_roi = ROIModel(x=zone["x"], y=zone["y"], width=max(zone["width"], 220), height=max(zone["height"], 170))
+    if validator_profile and validator_profile.target_roi and validator_profile.target_roi.get("coord_space") == "panel":
+        target_roi = validator_profile.target_roi
+        counter_roi = ROIModel(
+            x=int(panel["x"] + panel["width"] * float(target_roi.get("nx", 0.0))),
+            y=int(panel["y"] + panel["height"] * float(target_roi.get("ny", 0.0))),
+            width=max(1, int(panel["width"] * float(target_roi.get("nw", 1.0)))),
+            height=max(1, int(panel["height"] * float(target_roi.get("nh", 1.0)))),
+        )
+    else:
+        counter_roi = ROIModel(x=zone["x"], y=zone["y"], width=max(zone["width"], 220), height=max(zone["height"], 170))
 
-    before_ocr = ocr_engine.ocr_region(counter_roi, save_image=True, debug=False)
+    ocr_roi = counter_roi
+    if validator_profile and validator_profile.ocr_roi and validator_profile.ocr_roi.get("coord_space") == "panel":
+        ocr_cfg = validator_profile.ocr_roi
+        ocr_roi = ROIModel(
+            x=int(panel["x"] + panel["width"] * float(ocr_cfg.get("nx", 0.0))),
+            y=int(panel["y"] + panel["height"] * float(ocr_cfg.get("ny", 0.0))),
+            width=max(1, int(panel["width"] * float(ocr_cfg.get("nw", 1.0)))),
+            height=max(1, int(panel["height"] * float(ocr_cfg.get("nh", 1.0)))),
+        )
+
+    before_ocr = ocr_engine.ocr_region(ocr_roi, save_image=True, debug=False)
     before_texts = [str(line.get("text", "")).strip() for line in (before_ocr.get("lines", []) or []) if str(line.get("text", "")).strip()]
     before_numeric_texts = _extract_numeric_texts(before_texts)
 
@@ -288,10 +428,27 @@ def _run_region_click(
         before_state = verifier.capture_pre_action_state(roi=counter_roi)
         click_result = input_controller.click_point(point["x"], point["y"], move_before_click=True, settle_ms=settle_ms, hold_ms=hold_ms)
         verification = verifier.verify_action(case_name, roi=counter_roi, before_state=before_state, click_result=click_result)
-        after_ocr = ocr_engine.ocr_region(counter_roi, save_image=True, debug=False)
+        after_ocr = ocr_engine.ocr_region(ocr_roi, save_image=True, debug=False)
         after_texts = [str(line.get("text", "")).strip() for line in (after_ocr.get("lines", []) or []) if str(line.get("text", "")).strip()]
         after_numeric_texts = _extract_numeric_texts(after_texts)
+        roi_diff_score = None
+        roi_diff_changed = None
+        before_after_diff = verification.get("diff") if isinstance(verification, dict) else None
+        if isinstance(before_after_diff, dict) and before_after_diff.get("available"):
+            regions = before_after_diff.get("regions") or []
+            total_area = max(1, counter_roi.width * counter_roi.height)
+            changed_area = sum(int(region.get("area", 0)) for region in regions)
+            roi_diff_score = round(changed_area / total_area, 4)
+            roi_diff_changed = bool(before_after_diff.get("changed"))
         counter_eval = validator(before_numeric_texts, after_numeric_texts)
+        if roi_diff_score is not None:
+            counter_eval["roi_diff_score"] = roi_diff_score
+            counter_eval["target_counter_roi_changed"] = roi_diff_changed
+            if roi_diff_score >= 0.01:
+                counter_eval["strict_score"] = int(counter_eval.get("strict_score", 0)) + 1
+                counter_eval["strict_success"] = bool(counter_eval.get("strict_score", 0) >= 3)
+            if roi_diff_changed and not counter_eval.get("weak_success"):
+                counter_eval["weak_success"] = True
         retry = {
             "attempt_index": idx,
             "point": point,
@@ -370,23 +527,64 @@ def click_mouse_tester_left_region() -> APIResponse:
     if bound is None:
         return APIResponse(success=False, message="No bound window is currently available", data=None, error=ErrorModel(code="no_bound_window", details="Bind a MouseTester window before calling /action/click_mouse_tester_left_region"))
 
-    try:
-        result = _run_region_click(
-            case_name="click_mouse_tester_left_region",
-            bound=bound,
-            panel_locator=_locate_mouse_tester_panel,
-            zone_resolver=_derive_left_button_zone,
-            point_strategy=_generate_zone_points,
-            validator=_evaluate_counter_result,
+    state_before, actions, validators = _ensure_mouse_tester_state_assets(bound)
+
+    primary_action = next((a for a in actions if a.action_id == "click_mouse_tester_left_region"), None)
+    alt_action = next((a for a in actions if a.action_id == "click_mouse_tester_left_region_alt"), None)
+
+    def execute_with_action(action_target: ActionTarget) -> dict[str, Any]:
+        zone_profile = action_target.zone_resolver_profile
+
+        def dynamic_zone(panel: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "x": int(panel["x"] + panel["width"] * float(zone_profile.get("nx", 0.0))),
+                "y": int(panel["y"] + panel["height"] * float(zone_profile.get("ny", 0.0))),
+                "width": max(1, int(panel["width"] * float(zone_profile.get("nw", 1.0)))),
+                "height": max(1, int(panel["height"] * float(zone_profile.get("nh", 1.0)))),
+                "source": action_target.action_id,
+            }
+
+        return run_known_action(
+            app_name="MouseTesterWeb",
+            state_before=state_before,
+            action_target=action_target,
+            validator_profile=validators.get(action_target.action_id),
+            capture_state_image=lambda prefix: _capture_bound_window_image(bound, prefix),
+            get_window_bucket=lambda: _window_size_bucket(_window_rect(bound)),
+            execute_action=lambda: _run_region_click(
+                case_name=action_target.action_id,
+                bound=bound,
+                panel_locator=_locate_mouse_tester_panel,
+                zone_resolver=dynamic_zone,
+                point_strategy=_generate_zone_points,
+                validator=_evaluate_counter_result,
+                validator_profile=validators.get(action_target.action_id),
+            ),
         )
+
+    try:
+        result = execute_with_action(primary_action) if primary_action else {"success": False}
+        if not result.get("success") and alt_action is not None:
+            result["fallback_attempted_action_id"] = alt_action.action_id
+            fallback_result = execute_with_action(alt_action)
+            result["fallback_result"] = {
+                "success": fallback_result.get("success"),
+                "action_target_id": fallback_result.get("action_target_id"),
+                "strict_success": fallback_result.get("strict_success"),
+                "weak_success": fallback_result.get("weak_success"),
+            }
+            if fallback_result.get("success"):
+                result = fallback_result
+                result["used_fallback_action"] = True
     except Exception as exc:
         return APIResponse(success=False, message="Region click execution failed", data=None, error=ErrorModel(code="region_click_failed", details=str(exc)))
 
     if not result["success"]:
-        return APIResponse(success=False, message="MouseTester left region click did not change the counter", data=result, error=ErrorModel(code="counter_not_changed", details="No region sample point changed the target counter"))
+        return APIResponse(success=False, message="MouseTester left region click did not change the counter", data=result, error=ErrorModel(code="counter_not_changed", details="No known action target changed the target counter; generic region_click path remains available as fallback"))
 
     data = ActionResultData(action="click_mouse_tester_left_region", result=result)
     return APIResponse(success=True, message="MouseTester left region clicked successfully", data=data.model_dump(), error=None)
+
 
 
 @router.post("/click_text", response_model=APIResponse)

@@ -22,9 +22,10 @@ It is responsible for:
 It is **not** responsible for:
 
 - natural language task planning
-- long-term memory
-- multi-step autonomous reasoning
-- acting as a full desktop agent by itself
+- becoming a full desktop agent by itself
+- unrestricted autonomous exploration of unknown software
+
+It now also includes an early **software-specific state memory layer** for known apps/pages, but that layer is still subordinate to the runtime role: it helps the execution layer recognize known states, reuse known action targets, and record transitions. It is not a general reasoning or planning system.
 
 In short:
 
@@ -32,9 +33,47 @@ In short:
 
 ---
 
-## MVP scope
+## Runtime model
 
-Current MVP goals:
+This runtime now has **two complementary execution modes**.
+
+### 1. Generic visual execution
+
+The original runtime model:
+
+- bind a window
+- capture the window or ROI
+- run OCR/template matching
+- click or verify
+- return structured results
+
+This is still the compatibility baseline.
+
+### 2. Software-specific state-aware execution (V1)
+
+A new V1 layer has been added for known software/layouts.
+
+This layer can:
+
+- recognize whether the current screen matches a known `AppState`
+- load known `ActionTarget` definitions for that state
+- prefer historically successful click strategies
+- record `TransitionRecord` and `ReplayCase` artifacts after execution
+- preserve validator-based closed-loop verification
+- fall back to existing `region_click` behavior if state-aware reuse is not enough
+
+Important V1 scope boundaries:
+
+- it does **not** do blind exploration in unknown states
+- it does **not** try to autonomously learn every clickable target in arbitrary software
+- it does **not** use LLM visual reasoning inside the runtime
+- it is intentionally conservative: unknown recognition should return `unknown`, not a forced guess
+
+---
+
+## MVP / V1 scope
+
+### Baseline runtime goals
 
 1. bind to a target window
 2. inspect runtime state
@@ -44,15 +83,24 @@ Current MVP goals:
 6. click based on template or text
 7. wait for a named scene/state
 
-For the MVP, the project is intentionally:
+### Current state-aware V1 goals
+
+1. recognize a known app state for a known software/layout
+2. load known action targets for that state
+3. prefer history-backed click reuse
+4. preserve validator closed loop
+5. record state transition experience
+6. keep generic `region_click` as fallback
+
+For the current phase, the project is intentionally:
 
 - Windows only
 - local-only HTTP API
 - vision-first
 - single-session
 - no frontend
-- no database
-- modular but small
+- file-based persistence under `logs/`
+- software-specific before software-general
 
 ---
 
@@ -74,9 +122,10 @@ For the MVP, the project is intentionally:
 
 ### Current working assumptions
 
-- only one active bound window/session is needed for the MVP
-- all GUI operations must go through this runtime
+- only one active bound window/session is needed for the MVP/V1
+- all GUI operations should go through this runtime
 - no ad-hoc scripts should bypass the runtime once APIs are in place
+- software-specific memory is file-based and local-first in the current phase
 
 ---
 
@@ -110,7 +159,7 @@ For the MVP, the project is intentionally:
 
 ## High-level architecture
 
-The MVP is organized into these layers:
+The runtime is now organized into these layers:
 
 ### 1. API layer
 Exposes local HTTP endpoints that upper-layer agents can call.
@@ -122,7 +171,7 @@ Tracks which window is currently bound and stores runtime session state.
 Captures the currently bound window or ROI.
 
 ### 4. Vision layer
-Performs template matching and OCR.
+Performs template matching, OCR, page fingerprinting, and ROI comparison.
 
 ### 5. Input / action layer
 Dispatches GUI actions such as clicks based on structured requests.
@@ -130,7 +179,10 @@ Dispatches GUI actions such as clicks based on structured requests.
 ### 6. Verification layer
 Confirms whether an action produced the expected change.
 
-This separation is intentional so the MVP can stay small while still being extensible.
+### 7. State-aware memory layer (V1)
+Stores known states, known action targets, validator profiles, replay cases, and transition history for specific software/layouts.
+
+This separation is intentional so the runtime can stay small while still being extensible.
 
 ---
 
@@ -139,9 +191,13 @@ This separation is intentional so the MVP can stay small while still being exten
 ```text
 agent-gui-runtime/
 ├─ app/
+│  ├─ actions/
+│  │  ├─ __init__.py
+│  │  └─ known_action_runner.py
 │  ├─ api/
 │  │  ├─ session.py
 │  │  ├─ state.py
+│  │  ├─ state_memory.py
 │  │  ├─ vision.py
 │  │  ├─ action.py
 │  │  └─ wait.py
@@ -152,16 +208,38 @@ agent-gui-runtime/
 │  │  ├─ ocr_engine.py
 │  │  ├─ input_controller.py
 │  │  ├─ scene_detector.py
-│  │  └─ verifier.py
+│  │  ├─ verifier.py
+│  │  ├─ state_memory.py
+│  │  ├─ state_recognizer.py
+│  │  ├─ action_registry.py
+│  │  ├─ transition_memory.py
+│  │  └─ replay_case_store.py
 │  ├─ models/
 │  │  ├─ request.py
 │  │  └─ response.py
+│  ├─ schemas/
+│  │  ├─ __init__.py
+│  │  ├─ state.py
+│  │  ├─ action_target.py
+│  │  ├─ validator_profile.py
+│  │  ├─ transition.py
+│  │  └─ replay_case.py
+│  ├─ vision/
+│  │  ├─ page_fingerprint.py
+│  │  └─ roi_diff.py
 │  └─ main.py
 ├─ configs/
 │  ├─ templates/
 │  ├─ rois/
 │  └─ scenes/
 ├─ logs/
+│  ├─ app-states/
+│  ├─ app-actions/
+│  ├─ app-transitions/
+│  ├─ replay-cases/
+│  ├─ state-recognition/
+│  ├─ region-click-cache/
+│  └─ region-click-cases/
 ├─ pyproject.toml
 └─ README.md
 ```
@@ -186,56 +264,179 @@ Design principles:
 - stable interfaces over raw scripts
 - structured JSON over unstructured console output
 - vision-first interaction model
-- small MVP before advanced abstraction
-- clear layering between perception, action, and verification
+- closed-loop verification over blind clicking
+- conservative state recognition over forced guesses
+- keep generic execution working while layering state-aware reuse on top
+
+---
+
+## Region click model
+
+The current non-text click path is no longer purely OCR-anchor driven.
+
+The runtime now supports a **region-anchored click** flow for known UI layouts:
+
+1. locate a panel
+2. resolve a target zone inside that panel
+3. generate candidate points (grid / preferred memory-backed point)
+4. dispatch click via `SendInput`
+5. observe before/after state
+6. evaluate strict / weak success
+7. cache successful click point geometry
+8. persist replay/debug case artifacts
+
+This path remains the baseline execution primitive underneath the new state-aware V1 layer.
+
+---
+
+## State-aware memory model (V1)
+
+The new V1 memory layer introduces five persisted object types.
+
+### AppState
+Represents a known screen/page/state for a specific app and window-size bucket.
+
+### ActionTarget
+Represents a known action target inside a known state.
+
+### ValidatorProfile
+Defines how a target should be verified, including target ROI, OCR ROI, and scoring rules.
+
+### TransitionRecord
+Stores a recorded transition such as:
+
+> state A + action B -> state C
+
+### ReplayCase
+Stores replay/debug artifacts for a concrete execution attempt.
+
+Persistence is currently file-based under `logs/`.
+
+---
+
+## Recognition strategy (current V1)
+
+The current recognizer is intentionally conservative.
+
+It uses a lightweight three-stage strategy:
+
+1. `window_size_bucket` filtering
+2. `thumbnail_hash` coarse matching
+3. anchor patch hit scoring
+
+If confidence is insufficient, the recognizer should return `unknown` rather than force a match.
+
+This is deliberate: a false positive state match is often worse than no match.
+
+---
+
+## Validation strategy (current V1)
+
+Validation is moving from large noisy OCR-only checks toward **local target validation**.
+
+Current direction:
+
+- separate `target_roi` from `ocr_roi`
+- run OCR only on a smaller localized ROI when configured
+- include ROI diff evidence
+- compute `strict_score` in addition to `strict_success` / `weak_success`
+
+The long-term goal is a more stable validator based on:
+
+- target ROI
+- localized OCR
+- local diff
+- structured success scoring
+
+This is especially important for noisy numeric counters such as MouseTester.
 
 ---
 
 ## Current implementation status
 
-### Already working
+### Working / verified in the current codebase
 
-- FastAPI app bootstraps correctly
+- FastAPI app imports successfully in the project `.venv`
 - routers are registered
-- Swagger UI is available at `/docs`
-- OpenAPI schema is generated
-- all current endpoints return structured JSON
-- project skeleton is stable enough for iterative development
+- `/action/click_mouse_tester_left_region` is available
+- `/state-memory/states` is available
+- `/state-memory/actions` is available
+- `/state-memory/validators` is available
+- schema + storage layer objects can be written and read back
+- state-aware action wiring exists for MouseTester
 
-### Already scaffolded
+### State-aware components already added
 
-Endpoints currently present:
+- `AppState`
+- `ActionTarget`
+- `ValidatorProfile`
+- `TransitionRecord`
+- `ReplayCase`
+- `state_memory`
+- `action_registry`
+- `transition_memory`
+- `replay_case_store`
+- `page_fingerprint`
+- `state_recognizer`
+- `known_action_runner`
+
+### MouseTester integration status
+
+The first state-aware action path has been wired into:
+
+- `POST /action/click_mouse_tester_left_region`
+
+Current behavior:
+
+- ensure known MouseTester state/action/validator assets exist
+- recognize state before action
+- run known action using region click
+- recognize state after action
+- persist replay case and transition artifacts
+- keep fallback strategy available
+
+A second alternate action target has also been added for the same known state so the V1 system can try a fallback target profile rather than only a single hardcoded region.
+
+### Not complete yet
+
+The remaining high-value work is end-to-end runtime verification with a real bound target window:
+
+1. bind real MouseTester window
+2. execute state-aware click path
+3. confirm automatic bootstrap of persisted state/action/validator files
+4. confirm transition and replay-case persistence after real execution
+5. continue strengthening validator stability
+
+---
+
+## Runtime endpoints
+
+### Core runtime endpoints
 
 - `POST /session/bind_window`
+- `GET /session/windows`
 - `GET /state`
 - `POST /vision/find_template`
 - `POST /vision/ocr_region`
 - `POST /action/click_template`
 - `POST /action/click_text`
+- `POST /action/click_mouse_tester_left_region`
 - `POST /wait/scene`
 - `GET /health`
 
-### Not implemented yet
+### State-memory inspection endpoints
 
-The current build is still an execution framework skeleton.
+- `GET /state-memory/states`
+- `GET /state-memory/actions`
+- `GET /state-memory/validators`
 
-Real logic still needs to be added for:
-
-- real window binding
-- real screenshot capture
-- template matching
-- OCR integration
-- GUI click/input dispatch
-- scene detection and waiting
-- post-action verification
+These inspection endpoints are mainly for debugging and verifying what the V1 software-specific memory layer currently knows.
 
 ---
 
 ## Development roadmap
 
 ### Phase 1 — first real capability
-
-Priority order:
 
 1. real `bind_window`
 2. real `get_state`
@@ -264,6 +465,29 @@ Milestone:
 
 > Agent can use OCR-driven interaction and basic state transitions
 
+### Phase 4 — region-anchored action reuse
+
+9. reusable `region_click`
+10. point memory cache
+11. replay/debug case persistence
+
+Milestone:
+
+> Agent can act on non-text UI targets using panel-relative geometry and closed-loop validation
+
+### Phase 5 — software-specific state-aware V1
+
+12. known `AppState` recognition
+13. known `ActionTarget` reuse
+14. `TransitionRecord` persistence
+15. `ReplayCase` persistence
+16. validator-profile-driven local verification
+17. fallback from known target profile to compatible region-click behavior
+
+Milestone:
+
+> Agent can recognize a known software state, reuse learned action targets, remember transitions, and keep action verification in the loop
+
 ---
 
 ## How to run
@@ -281,6 +505,8 @@ uv sync
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
+For cleaner single-instance debugging, a non-`--reload` run is often preferable once the code path under test is known.
+
 ### 3. Open docs
 
 - Swagger UI: <http://127.0.0.1:8000/docs>
@@ -288,11 +514,30 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
 ---
 
+## Minimal state-aware test flow
+
+A practical current test flow for MouseTester is:
+
+1. open the target app/window
+2. call `GET /session/windows`
+3. bind the correct target with `POST /session/bind_window`
+4. call `POST /action/click_mouse_tester_left_region`
+5. inspect:
+   - `GET /state-memory/states`
+   - `GET /state-memory/actions`
+   - `GET /state-memory/validators`
+6. inspect persisted artifacts under:
+   - `logs/app-states/`
+   - `logs/app-actions/`
+   - `logs/app-transitions/`
+   - `logs/replay-cases/`
+
+---
+
 ## Development notes
 
-- Keep the MVP small and working.
-- Do not over-engineer multi-session or config systems yet.
-- Prefer shipping real vertical slices over adding too many abstractions.
-- Add technical details to this README incrementally as real functionality lands.
-
-This README is expected to evolve together with the implementation.
+- Keep the runtime small and working.
+- Do not over-engineer software-general learning before state-specific reuse works.
+- Prefer verified vertical slices over speculative abstraction.
+- Preserve compatibility with the existing screenshot/OCR/region-click execution model while layering software-specific state memory on top.
+- Continue evolving this README together with the implementation.
