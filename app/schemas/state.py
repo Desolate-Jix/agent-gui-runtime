@@ -29,7 +29,7 @@ class AppState:
     app_name: str
     state_name: str
     window_size_bucket: str
-    fingerprint: PageFingerprint
+    fingerprint: Optional[PageFingerprint] = None
     panel_profiles: list[dict[str, Any]] = field(default_factory=list)
     known_action_ids: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
@@ -41,7 +41,8 @@ class AppState:
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "AppState":
         payload = dict(payload)
-        payload["fingerprint"] = PageFingerprint(**payload.get("fingerprint", {}))
+        fingerprint = payload.get("fingerprint")
+        payload["fingerprint"] = PageFingerprint(**fingerprint) if fingerprint else None
         return cls(**payload)
 
 

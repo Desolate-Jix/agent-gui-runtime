@@ -4,6 +4,23 @@ A local Windows-only GUI automation runtime for AI agents.
 
 `agent-gui-runtime` is **not** a full agent. It is an execution layer that exposes stable visual and action APIs over local HTTP so an upper-layer LLM/agent can interact with desktop applications in a more controlled way.
 
+## Maintenance workflow
+
+When code changes affect runtime behavior, API shape, architecture, or current progress, update the docs in the same work session.
+
+Expected sync targets:
+
+- `README.md`
+- `PROJECT_CONTEXT.md`
+- `RULES.md`
+- `KNOWLEDGE_BASE.md`
+- `PROJECT_SUMMARY.md`
+- `ARCHITECTURE.md`
+- `CURRENT_STATE.md`
+- `NEXT_STEPS.md`
+
+When implementing code, follow the execution loop in `skills/code-implementation-loop/SKILL.md`: make the smallest useful change, run the narrowest meaningful verification, inspect results, fix failures, and rerun until the path is verified or a real blocker remains.
+
 ---
 
 ## Project positioning
@@ -190,48 +207,36 @@ This separation is intentional so the runtime can stay small while still being e
 
 ```text
 agent-gui-runtime/
+├─ modules/
+│  ├─ ocr/
+│  ├─ click/
+│  ├─ region/
+│  └─ validation/
+├─ tests/
 ├─ app/
 │  ├─ actions/
-│  │  ├─ __init__.py
 │  │  └─ known_action_runner.py
 │  ├─ api/
 │  │  ├─ session.py
 │  │  ├─ state.py
-│  │  ├─ state_memory.py
 │  │  ├─ vision.py
-│  │  ├─ action.py
-│  │  └─ wait.py
+│  │  └─ action.py
 │  ├─ core/
 │  │  ├─ window_manager.py
 │  │  ├─ screenshot.py
-│  │  ├─ template_matcher.py
-│  │  ├─ ocr_engine.py
+│  │  ├─ ocr_service.py
 │  │  ├─ input_controller.py
-│  │  ├─ scene_detector.py
 │  │  ├─ verifier.py
-│  │  ├─ state_memory.py
-│  │  ├─ state_recognizer.py
 │  │  ├─ action_registry.py
-│  │  ├─ transition_memory.py
 │  │  └─ replay_case_store.py
 │  ├─ models/
 │  │  ├─ request.py
 │  │  └─ response.py
 │  ├─ schemas/
-│  │  ├─ __init__.py
-│  │  ├─ state.py
-│  │  ├─ action_target.py
-│  │  ├─ validator_profile.py
-│  │  ├─ transition.py
-│  │  └─ replay_case.py
 │  ├─ vision/
-│  │  ├─ page_fingerprint.py
-│  │  └─ roi_diff.py
+│  ├─ vision_protocol/
 │  └─ main.py
 ├─ configs/
-│  ├─ templates/
-│  ├─ rois/
-│  └─ scenes/
 ├─ logs/
 │  ├─ app-states/
 │  ├─ app-actions/
@@ -240,9 +245,14 @@ agent-gui-runtime/
 │  ├─ state-recognition/
 │  ├─ region-click-cache/
 │  └─ region-click-cases/
+├─ PROJECT_CONTEXT.md
+├─ RULES.md
+├─ KNOWLEDGE_BASE.md
 ├─ pyproject.toml
 └─ README.md
 ```
+
+For a detailed folder-by-folder map, feature-to-file ownership, config locations, and persistence paths, see `PROJECT_STRUCTURE.md`.
 
 ---
 
@@ -358,10 +368,11 @@ This is especially important for noisy numeric counters such as MouseTester.
 
 - FastAPI app imports successfully in the project `.venv`
 - routers are registered
-- `/action/click_mouse_tester_left_region` is available
-- `/state-memory/states` is available
-- `/state-memory/actions` is available
-- `/state-memory/validators` is available
+- `modules/` boundaries now exist for `ocr`, `click`, `region`, and `validation`
+- pytest coverage now exists for OCR matching, click geometry, region geometry, validator logic, `click_text`, and state-hint persistence
+- `/vision/ocr_region` is restored on top of a PaddleOCR-backed adapter
+- `/action/click_text` is restored with OCR matching, ROI-aware coordinate translation, and retry-based fallback
+- `/action/click_mouse_tester_left_region` remains the main action entrypoint
 - schema + storage layer objects can be written and read back
 - state-aware action wiring exists for MouseTester
 
@@ -402,10 +413,11 @@ A second alternate action target has also been added for the same known state so
 The remaining high-value work is end-to-end runtime verification with a real bound target window:
 
 1. bind real MouseTester window
-2. execute state-aware click path
+2. execute both `click_text` and state-aware region-click against a live target
 3. confirm automatic bootstrap of persisted state/action/validator files
 4. confirm transition and replay-case persistence after real execution
 5. continue strengthening validator stability
+6. replace the stub `/vision/analyze` providers with at least one real backend
 
 ---
 
@@ -416,21 +428,12 @@ The remaining high-value work is end-to-end runtime verification with a real bou
 - `POST /session/bind_window`
 - `GET /session/windows`
 - `GET /state`
-- `POST /vision/find_template`
+- `POST /state/capture_window`
 - `POST /vision/ocr_region`
-- `POST /action/click_template`
+- `POST /vision/analyze`
 - `POST /action/click_text`
 - `POST /action/click_mouse_tester_left_region`
-- `POST /wait/scene`
 - `GET /health`
-
-### State-memory inspection endpoints
-
-- `GET /state-memory/states`
-- `GET /state-memory/actions`
-- `GET /state-memory/validators`
-
-These inspection endpoints are mainly for debugging and verifying what the V1 software-specific memory layer currently knows.
 
 ---
 
@@ -448,41 +451,31 @@ Milestone:
 
 ### Phase 2 — first closed loop
 
-4. `find_template`
-5. `click_template`
+4. `ocr_region`
+5. `click_text`
 
 Milestone:
 
-> Agent can locate a stable visual target and perform a validated click
+> Agent can locate text in a target window and perform a validated click
 
-### Phase 3 — text-aware interaction
+### Phase 3 — region-aware interaction
 
-6. `ocr_region`
-7. `click_text`
-8. `wait_for_scene`
-
-Milestone:
-
-> Agent can use OCR-driven interaction and basic state transitions
-
-### Phase 4 — region-anchored action reuse
-
-9. reusable `region_click`
-10. point memory cache
-11. replay/debug case persistence
+6. reusable `region_click`
+7. point memory cache
+8. replay/debug case persistence
 
 Milestone:
 
 > Agent can act on non-text UI targets using panel-relative geometry and closed-loop validation
 
-### Phase 5 — software-specific state-aware V1
+### Phase 4 — software-specific state-aware V1
 
-12. known `AppState` recognition
-13. known `ActionTarget` reuse
-14. `TransitionRecord` persistence
-15. `ReplayCase` persistence
-16. validator-profile-driven local verification
-17. fallback from known target profile to compatible region-click behavior
+9. known `AppState` recognition
+10. known `ActionTarget` reuse
+11. `TransitionRecord` persistence
+12. `ReplayCase` persistence
+13. validator-profile-driven local verification
+14. fallback from known target profile to compatible region-click behavior
 
 Milestone:
 
@@ -521,16 +514,9 @@ A practical current test flow for MouseTester is:
 1. open the target app/window
 2. call `GET /session/windows`
 3. bind the correct target with `POST /session/bind_window`
-4. call `POST /action/click_mouse_tester_left_region`
-5. inspect:
-   - `GET /state-memory/states`
-   - `GET /state-memory/actions`
-   - `GET /state-memory/validators`
-6. inspect persisted artifacts under:
-   - `logs/app-states/`
-   - `logs/app-actions/`
-   - `logs/app-transitions/`
-   - `logs/replay-cases/`
+4. call `POST /vision/ocr_region` or `POST /action/click_text`
+5. call `POST /action/click_mouse_tester_left_region`
+6. inspect persisted artifacts under `logs/`
 
 ---
 

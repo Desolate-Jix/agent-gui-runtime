@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -66,3 +66,15 @@ class WaitForSceneRequest(BaseModel):
 
     scene_name: str = Field(min_length=1)
     timeout: float = Field(default=3.0, gt=0)
+
+
+class VisionAnalyzeRequestModel(BaseModel):
+    """Request model for unified vision analysis across local/api providers."""
+
+    image_path: str = Field(min_length=1)
+    task: str = Field(default="analyze_ui", min_length=1)
+    app_name: Optional[str] = None
+    goal: Optional[str] = None
+    state_hint: Optional[str] = None
+    provider_mode: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)

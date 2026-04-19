@@ -7,6 +7,7 @@ from typing import Any, Optional
 from loguru import logger
 
 from app.core.window_manager import window_manager
+from modules.click.geometry import resolve_window_and_screen_point
 
 WINDOWS_INPUT_AVAILABLE = False
 WINDOWS_INPUT_IMPORT_ERROR: Optional[str] = None
@@ -29,6 +30,10 @@ MOUSEEVENTF_MOVE = 0x0001
 MOUSEEVENTF_ABSOLUTE = 0x8000
 MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
+MOUSEEVENTF_RIGHTDOWN = 0x0008
+MOUSEEVENTF_RIGHTUP = 0x0010
+MOUSEEVENTF_MIDDLEDOWN = 0x0020
+MOUSEEVENTF_MIDDLEUP = 0x0040
 SM_CXSCREEN = 0
 SM_CYSCREEN = 1
 
@@ -84,17 +89,13 @@ class InputController:
 
     def mouse_down(self, button: str = "left") -> dict[str, Any]:
         self._ensure_windows_input()
-        if button != "left":
-            raise ValueError(f"Unsupported mouse button: {button}")
-        self._send_mouse_flags(MOUSEEVENTF_LEFTDOWN)
+        self._send_mouse_flags(self._button_down_flag(button))
         pos = win32api.GetCursorPos()  # type: ignore[union-attr]
         return {"button": button, "state": "down", "cursor": {"x": int(pos[0]), "y": int(pos[1])}}
 
     def mouse_up(self, button: str = "left") -> dict[str, Any]:
         self._ensure_windows_input()
-        if button != "left":
-            raise ValueError(f"Unsupported mouse button: {button}")
-        self._send_mouse_flags(MOUSEEVENTF_LEFTUP)
+        self._send_mouse_flags(self._button_up_flag(button))
         pos = win32api.GetCursorPos()  # type: ignore[union-attr]
         return {"button": button, "state": "up", "cursor": {"x": int(pos[0]), "y": int(pos[1])}}
 
@@ -103,6 +104,7 @@ class InputController:
         x: int,
         y: int,
         *,
+        button: str = "left",
         move_before_click: bool = True,
         settle_ms: int = 100,
         hold_ms: int = 60,
@@ -113,8 +115,9 @@ class InputController:
         point = self._resolve_window_and_screen_point(bound=bound, x=x, y=y)
 
         logger.info(
-            "Clicking bound window point via SendInput: handle={}, window_point=({}, {}), screen_point=({}, {}), move_first={}, settle_ms={}, hold_ms={}",
+            "Clicking bound window point via SendInput: handle={}, button={}, window_point=({}, {}), screen_point=({}, {}), move_first={}, settle_ms={}, hold_ms={}",
             bound.handle,
+            button,
             x,
             y,
             point["screen_x"],
@@ -128,7 +131,6 @@ class InputController:
         set_foreground_ok = self._focus_window(bound.handle)
         cursor_before = win32api.GetCursorPos()  # type: ignore[union-attr]
 
-        move_result = None
         if move_before_click:
             self._send_move(point["screen_x"], point["screen_y"])
             if settle_ms > 0:
@@ -141,10 +143,10 @@ class InputController:
         else:
             move_result = {"performed": False}
 
-        down_result = self.mouse_down("left")
+        down_result = self.mouse_down(button)
         if hold_ms > 0:
             time.sleep(hold_ms / 1000.0)
-        up_result = self.mouse_up("left")
+        up_result = self.mouse_up(button)
 
         cursor_after = win32api.GetCursorPos()  # type: ignore[union-attr]
         foreground_after = int(win32gui.GetForegroundWindow())  # type: ignore[union-attr]
@@ -156,6 +158,7 @@ class InputController:
             "screen_point": {"x": point["screen_x"], "y": point["screen_y"]},
             "window_handle": int(bound.handle),
             "window_title": bound.title,
+            "button": button,
             "foreground_before": foreground_before,
             "foreground_after": foreground_after,
             "set_foreground_ok": set_foreground_ok,
@@ -178,22 +181,7 @@ class InputController:
         return bound
 
     def _resolve_window_and_screen_point(self, *, bound: Any, x: int, y: int) -> dict[str, int]:
-        window_width = max(1, bound.rect.right - bound.rect.left)
-        window_height = max(1, bound.rect.bottom - bound.rect.top)
-        if x < 0 or y < 0 or x >= window_width or y >= window_height:
-            raise ValueError(
-                f"Click point is outside the bound window: point=({x}, {y}), "
-                f"window_size=({window_width}, {window_height})"
-            )
-
-        screen_x = int(bound.rect.left + x)
-        screen_y = int(bound.rect.top + y)
-        return {
-            "window_x": int(x),
-            "window_y": int(y),
-            "screen_x": screen_x,
-            "screen_y": screen_y,
-        }
+        return resolve_window_and_screen_point(bound=bound, x=x, y=y)
 
     def _focus_window(self, handle: int) -> bool:
         set_foreground_ok = False
@@ -203,6 +191,24 @@ class InputController:
         except Exception as exc:
             logger.warning("SetForegroundWindow failed for handle {}: {}", handle, exc)
         return set_foreground_ok
+
+    def _button_down_flag(self, button: str) -> int:
+        if button == "left":
+            return MOUSEEVENTF_LEFTDOWN
+        if button == "middle":
+            return MOUSEEVENTF_MIDDLEDOWN
+        if button == "right":
+            return MOUSEEVENTF_RIGHTDOWN
+        raise ValueError(f"Unsupported mouse button: {button}")
+
+    def _button_up_flag(self, button: str) -> int:
+        if button == "left":
+            return MOUSEEVENTF_LEFTUP
+        if button == "middle":
+            return MOUSEEVENTF_MIDDLEUP
+        if button == "right":
+            return MOUSEEVENTF_RIGHTUP
+        raise ValueError(f"Unsupported mouse button: {button}")
 
     def _send_move(self, screen_x: int, screen_y: int) -> None:
         screen_width = ctypes.windll.user32.GetSystemMetrics(SM_CXSCREEN)

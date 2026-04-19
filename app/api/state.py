@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.core.scene_detector import scene_detector
 from app.core.screenshot import screenshot_service
 from app.core.window_manager import window_manager
 from app.models.request import CaptureWindowRequest
@@ -13,12 +12,11 @@ router = APIRouter(tags=["state"])
 
 @router.get("/state", response_model=APIResponse)
 def get_state() -> APIResponse:
-    """Return high-level runtime state for the currently bound session."""
+    """Return runtime state for the currently bound session without legacy scene detection."""
     bound = window_manager.get_bound_window()
-    scene = scene_detector.detect_scene()
 
     if bound is None:
-        data = StateData(bound=False, is_active=False, scene_name=scene.get("scene_name"))
+        data = StateData(bound=False, is_active=False, scene_name=None)
     else:
         data = StateData(
             bound=True,
@@ -33,7 +31,7 @@ def get_state() -> APIResponse:
                 bottom=bound.rect.bottom,
             ),
             is_active=bound.is_active,
-            scene_name=scene.get("scene_name"),
+            scene_name=None,
         )
 
     return APIResponse(success=True, message="State retrieved", data=data.model_dump(), error=None)

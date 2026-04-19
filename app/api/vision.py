@@ -1,41 +1,77 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter
 
-from app.core.ocr_engine import ocr_engine
-from app.core.template_matcher import template_matcher
-from app.models.request import FindTemplateRequest, OCRRegionRequest
+from app.core.ocr_service import ocr_service
+from app.core.screenshot import screenshot_service
+from app.models.request import VisionAnalyzeRequestModel
 from app.models.response import APIResponse, ErrorModel, VisionResultData
+from app.models.request import OCRRegionRequest
+from app.vision.factory import VisionProviderFactory
+from app.vision.normalizer import normalizer
+from app.vision.schemas import VisionAnalyzeRequest
 
 router = APIRouter(prefix="/vision", tags=["vision"])
 
 
-@router.post("/find_template", response_model=APIResponse)
-def find_template(request: FindTemplateRequest) -> APIResponse:
-    """Find a configured template within the current bound window."""
-    result = template_matcher.find_template(request.name, request.roi)
-    data = VisionResultData(result=result)
-    return APIResponse(success=True, message="Template search completed", data=data.model_dump(), error=None)
-
-
 @router.post("/ocr_region", response_model=APIResponse)
 def ocr_region(request: OCRRegionRequest) -> APIResponse:
-    """Run OCR on the provided region of interest."""
     try:
-        result = ocr_engine.ocr_region(request.roi, save_image=request.save_image, debug=request.debug)
-        data = VisionResultData(result=result)
+        capture = screenshot_service.capture_window(roi=request.roi, save_image=True)
+        result = ocr_service.scan_image(capture["image_path"])
+        result.metadata.update(
+            {
+                "roi": capture.get("roi"),
+                "roi_adjusted": capture.get("roi_adjusted"),
+                "window_size": capture.get("window_size"),
+                "capture_saved_for_ocr": True,
+            }
+        )
+        data = VisionResultData(result=result.to_dict())
         return APIResponse(success=True, message="OCR completed", data=data.model_dump(), error=None)
-    except ValueError as exc:
+    except Exception as exc:
         return APIResponse(
             success=False,
             message="OCR failed",
             data=None,
             error=ErrorModel(code="ocr_failed", details=str(exc)),
         )
-    except RuntimeError as exc:
+
+
+@router.post("/analyze", response_model=APIResponse)
+def analyze_vision(request: VisionAnalyzeRequestModel) -> APIResponse:
+    image_path = Path(request.image_path)
+    if not image_path.exists():
         return APIResponse(
             success=False,
-            message="OCR backend unavailable",
+            message="Image path not found",
             data=None,
-            error=ErrorModel(code="ocr_backend_unavailable", details=str(exc)),
+            error=ErrorModel(code="image_not_found", details=str(image_path)),
+        )
+
+    try:
+        config = VisionProviderFactory.load_config()
+        provider = VisionProviderFactory.create(mode=request.provider_mode, config=config)
+        response = provider.analyze(
+            VisionAnalyzeRequest(
+                image_path=str(image_path),
+                task=request.task,
+                app_name=request.app_name,
+                goal=request.goal,
+                state_hint=request.state_hint,
+                provider_mode=request.provider_mode,
+                metadata=request.metadata,
+            )
+        )
+        normalized = normalizer.normalize(response.to_dict(), response.provider)
+        data = VisionResultData(result=normalized.to_dict())
+        return APIResponse(success=True, message="Vision analysis completed", data=data.model_dump(), error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Vision analysis failed",
+            data=None,
+            error=ErrorModel(code="vision_analyze_failed", details=str(exc)),
         )

@@ -20,3 +20,8 @@ logs/*.json
 *.bmp
 .DS_Store
 Thumbs.db
+PROJECT_SUMMARY.md
+ARCHITECTURE.md
+CURRENT_STATE.md
+NEXT_STEPS.md
+OPENCLAW_RECOVERY.md

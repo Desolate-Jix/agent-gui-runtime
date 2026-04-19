@@ -1,0 +1,16 @@
+{
+  "vision": {
+    "mode": "local",
+    "fallback_mode": "api",
+    "timeout_seconds": 30,
+    "local": {
+      "model_name": "local_stub",
+      "endpoint": null
+    },
+    "api": {
+      "provider": "api_stub",
+      "model": "api_stub",
+      "endpoint": null
+    }
+  }
+}

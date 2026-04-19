@@ -5,7 +5,6 @@ from typing import Any, Callable, Optional
 from uuid import uuid4
 
 from app.core.replay_case_store import replay_case_store
-from app.core.state_recognizer import state_recognizer
 from app.core.transition_memory import transition_memory
 from app.schemas.action_target import ActionTarget
 from app.schemas.replay_case import ReplayCase
@@ -30,21 +29,24 @@ def run_known_action(
     get_window_bucket: BucketCallable,
 ) -> dict[str, Any]:
     before_image_path = capture_state_image("before-state")
-    recognition_before = state_recognizer.recognize(before_image_path, get_window_bucket()).to_dict() if before_image_path else {
-        "matched": False,
-        "state_id": None,
-        "confidence": 0.0,
-        "reason": {"capture": "missing"},
-    }
-
     result = execute_action()
-
     after_image_path = capture_state_image("after-state")
-    recognition_after = state_recognizer.recognize(after_image_path, get_window_bucket()).to_dict() if after_image_path else {
-        "matched": False,
-        "state_id": None,
-        "confidence": 0.0,
-        "reason": {"capture": "missing"},
+
+    recognition_before = {
+        "matched": state_before is not None,
+        "state_id": state_before.state_id if state_before else None,
+        "confidence": 1.0 if state_before else 0.0,
+        "reason": {"source": "state_hint" if state_before else "missing"},
+        "image_path": before_image_path,
+        "window_bucket": get_window_bucket(),
+    }
+    recognition_after = {
+        "matched": bool(result.get("success")),
+        "state_id": state_before.state_id if state_before else None,
+        "confidence": 0.85 if result.get("success") else 0.25,
+        "reason": {"source": "action_result"},
+        "image_path": after_image_path,
+        "window_bucket": get_window_bucket(),
     }
 
     success_type = "miss"
@@ -61,7 +63,7 @@ def run_known_action(
         app_name=app_name,
         state_before_id=state_before.state_id if state_before else None,
         action_id=action_target.action_id if action_target else "unknown_action",
-        click_point=result.get("successful_point") or {},
+        click_point=result.get("selected_point") or result.get("successful_point") or {},
         artifacts_before={"image_path": before_image_path, "state_recognition": recognition_before},
         artifacts_after={"image_path": after_image_path, "state_recognition": recognition_after},
         validator_result={
