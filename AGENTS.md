@@ -33,6 +33,11 @@ At minimum, review and update the relevant files:
 - `NEXT_STEPS.md`
 - `OPENCLAW_RECOVERY.md` when recovered OpenClaw history or migration notes change
 
+For bilingual design docs, keep both language versions in sync in the same work session:
+
+- `RUNTIME_STATE_GRAPH.md`
+- `RUNTIME_STATE_GRAPH.zh-CN.md`
+
 Update only the files impacted by the change, but do not leave `README.md` stale when public behavior changed.
 
 ## Definition Of Done

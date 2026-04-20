@@ -1,4 +1,4 @@
-# agent-gui-runtime
+﻿# agent-gui-runtime
 
 A local Windows-only GUI automation runtime for AI agents.
 
@@ -150,27 +150,27 @@ For the current phase, the project is intentionally:
 
 ### Core framework
 
-- **FastAPI** — local HTTP API service
-- **Pydantic v2** — structured request/response models
-- **Uvicorn** — ASGI server
-- **loguru** — runtime logging
+- **FastAPI** â€” local HTTP API service
+- **Pydantic v2** â€” structured request/response models
+- **Uvicorn** â€” ASGI server
+- **loguru** â€” runtime logging
 
 ### Windows GUI automation
 
-- **pywinauto** — window discovery and control primitives
-- **pywin32** — lower-level Windows API integration
+- **pywinauto** â€” window discovery and control primitives
+- **pywin32** â€” lower-level Windows API integration
 
 ### Vision and image processing
 
-- **mss** — screenshot capture
-- **opencv-python** — template matching and image utilities
-- **numpy** — image array operations
-- **Pillow** — image helpers and conversions
-- **PaddleOCR** — OCR engine for text recognition
+- **mss** â€” screenshot capture
+- **opencv-python** â€” template matching and image utilities
+- **numpy** â€” image array operations
+- **Pillow** â€” image helpers and conversions
+- **PaddleOCR** â€” OCR engine for text recognition
 
 ### Tooling
 
-- **uv** — virtual environment and dependency management
+- **uv** â€” virtual environment and dependency management
 
 ---
 
@@ -207,52 +207,61 @@ This separation is intentional so the runtime can stay small while still being e
 
 ```text
 agent-gui-runtime/
-├─ modules/
-│  ├─ ocr/
-│  ├─ click/
-│  ├─ region/
-│  └─ validation/
-├─ tests/
-├─ app/
-│  ├─ actions/
-│  │  └─ known_action_runner.py
-│  ├─ api/
-│  │  ├─ session.py
-│  │  ├─ state.py
-│  │  ├─ vision.py
-│  │  └─ action.py
-│  ├─ core/
-│  │  ├─ window_manager.py
-│  │  ├─ screenshot.py
-│  │  ├─ ocr_service.py
-│  │  ├─ input_controller.py
-│  │  ├─ verifier.py
-│  │  ├─ action_registry.py
-│  │  └─ replay_case_store.py
-│  ├─ models/
-│  │  ├─ request.py
-│  │  └─ response.py
-│  ├─ schemas/
-│  ├─ vision/
-│  ├─ vision_protocol/
-│  └─ main.py
-├─ configs/
-├─ logs/
-│  ├─ app-states/
-│  ├─ app-actions/
-│  ├─ app-transitions/
-│  ├─ replay-cases/
-│  ├─ state-recognition/
-│  ├─ region-click-cache/
-│  └─ region-click-cases/
-├─ PROJECT_CONTEXT.md
-├─ RULES.md
-├─ KNOWLEDGE_BASE.md
-├─ pyproject.toml
-└─ README.md
+â”œâ”€ modules/
+â”‚  â”œâ”€ ocr/
+â”‚  â”œâ”€ click/
+â”‚  â”œâ”€ region/
+â”‚  â””â”€ validation/
+â”œâ”€ tests/
+â”œâ”€ app/
+â”‚  â”œâ”€ actions/
+â”‚  â”‚  â””â”€ known_action_runner.py
+â”‚  â”œâ”€ api/
+â”‚  â”‚  â”œâ”€ session.py
+â”‚  â”‚  â”œâ”€ state.py
+â”‚  â”‚  â”œâ”€ vision.py
+â”‚  â”‚  â””â”€ action.py
+â”‚  â”œâ”€ core/
+â”‚  â”‚  â”œâ”€ window_manager.py
+â”‚  â”‚  â”œâ”€ screenshot.py
+â”‚  â”‚  â”œâ”€ ocr_service.py
+â”‚  â”‚  â”œâ”€ input_controller.py
+â”‚  â”‚  â”œâ”€ verifier.py
+â”‚  â”‚  â”œâ”€ action_registry.py
+â”‚  â”‚  â””â”€ replay_case_store.py
+â”‚  â”œâ”€ models/
+â”‚  â”‚  â”œâ”€ request.py
+â”‚  â”‚  â””â”€ response.py
+â”‚  â”œâ”€ schemas/
+â”‚  â”œâ”€ vision/
+â”‚  â”œâ”€ vision_protocol/
+â”‚  â””â”€ main.py
+â”œâ”€ configs/
+â”œâ”€ logs/
+â”‚  â”œâ”€ app-states/
+â”‚  â”œâ”€ app-actions/
+â”‚  â”œâ”€ app-transitions/
+â”‚  â”œâ”€ replay-cases/
+â”‚  â”œâ”€ state-recognition/
+â”‚  â”œâ”€ region-click-cache/
+â”‚  â””â”€ region-click-cases/
+â”œâ”€ PROJECT_CONTEXT.md
+â”œâ”€ RULES.md
+â”œâ”€ KNOWLEDGE_BASE.md
+â”œâ”€ pyproject.toml
+â””â”€ README.md
 ```
 
 For a detailed folder-by-folder map, feature-to-file ownership, config locations, and persistence paths, see `PROJECT_STRUCTURE.md`.
+
+For the detailed runtime logic covering state graph growth, target patch persistence, field definitions, and runtime reuse, see:
+
+- English: `RUNTIME_STATE_GRAPH.md`
+- Chinese: `RUNTIME_STATE_GRAPH.zh-CN.md`
+
+These two files should be kept in sync.
+
+
 
 ---
 
@@ -439,7 +448,7 @@ The remaining high-value work is end-to-end runtime verification with a real bou
 
 ## Development roadmap
 
-### Phase 1 — first real capability
+### Phase 1 â€” first real capability
 
 1. real `bind_window`
 2. real `get_state`
@@ -449,7 +458,7 @@ Milestone:
 
 > Agent -> bind_window -> capture_window -> can see the target window
 
-### Phase 2 — first closed loop
+### Phase 2 â€” first closed loop
 
 4. `ocr_region`
 5. `click_text`
@@ -458,7 +467,7 @@ Milestone:
 
 > Agent can locate text in a target window and perform a validated click
 
-### Phase 3 — region-aware interaction
+### Phase 3 â€” region-aware interaction
 
 6. reusable `region_click`
 7. point memory cache
@@ -468,7 +477,7 @@ Milestone:
 
 > Agent can act on non-text UI targets using panel-relative geometry and closed-loop validation
 
-### Phase 4 — software-specific state-aware V1
+### Phase 4 â€” software-specific state-aware V1
 
 9. known `AppState` recognition
 10. known `ActionTarget` reuse
@@ -527,3 +536,5 @@ A practical current test flow for MouseTester is:
 - Prefer verified vertical slices over speculative abstraction.
 - Preserve compatibility with the existing screenshot/OCR/region-click execution model while layering software-specific state memory on top.
 - Continue evolving this README together with the implementation.
+
+
