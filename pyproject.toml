@@ -14,6 +14,7 @@ dependencies = [
   "opencv-python",
   "numpy",
   "paddleocr",
+  "rapidocr-onnxruntime",
   "pillow",
   "loguru",
   "psutil",

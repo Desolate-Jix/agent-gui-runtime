@@ -3,15 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter
+from PIL import Image
 
 from app.core.ocr_service import ocr_service
 from app.core.screenshot import screenshot_service
 from app.models.request import VisionAnalyzeRequestModel
 from app.models.response import APIResponse, ErrorModel, VisionResultData
 from app.models.request import OCRRegionRequest
+from app.vision.artifacts import save_region_artifacts
 from app.vision.factory import VisionProviderFactory
 from app.vision.normalizer import normalizer
-from app.vision.schemas import VisionAnalyzeRequest
+from app.vision.schemas import ImageSize, VisionAnalyzeRequest
 
 router = APIRouter(prefix="/vision", tags=["vision"])
 
@@ -66,6 +68,10 @@ def analyze_vision(request: VisionAnalyzeRequestModel) -> APIResponse:
             )
         )
         normalized = normalizer.normalize(response.to_dict(), response.provider)
+        if normalized.image_size is None:
+            with Image.open(image_path) as image:
+                normalized.image_size = ImageSize(width=image.width, height=image.height)
+        normalized.artifacts = save_region_artifacts(image_path, normalized)
         data = VisionResultData(result=normalized.to_dict())
         return APIResponse(success=True, message="Vision analysis completed", data=data.model_dump(), error=None)
     except Exception as exc:

@@ -166,7 +166,7 @@ For the current phase, the project is intentionally:
 - **opencv-python** â€” template matching and image utilities
 - **numpy** â€” image array operations
 - **Pillow** â€” image helpers and conversions
-- **PaddleOCR** â€” OCR engine for text recognition
+- **RapidOCR + PaddleOCR fallback** â€” OCR backends for text recognition
 
 ### Tooling
 
@@ -188,7 +188,7 @@ Tracks which window is currently bound and stores runtime session state.
 Captures the currently bound window or ROI.
 
 ### 4. Vision layer
-Performs template matching, OCR, page fingerprinting, and ROI comparison.
+Performs template matching, OCR, page fingerprinting, ROI comparison, and normalized screenshot-region analysis for local learning.
 
 ### 5. Input / action layer
 Dispatches GUI actions such as clicks based on structured requests.
@@ -287,6 +287,143 @@ Design principles:
 - conservative state recognition over forced guesses
 - keep generic execution working while layering state-aware reuse on top
 
+## Vision region contract
+
+`POST /vision/analyze` now centers on a standard region contract named `vision_regions_v1`.
+
+The goal of this contract is to let an upper-layer model return screen understanding in a format that can be matched by the local runtime and later reused by the local learning layer.
+
+Key rules:
+
+- the response includes the screenshot resolution in `image_size`
+- every semantic region is defined by a diagonal:
+  - top-left `(x1, y1)`
+  - bottom-right `(x2, y2)`
+- the runtime computes normalized diagonal coordinates so matching can survive resolution changes
+- every region should include:
+  - visible content description
+  - OCR text and text lines
+  - likely destination/page/panel transition after interaction
+  - deterministic `layout_key`, `content_key`, and `match_key`
+
+The prompt template that enforces this output format now lives in `app/vision/prompting.py`.
+
+After `/vision/analyze` normalizes the response, the runtime now also persists local region artifacts under `logs/vision-regions/`:
+
+- one full annotated screenshot with region boxes
+- one crop per region
+- one annotated crop per region
+- one `regions.json` manifest that maps `region_id`, `bbox`, `match_key`, and saved file paths
+
+---
+
+## Page structure contract
+
+The long-term consumer of learned screenshot knowledge should not be the raw `regions` list directly.
+
+Instead, the intended decision flow is:
+
+1. capture a screenshot
+2. analyze it into `vision_regions_v1`
+3. persist image evidence and region artifacts locally
+4. build a higher-level `page_structure`
+5. give that `page_structure` to the upper-layer agent
+6. let the agent choose the next action based on page semantics rather than raw OCR or raw coordinates
+
+The design intent is:
+
+- `vision_regions_v1`
+  - detailed learning layer
+  - used for screenshot grounding, cropping, annotation, OCR text retention, and region matching
+- `page_structure_v1`
+  - decision layer for the agent
+  - used to describe sections, available elements, likely destinations, and recommended next actions
+
+The runtime should therefore separate:
+
+- learning output
+  - image evidence
+  - region coordinates
+  - OCR text
+  - `match_key`
+  - saved crops / annotations
+- agent-facing structure
+  - `page_id`
+  - `page_name`
+  - `screen_summary`
+  - `sections[]`
+  - `elements[]`
+  - `destination_page_id`
+  - `expected_result`
+  - `priority`
+  - `recommended_action_id`
+
+In other words:
+
+> learn first, then summarize the page, then let the agent decide
+
+The agent should not be forced to infer the next step from raw region geometry alone.
+
+### Target page structure shape
+
+The current intended page-structure output is:
+
+```json
+{
+  "page_id": "mousetester_home_zh",
+  "page_name": "MouseTester Home",
+  "page_type": "home",
+  "screen_summary": "Home page with top navigation, hero copy, and primary call-to-action buttons.",
+  "resolution": {
+    "width": 1089,
+    "height": 668
+  },
+  "sections": [
+    {
+      "section_id": "top_nav",
+      "name": "Top Navigation",
+      "role": "navigation",
+      "match_key": "1b19abd52db7543c:a21c455c77231003",
+      "importance": 0.8,
+      "elements": [
+        {
+          "element_id": "nav_features",
+          "name": "Features",
+          "action_type": "click",
+          "expected_result": "Navigate to the features page",
+          "destination_page_id": "features_page",
+          "confidence": 0.91
+        }
+      ]
+    },
+    {
+      "section_id": "hero_actions",
+      "name": "Primary Actions",
+      "role": "primary_action",
+      "importance": 1.0,
+      "elements": [
+        {
+          "element_id": "start_mouse_test",
+          "name": "Start Mouse Test",
+          "action_type": "click",
+          "expected_result": "Open the interactive mouse test page",
+          "destination_page_id": "mouse_test_page",
+          "confidence": 0.98,
+          "priority": 1
+        }
+      ]
+    }
+  ],
+  "recommended_action_id": "start_mouse_test"
+}
+```
+
+Current status:
+
+- `vision_regions_v1` is implemented
+- region artifact persistence is implemented
+- `page_structure_v1` is a documented target contract and should be built on top of learned regions next
+
 ---
 
 ## Region click model
@@ -379,9 +516,10 @@ This is especially important for noisy numeric counters such as MouseTester.
 - routers are registered
 - `modules/` boundaries now exist for `ocr`, `click`, `region`, and `validation`
 - pytest coverage now exists for OCR matching, click geometry, region geometry, validator logic, `click_text`, and state-hint persistence
-- `/vision/ocr_region` is restored on top of a PaddleOCR-backed adapter
+- `/vision/ocr_region` is restored on top of a RapidOCR-first adapter with PaddleOCR fallback
 - `/action/click_text` is restored with OCR matching, ROI-aware coordinate translation, and retry-based fallback
 - `/action/click_mouse_tester_left_region` remains the main action entrypoint
+- `/vision/analyze` now normalizes provider output into `vision_regions_v1` with diagonal coordinates and stable region match keys
 - schema + storage layer objects can be written and read back
 - state-aware action wiring exists for MouseTester
 
@@ -426,7 +564,7 @@ The remaining high-value work is end-to-end runtime verification with a real bou
 3. confirm automatic bootstrap of persisted state/action/validator files
 4. confirm transition and replay-case persistence after real execution
 5. continue strengthening validator stability
-6. replace the stub `/vision/analyze` providers with at least one real backend
+6. replace the stub `/vision/analyze` providers with at least one real backend that emits `vision_regions_v1`
 
 ---
 

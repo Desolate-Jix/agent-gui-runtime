@@ -93,8 +93,10 @@ Use it when you need to answer:
   - `POST /vision/ocr_region`
   - `POST /vision/analyze`
   - responsibility:
-    - OCR a bound-window ROI through PaddleOCR
+    - OCR a bound-window ROI through the OCR adapter
     - run provider-based vision analysis through the `app/vision/` abstraction
+    - normalize learned regions
+    - persist annotated screenshots and per-region crops for later page-structure building
 
 - `app/api/action.py`
   - `POST /action/click_text`
@@ -115,7 +117,8 @@ Use it when you need to answer:
   - writes `capture-*.png` files to `logs/`
 
 - `app/core/ocr_service.py`
-  - lazy PaddleOCR adapter
+  - lazy OCR adapter
+  - RapidOCR first, PaddleOCR fallback
   - converts raw OCR output into `modules.ocr` contracts
 
 - `app/core/input_controller.py`
@@ -192,12 +195,20 @@ Key files:
   - normalizes provider output into a stable schema
 - `schemas.py`
   - dataclasses for provider I/O
+- `prompting.py`
+  - model-facing prompt contract for `vision_regions_v1`
+- `region_standard.py`
+  - deterministic coordinate normalization and region match-key helpers
+- `artifacts.py`
+  - writes full annotated screenshots, per-region crops, per-region annotated crops, and `regions.json`
 
 Current status:
 
 - structure exists
 - `/vision/analyze` can call into it
 - providers are still stub implementations
+- learned region artifacts are persisted locally under `logs/vision-regions/`
+- the next intended layer is a page-structure builder that summarizes learned regions for the agent
 
 ### Vision execution protocol
 
@@ -379,7 +390,27 @@ Current test coverage:
 - route: `app/api/vision.py`
 - provider loading: `app/vision/factory.py`
 - provider impls: `app/vision/local_provider.py`, `app/vision/api_provider.py`
+- learned region artifacts: `app/vision/artifacts.py`
 - protocol handling: `app/vision_protocol/`
+
+### planned page structure
+
+- source inputs:
+  - normalized `vision_regions_v1`
+  - saved region artifacts
+  - historical `match_key` reuse
+- intended output:
+  - `page_id`
+  - `page_name`
+  - `screen_summary`
+  - `sections[]`
+  - `elements[]`
+  - `destination_page_id`
+  - `expected_result`
+  - `priority`
+  - `recommended_action_id`
+
+This layer is not yet implemented in code, but it is now the intended agent-facing structure.
 
 ## Active Vs Legacy
 
