@@ -7,6 +7,10 @@ from typing import Any, Optional
 
 from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_PADDLEX_CACHE = PROJECT_ROOT / ".paddlex"
+DEFAULT_PADDLE_HOME = PROJECT_ROOT / ".paddle-home"
+
 
 class OCRService:
     """Run OCR lazily so the runtime can still import without the backend installed."""
@@ -70,28 +74,44 @@ class OCRService:
         if self._paddle_engine is not None:
             return self._paddle_engine
 
+        DEFAULT_PADDLE_HOME.mkdir(parents=True, exist_ok=True)
+        os.environ.setdefault("PADDLE_PDX_CACHE_HOME", str(DEFAULT_PADDLEX_CACHE))
         os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
 
+        original_home = os.environ.get("HOME")
+        original_userprofile = os.environ.get("USERPROFILE")
+        os.environ["HOME"] = str(DEFAULT_PADDLE_HOME)
+        os.environ["USERPROFILE"] = str(DEFAULT_PADDLE_HOME)
         try:
-            from paddleocr import PaddleOCR
-        except Exception as exc:  # pragma: no cover - depends on local install/runtime
-            self._engine_import_error = str(exc)
-            raise RuntimeError(f"PaddleOCR backend is unavailable: {exc}") from exc
+            try:
+                from paddleocr import PaddleOCR
+            except Exception as exc:  # pragma: no cover - depends on local install/runtime
+                self._engine_import_error = str(exc)
+                raise RuntimeError(f"PaddleOCR backend is unavailable: {exc}") from exc
 
-        init_signature = inspect.signature(PaddleOCR.__init__)
-        kwargs: dict[str, Any] = {}
-        if "lang" in init_signature.parameters:
-            # Chinese model handles mixed Chinese/English UI text more reliably for this runtime.
-            kwargs["lang"] = "ch"
-        if "use_angle_cls" in init_signature.parameters:
-            kwargs["use_angle_cls"] = False
-        if "show_log" in init_signature.parameters:
-            kwargs["show_log"] = False
-        for option_name in ("use_doc_orientation_classify", "use_doc_unwarping", "use_textline_orientation"):
-            if option_name in init_signature.parameters:
-                kwargs[option_name] = False
+            init_signature = inspect.signature(PaddleOCR.__init__)
+            kwargs: dict[str, Any] = {}
+            if "lang" in init_signature.parameters:
+                # Chinese model handles mixed Chinese/English UI text more reliably for this runtime.
+                kwargs["lang"] = "ch"
+            if "use_angle_cls" in init_signature.parameters:
+                kwargs["use_angle_cls"] = False
+            if "show_log" in init_signature.parameters:
+                kwargs["show_log"] = False
+            for option_name in ("use_doc_orientation_classify", "use_doc_unwarping", "use_textline_orientation"):
+                if option_name in init_signature.parameters:
+                    kwargs[option_name] = False
 
-        self._paddle_engine = PaddleOCR(**kwargs)
+            self._paddle_engine = PaddleOCR(**kwargs)
+        finally:
+            if original_home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = original_home
+            if original_userprofile is None:
+                os.environ.pop("USERPROFILE", None)
+            else:
+                os.environ["USERPROFILE"] = original_userprofile
         return self._paddle_engine
 
     def _parse_matches(self, raw_result: Any) -> list[OCRTextMatch]:

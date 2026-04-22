@@ -167,6 +167,7 @@ For the current phase, the project is intentionally:
 - **numpy** â€” image array operations
 - **Pillow** â€” image helpers and conversions
 - **RapidOCR + PaddleOCR fallback** â€” OCR backends for text recognition
+- **paddlepaddle 3.2.2** â€” PaddleOCR runtime pinned to avoid known CPU inference issues in newer 3.3.x builds
 
 ### Tooling
 
@@ -637,6 +638,15 @@ Milestone:
 ```bash
 uv venv
 uv sync
+```
+
+PaddleOCR stores its warmed model cache under the local `.paddlex/` directory by default, and Paddle's own runtime cache is redirected to `.paddle-home/` during OCR initialization. The first PaddleOCR run may download the detection and recognition models; later runs reuse the cached files.
+
+For a quick dependency and OCR smoke check:
+
+```powershell
+$env:PYTHONPATH="."
+uv run pytest
 ```
 
 ### 2. Start the server

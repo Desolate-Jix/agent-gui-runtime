@@ -18,6 +18,7 @@ dependencies = [
   "pillow",
   "loguru",
   "psutil",
+  "paddlepaddle==3.2.2",
 ]
 
 [tool.uv]
