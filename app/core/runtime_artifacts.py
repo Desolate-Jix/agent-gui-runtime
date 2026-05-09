@@ -14,8 +14,9 @@ ARTIFACTS_DIR = Path("artifacts")
 SCREENSHOTS_DIR = ARTIFACTS_DIR / "screenshots"
 VERIFICATION_DIR = ARTIFACTS_DIR / "verification"
 REVIEW_OVERLAYS_DIR = ARTIFACTS_DIR / "review-overlays"
+RECOGNITION_CROPS_DIR = ARTIFACTS_DIR / "recognition-crops"
 
-for path in (LOGS_DIR, TRACES_DIR, ARTIFACTS_DIR, SCREENSHOTS_DIR, VERIFICATION_DIR, REVIEW_OVERLAYS_DIR):
+for path in (LOGS_DIR, TRACES_DIR, ARTIFACTS_DIR, SCREENSHOTS_DIR, VERIFICATION_DIR, REVIEW_OVERLAYS_DIR, RECOGNITION_CROPS_DIR):
     path.mkdir(parents=True, exist_ok=True)
 
 
@@ -88,6 +89,11 @@ def build_verification_image_path(*, action_name: str, suffix: str = "diff") -> 
 def build_review_overlay_path(*, name_hint: Optional[str] = None, suffix: str = "review-overlay") -> Path:
     parts = [slugify(name_hint, fallback="trace"), slugify(suffix, fallback="overlay"), timestamp_label()]
     return REVIEW_OVERLAYS_DIR / ("__".join(parts) + ".png")
+
+
+def build_recognition_crop_path(*, name_hint: Optional[str] = None, candidate_id: Optional[str] = None) -> Path:
+    parts = [slugify(name_hint, fallback="recognition"), slugify(candidate_id, fallback="candidate"), timestamp_label()]
+    return RECOGNITION_CROPS_DIR / ("__".join(parts) + ".png")
 
 
 def write_trace(*, category: str, operation: str, payload: dict[str, Any], name_hint: Optional[str] = None) -> str:

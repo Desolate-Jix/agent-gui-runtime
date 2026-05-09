@@ -1,0 +1,202 @@
+from __future__ import annotations
+
+from app.page_structure.schemas import InteractionPolicy, PageElement, VerificationHints
+from app.recognition import (
+    CandidateRankResult,
+    LocalGroundingCandidateResult,
+    LocalGroundingResult,
+    RecognitionCandidate,
+    ScoreBreakdown,
+    decide_pre_click,
+)
+from app.vision.schemas import BBox
+
+
+def _candidate(
+    *,
+    candidate_id: str = "candidate_element_start",
+    score: float = 0.8,
+    text_similarity: float = 1.0,
+    allowed: bool = True,
+    ad_risk: float = 0.0,
+    zone_type: str = "test_module",
+    refined_bbox: dict[str, int] | None = None,
+) -> RecognitionCandidate:
+    element = PageElement(
+        element_id="element_start",
+        label="Start detection",
+        role="button",
+        interaction_type="click",
+        description="Start detection button",
+        text="Start detection",
+        bbox=BBox(x=100, y=80, w=140, h=80),
+        semantic_bbox=BBox(x=100, y=80, w=140, h=80),
+        click_point={"x": 170, "y": 120},
+        click_strategy="semantic_bbox_center",
+        possible_destinations=[],
+        verification_hints=VerificationHints(expected_changes=["content_change"], target_scope="local"),
+        interaction_policy=InteractionPolicy(allowed=allowed, zone_type=zone_type, priority="high", ad_risk=ad_risk),
+        fusion_confidence=0.9,
+        coordinate_confidence="high",
+        memory_key="memory:start",
+        sources=["test"],
+    )
+    return RecognitionCandidate(
+        candidate_id=candidate_id,
+        rank=1,
+        element_id=element.element_id,
+        label=element.label,
+        role=element.role,
+        text=element.text,
+        score=score,
+        eligible=allowed,
+        reasons=[],
+        score_breakdown=ScoreBreakdown(text_similarity=text_similarity),
+        element=element,
+        refined_bbox=refined_bbox,
+        bbox_refine_reason="test_refined_bbox" if refined_bbox else None,
+    )
+
+
+def _rank_result(candidate: RecognitionCandidate, *, margin: float | None = 0.2) -> CandidateRankResult:
+    return CandidateRankResult(
+        goal="click start detection",
+        candidates=[candidate],
+        recommended_candidate_id=candidate.candidate_id,
+        margin_to_second=margin,
+    )
+
+
+def _grounding(
+    *,
+    candidate_id: str = "candidate_element_start",
+    matched_text: str = "Start detection",
+    point: dict[str, int] | None = None,
+    status: str = "grounded",
+) -> LocalGroundingResult:
+    return LocalGroundingResult(
+        goal="click start detection",
+        results=[
+            LocalGroundingCandidateResult(
+                candidate_id=candidate_id,
+                element_id="element_start",
+                status=status,
+                crop_path="crop.png",
+                crop_bbox={"x": 80, "y": 60, "width": 180, "height": 120},
+                refined_click_point=point or {"x": 170, "y": 120},
+                coordinate_source="local_ocr_text_center",
+                confidence=0.9,
+                matched_text=matched_text,
+                matched_text_bbox={"x": 40, "y": 40, "width": 80, "height": 16},
+            )
+        ],
+    )
+
+
+def test_pre_click_decision_allows_grounded_matching_candidate() -> None:
+    candidate = _candidate()
+
+    result = decide_pre_click(
+        goal="click start detection",
+        candidates=_rank_result(candidate),
+        grounding=_grounding(),
+    )
+
+    assert result.contract_version == "pre_click_decision_v1"
+    assert result.allowed is True
+    assert result.selected_candidate_id == "candidate_element_start"
+    assert result.selected_click_point == {"x": 170, "y": 120}
+    assert "pre_click_candidate_allowed" in result.reasons
+
+
+def test_pre_click_decision_rejects_local_ocr_text_mismatch() -> None:
+    candidate = _candidate()
+
+    result = decide_pre_click(
+        goal="click start detection",
+        candidates=_rank_result(candidate),
+        grounding=_grounding(matched_text="A☆"),
+    )
+
+    assert result.allowed is False
+    assert "local_ocr_text_mismatch" in result.candidate_decisions[0].reasons
+
+
+def test_pre_click_decision_rejects_candidate_that_matches_local_ocr_but_not_goal() -> None:
+    candidate = _candidate(text_similarity=0.4)
+
+    result = decide_pre_click(
+        goal="click start detection",
+        candidates=_rank_result(candidate),
+        grounding=_grounding(matched_text="Start detection"),
+    )
+
+    assert result.allowed is False
+    assert "candidate_goal_text_mismatch" in result.candidate_decisions[0].reasons
+
+
+def test_pre_click_decision_rejects_refined_point_outside_candidate_bbox() -> None:
+    candidate = _candidate()
+
+    result = decide_pre_click(
+        goal="click start detection",
+        candidates=_rank_result(candidate),
+        grounding=_grounding(point={"x": 20, "y": 20}),
+    )
+
+    assert result.allowed is False
+    assert "refined_point_outside_candidate_bbox" in result.candidate_decisions[0].reasons
+
+
+def test_pre_click_decision_uses_refined_bbox_when_available() -> None:
+    candidate = _candidate(refined_bbox={"x": 130, "y": 94, "w": 60, "h": 24})
+
+    result = decide_pre_click(
+        goal="click start detection",
+        candidates=_rank_result(candidate),
+        grounding=_grounding(point={"x": 230, "y": 150}),
+    )
+
+    assert result.allowed is False
+    assert "refined_point_outside_candidate_bbox" in result.candidate_decisions[0].reasons
+
+
+def test_pre_click_decision_rejects_ad_like_candidate() -> None:
+    candidate = _candidate(allowed=False, ad_risk=0.9, zone_type="ad_candidate")
+
+    result = decide_pre_click(
+        goal="download cpu-z",
+        candidates=_rank_result(candidate),
+        grounding=_grounding(matched_text="Download CPU-Z"),
+    )
+
+    assert result.allowed is False
+    assert "ad_like_candidate" in result.candidate_decisions[0].reasons
+
+
+def test_pre_click_decision_removes_passed_reason_when_margin_later_rejects() -> None:
+    top = _candidate(candidate_id="candidate_top", score=0.8)
+    second = _candidate(candidate_id="candidate_second", score=0.79)
+    rank_result = CandidateRankResult(
+        goal="click start detection",
+        candidates=[top, second],
+        recommended_candidate_id=top.candidate_id,
+        margin_to_second=0.01,
+    )
+    grounding = LocalGroundingResult(
+        goal="click start detection",
+        results=[
+            _grounding(candidate_id="candidate_top").results[0],
+            _grounding(candidate_id="candidate_second").results[0],
+        ],
+    )
+
+    result = decide_pre_click(
+        goal="click start detection",
+        candidates=rank_result,
+        grounding=grounding,
+    )
+
+    assert result.allowed is False
+    assert "top_candidate_margin_too_small" in result.candidate_decisions[0].reasons
+    assert "pre_click_checks_passed" not in result.candidate_decisions[0].reasons

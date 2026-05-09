@@ -8,10 +8,17 @@ from PIL import Image
 from app.core.ocr_service import ocr_service
 from app.core.runtime_artifacts import write_trace
 from app.core.screenshot import screenshot_service
-from app.models.request import VisionAnalyzeRequestModel, VisionReviewOverlayRequestModel
+from app.models.request import (
+    VisionAnalyzeRequestModel,
+    VisionRecognitionPlanOverlayRequestModel,
+    VisionRecognitionPlanRequestModel,
+    VisionReviewOverlayRequestModel,
+)
 from app.models.response import APIResponse, ErrorModel, VisionResultData
 from app.models.request import OCRRegionRequest
 from app.page_structure import build_page_structure
+from app.recognition import CandidateRankRequest, LocalGroundingRequest, decide_pre_click, rank_candidates, run_local_grounding
+from app.recognition.plan_overlay import render_recognition_plan_overlay
 from app.vision.artifacts import save_region_artifacts
 from app.vision.factory import VisionProviderFactory
 from app.vision.layer_trace import (
@@ -226,6 +233,128 @@ def page_structure(request: VisionAnalyzeRequestModel) -> APIResponse:
             message="Page structure failed",
             data={"trace_path": trace_path},
             error=ErrorModel(code="page_structure_failed", details=str(exc)),
+        )
+
+
+@router.post("/recognition_plan", response_model=APIResponse)
+def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
+    image_path = Path(request.image_path)
+    if not image_path.exists():
+        return APIResponse(
+            success=False,
+            message="Image path not found",
+            data=None,
+            error=ErrorModel(code="image_not_found", details=str(image_path)),
+        )
+
+    try:
+        config = VisionProviderFactory.load_config()
+        provider = VisionProviderFactory.create(mode=request.provider_mode, config=config)
+        response = provider.analyze(
+            VisionAnalyzeRequest(
+                image_path=str(image_path),
+                task=request.task,
+                app_name=request.app_name,
+                goal=request.goal,
+                state_hint=request.state_hint,
+                provider_mode=request.provider_mode,
+                metadata=request.metadata,
+            )
+        )
+        response, ocr_result, refine_options = _maybe_refine_with_ocr(response, request=request, image_path=image_path)
+        normalized = normalizer.normalize(response.to_dict(), response.provider)
+        if normalized.image_size is None:
+            with Image.open(image_path) as image:
+                normalized.image_size = ImageSize(width=image.width, height=image.height)
+        if ocr_result is None:
+            ocr_result = ocr_service.scan_image(str(image_path))
+        structure = build_page_structure(normalized, ocr_result)
+        goal = request.goal or request.task
+        candidate_result = rank_candidates(
+            CandidateRankRequest(
+                goal=goal,
+                page_structure=structure,
+                top_k=request.top_k,
+                state_hint=request.state_hint,
+            )
+        )
+        narrow_search_result = run_local_grounding(
+            LocalGroundingRequest(
+                image_path=str(image_path),
+                goal=goal,
+                candidates=candidate_result.candidates,
+                ocr_scan=ocr_service.scan_image,
+                app_name=request.app_name,
+            )
+        )
+        pre_click_decision = decide_pre_click(
+            goal=goal,
+            candidates=candidate_result,
+            grounding=narrow_search_result,
+        )
+        recommended = candidate_result.candidates[0].to_dict() if candidate_result.candidates else None
+        result_payload = {
+            "contract_version": "recognition_plan_v1",
+            "image_path": str(image_path),
+            "goal": goal,
+            "top_k": request.top_k,
+            "parse_result": {
+                "vision_regions": normalized.to_dict(),
+                "ocr_result": ocr_result.to_dict(),
+                "page_structure": structure.to_dict(),
+            },
+            "candidate_result": candidate_result.to_dict(),
+            "narrow_search_result": narrow_search_result.to_dict(),
+            "pre_click_decision": pre_click_decision.to_dict(),
+            "verification_plan": {
+                "status": "planned_not_executed",
+                "pre_click_checks": [
+                    "top_1_margin_to_second",
+                    "candidate_policy_allowed",
+                    "candidate_not_ad_like",
+                    "click_point_inside_candidate_bbox",
+                ],
+                "post_click_checks": [
+                    "ocr_change",
+                    "content_change",
+                    "focus_or_state_change",
+                ],
+            },
+            "recommended_target": recommended,
+            "execution_path": {
+                **_vision_execution_path(
+                    requested_mode=request.provider_mode or str((config.get("vision") or {}).get("mode") or "local"),
+                    response_provider=response.provider,
+                    raw_response=response.raw_response,
+                    page_structure_generated=True,
+                    ocr_region_refine_used=refine_options.enabled,
+                ),
+                "candidate_rank_used": True,
+                "narrow_search_used": True,
+                "pre_click_decision_used": True,
+                "action_executed": False,
+            },
+        }
+        result_payload["trace_path"] = write_trace(
+            category="vision",
+            operation="recognition_plan",
+            payload={"success": True, "request": request.model_dump(), "result": result_payload},
+            name_hint=request.app_name or image_path.stem,
+        )
+        data = VisionResultData(result=result_payload)
+        return APIResponse(success=True, message="Recognition plan completed", data=data.model_dump(), error=None)
+    except Exception as exc:
+        trace_path = write_trace(
+            category="vision",
+            operation="recognition_plan",
+            payload={"success": False, "request": request.model_dump(), "error": str(exc)},
+            name_hint=request.app_name or image_path.stem,
+        )
+        return APIResponse(
+            success=False,
+            message="Recognition plan failed",
+            data={"trace_path": trace_path},
+            error=ErrorModel(code="recognition_plan_failed", details=str(exc)),
         )
 
 
@@ -454,4 +583,46 @@ def render_review_overlay_route(request: VisionReviewOverlayRequestModel) -> API
             message="Review overlay failed",
             data={"trace_path": trace_out},
             error=ErrorModel(code="render_review_overlay_failed", details=str(exc)),
+        )
+
+
+@router.post("/render_recognition_plan_overlay", response_model=APIResponse)
+def render_recognition_plan_overlay_route(request: VisionRecognitionPlanOverlayRequestModel) -> APIResponse:
+    trace_path = Path(request.trace_path)
+    if not trace_path.exists():
+        return APIResponse(
+            success=False,
+            message="Trace path not found",
+            data=None,
+            error=ErrorModel(code="trace_not_found", details=str(trace_path)),
+        )
+
+    try:
+        overlay = render_recognition_plan_overlay(
+            trace_path=trace_path,
+            include_rejected=request.include_rejected,
+            include_points=request.include_points,
+            label_candidates=request.label_candidates,
+            label_reasons=request.label_reasons,
+        )
+        overlay["trace_path"] = write_trace(
+            category="vision",
+            operation="render_recognition_plan_overlay",
+            payload={"success": True, "request": request.model_dump(), "result": overlay},
+            name_hint=trace_path.stem,
+        )
+        data = VisionResultData(result=overlay)
+        return APIResponse(success=True, message="Recognition plan overlay rendered", data=data.model_dump(), error=None)
+    except Exception as exc:
+        trace_out = write_trace(
+            category="vision",
+            operation="render_recognition_plan_overlay",
+            payload={"success": False, "request": request.model_dump(), "error": str(exc)},
+            name_hint=trace_path.stem,
+        )
+        return APIResponse(
+            success=False,
+            message="Recognition plan overlay failed",
+            data={"trace_path": trace_out},
+            error=ErrorModel(code="render_recognition_plan_overlay_failed", details=str(exc)),
         )

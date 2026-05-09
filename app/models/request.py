@@ -80,6 +80,12 @@ class VisionAnalyzeRequestModel(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class VisionRecognitionPlanRequestModel(VisionAnalyzeRequestModel):
+    """Request model for no-click staged recognition planning."""
+
+    top_k: int = Field(default=5, ge=1, le=20)
+
+
 class VisionReviewOverlayRequestModel(BaseModel):
     """Request model for drawing human-review overlays from a saved vision trace."""
 
@@ -89,3 +95,13 @@ class VisionReviewOverlayRequestModel(BaseModel):
     include_ocr: bool = True
     label_regions: bool = True
     label_ocr: bool = False
+
+
+class VisionRecognitionPlanOverlayRequestModel(BaseModel):
+    """Request model for drawing recognition-plan review overlays."""
+
+    trace_path: str = Field(min_length=1)
+    include_rejected: bool = True
+    include_points: bool = True
+    label_candidates: bool = True
+    label_reasons: bool = True

@@ -106,3 +106,54 @@ def test_build_page_structure_marks_ad_like_action_as_blocked() -> None:
     assert download["interaction_policy"]["priority"] == "blocked"
     assert result["learning_summary"]["blocked_element_count"] == 1
     assert result["learning_summary"]["ad_like_element_ids"] == [download["element_id"]]
+
+
+def test_build_page_structure_does_not_bind_far_duplicate_short_texts() -> None:
+    vision = VisionAnalyzeResponse(
+        provider="local",
+        image_size=ImageSize(width=1500, height=900),
+        screen_summary="mouse tester",
+        state_guess="test_page",
+        regions=[_region("region_double_click", "C E Click here", "button", 980, 500, 120, 90)],
+    )
+    ocr = OCRResult(
+        image_path="screen.png",
+        metadata={"engine": "rapidocr_onnxruntime"},
+        matches=[
+            OCRTextMatch(text="C", score=0.93, bbox=OCRBoundingBox(x=56, y=52, width=18, height=16)),
+            OCRTextMatch(text="E", score=0.81, bbox=OCRBoundingBox(x=1282, y=104, width=46, height=25)),
+            OCRTextMatch(text="Click here", score=0.99, bbox=OCRBoundingBox(x=1008, y=532, width=70, height=17)),
+        ],
+    )
+
+    structure = build_page_structure(vision, ocr)
+    result = structure.to_dict()
+
+    element = result["elements"][0]
+    assert element["text"] == "Click here"
+    assert element["source_text_ids"] == ["text_3"]
+    assert element["bbox"] == {"x": 1008, "y": 532, "w": 70, "h": 17}
+
+
+def test_build_page_structure_rejects_far_ambiguous_short_text_binding() -> None:
+    vision = VisionAnalyzeResponse(
+        provider="local",
+        image_size=ImageSize(width=1500, height=900),
+        screen_summary="mouse tester",
+        state_guess="test_page",
+        regions=[_region("region_icon", "C E", "button", 980, 500, 120, 90)],
+    )
+    ocr = OCRResult(
+        image_path="screen.png",
+        metadata={"engine": "rapidocr_onnxruntime"},
+        matches=[OCRTextMatch(text="C", score=0.93, bbox=OCRBoundingBox(x=56, y=52, width=18, height=16))],
+    )
+
+    structure = build_page_structure(vision, ocr)
+    result = structure.to_dict()
+
+    element = result["elements"][0]
+    assert element["text"] == "C E"
+    assert element["source_text_ids"] == []
+    assert element["bbox"] == {"x": 980, "y": 500, "w": 120, "h": 90}
+    assert result["links"][0]["relation"] == "semantic_only"

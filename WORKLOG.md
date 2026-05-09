@@ -1,5 +1,46 @@
 # WORKLOG
 
+## 2026-05-09
+
+### Summary
+
+This session turned the recognition-design work into a verified no-click MouseTester recognition MVP:
+
+- `POST /vision/recognition_plan` now runs parse -> candidate ranking -> local grounding -> pre-click decision
+- `POST /vision/render_recognition_plan_overlay` produces review images for recognition plans
+- candidate ranking can add a goal-specific OCR `refined_bbox`
+- local grounding crops refined candidate ROIs and maps matched OCR text centers back to full-screen coordinates
+- pre-click decision now rejects goal-mismatched candidates even if local OCR matches the candidate itself
+
+### Accuracy fixes
+
+- Page-structure fusion now rejects far ambiguous OCR bindings, especially short repeated text fragments.
+- Additional bound OCR text is clustered around the best local OCR anchor instead of unioning distant same-label fragments.
+- Candidate bbox refinement prefers OCR text that matches the current goal before falling back to all bound source text.
+- Pre-click verification now requires candidate-goal text similarity, not only local OCR text match.
+
+### Latest real evidence
+
+- Goal: `点击此处测试`
+- Trace: `logs/traces/vision/20260509-191124-406879__recognition-plan__mousetesterweb.json`
+- Overlay: `artifacts/review-overlays/20260509-191124-406879-recognition-plan-mousetesterweb__recognition-plan-overlay__20260509-191124-668878.png`
+- Result: top candidate was the double-click test card, `refined_bbox` narrowed to the target text line, local OCR matched `点击此处测试`, and pre-click verification allowed the action.
+- Actual click: not executed.
+
+### Validation completed
+
+- Full test suite passed:
+  - `61 passed in 0.76s`
+- Real route smoke passed:
+  - `POST /vision/recognition_plan`
+  - `POST /vision/render_recognition_plan_overlay`
+
+### Remaining follow-up
+
+- Attach a controlled execution endpoint only after `pre_click_decision_v1` allows the candidate.
+- Add post-click verification and retry policy before broadening beyond MouseTester.
+- Build a small screenshot evaluation set for candidate accuracy and click-point hit rate.
+
 ## 2026-04-21
 
 ### Summary

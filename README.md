@@ -11,6 +11,9 @@ When code changes affect runtime behavior, API shape, architecture, or current p
 Expected sync targets in this repo:
 
 - `README.md`
+- `PROJECT_SUMMARY.md`
+- `CURRENT_STATE.md`
+- `NEXT_STEPS.md`
 - `PROJECT_STRUCTURE.md`
 - `PROJECT_CONTEXT.md`
 - `RULES.md`
@@ -118,6 +121,45 @@ For the current phase, the project is intentionally:
 - no frontend
 - file-based persistence under `logs/` and `artifacts/`
 - software-specific before software-general
+
+---
+
+## Current Progress Snapshot
+
+Last updated: 2026-05-09.
+
+The project has moved from raw full-page visual coordinates toward an inspectable staged recognition MVP:
+
+`screenshot -> vision_regions_v1 + OCR -> page_structure_v1 -> candidate_rank_v1 -> narrow_search_v1 -> pre_click_decision_v1`
+
+Current verified status:
+
+- Local Qwen3-VL-style vision endpoint is reachable through the OpenAI-compatible local provider.
+- `POST /vision/recognition_plan` runs the full no-click recognition plan.
+- `POST /vision/render_recognition_plan_overlay` produces human-review overlays for candidate boxes, OCR-refined boxes, local OCR matches, and refined click points.
+- `page_structure_v1` now guards against far/short OCR text binding so repeated fragments such as single-letter labels do not inflate element boxes.
+- Candidate ranking preserves original element geometry and adds optional `refined_bbox` from goal-matching OCR text when that evidence is tighter.
+- Local grounding crops the refined candidate ROI, reruns OCR, and maps the matched text center back to full-screen coordinates.
+- Pre-click verification rejects blocked, ad-like, goal-mismatched, locally mismatched, ambiguous-margin, or out-of-bounds candidates before any action execution is attached.
+
+Latest real MouseTester evidence:
+
+- Trace: `logs/traces/vision/20260509-191124-406879__recognition-plan__mousetesterweb.json`
+- Overlay: `artifacts/review-overlays/20260509-191124-406879-recognition-plan-mousetesterweb__recognition-plan-overlay__20260509-191124-668878.png`
+- Target goal: `点击此处测试`
+- Top candidate: double-click test card with `text_similarity=0.9`
+- `refined_bbox`: narrowed to the goal text line through `goal_text_ids_union:1`
+- Local OCR matched text: `点击此处测试`
+- Pre-click decision: allowed, no click executed
+- Test suite: `61 passed`
+
+Current limitation:
+
+- The system has a verified no-click recognition plan, not a production click loop. Real action dispatch should be attached only after post-click verification and retry policy are measurable.
+
+Primary next step:
+
+- Add the first execution endpoint on top of `recognition_plan`, but keep it gated by `pre_click_decision_v1` and a post-click verifier.
 
 ---
 
@@ -236,6 +278,7 @@ agent-gui-runtime/
 |-- configs/
 |   `-- vision.json
 |-- artifacts/
+|   |-- recognition-crops/
 |   |-- screenshots/
 |   |-- verification/
 |   `-- vision-regions/
@@ -299,6 +342,7 @@ Design principles:
 For action and vision routes, runtime evidence now follows this split:
 
 - image artifacts such as screenshots, pre/post captures, verification diffs, and vision region crops go under `artifacts/`
+- local recognition candidate crops go under `artifacts/recognition-crops/`
 - human review overlays such as red region boxes and blue OCR boxes go under `artifacts/review-overlays/`
 - text logs and structured JSON traces go under `logs/`
 
@@ -543,11 +587,15 @@ It reads a `vision_layer_trace_v1` JSON file, redraws region boxes and OCR boxes
 Use `region_layer = "vision_provider_raw"` when checking the visual model's raw returned regions.
 Use `region_layer = "vision_regions_refined_v1"` when checking the OCR-assisted experiment output.
 
+To visually audit a staged recognition plan, call `POST /vision/render_recognition_plan_overlay`.
+It reads a `recognition_plan_v1` trace, redraws ranked candidates, OCR-refined candidate boxes, pre-click allow/reject state, local OCR matches, and refined click points on the original screenshot.
+
 Current status:
 
 - `vision_regions_v1` is implemented
 - region artifact persistence is implemented
 - `page_structure_v1` is implemented as deterministic fusion over normalized Qwen regions and OCR boxes
+- `page_structure_v1` uses stricter OCR binding guards for far/short text so repeated UI fragments such as single-letter labels do not inflate executable element boxes
 - `page_structure_v1` now includes rule-based interaction learning that marks test modules, navigation controls, and ad-like action candidates
 
 ### Recommended recognition flow
@@ -577,7 +625,12 @@ The project design now treats this as the planned MVP direction:
 - then rerun local grounding on cropped ROIs
 - only attach real click execution after verification is measurable
 
-The first candidate-ranking contract is now available internally as `candidate_rank_v1` under `app/recognition/`.
+The first candidate-ranking contract is available internally as `candidate_rank_v1` under `app/recognition/`.
+The no-click planning endpoint is now available as `POST /vision/recognition_plan`.
+It returns `recognition_plan_v1` with `parse_result`, `candidate_result`, `narrow_search_result`, `pre_click_decision`, `verification_plan`, and `recommended_target`.
+Candidate ranking now preserves the original fused element bbox and may add `refined_bbox` when the element is tied to OCR `source_text_ids` and the OCR union produces a tighter box; when possible, refinement first uses the source OCR text that matches the current goal instead of unioning every line in the card. This lets review compare model/fusion geometry against OCR evidence without overwriting either layer.
+The first local search contract is available as `narrow_search_v1`; it crops the candidate `refined_bbox` when available, otherwise the original element bbox, runs local OCR on each crop, and maps matching local text centers back to full-image coordinates.
+The first pre-click verifier contract is available as `pre_click_decision_v1`; it rejects weak, blocked, ad-like, goal-mismatched, locally mismatched, or out-of-bounds candidates before any click is allowed, and uses `refined_bbox` for the bounds check when present.
 
 See [PROJECT_STRUCTURE.md](./PROJECT_STRUCTURE.md) for the concrete MVP module plan and endpoint outline.
 
@@ -739,8 +792,10 @@ The remaining high-value work is end-to-end runtime verification with a real bou
 - `POST /vision/ocr_region`
 - `POST /vision/analyze`
 - `POST /vision/page_structure`
+- `POST /vision/recognition_plan`
 - `POST /vision/layer_trace`
 - `POST /vision/render_review_overlay`
+- `POST /vision/render_recognition_plan_overlay`
 - `POST /action/click_text`
 - `POST /action/click_mouse_tester_left_region`
 - `GET /health`

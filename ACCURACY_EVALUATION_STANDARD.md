@@ -248,6 +248,8 @@ Current candidate contract:
 - `RecognitionCandidate`
 - `ScoreBreakdown`
 - contract version: `candidate_rank_v1`
+- no-click route: `POST /vision/recognition_plan`
+- planning response version: `recognition_plan_v1`
 
 Minimum evidence per candidate:
 
@@ -256,6 +258,10 @@ Minimum evidence per candidate:
 - eligibility
 - reasons
 - source element id
+- original element bbox
+- optional OCR-derived `refined_bbox` only when it is tighter than the original bbox
+- whether `refined_bbox` came from goal-matching OCR text or all bound source text
+- bbox refinement reason
 
 ### Narrow search checks
 
@@ -263,11 +269,51 @@ Minimum evidence per candidate:
 - click-point-inside-target rate
 - cross-card drift rate
 
+Current narrow-search contract:
+
+- `LocalGroundingRequest`
+- `LocalGroundingResult`
+- `LocalGroundingCandidateResult`
+- contract version: `narrow_search_v1`
+- current baseline: crop top candidates using `refined_bbox` when available, run local OCR, map matched local OCR text center back to full-image coordinates
+
+Minimum evidence per grounded candidate:
+
+- crop path
+- crop bbox in full-image coordinates
+- matched local OCR text
+- local OCR bbox
+- refined full-image click point
+- fallback reason when no match is found
+
 ### Verify checks
 
 - true-success acceptance rate
 - false-success rejection rate
 - retry-trigger precision
+
+Current pre-click decision contract:
+
+- `PreClickDecisionResult`
+- `PreClickCandidateDecision`
+- contract version: `pre_click_decision_v1`
+
+Minimum pre-click evidence:
+
+- selected candidate id
+- selected click point
+- allow/reject boolean
+- per-candidate reasons
+- top-1 margin status
+- candidate-goal text match status
+- local OCR text match status
+- refined-point-in-candidate-bbox status, using `refined_bbox` when present
+
+Human review evidence:
+
+- `POST /vision/render_recognition_plan_overlay`
+- output image under `artifacts/review-overlays/`
+- should show original candidate boxes, OCR-refined candidate boxes, decision state, local OCR matches, and refined click points
 
 ---
 
@@ -556,6 +602,8 @@ Completion checks:
 - element labels are correct
 - click point is usable
 - unsupported regions do not create misleading actionable elements
+- far repeated OCR fragments are not bound to the same element unless local geometry supports the binding
+- short ambiguous OCR text does not override semantic-only coordinates when it is far from the semantic region
 
 Metrics:
 
@@ -585,6 +633,7 @@ Common failure meaning:
 
 - OCR and vision both good, element bad: fusion scoring or role filter problem
 - element exists but point misses: bbox selection strategy problem
+- element bbox spans unrelated text: OCR binding cluster or short-text guard problem
 
 ## 6. Action Execution
 

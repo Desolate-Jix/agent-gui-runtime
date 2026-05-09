@@ -4,8 +4,9 @@ import re
 from difflib import SequenceMatcher
 from typing import Iterable
 
-from app.page_structure.schemas import PageElement
+from app.page_structure.schemas import PageElement, PageText
 from app.recognition.schemas import CandidateRankRequest, CandidateRankResult, RecognitionCandidate, ScoreBreakdown
+from app.vision.schemas import ImageSize
 
 
 SUPPORTED_INTERACTIONS = {"click", "focus"}
@@ -16,9 +17,18 @@ def rank_candidates(request: CandidateRankRequest) -> CandidateRankResult:
     top_k = max(1, int(request.top_k or 5))
     ranked: list[RecognitionCandidate] = []
     rejected: list[RecognitionCandidate] = []
+    texts_by_id = {text.text_id: text for text in request.page_structure.texts}
 
     for element in request.page_structure.elements:
         breakdown, reasons, eligible = _score_element(element, goal=request.goal, state_hint=request.state_hint)
+        refined_bbox, bbox_refine_reason = _refined_bbox_from_source_texts(
+            element,
+            goal=request.goal,
+            texts_by_id=texts_by_id,
+            image_size=request.page_structure.image_size,
+        )
+        if refined_bbox is not None:
+            reasons.append("bbox_refined_from_source_text")
         candidate = RecognitionCandidate(
             candidate_id=_candidate_id(element),
             rank=0,
@@ -31,6 +41,8 @@ def rank_candidates(request: CandidateRankRequest) -> CandidateRankResult:
             reasons=reasons,
             score_breakdown=breakdown,
             element=element,
+            refined_bbox=refined_bbox,
+            bbox_refine_reason=bbox_refine_reason,
         )
         if eligible:
             ranked.append(candidate)
@@ -190,6 +202,70 @@ def _normalize_text(value: str) -> str:
 def _candidate_id(element: PageElement) -> str:
     slug = re.sub(r"[^0-9a-z]+", "_", element.element_id.casefold()).strip("_")
     return f"candidate_{slug or 'element'}"
+
+
+def _refined_bbox_from_source_texts(
+    element: PageElement,
+    *,
+    goal: str,
+    texts_by_id: dict[str, PageText],
+    image_size: ImageSize | None,
+    padding: int = 12,
+) -> tuple[dict[str, int] | None, str | None]:
+    if not element.source_text_ids:
+        return None, "no_source_text_ids"
+
+    source_texts = [texts_by_id[text_id] for text_id in element.source_text_ids if text_id in texts_by_id]
+    if not source_texts:
+        return None, "source_text_ids_not_found"
+    selected_texts, selected_reason = _select_refine_texts(source_texts, goal=goal)
+    boxes = [text.bbox for text in selected_texts]
+
+    x1 = min(int(box.x) for box in boxes) - int(padding)
+    y1 = min(int(box.y) for box in boxes) - int(padding)
+    x2 = max(int(box.x + box.w) for box in boxes) + int(padding)
+    y2 = max(int(box.y + box.h) for box in boxes) + int(padding)
+
+    x1 = max(0, x1)
+    y1 = max(0, y1)
+    if image_size is not None:
+        x2 = min(int(image_size.width), x2)
+        y2 = min(int(image_size.height), y2)
+
+    original_x1 = int(element.bbox.x)
+    original_y1 = int(element.bbox.y)
+    original_x2 = int(element.bbox.x + element.bbox.w)
+    original_y2 = int(element.bbox.y + element.bbox.h)
+    x1 = max(x1, original_x1)
+    y1 = max(y1, original_y1)
+    x2 = min(x2, original_x2)
+    y2 = min(y2, original_y2)
+
+    if x2 <= x1 or y2 <= y1:
+        return None, "source_text_bbox_outside_element"
+    original_area = max(1, (original_x2 - original_x1) * (original_y2 - original_y1))
+    refined_area = max(1, (x2 - x1) * (y2 - y1))
+    if refined_area >= original_area * 0.95:
+        return None, "source_text_bbox_not_tighter"
+    return {
+        "x": x1,
+        "y": y1,
+        "w": max(1, x2 - x1),
+        "h": max(1, y2 - y1),
+    }, f"{selected_reason}:{len(boxes)}"
+
+
+def _select_refine_texts(texts: list[PageText], *, goal: str) -> tuple[list[PageText], str]:
+    normalized_goal = _normalize_text(goal)
+    if normalized_goal:
+        scored = [
+            (_text_similarity(normalized_goal, _normalize_text(text.text)), text)
+            for text in texts
+        ]
+        goal_matches = [text for score, text in scored if score >= 0.65]
+        if goal_matches:
+            return goal_matches, "goal_text_ids_union"
+    return texts, "source_text_ids_union"
 
 
 def _unique(values: Iterable[str]) -> list[str]:

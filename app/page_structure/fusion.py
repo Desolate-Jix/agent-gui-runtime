@@ -80,9 +80,9 @@ def build_page_structure(vision: VisionAnalyzeResponse, ocr: OCRResult) -> PageS
             continue
 
         candidates = _rank_text_candidates(region, texts)
-        bound = [item for item in candidates if item.score >= 0.45]
+        bound = [item for item in candidates if _candidate_is_bindable(item)]
         if bound:
-            selected_texts = _select_bound_texts(bound)
+            selected_texts = _select_bound_texts(bound, region=region)
             used_text_ids.update(item.text.text_id for item in selected_texts)
             element = _element_from_region_and_texts(region, role, selected_texts)
             elements.append(element)
@@ -196,14 +196,43 @@ def _rank_text_candidates(region: VisionRegion, texts: list[PageText]) -> list[_
     return candidates
 
 
-def _select_bound_texts(candidates: list[_Candidate]) -> list[_Candidate]:
+def _select_bound_texts(candidates: list[_Candidate], *, region: VisionRegion) -> list[_Candidate]:
     best = candidates[0]
     selected = [best]
     for candidate in candidates[1:]:
-        if candidate.text_score >= 0.85 and candidate.score >= best.score - 0.12:
+        if (
+            candidate.text_score >= 0.85
+            and candidate.score >= best.score - 0.12
+            and _same_text_cluster(best.text.bbox, candidate.text.bbox, region.bbox)
+        ):
             selected.append(candidate)
     selected.sort(key=lambda item: (item.text.bbox.y, item.text.bbox.x))
     return selected
+
+
+def _same_text_cluster(anchor: BBox, candidate: BBox, region_bbox: BBox) -> bool:
+    anchor_center = _bbox_center(anchor)
+    candidate_center = _bbox_center(candidate)
+    dx = abs(anchor_center["x"] - candidate_center["x"])
+    dy = abs(anchor_center["y"] - candidate_center["y"])
+    same_line = dy <= max(anchor.h, candidate.h, 18) * 1.8
+    nearby_line = dy <= max(region_bbox.h, anchor.h, candidate.h, 40) * 1.2
+    max_dx = max(120, min(max(region_bbox.w, anchor.w, candidate.w) * 1.6, 360))
+    if same_line and dx <= max_dx:
+        return True
+    return nearby_line and dx <= max(80, min(max(region_bbox.w, anchor.w, candidate.w) * 0.75, 220))
+
+
+def _candidate_is_bindable(candidate: _Candidate) -> bool:
+    if candidate.score < 0.45:
+        return False
+    normalized = _normalize_text(candidate.text.text)
+    compact_length = len(normalized.replace(" ", ""))
+    if candidate.geometry_score < 0.05 and candidate.text_score < 0.92:
+        return False
+    if compact_length <= 2 and candidate.geometry_score < 0.35 and candidate.text_score < 0.98:
+        return False
+    return True
 
 
 def _element_from_region_and_texts(region: VisionRegion, role: str, candidates: list[_Candidate]) -> PageElement:
