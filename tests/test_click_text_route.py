@@ -20,7 +20,7 @@ def test_click_text_uses_roi_offset_and_returns_success(monkeypatch) -> None:
     monkeypatch.setattr(
         action_api.screenshot_service,
         "capture_window",
-        lambda roi=None, save_image=True: {
+        lambda roi=None, save_image=True, **kwargs: {
             "image_path": "capture.png",
             "roi": {"x": 100, "y": 200, "width": 300, "height": 200},
             "roi_adjusted": False,
@@ -41,8 +41,9 @@ def test_click_text_uses_roi_offset_and_returns_success(monkeypatch) -> None:
             ],
         ),
     )
-    monkeypatch.setattr(action_api.verifier, "capture_pre_action_state", lambda roi=None: {"image_path": "before.png"})
+    monkeypatch.setattr(action_api.verifier, "capture_pre_action_state", lambda roi=None, action_name=None: {"image_path": "before.png"})
     monkeypatch.setattr(action_api.verifier, "verify_action", lambda *args, **kwargs: {"verified": True})
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/click_text.json")
 
     clicked: dict[str, int] = {}
 
@@ -60,6 +61,8 @@ def test_click_text_uses_roi_offset_and_returns_success(monkeypatch) -> None:
     assert response.success is True
     assert clicked == {"x": 140, "y": 240}
     assert response.data["result"]["selected_match"]["text"] == "Start"
+    assert response.data["result"]["execution_path"]["vision_model_used"] is False
+    assert response.data["result"]["trace_path"].endswith("click_text.json")
 
 
 def test_click_text_returns_text_not_found(monkeypatch) -> None:
@@ -75,7 +78,7 @@ def test_click_text_returns_text_not_found(monkeypatch) -> None:
     monkeypatch.setattr(
         action_api.screenshot_service,
         "capture_window",
-        lambda roi=None, save_image=True: {
+        lambda roi=None, save_image=True, **kwargs: {
             "image_path": "capture.png",
             "roi": None,
             "roi_adjusted": False,
@@ -83,12 +86,14 @@ def test_click_text_returns_text_not_found(monkeypatch) -> None:
         },
     )
     monkeypatch.setattr(action_api.ocr_service, "scan_image", lambda path: OCRResult(image_path=path, matches=[]))
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/click_text-not-found.json")
 
     response = action_api.click_text(ClickTextRequest(text="Missing"))
 
     assert response.success is False
     assert response.error is not None
     assert response.error.code == "text_not_found"
+    assert response.data["trace_path"].endswith("click_text-not-found.json")
 
 
 def test_click_text_retries_next_candidate_when_validation_fails(monkeypatch) -> None:
@@ -104,7 +109,7 @@ def test_click_text_retries_next_candidate_when_validation_fails(monkeypatch) ->
     monkeypatch.setattr(
         action_api.screenshot_service,
         "capture_window",
-        lambda roi=None, save_image=True: {
+        lambda roi=None, save_image=True, **kwargs: {
             "image_path": "capture.png",
             "roi": None,
             "roi_adjusted": False,
@@ -122,7 +127,7 @@ def test_click_text_retries_next_candidate_when_validation_fails(monkeypatch) ->
             ],
         ),
     )
-    monkeypatch.setattr(action_api.verifier, "capture_pre_action_state", lambda roi=None: {"image_path": "before.png"})
+    monkeypatch.setattr(action_api.verifier, "capture_pre_action_state", lambda roi=None, action_name=None: {"image_path": "before.png"})
 
     verification_results = iter([{"verified": False}, {"verified": True}])
     monkeypatch.setattr(action_api.verifier, "verify_action", lambda *args, **kwargs: next(verification_results))
@@ -134,9 +139,11 @@ def test_click_text_retries_next_candidate_when_validation_fails(monkeypatch) ->
         return {"clicked": True, "window_point": {"x": x, "y": y}}
 
     monkeypatch.setattr(action_api.input_controller, "click_point", fake_click)
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/click_text-retry.json")
 
     response = action_api.click_text(ClickTextRequest(text="Start", max_retries=2))
 
     assert response.success is True
     assert clicked_points == [(20, 30), (120, 130)]
     assert response.data["result"]["window_point"] == {"x": 120, "y": 130}
+    assert response.data["result"]["trace_path"].endswith("click_text-retry.json")

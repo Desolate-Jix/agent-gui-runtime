@@ -31,8 +31,9 @@ The current repo is mid-refactor:
 
 - region click and diff-based verification still exist
 - MouseTester remains the main proven action path
-- unified vision provider plumbing exists but is still stubbed
-- legacy OCR/template/click_text code has been removed from the current branch state
+- unified vision provider plumbing exists, and the local provider can call an OpenAI-compatible Qwen3-VL-style multimodal endpoint
+- OCR/click_text behavior has been restored around RapidOCR-first OCR contracts
+- `page_structure_v1` now fuses Qwen semantic regions and OCR boxes into executable element candidates
 
 So the migration is not “starting from zero”; it is “recovering the stable pieces and reorganizing them under Codex-owned docs and modules.”
 

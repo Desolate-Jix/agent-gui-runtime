@@ -8,16 +8,16 @@ A local Windows-only GUI automation runtime for AI agents.
 
 When code changes affect runtime behavior, API shape, architecture, or current progress, update the docs in the same work session.
 
-Expected sync targets:
+Expected sync targets in this repo:
 
 - `README.md`
+- `PROJECT_STRUCTURE.md`
 - `PROJECT_CONTEXT.md`
 - `RULES.md`
 - `KNOWLEDGE_BASE.md`
-- `PROJECT_SUMMARY.md`
-- `ARCHITECTURE.md`
-- `CURRENT_STATE.md`
-- `NEXT_STEPS.md`
+- `ACCURACY_EVALUATION_STANDARD.md`
+- `RUNTIME_STATE_GRAPH.md`
+- `RUNTIME_STATE_GRAPH.zh-CN.md`
 
 When implementing code, follow the execution loop in `skills/code-implementation-loop/SKILL.md`: make the smallest useful change, run the narrowest meaningful verification, inspect results, fix failures, and rerun until the path is verified or a real blocker remains.
 
@@ -116,7 +116,7 @@ For the current phase, the project is intentionally:
 - vision-first
 - single-session
 - no frontend
-- file-based persistence under `logs/`
+- file-based persistence under `logs/` and `artifacts/`
 - software-specific before software-general
 
 ---
@@ -150,28 +150,28 @@ For the current phase, the project is intentionally:
 
 ### Core framework
 
-- **FastAPI** â€” local HTTP API service
-- **Pydantic v2** â€” structured request/response models
-- **Uvicorn** â€” ASGI server
-- **loguru** â€” runtime logging
+- **FastAPI** - local HTTP API service
+- **Pydantic v2** - structured request/response models
+- **Uvicorn** - ASGI server
+- **loguru** - runtime logging
 
 ### Windows GUI automation
 
-- **pywinauto** â€” window discovery and control primitives
-- **pywin32** â€” lower-level Windows API integration
+- **pywinauto** - window discovery and control primitives
+- **pywin32** - lower-level Windows API integration
 
 ### Vision and image processing
 
-- **mss** â€” screenshot capture
-- **opencv-python** â€” template matching and image utilities
-- **numpy** â€” image array operations
-- **Pillow** â€” image helpers and conversions
-- **RapidOCR + PaddleOCR fallback** â€” OCR backends for text recognition
-- **paddlepaddle 3.2.2** â€” PaddleOCR runtime pinned to avoid known CPU inference issues in newer 3.3.x builds
+- **mss** - screenshot capture
+- **opencv-python** - template matching and image utilities
+- **numpy** - image array operations
+- **Pillow** - image helpers and conversions
+- **RapidOCR + PaddleOCR fallback** - OCR backends for text recognition
+- **paddlepaddle 3.2.2** - PaddleOCR runtime pinned to avoid known CPU inference issues in newer 3.3.x builds
 
 ### Tooling
 
-- **uv** â€” virtual environment and dependency management
+- **uv** - virtual environment and dependency management
 
 ---
 
@@ -208,52 +208,60 @@ This separation is intentional so the runtime can stay small while still being e
 
 ```text
 agent-gui-runtime/
-â”œâ”€ modules/
-â”‚  â”œâ”€ ocr/
-â”‚  â”œâ”€ click/
-â”‚  â”œâ”€ region/
-â”‚  â””â”€ validation/
-â”œâ”€ tests/
-â”œâ”€ app/
-â”‚  â”œâ”€ actions/
-â”‚  â”‚  â””â”€ known_action_runner.py
-â”‚  â”œâ”€ api/
-â”‚  â”‚  â”œâ”€ session.py
-â”‚  â”‚  â”œâ”€ state.py
-â”‚  â”‚  â”œâ”€ vision.py
-â”‚  â”‚  â””â”€ action.py
-â”‚  â”œâ”€ core/
-â”‚  â”‚  â”œâ”€ window_manager.py
-â”‚  â”‚  â”œâ”€ screenshot.py
-â”‚  â”‚  â”œâ”€ ocr_service.py
-â”‚  â”‚  â”œâ”€ input_controller.py
-â”‚  â”‚  â”œâ”€ verifier.py
-â”‚  â”‚  â”œâ”€ action_registry.py
-â”‚  â”‚  â””â”€ replay_case_store.py
-â”‚  â”œâ”€ models/
-â”‚  â”‚  â”œâ”€ request.py
-â”‚  â”‚  â””â”€ response.py
-â”‚  â”œâ”€ schemas/
-â”‚  â”œâ”€ vision/
-â”‚  â”œâ”€ vision_protocol/
-â”‚  â””â”€ main.py
-â”œâ”€ configs/
-â”œâ”€ logs/
-â”‚  â”œâ”€ app-states/
-â”‚  â”œâ”€ app-actions/
-â”‚  â”œâ”€ app-transitions/
-â”‚  â”œâ”€ replay-cases/
-â”‚  â”œâ”€ state-recognition/
-â”‚  â”œâ”€ region-click-cache/
-â”‚  â””â”€ region-click-cases/
-â”œâ”€ PROJECT_CONTEXT.md
-â”œâ”€ RULES.md
-â”œâ”€ KNOWLEDGE_BASE.md
-â”œâ”€ pyproject.toml
-â””â”€ README.md
+|-- app/
+|   |-- actions/
+|   |   `-- known_action_runner.py
+|   |-- api/
+|   |   |-- action.py
+|   |   |-- session.py
+|   |   |-- state.py
+|   |   `-- vision.py
+|   |-- core/
+|   |   |-- action_registry.py
+|   |   |-- input_controller.py
+|   |   |-- ocr_service.py
+|   |   |-- replay_case_store.py
+|   |   |-- screenshot.py
+|   |   |-- transition_memory.py
+|   |   |-- verifier.py
+|   |   `-- window_manager.py
+|   |-- models/
+|   |   |-- request.py
+|   |   `-- response.py
+|   |-- page_structure/
+|   |-- schemas/
+|   |-- vision/
+|   |-- vision_protocol/
+|   `-- main.py
+|-- configs/
+|   `-- vision.json
+|-- artifacts/
+|   |-- screenshots/
+|   |-- verification/
+|   `-- vision-regions/
+|-- logs/
+|   `-- traces/
+|-- modules/
+|   |-- click/
+|   |-- ocr/
+|   |-- region/
+|   `-- validation/
+|-- scripts/
+|-- tests/
+|-- AGENTS.md
+|-- KNOWLEDGE_BASE.md
+|-- PROJECT_CONTEXT.md
+|-- PROJECT_STRUCTURE.md
+|-- README.md
+|-- RULES.md
+|-- RUNTIME_STATE_GRAPH.md
+|-- RUNTIME_STATE_GRAPH.zh-CN.md
+`-- pyproject.toml
 ```
 
 For a detailed folder-by-folder map, feature-to-file ownership, config locations, and persistence paths, see `PROJECT_STRUCTURE.md`.
+
+For a stage-by-stage completion and accuracy scoring rubric, see `ACCURACY_EVALUATION_STANDARD.md`.
 
 For the detailed runtime logic covering state graph growth, target patch persistence, field definitions, and runtime reuse, see:
 
@@ -288,6 +296,21 @@ Design principles:
 - conservative state recognition over forced guesses
 - keep generic execution working while layering state-aware reuse on top
 
+For action and vision routes, runtime evidence now follows this split:
+
+- image artifacts such as screenshots, pre/post captures, verification diffs, and vision region crops go under `artifacts/`
+- human review overlays such as red region boxes and blue OCR boxes go under `artifacts/review-overlays/`
+- text logs and structured JSON traces go under `logs/`
+
+Most action and vision results now also include:
+
+- `execution_path`
+  - says whether a vision model was used
+  - says whether `page_structure_v1` participated
+  - says what coordinate source was used
+- `trace_path`
+  - points to a structured JSON trace file under `logs/traces/`
+
 ## Vision region contract
 
 `POST /vision/analyze` now centers on a standard region contract named `vision_regions_v1`.
@@ -309,7 +332,46 @@ Key rules:
 
 The prompt template that enforces this output format now lives in `app/vision/prompting.py`.
 
-After `/vision/analyze` normalizes the response, the runtime now also persists local region artifacts under `logs/vision-regions/`:
+### Local Qwen3-VL backend
+
+`app/vision/local_provider.py` can now call a local OpenAI-compatible multimodal chat endpoint instead of always returning stub data.
+
+For large screenshots, the local provider now adds a stability pass before giving up:
+
+- it scales the inference image down for the model when the page is large
+- it remaps returned coordinates back to the original screenshot size
+- if the first model response is truncated or malformed, it retries once or twice with a more compact prompt and fewer regions
+- the winning attempt is recorded in `raw_response.attempts`, and scaling evidence is added to `notes`
+
+The default local configuration in `configs/vision.json` targets:
+
+```json
+{
+  "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+  "endpoint": "http://127.0.0.1:1234/v1/chat/completions"
+}
+```
+
+This matches the common LM Studio local server shape. For this machine class, prefer a 4-bit GGUF quantization of `Qwen3-VL-8B-Instruct`; keep RapidOCR/PaddleOCR enabled for text boxes and use Qwen3-VL for semantic screen understanding and `vision_regions_v1` JSON generation.
+
+The checked local deployment uses:
+
+- `models/qwen3-vl-8b-instruct-gguf/Qwen3VL-8B-Instruct-Q4_K_M.gguf`
+- `models/qwen3-vl-8b-instruct-gguf/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf`
+- `tools/llama.cpp-b8892-cuda13/llama-server.exe`
+
+Start and stop helpers:
+
+```powershell
+.\scripts\serve_qwen3_vl_server.ps1
+.\scripts\stop_qwen3_vl_server.ps1
+```
+
+`serve_qwen3_vl_server.ps1` runs in the foreground. Keep that terminal open while using `/vision/analyze`.
+
+If no local vision server is running, `/vision/analyze` will fail with a connection error when this endpoint is configured. Set the endpoint back to `null` to use stub mode.
+
+After `/vision/analyze` normalizes the response, the runtime now persists local region artifacts under `artifacts/vision-regions/`:
 
 - one full annotated screenshot with region boxes
 - one crop per region
@@ -326,8 +388,8 @@ Instead, the intended decision flow is:
 
 1. capture a screenshot
 2. analyze it into `vision_regions_v1`
-3. persist image evidence and region artifacts locally
-4. build a higher-level `page_structure`
+3. run OCR on the same image
+4. build a higher-level `page_structure_v1`
 5. give that `page_structure` to the upper-layer agent
 6. let the agent choose the next action based on page semantics rather than raw OCR or raw coordinates
 
@@ -338,7 +400,7 @@ The design intent is:
   - used for screenshot grounding, cropping, annotation, OCR text retention, and region matching
 - `page_structure_v1`
   - decision layer for the agent
-  - used to describe sections, available elements, likely destinations, and recommended next actions
+  - used to describe executable elements, OCR-backed click points, verification hints, and memory keys
 
 The runtime should therefore separate:
 
@@ -349,81 +411,175 @@ The runtime should therefore separate:
   - `match_key`
   - saved crops / annotations
 - agent-facing structure
-  - `page_id`
-  - `page_name`
   - `screen_summary`
-  - `sections[]`
   - `elements[]`
-  - `destination_page_id`
-  - `expected_result`
-  - `priority`
-  - `recommended_action_id`
+  - `texts[]`
+  - `links[]`
+  - `interaction_type`
+  - `interaction_policy`
+  - `verification_hints`
+  - `memory_key`
+  - `learning_summary`
 
 In other words:
 
-> learn first, then summarize the page, then let the agent decide
+> collect evidence first, fuse it into executable elements, then let the agent decide
 
 The agent should not be forced to infer the next step from raw region geometry alone.
 
-### Target page structure shape
+### Page structure shape
 
-The current intended page-structure output is:
+`POST /vision/page_structure` returns:
 
 ```json
 {
-  "page_id": "mousetester_home_zh",
-  "page_name": "MouseTester Home",
-  "page_type": "home",
-  "screen_summary": "Home page with top navigation, hero copy, and primary call-to-action buttons.",
-  "resolution": {
-    "width": 1089,
-    "height": 668
-  },
-  "sections": [
+  "contract_version": "page_structure_v1",
+  "image_size": {"width": 420, "height": 220},
+  "screen_summary": "Main menu with Start and Settings controls.",
+  "state_guess": "home",
+  "regions": [],
+  "elements": [
     {
-      "section_id": "top_nav",
-      "name": "Top Navigation",
-      "role": "navigation",
-      "match_key": "1b19abd52db7543c:a21c455c77231003",
-      "importance": 0.8,
-      "elements": [
-        {
-          "element_id": "nav_features",
-          "name": "Features",
-          "action_type": "click",
-          "expected_result": "Navigate to the features page",
-          "destination_page_id": "features_page",
-          "confidence": 0.91
-        }
-      ]
-    },
-    {
-      "section_id": "hero_actions",
-      "name": "Primary Actions",
-      "role": "primary_action",
-      "importance": 1.0,
-      "elements": [
-        {
-          "element_id": "start_mouse_test",
-          "name": "Start Mouse Test",
-          "action_type": "click",
-          "expected_result": "Open the interactive mouse test page",
-          "destination_page_id": "mouse_test_page",
-          "confidence": 0.98,
-          "priority": 1
-        }
-      ]
+      "element_id": "element_start_12345678",
+      "label": "Start",
+      "role": "button",
+      "interaction_type": "click",
+      "description": "Start button that opens the main screen.",
+      "text": "Start",
+      "bbox": {"x": 77, "y": 68, "w": 24, "h": 13},
+      "semantic_bbox": {"x": 80, "y": 120, "w": 140, "h": 100},
+      "click_point": {"x": 89, "y": 74},
+      "click_strategy": "ocr_text_center",
+      "possible_destinations": ["main"],
+      "verification_hints": {
+        "expected_changes": ["state_change", "new_region", "content_change"],
+        "target_scope": "page"
+      },
+      "interaction_policy": {
+        "allowed": true,
+        "zone_type": "test_module",
+        "priority": "high",
+        "ad_risk": 0.0,
+        "reasons": ["test_like_keyword"]
+      },
+      "fusion_confidence": 0.93,
+      "coordinate_confidence": "high",
+      "memory_key": "role:button|label:start|text:start|layout:layout_start",
+      "sources": ["qwen3_vl", "rapidocr_onnxruntime"],
+      "source_region_ids": ["region_start"],
+      "source_text_ids": ["text_1"],
+      "evidence": {}
     }
   ],
-  "recommended_action_id": "start_mouse_test"
+  "texts": [],
+  "links": [],
+  "learning_summary": {
+    "profile": "rule_based_interaction_learning_v1",
+    "safe_element_ids": ["element_start_12345678"],
+    "blocked_element_ids": [],
+    "ad_like_element_ids": [],
+    "allowed_element_count": 1,
+    "blocked_element_count": 0
+  },
+  "raw_ocr": {},
+  "raw_vision_regions": []
 }
 ```
+
+Important element fields:
+
+- `interaction_type`: how to operate the element, such as `click` or `focus`
+- `interaction_policy`: whether the element should currently be considered safe to click, what zone type it belongs to, and why
+- `verification_hints`: expected post-action evidence for the validator
+- `memory_key`: stable learning key for successful click strategy and validation outcomes
+- `bbox`: execution bbox chosen by fusion, OCR-backed when possible
+- `semantic_bbox`: original Qwen region bbox, kept for evidence and layout memory
+- `click_point`: selected interaction coordinate
+- `click_strategy`: why that coordinate was selected
+- `fusion_confidence`: confidence in the semantic/text binding
+- `coordinate_confidence`: confidence in the coordinate source
+- `learning_summary`: page-level rule output that groups safe elements, blocked elements, and ad-like candidates
+
+For test and inspection, `POST /vision/layer_trace` returns `vision_layer_trace_v1`.
+
+It includes one ordered record per layer:
+
+- `input_image`
+- `vision_provider_raw`
+- `vision_regions_v1`
+- `ocr_result`
+- `page_structure_v1`
+
+Each record includes:
+
+- `summary`: compact counters such as region count, OCR text count, and element count
+- `validation`: missing fields, item-level field errors, warnings, and runtime errors
+- `result`: the full returned payload for that layer
+
+Use `/vision/layer_trace` when validating a new webpage screenshot before letting action code consume the result.
+
+For local-model runs, `vision_provider_raw.result.raw_response.attempts` now shows whether the provider used scaled inference, whether a compact retry was needed, and whether coordinates were remapped back to the original image.
+
+For bbox-precision experiments, `/vision/analyze`, `/vision/page_structure`, and `/vision/layer_trace` also accept `metadata.grid_overlay`.
+Supported values:
+
+- `true` to enable a default `100px` light grid
+- an integer such as `120` to use that pixel spacing
+- an object such as `{"enabled": true, "spacing": 100}`
+
+When enabled, the local provider renders a light pixel grid and tick-label reference image for inference, using denser minor guide lines between major marks, records `grid_overlay_spacing=...` in `vision_provider_raw.result.notes`, and stores the saved reference image path under `vision_provider_raw.result.raw_response.attempts[*].grid_overlay.artifact_path`.
+
+For OCR-assisted bbox correction experiments, the same routes also accept `metadata.ocr_region_refine`.
+Supported values:
+
+- `true` to enable the default OCR-anchor refinement pass
+- an object such as `{"enabled": true, "min_text_score": 0.58, "padding": 16}`
+
+When enabled, the runtime keeps the original model regions intact, adds an OCR-assisted refinement pass, and records `ocr_region_refine=...` in the refined notes.
+`/vision/layer_trace` also adds an extra `vision_regions_refined_v1` layer so raw model boxes and OCR-adjusted boxes can be compared side by side.
+
+To visually audit a saved trace, call `POST /vision/render_review_overlay`.
+It reads a `vision_layer_trace_v1` JSON file, redraws region boxes and OCR boxes on the original screenshot, and writes the review image under `artifacts/review-overlays/`.
+Use `region_layer = "vision_provider_raw"` when checking the visual model's raw returned regions.
+Use `region_layer = "vision_regions_refined_v1"` when checking the OCR-assisted experiment output.
 
 Current status:
 
 - `vision_regions_v1` is implemented
 - region artifact persistence is implemented
-- `page_structure_v1` is a documented target contract and should be built on top of learned regions next
+- `page_structure_v1` is implemented as deterministic fusion over normalized Qwen regions and OCR boxes
+- `page_structure_v1` now includes rule-based interaction learning that marks test modules, navigation controls, and ad-like action candidates
+
+### Recommended recognition flow
+
+For higher-accuracy GUI targeting, the preferred direction is no longer "one full screenshot -> one final coordinate".
+The recommended flow is:
+
+1. `parse`
+   - turn one screenshot into structured regions, OCR text, and executable elements
+   - current evidence sources: `vision_regions_v1`, `ocr_result`, `page_structure_v1`
+2. `candidate`
+   - score only the small set of elements that could satisfy the current task
+   - use text match, zone trust, actionability, and ad-blocking rules
+3. `narrow search`
+   - crop the top candidates and run a second local analysis on the smaller ROI
+   - prefer local re-grounding over trusting one full-screen bbox
+4. `verify`
+   - confirm before click that the chosen candidate is sufficiently ahead of alternatives
+   - confirm after click that page state, OCR, focus, or URL changed as expected
+
+This architecture is the preferred path for improving recognition accuracy because it reduces full-screen ambiguity instead of asking one model call to solve parsing, selection, and pixel-accurate grounding all at once.
+
+The project design now treats this as the planned MVP direction:
+
+- first build a no-click `recognition_plan`
+- then rank `top-k` candidates
+- then rerun local grounding on cropped ROIs
+- only attach real click execution after verification is measurable
+
+The first candidate-ranking contract is now available internally as `candidate_rank_v1` under `app/recognition/`.
+
+See [PROJECT_STRUCTURE.md](./PROJECT_STRUCTURE.md) for the concrete MVP module plan and endpoint outline.
 
 ---
 
@@ -521,6 +677,9 @@ This is especially important for noisy numeric counters such as MouseTester.
 - `/action/click_text` is restored with OCR matching, ROI-aware coordinate translation, and retry-based fallback
 - `/action/click_mouse_tester_left_region` remains the main action entrypoint
 - `/vision/analyze` now normalizes provider output into `vision_regions_v1` with diagonal coordinates and stable region match keys
+- the local vision provider can call an OpenAI-compatible local multimodal endpoint for Qwen3-VL-style screenshot analysis
+- `/vision/page_structure` fuses Qwen semantic regions with OCR text boxes into `page_structure_v1`
+- `/vision/layer_trace` returns every layer's result and validation report for screenshot testing
 - schema + storage layer objects can be written and read back
 - state-aware action wiring exists for MouseTester
 
@@ -565,7 +724,7 @@ The remaining high-value work is end-to-end runtime verification with a real bou
 3. confirm automatic bootstrap of persisted state/action/validator files
 4. confirm transition and replay-case persistence after real execution
 5. continue strengthening validator stability
-6. replace the stub `/vision/analyze` providers with at least one real backend that emits `vision_regions_v1`
+6. run `/vision/page_structure` against an actual bound-window screenshot and compare fused click points with live UI behavior
 
 ---
 
@@ -579,6 +738,9 @@ The remaining high-value work is end-to-end runtime verification with a real bou
 - `POST /state/capture_window`
 - `POST /vision/ocr_region`
 - `POST /vision/analyze`
+- `POST /vision/page_structure`
+- `POST /vision/layer_trace`
+- `POST /vision/render_review_overlay`
 - `POST /action/click_text`
 - `POST /action/click_mouse_tester_left_region`
 - `GET /health`
@@ -587,7 +749,7 @@ The remaining high-value work is end-to-end runtime verification with a real bou
 
 ## Development roadmap
 
-### Phase 1 â€” first real capability
+### Phase 1 - first real capability
 
 1. real `bind_window`
 2. real `get_state`
@@ -597,7 +759,7 @@ Milestone:
 
 > Agent -> bind_window -> capture_window -> can see the target window
 
-### Phase 2 â€” first closed loop
+### Phase 2 - first closed loop
 
 4. `ocr_region`
 5. `click_text`
@@ -606,7 +768,7 @@ Milestone:
 
 > Agent can locate text in a target window and perform a validated click
 
-### Phase 3 â€” region-aware interaction
+### Phase 3 - region-aware interaction
 
 6. reusable `region_click`
 7. point memory cache
@@ -616,7 +778,7 @@ Milestone:
 
 > Agent can act on non-text UI targets using panel-relative geometry and closed-loop validation
 
-### Phase 4 â€” software-specific state-aware V1
+### Phase 4 - software-specific state-aware V1
 
 9. known `AppState` recognition
 10. known `ActionTarget` reuse

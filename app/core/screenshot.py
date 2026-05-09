@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-from pathlib import Path
 from typing import Any, Optional
 
 from loguru import logger
@@ -20,6 +18,7 @@ except Exception as exc:  # pragma: no cover - depends on runtime platform/envir
     MSS_BACKEND_IMPORT_ERROR = str(exc)
 
 from app.core.window_manager import window_manager
+from app.core.runtime_artifacts import SCREENSHOTS_DIR, build_screenshot_path
 from app.models.request import ROIModel
 
 
@@ -27,11 +26,18 @@ class ScreenshotService:
     """Capture screenshots for the currently bound window using MSS."""
 
     def __init__(self) -> None:
-        self._log_dir = Path("logs")
-        self._log_dir.mkdir(parents=True, exist_ok=True)
+        self._capture_dir = SCREENSHOTS_DIR
+        self._capture_dir.mkdir(parents=True, exist_ok=True)
         self._capture_keep_limit = 40
 
-    def capture_window(self, roi: Optional[ROIModel] = None, save_image: bool = True) -> dict[str, Any]:
+    def capture_window(
+        self,
+        roi: Optional[ROIModel] = None,
+        save_image: bool = True,
+        *,
+        purpose: str = "capture",
+        name_hint: Optional[str] = None,
+    ) -> dict[str, Any]:
         """Capture a screenshot for the bound window or a sub-region."""
         self._ensure_capture_backend()
 
@@ -60,8 +66,15 @@ class ScreenshotService:
 
         image_path: Optional[str] = None
         if save_image:
-            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-            image_path = str((self._log_dir / f"capture-{timestamp}.png").resolve())
+            output_path = build_screenshot_path(
+                title=bound.title,
+                process_name=bound.process_name,
+                handle=bound.handle,
+                purpose=purpose,
+                roi=capture_rect["roi"],
+                name_hint=name_hint,
+            )
+            image_path = str(output_path.resolve())
             image.save(image_path)
             logger.info("Saved screenshot to {}", image_path)
             self._cleanup_old_captures()
@@ -72,6 +85,7 @@ class ScreenshotService:
             "image_height": image.height,
             "roi": capture_rect["roi"],
             "roi_adjusted": capture_rect["roi_adjusted"],
+            "capture_purpose": purpose,
             "window_size": {
                 "width": capture_rect["window_width"],
                 "height": capture_rect["window_height"],
@@ -138,7 +152,7 @@ class ScreenshotService:
 
     def _cleanup_old_captures(self) -> None:
         captures = sorted(
-            self._log_dir.glob("capture-*.png"),
+            self._capture_dir.glob("*.png"),
             key=lambda path: path.stat().st_mtime,
             reverse=True,
         )

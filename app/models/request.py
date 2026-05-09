@@ -78,3 +78,14 @@ class VisionAnalyzeRequestModel(BaseModel):
     state_hint: Optional[str] = None
     provider_mode: Optional[str] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class VisionReviewOverlayRequestModel(BaseModel):
+    """Request model for drawing human-review overlays from a saved vision trace."""
+
+    trace_path: str = Field(min_length=1)
+    region_layer: str = Field(default="vision_provider_raw", min_length=1)
+    include_regions: bool = True
+    include_ocr: bool = True
+    label_regions: bool = True
+    label_ocr: bool = False

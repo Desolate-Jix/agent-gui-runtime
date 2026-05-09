@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
 from typing import Any, Optional
 
 from loguru import logger
 
+from app.core.runtime_artifacts import VERIFICATION_DIR, build_verification_image_path
 from app.core.screenshot import screenshot_service
 from app.core.window_manager import window_manager
 from app.models.request import ROIModel
@@ -28,13 +28,13 @@ class Verifier:
     """Validate post-action outcomes for stable automation steps."""
 
     def __init__(self) -> None:
-        self._log_dir = Path("logs")
-        self._log_dir.mkdir(parents=True, exist_ok=True)
+        self._verification_dir = VERIFICATION_DIR
+        self._verification_dir.mkdir(parents=True, exist_ok=True)
 
-    def capture_pre_action_state(self, roi: Optional[ROIModel] = None) -> dict[str, Any]:
+    def capture_pre_action_state(self, roi: Optional[ROIModel] = None, *, action_name: Optional[str] = None) -> dict[str, Any]:
         """Capture minimal state before an action executes."""
         bound = window_manager.get_bound_window()
-        capture = screenshot_service.capture_window(roi=roi, save_image=True)
+        capture = screenshot_service.capture_window(roi=roi, save_image=True, purpose="pre_action", name_hint=action_name)
         pre_state = {
             "captured": True,
             "roi": capture.get("roi"),
@@ -59,7 +59,12 @@ class Verifier:
         logger.info("Verifying action: {}", action_name)
         time.sleep(max(0, wait_ms) / 1000.0)
 
-        after_capture = screenshot_service.capture_window(roi=roi, save_image=True)
+        after_capture = screenshot_service.capture_window(
+            roi=roi,
+            save_image=True,
+            purpose="post_action",
+            name_hint=action_name,
+        )
         bound = window_manager.get_bound_window()
 
         diff_result = self._compare_images(
@@ -168,8 +173,7 @@ class Verifier:
             cv2.rectangle(visual, (x, y), (x + w, y + h), (0, 0, 255), 2)
 
         regions.sort(key=lambda item: item["area"], reverse=True)
-        timestamp = int(time.time() * 1000)
-        diff_path = self._log_dir / f"verify-{action_name}-{timestamp}-diff.png"
+        diff_path = build_verification_image_path(action_name=action_name, suffix="diff")
         cv2.imwrite(str(diff_path), visual)
 
         return {

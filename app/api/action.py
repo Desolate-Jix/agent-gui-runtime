@@ -11,6 +11,7 @@ from app.actions.known_action_runner import run_known_action
 from app.core.action_registry import action_registry
 from app.core.input_controller import input_controller
 from app.core.ocr_service import ocr_service
+from app.core.runtime_artifacts import write_trace
 from app.core.screenshot import screenshot_service
 from app.core.verifier import verifier
 from app.core.window_manager import window_manager
@@ -90,7 +91,7 @@ def _save_region_click_memory(case_name: str, bucket: str, payload: dict[str, An
 
 
 def _capture_bound_window_image(bound: Any, name_prefix: str) -> Optional[str]:
-    capture = screenshot_service.capture_window(save_image=True)
+    capture = screenshot_service.capture_window(save_image=True, purpose="state_snapshot", name_hint=name_prefix)
     image_path = capture.get("image_path")
     if not image_path:
         return None
@@ -187,16 +188,43 @@ def click_text(request: ClickTextRequest) -> APIResponse:
         )
 
     try:
-        capture = screenshot_service.capture_window(roi=request.roi, save_image=True)
+        action_name = f"click_text:{request.text}"
+        execution_path = {
+            "vision_model_used": False,
+            "page_structure_used": False,
+            "coordinate_source": "ocr_bbox_center",
+            "selection_source": "ocr_text_match",
+        }
+        capture = screenshot_service.capture_window(
+            roi=request.roi,
+            save_image=True,
+            purpose="click_text_scan",
+            name_hint=request.text,
+        )
         ocr_result = ocr_service.scan_image(capture["image_path"])
         matches = find_text_matches(ocr_result, request.text, partial_match=request.partial_match)
         if not matches:
+            trace_path = write_trace(
+                category="actions",
+                operation="click_text",
+                payload={
+                    "success": False,
+                    "request": request.model_dump(),
+                    "execution_path": execution_path,
+                    "capture": capture,
+                    "ocr_result": ocr_result.to_dict(),
+                    "failure_reason": "text_not_found",
+                },
+                name_hint=request.text,
+            )
             return APIResponse(
                 success=False,
                 message="Requested text was not found in OCR result",
                 data={
                     "query": request.text,
                     "partial_match": request.partial_match,
+                    "execution_path": execution_path,
+                    "trace_path": trace_path,
                     "matches": [match.to_dict() for match in find_text_matches(ocr_result, request.text, partial_match=True)],
                     "ocr_result": ocr_result.to_dict(),
                 },
@@ -213,11 +241,11 @@ def click_text(request: ClickTextRequest) -> APIResponse:
             window_x = int(center["x"] + int(roi_payload.get("x", 0)))
             window_y = int(center["y"] + int(roi_payload.get("y", 0)))
 
-            before_state = verifier.capture_pre_action_state(roi=request.roi) if request.enable_validation else None
+            before_state = verifier.capture_pre_action_state(roi=request.roi, action_name=action_name) if request.enable_validation else None
             click_result = input_controller.click_point(window_x, window_y, move_before_click=True, settle_ms=100, hold_ms=70)
             verification = (
                 verifier.verify_action(
-                    f"click_text:{request.text}",
+                    action_name,
                     roi=request.roi,
                     before_state=before_state,
                     click_result=click_result,
@@ -240,12 +268,28 @@ def click_text(request: ClickTextRequest) -> APIResponse:
                 break
 
         if selected_result is None:
+            trace_path = write_trace(
+                category="actions",
+                operation="click_text",
+                payload={
+                    "success": False,
+                    "request": request.model_dump(),
+                    "execution_path": execution_path,
+                    "capture": capture,
+                    "ocr_result": ocr_result.to_dict(),
+                    "attempts": attempts,
+                    "failure_reason": "verification_failed",
+                },
+                name_hint=request.text,
+            )
             return APIResponse(
                 success=False,
                 message="Text candidates were clicked but verification did not succeed",
                 data={
                     "query": request.text,
                     "partial_match": request.partial_match,
+                    "execution_path": execution_path,
+                    "trace_path": trace_path,
                     "capture": {
                         "image_path": capture.get("image_path"),
                         "roi": capture.get("roi"),
@@ -269,11 +313,24 @@ def click_text(request: ClickTextRequest) -> APIResponse:
                 "roi_adjusted": capture.get("roi_adjusted"),
                 "window_size": capture.get("window_size"),
             },
+            "execution_path": execution_path,
             "ocr_match_count": len(ocr_result.matches),
             "attempts": attempts,
             "click_result": selected_result["click_result"],
             "verification": selected_result["verification"],
         }
+        result["trace_path"] = write_trace(
+            category="actions",
+            operation="click_text",
+            payload={
+                "success": True,
+                "request": request.model_dump(),
+                "execution_path": execution_path,
+                "result": result,
+                "ocr_result": ocr_result.to_dict(),
+            },
+            name_hint=request.text,
+        )
         data = ActionResultData(action="click_text", result=result)
         return APIResponse(success=True, message="Text clicked successfully", data=data.model_dump(), error=None)
     except Exception as exc:
@@ -303,7 +360,7 @@ def _run_region_click(
     preferred_norm_point = memory.get("preferred_norm_point")
     points = point_strategy(zone, preferred_norm_point)
 
-    before_state = verifier.capture_pre_action_state()
+    before_state = verifier.capture_pre_action_state(action_name=case_name)
     retries: list[dict[str, Any]] = []
 
     for attempt_index, point in enumerate(points[: max(1, len(points))]):
@@ -425,7 +482,31 @@ def click_mouse_tester_left_region() -> APIResponse:
         return APIResponse(success=False, message="Region click execution failed", data=None, error=ErrorModel(code="region_click_failed", details=str(exc)))
 
     if not result["success"]:
+        result["execution_path"] = {
+            "vision_model_used": False,
+            "page_structure_used": False,
+            "coordinate_source": "region_grid_or_memory_point",
+            "selection_source": "known_action_target",
+        }
+        result["trace_path"] = write_trace(
+            category="actions",
+            operation="click_mouse_tester_left_region",
+            payload={"success": False, "result": result},
+            name_hint="mouse_tester_left_region",
+        )
         return APIResponse(success=False, message="MouseTester left region click did not change the counter", data=result, error=ErrorModel(code="counter_not_changed", details="No known action target changed the target counter; generic region_click path remains available as fallback"))
 
+    result["execution_path"] = {
+        "vision_model_used": False,
+        "page_structure_used": False,
+        "coordinate_source": "region_grid_or_memory_point",
+        "selection_source": "known_action_target",
+    }
+    result["trace_path"] = write_trace(
+        category="actions",
+        operation="click_mouse_tester_left_region",
+        payload={"success": True, "result": result},
+        name_hint="mouse_tester_left_region",
+    )
     data = ActionResultData(action="click_mouse_tester_left_region", result=result)
     return APIResponse(success=True, message="MouseTester left region clicked successfully", data=data.model_dump(), error=None)

@@ -22,8 +22,9 @@ Originally backed by PaddleOCR with:
 
 Current repo status:
 
-- OCR contracts are being kept as module boundaries
-- the old OCR engine implementation is not present in the current branch state
+- OCR contracts are module boundaries
+- `app/core/ocr_service.py` uses RapidOCR first with PaddleOCR fallback
+- OCR boxes now feed `page_structure_v1` fusion as the precise text-coordinate source
 
 ### click_text
 
@@ -33,8 +34,22 @@ Original intended flow:
 
 Current repo status:
 
-- the legacy click_text implementation is not present in the current branch state
-- this needs to be reintroduced on top of the new module boundaries
+- `POST /action/click_text` is restored on top of the OCR contracts
+- route-level tests cover ROI offset handling, text-not-found behavior, and retry fallback
+
+### page_structure_v1
+
+Current intended flow:
+
+`vision_regions_v1 + OCRResult -> deterministic fusion -> page_structure_v1`
+
+This layer keeps:
+
+- Qwen semantic regions for meaning, role, likely destination, and layout memory
+- OCR text boxes for precise text grounding and click points
+- links between semantic regions, OCR boxes, and generated elements
+- verification hints for the later closed-loop validator
+- memory keys for local learning of successful click strategies
 
 ### region_click
 

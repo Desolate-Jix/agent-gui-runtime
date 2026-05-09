@@ -1,0 +1,46 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from app.core import runtime_artifacts
+
+
+def test_build_screenshot_path_uses_purpose_and_roi(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(runtime_artifacts, "SCREENSHOTS_DIR", tmp_path / "screenshots")
+    monkeypatch.setattr(runtime_artifacts, "timestamp_label", lambda: "20260504-190000-000001")
+
+    path = runtime_artifacts.build_screenshot_path(
+        title="MouseTester.cn - Microsoft Edge",
+        process_name="msedge.exe",
+        handle=123,
+        purpose="click_text_scan",
+        roi={"x": 720, "y": 340, "width": 1076, "height": 900},
+        name_hint="点击开始检测",
+    )
+
+    assert path.parent == tmp_path / "screenshots"
+    assert "mousetester-cn-microsoft-edge" in path.name
+    assert "click-text-scan" in path.name
+    assert "roi-x720-y340-w1076-h900" in path.name
+    assert path.name.endswith(".png")
+
+
+def test_write_trace_writes_json(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(runtime_artifacts, "TRACES_DIR", tmp_path / "traces")
+    monkeypatch.setattr(runtime_artifacts, "timestamp_label", lambda: "20260504-190000-000002")
+
+    path = runtime_artifacts.write_trace(
+        category="vision",
+        operation="layer_trace",
+        payload={"success": True, "result": {"final_ok": True}},
+        name_hint="demo",
+    )
+
+    saved = Path(path)
+    assert saved.exists()
+    assert saved.parent == tmp_path / "traces" / "vision"
+
+    payload = json.loads(saved.read_text(encoding="utf-8"))
+    assert payload["success"] is True
+    assert payload["result"]["final_ok"] is True

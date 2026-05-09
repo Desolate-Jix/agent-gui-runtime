@@ -84,5 +84,22 @@ def test_prompt_builder_includes_resolution_and_required_schema() -> None:
 
     assert "image width = 1440" in prompt
     assert "image height = 900" in prompt
-    assert '"contract_version": "vision_regions_v1"' in prompt
-    assert '"possible_destinations"' in prompt
+    assert 'contract_version must be "vision_regions_v1"' in prompt
+    assert "possible_destinations" in prompt
+
+
+def test_prompt_builder_strengthens_grid_coordinate_guidance() -> None:
+    prompt = build_region_analysis_prompt(
+        VisionAnalyzeRequest(
+            image_path="demo.png",
+            app_name="DemoApp",
+            goal="segment modules precisely",
+            state_hint="dashboard",
+        ),
+        ImageSize(width=1440, height=900),
+        grid_overlay_spacing=100,
+    )
+
+    assert "major grid spacing is 100 pixels" in prompt
+    assert "first estimate each bbox edge against the nearest visible grid lines" in prompt
+    assert "prefer tight boxes around the visible module itself" in prompt

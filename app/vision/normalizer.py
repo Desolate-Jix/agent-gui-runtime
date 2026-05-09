@@ -36,7 +36,7 @@ class VisionResultNormalizer:
             regions=regions,
             targets=targets,
             observers=observers,
-            notes=[str(item) for item in (raw.get("notes") or []) if str(item).strip()],
+            notes=self._normalize_notes(raw.get("notes")),
             raw_text=raw.get("raw_text"),
             raw_response=raw,
         )
@@ -149,6 +149,14 @@ class VisionResultNormalizer:
 
     def _normalize_bbox(self, raw: dict[str, Any], *, width: int, height: int) -> Optional[BBox]:
         return bbox_from_any(raw, width=width, height=height)
+
+    def _normalize_notes(self, raw_notes: Any) -> list[str]:
+        if raw_notes is None:
+            return []
+        if isinstance(raw_notes, str):
+            note = raw_notes.strip()
+            return [note] if note else []
+        return [str(item) for item in raw_notes if str(item).strip()]
 
 
 normalizer = VisionResultNormalizer()

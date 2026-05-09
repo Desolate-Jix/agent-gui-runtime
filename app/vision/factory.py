@@ -45,6 +45,7 @@ class VisionProviderFactory:
             return LocalVisionProvider(
                 endpoint=local_cfg.get("endpoint"),
                 model_name=local_cfg.get("model_name"),
+                timeout_seconds=float(vision_cfg.get("timeout_seconds") or 30),
             )
         if selected_mode == "api":
             api_cfg = vision_cfg.get("api") or {}

@@ -10,7 +10,7 @@ from PIL import Image, ImageDraw, ImageFont
 from app.vision.schemas import VisionAnalyzeResponse, VisionRegion
 
 
-ARTIFACTS_DIR = Path("logs/vision-regions")
+ARTIFACTS_DIR = Path("artifacts/vision-regions")
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 
 

@@ -13,6 +13,8 @@ __pycache__/
 .coverage
 htmlcov/
 logs/
+models/
+tools/
 tmp_*.ps1
 logs/*.log
 logs/*.json
