@@ -19,6 +19,7 @@ from app.models.request import OCRRegionRequest
 from app.page_structure import build_page_structure
 from app.recognition import CandidateRankRequest, LocalGroundingRequest, decide_pre_click, rank_candidates, run_local_grounding
 from app.recognition.plan_overlay import render_recognition_plan_overlay
+from app.screen_reading import build_screen_reading
 from app.vision.artifacts import save_region_artifacts
 from app.vision.factory import VisionProviderFactory
 from app.vision.layer_trace import (
@@ -233,6 +234,80 @@ def page_structure(request: VisionAnalyzeRequestModel) -> APIResponse:
             message="Page structure failed",
             data={"trace_path": trace_path},
             error=ErrorModel(code="page_structure_failed", details=str(exc)),
+        )
+
+
+@router.post("/screen_reading", response_model=APIResponse)
+def screen_reading(request: VisionAnalyzeRequestModel) -> APIResponse:
+    image_path = Path(request.image_path)
+    if not image_path.exists():
+        return APIResponse(
+            success=False,
+            message="Image path not found",
+            data=None,
+            error=ErrorModel(code="image_not_found", details=str(image_path)),
+        )
+
+    try:
+        config = VisionProviderFactory.load_config()
+        provider = VisionProviderFactory.create(mode=request.provider_mode, config=config)
+        response = provider.analyze(
+            VisionAnalyzeRequest(
+                image_path=str(image_path),
+                task=request.task,
+                app_name=request.app_name,
+                goal=request.goal,
+                state_hint=request.state_hint,
+                provider_mode=request.provider_mode,
+                metadata=request.metadata,
+            )
+        )
+        response, ocr_result, refine_options = _maybe_refine_with_ocr(response, request=request, image_path=image_path)
+        normalized = normalizer.normalize(response.to_dict(), response.provider)
+        if normalized.image_size is None:
+            with Image.open(image_path) as image:
+                normalized.image_size = ImageSize(width=image.width, height=image.height)
+        if ocr_result is None:
+            ocr_result = ocr_service.scan_image(str(image_path))
+        structure = build_page_structure(normalized, ocr_result)
+        result_payload = build_screen_reading(
+            image_path=str(image_path),
+            vision=normalized,
+            ocr=ocr_result,
+            page_structure=structure,
+            app_name=request.app_name,
+        )
+        result_payload["execution_path"] = {
+            **_vision_execution_path(
+                requested_mode=request.provider_mode or str((config.get("vision") or {}).get("mode") or "local"),
+                response_provider=response.provider,
+                raw_response=response.raw_response,
+                page_structure_generated=True,
+                ocr_region_refine_used=refine_options.enabled,
+            ),
+            "screen_reading_used": True,
+            "ui_provider_slots_reserved": True,
+        }
+        result_payload["trace_path"] = write_trace(
+            category="vision",
+            operation="screen_reading",
+            payload={"success": True, "request": request.model_dump(), "result": result_payload},
+            name_hint=request.app_name or image_path.stem,
+        )
+        data = VisionResultData(result=result_payload)
+        return APIResponse(success=True, message="Screen reading completed", data=data.model_dump(), error=None)
+    except Exception as exc:
+        trace_path = write_trace(
+            category="vision",
+            operation="screen_reading",
+            payload={"success": False, "request": request.model_dump(), "error": str(exc)},
+            name_hint=request.app_name or image_path.stem,
+        )
+        return APIResponse(
+            success=False,
+            message="Screen reading failed",
+            data={"trace_path": trace_path},
+            error=ErrorModel(code="screen_reading_failed", details=str(exc)),
         )
 
 

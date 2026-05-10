@@ -17,13 +17,17 @@ This session attached the first controlled execution bridge on top of the staged
 - added MouseTester-specific semantic post-click verification using target-area OCR before/after evidence
 - added bounded retry policy for retry-safe post-click verification failures
 - added initial trace-based MouseTester evaluation set and CLI report generator
+- added `POST /vision/screen_reading` with `screen_reading_v1`
+- split the READ-facing UI layer out from page structure, including OCR-backed elements, visual-only/icon candidates, module grouping, reserved provider slots, and learned-UI hooks
 
 ### Validation completed
 
+- Targeted screen-reading tests passed:
+  - `9 passed`
 - Targeted route tests passed:
   - `6 passed`
 - Full test suite passed:
-  - `69 passed`
+  - `71 passed`
 - Trace evaluation passed:
   - `4/4` cases
   - top-1, pre-click, action execution, and semantic verification pass rates: `1.0`

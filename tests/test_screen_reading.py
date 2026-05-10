@@ -1,0 +1,75 @@
+from __future__ import annotations
+
+from app.page_structure import build_page_structure
+from app.screen_reading import build_screen_reading
+from app.vision.schemas import BBox, Diagonal, ImageSize, NormalizedDiagonal, VisionAnalyzeResponse, VisionRegion
+from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
+
+
+def test_screen_reading_exposes_ui_layer_with_reserved_icon_and_learning_slots() -> None:
+    vision = VisionAnalyzeResponse(
+        provider="dummy",
+        screen_summary="Browser page with toolbar and a Start button.",
+        state_guess="demo",
+        image_size=ImageSize(width=420, height=220),
+        regions=[
+            VisionRegion(
+                region_id="region_start",
+                label="Start",
+                role="button",
+                bbox=BBox(x=80, y=120, w=140, h=80),
+                diagonal=Diagonal(x1=80, y1=120, x2=220, y2=200),
+                normalized_diagonal=NormalizedDiagonal(nx1=0.19, ny1=0.54, nx2=0.52, ny2=0.9),
+                description="Start button",
+                ocr_text="Start",
+                text_lines=["Start"],
+                confidence=0.9,
+                layout_key="start_layout",
+                content_key="start_content",
+                match_key="start_layout:start_content",
+            ),
+            VisionRegion(
+                region_id="region_back",
+                label="Back arrow",
+                role="icon_button",
+                bbox=BBox(x=12, y=50, w=34, h=34),
+                diagonal=Diagonal(x1=12, y1=50, x2=46, y2=84),
+                normalized_diagonal=NormalizedDiagonal(nx1=0.02, ny1=0.22, nx2=0.1, ny2=0.38),
+                description="Left arrow icon in the browser toolbar.",
+                confidence=0.82,
+                layout_key="browser_toolbar_left",
+                content_key="back_arrow",
+                match_key="browser_toolbar_left:back_arrow",
+            ),
+        ],
+    )
+    ocr = OCRResult(
+        image_path="demo.png",
+        metadata={"engine": "test_ocr"},
+        matches=[OCRTextMatch(text="Start", score=0.99, bbox=OCRBoundingBox(x=112, y=150, width=44, height=18))],
+    )
+    page_structure = build_page_structure(vision, ocr)
+
+    result = build_screen_reading(
+        image_path="demo.png",
+        vision=vision,
+        ocr=ocr,
+        page_structure=page_structure,
+        app_name="demo",
+    )
+
+    assert result["contract_version"] == "screen_reading_v1"
+    assert result["ui"]["summary"]["element_count"] == 2
+    assert result["ui"]["summary"]["icon_candidate_count"] == 1
+    assert result["ui"]["provider_slots"]["icon_library"]["status"] == "reserved"
+    assert result["ui"]["provider_slots"]["learned_ui_memory"]["status"] == "reserved"
+
+    start = next(item for item in result["ui_elements"] if item["label"] == "Start")
+    assert start["evidence_level"] == "ocr_text_and_semantic_region"
+    assert start["locator_hints"]["future_providers"]["uia"]["status"] == "reserved"
+
+    back = next(item for item in result["ui_elements"] if item["role_guess"] == "icon_button")
+    assert back["type"] == "icon_button"
+    assert back["evidence_level"] == "visual_region_only"
+    assert back["id"] in result["execution_relevance"]["risky_candidates"]
+    assert result["uncertainties"][0]["code"] == "icon_provider_not_connected"

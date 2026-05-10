@@ -130,7 +130,7 @@ Last updated: 2026-05-10.
 
 The project has moved from raw full-page visual coordinates toward an inspectable staged recognition MVP plus a gated execution bridge:
 
-`screenshot -> vision_regions_v1 + OCR -> page_structure_v1 -> candidate_rank_v1 -> narrow_search_v1 -> pre_click_decision_v1`
+`screenshot -> vision_regions_v1 + OCR -> page_structure_v1 -> screen_reading_v1 -> candidate_rank_v1 -> narrow_search_v1 -> pre_click_decision_v1`
 
 Execution bridge:
 
@@ -140,6 +140,7 @@ Current verified status:
 
 - Local Qwen3-VL-style vision endpoint is reachable through the OpenAI-compatible local provider.
 - `POST /vision/recognition_plan` runs the full no-click recognition plan.
+- `POST /vision/screen_reading` exposes a READ-facing UI layer with OCR-backed elements, visual-only UI candidates, module grouping, and reserved slots for future UIA, browser accessibility, icon-library, and learned-UI providers.
 - `POST /vision/render_recognition_plan_overlay` produces human-review overlays for candidate boxes, OCR-refined boxes, local OCR matches, and refined click points.
 - `POST /action/execute_recognition_plan` executes only a `pre_click_decision_v1`-approved selected point from a live bound-window capture.
 - `page_structure_v1` now guards against far/short OCR text binding so repeated fragments such as single-letter labels do not inflate element boxes.
@@ -156,7 +157,7 @@ Latest real MouseTester evidence:
 - `refined_bbox`: narrowed to the goal text line through `goal_text_ids_union:1`
 - Local OCR matched text: `点击此处测试`
 - Pre-click decision: allowed, no click executed
-- Test suite: `64 passed`
+- Test suite: `71 passed`
 
 Current limitation:
 
@@ -475,6 +476,22 @@ In other words:
 > collect evidence first, fuse it into executable elements, then let the agent decide
 
 The agent should not be forced to infer the next step from raw region geometry alone.
+
+### Screen reading contract
+
+`POST /vision/screen_reading` returns `screen_reading_v1`, the current READ-facing contract. It sits above `page_structure_v1` and keeps the UI-specific layer separate from action execution.
+
+The contract includes:
+
+- `texts`: normalized OCR text boxes
+- `ui.elements`: executable or potentially executable UI objects
+- `ui.modules`: grouped screen areas inferred from semantic regions
+- `ui.icon_candidates`: no-text or icon-like controls that require stronger grounding before execution
+- `ui.provider_slots`: reserved integration points for UIA, browser accessibility, icon libraries, and learned UI memory
+- `ui.learning_hooks`: candidate records that can later be written into UI memory after manual review or verified actions
+- `execution_relevance`: safe, risky, and unknown UI candidate ids
+
+This route is intentionally conservative. OCR-backed/page-structure elements can be considered by later grounding, while visual-only icon candidates are exposed for review and future provider matching instead of being treated as immediately safe click targets.
 
 ### Page structure shape
 
@@ -797,6 +814,7 @@ The remaining high-value work is end-to-end runtime verification with a real bou
 - `POST /vision/ocr_region`
 - `POST /vision/analyze`
 - `POST /vision/page_structure`
+- `POST /vision/screen_reading`
 - `POST /vision/recognition_plan`
 - `POST /vision/layer_trace`
 - `POST /vision/render_review_overlay`

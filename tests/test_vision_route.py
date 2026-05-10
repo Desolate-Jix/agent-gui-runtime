@@ -135,6 +135,88 @@ def test_vision_page_structure_returns_fused_elements(tmp_path, monkeypatch) -> 
     assert result["learning_summary"]["allowed_element_count"] == 1
 
 
+def test_vision_screen_reading_returns_ui_provider_slots(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (420, 220), color=(255, 255, 255)).save(image_path)
+
+    class DummyProvider:
+        def analyze(self, req):
+            from app.vision.schemas import BBox, Diagonal, ImageSize, NormalizedDiagonal, VisionAnalyzeResponse, VisionRegion
+
+            return VisionAnalyzeResponse(
+                provider="dummy",
+                screen_summary="dummy page",
+                state_guess="dummy_state",
+                image_size=ImageSize(width=420, height=220),
+                regions=[
+                    VisionRegion(
+                        region_id="region_start",
+                        label="Start",
+                        role="button",
+                        bbox=BBox(x=80, y=120, w=140, h=80),
+                        diagonal=Diagonal(x1=80, y1=120, x2=220, y2=200),
+                        normalized_diagonal=NormalizedDiagonal(nx1=0.1, ny1=0.5, nx2=0.5, ny2=0.9),
+                        description="Start button",
+                        ocr_text="Start",
+                        text_lines=["Start"],
+                        confidence=0.9,
+                        layout_key="layout_start",
+                        content_key="content_start",
+                        match_key="layout_start:content_start",
+                    ),
+                    VisionRegion(
+                        region_id="region_back",
+                        label="Back arrow",
+                        role="icon_button",
+                        bbox=BBox(x=12, y=50, w=34, h=34),
+                        diagonal=Diagonal(x1=12, y1=50, x2=46, y2=84),
+                        normalized_diagonal=NormalizedDiagonal(nx1=0.02, ny1=0.22, nx2=0.1, ny2=0.38),
+                        description="Left arrow icon in a toolbar",
+                        confidence=0.82,
+                        layout_key="toolbar_left",
+                        content_key="back_arrow",
+                        match_key="toolbar_left:back_arrow",
+                    ),
+                ],
+            )
+
+    class DummyOCR:
+        def scan_image(self, image_path):
+            from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
+
+            return OCRResult(
+                image_path=image_path,
+                metadata={"engine": "rapidocr_onnxruntime"},
+                matches=[OCRTextMatch(text="Start", score=0.99, bbox=OCRBoundingBox(x=112, y=150, width=44, height=18))],
+            )
+
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.load_config", lambda: {"vision": {"mode": "local"}})
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: DummyProvider())
+    monkeypatch.setattr("app.api.vision.ocr_service", DummyOCR())
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/screen_reading",
+        json={
+            "image_path": str(image_path),
+            "task": "analyze_ui",
+            "app_name": "demo",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    assert result["contract_version"] == "screen_reading_v1"
+    assert result["ui"]["summary"]["element_count"] == 2
+    assert result["ui"]["summary"]["icon_candidate_count"] == 1
+    assert result["ui"]["provider_slots"]["uia"]["status"] == "reserved"
+    assert result["ui"]["provider_slots"]["icon_library"]["status"] == "reserved"
+    assert result["execution_path"]["screen_reading_used"] is True
+    assert Path(result["trace_path"]).exists()
+
+
 def test_vision_recognition_plan_returns_ranked_candidates(tmp_path, monkeypatch) -> None:
     image_path = tmp_path / "capture.png"
     Image.new("RGB", (420, 220), color=(255, 255, 255)).save(image_path)

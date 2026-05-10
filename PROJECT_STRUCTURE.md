@@ -103,6 +103,7 @@ Use it when you need to answer:
   - `POST /vision/ocr_region`
   - `POST /vision/analyze`
   - `POST /vision/page_structure`
+  - `POST /vision/screen_reading`
   - `POST /vision/recognition_plan`
   - `POST /vision/layer_trace`
   - `POST /vision/render_review_overlay`
@@ -112,6 +113,7 @@ Use it when you need to answer:
     - run provider-based vision analysis through the `app/vision/` abstraction
     - normalize learned regions
     - fuse semantic regions with OCR text boxes into `page_structure_v1`
+    - build `screen_reading_v1` as the READ-facing UI layer, including reserved UIA/browser/icon/learned-UI provider slots
     - return a no-click staged recognition plan with ranked candidates
     - expose a test/debug trace that shows every layer result and schema validation
     - redraw region/OCR boxes on the original screenshot for human review
@@ -398,6 +400,54 @@ Runtime output:
 - `evidence`
   - binding scores and source match keys
   - explains how fusion chose this element and click point
+
+### Screen reading layer
+
+- `app/screen_reading/`
+  - READ-facing screen interpretation layer above `page_structure_v1`
+  - outputs `screen_reading_v1`
+  - keeps UI recognition separate from action execution
+  - exposes conservative placeholders for future UIA, browser accessibility, icon-library, and learned-UI-memory providers
+
+Key files:
+
+- `builder.py`
+  - consumes normalized `vision_regions_v1`, OCR output, and `page_structure_v1`
+  - promotes OCR-backed page elements into `ui.elements`
+  - preserves visual-only semantic UI regions as low-confidence/reserved candidates
+  - extracts `ui.icon_candidates` for no-text or icon-like controls without marking them safe for execution
+  - builds `ui.modules` from larger semantic regions and records child element/text ids
+  - emits `provider_slots` and `learning_hooks` so later UIA/icon-library/learning work has a stable integration point
+
+Runtime output:
+
+- `contract_version`
+  - always `screen_reading_v1`
+- `texts`
+  - normalized OCR text boxes
+- `ui.elements`
+  - UI objects with `role_guess`, `type`, label, bbox, click point, evidence level, locator hints, and memory key
+- `ui.icon_candidates`
+  - reserved icon-like candidates that still need icon-shape, nearby-context, or provider confirmation
+- `ui.provider_slots`
+  - planned provider interfaces for `uia`, `browser_accessibility`, `icon_library`, and `learned_ui_memory`
+- `execution_relevance`
+  - safe, risky, and unknown candidate id buckets for later grounding
+- `uncertainties`
+  - explicit gaps such as `icon_provider_not_connected` and `visual_only_ui_requires_grounding`
+
+Route:
+
+- `POST /vision/screen_reading`
+
+Execution sequence:
+
+1. validate `image_path`
+2. run configured vision provider and normalize to `vision_regions_v1`
+3. run OCR
+4. build `page_structure_v1`
+5. build `screen_reading_v1`
+6. write a vision trace under `logs/traces/vision/`
 
 ### Vision layer trace
 
@@ -708,6 +758,16 @@ Fusion scoring uses:
 
 The first version intentionally does not make action decisions. It prepares executable element evidence for the future action layer.
 
+### vision screen reading
+
+- route: `app/api/vision.py`
+- endpoint: `POST /vision/screen_reading`
+- builder: `app/screen_reading/builder.py`
+
+Use this when the upper layer wants a fuller READ result instead of only the older page-structure fusion result. The current implementation strengthens the UI part of READ by returning OCR-backed elements, visual-only/icon candidates, module grouping, locator hints, reserved provider slots, and learning hooks.
+
+This endpoint still does not execute actions. Visual-only candidates are intentionally risky/reserved until a future provider such as UIA, browser accessibility, an icon catalog, or learned UI memory confirms them.
+
 ### vision layer trace
 
 - route: `app/api/vision.py`
@@ -1006,6 +1066,7 @@ This keeps the MVP small, inspectable, and reversible.
 - `vision/ocr_region`
 - `vision/analyze`
 - `vision/page_structure`
+- `vision/screen_reading`
 - `vision/recognition_plan`
 - `vision/layer_trace`
 - `vision/render_review_overlay`

@@ -13,7 +13,7 @@ It is designed for the current runtime in this repo, not for a generic agent sys
 
 The main evaluation chain is:
 
-`session -> capture -> OCR -> vision_regions_v1 -> page_structure_v1 -> action -> verification -> memory`
+`session -> capture -> OCR -> vision_regions_v1 -> page_structure_v1 -> screen_reading_v1 -> action -> verification -> memory`
 
 The preferred recognition-improvement strategy on top of that chain is:
 
@@ -150,6 +150,7 @@ Current repo mapping:
 - `vision_regions_v1`
 - `ocr_result`
 - `page_structure_v1`
+- `screen_reading_v1`
 
 Primary evaluation question:
 
@@ -635,7 +636,58 @@ Common failure meaning:
 - element exists but point misses: bbox selection strategy problem
 - element bbox spans unrelated text: OCR binding cluster or short-text guard problem
 
-## 6. Action Execution
+## 6. Screen Reading
+
+Scope:
+
+- `POST /vision/screen_reading`
+- `screen_reading_v1`
+- `app/screen_reading/builder.py`
+
+Goal:
+
+- expose a READ-facing UI layer that describes text, modules, executable elements, visual-only/icon candidates, provider slots, and learning hooks without executing actions
+
+Completion checks:
+
+- OCR-backed page elements appear in `ui.elements`
+- visual-only or icon-like candidates appear in `ui.icon_candidates`
+- visual-only/icon candidates are not marked as safe execution targets without stronger grounding
+- provider slots are present for UIA, browser accessibility, icon library, and learned UI memory
+- uncertainties explicitly describe missing provider evidence
+
+Metrics:
+
+- `screen_reading_contract_pass_rate`
+- `ui_element_recall`
+  - expected UI elements represented / expected UI elements
+- `icon_candidate_recall`
+  - expected no-text icons represented / expected no-text icons
+- `unsafe_icon_block_rate`
+  - visual-only icon candidates kept out of safe action candidates / visual-only icon candidates
+- `module_grouping_accuracy`
+
+Target thresholds for the current phase:
+
+- `screen_reading_contract_pass_rate = 1.00`
+- `ui_element_recall >= 0.90`
+- `icon_candidate_recall >= 0.80`
+- `unsafe_icon_block_rate = 1.00`
+
+Pass evidence:
+
+- `screen_reading_v1` JSON
+- `ui.elements`, `ui.icon_candidates`, `ui.provider_slots`, `execution_relevance`, and `uncertainties`
+- route trace under `logs/traces/vision/`
+- targeted route/unit tests
+
+Common failure meaning:
+
+- OCR/page structure good but missing UI element: READ builder mapping issue
+- icon visible but absent from `icon_candidates`: visual-region role/label mapping issue
+- visual-only icon marked safe: grounding safety policy issue
+
+## 7. Action Execution
 
 Scope:
 
@@ -691,7 +743,7 @@ Common failure meaning:
 - click sent but no effect: verification or target point issue
 - wrong click with correct OCR: coordinate translation issue
 
-## 7. Verification
+## 8. Verification
 
 Scope:
 
@@ -743,7 +795,7 @@ Common failure meaning:
 - precision low: visual diff threshold too loose
 - recall low: wait time or ROI too narrow
 
-## 8. State Memory And Persistence
+## 9. State Memory And Persistence
 
 Scope:
 
@@ -787,7 +839,7 @@ Common failure meaning:
 
 - memory exists but success drops: match key or reuse policy too aggressive
 
-## 9. End-To-End Task Accuracy
+## 10. End-To-End Task Accuracy
 
 Scope:
 
@@ -926,6 +978,7 @@ Before trusting a new target workflow in this repo, require at least:
 - `ocr_region` at `L3`
 - `vision_regions_v1` at `L3`
 - `page_structure_v1` at `L3`
+- `screen_reading_v1` at `L2`
 - `action execution` at `L3`
 - `verification` at `L4`
 - `memory reuse` at `L2`
