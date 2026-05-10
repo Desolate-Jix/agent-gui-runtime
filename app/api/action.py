@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -15,7 +17,7 @@ from app.core.runtime_artifacts import write_trace
 from app.core.screenshot import screenshot_service
 from app.core.verifier import verifier
 from app.core.window_manager import window_manager
-from app.models.request import ClickTextRequest
+from app.models.request import ClickTextRequest, ExecuteRecognitionPlanRequest, VisionRecognitionPlanOverlayRequestModel, VisionRecognitionPlanRequestModel
 from app.models.response import APIResponse, ActionResultData, ErrorModel
 from app.schemas.action_target import ActionTarget
 from app.schemas.state import AppState
@@ -41,6 +43,296 @@ RegionClickPanelLocator = Callable[[Any], dict[str, Any]]
 RegionClickZoneResolver = Callable[[dict[str, Any]], dict[str, Any]]
 RegionClickPointStrategy = Callable[[dict[str, Any], Optional[dict[str, float]]], list[dict[str, Any]]]
 RegionClickValidator = Callable[[list[str], list[str]], dict[str, Any]]
+
+
+def _run_recognition_plan_for_execution(request: VisionRecognitionPlanRequestModel) -> APIResponse:
+    from app.api.vision import recognition_plan
+
+    return recognition_plan(request)
+
+
+def _render_recognition_plan_overlay_for_execution(trace_path: str) -> Optional[dict[str, Any]]:
+    from app.api.vision import render_recognition_plan_overlay_route
+
+    response = render_recognition_plan_overlay_route(
+        VisionRecognitionPlanOverlayRequestModel(
+            trace_path=trace_path,
+            include_rejected=True,
+            include_points=True,
+            label_candidates=True,
+            label_reasons=True,
+        )
+    )
+    if not response.success or not response.data:
+        return None
+    return response.data.get("result")
+
+
+def _extract_action_point(plan: dict[str, Any]) -> Optional[dict[str, int]]:
+    point = (plan.get("pre_click_decision") or {}).get("selected_click_point")
+    if not point:
+        return None
+    return {"x": int(point["x"]), "y": int(point["y"])}
+
+
+def _should_verify_mouse_tester_semantics(request: ExecuteRecognitionPlanRequest, plan: dict[str, Any]) -> bool:
+    values = [
+        request.app_name or "",
+        request.state_hint or "",
+        plan.get("goal") or "",
+        (plan.get("parse_result") or {}).get("vision_regions", {}).get("screen_summary") or "",
+    ]
+    normalized = " ".join(str(value).casefold() for value in values)
+    return "mousetester" in normalized or "mouse tester" in normalized or "鼠标" in normalized
+
+
+def _verify_mouse_tester_post_click_semantics(
+    *,
+    request: ExecuteRecognitionPlanRequest,
+    plan: dict[str, Any],
+    generic_verification: dict[str, Any],
+) -> dict[str, Any]:
+    before_path = ((generic_verification.get("before") or {}).get("image_path"))
+    after_path = ((generic_verification.get("after") or {}).get("image_path"))
+    recommended = plan.get("recommended_target") or {}
+    target_bbox = _target_bbox_from_recommended(recommended)
+    if not before_path or not after_path or target_bbox is None:
+        return {
+            "applicable": True,
+            "verified": False,
+            "reason": "missing_before_after_or_target_bbox",
+            "before_path": before_path,
+            "after_path": after_path,
+            "target_bbox": target_bbox,
+        }
+
+    image_size = _image_size_from_plan(plan)
+    verification_bbox = _expand_bbox(target_bbox, pad_x=90, pad_y=55, image_size=image_size)
+    before_texts = _ocr_texts_in_bbox(before_path, verification_bbox)
+    after_texts = _ocr_texts_in_bbox(after_path, verification_bbox)
+    expected_values = [
+        request.goal,
+        str(recommended.get("label") or ""),
+        str(recommended.get("text") or ""),
+    ]
+    before_target_present = _texts_contain_expected(before_texts, expected_values)
+    after_target_present = _texts_contain_expected(after_texts, expected_values)
+    localized_text_changed = _text_signature(before_texts) != _text_signature(after_texts)
+    diff_overlaps_target = _diff_overlaps_bbox(generic_verification.get("diff") or {}, verification_bbox)
+    target_text_replaced = bool(before_target_present and not after_target_present)
+    verified = bool(diff_overlaps_target and localized_text_changed and (target_text_replaced or before_target_present))
+
+    return {
+        "applicable": True,
+        "verified": verified,
+        "profile": "mousetester_target_text_change_v1",
+        "target_bbox": target_bbox,
+        "verification_bbox": verification_bbox,
+        "before_path": before_path,
+        "after_path": after_path,
+        "before_texts": before_texts,
+        "after_texts": after_texts,
+        "before_target_present": before_target_present,
+        "after_target_present": after_target_present,
+        "target_text_replaced": target_text_replaced,
+        "localized_text_changed": localized_text_changed,
+        "diff_overlaps_target": diff_overlaps_target,
+        "reasons": _semantic_verification_reasons(
+            before_target_present=before_target_present,
+            after_target_present=after_target_present,
+            target_text_replaced=target_text_replaced,
+            localized_text_changed=localized_text_changed,
+            diff_overlaps_target=diff_overlaps_target,
+        ),
+    }
+
+
+def _target_bbox_from_recommended(recommended: dict[str, Any]) -> Optional[dict[str, int]]:
+    source = recommended.get("refined_bbox") or (recommended.get("element") or {}).get("bbox")
+    if not source:
+        return None
+    return {
+        "x": int(source.get("x", 0)),
+        "y": int(source.get("y", 0)),
+        "width": int(source.get("width", source.get("w", 0))),
+        "height": int(source.get("height", source.get("h", 0))),
+    }
+
+
+def _image_size_from_plan(plan: dict[str, Any]) -> Optional[dict[str, int]]:
+    image_size = (((plan.get("parse_result") or {}).get("vision_regions") or {}).get("image_size") or {})
+    width = image_size.get("width")
+    height = image_size.get("height")
+    if width and height:
+        return {"width": int(width), "height": int(height)}
+    return None
+
+
+def _expand_bbox(
+    bbox: dict[str, int],
+    *,
+    pad_x: int,
+    pad_y: int,
+    image_size: Optional[dict[str, int]] = None,
+) -> dict[str, int]:
+    x1 = int(bbox["x"]) - int(pad_x)
+    y1 = int(bbox["y"]) - int(pad_y)
+    x2 = int(bbox["x"]) + int(bbox["width"]) + int(pad_x)
+    y2 = int(bbox["y"]) + int(bbox["height"]) + int(pad_y)
+    x1 = max(0, x1)
+    y1 = max(0, y1)
+    if image_size:
+        x2 = min(int(image_size["width"]), x2)
+        y2 = min(int(image_size["height"]), y2)
+    return {"x": x1, "y": y1, "width": max(1, x2 - x1), "height": max(1, y2 - y1)}
+
+
+def _ocr_texts_in_bbox(image_path: str, bbox: dict[str, int]) -> list[dict[str, Any]]:
+    result = ocr_service.scan_image(image_path)
+    texts: list[dict[str, Any]] = []
+    for match in result.matches:
+        match_bbox = match.bbox.to_dict()
+        center = {
+            "x": int(match_bbox["x"] + match_bbox["width"] / 2),
+            "y": int(match_bbox["y"] + match_bbox["height"] / 2),
+        }
+        if _point_in_rect(center, bbox):
+            texts.append({"text": match.text, "score": float(match.score), "bbox": match_bbox})
+    texts.sort(key=lambda item: (item["bbox"]["y"], item["bbox"]["x"]))
+    return texts
+
+
+def _texts_contain_expected(texts: list[dict[str, Any]], expected_values: list[str]) -> bool:
+    expected = [_normalize_semantic_text(value) for value in expected_values if _normalize_semantic_text(value)]
+    for item in texts:
+        normalized_text = _normalize_semantic_text(str(item.get("text") or ""))
+        if any(_semantic_text_similarity(normalized_text, value) >= 0.75 for value in expected):
+            return True
+    return False
+
+
+def _text_signature(texts: list[dict[str, Any]]) -> list[str]:
+    return [_normalize_semantic_text(str(item.get("text") or "")) for item in texts]
+
+
+def _diff_overlaps_bbox(diff: dict[str, Any], bbox: dict[str, int]) -> bool:
+    for region in diff.get("regions") or []:
+        region_bbox = {
+            "x": int(region.get("x", 0)),
+            "y": int(region.get("y", 0)),
+            "width": int(region.get("width", region.get("w", 0))),
+            "height": int(region.get("height", region.get("h", 0))),
+        }
+        if _rects_intersect(region_bbox, bbox):
+            return True
+    return False
+
+
+def _semantic_verification_reasons(
+    *,
+    before_target_present: bool,
+    after_target_present: bool,
+    target_text_replaced: bool,
+    localized_text_changed: bool,
+    diff_overlaps_target: bool,
+) -> list[str]:
+    reasons: list[str] = []
+    reasons.append("before_target_present" if before_target_present else "before_target_missing")
+    reasons.append("after_target_still_present" if after_target_present else "after_target_absent")
+    if target_text_replaced:
+        reasons.append("target_text_replaced")
+    if localized_text_changed:
+        reasons.append("localized_text_changed")
+    if diff_overlaps_target:
+        reasons.append("diff_overlaps_target")
+    else:
+        reasons.append("diff_did_not_overlap_target")
+    return reasons
+
+
+def _point_in_rect(point: dict[str, int], rect: dict[str, int]) -> bool:
+    return (
+        int(rect["x"]) <= int(point["x"]) <= int(rect["x"]) + int(rect["width"])
+        and int(rect["y"]) <= int(point["y"]) <= int(rect["y"]) + int(rect["height"])
+    )
+
+
+def _rects_intersect(left: dict[str, int], right: dict[str, int]) -> bool:
+    left_x2 = int(left["x"]) + int(left["width"])
+    left_y2 = int(left["y"]) + int(left["height"])
+    right_x2 = int(right["x"]) + int(right["width"])
+    right_y2 = int(right["y"]) + int(right["height"])
+    return not (
+        left_x2 < int(right["x"])
+        or right_x2 < int(left["x"])
+        or left_y2 < int(right["y"])
+        or right_y2 < int(left["y"])
+    )
+
+
+def _semantic_text_similarity(left: str, right: str) -> float:
+    if not left or not right:
+        return 0.0
+    if left == right:
+        return 1.0
+    if min(len(left), len(right)) >= 3 and (left in right or right in left):
+        return 0.9
+    return SequenceMatcher(None, left, right).ratio()
+
+
+def _normalize_semantic_text(value: str) -> str:
+    normalized = str(value or "").casefold()
+    normalized = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", " ", normalized)
+    return " ".join(normalized.split())
+
+
+def _execution_attempt_verified(
+    *,
+    request: ExecuteRecognitionPlanRequest,
+    post_click_verification: dict[str, Any],
+    semantic_post_click_verification: dict[str, Any],
+) -> bool:
+    if not request.enable_post_click_verification:
+        return True
+    if semantic_post_click_verification.get("applicable"):
+        return bool(post_click_verification.get("verified")) and bool(semantic_post_click_verification.get("verified"))
+    return bool(post_click_verification.get("verified"))
+
+
+def _retry_allowed_after_attempt(
+    *,
+    request: ExecuteRecognitionPlanRequest,
+    pre_click: dict[str, Any],
+    attempt_index: int,
+    attempt_verified: bool,
+) -> tuple[bool, str]:
+    if attempt_verified:
+        return False, "attempt_verified"
+    if not request.enable_post_click_verification:
+        return False, "post_click_verification_disabled"
+    if attempt_index >= int(request.max_execution_attempts):
+        return False, "max_execution_attempts_reached"
+    if not pre_click.get("allowed"):
+        return False, "pre_click_not_allowed"
+
+    selected_candidate_id = pre_click.get("selected_candidate_id")
+    selected_decision = None
+    for item in pre_click.get("candidate_decisions") or []:
+        if item.get("candidate_id") == selected_candidate_id:
+            selected_decision = item
+            break
+    selected_reasons = set((selected_decision or {}).get("reasons") or [])
+    blocked_reasons = {
+        "candidate_goal_text_mismatch",
+        "local_ocr_text_mismatch",
+        "candidate_not_eligible",
+        "interaction_policy_blocked",
+        "ad_like_candidate",
+        "refined_point_outside_candidate_bbox",
+    }
+    if selected_reasons & blocked_reasons:
+        return False, "selected_candidate_not_retry_safe"
+    return True, "verification_failed_retry_safe"
 
 
 def _window_rect(bound: Any) -> dict[str, int]:
@@ -96,6 +388,288 @@ def _capture_bound_window_image(bound: Any, name_prefix: str) -> Optional[str]:
     if not image_path:
         return None
     return str(Path(image_path).resolve())
+
+
+@router.post("/execute_recognition_plan", response_model=APIResponse)
+def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIResponse:
+    bound = window_manager.get_bound_window()
+    live_capture: Optional[dict[str, Any]] = None
+
+    if request.capture_live:
+        if bound is None:
+            return APIResponse(
+                success=False,
+                message="No bound window is currently available",
+                data=None,
+                error=ErrorModel(
+                    code="no_bound_window",
+                    details="Bind the MouseTester window before calling /action/execute_recognition_plan with live capture",
+                ),
+            )
+        try:
+            live_capture = screenshot_service.capture_window(
+                save_image=True,
+                purpose="recognition_plan_execution",
+                name_hint=request.app_name or "recognition_plan",
+            )
+        except Exception as exc:
+            trace_path = write_trace(
+                category="actions",
+                operation="execute_recognition_plan",
+                payload={"success": False, "request": request.model_dump(), "error": str(exc)},
+                name_hint=request.app_name or "recognition_plan",
+            )
+            return APIResponse(
+                success=False,
+                message="Live capture failed",
+                data={"trace_path": trace_path},
+                error=ErrorModel(code="live_capture_failed", details=str(exc)),
+            )
+        image_path = str(Path(str(live_capture["image_path"])).resolve())
+    elif request.image_path:
+        image_path = request.image_path
+        if not request.allow_saved_image_execution and not request.dry_run:
+            trace_path = write_trace(
+                category="actions",
+                operation="execute_recognition_plan",
+                payload={
+                    "success": False,
+                    "request": request.model_dump(),
+                    "failure_reason": "saved_image_execution_not_allowed",
+                },
+                name_hint=request.app_name or "recognition_plan",
+            )
+            return APIResponse(
+                success=False,
+                message="Saved-image execution requires explicit override",
+                data={"trace_path": trace_path},
+                error=ErrorModel(
+                    code="saved_image_execution_not_allowed",
+                    details="Use capture_live=true, dry_run=true, or allow_saved_image_execution=true",
+                ),
+            )
+    else:
+        return APIResponse(
+            success=False,
+            message="No screenshot source provided",
+            data=None,
+            error=ErrorModel(code="missing_image_source", details="Provide image_path or set capture_live=true"),
+        )
+
+    plan_request = VisionRecognitionPlanRequestModel(
+        image_path=image_path,
+        task=request.task,
+        app_name=request.app_name,
+        goal=request.goal,
+        state_hint=request.state_hint,
+        provider_mode=request.provider_mode,
+        metadata=request.metadata,
+        top_k=request.top_k,
+    )
+    plan_response = _run_recognition_plan_for_execution(plan_request)
+    if not plan_response.success or not plan_response.data:
+        trace_path = write_trace(
+            category="actions",
+            operation="execute_recognition_plan",
+            payload={
+                "success": False,
+                "request": request.model_dump(),
+                "live_capture": live_capture,
+                "recognition_plan_response": plan_response.model_dump(),
+                "failure_reason": "recognition_plan_failed",
+            },
+            name_hint=request.app_name or "recognition_plan",
+        )
+        return APIResponse(
+            success=False,
+            message="Recognition plan failed",
+            data={"trace_path": trace_path, "recognition_plan_response": plan_response.model_dump()},
+            error=ErrorModel(code="recognition_plan_failed", details=plan_response.error.model_dump() if plan_response.error else None),
+        )
+
+    plan = plan_response.data["result"]
+    pre_click = plan.get("pre_click_decision") or {}
+    selected_point = _extract_action_point(plan)
+    plan_trace_path = plan.get("trace_path")
+    overlay = _render_recognition_plan_overlay_for_execution(plan_trace_path) if plan_trace_path else None
+    execution_path = {
+        "vision_model_used": bool((plan.get("execution_path") or {}).get("vision_model_used")),
+        "page_structure_used": True,
+        "candidate_rank_used": True,
+        "narrow_search_used": True,
+        "pre_click_decision_used": True,
+        "post_click_verification_used": bool(request.enable_post_click_verification and not request.dry_run),
+        "coordinate_source": "pre_click_decision_v1.selected_click_point",
+        "selection_source": "recognition_plan_v1",
+        "action_executed": False,
+        "dry_run": bool(request.dry_run),
+        "retry_policy_used": True,
+        "max_execution_attempts": int(request.max_execution_attempts),
+    }
+
+    base_result: dict[str, Any] = {
+        "contract_version": "execute_recognition_plan_v1",
+        "goal": request.goal,
+        "image_path": image_path,
+        "live_capture": live_capture,
+        "recognition_plan": plan,
+        "recognition_plan_trace_path": plan_trace_path,
+        "recognition_plan_overlay": overlay,
+        "pre_click_decision": pre_click,
+        "selected_click_point": selected_point,
+        "execution_path": execution_path,
+    }
+
+    if not pre_click.get("allowed") or selected_point is None:
+        base_result["trace_path"] = write_trace(
+            category="actions",
+            operation="execute_recognition_plan",
+            payload={
+                "success": False,
+                "request": request.model_dump(),
+                "result": base_result,
+                "failure_reason": "pre_click_rejected",
+            },
+            name_hint=request.app_name or "recognition_plan",
+        )
+        return APIResponse(
+            success=False,
+            message="Recognition plan was rejected before click",
+            data=base_result,
+            error=ErrorModel(code="pre_click_rejected", details=pre_click.get("reasons")),
+        )
+
+    if request.dry_run:
+        base_result["trace_path"] = write_trace(
+            category="actions",
+            operation="execute_recognition_plan",
+            payload={"success": True, "request": request.model_dump(), "result": base_result},
+            name_hint=request.app_name or "recognition_plan",
+        )
+        data = ActionResultData(action="execute_recognition_plan", result=base_result)
+        return APIResponse(success=True, message="Recognition plan accepted; dry run did not click", data=data.model_dump(), error=None)
+
+    attempts: list[dict[str, Any]] = []
+    final_attempt: dict[str, Any] | None = None
+    try:
+        for attempt_index in range(1, int(request.max_execution_attempts) + 1):
+            before_state = (
+                verifier.capture_pre_action_state(action_name="execute_recognition_plan")
+                if request.enable_post_click_verification
+                else None
+            )
+            click_result = input_controller.click_point(
+                selected_point["x"],
+                selected_point["y"],
+                move_before_click=True,
+                settle_ms=100,
+                hold_ms=70,
+            )
+            post_click_verification = (
+                verifier.verify_action(
+                    "execute_recognition_plan",
+                    before_state=before_state,
+                    click_result=click_result,
+                )
+                if request.enable_post_click_verification
+                else {"verified": None, "verification_skipped": True}
+            )
+            semantic_post_click_verification = (
+                _verify_mouse_tester_post_click_semantics(
+                    request=request,
+                    plan=plan,
+                    generic_verification=post_click_verification,
+                )
+                if request.enable_post_click_verification and _should_verify_mouse_tester_semantics(request, plan)
+                else {"applicable": False, "verified": None, "verification_skipped": True}
+            )
+            attempt_verified = _execution_attempt_verified(
+                request=request,
+                post_click_verification=post_click_verification,
+                semantic_post_click_verification=semantic_post_click_verification,
+            )
+            retry_allowed, retry_reason = _retry_allowed_after_attempt(
+                request=request,
+                pre_click=pre_click,
+                attempt_index=attempt_index,
+                attempt_verified=attempt_verified,
+            )
+            attempt = {
+                "attempt": attempt_index,
+                "click_point": selected_point,
+                "click_result": click_result,
+                "post_click_verification": post_click_verification,
+                "semantic_post_click_verification": semantic_post_click_verification,
+                "verified": attempt_verified,
+                "retry_allowed": retry_allowed,
+                "retry_reason": retry_reason,
+            }
+            attempts.append(attempt)
+            final_attempt = attempt
+            if attempt_verified or not retry_allowed:
+                break
+    except Exception as exc:
+        base_result["execution_path"]["action_executed"] = bool(attempts)
+        base_result["attempts"] = attempts
+        base_result["trace_path"] = write_trace(
+            category="actions",
+            operation="execute_recognition_plan",
+            payload={
+                "success": False,
+                "request": request.model_dump(),
+                "result": base_result,
+                "error": str(exc),
+            },
+            name_hint=request.app_name or "recognition_plan",
+        )
+        return APIResponse(
+            success=False,
+            message="Recognition-plan click failed",
+            data=base_result,
+            error=ErrorModel(code="recognition_plan_click_failed", details=str(exc)),
+        )
+
+    final_attempt = final_attempt or {}
+    verified = bool(final_attempt.get("verified"))
+    post_click_verification = final_attempt.get("post_click_verification") or {}
+    semantic_post_click_verification = final_attempt.get("semantic_post_click_verification") or {}
+    click_result = final_attempt.get("click_result") or {}
+    base_result.update(
+        {
+            "click_result": click_result,
+            "post_click_verification": post_click_verification,
+            "semantic_post_click_verification": semantic_post_click_verification,
+            "attempts": attempts,
+        }
+    )
+    base_result["execution_path"]["action_executed"] = bool(attempts)
+    base_result["execution_path"]["execution_attempt_count"] = len(attempts)
+    base_result["execution_path"]["retry_count"] = max(0, len(attempts) - 1)
+    base_result["execution_path"]["semantic_post_click_verification_used"] = bool(semantic_post_click_verification.get("applicable"))
+    base_result["trace_path"] = write_trace(
+        category="actions",
+        operation="execute_recognition_plan",
+        payload={"success": verified, "request": request.model_dump(), "result": base_result},
+        name_hint=request.app_name or "recognition_plan",
+    )
+
+    if not verified:
+        error_code = "semantic_post_click_verification_failed" if semantic_post_click_verification.get("applicable") else "post_click_verification_failed"
+        return APIResponse(
+            success=False,
+            message="Recognition-plan click executed but post-click verification failed",
+            data=base_result,
+            error=ErrorModel(
+                code=error_code,
+                details={
+                    "post_click_verification": post_click_verification,
+                    "semantic_post_click_verification": semantic_post_click_verification,
+                },
+            ),
+        )
+
+    data = ActionResultData(action="execute_recognition_plan", result=base_result)
+    return APIResponse(success=True, message="Recognition-plan click executed and verified", data=data.model_dump(), error=None)
 
 
 def _ensure_mouse_tester_state_assets(bound: Any) -> tuple[Optional[AppState], list[ActionTarget], dict[str, ValidatorProfile]]:

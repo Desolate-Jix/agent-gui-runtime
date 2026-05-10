@@ -639,6 +639,7 @@ Common failure meaning:
 
 Scope:
 
+- `POST /action/execute_recognition_plan`
 - `POST /action/click_text`
 - `POST /action/click_mouse_tester_left_region`
 - `input_controller`
@@ -650,6 +651,8 @@ Goal:
 Completion checks:
 
 - selected coordinate is correct
+- recognition-plan execution is gated by `pre_click_decision_v1.allowed`
+- saved screenshots are not used for live execution unless explicitly overridden
 - click is physically sent
 - retry/fallback behaves as designed
 - wrong control is not clicked more often than tolerated
@@ -674,9 +677,13 @@ Target thresholds:
 
 Pass evidence:
 
+- recognition plan trace and overlay
 - returned click coordinates
 - attempts list
+- retry reason and retry count for every repeated execution attempt
 - before and after screenshots
+- semantic post-click verification for MouseTester targets
+- trace-evaluation report from `scripts/evaluate_mousetester_traces.py`
 - replay case if applicable
 
 Common failure meaning:

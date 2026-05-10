@@ -126,17 +126,22 @@ For the current phase, the project is intentionally:
 
 ## Current Progress Snapshot
 
-Last updated: 2026-05-09.
+Last updated: 2026-05-10.
 
-The project has moved from raw full-page visual coordinates toward an inspectable staged recognition MVP:
+The project has moved from raw full-page visual coordinates toward an inspectable staged recognition MVP plus a gated execution bridge:
 
 `screenshot -> vision_regions_v1 + OCR -> page_structure_v1 -> candidate_rank_v1 -> narrow_search_v1 -> pre_click_decision_v1`
+
+Execution bridge:
+
+`live bound-window capture -> recognition_plan_v1 -> pre_click_decision_v1 gate -> selected refined click point -> generic post-click verifier`
 
 Current verified status:
 
 - Local Qwen3-VL-style vision endpoint is reachable through the OpenAI-compatible local provider.
 - `POST /vision/recognition_plan` runs the full no-click recognition plan.
 - `POST /vision/render_recognition_plan_overlay` produces human-review overlays for candidate boxes, OCR-refined boxes, local OCR matches, and refined click points.
+- `POST /action/execute_recognition_plan` executes only a `pre_click_decision_v1`-approved selected point from a live bound-window capture.
 - `page_structure_v1` now guards against far/short OCR text binding so repeated fragments such as single-letter labels do not inflate element boxes.
 - Candidate ranking preserves original element geometry and adds optional `refined_bbox` from goal-matching OCR text when that evidence is tighter.
 - Local grounding crops the refined candidate ROI, reruns OCR, and maps the matched text center back to full-screen coordinates.
@@ -151,15 +156,15 @@ Latest real MouseTester evidence:
 - `refined_bbox`: narrowed to the goal text line through `goal_text_ids_union:1`
 - Local OCR matched text: `点击此处测试`
 - Pre-click decision: allowed, no click executed
-- Test suite: `61 passed`
+- Test suite: `64 passed`
 
 Current limitation:
 
-- The system has a verified no-click recognition plan, not a production click loop. Real action dispatch should be attached only after post-click verification and retry policy are measurable.
+- The system has a gated execution route, one successful live MouseTester click smoke, MouseTester-specific target-area semantic verification, bounded retry for retry-safe verification failures, and an initial trace-based MouseTester evaluation set. It is not a production autonomous click loop yet: it needs a broader evaluation set.
 
 Primary next step:
 
-- Add the first execution endpoint on top of `recognition_plan`, but keep it gated by `pre_click_decision_v1` and a post-click verifier.
+- Expand the MouseTester evaluation set across more saved states and negative cases.
 
 ---
 
@@ -796,6 +801,7 @@ The remaining high-value work is end-to-end runtime verification with a real bou
 - `POST /vision/layer_trace`
 - `POST /vision/render_review_overlay`
 - `POST /vision/render_recognition_plan_overlay`
+- `POST /action/execute_recognition_plan`
 - `POST /action/click_text`
 - `POST /action/click_mouse_tester_left_region`
 - `GET /health`

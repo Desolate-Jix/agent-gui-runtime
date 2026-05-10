@@ -61,6 +61,24 @@ class ClickTextRequest(BaseModel):
     max_retries: int = Field(default=3, ge=1, le=6)
 
 
+class ExecuteRecognitionPlanRequest(BaseModel):
+    """Request model for executing a gated recognition plan against a bound window."""
+
+    goal: str = Field(min_length=1)
+    task: str = Field(default="click_target", min_length=1)
+    app_name: Optional[str] = None
+    state_hint: Optional[str] = None
+    provider_mode: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    top_k: int = Field(default=5, ge=1, le=20)
+    image_path: Optional[str] = None
+    capture_live: bool = True
+    allow_saved_image_execution: bool = False
+    enable_post_click_verification: bool = True
+    max_execution_attempts: int = Field(default=2, ge=1, le=3)
+    dry_run: bool = False
+
+
 class WaitForSceneRequest(BaseModel):
     """Request model for waiting until a named scene is detected."""
 

@@ -1,5 +1,52 @@
 # WORKLOG
 
+## 2026-05-10
+
+### Summary
+
+This session attached the first controlled execution bridge on top of the staged recognition plan:
+
+- added `POST /action/execute_recognition_plan`
+- added `execute_recognition_plan_v1` result payloads
+- defaulted execution to live bound-window captures
+- blocked saved-image execution unless dry-run or explicit override is used
+- required `pre_click_decision_v1.allowed == true` before any click is sent
+- clicked only `pre_click_decision_v1.selected_click_point`
+- captured generic post-click evidence through the existing verifier
+- attempted to render a recognition-plan overlay for accepted plans
+- added MouseTester-specific semantic post-click verification using target-area OCR before/after evidence
+- added bounded retry policy for retry-safe post-click verification failures
+- added initial trace-based MouseTester evaluation set and CLI report generator
+
+### Validation completed
+
+- Targeted route tests passed:
+  - `6 passed`
+- Full test suite passed:
+  - `69 passed`
+- Trace evaluation passed:
+  - `4/4` cases
+  - top-1, pre-click, action execution, and semantic verification pass rates: `1.0`
+  - report: `logs/evaluations/mousetester-trace-eval-20260510-175234.json`
+- Local Qwen3-VL server started on `http://127.0.0.1:1234/v1/chat/completions`.
+- Live MouseTester dry-run succeeded:
+  - goal `点击此处测试`
+  - recommended target `点击此处测试`
+  - selected point `{x: 1434, y: 493}`
+  - `pre_click_decision.allowed == true`
+  - no click executed
+- Live MouseTester click smoke succeeded:
+  - clicked `{x: 1434, y: 493}`
+  - generic post-click verification passed through screenshot diff and cursor/focus evidence
+  - MouseTester semantic verification passed; target-area OCR changed from `点击此处测试` to `超时/单击`
+  - action trace: `logs/traces/actions/20260510-163204-630600__execute-recognition-plan__mousetesterweb.json`
+  - recognition trace: `logs/traces/vision/20260510-163203-384944__recognition-plan__mousetesterweb.json`
+  - overlay: `artifacts/review-overlays/20260510-163203-384944-recognition-plan-mousetesterweb__recognition-plan-overlay__20260510-163233-420701.png`
+
+### Remaining follow-up
+
+- Expand the MouseTester evaluation set with more states and negative cases.
+
 ## 2026-05-09
 
 ### Summary

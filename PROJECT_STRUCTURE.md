@@ -32,6 +32,7 @@ Use it when you need to answer:
 - `configs/`
   - runtime configuration files
   - currently most relevant file: `configs/vision.json`
+  - `configs/mousetester_eval_cases.json` defines the initial trace-based MouseTester evaluation cases
 
 ### Evidence and persistence
 
@@ -49,6 +50,12 @@ Use it when you need to answer:
 
 - `tests/`
   - pytest coverage for extracted logic and route-level behavior
+
+### Scripts
+
+- `scripts/evaluate_mousetester_traces.py`
+  - evaluates saved MouseTester recognition/action traces
+  - writes JSON reports under `logs/evaluations/`
 
 ### Project memory and takeover docs
 
@@ -113,11 +120,19 @@ Use it when you need to answer:
     - persist annotated screenshots and per-region crops for later page-structure building
 
 - `app/api/action.py`
+  - `POST /action/execute_recognition_plan`
   - `POST /action/click_text`
   - `POST /action/click_mouse_tester_left_region`
   - responsibility:
+    - controlled execution of a `recognition_plan_v1` selected click point after `pre_click_decision_v1` allows it
+    - MouseTester target-area semantic post-click verification
+    - bounded retry for retry-safe post-click verification failures
     - OCR-driven text click
     - MouseTester-specific region click with validation and persistence
+
+- `app/evaluation/mousetester_trace_eval.py`
+  - trace-evaluation helpers for MouseTester recognition/action evidence
+  - reports top-1, pre-click, action execution, semantic verification, and retry facts
 
 ### Runtime services
 

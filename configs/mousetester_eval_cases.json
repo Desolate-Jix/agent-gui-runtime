@@ -1,0 +1,40 @@
+{
+  "contract_version": "mousetester_eval_cases_v1",
+  "cases": [
+    {
+      "case_id": "live_click_target_text_changed",
+      "trace_path": "logs/traces/actions/20260510-163204-630600__execute-recognition-plan__mousetesterweb.json",
+      "expected_goal": "点击此处测试",
+      "expected_label_contains": "点击此处测试",
+      "expected_pre_click_allowed": true,
+      "expected_action_executed": true,
+      "expected_success": true,
+      "expected_semantic_verified": true
+    },
+    {
+      "case_id": "live_dry_run_target_ranked_first",
+      "trace_path": "logs/traces/actions/20260510-163119-367419__execute-recognition-plan__mousetesterweb.json",
+      "expected_goal": "点击此处测试",
+      "expected_label_contains": "点击此处测试",
+      "expected_pre_click_allowed": true,
+      "expected_action_executed": false,
+      "expected_success": true
+    },
+    {
+      "case_id": "invalid_encoded_goal_rejected",
+      "trace_path": "logs/traces/actions/20260510-162546-674617__execute-recognition-plan__mousetesterweb.json",
+      "expected_goal": "??????",
+      "expected_pre_click_allowed": false,
+      "expected_action_executed": false,
+      "expected_success": false
+    },
+    {
+      "case_id": "saved_recognition_plan_target_ranked_first",
+      "trace_path": "logs/traces/vision/20260509-191124-406879__recognition-plan__mousetesterweb.json",
+      "expected_goal": "点击此处测试",
+      "expected_label_contains": "点击此处测试",
+      "expected_pre_click_allowed": true,
+      "expected_success": true
+    }
+  ]
+}
