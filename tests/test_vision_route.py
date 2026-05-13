@@ -111,6 +111,17 @@ def test_vision_page_structure_returns_fused_elements(tmp_path, monkeypatch) -> 
     monkeypatch.setattr("app.api.vision.VisionProviderFactory.load_config", lambda: {"vision": {"mode": "local"}})
     monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: DummyProvider())
     monkeypatch.setattr("app.api.vision.ocr_service", DummyOCR())
+    monkeypatch.setattr(
+        "app.api.vision.uia_provider.snapshot_bound_window",
+        lambda: {
+            "provider": "windows_uia",
+            "provider_version": "windows_uia_provider_v1",
+            "status": "unavailable",
+            "reason": "no_bound_window",
+            "control_count": 0,
+            "controls": [],
+        },
+    )
 
     client = TestClient(app)
     response = client.post(
@@ -193,6 +204,17 @@ def test_vision_screen_reading_returns_ui_provider_slots(tmp_path, monkeypatch) 
     monkeypatch.setattr("app.api.vision.VisionProviderFactory.load_config", lambda: {"vision": {"mode": "local"}})
     monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: DummyProvider())
     monkeypatch.setattr("app.api.vision.ocr_service", DummyOCR())
+    monkeypatch.setattr(
+        "app.api.vision.uia_provider.snapshot_bound_window",
+        lambda: {
+            "provider": "windows_uia",
+            "provider_version": "windows_uia_provider_v1",
+            "status": "unavailable",
+            "reason": "no_bound_window",
+            "control_count": 0,
+            "controls": [],
+        },
+    )
 
     client = TestClient(app)
     response = client.post(
@@ -211,9 +233,16 @@ def test_vision_screen_reading_returns_ui_provider_slots(tmp_path, monkeypatch) 
     assert result["contract_version"] == "screen_reading_v1"
     assert result["ui"]["summary"]["element_count"] == 2
     assert result["ui"]["summary"]["icon_candidate_count"] == 1
-    assert result["ui"]["provider_slots"]["uia"]["status"] == "reserved"
-    assert result["ui"]["provider_slots"]["icon_library"]["status"] == "reserved"
+    assert result["ui"]["provider_slots"]["uia"]["status"] == "connected"
+    assert result["ui"]["provider_slots"]["uia"]["last_scan_status"] == "unavailable"
+    assert result["ui"]["provider_slots"]["icon_library"]["status"] == "connected"
+    assert result["ui"]["provider_slots"]["icon_library"]["provider"] == "microsoft_fluent_system_icons"
+    assert result["ui"]["icon_candidates"][0]["catalog_status"] == "matched"
+    assert result["ui"]["icon_candidates"][0]["icon_library_match"]["icon_id"] == "arrow_left_24_regular"
     assert result["execution_path"]["screen_reading_used"] is True
+    assert result["execution_path"]["icon_library_provider_connected"] is True
+    assert result["execution_path"]["uia_provider_connected"] is True
+    assert result["execution_path"]["uia_scan_status"] == "unavailable"
     assert Path(result["trace_path"]).exists()
 
 
@@ -311,7 +340,10 @@ def test_vision_recognition_plan_returns_ranked_candidates(tmp_path, monkeypatch
     assert result["contract_version"] == "recognition_plan_v1"
     assert result["candidate_result"]["contract_version"] == "candidate_rank_v1"
     assert result["recommended_target"]["element_id"].startswith("element_start")
+    assert result["parse_result"]["screen_reading"]["contract_version"] == "screen_reading_v1"
     assert result["execution_path"]["candidate_rank_used"] is True
+    assert result["execution_path"]["screen_reading_used"] is True
+    assert result["execution_path"]["screen_reading_rank_evidence_used"] is True
     assert result["execution_path"]["narrow_search_used"] is True
     assert result["execution_path"]["pre_click_decision_used"] is True
     assert result["execution_path"]["action_executed"] is False

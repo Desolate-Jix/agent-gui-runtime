@@ -4,6 +4,8 @@ import re
 from typing import Any
 
 from app.page_structure.schemas import PageElement, PageStructure, PageText
+from app.screen_reading.icon_library import FLUENT_FAMILY, MicrosoftFluentIconLibrary
+from app.screen_reading.uia_provider import WindowsUIAProvider
 from app.vision.schemas import BBox, VisionAnalyzeResponse, VisionRegion
 from modules.ocr.contracts import OCRResult
 
@@ -54,9 +56,14 @@ def build_screen_reading(
     ocr: OCRResult,
     page_structure: PageStructure,
     app_name: str | None = None,
+    icon_library: MicrosoftFluentIconLibrary | None = None,
+    uia_provider: WindowsUIAProvider | None = None,
+    uia_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the agent-facing READ contract from current vision/OCR/fusion evidence."""
 
+    icon_library = icon_library or MicrosoftFluentIconLibrary()
+    uia_provider = uia_provider or WindowsUIAProvider()
     texts = [_text_to_dict(item) for item in page_structure.texts]
     elements = [_element_from_page_element(item) for item in page_structure.elements]
     source_region_ids = {
@@ -72,9 +79,10 @@ def build_screen_reading(
     ]
     elements.extend(visual_only_elements)
     elements.sort(key=lambda item: (item["bbox"]["y"], item["bbox"]["x"], item["id"]))
+    _attach_uia_matches(elements, uia_snapshot)
 
     modules = _build_modules(vision.regions, elements, page_structure.texts)
-    icon_candidates = [_icon_candidate(item) for item in elements if _is_icon_candidate(item)]
+    icon_candidates = [_icon_candidate(item, icon_library=icon_library) for item in elements if _is_icon_candidate(item)]
     execution_relevance = _execution_relevance(elements)
     uncertainties = _uncertainties(elements, icon_candidates)
 
@@ -89,7 +97,7 @@ def build_screen_reading(
         "elements": elements,
         "modules": modules,
         "icon_candidates": icon_candidates,
-        "provider_slots": _provider_slots(),
+        "provider_slots": _provider_slots(icon_library, uia_provider, uia_snapshot),
         "learning_hooks": _learning_hooks(elements),
     }
 
@@ -122,6 +130,7 @@ def build_screen_reading(
                 "text_count": len(page_structure.texts),
                 "link_count": len(page_structure.links),
             },
+            "windows_uia": _uia_source_layer(uia_snapshot),
         },
         "raw_refs": {
             "page_structure_contract": page_structure.contract_version,
@@ -175,6 +184,7 @@ def _element_from_page_element(element: PageElement) -> dict[str, Any]:
             coordinate_source=element.click_strategy,
         ),
         "memory_key": element.memory_key,
+        "provider_matches": {"uia": None},
     }
 
 
@@ -226,6 +236,7 @@ def _element_from_visual_region(region: VisionRegion) -> dict[str, Any]:
             coordinate_source="semantic_bbox_center_reserved",
         ),
         "memory_key": f"visual|role:{role}|label:{_normalize_text(label)}|layout:{region.layout_key or 'none'}",
+        "provider_matches": {"uia": None},
     }
 
 
@@ -256,7 +267,8 @@ def _build_modules(regions: list[VisionRegion], elements: list[dict[str, Any]], 
     return modules
 
 
-def _icon_candidate(element: dict[str, Any]) -> dict[str, Any]:
+def _icon_candidate(element: dict[str, Any], *, icon_library: MicrosoftFluentIconLibrary) -> dict[str, Any]:
+    icon_library_match = icon_library.match(element)
     return {
         "element_id": element["id"],
         "role_guess": element["role_guess"],
@@ -264,10 +276,11 @@ def _icon_candidate(element: dict[str, Any]) -> dict[str, Any]:
         "bbox": element["bbox"],
         "click_point": element["click_point"],
         "confidence": element["confidence"],
-        "icon_library_match": None,
-        "catalog_status": "reserved_for_icon_provider",
+        "icon_library_match": icon_library_match,
+        "uia_match": element.get("provider_matches", {}).get("uia"),
+        "catalog_status": "matched" if icon_library_match is not None else "no_catalog_match",
         "learning_status": "reserved_for_ui_memory",
-        "needed_evidence": ["icon_shape_match", "nearby_context", "post_action_verification_plan"],
+        "needed_evidence": _needed_icon_evidence(icon_library_match),
     }
 
 
@@ -292,12 +305,13 @@ def _execution_relevance(elements: list[dict[str, Any]]) -> dict[str, list[str]]
 
 def _uncertainties(elements: list[dict[str, Any]], icon_candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
-    if icon_candidates:
+    unmatched_icons = [item["element_id"] for item in icon_candidates if item.get("catalog_status") != "matched"]
+    if unmatched_icons:
         items.append(
             {
-                "code": "icon_provider_not_connected",
-                "message": "Icon-like UI candidates are exposed but no icon catalog/template provider has confirmed their role yet.",
-                "affected_element_ids": [item["element_id"] for item in icon_candidates],
+                "code": "icon_library_match_missing",
+                "message": "Icon-like UI candidates were checked against the Microsoft Fluent icon catalog but no catalog match was found.",
+                "affected_element_ids": unmatched_icons,
             }
         )
     visual_only = [item["id"] for item in elements if item["evidence_level"] == "visual_region_only"]
@@ -305,33 +319,27 @@ def _uncertainties(elements: list[dict[str, Any]], icon_candidates: list[dict[st
         items.append(
             {
                 "code": "visual_only_ui_requires_grounding",
-                "message": "Visual-only UI regions are reserved for future UIA, browser accessibility, icon, or learned-UI grounding before execution.",
+                "message": "Visual-only UI regions are reserved until stronger UIA, browser accessibility, icon shape, or learned-UI grounding confirms them before execution.",
                 "affected_element_ids": visual_only,
             }
         )
     return items
 
 
-def _provider_slots() -> dict[str, dict[str, Any]]:
+def _provider_slots(
+    icon_library: MicrosoftFluentIconLibrary,
+    uia_provider: WindowsUIAProvider,
+    uia_snapshot: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
     return {
-        "uia": {
-            "status": "reserved",
-            "intended_use": "Windows desktop controls and browser chrome such as Back, Forward, Refresh, address bar, tabs, and window buttons.",
-            "expected_fields": ["control_type", "name", "automation_id", "bounding_rectangle", "enabled", "patterns"],
-            "merge_keys": ["bbox_overlap", "role_guess", "label_or_name", "window_process"],
-        },
+        "uia": uia_provider.describe_slot(uia_snapshot),
         "browser_accessibility": {
             "status": "reserved",
             "intended_use": "Web page DOM/accessibility roles, names, and bounding boxes.",
             "expected_fields": ["role", "name", "backend_node_id", "bounding_box", "states"],
             "merge_keys": ["bbox_overlap", "accessible_name", "role"],
         },
-        "icon_library": {
-            "status": "reserved",
-            "intended_use": "No-text icons such as browser_back, refresh, close, search, settings, and menu.",
-            "expected_fields": ["icon_id", "family", "bbox", "score", "template_or_model_version"],
-            "merge_keys": ["bbox_overlap", "icon_id", "nearby_context"],
-        },
+        "icon_library": icon_library.describe_slot(),
         "learned_ui_memory": {
             "status": "reserved",
             "intended_use": "Store successful UI element signatures, click points, verification outcomes, and app/window context.",
@@ -339,6 +347,12 @@ def _provider_slots() -> dict[str, dict[str, Any]]:
             "merge_keys": ["memory_key", "layout_key", "app_name", "window_size_bucket"],
         },
     }
+
+
+def _needed_icon_evidence(icon_library_match: dict[str, Any] | None) -> list[str]:
+    if icon_library_match is None:
+        return ["icon_shape_match", "nearby_context", "post_action_verification_plan"]
+    return ["shape_or_accessibility_confirmation", "nearby_context", "post_action_verification_plan"]
 
 
 def _learning_hooks(elements: list[dict[str, Any]]) -> dict[str, Any]:
@@ -380,12 +394,124 @@ def _locator_hints(
             "label": label or None,
         },
         "future_providers": {
-            "uia": {"status": "reserved", "candidate_query": {"name": label or None, "control_type": role}},
+            "uia": {
+                "status": "connected",
+                "provider": "windows_uia",
+                "candidate_query": {"name": label or None, "control_type": role},
+            },
             "browser_accessibility": {"status": "reserved", "candidate_query": {"role": role, "name": label or None}},
-            "icon_library": {"status": "reserved", "candidate_query": {"role_guess": role, "bbox": bbox.to_dict()}},
+            "icon_library": {
+                "status": "connected",
+                "provider": FLUENT_FAMILY,
+                "candidate_query": {"role_guess": role, "bbox": bbox.to_dict()},
+            },
             "learned_ui_memory": {"status": "reserved", "candidate_query": {"memory_key": memory_key}},
         },
     }
+
+
+def _attach_uia_matches(elements: list[dict[str, Any]], uia_snapshot: dict[str, Any] | None) -> None:
+    controls = list((uia_snapshot or {}).get("controls") or [])
+    if not controls:
+        return
+    for element in elements:
+        match = _best_uia_match(element, controls)
+        element.setdefault("provider_matches", {})["uia"] = match
+        if match is not None:
+            element["evidence"].setdefault("provider_matches", {})["uia"] = match
+
+
+def _best_uia_match(element: dict[str, Any], controls: list[dict[str, Any]]) -> dict[str, Any] | None:
+    best: tuple[float, dict[str, Any], list[str]] | None = None
+    for control in controls:
+        control_bbox = control.get("bbox")
+        if not isinstance(control_bbox, dict):
+            continue
+        overlap = _bbox_iou(element["bbox"], control_bbox)
+        name_score = _text_match_score(
+            " ".join(str(value or "") for value in [element.get("label"), element.get("description"), element.get("memory_key")]),
+            str(control.get("name") or ""),
+        )
+        role_score = _role_match_score(str(element.get("role_guess") or element.get("type") or ""), str(control.get("control_type") or ""))
+        score = (overlap * 0.72) + (name_score * 0.2) + (role_score * 0.08)
+        if score < 0.28:
+            continue
+        basis = [f"bbox_iou:{overlap:.3f}"]
+        if name_score > 0:
+            basis.append(f"name:{control.get('name')}")
+        if role_score > 0:
+            basis.append(f"control_type:{control.get('control_type')}")
+        if best is None or score > best[0]:
+            best = (score, control, basis)
+    if best is None:
+        return None
+
+    score, control, basis = best
+    return {
+        "provider": control.get("provider") or "windows_uia",
+        "control_id": control.get("control_id"),
+        "name": control.get("name"),
+        "control_type": control.get("control_type"),
+        "automation_id": control.get("automation_id"),
+        "class_name": control.get("class_name"),
+        "bbox": control.get("bbox"),
+        "enabled": control.get("enabled"),
+        "visible": control.get("visible"),
+        "patterns": list(control.get("patterns") or []),
+        "score": round(score, 4),
+        "match_basis": basis,
+    }
+
+
+def _uia_source_layer(uia_snapshot: dict[str, Any] | None) -> dict[str, Any]:
+    snapshot = uia_snapshot or {}
+    return {
+        "provider": snapshot.get("provider") or "windows_uia",
+        "status": snapshot.get("status") or "not_scanned",
+        "control_count": int(snapshot.get("control_count") or 0),
+        "reason": snapshot.get("reason"),
+    }
+
+
+def _bbox_iou(first: dict[str, Any], second: dict[str, Any]) -> float:
+    left = max(float(first["x"]), float(second["x"]))
+    top = max(float(first["y"]), float(second["y"]))
+    right = min(float(first["x"]) + float(first["w"]), float(second["x"]) + float(second["w"]))
+    bottom = min(float(first["y"]) + float(first["h"]), float(second["y"]) + float(second["h"]))
+    if right <= left or bottom <= top:
+        return 0.0
+    intersection = (right - left) * (bottom - top)
+    first_area = max(1.0, float(first["w"]) * float(first["h"]))
+    second_area = max(1.0, float(second["w"]) * float(second["h"]))
+    return intersection / (first_area + second_area - intersection)
+
+
+def _text_match_score(first: str, second: str) -> float:
+    first_norm = _normalize_text(first)
+    second_norm = _normalize_text(second)
+    if not first_norm or not second_norm:
+        return 0.0
+    if first_norm in second_norm or second_norm in first_norm:
+        return 1.0
+    first_tokens = set(first_norm.split())
+    second_tokens = set(second_norm.split())
+    if not first_tokens or not second_tokens:
+        return 0.0
+    return len(first_tokens & second_tokens) / len(first_tokens | second_tokens)
+
+
+def _role_match_score(role: str, control_type: str) -> float:
+    role_norm = _normalize_text(role)
+    control_norm = _normalize_text(control_type)
+    if not role_norm or not control_norm:
+        return 0.0
+    if "button" in role_norm and "button" in control_norm:
+        return 1.0
+    if "input" in role_norm and any(token in control_norm for token in ["edit", "document", "textbox"]):
+        return 1.0
+    if role_norm in control_norm or control_norm in role_norm:
+        return 0.7
+    return 0.0
 
 
 def _region_is_potential_ui(region: VisionRegion) -> bool:

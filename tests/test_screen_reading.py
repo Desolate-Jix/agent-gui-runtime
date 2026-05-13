@@ -2,8 +2,21 @@ from __future__ import annotations
 
 from app.page_structure import build_page_structure
 from app.screen_reading import build_screen_reading
+from app.screen_reading.uia_provider import _patterns
 from app.vision.schemas import BBox, Diagonal, ImageSize, NormalizedDiagonal, VisionAnalyzeResponse, VisionRegion
 from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
+
+
+def test_uia_pattern_probe_ignores_descriptor_errors() -> None:
+    class Wrapper:
+        @property
+        def invoke(self) -> object:
+            raise RuntimeError("pattern unavailable")
+
+        def get_value(self) -> str:
+            return "value"
+
+    assert _patterns(Wrapper()) == ("Value",)
 
 
 def test_screen_reading_exposes_ui_layer_with_reserved_icon_and_learning_slots() -> None:
@@ -49,6 +62,27 @@ def test_screen_reading_exposes_ui_layer_with_reserved_icon_and_learning_slots()
         matches=[OCRTextMatch(text="Start", score=0.99, bbox=OCRBoundingBox(x=112, y=150, width=44, height=18))],
     )
     page_structure = build_page_structure(vision, ocr)
+    uia_snapshot = {
+        "provider": "windows_uia",
+        "provider_version": "windows_uia_provider_v1",
+        "status": "ok",
+        "control_count": 1,
+        "controls": [
+            {
+                "provider": "windows_uia",
+                "control_id": "uia_1_back",
+                "name": "Back",
+                "control_type": "Button",
+                "automation_id": "Back",
+                "class_name": "Button",
+                "bbox": {"x": 12, "y": 50, "w": 34, "h": 34},
+                "screen_bbox": {"x": 112, "y": 150, "w": 34, "h": 34},
+                "enabled": True,
+                "visible": True,
+                "patterns": ["Invoke"],
+            }
+        ],
+    }
 
     result = build_screen_reading(
         image_path="demo.png",
@@ -56,20 +90,34 @@ def test_screen_reading_exposes_ui_layer_with_reserved_icon_and_learning_slots()
         ocr=ocr,
         page_structure=page_structure,
         app_name="demo",
+        uia_snapshot=uia_snapshot,
     )
 
     assert result["contract_version"] == "screen_reading_v1"
     assert result["ui"]["summary"]["element_count"] == 2
     assert result["ui"]["summary"]["icon_candidate_count"] == 1
-    assert result["ui"]["provider_slots"]["icon_library"]["status"] == "reserved"
+    assert result["ui"]["provider_slots"]["icon_library"]["status"] == "connected"
+    assert result["ui"]["provider_slots"]["icon_library"]["provider"] == "microsoft_fluent_system_icons"
+    assert result["ui"]["provider_slots"]["uia"]["status"] == "connected"
+    assert result["ui"]["provider_slots"]["uia"]["last_scan_status"] == "ok"
     assert result["ui"]["provider_slots"]["learned_ui_memory"]["status"] == "reserved"
 
     start = next(item for item in result["ui_elements"] if item["label"] == "Start")
     assert start["evidence_level"] == "ocr_text_and_semantic_region"
-    assert start["locator_hints"]["future_providers"]["uia"]["status"] == "reserved"
+    assert start["locator_hints"]["future_providers"]["uia"]["status"] == "connected"
+    assert start["locator_hints"]["future_providers"]["icon_library"]["status"] == "connected"
 
     back = next(item for item in result["ui_elements"] if item["role_guess"] == "icon_button")
     assert back["type"] == "icon_button"
     assert back["evidence_level"] == "visual_region_only"
     assert back["id"] in result["execution_relevance"]["risky_candidates"]
-    assert result["uncertainties"][0]["code"] == "icon_provider_not_connected"
+    back_icon = next(item for item in result["ui"]["icon_candidates"] if item["element_id"] == back["id"])
+    assert back_icon["catalog_status"] == "matched"
+    assert back_icon["icon_library_match"]["icon_id"] == "arrow_left_24_regular"
+    assert back_icon["icon_library_match"]["family"] == "microsoft_fluent_system_icons"
+    assert back_icon["uia_match"]["name"] == "Back"
+    assert back_icon["uia_match"]["control_type"] == "Button"
+    assert "Invoke" in back_icon["uia_match"]["patterns"]
+    assert back["provider_matches"]["uia"]["control_id"] == "uia_1_back"
+    assert any(item["code"] == "visual_only_ui_requires_grounding" for item in result["uncertainties"])
+    assert result["source_layers"]["windows_uia"]["status"] == "ok"

@@ -1,0 +1,127 @@
+{
+  "run_dir": "D:\\agent-gui-runtime\\artifacts\\live-click-validation\\mousetester-20260513-continue-mainline",
+  "input_recognition_plan_trace": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260513-174919-567650__recognition-plan__mousetesterweb.json",
+  "input_recognition_plan_image": "D:\\agent-gui-runtime\\artifacts\\screenshots\\mousetester-cn-microsoft-edge__live-recognition-plan__mousetester__full-window__20260513-174854-032406.png",
+  "execute_request_used_saved_plan_image": true,
+  "roi": {
+    "x": 1273,
+    "y": 308,
+    "width": 321,
+    "height": 217
+  },
+  "before_full": "D:\\agent-gui-runtime\\artifacts\\live-click-validation\\mousetester-20260513-continue-mainline\\before_full.png",
+  "before_roi": "D:\\agent-gui-runtime\\artifacts\\live-click-validation\\mousetester-20260513-continue-mainline\\before_roi.png",
+  "after_full": "D:\\agent-gui-runtime\\artifacts\\live-click-validation\\mousetester-20260513-continue-mainline\\after_full.png",
+  "after_roi": "D:\\agent-gui-runtime\\artifacts\\live-click-validation\\mousetester-20260513-continue-mainline\\after_roi.png",
+  "selected_point_from_current_plan": {
+    "x": 1434,
+    "y": 433
+  },
+  "top_candidate_from_current_plan": {
+    "candidate_id": "candidate_element_element_d681b8d8",
+    "element_id": "element_element_d681b8d8",
+    "label": "点击此处测试",
+    "score": 0.8847,
+    "score_breakdown": {
+      "text_similarity": 1.0,
+      "role_score": 1.0,
+      "policy_score": 0.65,
+      "confidence_score": 0.9993,
+      "state_score": 0.0,
+      "screen_reading_score": 0.8777,
+      "ad_penalty": 0.0,
+      "blocked_penalty": 0.0,
+      "total": 0.8847
+    },
+    "reasons": [
+      "strong_goal_text_match",
+      "supported_interaction",
+      "trusted_zone:general_action",
+      "screen_reading_uia_match",
+      "screen_reading_uia_goal_name_match",
+      "screen_reading_uia_invoke_pattern"
+    ],
+    "element_bbox": {
+      "x": 1398,
+      "y": 424,
+      "w": 73,
+      "h": 20
+    },
+    "uia_bbox": {
+      "x": 1323,
+      "y": 358,
+      "w": 221,
+      "h": 117
+    }
+  },
+  "api_response_success": false,
+  "api_response_message": "Recognition plan was rejected before click",
+  "api_response_error": {
+    "code": "pre_click_rejected",
+    "details": [
+      "no_candidate_passed_pre_click_checks",
+      "top_candidate_margin_too_small"
+    ]
+  },
+  "action_result": null,
+  "roi_diff": {
+    "size": {
+      "width": 321,
+      "height": 217
+    },
+    "changed_pixels": 0,
+    "changed_ratio": 0.0,
+    "mean_abs_diff_rgb": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "max_channel_diff": [
+      0,
+      0,
+      0
+    ]
+  },
+  "full_diff": {
+    "size": {
+      "width": 2027,
+      "height": 1159
+    },
+    "changed_pixels": 171,
+    "changed_ratio": 7.3e-05,
+    "mean_abs_diff_rgb": [
+      0.0015,
+      0.0014,
+      0.0018
+    ],
+    "max_channel_diff": [
+      46,
+      46,
+      46
+    ]
+  },
+  "before_roi_ocr_texts": [
+    "双击测试",
+    "重置",
+    "微动双击",
+    "点击此处测试",
+    "成功次数",
+    "上次间隔",
+    "0"
+  ],
+  "after_roi_ocr_texts": [
+    "双击测试",
+    "重置",
+    "微动双击",
+    "点击此处测试",
+    "成功次数",
+    "上次间隔",
+    "0"
+  ],
+  "selected_point_from_execute": null,
+  "clicked_point": null,
+  "pre_click_decision": null,
+  "post_click_verification": null,
+  "semantic_post_click_verification": null,
+  "action_trace_path": null
+}

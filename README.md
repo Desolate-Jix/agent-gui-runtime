@@ -126,7 +126,7 @@ For the current phase, the project is intentionally:
 
 ## Current Progress Snapshot
 
-Last updated: 2026-05-10.
+Last updated: 2026-05-13.
 
 The project has moved from raw full-page visual coordinates toward an inspectable staged recognition MVP plus a gated execution bridge:
 
@@ -140,15 +140,37 @@ Current verified status:
 
 - Local Qwen3-VL-style vision endpoint is reachable through the OpenAI-compatible local provider.
 - `POST /vision/recognition_plan` runs the full no-click recognition plan.
-- `POST /vision/screen_reading` exposes a READ-facing UI layer with OCR-backed elements, visual-only UI candidates, module grouping, and reserved slots for future UIA, browser accessibility, icon-library, and learned-UI providers.
+- `POST /vision/screen_reading` exposes a READ-facing UI layer with OCR-backed elements, visual-only UI candidates, module grouping, a connected Windows UIA scanner, a connected Microsoft Fluent System Icons catalog matcher, and reserved slots for future browser accessibility and learned-UI providers.
+- The Windows UIA scanner has passed a live Edge/MouseTester smoke and now tolerates unavailable pywinauto pattern descriptors during control enumeration.
+- `scripts/record_uia_smoke.py` can now record repeatable `uia_smoke_trace_v1` evidence and score expected UIA controls.
+- `POST /vision/recognition_plan` now builds `screen_reading_v1` inside the planning path and passes its UIA/icon evidence into `candidate_rank_v1`.
 - `POST /vision/render_recognition_plan_overlay` produces human-review overlays for candidate boxes, OCR-refined boxes, local OCR matches, and refined click points.
 - `POST /action/execute_recognition_plan` executes only a `pre_click_decision_v1`-approved selected point from a live bound-window capture.
 - `page_structure_v1` now guards against far/short OCR text binding so repeated fragments such as single-letter labels do not inflate element boxes.
-- Candidate ranking preserves original element geometry and adds optional `refined_bbox` from goal-matching OCR text when that evidence is tighter.
+- Candidate ranking preserves original element geometry, adds optional `refined_bbox` from goal-matching OCR text when that evidence is tighter, and uses `screen_reading_v1` accessible-name/provider evidence as a bounded ranking signal.
 - Local grounding crops the refined candidate ROI, reruns OCR, and maps the matched text center back to full-screen coordinates.
 - Pre-click verification rejects blocked, ad-like, goal-mismatched, locally mismatched, ambiguous-margin, or out-of-bounds candidates before any action execution is attached.
 
 Latest real MouseTester evidence:
+
+- Date: 2026-05-13.
+- Golden baseline: `artifacts/golden-traces/mousetester-live-execute-20260513-182111-unicode-goal/`
+- Recognition trace: `logs/traces/vision/20260513-182111-330997__recognition-plan__mousetesterweb.json`
+- Action trace: `logs/traces/actions/20260513-182115-605129__execute-recognition-plan__mousetesterweb.json`
+- Execute response: `logs/live-execute-unicode-goal/execute-response.json`
+- Bound window: MouseTester.cn in Microsoft Edge.
+- Selected click point: `{x: 1434, y: 433}`
+- Result: live click executed from the gated recognition plan, the internal recognition trace preserved goal `点击此处测试`, the top candidate carried UIA name/Invoke evidence, and validation passed through generic screenshot/focus evidence plus MouseTester target-area semantic OCR verification.
+
+Latest live UIA evidence:
+
+- Date: 2026-05-13.
+- Bound window: MouseTester.cn in Microsoft Edge.
+- Result: UIA smoke evaluation passed `1/1` cases; the scan returned `249` controls and `26` buttons, including browser Back/Refresh, address edit `https://www.mousetester.cn`, `RootWebArea`, and page controls such as `点击此处测试`.
+- Trace: `logs/traces/evaluation/20260513-162852-157632__uia-smoke__mousetester.json`
+- Report: `logs/evaluations/uia-smoke-eval-20260513-162852.json`
+
+Previous no-click recognition evidence:
 
 - Trace: `logs/traces/vision/20260509-191124-406879__recognition-plan__mousetesterweb.json`
 - Overlay: `artifacts/review-overlays/20260509-191124-406879-recognition-plan-mousetesterweb__recognition-plan-overlay__20260509-191124-668878.png`
@@ -157,7 +179,7 @@ Latest real MouseTester evidence:
 - `refined_bbox`: narrowed to the goal text line through `goal_text_ids_union:1`
 - Local OCR matched text: `点击此处测试`
 - Pre-click decision: allowed, no click executed
-- Test suite: `71 passed`
+- Test suite: `77 passed`
 
 Current limitation:
 
@@ -486,12 +508,13 @@ The contract includes:
 - `texts`: normalized OCR text boxes
 - `ui.elements`: executable or potentially executable UI objects
 - `ui.modules`: grouped screen areas inferred from semantic regions
-- `ui.icon_candidates`: no-text or icon-like controls that require stronger grounding before execution
-- `ui.provider_slots`: reserved integration points for UIA, browser accessibility, icon libraries, and learned UI memory
+- `ui.icon_candidates`: no-text or icon-like controls, including Microsoft Fluent catalog matches when label/context is strong enough, that require stronger grounding before execution
+- `ui.provider_slots`: integration points for the connected Windows UIA scanner, browser accessibility, the connected Microsoft Fluent icon catalog, and learned UI memory
+- `source_layers.windows_uia`: UIA scan status and control count for the current bound window, when available
 - `ui.learning_hooks`: candidate records that can later be written into UI memory after manual review or verified actions
 - `execution_relevance`: safe, risky, and unknown UI candidate ids
 
-This route is intentionally conservative. OCR-backed/page-structure elements can be considered by later grounding, while visual-only icon candidates are exposed for review and future provider matching instead of being treated as immediately safe click targets.
+This route is intentionally conservative. OCR-backed/page-structure elements can be considered by later grounding, while visual-only icon candidates are exposed for review, Windows UIA matching, and Microsoft Fluent catalog matching instead of being treated as immediately safe click targets.
 
 ### Page structure shape
 
@@ -650,7 +673,7 @@ The project design now treats this as the planned MVP direction:
 The first candidate-ranking contract is available internally as `candidate_rank_v1` under `app/recognition/`.
 The no-click planning endpoint is now available as `POST /vision/recognition_plan`.
 It returns `recognition_plan_v1` with `parse_result`, `candidate_result`, `narrow_search_result`, `pre_click_decision`, `verification_plan`, and `recommended_target`.
-Candidate ranking now preserves the original fused element bbox and may add `refined_bbox` when the element is tied to OCR `source_text_ids` and the OCR union produces a tighter box; when possible, refinement first uses the source OCR text that matches the current goal instead of unioning every line in the card. This lets review compare model/fusion geometry against OCR evidence without overwriting either layer.
+Candidate ranking now preserves the original fused element bbox and may add `refined_bbox` when the element is tied to OCR `source_text_ids` and the OCR union produces a tighter box; when possible, refinement first uses the source OCR text that matches the current goal instead of unioning every line in the card. It also consumes `screen_reading_v1` evidence: UIA accessible names can improve goal text matching, and UIA/icon matches add `screen_reading_score` plus explicit candidate reasons. Blocked/ad-like interaction policy still wins, so screen-reading evidence cannot make a blocked target executable by itself.
 The first local search contract is available as `narrow_search_v1`; it crops the candidate `refined_bbox` when available, otherwise the original element bbox, runs local OCR on each crop, and maps matching local text centers back to full-image coordinates.
 The first pre-click verifier contract is available as `pre_click_decision_v1`; it rejects weak, blocked, ad-like, goal-mismatched, locally mismatched, or out-of-bounds candidates before any click is allowed, and uses `refined_bbox` for the bounds check when present.
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from difflib import SequenceMatcher
-from typing import Iterable
+from typing import Any, Iterable
 
 from app.page_structure.schemas import PageElement, PageText
 from app.recognition.schemas import CandidateRankRequest, CandidateRankResult, RecognitionCandidate, ScoreBreakdown
@@ -18,9 +18,16 @@ def rank_candidates(request: CandidateRankRequest) -> CandidateRankResult:
     ranked: list[RecognitionCandidate] = []
     rejected: list[RecognitionCandidate] = []
     texts_by_id = {text.text_id: text for text in request.page_structure.texts}
+    screen_index = _screen_reading_index(request.screen_reading)
 
     for element in request.page_structure.elements:
-        breakdown, reasons, eligible = _score_element(element, goal=request.goal, state_hint=request.state_hint)
+        screen_evidence = _screen_evidence_for_element(element, screen_index)
+        breakdown, reasons, eligible = _score_element(
+            element,
+            goal=request.goal,
+            state_hint=request.state_hint,
+            screen_evidence=screen_evidence,
+        )
         refined_bbox, bbox_refine_reason = _refined_bbox_from_source_texts(
             element,
             goal=request.goal,
@@ -49,7 +56,15 @@ def rank_candidates(request: CandidateRankRequest) -> CandidateRankResult:
         else:
             rejected.append(candidate)
 
-    ranked.sort(key=lambda item: (item.score, item.score_breakdown.text_similarity, item.element.fusion_confidence), reverse=True)
+    ranked.sort(
+        key=lambda item: (
+            item.score,
+            item.score_breakdown.text_similarity,
+            item.score_breakdown.screen_reading_score,
+            item.element.fusion_confidence,
+        ),
+        reverse=True,
+    )
     rejected.sort(key=lambda item: (item.score, item.score_breakdown.text_similarity), reverse=True)
     for index, candidate in enumerate(ranked, start=1):
         candidate.rank = index
@@ -76,21 +91,40 @@ def rank_candidates(request: CandidateRankRequest) -> CandidateRankResult:
             "rejected_count": len(rejected),
             "returned_count": len(selected),
             "has_recommendation": bool(selected),
+            "screen_reading_used": request.screen_reading is not None,
+            "screen_reading_matched_count": len(
+                [
+                    item
+                    for item in [*ranked, *rejected]
+                    if item.score_breakdown.screen_reading_score > 0
+                ]
+            ),
         },
     )
 
 
-def _score_element(element: PageElement, *, goal: str, state_hint: str | None) -> tuple[ScoreBreakdown, list[str], bool]:
+def _score_element(
+    element: PageElement,
+    *,
+    goal: str,
+    state_hint: str | None,
+    screen_evidence: dict[str, Any] | None = None,
+) -> tuple[ScoreBreakdown, list[str], bool]:
     policy = element.interaction_policy
     reasons: list[str] = []
-    text_similarity = _best_text_similarity(goal, _element_text_values(element))
+    base_text_similarity = _best_text_similarity(goal, _element_text_values(element))
+    screen_text_similarity = _best_text_similarity(goal, _screen_reading_text_values(screen_evidence))
+    text_similarity = max(base_text_similarity, screen_text_similarity)
     role_score = _role_score(element)
     policy_score = _policy_score(element)
     confidence_score = _confidence_score(element)
     state_score = _state_score(element, state_hint)
+    screen_reading_score, screen_reasons = _screen_reading_score(goal=goal, element=element, screen_evidence=screen_evidence)
     ad_penalty = max(0.0, min(float(policy.ad_risk), 1.0))
     blocked_penalty = 1.0 if not policy.allowed else 0.0
 
+    if screen_text_similarity > base_text_similarity:
+        reasons.append("screen_reading_text_match")
     if text_similarity >= 0.75:
         reasons.append("strong_goal_text_match")
     elif text_similarity >= 0.45:
@@ -105,6 +139,7 @@ def _score_element(element: PageElement, *, goal: str, state_hint: str | None) -
         reasons.append("blocked_by_interaction_policy")
     if state_score > 0.0:
         reasons.append("state_hint_match")
+    reasons.extend(screen_reasons)
 
     breakdown = ScoreBreakdown(
         text_similarity=text_similarity,
@@ -112,6 +147,7 @@ def _score_element(element: PageElement, *, goal: str, state_hint: str | None) -
         policy_score=policy_score,
         confidence_score=confidence_score,
         state_score=state_score,
+        screen_reading_score=screen_reading_score,
         ad_penalty=ad_penalty,
         blocked_penalty=blocked_penalty,
     )
@@ -130,6 +166,45 @@ def _element_text_values(element: PageElement) -> list[str]:
         element.role,
         element.interaction_type,
     ]
+
+
+def _screen_reading_text_values(screen_evidence: dict[str, Any] | None) -> list[str]:
+    if not screen_evidence:
+        return []
+    values: list[str] = []
+    ui_element = screen_evidence.get("ui_element")
+    if isinstance(ui_element, dict):
+        values.extend(
+            [
+                str(ui_element.get("label") or ""),
+                str(ui_element.get("description") or ""),
+                str(ui_element.get("role_guess") or ""),
+                str(ui_element.get("type") or ""),
+            ]
+        )
+        uia_match = ((ui_element.get("provider_matches") or {}).get("uia") or {})
+        if isinstance(uia_match, dict):
+            values.extend(
+                [
+                    str(uia_match.get("name") or ""),
+                    str(uia_match.get("control_type") or ""),
+                    str(uia_match.get("automation_id") or ""),
+                ]
+            )
+    icon_candidate = screen_evidence.get("icon_candidate")
+    if isinstance(icon_candidate, dict):
+        icon_match = icon_candidate.get("icon_library_match") or {}
+        if isinstance(icon_match, dict):
+            values.extend(
+                [
+                    str(icon_match.get("catalog_name") or ""),
+                    str(icon_match.get("icon_id") or ""),
+                ]
+            )
+        uia_match = icon_candidate.get("uia_match") or {}
+        if isinstance(uia_match, dict):
+            values.append(str(uia_match.get("name") or ""))
+    return values
 
 
 def _best_text_similarity(goal: str, candidates: Iterable[str]) -> float:
@@ -191,6 +266,74 @@ def _state_score(element: PageElement, state_hint: str | None) -> float:
     if not normalized_state:
         return 0.0
     return round(max(_text_similarity(normalized_state, _normalize_text(value)) for value in _element_text_values(element)), 4)
+
+
+def _screen_reading_score(
+    *,
+    goal: str,
+    element: PageElement,
+    screen_evidence: dict[str, Any] | None,
+) -> tuple[float, list[str]]:
+    if not screen_evidence:
+        return 0.0, []
+    score = 0.0
+    reasons: list[str] = []
+    ui_element = screen_evidence.get("ui_element")
+    uia_match: dict[str, Any] | None = None
+    if isinstance(ui_element, dict):
+        raw_match = ((ui_element.get("provider_matches") or {}).get("uia") or None)
+        if isinstance(raw_match, dict):
+            uia_match = raw_match
+    icon_candidate = screen_evidence.get("icon_candidate")
+    if uia_match is None and isinstance(icon_candidate, dict):
+        raw_icon_uia = icon_candidate.get("uia_match")
+        if isinstance(raw_icon_uia, dict):
+            uia_match = raw_icon_uia
+
+    if uia_match is not None:
+        if uia_match.get("visible") is not False and uia_match.get("enabled") is not False:
+            uia_score = max(0.0, min(float(uia_match.get("score") or 0.0), 1.0))
+            score += 0.62 + (uia_score * 0.18)
+            reasons.append("screen_reading_uia_match")
+            if _best_text_similarity(goal, [str(uia_match.get("name") or "")]) >= 0.75:
+                score += 0.15
+                reasons.append("screen_reading_uia_goal_name_match")
+            if element.interaction_type == "click" and "Invoke" in list(uia_match.get("patterns") or []):
+                score += 0.05
+                reasons.append("screen_reading_uia_invoke_pattern")
+
+    if isinstance(icon_candidate, dict):
+        icon_match = icon_candidate.get("icon_library_match")
+        if isinstance(icon_match, dict):
+            score += 0.08
+            reasons.append("screen_reading_icon_catalog_match")
+            if icon_candidate.get("uia_match"):
+                score += 0.08
+                reasons.append("screen_reading_icon_uia_match")
+
+    return round(max(0.0, min(score, 1.0)), 4), _unique(reasons)
+
+
+def _screen_reading_index(screen_reading: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    if not isinstance(screen_reading, dict):
+        return {}
+    ui_elements = screen_reading.get("ui_elements") or (screen_reading.get("ui") or {}).get("elements") or []
+    icon_candidates = (screen_reading.get("ui") or {}).get("icon_candidates") or []
+    indexed: dict[str, dict[str, Any]] = {}
+    for item in ui_elements:
+        if not isinstance(item, dict) or not item.get("id"):
+            continue
+        indexed.setdefault(str(item["id"]), {})["ui_element"] = item
+    for item in icon_candidates:
+        if not isinstance(item, dict) or not item.get("element_id"):
+            continue
+        indexed.setdefault(str(item["element_id"]), {})["icon_candidate"] = item
+    return indexed
+
+
+def _screen_evidence_for_element(element: PageElement, screen_index: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+    evidence = screen_index.get(element.element_id)
+    return evidence if evidence else None
 
 
 def _normalize_text(value: str) -> str:

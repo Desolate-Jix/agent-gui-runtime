@@ -35,6 +35,59 @@ def _allowed_plan(point: dict[str, int] | None = None) -> dict:
     }
 
 
+def test_execute_recognition_plan_preserves_unicode_goal_for_internal_recognition(monkeypatch) -> None:
+    goal = "\u70b9\u51fb\u6b64\u5904\u6d4b\u8bd5"
+    captured: dict[str, str] = {}
+
+    monkeypatch.setattr(
+        action_api.window_manager,
+        "get_bound_window",
+        lambda: SimpleNamespace(
+            handle=1,
+            title="MouseTester",
+            rect=SimpleNamespace(left=0, top=0, right=800, bottom=600),
+            is_active=True,
+        ),
+    )
+    monkeypatch.setattr(
+        action_api.screenshot_service,
+        "capture_window",
+        lambda **kwargs: {
+            "image_path": "capture.png",
+            "roi": None,
+            "roi_adjusted": False,
+            "window_size": {"width": 800, "height": 600},
+        },
+    )
+
+    def fake_recognition_plan(request):
+        captured["goal"] = request.goal
+        plan = _allowed_plan()
+        plan["goal"] = request.goal
+        plan["trace_path"] = "logs/traces/vision/unicode-goal-recognition-plan.json"
+        return APIResponse(
+            success=True,
+            message="ok",
+            data=VisionResultData(result=plan).model_dump(),
+            error=None,
+        )
+
+    monkeypatch.setattr(action_api, "_run_recognition_plan_for_execution", fake_recognition_plan)
+    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", lambda trace_path: None)
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/unicode-goal-execute.json")
+
+    response = action_api.execute_recognition_plan(
+        ExecuteRecognitionPlanRequest(goal=goal, app_name="mousetesterweb", dry_run=True)
+    )
+
+    assert captured["goal"] == goal
+    assert response.success is True
+    result = response.data["result"]
+    assert result["goal"] == goal
+    assert result["recognition_plan"]["goal"] == goal
+    assert result["recognition_plan_trace_path"].endswith("unicode-goal-recognition-plan.json")
+
+
 def test_execute_recognition_plan_clicks_allowed_live_capture(monkeypatch) -> None:
     monkeypatch.setattr(
         action_api.window_manager,

@@ -1,0 +1,97 @@
+{
+  "contract_version": "golden_trace_validation_summary_v1",
+  "case_id": "mousetester_live_execute_unicode_goal_20260513_182111",
+  "recorded_at": "2026-05-13T18:21:15",
+  "goal": "点击此处测试",
+  "app_name": "mousetesterweb",
+  "artifacts": {
+    "recognition_trace": "recognition_trace.json",
+    "action_trace": "action_trace.json",
+    "execute_response": "execute-response.json",
+    "before_full": "before_full.png",
+    "after_full": "after_full.png",
+    "diff": "diff.png"
+  },
+  "recognition": {
+    "success": true,
+    "internal_trace_goal_matches_request": true,
+    "top_candidate": {
+      "label": "点击此处测试",
+      "score": 0.8847,
+      "screen_reading_score": 0.8777,
+      "bbox": {
+        "x": 1398,
+        "y": 424,
+        "w": 73,
+        "h": 20
+      },
+      "reasons": [
+        "strong_goal_text_match",
+        "supported_interaction",
+        "trusted_zone:general_action",
+        "screen_reading_uia_match",
+        "screen_reading_uia_goal_name_match",
+        "screen_reading_uia_invoke_pattern"
+      ]
+    }
+  },
+  "pre_click": {
+    "allowed": true,
+    "selected_candidate_id": "candidate_element_element_d681b8d8",
+    "selected_click_point": {
+      "x": 1434,
+      "y": 433
+    },
+    "reasons": [
+      "pre_click_candidate_allowed"
+    ],
+    "margin_to_second": 0.2714
+  },
+  "action": {
+    "success": true,
+    "executed": true,
+    "input_backend": "SendInput",
+    "selected_point": {
+      "x": 1434,
+      "y": 433
+    },
+    "clicked_point": {
+      "x": 1434,
+      "y": 433
+    }
+  },
+  "validation": {
+    "generic_post_click_verified": true,
+    "semantic_post_click_verified": true,
+    "semantic_profile": "mousetester_target_text_change_v1",
+    "target_bbox": {
+      "x": 1398,
+      "y": 424,
+      "width": 73,
+      "height": 20
+    },
+    "verification_bbox": {
+      "x": 1308,
+      "y": 369,
+      "width": 253,
+      "height": 130
+    },
+    "before_target_text": "点击此处测试",
+    "after_target_text": "超时/单击",
+    "reasons": [
+      "before_target_present",
+      "after_target_absent",
+      "target_text_replaced",
+      "localized_text_changed",
+      "diff_overlaps_target"
+    ]
+  },
+  "proves": [
+    "A Unicode Chinese goal survives execute_recognition_plan request construction and the internal recognition trace.",
+    "screen_reading_v1 UIA evidence contributes to the top candidate without changing pre-click safety gates.",
+    "recognition_plan_v1 selects the MouseTester target text as the top candidate.",
+    "pre_click_decision_v1 permits only the grounded target point.",
+    "execute_recognition_plan clicks the selected pre-click point, not raw vision coordinates.",
+    "generic screenshot diff/focus validation and MouseTester semantic OCR validation both confirm the click changed the target area."
+  ]
+}

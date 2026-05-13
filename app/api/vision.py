@@ -20,6 +20,7 @@ from app.page_structure import build_page_structure
 from app.recognition import CandidateRankRequest, LocalGroundingRequest, decide_pre_click, rank_candidates, run_local_grounding
 from app.recognition.plan_overlay import render_recognition_plan_overlay
 from app.screen_reading import build_screen_reading
+from app.screen_reading.uia_provider import uia_provider
 from app.vision.artifacts import save_region_artifacts
 from app.vision.factory import VisionProviderFactory
 from app.vision.layer_trace import (
@@ -270,12 +271,14 @@ def screen_reading(request: VisionAnalyzeRequestModel) -> APIResponse:
         if ocr_result is None:
             ocr_result = ocr_service.scan_image(str(image_path))
         structure = build_page_structure(normalized, ocr_result)
+        uia_snapshot = uia_provider.snapshot_bound_window()
         result_payload = build_screen_reading(
             image_path=str(image_path),
             vision=normalized,
             ocr=ocr_result,
             page_structure=structure,
             app_name=request.app_name,
+            uia_snapshot=uia_snapshot,
         )
         result_payload["execution_path"] = {
             **_vision_execution_path(
@@ -286,7 +289,10 @@ def screen_reading(request: VisionAnalyzeRequestModel) -> APIResponse:
                 ocr_region_refine_used=refine_options.enabled,
             ),
             "screen_reading_used": True,
-            "ui_provider_slots_reserved": True,
+            "ui_provider_slots_available": True,
+            "icon_library_provider_connected": True,
+            "uia_provider_connected": True,
+            "uia_scan_status": uia_snapshot.get("status"),
         }
         result_payload["trace_path"] = write_trace(
             category="vision",
@@ -344,6 +350,15 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
         if ocr_result is None:
             ocr_result = ocr_service.scan_image(str(image_path))
         structure = build_page_structure(normalized, ocr_result)
+        uia_snapshot = uia_provider.snapshot_bound_window()
+        screen_reading_payload = build_screen_reading(
+            image_path=str(image_path),
+            vision=normalized,
+            ocr=ocr_result,
+            page_structure=structure,
+            app_name=request.app_name,
+            uia_snapshot=uia_snapshot,
+        )
         goal = request.goal or request.task
         candidate_result = rank_candidates(
             CandidateRankRequest(
@@ -351,6 +366,7 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
                 page_structure=structure,
                 top_k=request.top_k,
                 state_hint=request.state_hint,
+                screen_reading=screen_reading_payload,
             )
         )
         narrow_search_result = run_local_grounding(
@@ -377,6 +393,7 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
                 "vision_regions": normalized.to_dict(),
                 "ocr_result": ocr_result.to_dict(),
                 "page_structure": structure.to_dict(),
+                "screen_reading": screen_reading_payload,
             },
             "candidate_result": candidate_result.to_dict(),
             "narrow_search_result": narrow_search_result.to_dict(),
@@ -405,6 +422,9 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
                     ocr_region_refine_used=refine_options.enabled,
                 ),
                 "candidate_rank_used": True,
+                "screen_reading_used": True,
+                "screen_reading_rank_evidence_used": True,
+                "uia_scan_status": uia_snapshot.get("status"),
                 "narrow_search_used": True,
                 "pre_click_decision_used": True,
                 "action_executed": False,

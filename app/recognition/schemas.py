@@ -13,6 +13,7 @@ class CandidateRankRequest:
     page_structure: PageStructure
     top_k: int = 5
     state_hint: str | None = None
+    screen_reading: dict[str, Any] | None = None
 
 
 @dataclass
@@ -22,6 +23,7 @@ class ScoreBreakdown:
     policy_score: float = 0.0
     confidence_score: float = 0.0
     state_score: float = 0.0
+    screen_reading_score: float = 0.0
     ad_penalty: float = 0.0
     blocked_penalty: float = 0.0
 
@@ -32,6 +34,7 @@ class ScoreBreakdown:
             + (self.policy_score * 0.18)
             + (self.confidence_score * 0.14)
             + (self.state_score * 0.08)
+            + (self.screen_reading_score * 0.10)
             - (self.ad_penalty * 0.18)
             - (self.blocked_penalty * 0.35)
         )
@@ -44,6 +47,7 @@ class ScoreBreakdown:
             "policy_score": round(float(self.policy_score), 4),
             "confidence_score": round(float(self.confidence_score), 4),
             "state_score": round(float(self.state_score), 4),
+            "screen_reading_score": round(float(self.screen_reading_score), 4),
             "ad_penalty": round(float(self.ad_penalty), 4),
             "blocked_penalty": round(float(self.blocked_penalty), 4),
             "total": self.total(),

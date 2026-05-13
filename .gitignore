@@ -23,6 +23,8 @@ logs/*.json
 *.jpeg
 *.webp
 *.bmp
+!artifacts/golden-traces/
+!artifacts/golden-traces/**
 .DS_Store
 Thumbs.db
 PROJECT_SUMMARY.md

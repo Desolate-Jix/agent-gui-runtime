@@ -40,6 +40,7 @@ Use it when you need to answer:
   - screenshots
   - verification diff images
   - vision region image bundles
+  - golden trace baselines, including `artifacts/golden-traces/mousetester-live-execute-20260513-182111-unicode-goal/`
 - `logs/`
   - structured JSON traces
   - action/state memory JSON
@@ -55,6 +56,11 @@ Use it when you need to answer:
 
 - `scripts/evaluate_mousetester_traces.py`
   - evaluates saved MouseTester recognition/action traces
+  - writes JSON reports under `logs/evaluations/`
+  - includes the 2026-05-13 live execute golden baseline through `configs/mousetester_eval_cases.json`
+- `scripts/record_uia_smoke.py`
+  - binds a target window, collects a Windows UIA snapshot, writes a `uia_smoke_trace_v1` trace, and scores it
+  - default target is MouseTester.cn in Microsoft Edge
   - writes JSON reports under `logs/evaluations/`
 
 ### Project memory and takeover docs
@@ -113,8 +119,8 @@ Use it when you need to answer:
     - run provider-based vision analysis through the `app/vision/` abstraction
     - normalize learned regions
     - fuse semantic regions with OCR text boxes into `page_structure_v1`
-    - build `screen_reading_v1` as the READ-facing UI layer, including reserved UIA/browser/icon/learned-UI provider slots
-    - return a no-click staged recognition plan with ranked candidates
+    - build `screen_reading_v1` as the READ-facing UI layer, including connected Windows UIA and Microsoft Fluent icon providers plus reserved browser/learned-UI provider slots
+    - return a no-click staged recognition plan with ranked candidates, including bounded screen-reading rank evidence
     - expose a test/debug trace that shows every layer result and schema validation
     - redraw region/OCR boxes on the original screenshot for human review
     - redraw recognition-plan candidates, decisions, and refined points for human review
@@ -135,6 +141,10 @@ Use it when you need to answer:
 - `app/evaluation/mousetester_trace_eval.py`
   - trace-evaluation helpers for MouseTester recognition/action evidence
   - reports top-1, pre-click, action execution, semantic verification, and retry facts
+
+- `app/evaluation/uia_smoke_eval.py`
+  - trace-evaluation helpers for Windows UIA smoke evidence
+  - scores scan status, control count, button count, and expected control-name substrings such as `返回`, `刷新`, and `点击此处测试`
 
 ### Runtime services
 
@@ -407,17 +417,31 @@ Runtime output:
   - READ-facing screen interpretation layer above `page_structure_v1`
   - outputs `screen_reading_v1`
   - keeps UI recognition separate from action execution
-  - exposes conservative placeholders for future UIA, browser accessibility, icon-library, and learned-UI-memory providers
+  - exposes conservative placeholders for future browser accessibility and learned-UI-memory providers
+  - connects a Windows UIA provider for bound-window accessibility controls
+  - connects a small Microsoft Fluent System Icons catalog matcher for common no-text browser/UI icons
 
 Key files:
 
+- `uia_provider.py`
+  - defines the Windows UI Automation provider
+  - enumerates controls from the currently bound window through pywinauto's `uia` backend
+  - converts screen-space UIA rectangles into window-relative bboxes for screenshot matching
+  - skips unavailable pywinauto UIA pattern descriptors instead of failing the full scan
+  - returns structured `unavailable` results when no window is bound or UIA scanning fails
+- `icon_library.py`
+  - defines the Microsoft Fluent System Icons provider
+  - currently performs catalog/context matching for common icons such as back, forward, refresh, close, search, settings, menu, and home
+  - returns Fluent icon ids such as `arrow_left_24_regular`
+  - does not perform shape-template matching, so visual-only icon candidates remain blocked from safe execution
 - `builder.py`
   - consumes normalized `vision_regions_v1`, OCR output, and `page_structure_v1`
+  - merges optional Windows UIA matches into `ui.elements[*].provider_matches.uia`
   - promotes OCR-backed page elements into `ui.elements`
   - preserves visual-only semantic UI regions as low-confidence/reserved candidates
   - extracts `ui.icon_candidates` for no-text or icon-like controls without marking them safe for execution
   - builds `ui.modules` from larger semantic regions and records child element/text ids
-  - emits `provider_slots` and `learning_hooks` so later UIA/icon-library/learning work has a stable integration point
+  - emits `provider_slots` and `learning_hooks` so later browser/learning work has a stable integration point
 
 Runtime output:
 
@@ -426,15 +450,19 @@ Runtime output:
 - `texts`
   - normalized OCR text boxes
 - `ui.elements`
-  - UI objects with `role_guess`, `type`, label, bbox, click point, evidence level, locator hints, and memory key
+  - UI objects with `role_guess`, `type`, label, bbox, click point, evidence level, locator hints, memory key, and provider matches such as `uia`
 - `ui.icon_candidates`
-  - reserved icon-like candidates that still need icon-shape, nearby-context, or provider confirmation
+  - reserved icon-like candidates with Microsoft Fluent catalog matches when label/context is strong enough
+  - includes `uia_match` when a bound-window UIA control overlaps the icon candidate
+  - candidates still need sufficient combined evidence and post-action verification before execution
 - `ui.provider_slots`
-  - planned provider interfaces for `uia`, `browser_accessibility`, `icon_library`, and `learned_ui_memory`
+  - provider interfaces for `uia`, `browser_accessibility`, `icon_library`, and `learned_ui_memory`
+  - `uia` is connected to the Windows UIA scanner; scan status can be `ok` or `unavailable`
+  - `icon_library` is connected to the local Microsoft Fluent System Icons catalog matcher
 - `execution_relevance`
   - safe, risky, and unknown candidate id buckets for later grounding
 - `uncertainties`
-  - explicit gaps such as `icon_provider_not_connected` and `visual_only_ui_requires_grounding`
+  - explicit gaps such as `icon_library_match_missing` and `visual_only_ui_requires_grounding`
 
 Route:
 
@@ -766,7 +794,7 @@ The first version intentionally does not make action decisions. It prepares exec
 
 Use this when the upper layer wants a fuller READ result instead of only the older page-structure fusion result. The current implementation strengthens the UI part of READ by returning OCR-backed elements, visual-only/icon candidates, module grouping, locator hints, reserved provider slots, and learning hooks.
 
-This endpoint still does not execute actions. Visual-only candidates are intentionally risky/reserved until a future provider such as UIA, browser accessibility, an icon catalog, or learned UI memory confirms them.
+This endpoint still does not execute actions. Visual-only candidates are intentionally risky/reserved until enough combined evidence from UIA, browser accessibility, icon catalog, shape/template matching, or learned UI memory confirms them.
 
 ### vision layer trace
 
@@ -930,18 +958,21 @@ MVP non-goals:
   - responsibility:
     - rank parsed elements for one task
   - current contract:
-    - request: `CandidateRankRequest(goal, page_structure, top_k=5, state_hint=None)`
+    - request: `CandidateRankRequest(goal, page_structure, top_k=5, state_hint=None, screen_reading=None)`
     - response: `CandidateRankResult`
     - response version: `candidate_rank_v1`
     - candidate id: stable `candidate_<element_id>` form
     - ranking evidence: `ScoreBreakdown`
     - geometry evidence: original `element.bbox` plus optional OCR-derived `refined_bbox`
+    - optional `screen_reading_v1` evidence can supply UIA accessible names, UIA matches, and Microsoft Fluent icon catalog matches
+    - `ScoreBreakdown.screen_reading_score` is a bounded rank signal; it does not override blocked/ad-like interaction policy
   - current scoring signals:
     - goal text similarity
     - supported interaction role
     - interaction policy priority and zone type
     - fusion and coordinate confidence
     - optional state hint similarity
+    - optional screen-reading provider evidence
     - ad and blocked-policy penalties
   - current bbox refinement:
     - uses `source_text_ids` from `page_structure_v1`

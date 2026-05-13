@@ -167,6 +167,7 @@ Typical ranking signals:
 - task text similarity
 - element role support
 - interaction-policy trust
+- screen-reading provider evidence such as UIA accessible names and UIA/icon matches
 - ad risk
 - page-state compatibility
 
@@ -239,6 +240,7 @@ Use these checks when implementing the staged strategy.
 
 - `top_1_hit_rate`
 - `top_3_hit_rate`
+- `screen_reading_rank_contribution_rate`
 - ad-candidate exclusion rate
 - false-candidate promotion rate
 
@@ -256,6 +258,7 @@ Minimum evidence per candidate:
 
 - final score
 - score breakdown
+- `screen_reading_score` when `screen_reading_v1` evidence is available
 - eligibility
 - reasons
 - source element id
@@ -643,6 +646,8 @@ Scope:
 - `POST /vision/screen_reading`
 - `screen_reading_v1`
 - `app/screen_reading/builder.py`
+- `app/screen_reading/uia_provider.py`
+- `app/screen_reading/icon_library.py`
 
 Goal:
 
@@ -653,8 +658,11 @@ Completion checks:
 - OCR-backed page elements appear in `ui.elements`
 - visual-only or icon-like candidates appear in `ui.icon_candidates`
 - visual-only/icon candidates are not marked as safe execution targets without stronger grounding
-- provider slots are present for UIA, browser accessibility, icon library, and learned UI memory
-- uncertainties explicitly describe missing provider evidence
+- provider slots are present for UIA, browser accessibility, Microsoft Fluent icon catalog, and learned UI memory
+- UIA scan status and control count appear in `source_layers.windows_uia`
+- UIA matches appear on supported bound-window controls when overlap/name evidence is available
+- Microsoft Fluent catalog matches appear for supported contextual icon candidates
+- uncertainties explicitly describe missing catalog or grounding evidence
 
 Metrics:
 
@@ -663,6 +671,12 @@ Metrics:
   - expected UI elements represented / expected UI elements
 - `icon_candidate_recall`
   - expected no-text icons represented / expected no-text icons
+- `icon_catalog_match_rate`
+  - expected Microsoft Fluent matches found / expected supported icon candidates
+- `uia_control_match_rate`
+  - expected UIA controls merged / expected supported bound-window controls
+- `uia_smoke_pass_rate`
+  - UIA smoke cases with expected status, control counts, button counts, and required control-name substrings passing / UIA smoke cases
 - `unsafe_icon_block_rate`
   - visual-only icon candidates kept out of safe action candidates / visual-only icon candidates
 - `module_grouping_accuracy`
@@ -672,19 +686,25 @@ Target thresholds for the current phase:
 - `screen_reading_contract_pass_rate = 1.00`
 - `ui_element_recall >= 0.90`
 - `icon_candidate_recall >= 0.80`
+- `icon_catalog_match_rate >= 0.80` for supported common browser/UI icons
+- `uia_control_match_rate >= 0.80` for supported bound-window controls
+- `uia_smoke_pass_rate = 1.00` for the current MouseTester/Edge smoke case
 - `unsafe_icon_block_rate = 1.00`
 
 Pass evidence:
 
 - `screen_reading_v1` JSON
-- `ui.elements`, `ui.icon_candidates`, `ui.provider_slots`, `execution_relevance`, and `uncertainties`
+- `ui.elements`, `ui.icon_candidates`, `ui.provider_slots`, `source_layers.windows_uia`, `execution_relevance`, and `uncertainties`
 - route trace under `logs/traces/vision/`
+- UIA smoke trace under `logs/traces/evaluation/` and report from `scripts/record_uia_smoke.py`
 - targeted route/unit tests
 
 Common failure meaning:
 
 - OCR/page structure good but missing UI element: READ builder mapping issue
 - icon visible but absent from `icon_candidates`: visual-region role/label mapping issue
+- icon candidate present but expected Microsoft Fluent match absent: catalog alias/context mapping issue
+- UIA control present but not merged into expected element: bbox overlap/name matching issue
 - visual-only icon marked safe: grounding safety policy issue
 
 ## 7. Action Execution

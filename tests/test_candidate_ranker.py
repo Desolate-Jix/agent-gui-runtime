@@ -206,3 +206,103 @@ def test_rank_candidates_refines_bbox_from_goal_matching_source_text_subset() ->
     candidate = result.candidates[0]
     assert candidate.refined_bbox == {"x": 23, "y": 10, "w": 48, "h": 30}
     assert candidate.bbox_refine_reason == "goal_text_ids_union:1"
+
+
+def test_rank_candidates_uses_screen_reading_uia_name_to_promote_candidate() -> None:
+    structure = _structure(
+        [
+            _element("element_generic", "Generic button", priority="medium"),
+            _element("element_uia_target", "Unknown control", priority="medium"),
+        ]
+    )
+    screen_reading = {
+        "contract_version": "screen_reading_v1",
+        "ui_elements": [
+            {
+                "id": "element_uia_target",
+                "label": "Unknown control",
+                "description": "Control with accessibility name",
+                "role_guess": "button",
+                "type": "button",
+                "provider_matches": {
+                    "uia": {
+                        "name": "点击此处测试",
+                        "control_type": "Button",
+                        "automation_id": None,
+                        "enabled": True,
+                        "visible": True,
+                        "patterns": ["Invoke"],
+                        "score": 0.91,
+                    }
+                },
+            }
+        ],
+        "ui": {"icon_candidates": []},
+    }
+
+    result = rank_candidates(
+        CandidateRankRequest(
+            goal="点击此处测试",
+            page_structure=structure,
+            top_k=2,
+            screen_reading=screen_reading,
+        )
+    )
+
+    candidate = result.candidates[0]
+    assert candidate.element_id == "element_uia_target"
+    assert candidate.score_breakdown.screen_reading_score > 0
+    assert "screen_reading_text_match" in candidate.reasons
+    assert "screen_reading_uia_goal_name_match" in candidate.reasons
+    assert result.summary["screen_reading_used"] is True
+    assert result.summary["screen_reading_matched_count"] == 1
+
+
+def test_rank_candidates_keeps_blocked_screen_reading_match_rejected() -> None:
+    structure = _structure(
+        [
+            _element(
+                "element_blocked",
+                "Unknown control",
+                allowed=False,
+                zone_type="ad_candidate",
+                priority="blocked",
+            )
+        ]
+    )
+    screen_reading = {
+        "contract_version": "screen_reading_v1",
+        "ui_elements": [
+            {
+                "id": "element_blocked",
+                "label": "Unknown control",
+                "role_guess": "button",
+                "type": "button",
+                "provider_matches": {
+                    "uia": {
+                        "name": "点击此处测试",
+                        "control_type": "Button",
+                        "enabled": True,
+                        "visible": True,
+                        "patterns": ["Invoke"],
+                        "score": 0.95,
+                    }
+                },
+            }
+        ],
+        "ui": {"icon_candidates": []},
+    }
+
+    result = rank_candidates(
+        CandidateRankRequest(
+            goal="点击此处测试",
+            page_structure=structure,
+            top_k=1,
+            screen_reading=screen_reading,
+        )
+    )
+
+    assert result.candidates == []
+    assert result.rejected[0].element_id == "element_blocked"
+    assert result.rejected[0].score_breakdown.screen_reading_score > 0
+    assert "blocked_by_interaction_policy" in result.rejected[0].reasons
