@@ -32,7 +32,7 @@ Use it when you need to answer:
 - `configs/`
   - runtime configuration files
   - currently most relevant file: `configs/vision.json`
-  - `configs/mousetester_eval_cases.json` defines the initial trace-based MouseTester evaluation cases
+  - `configs/mousetester_eval_cases.json` defines the trace-based MouseTester smoke cases, including the 2026-05-13 golden live execute baseline
 
 ### Evidence and persistence
 
@@ -41,6 +41,7 @@ Use it when you need to answer:
   - verification diff images
   - vision region image bundles
   - golden trace baselines, including `artifacts/golden-traces/mousetester-live-execute-20260513-182111-unicode-goal/`
+    - contains copied `recognition_trace.json`, `action_trace.json`, `execute-response.json`, `before_full.png`, `after_full.png`, `diff.png`, `validation_summary.json`, and `manual_regression_checklist.md`
 - `logs/`
   - structured JSON traces
   - action/state memory JSON

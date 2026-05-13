@@ -158,6 +158,7 @@ Latest real MouseTester evidence:
 - Recognition trace: `logs/traces/vision/20260513-182111-330997__recognition-plan__mousetesterweb.json`
 - Action trace: `logs/traces/actions/20260513-182115-605129__execute-recognition-plan__mousetesterweb.json`
 - Execute response: `logs/live-execute-unicode-goal/execute-response.json`
+- Baseline contents: copied recognition/action traces, execute response, before/after screenshots, diff image, validation summary, and manual regression checklist.
 - Bound window: MouseTester.cn in Microsoft Edge.
 - Selected click point: `{x: 1434, y: 433}`
 - Result: live click executed from the gated recognition plan, the internal recognition trace preserved goal `点击此处测试`, the top candidate carried UIA name/Invoke evidence, and validation passed through generic screenshot/focus evidence plus MouseTester target-area semantic OCR verification.
@@ -183,7 +184,7 @@ Previous no-click recognition evidence:
 
 Current limitation:
 
-- The system has a gated execution route, one successful live MouseTester click smoke, MouseTester-specific target-area semantic verification, bounded retry for retry-safe verification failures, and an initial trace-based MouseTester evaluation set. It is not a production autonomous click loop yet: it needs a broader evaluation set.
+- The system has a gated execution route, a golden live MouseTester click baseline, MouseTester-specific target-area semantic verification, bounded retry for retry-safe verification failures, and a 5-case trace-based MouseTester smoke set. It is not a production autonomous click loop yet: it needs a broader evaluation set across more states and negative cases.
 
 Primary next step:
 
