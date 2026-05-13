@@ -188,7 +188,15 @@ Current limitation:
 
 Primary next step:
 
-- Expand the MouseTester evaluation set across more saved states and negative cases.
+- Build the Single-page stable loop for MouseTester: fixed website, fixed task, repeated stable execution across sessions.
+
+Longer roadmap:
+
+1. Single-page stable loop: fixed website, fixed task, stable execution. MouseTester is the current baseline and proves structured reasoning rather than random coordinate success.
+2. Cross-session stability: prove the same task still works across days, window sizes, DPI/display scaling, OCR fluctuation, and visual-model fluctuation.
+3. Semantic generalization: map equivalent task intent across labels such as `点击此处测试`, `开始测速`, `Launch Test`, `Run Benchmark`, and `Start`.
+4. Multi-step stateful workflows: handle login, navigation, popups, menus, forms, and result validation with durable state and planning.
+5. Recovery and self-healing: re-observe, explain failure, re-plan, and retry safely when buttons are missing, pages stall, OCR fails, popups block targets, clicks have no effect, or validation fails.
 
 ---
 

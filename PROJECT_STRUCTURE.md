@@ -1089,6 +1089,131 @@ For one controlled page family such as MouseTester:
 
 This keeps the MVP small, inspectable, and reversible.
 
+### Long-Term Agent Roadmap
+
+Long-term product goal:
+
+- build toward an agent that can operate unknown pages by observing the UI, forming a structured plan, executing cautiously, validating the result, and recovering from failure
+- the runtime should not jump directly from one successful click to unknown-page autonomy
+- each stage must be backed by trace evidence, regression cases, and explicit failure modes
+
+#### Stage 1: Single-Page Stable Loop
+
+Goal:
+
+- fixed website
+- fixed task
+- stable execution
+
+Current representative target:
+
+- MouseTester.cn in Microsoft Edge
+- task: click `点击此处测试`
+- route: `POST /action/execute_recognition_plan`
+- golden baseline: `artifacts/golden-traces/mousetester-live-execute-20260513-182111-unicode-goal/`
+
+What the MouseTester baseline proves:
+
+- the system is not randomly succeeding from a raw coordinate
+- it uses structured reasoning: page parse, screen-reading evidence, candidate ranking, local grounding, pre-click gate, click execution, and post-click validation
+- the internal recognition trace preserves the Unicode goal
+- the top target carries UIA name/Invoke evidence and target-area OCR validation
+- the clicked point comes from `pre_click_decision_v1.selected_click_point`, not from unverified full-screen vision output
+
+Next work inside this stage:
+
+- turn the one golden success into a stable loop over repeated runs
+- keep the website and task fixed while varying the session conditions
+- measure top-1 target stability, pre-click allow/reject stability, selected point drift, action execution, and semantic validation
+
+#### Stage 2: Cross-Session Stability
+
+Goal:
+
+- prove that a task that works today still works tomorrow
+- measure robustness before broadening to unknown sites
+
+Stability variables to test:
+
+- page state changes and light layout changes
+- window size changes
+- DPI or display scaling changes
+- OCR fluctuation
+- visual model fluctuation
+- browser/session differences such as reloads, zoom, focus, and page scroll position
+
+Expected evidence:
+
+- repeated MouseTester traces across sessions
+- pass/fail reports that separate OCR failures, vision-region failures, page-structure failures, screen-reading failures, candidate-ranker failures, pre-click failures, action failures, and validator failures
+- baselines for acceptable bbox/click-point drift
+
+#### Stage 3: Semantic Generalization
+
+Goal:
+
+- move from exact text matching toward intent matching across similar controls
+
+Example:
+
+- known target: `点击此处测试`
+- possible unknown-site labels: `开始测速`, `Launch Test`, `Run Benchmark`, `Start`
+
+Core challenge:
+
+- the hard part becomes semantic understanding, not OCR or clicking
+- the system must infer that several labels can express the same user intent while still avoiding unsafe or unrelated controls
+
+Expected future components:
+
+- intent schema for user goals
+- semantic candidate matching with explanations
+- negative examples for misleading labels
+- confidence and abstention rules when intent is ambiguous
+
+#### Stage 4: Multi-Step Stateful Workflows
+
+Goal:
+
+- execute workflows that require state tracking and planning, not only one click
+
+Example workflow shape:
+
+- login
+- wait for navigation
+- handle popup
+- find menu
+- submit form
+- validate result
+
+Core challenge:
+
+- agent memory and planning become more important than the click primitive
+- the runtime needs durable state observations, step results, and workflow-level validation
+
+#### Stage 5: Recovery And Self-Healing
+
+Goal:
+
+- recover when the expected path fails instead of blindly repeating the same click
+
+Failure modes to handle:
+
+- button does not appear
+- page is stuck or still loading
+- OCR fails
+- popup blocks the target
+- click has no visible effect
+- validation fails after action execution
+
+Expected recovery behavior:
+
+- observe again
+- explain the failure category
+- re-plan with bounded alternatives
+- execute only if the new plan passes safety gates
+- record the recovery trace for later regression
+
 ## Active Vs Legacy
 
 ### Active mainline
