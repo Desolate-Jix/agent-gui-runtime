@@ -1,0 +1,261 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1700" height="1900" viewBox="0 0 1700 1900" role="img" aria-labelledby="title desc">
+  <title id="title">GUI Agent Runtime Bilingual Layer Map</title>
+  <desc id="desc">A high contrast bilingual architecture map of the GUI agent runtime layers, from input and perception to page structure, screen reading, ranking, grounding, safety gate, execution, validation, evidence, learning write-back, stability, and future agent stages.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#93c5fd"/>
+    </marker>
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#020617" flood-opacity="0.45"/>
+    </filter>
+    <style>
+      .bg { fill: #020617; }
+      .title { fill: #f8fafc; font: 800 38px "Segoe UI", "Microsoft YaHei", Arial, sans-serif; }
+      .subtitle { fill: #cbd5e1; font: 400 19px "Segoe UI", "Microsoft YaHei", Arial, sans-serif; }
+      .header { fill: #facc15; font: 800 19px "Segoe UI", "Microsoft YaHei", Arial, sans-serif; }
+      .card { fill: #1e3a8a; stroke: #93c5fd; stroke-width: 2.5; filter: url(#shadow); }
+      .gate { fill: #7f1d1d; stroke: #fca5a5; stroke-width: 2.5; filter: url(#shadow); }
+      .evidence { fill: #312e81; stroke: #c4b5fd; stroke-width: 2.5; filter: url(#shadow); }
+      .learn { fill: #14532d; stroke: #86efac; stroke-width: 2.5; filter: url(#shadow); }
+      .future { fill: #581c87; stroke: #d8b4fe; stroke-width: 2.5; filter: url(#shadow); }
+      .panel { fill: #0f172a; stroke: #475569; stroke-width: 1.5; }
+      .panelGreen { fill: #052e16; stroke: #22c55e; stroke-width: 1.5; }
+      .panelPurple { fill: #2e1065; stroke: #a855f7; stroke-width: 1.5; }
+      .cn { fill: #f8fafc; font: 800 22px "Segoe UI", "Microsoft YaHei", Arial, sans-serif; }
+      .en { fill: #dbeafe; font: 600 15px "Segoe UI", Arial, sans-serif; }
+      .body { fill: #e5e7eb; font: 400 15px "Segoe UI", "Microsoft YaHei", Arial, sans-serif; }
+      .small { fill: #cbd5e1; font: 400 13px "Segoe UI", "Microsoft YaHei", Arial, sans-serif; }
+      .line { stroke: #93c5fd; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+      .divider { stroke: #334155; stroke-width: 1; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1700" height="1900"/>
+  <text class="title" x="850" y="58" text-anchor="middle">GUI Agent Runtime Layer Map / GUI Agent Runtime 分层脑图</text>
+  <text class="subtitle" x="850" y="92" text-anchor="middle">From screenshot guessing to explainable, rejectable, verifiable, learnable GUI actions / 从看图猜点击到可解释、可拒绝、可验证、可学习的 GUI 行动链</text>
+
+  <text class="header" x="120" y="145">Layer 层</text>
+  <text class="header" x="465" y="145">What It Solves 解决什么</text>
+  <text class="header" x="855" y="145">Why It Exists 为什么需要</text>
+  <text class="header" x="1245" y="145">Output To Next Layer 交给下一层</text>
+  <line class="divider" x1="95" y1="162" x2="1605" y2="162"/>
+
+  <!-- Row helper: x columns 90/425/815/1205, row height 150 -->
+
+  <!-- 1 Input -->
+  <g transform="translate(0,180)">
+    <rect class="card" x="90" y="0" rx="18" width="285" height="105"/>
+    <text class="cn" x="232" y="36" text-anchor="middle">输入层</text>
+    <text class="en" x="232" y="66" text-anchor="middle">Input Layer</text>
+    <text class="small" x="232" y="91" text-anchor="middle">Goal + live screenshot</text>
+    <rect class="panel" x="425" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="445" y="32">接收用户目标和当前窗口。</text>
+    <text class="small" x="445" y="62">Receives the user goal and bound window image.</text>
+    <rect class="panel" x="815" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="835" y="32">没有输入层，后续无法知道“要做什么”。</text>
+    <text class="small" x="835" y="62">Without this, there is no task context.</text>
+    <rect class="panel" x="1205" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="1225" y="32">输出 goal、截图、窗口上下文。</text>
+    <text class="small" x="1225" y="62">Outputs goal, screenshot, window context.</text>
+  </g>
+
+  <!-- 2 Perception -->
+  <g transform="translate(0,330)">
+    <rect class="card" x="90" y="0" rx="18" width="285" height="105"/>
+    <text class="cn" x="232" y="36" text-anchor="middle">感知层</text>
+    <text class="en" x="232" y="66" text-anchor="middle">Perception</text>
+    <text class="small" x="232" y="91" text-anchor="middle">vision + OCR + UIA</text>
+    <rect class="panel" x="425" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="445" y="29">从截图提取区域、文字和系统控件。</text>
+    <text class="small" x="445" y="57">Extracts regions, text, and UI controls.</text>
+    <text class="small" x="445" y="82">vision_regions_v1 / OCR / Accessibility</text>
+    <rect class="panel" x="815" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="835" y="29">只看像素不够，必须先感知页面内容。</text>
+    <text class="small" x="835" y="57">Pixels alone are not usable action objects.</text>
+    <rect class="panel" x="1205" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="1225" y="29">输出视觉区域、OCR 文本框、UIA 控件。</text>
+    <text class="small" x="1225" y="57">Outputs regions, text boxes, controls.</text>
+  </g>
+  <path class="line" d="M232 285 V322"/>
+
+  <!-- 3 Page structure -->
+  <g transform="translate(0,480)">
+    <rect class="card" x="90" y="0" rx="18" width="285" height="105"/>
+    <text class="cn" x="232" y="36" text-anchor="middle">页面结构层</text>
+    <text class="en" x="232" y="66" text-anchor="middle">page_structure_v1</text>
+    <text class="small" x="232" y="91" text-anchor="middle">Build PageElement</text>
+    <rect class="panel" x="425" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="445" y="29">把视觉和 OCR 融合成可交互对象。</text>
+    <text class="small" x="445" y="57">Turns perception into UI elements.</text>
+    <text class="small" x="445" y="82">role / policy / bbox / memory_key</text>
+    <rect class="panel" x="815" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="835" y="29">OCR 只知道文字，不知道它属于哪个控件。</text>
+    <text class="small" x="835" y="57">OCR text alone is not page structure.</text>
+    <rect class="panel" x="1205" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="1225" y="29">输出候选 PageElement 和交互策略。</text>
+    <text class="small" x="1225" y="57">Outputs elements and interaction policy.</text>
+  </g>
+  <path class="line" d="M232 435 V472"/>
+
+  <!-- 4 Screen reading -->
+  <g transform="translate(0,630)">
+    <rect class="card" x="90" y="0" rx="18" width="285" height="105"/>
+    <text class="cn" x="232" y="36" text-anchor="middle">屏幕读取层</text>
+    <text class="en" x="232" y="66" text-anchor="middle">screen_reading_v1</text>
+    <text class="small" x="232" y="91" text-anchor="middle">READ-facing UI evidence</text>
+    <rect class="panel" x="425" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="445" y="29">补充 UIA、icon、未来学习证据。</text>
+    <text class="small" x="445" y="57">Adds accessibility and provider evidence.</text>
+    <text class="small" x="445" y="82">name / Button / Invoke / learning_hooks</text>
+    <rect class="panel" x="815" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="835" y="29">视觉会波动，需要第二套证据来源。</text>
+    <text class="small" x="835" y="57">Visual parsing needs independent evidence.</text>
+    <rect class="panel" x="1205" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="1225" y="29">输出 screen_reading_score 的依据。</text>
+    <text class="small" x="1225" y="57">Feeds READ evidence to ranking.</text>
+  </g>
+  <path class="line" d="M232 585 V622"/>
+
+  <!-- 5 Candidate ranker -->
+  <g transform="translate(0,780)">
+    <rect class="card" x="90" y="0" rx="18" width="285" height="105"/>
+    <text class="cn" x="232" y="36" text-anchor="middle">目标选择层</text>
+    <text class="en" x="232" y="66" text-anchor="middle">candidate_ranker</text>
+    <text class="small" x="232" y="91" text-anchor="middle">Choose target by goal</text>
+    <rect class="panel" x="425" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="445" y="29">按用户目标给候选排序。</text>
+    <text class="small" x="445" y="57">Ranks candidates against the goal.</text>
+    <text class="small" x="445" y="82">text / role / policy / screen_reading</text>
+    <rect class="panel" x="815" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="835" y="29">页面对象很多，必须知道“点哪个”。</text>
+    <text class="small" x="835" y="57">Many controls exist; one matches intent best.</text>
+    <rect class="panel" x="1205" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="1225" y="29">输出 top candidates 和排序理由。</text>
+    <text class="small" x="1225" y="57">Outputs ranked candidates and reasons.</text>
+  </g>
+  <path class="line" d="M232 735 V772"/>
+
+  <!-- 6 Local grounding -->
+  <g transform="translate(0,930)">
+    <rect class="card" x="90" y="0" rx="18" width="285" height="105"/>
+    <text class="cn" x="232" y="36" text-anchor="middle">局部确认层</text>
+    <text class="en" x="232" y="66" text-anchor="middle">local_grounding</text>
+    <text class="small" x="232" y="91" text-anchor="middle">Refine click point</text>
+    <rect class="panel" x="425" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="445" y="29">裁剪候选区域，局部 OCR 重新定位。</text>
+    <text class="small" x="445" y="57">Crops candidate and re-grounds locally.</text>
+    <text class="small" x="445" y="82">crop -> local OCR -> refined_click_point</text>
+    <rect class="panel" x="815" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="835" y="29">全局理解正确，不代表坐标准确。</text>
+    <text class="small" x="835" y="57">Correct target does not guarantee safe pixels.</text>
+    <rect class="panel" x="1205" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="1225" y="29">输出精确点击点和本地 OCR 证据。</text>
+    <text class="small" x="1225" y="57">Outputs grounded point and local evidence.</text>
+  </g>
+  <path class="line" d="M232 885 V922"/>
+
+  <!-- 7 Pre-click gate -->
+  <g transform="translate(0,1080)">
+    <rect class="gate" x="90" y="0" rx="18" width="285" height="105"/>
+    <text class="cn" x="232" y="36" text-anchor="middle">点击前安全层</text>
+    <text class="en" x="232" y="66" text-anchor="middle">pre-click gate</text>
+    <text class="small" x="232" y="91" text-anchor="middle">Allow or reject</text>
+    <rect class="panel" x="425" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="445" y="29">点击前最后判断是否安全。</text>
+    <text class="small" x="445" y="57">Final safety decision before real input.</text>
+    <text class="small" x="445" y="82">goal / bbox / policy / margin checks</text>
+    <rect class="panel" x="815" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="835" y="29">不能等点击后才发现点错。</text>
+    <text class="small" x="835" y="57">Some wrong clicks are not safely reversible.</text>
+    <rect class="panel" x="1205" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="1225" y="29">只输出允许点击的 selected point。</text>
+    <text class="small" x="1225" y="57">Outputs the only executable point.</text>
+  </g>
+  <path class="line" d="M232 1035 V1072"/>
+
+  <!-- 8 Execute -->
+  <g transform="translate(0,1230)">
+    <rect class="card" x="90" y="0" rx="18" width="285" height="105"/>
+    <text class="cn" x="232" y="36" text-anchor="middle">执行层</text>
+    <text class="en" x="232" y="66" text-anchor="middle">execute_recognition_plan</text>
+    <text class="small" x="232" y="91" text-anchor="middle">SendInput</text>
+    <rect class="panel" x="425" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="445" y="29">只点击安全门允许的点。</text>
+    <text class="small" x="445" y="57">Clicks only the gated selected point.</text>
+    <text class="small" x="445" y="82">window point -> screen point</text>
+    <rect class="panel" x="815" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="835" y="29">执行层不重新猜目标，只负责动作。</text>
+    <text class="small" x="835" y="57">Execution dispatch is not target selection.</text>
+    <rect class="panel" x="1205" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="1225" y="29">输出 clicked_point 和输入后证据。</text>
+    <text class="small" x="1225" y="57">Outputs click result and action metadata.</text>
+  </g>
+  <path class="line" d="M232 1185 V1222"/>
+
+  <!-- 9 Validator -->
+  <g transform="translate(0,1380)">
+    <rect class="card" x="90" y="0" rx="18" width="285" height="105"/>
+    <text class="cn" x="232" y="36" text-anchor="middle">点击后验证层</text>
+    <text class="en" x="232" y="66" text-anchor="middle">validator</text>
+    <text class="small" x="232" y="91" text-anchor="middle">Did it really work?</text>
+    <rect class="panel" x="425" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="445" y="29">比较 before/after，确认任务结果。</text>
+    <text class="small" x="445" y="57">Checks outcome after the click.</text>
+    <text class="small" x="445" y="82">generic diff / semantic OCR / focus</text>
+    <rect class="panel" x="815" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="835" y="29">“点了”不等于“完成了”。</text>
+    <text class="small" x="835" y="57">A sent click is not proof of success.</text>
+    <rect class="panel" x="1205" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="1225" y="29">输出成功/失败和验证理由。</text>
+    <text class="small" x="1225" y="57">Outputs verified result and reasons.</text>
+  </g>
+  <path class="line" d="M232 1335 V1372"/>
+
+  <!-- 10 Evidence and learning -->
+  <g transform="translate(0,1530)">
+    <rect class="evidence" x="90" y="0" rx="18" width="285" height="105"/>
+    <text class="cn" x="232" y="36" text-anchor="middle">证据层</text>
+    <text class="en" x="232" y="66" text-anchor="middle">Evidence</text>
+    <text class="small" x="232" y="91" text-anchor="middle">traces + baseline</text>
+    <rect class="panel" x="425" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="445" y="29">保存可回放、可检查的证据。</text>
+    <text class="small" x="445" y="57">Keeps inspectable run artifacts.</text>
+    <text class="small" x="445" y="82">recognition trace / action trace / screenshots</text>
+    <rect class="learn" x="815" y="0" rx="18" width="330" height="105"/>
+    <text class="cn" x="980" y="36" text-anchor="middle">学习记忆层（下一阶段）</text>
+    <text class="en" x="980" y="66" text-anchor="middle">Learning Write-back</text>
+    <text class="small" x="980" y="91" text-anchor="middle">ReplayCase / TransitionRecord / TargetAsset</text>
+    <rect class="panelGreen" x="1205" y="0" rx="14" width="330" height="105"/>
+    <text class="body" x="1225" y="29">成功经验可复用，但不绕过安全。</text>
+    <text class="small" x="1225" y="57">Reuse evidence, still require fresh checks.</text>
+    <text class="small" x="1225" y="82">fresh observation + gate + validator</text>
+  </g>
+  <path class="line" d="M232 1485 V1522"/>
+  <path class="line" d="M755 1582 H807"/>
+
+  <!-- Future stages, separated from learning row -->
+  <text class="header" x="850" y="1705" text-anchor="middle">Roadmap 路线图</text>
+  <g transform="translate(0,1730)">
+    <rect class="learn" x="80" y="0" rx="18" width="285" height="78"/>
+    <text class="cn" x="222" y="31" text-anchor="middle">单页稳定循环</text>
+    <text class="en" x="222" y="58" text-anchor="middle">Single-page stable loop</text>
+    <rect class="learn" x="395" y="0" rx="18" width="285" height="78"/>
+    <text class="cn" x="537" y="31" text-anchor="middle">跨会期稳定性</text>
+    <text class="en" x="537" y="58" text-anchor="middle">Cross-session stability</text>
+    <rect class="future" x="710" y="0" rx="18" width="285" height="78"/>
+    <text class="cn" x="852" y="31" text-anchor="middle">语义泛化</text>
+    <text class="en" x="852" y="58" text-anchor="middle">Semantic generalization</text>
+    <rect class="future" x="1025" y="0" rx="18" width="285" height="78"/>
+    <text class="cn" x="1167" y="31" text-anchor="middle">多步骤工作流</text>
+    <text class="en" x="1167" y="58" text-anchor="middle">Multi-step workflows</text>
+    <rect class="future" x="1340" y="0" rx="18" width="285" height="78"/>
+    <text class="cn" x="1482" y="31" text-anchor="middle">恢复与自愈</text>
+    <text class="en" x="1482" y="58" text-anchor="middle">Recovery &amp; self-healing</text>
+  </g>
+  <path class="line" d="M365 1769 H387"/>
+  <path class="line" d="M680 1769 H702"/>
+  <path class="line" d="M995 1769 H1017"/>
+  <path class="line" d="M1310 1769 H1332"/>
+
+  <text class="header" x="850" y="1860" text-anchor="middle">Core flow 核心主线：Observe 观察 -> Model 建模 -> Select 选择 -> Ground 定位 -> Gate 放行 -> Act 点击 -> Validate 验证 -> Learn 学习</text>
+</svg>

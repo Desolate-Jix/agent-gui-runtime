@@ -1123,8 +1123,12 @@ What the MouseTester baseline proves:
 Next work inside this stage:
 
 - turn the one golden success into a stable loop over repeated runs
+- add successful-run learning write-back for the recognition execution mainline
+- after recognition, click, and validation all succeed, persist a reusable record with goal, site/app identity, state fingerprint or state hint, candidate id, `memory_key`, bbox/refined bbox, selected/clicked point, OCR/UIA evidence, before/after screenshots, validation result, recognition trace path, and action trace path
+- bridge successful `execute_recognition_plan` runs into the existing memory vocabulary: `ReplayCase`, `TransitionRecord`, future `TargetAsset`, and `learned_ui_memory`
+- use learned records only as additional evidence on later runs; fresh observation, pre-click gate, and post-click validation remain mandatory
 - keep the website and task fixed while varying the session conditions
-- measure top-1 target stability, pre-click allow/reject stability, selected point drift, action execution, and semantic validation
+- measure top-1 target stability, pre-click allow/reject stability, selected point drift, action execution, semantic validation, and learning-record reuse stability
 
 #### Stage 2: Cross-Session Stability
 
@@ -1147,6 +1151,7 @@ Expected evidence:
 - repeated MouseTester traces across sessions
 - pass/fail reports that separate OCR failures, vision-region failures, page-structure failures, screen-reading failures, candidate-ranker failures, pre-click failures, action failures, and validator failures
 - baselines for acceptable bbox/click-point drift
+- evidence that learned records survive across sessions and improve reuse without bypassing safety gates
 
 #### Stage 3: Semantic Generalization
 
