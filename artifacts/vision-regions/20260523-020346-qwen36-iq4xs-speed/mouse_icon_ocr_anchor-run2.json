@@ -1,0 +1,53 @@
+{
+  "metrics": {
+    "case": "mouse_icon_ocr_anchor",
+    "run_index": 2,
+    "elapsed_sec_client": 6.018,
+    "finish_reason": "stop",
+    "prompt_tokens": 1328,
+    "completion_tokens": 138,
+    "total_tokens": 1466,
+    "prompt_tokens_per_second": 58.04672761573067,
+    "generation_tokens_per_second": 23.401114605263047,
+    "prompt_ms": 68.91,
+    "generation_ms": 5897.155,
+    "content_excerpt": "```json\n{\n  \"bbox\": {\n    \"x1\": 515,\n    \"y1\": 195,\n    \"x2\": 838,\n    \"y2\": 575\n  },\n  \"used_anchor_ids\": [\n    \"ocr_anchor_1\",\n    \"ocr_anchor_2\",\n    \"ocr_anchor_3\",\n    \"ocr_anchor_4\",\n    \"ocr_anchor_5\",\n    \"ocr_anchor_6\",\n    \"ocr_anchor_7\"\n  ],\n  \"confidence\": 0.98\n}\n```",
+    "reasoning_present": false
+  },
+  "raw": {
+    "choices": [
+      {
+        "finish_reason": "stop",
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "```json\n{\n  \"bbox\": {\n    \"x1\": 515,\n    \"y1\": 195,\n    \"x2\": 838,\n    \"y2\": 575\n  },\n  \"used_anchor_ids\": [\n    \"ocr_anchor_1\",\n    \"ocr_anchor_2\",\n    \"ocr_anchor_3\",\n    \"ocr_anchor_4\",\n    \"ocr_anchor_5\",\n    \"ocr_anchor_6\",\n    \"ocr_anchor_7\"\n  ],\n  \"confidence\": 0.98\n}\n```"
+        }
+      }
+    ],
+    "created": 1779458678,
+    "model": "Qwen-Qwen3.6-35B-A3B-IQ4_XS.gguf",
+    "system_fingerprint": "b8892-0d0764dfd",
+    "object": "chat.completion",
+    "usage": {
+      "completion_tokens": 138,
+      "prompt_tokens": 1328,
+      "total_tokens": 1466,
+      "prompt_tokens_details": {
+        "cached_tokens": 1324
+      }
+    },
+    "id": "chatcmpl-sl4EklzHV158puM71ggi0YCyP6D1YdBK",
+    "timings": {
+      "cache_n": 1324,
+      "prompt_n": 4,
+      "prompt_ms": 68.91,
+      "prompt_per_token_ms": 17.2275,
+      "prompt_per_second": 58.04672761573067,
+      "predicted_n": 138,
+      "predicted_ms": 5897.155,
+      "predicted_per_token_ms": 42.73300724637681,
+      "predicted_per_second": 23.401114605263047
+    }
+  }
+}

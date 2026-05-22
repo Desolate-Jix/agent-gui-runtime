@@ -2,6 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $pidPaths = @(
+    (Join-Path $root "logs\qwen3_6-iq4_xs-server.pid"),
     (Join-Path $root "logs\internvl3_5-server.pid"),
     (Join-Path $root "logs\qwen3-vl-server.pid")
 )

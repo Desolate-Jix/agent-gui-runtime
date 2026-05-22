@@ -126,7 +126,7 @@ For the current phase, the project is intentionally:
 
 ## Current Progress Snapshot
 
-Last updated: 2026-05-19.
+Last updated: 2026-05-23.
 
 The project has moved from raw full-page visual coordinates toward an inspectable staged recognition MVP plus a gated execution bridge:
 
@@ -143,6 +143,7 @@ Architecture map:
 Current verified status:
 
 - Local InternVL3.5/Qwen-style vision endpoints are reachable through the OpenAI-compatible local provider.
+- Latest local-model experiment: `Qwen-Qwen3.6-35B-A3B-IQ4_XS.gguf` loads through llama.cpp with `mmproj-Qwen3.6-35B-A3B-Q6_K.gguf`, and with reasoning disabled it returns stable JSON for OCR-assisted GUI grounding. OCR anchors improved the browser Back icon center error from about `51.58px` to `3.81px`; the model remains better for large icons than tiny icon boundaries.
 - `POST /vision/recognition_plan` runs the full no-click recognition plan.
 - `POST /vision/recognition_plan` now builds `ocr_anchors_v1` before the vision call and passes all OCR text boxes to the local provider as spatial anchors for icon/button/card grounding unless `metadata.ocr_anchors.max_anchors` explicitly limits them.
 - OCR-anchor prompting is conservative: anchors are scaled into the provider inference coordinate space and compacted in the prompt as `id/t/b/c/s/g` fields, and if the anchored provider call fails the route retries once without anchors. The local multimodal server scripts use `-c 8192 --parallel 1` so full-page OCR anchors fit in one request.
@@ -177,6 +178,16 @@ Latest live UIA evidence:
 - Result: UIA smoke evaluation passed `1/1` cases; the scan returned `249` controls and `26` buttons, including browser Back/Refresh, address edit `https://www.mousetester.cn`, `RootWebArea`, and page controls such as `点击此处测试`.
 - Trace: `logs/traces/evaluation/20260513-162852-157632__uia-smoke__mousetester.json`
 - Report: `logs/evaluations/uia-smoke-eval-20260513-162852.json`
+
+Latest local vision model evidence:
+
+- Date: 2026-05-22 / 2026-05-23.
+- Model: `Qwen-Qwen3.6-35B-A3B-IQ4_XS.gguf` with `mmproj-Qwen3.6-35B-A3B-Q6_K.gguf`.
+- Runtime: llama.cpp b8892 CUDA 13, `-ngl 26`, `-c 4096`, `--image-min-tokens 1024`, `--reasoning off`, `--reasoning-budget 0`.
+- Accuracy result: large MouseTester mouse illustration was usable but still missed the left-side buttons; OCR anchors did not materially change the large-icon box.
+- Accuracy result: tiny browser Back icon was poor with pure visual grounding but became well-centered with OCR-anchor context, though the returned box was still too tight.
+- Speed result: text-only JSON averaged `2.10s` and about `29.0 generated tokens/s`; OCR-assisted image grounding averaged about `23-24 generated tokens/s`, with first image calls taking about `17-20s` and warm cached calls taking about `2.5-6.0s`.
+- Trace artifacts: `artifacts/vision-regions/20260522-181534-qwen36-iq4xs-ocr-reasonoff/` and `artifacts/vision-regions/20260523-020346-qwen36-iq4xs-speed/`.
 
 Previous no-click recognition evidence:
 
@@ -436,37 +447,79 @@ The default local configuration in `configs/vision.json` targets:
 ```json
 {
   "timeout_seconds": 180,
-  "model_name": "InternVL3_5-8B-Q4_K_M.gguf",
+  "model_name": "Qwen-Qwen3.6-35B-A3B-IQ4_XS.gguf",
   "endpoint": "http://127.0.0.1:1234/v1/chat/completions"
 }
 ```
 
-This matches the common OpenAI-compatible local server shape. The active default is now `InternVL3_5-8B-Q4_K_M.gguf` through the existing llama.cpp server path. The previous Qwen3.6 27B files were removed after proving too slow for this local interactive GUI-recognition loop; the older Qwen3-VL 8B files remain as rollback assets.
+This matches the common OpenAI-compatible local server shape. The checked local model is now Qwen3.6 35B A3B `IQ4_XS`, because it gave the best small-icon result when OCR anchors were included. The previous 7B/8B/14B comparison assets and older Qwen3-VL rollback files were removed after the qwen3.6 result became the working baseline.
 
 The checked local deployment uses:
 
-- `models/internvl3_5-8b-gguf/InternVL3_5-8B-Q4_K_M.gguf`
-- `models/internvl3_5-8b-gguf/mmproj-model-f16.gguf`
-- rollback model: `models/qwen3-vl-8b-instruct-gguf/Qwen3VL-8B-Instruct-Q4_K_M.gguf`
-- rollback mmproj: `models/qwen3-vl-8b-instruct-gguf/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf`
-- `tools/llama.cpp-b8892-cuda13/llama-server.exe`
+- model: `models/qwen3_6-35b-a3b-iq4_xs-gguf/Qwen-Qwen3.6-35B-A3B-IQ4_XS.gguf`
+- mmproj: `models/qwen3_6-35b-a3b-iq4_xs-gguf/mmproj-Qwen3.6-35B-A3B-Q6_K.gguf`
+- server: `tools/llama.cpp-b8892-cuda13/llama-server.exe`
 
 Start and stop helpers:
 
 ```powershell
-.\scripts\serve_internvl3_5_server.ps1
+.\scripts\serve_qwen3_6_iq4_xs_server.ps1
 .\scripts\stop_local_vision_server.ps1
 ```
 
-`serve_internvl3_5_server.ps1` runs in the foreground when launched directly. Keep that terminal open while using `/vision/analyze`, or launch it in a hidden/background process and stop it with `stop_local_vision_server.ps1`.
+`serve_qwen3_6_iq4_xs_server.ps1` runs in the foreground when launched directly. Keep that terminal open while using `/vision/analyze`, or launch it in a hidden/background process and stop it with `stop_local_vision_server.ps1`.
 The local provider also requests JSON-object output and caps model output at 2048 tokens for the same reason.
-To test another OpenAI-compatible vision model or roll back to the old 8B model, pass explicit paths and keep `configs/vision.json` pointed at the same endpoint:
+To test another OpenAI-compatible vision model, pass explicit paths and keep `configs/vision.json` pointed at the same endpoint:
 
 ```powershell
-.\scripts\serve_qwen3_vl_server.ps1 -ModelPath .\models\qwen3-vl-8b-instruct-gguf\Qwen3VL-8B-Instruct-Q4_K_M.gguf -MmprojPath .\models\qwen3-vl-8b-instruct-gguf\mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf -ContextSize 8192
+.\scripts\serve_qwen3_6_iq4_xs_server.ps1 -ModelPath .\models\some-model.gguf -MmprojPath .\models\some-mmproj.gguf
 ```
 
-Latest local InternVL3.5 smoke status: the server loads and `/v1/models` reports `InternVL3_5-8B-Q4_K_M.gguf`. A synthetic Start-button smoke returned one boxed region in about 6 seconds, but the bbox was vertically shifted. A MouseTester mouse-ROI smoke returned the mouse illustration in about 22 seconds, but the bbox captured the right half of the mouse rather than the full icon; adding OCR anchors did not improve that ROI box. Treat InternVL3.5 8B as runnable but not yet coordinate-trusted for execution.
+### Local model notes
+
+Latest Qwen3.6 IQ4_XS experiment:
+
+- Source repo: `batiai/Qwen3.6-35B-A3B-GGUF`.
+- Files: `Qwen-Qwen3.6-35B-A3B-IQ4_XS.gguf` (`18.7GB`) plus `mmproj-Qwen3.6-35B-A3B-Q6_K.gguf` (`607MB`).
+- Startup parameters used for the successful run: `-ngl 26 -c 4096 --parallel 1 --image-min-tokens 1024 --jinja --reasoning off --reasoning-budget 0`.
+- Reasoning must be disabled for this model in the local server; otherwise it can spend the whole response budget in `reasoning_content` and return an empty `content` payload.
+- The model often returns Qwen-style `0-1000` coordinates even when asked for pixel coordinates, so small-image responses should be normalized back to real pixels before evaluation.
+
+Qwen3.6 IQ4_XS accuracy evidence:
+
+| Target | Prompt mode | Returned pixel bbox | Reference bbox | IoU | Center error |
+| --- | --- | --- | --- | --- | --- |
+| Browser Back icon | pure vision | `{52,36,102,54}` | `{12,44,43,75}` | `0.0` | `51.58px` |
+| Browser Back icon | OCR anchors | `{13,51,35,65}` | `{12,44,43,75}` | `0.3205` | `3.81px` |
+| Mouse illustration | pure vision | `{258,142,418,420}` | `{188,133,422,427}` | `0.6465` | `33.02px` |
+| Mouse illustration | OCR anchors | `{258,142,418,423}` | `{188,133,422,427}` | `0.6535` | `33.09px` |
+
+OCR-assisted overlay legend: magenta is the model bbox, green is the manual reference bbox, and blue is the OCR text-anchor bbox.
+
+![Qwen3.6 IQ4_XS OCR-assisted browser Back icon overlay](artifacts/vision-regions/20260522-181534-qwen36-iq4xs-ocr-reasonoff/browser-back-annotated.png)
+
+![Qwen3.6 IQ4_XS OCR-assisted MouseTester mouse icon overlay](artifacts/vision-regions/20260522-181534-qwen36-iq4xs-ocr-reasonoff/mouse-icon-annotated.png)
+
+Qwen3.6 IQ4_XS speed evidence:
+
+| Case | Runs | Average client time | Cold/warm client time | Average generated tokens/s | Notes |
+| --- | ---: | ---: | --- | ---: | --- |
+| Text-only compact JSON | 3 | `2.10s` | `1.90-2.26s` | `29.0 tok/s` | No image encoder cost |
+| Browser Back icon with OCR anchors | 2 | `9.69s` | `16.85s / 2.52s` | `24.45 tok/s` | Warm call benefits from prompt/cache state |
+| Mouse illustration with OCR anchors | 2 | `12.94s` | `19.87s / 6.02s` | `23.23 tok/s` | Larger crop and longer output |
+
+Evidence artifacts:
+
+- OCR-assisted result overlays: `artifacts/vision-regions/20260522-181534-qwen36-iq4xs-ocr-reasonoff/`
+- Speed benchmark JSON: `artifacts/vision-regions/20260523-020346-qwen36-iq4xs-speed/speed-summary.json`
+
+Interpretation:
+
+- Qwen3.6 IQ4_XS is currently the strongest local result for small GUI icon grounding when OCR anchors are included.
+- Large icon grounding is already usable, but it still needs contour/candidate post-processing to recover tight shape boundaries such as the mouse side buttons.
+- Tiny icon execution should not trust the raw model bbox alone; use OCR anchors to locate the icon neighborhood, then use local icon-candidate geometry or padding to produce the final click-safe target.
+
+Removed local model attempts: InternVL3.5 8B, Qwen3-VL 8B, Qwen2.5-VL 7B, GUI-Actor 7B, UI-TARS 7B, Gemma4 E2B, and InternVL3 14B local directories were removed from this workspace after they were either weaker, incomplete, or not part of the current qwen3.6 OCR-anchor baseline.
 
 If no local vision server is running, `/vision/analyze` will fail with a connection error when this endpoint is configured. Set the endpoint back to `null` to use stub mode.
 

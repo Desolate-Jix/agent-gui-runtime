@@ -1,0 +1,53 @@
+{
+  "metrics": {
+    "case": "mouse_icon_ocr_anchor",
+    "run_index": 1,
+    "elapsed_sec_client": 19.865,
+    "finish_reason": "stop",
+    "prompt_tokens": 1328,
+    "completion_tokens": 138,
+    "total_tokens": 1466,
+    "prompt_tokens_per_second": 96.34014105560502,
+    "generation_tokens_per_second": 23.0626304166682,
+    "prompt_ms": 13784.493,
+    "generation_ms": 5983.706,
+    "content_excerpt": "```json\n{\n  \"bbox\": {\n    \"x1\": 515,\n    \"y1\": 195,\n    \"x2\": 838,\n    \"y2\": 575\n  },\n  \"used_anchor_ids\": [\n    \"ocr_anchor_1\",\n    \"ocr_anchor_2\",\n    \"ocr_anchor_3\",\n    \"ocr_anchor_4\",\n    \"ocr_anchor_5\",\n    \"ocr_anchor_6\",\n    \"ocr_anchor_7\"\n  ],\n  \"confidence\": 0.98\n}\n```",
+    "reasoning_present": false
+  },
+  "raw": {
+    "choices": [
+      {
+        "finish_reason": "stop",
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "```json\n{\n  \"bbox\": {\n    \"x1\": 515,\n    \"y1\": 195,\n    \"x2\": 838,\n    \"y2\": 575\n  },\n  \"used_anchor_ids\": [\n    \"ocr_anchor_1\",\n    \"ocr_anchor_2\",\n    \"ocr_anchor_3\",\n    \"ocr_anchor_4\",\n    \"ocr_anchor_5\",\n    \"ocr_anchor_6\",\n    \"ocr_anchor_7\"\n  ],\n  \"confidence\": 0.98\n}\n```"
+        }
+      }
+    ],
+    "created": 1779458672,
+    "model": "Qwen-Qwen3.6-35B-A3B-IQ4_XS.gguf",
+    "system_fingerprint": "b8892-0d0764dfd",
+    "object": "chat.completion",
+    "usage": {
+      "completion_tokens": 138,
+      "prompt_tokens": 1328,
+      "total_tokens": 1466,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "id": "chatcmpl-z3Sj2SWyZGhVGUqO5abkZqfUsuVmy3SA",
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 1328,
+      "prompt_ms": 13784.493,
+      "prompt_per_token_ms": 10.379889307228916,
+      "prompt_per_second": 96.34014105560502,
+      "predicted_n": 138,
+      "predicted_ms": 5983.706,
+      "predicted_per_token_ms": 43.3601884057971,
+      "predicted_per_second": 23.0626304166682
+    }
+  }
+}
