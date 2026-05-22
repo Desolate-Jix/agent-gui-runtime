@@ -51,14 +51,17 @@ def bbox_from_any(raw: Any, *, width: int, height: int) -> Optional[BBox]:
         return None
     if {"x", "y"} <= set(raw.keys()) and ("w" in raw or "width" in raw) and ("h" in raw or "height" in raw):
         try:
-            bbox = BBox(
-                x=int(raw.get("x", 0)),
-                y=int(raw.get("y", 0)),
-                w=int(raw.get("w", raw.get("width", 0))),
-                h=int(raw.get("h", raw.get("height", 0))),
-            )
+            x = int(raw.get("x", 0))
+            y = int(raw.get("y", 0))
+            w = int(raw.get("w", raw.get("width", 0)))
+            h = int(raw.get("h", raw.get("height", 0)))
         except Exception:
             return None
+        if _looks_like_unit_1000_coordinates(x, y, x + w, y + h, width=width, height=height):
+            x1, y1, x2, y2 = _scale_unit_1000_diagonal(x, y, x + w, y + h, width=width, height=height)
+            bbox = BBox(x=x1, y=y1, w=max(1, x2 - x1), h=max(1, y2 - y1))
+        else:
+            bbox = BBox(x=x, y=y, w=w, h=h)
         return clamp_bbox(bbox, width=width, height=height)
 
     if {"x1", "y1", "x2", "y2"} <= set(raw.keys()):
@@ -69,6 +72,8 @@ def bbox_from_any(raw: Any, *, width: int, height: int) -> Optional[BBox]:
             y2 = int(raw.get("y2", 0))
         except Exception:
             return None
+        if _looks_like_unit_1000_coordinates(x1, y1, x2, y2, width=width, height=height):
+            x1, y1, x2, y2 = _scale_unit_1000_diagonal(x1, y1, x2, y2, width=width, height=height)
         x = min(x1, x2)
         y = min(y1, y2)
         w = abs(x2 - x1)
@@ -76,6 +81,28 @@ def bbox_from_any(raw: Any, *, width: int, height: int) -> Optional[BBox]:
         return clamp_bbox(BBox(x=x, y=y, w=w, h=h), width=width, height=height)
 
     return None
+
+
+def _looks_like_unit_1000_coordinates(x1: int, y1: int, x2: int, y2: int, *, width: int, height: int) -> bool:
+    if width <= 0 or height <= 0:
+        return False
+    values = [x1, y1, x2, y2]
+    if any(value < 0 for value in values):
+        return False
+    if max(values) > 1000:
+        return False
+    if x2 <= width and y2 <= height:
+        return False
+    return width < 1000 or height < 1000
+
+
+def _scale_unit_1000_diagonal(x1: int, y1: int, x2: int, y2: int, *, width: int, height: int) -> tuple[int, int, int, int]:
+    return (
+        round(x1 / 1000 * width),
+        round(y1 / 1000 * height),
+        round(x2 / 1000 * width),
+        round(y2 / 1000 * height),
+    )
 
 
 def diagonal_from_bbox(bbox: BBox) -> Diagonal:

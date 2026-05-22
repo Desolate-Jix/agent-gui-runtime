@@ -1,0 +1,45 @@
+{
+  "contract_version": "ocr_anchors_v1",
+  "coordinate_space": "original_image",
+  "image_size": {
+    "width": 360,
+    "height": 130
+  },
+  "source_engine": "rapidocr_onnxruntime",
+  "total_detected_count": 2,
+  "anchor_count": 2,
+  "anchors": [
+    {
+      "anchor_id": "ocr_anchor_2",
+      "text": "https://www.mousetester.cn",
+      "bbox": {
+        "x": 115,
+        "y": 54,
+        "w": 175,
+        "h": 15
+      },
+      "center": {
+        "x": 202,
+        "y": 62
+      },
+      "confidence": 0.9984,
+      "goal_similarity": 0.2414
+    },
+    {
+      "anchor_id": "ocr_anchor_1",
+      "text": "鼠标测试工具-在线鼠标左中右侧键×",
+      "bbox": {
+        "x": 81,
+        "y": 14,
+        "w": 196,
+        "h": 13
+      },
+      "center": {
+        "x": 179,
+        "y": 20
+      },
+      "confidence": 0.924,
+      "goal_similarity": 0.04
+    }
+  ]
+}

@@ -11,7 +11,7 @@ DEFAULT_CONFIG = {
     "vision": {
         "mode": "local",
         "fallback_mode": "api",
-        "timeout_seconds": 30,
+        "timeout_seconds": 90,
         "local": {
             "model_name": "local_stub",
             "endpoint": None,
@@ -45,7 +45,7 @@ class VisionProviderFactory:
             return LocalVisionProvider(
                 endpoint=local_cfg.get("endpoint"),
                 model_name=local_cfg.get("model_name"),
-                timeout_seconds=float(vision_cfg.get("timeout_seconds") or 30),
+                timeout_seconds=float(vision_cfg.get("timeout_seconds") or 90),
             )
         if selected_mode == "api":
             api_cfg = vision_cfg.get("api") or {}

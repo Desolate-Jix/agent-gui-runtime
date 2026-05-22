@@ -1,0 +1,21 @@
+{
+  "name": "mouse-icon",
+  "pred_bbox": {
+    "x1": 258,
+    "y1": 142,
+    "x2": 418,
+    "y2": 423
+  },
+  "manual_bbox": {
+    "x1": 188,
+    "y1": 133,
+    "x2": 422,
+    "y2": 427
+  },
+  "iou": 0.6535,
+  "center_error_px": 33.09,
+  "elapsed_sec": 18.53,
+  "annotated": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260522-181534-qwen36-iq4xs-ocr-reasonoff\\mouse-icon-annotated.png",
+  "content": "```json\n{\n  \"bbox\": {\n    \"x1\": 515,\n    \"y1\": 195,\n    \"x2\": 835,\n    \"y2\": 580\n  },\n  \"used_anchor_ids\": [\n    \"ocr_anchor_1\",\n    \"ocr_anchor_2\",\n    \"ocr_anchor_3\",\n    \"ocr_anchor_4\",\n    \"ocr_anchor_5\",\n    \"ocr_anchor_6\"\n  ],\n  \"confidence\": 1.0\n}\n```",
+  "reasoning_content": null
+}

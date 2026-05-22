@@ -3,18 +3,15 @@ param(
     [string]$MmprojPath = "",
     [string]$ServerPath = "",
     [int]$Port = 1234,
-    [int]$ContextSize = 8192,
-    [ValidateSet("on", "off", "auto")]
-    [string]$Reasoning = "off",
-    [int]$ReasoningBudget = 0
+    [int]$ContextSize = 8192
 )
 
 $ErrorActionPreference = "Stop"
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $serverInput = if ($ServerPath) { $ServerPath } else { Join-Path $root "tools\llama.cpp-b8892-cuda13\llama-server.exe" }
-$modelInput = if ($ModelPath) { $ModelPath } else { Join-Path $root "models\qwen3-vl-8b-instruct-gguf\Qwen3VL-8B-Instruct-Q4_K_M.gguf" }
-$mmprojInput = if ($MmprojPath) { $MmprojPath } else { Join-Path $root "models\qwen3-vl-8b-instruct-gguf\mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf" }
+$modelInput = if ($ModelPath) { $ModelPath } else { Join-Path $root "models\internvl3_5-8b-gguf\InternVL3_5-8B-Q4_K_M.gguf" }
+$mmprojInput = if ($MmprojPath) { $MmprojPath } else { Join-Path $root "models\internvl3_5-8b-gguf\mmproj-model-f16.gguf" }
 
 $server = Resolve-Path $serverInput
 $model = Resolve-Path $modelInput
@@ -28,6 +25,4 @@ $mmproj = Resolve-Path $mmprojInput
     -ngl 99 `
     -c $ContextSize `
     --parallel 1 `
-    --reasoning $Reasoning `
-    --reasoning-budget $ReasoningBudget `
     --image-min-tokens 1024

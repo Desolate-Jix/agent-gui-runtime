@@ -1,0 +1,21 @@
+{
+  "source_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\internvl35-smoke-button.png",
+  "annotated_image_path": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260520-162515-171611-internvl35-smoke-button\\internvl35-smoke-button.annotated.png",
+  "region_count": 1,
+  "regions": [
+    {
+      "region_id": "1",
+      "role": "button",
+      "label": "Start Button",
+      "match_key": "f3d4f1e02d4efabb:f004872354653ae6",
+      "bbox": {
+        "x": 180,
+        "y": 130,
+        "w": 100,
+        "h": 40
+      },
+      "crop_path": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260520-162515-171611-internvl35-smoke-button\\1.png",
+      "annotated_crop_path": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260520-162515-171611-internvl35-smoke-button\\1.annotated.png"
+    }
+  ]
+}

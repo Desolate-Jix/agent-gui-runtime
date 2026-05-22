@@ -1,0 +1,162 @@
+{
+  "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\mousetester-qwen36-mouse-roi.png",
+  "annotated_image_path": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260520-164852-300620-all-ocr-anchor-mouse-test\\mousetester-all-ocr-anchor-test.annotated.png",
+  "result_json_path": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260520-164852-300620-all-ocr-anchor-mouse-test\\result.json",
+  "ocr_anchor_count_sent": 7,
+  "ocr_anchors_sent": [
+    {
+      "anchor_id": "ocr_anchor_7",
+      "text": "无需安装任何驱动或软",
+      "bbox": {
+        "x": 340,
+        "y": 678,
+        "w": 158,
+        "h": 17
+      },
+      "center": {
+        "x": 419,
+        "y": 686
+      },
+      "confidence": 0.9991,
+      "goal_similarity": 0.0
+    },
+    {
+      "anchor_id": "ocr_anchor_6",
+      "text": "后退",
+      "bbox": {
+        "x": 437,
+        "y": 468,
+        "w": 22,
+        "h": 17
+      },
+      "center": {
+        "x": 448,
+        "y": 476
+      },
+      "confidence": 0.9987,
+      "goal_similarity": 0.0
+    },
+    {
+      "anchor_id": "ocr_anchor_2",
+      "text": "检测点击及滚轮滚动方向",
+      "bbox": {
+        "x": 92,
+        "y": 79,
+        "w": 118,
+        "h": 15
+      },
+      "center": {
+        "x": 151,
+        "y": 86
+      },
+      "confidence": 0.9982,
+      "goal_similarity": 0.0
+    },
+    {
+      "anchor_id": "ocr_anchor_1",
+      "text": "按键与滚轮",
+      "bbox": {
+        "x": 96,
+        "y": 52,
+        "w": 117,
+        "h": 23
+      },
+      "center": {
+        "x": 154,
+        "y": 64
+      },
+      "confidence": 0.9974,
+      "goal_similarity": 0.0
+    },
+    {
+      "anchor_id": "ocr_anchor_3",
+      "text": "左键",
+      "bbox": {
+        "x": 128,
+        "y": 468,
+        "w": 26,
+        "h": 18
+      },
+      "center": {
+        "x": 141,
+        "y": 477
+      },
+      "confidence": 0.9953,
+      "goal_similarity": 0.0
+    },
+    {
+      "anchor_id": "ocr_anchor_5",
+      "text": "右键",
+      "bbox": {
+        "x": 333,
+        "y": 468,
+        "w": 25,
+        "h": 18
+      },
+      "center": {
+        "x": 346,
+        "y": 477
+      },
+      "confidence": 0.9593,
+      "goal_similarity": 0.0
+    },
+    {
+      "anchor_id": "ocr_anchor_4",
+      "text": "中键",
+      "bbox": {
+        "x": 231,
+        "y": 469,
+        "w": 24,
+        "h": 16
+      },
+      "center": {
+        "x": 243,
+        "y": 477
+      },
+      "confidence": 0.9575,
+      "goal_similarity": 0.0
+    }
+  ],
+  "raw_model_text": "{\n  \"provider\": \"InternVL3_5-8B-Q4_K_M.gguf\",\n  \"region\": {\n    \"label\": \"Mouse Illustration\",\n    \"role\": \"icon\",\n    \"diagonal\": {\"x1\": 0, \"y1\": 0, \"x2\": 0, \"y2\": 0},\n    \"text_inclusion_policy\": \"exclude_text\",\n    \"text_anchor_frame\": {\n      \"top_anchor_ids\": [],\n      \"bottom_anchor_ids\": [],\n      \"left_anchor_ids\": [],\n      \"right_anchor_ids\": [],\n      \"frame_bbox\": {\"x\": 0, \"y\": 0, \"w\": 500, \"h\": 730}\n    },\n    \"relative_frame_position\": {\n      \"center_fraction_x\": 0.5,\n      \"center_fraction_y\": 0.5,\n      \"width_fraction\": 0.5,\n      \"height_fraction\": 0.5,\n      \"frame_zone\": \"center\"\n    },\n    \"negative_anchor_ids\": [],\n    \"reason\": \"\"\n  }\n}",
+  "parsed": {
+    "provider": "InternVL3_5-8B-Q4_K_M.gguf",
+    "region": {
+      "label": "Mouse Illustration",
+      "role": "icon",
+      "diagonal": {
+        "x1": 0,
+        "y1": 0,
+        "x2": 0,
+        "y2": 0
+      },
+      "text_inclusion_policy": "exclude_text",
+      "text_anchor_frame": {
+        "top_anchor_ids": [],
+        "bottom_anchor_ids": [],
+        "left_anchor_ids": [],
+        "right_anchor_ids": [],
+        "frame_bbox": {
+          "x": 0,
+          "y": 0,
+          "w": 500,
+          "h": 730
+        }
+      },
+      "relative_frame_position": {
+        "center_fraction_x": 0.5,
+        "center_fraction_y": 0.5,
+        "width_fraction": 0.5,
+        "height_fraction": 0.5,
+        "frame_zone": "center"
+      },
+      "negative_anchor_ids": [],
+      "reason": ""
+    }
+  },
+  "clamped_draw_diagonal": {
+    "x1": 0,
+    "y1": 0,
+    "x2": 1,
+    "y2": 1
+  }
+}

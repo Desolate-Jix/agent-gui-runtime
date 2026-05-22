@@ -19,9 +19,9 @@ class VisionResultNormalizer:
         resolved_image_size = self._normalize_image_size(raw.get("image_size") or image_size or {})
         width = int(resolved_image_size.width if resolved_image_size is not None else 0)
         height = int(resolved_image_size.height if resolved_image_size is not None else 0)
-        regions = [self._normalize_region(item, width=width, height=height) for item in raw.get("regions") or []]
-        targets = [self._normalize_target(item, width=width, height=height) for item in raw.get("targets") or []]
-        observers = [self._normalize_observer(item, width=width, height=height) for item in raw.get("observers") or []]
+        regions = [self._normalize_region(item, width=width, height=height) for item in self._dict_items(raw.get("regions"))]
+        targets = [self._normalize_target(item, width=width, height=height) for item in self._dict_items(raw.get("targets"))]
+        observers = [self._normalize_observer(item, width=width, height=height) for item in self._dict_items(raw.get("observers"))]
         regions = [item for item in regions if item is not None]
         targets = [item for item in targets if item is not None]
         observers = [item for item in observers if item is not None]
@@ -51,6 +51,11 @@ class VisionResultNormalizer:
             return None
         return ImageSize(width=width, height=height)
 
+    def _dict_items(self, raw_items: Any) -> list[dict[str, Any]]:
+        if not isinstance(raw_items, list):
+            return []
+        return [item for item in raw_items if isinstance(item, dict)]
+
     def _normalize_region(self, raw: dict[str, Any], *, width: int, height: int) -> Optional[VisionRegion]:
         bbox = bbox_from_any(raw.get("bbox") or raw.get("diagonal") or {}, width=width, height=height)
         if bbox is None:
@@ -59,6 +64,10 @@ class VisionResultNormalizer:
         normalized_diagonal = normalized_diagonal_from_bbox(bbox, width=width, height=height)
         text_lines = normalize_string_list(raw.get("text_lines") or [])
         possible_destinations = normalize_string_list(raw.get("possible_destinations") or raw.get("destinations") or [])
+        anchor_relations = self._normalize_anchor_relations(raw.get("anchor_relations") or raw.get("ocr_anchor_relations") or [])
+        grounding_constraints = self._normalize_grounding_constraints(
+            raw.get("grounding_constraints") or raw.get("bbox_grounding") or raw.get("coordinate_constraints") or {}
+        )
         ocr_text = str(raw.get("ocr_text") or " ".join(text_lines)).strip()
         description = str(raw.get("description") or raw.get("summary") or raw.get("label") or "").strip()
         role = str(raw.get("role") or raw.get("kind") or "other").strip() or "other"
@@ -82,6 +91,8 @@ class VisionResultNormalizer:
             ocr_text=ocr_text,
             text_lines=text_lines,
             possible_destinations=possible_destinations,
+            anchor_relations=anchor_relations,
+            grounding_constraints=grounding_constraints,
             confidence=float(raw.get("confidence") or 0.0),
             layout_key=layout_key,
             content_key=content_key,
@@ -139,6 +150,8 @@ class VisionResultNormalizer:
                     ocr_text=target.label,
                     text_lines=text_lines,
                     possible_destinations=normalize_string_list([target.expected_effect] if target.expected_effect else []),
+                    anchor_relations=[],
+                    grounding_constraints={},
                     confidence=float(target.clickable_confidence),
                     layout_key=layout_key,
                     content_key=content_key,
@@ -157,6 +170,28 @@ class VisionResultNormalizer:
             note = raw_notes.strip()
             return [note] if note else []
         return [str(item) for item in raw_notes if str(item).strip()]
+
+    def _normalize_anchor_relations(self, raw_relations: Any) -> list[dict[str, Any]]:
+        if not isinstance(raw_relations, list):
+            return []
+        relations: list[dict[str, Any]] = []
+        for item in raw_relations:
+            if isinstance(item, dict):
+                relation = dict(item)
+                relation["anchor_id"] = str(item.get("anchor_id") or item.get("id") or "").strip()
+                relation["text"] = str(item.get("text") or "").strip()
+                relation["relation"] = str(item.get("relation") or item.get("spatial_relation") or "").strip()
+                relation["evidence"] = str(item.get("evidence") or item.get("reason") or "").strip()
+                if any(relation.values()):
+                    relations.append(relation)
+            elif isinstance(item, str) and item.strip():
+                relations.append({"anchor_id": "", "text": "", "relation": item.strip(), "evidence": ""})
+        return relations
+
+    def _normalize_grounding_constraints(self, raw_constraints: Any) -> dict[str, Any]:
+        if not isinstance(raw_constraints, dict):
+            return {}
+        return dict(raw_constraints)
 
 
 normalizer = VisionResultNormalizer()

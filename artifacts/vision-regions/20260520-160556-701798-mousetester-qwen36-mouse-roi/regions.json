@@ -1,0 +1,91 @@
+{
+  "source_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\mousetester-qwen36-mouse-roi.png",
+  "annotated_image_path": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260520-160556-701798-mousetester-qwen36-mouse-roi\\mousetester-qwen36-mouse-roi.annotated.png",
+  "region_count": 6,
+  "regions": [
+    {
+      "region_id": "mouse_icon",
+      "role": "icon",
+      "label": "Mouse Illustration",
+      "match_key": "5f83ce2973a3a9cf:ce57d163f4e9032e",
+      "bbox": {
+        "x": 150,
+        "y": 150,
+        "w": 300,
+        "h": 400
+      },
+      "crop_path": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260520-160556-701798-mousetester-qwen36-mouse-roi\\mouse_icon.png",
+      "annotated_crop_path": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260520-160556-701798-mousetester-qwen36-mouse-roi\\mouse_icon.annotated.png"
+    },
+    {
+      "region_id": "left_button",
+      "role": "button",
+      "label": "Left Button",
+      "match_key": "5762f883798bc5ed:9b51e8703614ddae",
+      "bbox": {
+        "x": 170,
+        "y": 620,
+        "w": 120,
+        "h": 60
+      },
+      "crop_path": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260520-160556-701798-mousetester-qwen36-mouse-roi\\left_button.png",
+      "annotated_crop_path": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260520-160556-701798-mousetester-qwen36-mouse-roi\\left_button.annotated.png"
+    },
+    {
+      "region_id": "middle_button",
+      "role": "button",
+      "label": "Middle Button",
+      "match_key": "049a4e2edc538900:82b12184e10aefe0",
+      "bbox": {
+        "x": 300,
+        "y": 620,
+        "w": 120,
+        "h": 60
+      },
+      "crop_path": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260520-160556-701798-mousetester-qwen36-mouse-roi\\middle_button.png",
+      "annotated_crop_path": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260520-160556-701798-mousetester-qwen36-mouse-roi\\middle_button.annotated.png"
+    },
+    {
+      "region_id": "right_button",
+      "role": "button",
+      "label": "Right Button",
+      "match_key": "191cfe0f3e4b7326:3e794ae22fdb709e",
+      "bbox": {
+        "x": 215,
+        "y": 453,
+        "w": 60,
+        "h": 43
+      },
+      "crop_path": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260520-160556-701798-mousetester-qwen36-mouse-roi\\right_button.png",
+      "annotated_crop_path": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260520-160556-701798-mousetester-qwen36-mouse-roi\\right_button.annotated.png"
+    },
+    {
+      "region_id": "scroll_button",
+      "role": "button",
+      "label": "Scroll Button",
+      "match_key": "76d5d3a3ca68318a:a1d5ebc15aba9b81",
+      "bbox": {
+        "x": 280,
+        "y": 453,
+        "w": 60,
+        "h": 43
+      },
+      "crop_path": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260520-160556-701798-mousetester-qwen36-mouse-roi\\scroll_button.png",
+      "annotated_crop_path": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260520-160556-701798-mousetester-qwen36-mouse-roi\\scroll_button.annotated.png"
+    },
+    {
+      "region_id": "header_text",
+      "role": "content",
+      "label": "Header Text",
+      "match_key": "dda77363de50e3d9:c139737e7a3191b6",
+      "bbox": {
+        "x": 150,
+        "y": 70,
+        "w": 200,
+        "h": 60
+      },
+      "crop_path": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260520-160556-701798-mousetester-qwen36-mouse-roi\\header_text.png",
+      "annotated_crop_path": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260520-160556-701798-mousetester-qwen36-mouse-roi\\header_text.annotated.png"
+    }
+  ]
+}

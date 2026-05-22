@@ -13,6 +13,7 @@ from PIL import Image
 
 from app.core.runtime_artifacts import build_review_overlay_path
 from app.vision.grid_overlay import create_grid_overlay_image
+from app.vision.ocr_anchors import scale_ocr_anchor_payload
 from app.vision.prompting import build_region_analysis_prompt
 from app.vision.schemas import ImageSize, VisionAnalyzeRequest, VisionAnalyzeResponse
 
@@ -127,7 +128,8 @@ class LocalVisionProvider:
         payload = {
             "model": self.model_name,
             "temperature": 0.1,
-            "max_tokens": 4096,
+            "max_tokens": 2048,
+            "response_format": {"type": "json_object"},
             "messages": [
                 {
                     "role": "system",
@@ -273,8 +275,9 @@ class LocalVisionProvider:
         if attempt.compact_prompt:
             attempt_notes.append("compact_prompt_mode=true")
 
+        prompt_req = self._request_for_inference_prompt(req, original_image_size=original_image_size, inference_size=inference_size)
         prompt = build_region_analysis_prompt(
-            req,
+            prompt_req,
             inference_size,
             compact=attempt.compact_prompt,
             max_regions=attempt.max_regions,
@@ -295,6 +298,12 @@ class LocalVisionProvider:
                     "spacing": grid_spacing,
                     "artifact_path": str(grid_overlay_path.resolve()) if grid_overlay_path is not None else None,
                 }
+            if isinstance(prompt_req.metadata.get("ocr_anchors"), dict):
+                attempt_meta["ocr_anchors"] = {
+                    "enabled": True,
+                    "coordinate_space": prompt_req.metadata["ocr_anchors"].get("coordinate_space"),
+                    "anchor_count": int(prompt_req.metadata["ocr_anchors"].get("anchor_count") or 0),
+                }
             if inference_size != original_image_size:
                 attempt_meta["coordinate_remap"] = {
                     "from": inference_size.to_dict(),
@@ -304,6 +313,34 @@ class LocalVisionProvider:
         finally:
             if temp_dir is not None:
                 temp_dir.cleanup()
+
+    def _request_for_inference_prompt(
+        self,
+        req: VisionAnalyzeRequest,
+        *,
+        original_image_size: ImageSize,
+        inference_size: ImageSize,
+    ) -> VisionAnalyzeRequest:
+        metadata = dict(req.metadata or {})
+        anchor_payload = metadata.get("ocr_anchors")
+        if isinstance(anchor_payload, dict):
+            scaled = scale_ocr_anchor_payload(
+                anchor_payload,
+                from_size=original_image_size,
+                to_size=inference_size,
+                coordinate_space="inference_image",
+            )
+            if scaled is not None:
+                metadata["ocr_anchors"] = scaled
+        return VisionAnalyzeRequest(
+            image_path=req.image_path,
+            task=req.task,
+            app_name=req.app_name,
+            goal=req.goal,
+            state_hint=req.state_hint,
+            provider_mode=req.provider_mode,
+            metadata=metadata,
+        )
 
     def _grid_overlay_spacing(self, req: VisionAnalyzeRequest) -> int | None:
         metadata = req.metadata or {}

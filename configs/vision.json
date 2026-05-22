@@ -2,9 +2,9 @@
   "vision": {
     "mode": "local",
     "fallback_mode": "api",
-    "timeout_seconds": 30,
+    "timeout_seconds": 180,
     "local": {
-      "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+      "model_name": "InternVL3_5-8B-Q4_K_M.gguf",
       "endpoint": "http://127.0.0.1:1234/v1/chat/completions"
     },
     "api": {

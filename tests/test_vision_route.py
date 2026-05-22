@@ -254,6 +254,9 @@ def test_vision_recognition_plan_returns_ranked_candidates(tmp_path, monkeypatch
         def analyze(self, req):
             from app.vision.schemas import BBox, Diagonal, ImageSize, NormalizedDiagonal, VisionAnalyzeResponse, VisionRegion
 
+            assert req.metadata["ocr_anchors"]["contract_version"] == "ocr_anchors_v1"
+            assert req.metadata["ocr_anchors"]["anchor_count"] == 2
+            assert req.metadata["ocr_anchors"]["anchors"][0]["text"] == "Start detection"
             return VisionAnalyzeResponse(
                 provider="dummy",
                 screen_summary="dummy page",
@@ -271,6 +274,18 @@ def test_vision_recognition_plan_returns_ranked_candidates(tmp_path, monkeypatch
                         ocr_text="Start detection",
                         text_lines=["Start detection"],
                         possible_destinations=["test_running"],
+                        anchor_relations=[
+                            {
+                                "anchor_id": "ocr_anchor_1",
+                                "text": "Start detection",
+                                "relation": "inside",
+                                "axis": "both",
+                            }
+                        ],
+                        grounding_constraints={
+                            "text_inclusion_policy": "include_referenced_text",
+                            "text_anchor_frame": {"bottom_anchor_id": "ocr_anchor_1"},
+                        },
                         confidence=0.9,
                         layout_key="layout_start",
                         content_key="content_start",
@@ -340,6 +355,13 @@ def test_vision_recognition_plan_returns_ranked_candidates(tmp_path, monkeypatch
     assert result["contract_version"] == "recognition_plan_v1"
     assert result["candidate_result"]["contract_version"] == "candidate_rank_v1"
     assert result["recommended_target"]["element_id"].startswith("element_start")
+    assert result["parse_result"]["ocr_anchors"]["contract_version"] == "ocr_anchors_v1"
+    region_constraints = result["parse_result"]["vision_regions"]["regions"][0]["grounding_constraints"]
+    assert region_constraints["grounding_evaluation"]["contract_version"] == "anchor_grounding_evaluation_v1"
+    assert region_constraints["grounding_evaluation"]["ok"] is True
+    assert region_constraints["grounding_evaluation"]["included_anchor_ids"] == ["ocr_anchor_1"]
+    assert result["execution_path"]["ocr_anchor_grounding_used"] is True
+    assert result["execution_path"]["ocr_anchor_count"] == 2
     assert result["parse_result"]["screen_reading"]["contract_version"] == "screen_reading_v1"
     assert result["execution_path"]["candidate_rank_used"] is True
     assert result["execution_path"]["screen_reading_used"] is True
@@ -352,6 +374,78 @@ def test_vision_recognition_plan_returns_ranked_candidates(tmp_path, monkeypatch
     assert result["pre_click_decision"]["contract_version"] == "pre_click_decision_v1"
     assert result["pre_click_decision"]["allowed"] is True
     assert Path(result["trace_path"]).exists()
+
+
+def test_vision_recognition_plan_retries_without_ocr_anchors_when_provider_rejects_them(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (420, 220), color=(255, 255, 255)).save(image_path)
+    calls: list[dict] = []
+
+    class DummyProvider:
+        def analyze(self, req):
+            from app.vision.schemas import BBox, Diagonal, ImageSize, NormalizedDiagonal, VisionAnalyzeResponse, VisionRegion
+
+            calls.append(req.metadata)
+            if req.metadata.get("ocr_anchors"):
+                raise RuntimeError("prompt too large")
+            return VisionAnalyzeResponse(
+                provider="dummy",
+                screen_summary="dummy page",
+                state_guess="dummy_state",
+                image_size=ImageSize(width=420, height=220),
+                regions=[
+                    VisionRegion(
+                        region_id="region_start",
+                        label="Start detection",
+                        role="button",
+                        bbox=BBox(x=40, y=40, w=180, h=80),
+                        diagonal=Diagonal(x1=40, y1=40, x2=220, y2=120),
+                        normalized_diagonal=NormalizedDiagonal(nx1=0.1, ny1=0.1, nx2=0.5, ny2=0.5),
+                        description="Start detection button",
+                        ocr_text="Start detection",
+                        text_lines=["Start detection"],
+                        possible_destinations=["test_running"],
+                        confidence=0.9,
+                    )
+                ],
+            )
+
+    class DummyOCR:
+        def scan_image(self, image_path):
+            from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
+
+            return OCRResult(
+                image_path=image_path,
+                metadata={"engine": "rapidocr_onnxruntime"},
+                matches=[
+                    OCRTextMatch(text="Start detection", score=0.99, bbox=OCRBoundingBox(x=70, y=66, width=96, height=16)),
+                ],
+            )
+
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.load_config", lambda: {"vision": {"mode": "local"}})
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: DummyProvider())
+    monkeypatch.setattr("app.api.vision.ocr_service", DummyOCR())
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "task": "click_target",
+            "goal": "click start detection",
+            "app_name": "demo",
+            "top_k": 1,
+        },
+    )
+
+    result = response.json()["data"]["result"]
+    assert response.json()["success"] is True
+    assert len(calls) == 2
+    assert calls[0]["ocr_anchors"]["anchor_count"] == 1
+    assert "ocr_anchors" not in calls[1]
+    assert result["execution_path"]["ocr_anchor_grounding_used"] is False
+    assert result["execution_path"]["ocr_anchor_grounding_fallback_used"] is True
+    assert result["parse_result"]["ocr_anchors"] is None
 
 
 def test_vision_layer_trace_returns_each_layer_result_and_validation(tmp_path, monkeypatch) -> None:

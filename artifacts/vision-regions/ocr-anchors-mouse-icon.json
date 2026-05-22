@@ -1,0 +1,125 @@
+{
+  "contract_version": "ocr_anchors_v1",
+  "coordinate_space": "original_image",
+  "image_size": {
+    "width": 500,
+    "height": 730
+  },
+  "source_engine": "rapidocr_onnxruntime",
+  "total_detected_count": 7,
+  "anchor_count": 7,
+  "anchors": [
+    {
+      "anchor_id": "ocr_anchor_7",
+      "text": "无需安装任何驱动或软",
+      "bbox": {
+        "x": 340,
+        "y": 678,
+        "w": 158,
+        "h": 17
+      },
+      "center": {
+        "x": 419,
+        "y": 686
+      },
+      "confidence": 0.9991,
+      "goal_similarity": 0.0
+    },
+    {
+      "anchor_id": "ocr_anchor_6",
+      "text": "后退",
+      "bbox": {
+        "x": 437,
+        "y": 468,
+        "w": 22,
+        "h": 17
+      },
+      "center": {
+        "x": 448,
+        "y": 476
+      },
+      "confidence": 0.9987,
+      "goal_similarity": 0.0
+    },
+    {
+      "anchor_id": "ocr_anchor_2",
+      "text": "检测点击及滚轮滚动方向",
+      "bbox": {
+        "x": 92,
+        "y": 79,
+        "w": 118,
+        "h": 15
+      },
+      "center": {
+        "x": 151,
+        "y": 86
+      },
+      "confidence": 0.9982,
+      "goal_similarity": 0.0
+    },
+    {
+      "anchor_id": "ocr_anchor_1",
+      "text": "按键与滚轮",
+      "bbox": {
+        "x": 96,
+        "y": 52,
+        "w": 117,
+        "h": 23
+      },
+      "center": {
+        "x": 154,
+        "y": 64
+      },
+      "confidence": 0.9974,
+      "goal_similarity": 0.0
+    },
+    {
+      "anchor_id": "ocr_anchor_3",
+      "text": "左键",
+      "bbox": {
+        "x": 128,
+        "y": 468,
+        "w": 26,
+        "h": 18
+      },
+      "center": {
+        "x": 141,
+        "y": 477
+      },
+      "confidence": 0.9953,
+      "goal_similarity": 0.0
+    },
+    {
+      "anchor_id": "ocr_anchor_5",
+      "text": "右键",
+      "bbox": {
+        "x": 333,
+        "y": 468,
+        "w": 25,
+        "h": 18
+      },
+      "center": {
+        "x": 346,
+        "y": 477
+      },
+      "confidence": 0.9593,
+      "goal_similarity": 0.0
+    },
+    {
+      "anchor_id": "ocr_anchor_4",
+      "text": "中键",
+      "bbox": {
+        "x": 231,
+        "y": 469,
+        "w": 24,
+        "h": 16
+      },
+      "center": {
+        "x": 243,
+        "y": 477
+      },
+      "confidence": 0.9575,
+      "goal_similarity": 0.0
+    }
+  ]
+}

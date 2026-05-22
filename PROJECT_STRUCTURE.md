@@ -126,6 +126,7 @@ Use it when you need to answer:
     - redraw region/OCR boxes on the original screenshot for human review
     - redraw recognition-plan candidates, decisions, and refined points for human review
     - optionally feed the local provider a light pixel-grid reference overlay for bbox-accuracy experiments
+    - optionally feed the recognition-plan provider prompt OCR text boxes as `ocr_anchors_v1` spatial hints, with fallback to the unanchored provider call if needed
     - persist annotated screenshots and per-region crops for later page-structure building
 
 - `app/api/action.py`
@@ -245,6 +246,18 @@ Key files:
   - dataclasses for provider I/O
 - `prompting.py`
   - model-facing prompt contract for `vision_regions_v1`
+  - includes optional `ocr_anchors_v1` guidance so the model can use OCR text boxes as relative-position anchors for nearby visual controls
+  - compacts OCR anchors for the prompt as `id/t/b/c/s/g` while preserving all text boxes and coordinates
+  - requires `anchor_relations` and `grounding_constraints` so each returned region records which OCR anchors constrained its bbox and how those anchors set edges, centers, size, exclusions, text-anchor frame, relative frame position, and text inclusion policy
+- `ocr_anchors.py`
+  - builds compact OCR anchor payloads from `OCRResult`
+  - sorts anchors by goal similarity and confidence
+  - keeps all OCR text boxes by default; `metadata.ocr_anchors.max_anchors` can explicitly cap the prompt when needed
+  - scales anchor coordinates into resized provider inference images
+- `anchor_grounding.py`
+  - evaluates model-returned OCR anchor relations against known OCR text boxes
+  - enforces the two grounding policies: visual-only icon bboxes should exclude referenced text anchors, while text-bearing controls should include referenced text anchors
+  - writes `grounding_evaluation` evidence and `anchor_corrected_bbox` suggestions into region `grounding_constraints`
 - `grid_overlay.py`
   - draws light review/inference grids with pixel tick labels and denser minor guide lines for bbox experiments
 - `region_standard.py`
@@ -269,6 +282,7 @@ Current status:
 - `/vision/analyze` can call into it
 - the local provider can invoke a configured local multimodal endpoint and normalize model JSON
 - local provider traces preserve per-attempt metadata such as scaled inference size, compact retry mode, coordinate remap evidence, and optional grid-reference artifact paths
+- local provider traces also record when OCR anchors were included in the prompt and which coordinate space they used
 - optional OCR-assisted refinement can add a second `vision_regions_refined_v1` layer for trace comparison without overwriting the raw provider layer
 - the API provider remains a stub implementation
 - learned region artifacts are persisted locally under `artifacts/vision-regions/`
@@ -625,7 +639,9 @@ Current shape:
 Current reality:
 
 - local and API provider entries exist
-- local defaults target `Qwen3VL-8B-Instruct-Q4_K_M.gguf` through `http://127.0.0.1:1234/v1/chat/completions`
+- local defaults target `InternVL3_5-8B-Q4_K_M.gguf` through `http://127.0.0.1:1234/v1/chat/completions`
+- local default provider timeout is `180` seconds for the current InternVL3.5 8B GGUF default
+- the previous `Qwen3VL-8B-Instruct-Q4_K_M.gguf` deployment remains on disk and can be used by passing explicit `-ModelPath` and `-MmprojPath`; the Qwen3.6 27B files were deleted after proving too slow for the local interactive loop
 - full-page stability is now improved in provider code through inference scaling plus compact retry fallback
 - local deployment assets are stored under ignored `models/` and `tools/` directories
 - API provider remains a stub unless replaced with a real endpoint
@@ -1034,6 +1050,7 @@ Request:
 Response includes:
 
 - `parse_result`
+  - includes `ocr_anchors` when OCR anchor prompting was used successfully; `null` means the route continued without anchored prompt evidence
 - `candidate_result`
 - `narrow_search_result`
 - `pre_click_decision`
@@ -1044,6 +1061,20 @@ Response includes:
 This route should not click yet.
 It should exist to prove that the staged selection logic is working before action dispatch is attached.
 Current response version: `recognition_plan_v1`.
+
+Current recognition-plan provider preparation:
+
+1. run OCR first and build `ocr_anchors_v1` from all detected text boxes by default
+2. add the anchor payload to `VisionAnalyzeRequest.metadata.ocr_anchors`
+3. let the local provider scale anchors into the actual inference image size when screenshots are resized
+4. include compact anchor guidance in the vision prompt so nearby icons/buttons/cards can be grounded by relative position without dropping all-page OCR text boxes
+5. require every returned region to include `anchor_relations` and `grounding_constraints`, including `text_anchor_frame`, `relative_frame_position`, and `text_inclusion_policy`, before its final bbox evidence is normalized
+6. if the anchored provider call fails, retry once without `ocr_anchors` and record `ocr_anchor_grounding_fallback_used`
+7. evaluate returned bbox policy against referenced OCR anchors and record `grounding_evaluation`
+8. reuse the OCR result for page-structure fusion when possible
+
+The local InternVL3.5 server is started with `-c 8192 --parallel 1` so full-page OCR anchor prompts can fit in a single slot.
+`scripts/serve_internvl3_5_server.ps1` accepts `-ModelPath`, `-MmprojPath`, `-ServerPath`, `-Port`, and `-ContextSize` so compatible GGUF multimodal models can be swapped without changing the recognition-plan code.
 
 #### Suggested first execution endpoint after planning works
 

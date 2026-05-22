@@ -1,0 +1,44 @@
+[
+  {
+    "name": "browser-back",
+    "pred_bbox": {
+      "x1": 52,
+      "y1": 36,
+      "x2": 102,
+      "y2": 54
+    },
+    "manual_bbox": {
+      "x1": 12,
+      "y1": 44,
+      "x2": 43,
+      "y2": 75
+    },
+    "iou": 0.0,
+    "center_error_px": 51.58,
+    "elapsed_sec": 40.59,
+    "annotated": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260522-180230-qwen36-iq4xs-rerun\\browser-back-annotated.png",
+    "content": "```json\n{\"bbox\": {\"x1\": 52, \"y1\": 36, \"x2\": 102, \"y2\": 54}, \"confidence\": 0.95}\n```",
+    "reasoning_excerpt": "The user wants me to identify the \"browser back navigation arrow icon\" in the provided image.\n\n1.  **Analyze the image:** The image shows a browser interface.\n    *   Top part: Tab bar with a title \"鼠标测试工具-在线鼠标左中右侧键\" and a close button 'X'. There's also a '+' button for new tabs.\n    *   Middle part: Address bar area.\n    *   Left side of address bar: There are navigation controls.\n    *   The leftmost icon is an arrow pointing to the left. This is the standard \"Back\" button in browsers.\n    *   Next to it is a refresh icon (circular arrow).\n    *   Next is the address bar with a lock icon and URL.\n\n2.  **Locate the target element:** The back arrow is the leftmost icon in the toolbar row below the tab bar.\n    *   It's an arrow pointing left `←`.\n    *   Coordinates estimation:\n        *  "
+  },
+  {
+    "name": "mouse-icon",
+    "pred_bbox": {
+      "x1": 258,
+      "y1": 142,
+      "x2": 418,
+      "y2": 420
+    },
+    "manual_bbox": {
+      "x1": 188,
+      "y1": 133,
+      "x2": 422,
+      "y2": 427
+    },
+    "iou": 0.6465,
+    "center_error_px": 33.02,
+    "elapsed_sec": 17.98,
+    "annotated": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260522-180230-qwen36-iq4xs-rerun\\mouse-icon-annotated.png",
+    "content": "```json\n{\"bbox\": {\"x1\": 515, \"y1\": 195, \"x2\": 835, \"y2\": 575}, \"confidence\": 0.95}\n```",
+    "reasoning_excerpt": "The user wants me to identify the bounding box for the \"large mouse device icon only\".\n\n1.  **Analyze the image:** The image shows a software interface, likely for configuring a mouse.\n2.  **Identify the target:** The user specifies \"large mouse device icon only, excluding all text\".\n3.  **Locate the mouse icon:** In the center of the white card, there is a large, stylized outline of a computer mouse. It's white with a light grey outline.\n4.  **Determine coordinates:**\n    *   Top edge: The top of the mouse curve is around y=195.\n    *   Left edge: The leftmost part (side buttons) starts around x=515.\n    *   Bottom edge: The bottom curve ends around y=575.\n    *   Right edge: The rightmost curve ends around x=835.\n5.  **Refine coordinates:**\n    *   y1: ~195\n    *   x1: ~515 (including th"
+  }
+]

@@ -1,0 +1,30 @@
+{
+  "case": "pixtral-dualimage-mouse",
+  "model": "pixtral-12b-Q4_K_M.gguf",
+  "annotated_image_path": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260522-173624-011138-pixtral-dualimage-mouse\\pixtral-dualimage-mouse.annotated.png",
+  "overlay_image_path": "D:\\agent-gui-runtime\\artifacts\\coordinate-overlays\\mousetester-mouse-roi-grid.png",
+  "valid_bbox_before_clamp": true,
+  "parsed": {
+    "provider": "pixtral-12b-Q4_K_M.gguf",
+    "region": {
+      "label": "icon",
+      "role": "icon",
+      "diagonal": {
+        "x1": 150,
+        "y1": 100,
+        "x2": 350,
+        "y2": 400
+      },
+      "text_inclusion_policy": "exclude_text",
+      "confidence": 95,
+      "coordinate_evidence": "Coordinates derived from Image 2"
+    }
+  },
+  "raw_text": "```json\n{\n  \"provider\": \"pixtral-12b-Q4_K_M.gguf\",\n  \"region\": {\n    \"label\": \"icon\",\n    \"role\": \"icon\",\n    \"diagonal\": {\n      \"x1\": 150,\n      \"y1\": 100,\n      \"x2\": 350,\n      \"y2\": 400\n    },\n    \"text_inclusion_policy\": \"exclude_text\",\n    \"confidence\": 95,\n    \"coordinate_evidence\": \"Coordinates derived from Image 2\"\n  }\n}\n```",
+  "clamped_draw_diagonal": {
+    "x1": 150,
+    "y1": 100,
+    "x2": 350,
+    "y2": 400
+  }
+}

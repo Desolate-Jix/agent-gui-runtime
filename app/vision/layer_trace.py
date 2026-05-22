@@ -45,6 +45,8 @@ def validate_vision_regions_layer(result: dict[str, Any]) -> dict[str, Any]:
         "ocr_text",
         "text_lines",
         "possible_destinations",
+        "anchor_relations",
+        "grounding_constraints",
         "confidence",
         "layout_key",
         "content_key",

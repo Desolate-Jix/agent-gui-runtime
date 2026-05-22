@@ -1,0 +1,21 @@
+{
+  "source_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\qwen36-smoke-button.png",
+  "annotated_image_path": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260519-160951-402873-qwen36-smoke-button\\qwen36-smoke-button.annotated.png",
+  "region_count": 1,
+  "regions": [
+    {
+      "region_id": "r1",
+      "role": "button",
+      "label": "Start Button",
+      "match_key": "c274850d25721649:367be9d54fb53efc",
+      "bbox": {
+        "x": 119,
+        "y": 80,
+        "w": 182,
+        "h": 60
+      },
+      "crop_path": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260519-160951-402873-qwen36-smoke-button\\r1.png",
+      "annotated_crop_path": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260519-160951-402873-qwen36-smoke-button\\r1.annotated.png"
+    }
+  ]
+}

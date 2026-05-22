@@ -22,6 +22,7 @@ from app.recognition.plan_overlay import render_recognition_plan_overlay
 from app.screen_reading import build_screen_reading
 from app.screen_reading.uia_provider import uia_provider
 from app.vision.artifacts import save_region_artifacts
+from app.vision.anchor_grounding import apply_anchor_grounding_evaluation
 from app.vision.factory import VisionProviderFactory
 from app.vision.layer_trace import (
     failure_layer,
@@ -36,9 +37,11 @@ from app.vision.layer_trace import (
     validate_vision_regions_layer,
 )
 from app.vision.normalizer import normalizer
+from app.vision.ocr_anchors import build_ocr_anchor_payload
 from app.vision.ocr_region_refiner import parse_ocr_region_refine_options, refine_vision_regions_with_ocr
 from app.vision.review_overlay import render_review_overlay
 from app.vision.schemas import ImageSize, VisionAnalyzeRequest
+from modules.ocr.contracts import OCRResult
 
 router = APIRouter(prefix="/vision", tags=["vision"])
 
@@ -70,6 +73,83 @@ def _maybe_refine_with_ocr(provider_response, *, request: VisionAnalyzeRequestMo
     ocr_result = ocr_service.scan_image(str(image_path))
     refined = refine_vision_regions_with_ocr(provider_response, ocr_result, options=options)
     return refined, ocr_result, options
+
+
+def _recognition_vision_request_with_ocr_anchors(
+    request: VisionRecognitionPlanRequestModel,
+    *,
+    image_path: Path,
+    image_size: ImageSize,
+) -> tuple[VisionAnalyzeRequest, OCRResult | None, dict[str, object] | None, dict[str, object]]:
+    metadata = dict(request.metadata or {})
+    anchor_status: dict[str, object] = {
+        "enabled": _ocr_anchors_enabled(metadata),
+        "used": False,
+        "fallback_used": False,
+        "anchor_count": 0,
+    }
+    ocr_result: OCRResult | None = None
+    anchor_payload: dict[str, object] | None = None
+
+    if anchor_status["enabled"]:
+        try:
+            ocr_result = ocr_service.scan_image(str(image_path))
+            raw_options = metadata.get("ocr_anchors") if isinstance(metadata.get("ocr_anchors"), dict) else {}
+            raw_max_anchors = raw_options.get("max_anchors") if isinstance(raw_options, dict) else None
+            max_anchors = None if raw_max_anchors in (None, "all", "ALL", 0, "0") else int(raw_max_anchors)
+            min_score = float(raw_options.get("min_score", 0.0)) if isinstance(raw_options, dict) else 0.0
+            anchor_payload = build_ocr_anchor_payload(
+                ocr_result,
+                image_size=image_size,
+                goal=request.goal or request.task,
+                max_anchors=max_anchors,
+                min_score=min_score,
+            )
+            metadata["ocr_anchors"] = anchor_payload
+            anchor_status.update(
+                {
+                    "used": bool(anchor_payload.get("anchor_count")),
+                    "anchor_count": int(anchor_payload.get("anchor_count") or 0),
+                    "source_engine": anchor_payload.get("source_engine"),
+                }
+            )
+        except Exception as exc:
+            anchor_status.update({"fallback_used": True, "error": str(exc)})
+            metadata.pop("ocr_anchors", None)
+
+    vision_request = VisionAnalyzeRequest(
+        image_path=str(image_path),
+        task=request.task,
+        app_name=request.app_name,
+        goal=request.goal,
+        state_hint=request.state_hint,
+        provider_mode=request.provider_mode,
+        metadata=metadata,
+    )
+    return vision_request, ocr_result, anchor_payload, anchor_status
+
+
+def _ocr_anchors_enabled(metadata: dict[str, object]) -> bool:
+    raw = metadata.get("ocr_anchors", True)
+    if raw is False:
+        return False
+    if isinstance(raw, dict):
+        return bool(raw.get("enabled", True))
+    return True
+
+
+def _vision_request_without_ocr_anchors(request: VisionRecognitionPlanRequestModel, *, image_path: Path) -> VisionAnalyzeRequest:
+    metadata = dict(request.metadata or {})
+    metadata.pop("ocr_anchors", None)
+    return VisionAnalyzeRequest(
+        image_path=str(image_path),
+        task=request.task,
+        app_name=request.app_name,
+        goal=request.goal,
+        state_hint=request.state_hint,
+        provider_mode=request.provider_mode,
+        metadata=metadata,
+    )
 
 
 @router.post("/ocr_region", response_model=APIResponse)
@@ -331,22 +411,28 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
     try:
         config = VisionProviderFactory.load_config()
         provider = VisionProviderFactory.create(mode=request.provider_mode, config=config)
-        response = provider.analyze(
-            VisionAnalyzeRequest(
-                image_path=str(image_path),
-                task=request.task,
-                app_name=request.app_name,
-                goal=request.goal,
-                state_hint=request.state_hint,
-                provider_mode=request.provider_mode,
-                metadata=request.metadata,
-            )
+        with Image.open(image_path) as image:
+            input_image_size = ImageSize(width=image.width, height=image.height)
+        vision_request, ocr_result, ocr_anchor_payload, ocr_anchor_status = _recognition_vision_request_with_ocr_anchors(
+            request,
+            image_path=image_path,
+            image_size=input_image_size,
         )
-        response, ocr_result, refine_options = _maybe_refine_with_ocr(response, request=request, image_path=image_path)
+        try:
+            response = provider.analyze(vision_request)
+        except Exception as exc:
+            if not ocr_anchor_status.get("used"):
+                raise
+            ocr_anchor_status.update({"used": False, "fallback_used": True, "provider_error": str(exc)})
+            ocr_anchor_payload = None
+            response = provider.analyze(_vision_request_without_ocr_anchors(request, image_path=image_path))
+        response, refine_ocr_result, refine_options = _maybe_refine_with_ocr(response, request=request, image_path=image_path)
+        if refine_ocr_result is not None:
+            ocr_result = refine_ocr_result
         normalized = normalizer.normalize(response.to_dict(), response.provider)
         if normalized.image_size is None:
-            with Image.open(image_path) as image:
-                normalized.image_size = ImageSize(width=image.width, height=image.height)
+            normalized.image_size = input_image_size
+        normalized = apply_anchor_grounding_evaluation(normalized, ocr_anchor_payload)
         if ocr_result is None:
             ocr_result = ocr_service.scan_image(str(image_path))
         structure = build_page_structure(normalized, ocr_result)
@@ -392,6 +478,7 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
             "parse_result": {
                 "vision_regions": normalized.to_dict(),
                 "ocr_result": ocr_result.to_dict(),
+                "ocr_anchors": ocr_anchor_payload,
                 "page_structure": structure.to_dict(),
                 "screen_reading": screen_reading_payload,
             },
@@ -422,6 +509,9 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
                     ocr_region_refine_used=refine_options.enabled,
                 ),
                 "candidate_rank_used": True,
+                "ocr_anchor_grounding_used": bool(ocr_anchor_status.get("used")),
+                "ocr_anchor_grounding_fallback_used": bool(ocr_anchor_status.get("fallback_used")),
+                "ocr_anchor_count": int(ocr_anchor_status.get("anchor_count") or 0),
                 "screen_reading_used": True,
                 "screen_reading_rank_evidence_used": True,
                 "uia_scan_status": uia_snapshot.get("status"),

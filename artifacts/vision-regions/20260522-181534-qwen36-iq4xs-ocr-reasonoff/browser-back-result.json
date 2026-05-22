@@ -1,0 +1,21 @@
+{
+  "name": "browser-back",
+  "pred_bbox": {
+    "x1": 13,
+    "y1": 51,
+    "x2": 35,
+    "y2": 65
+  },
+  "manual_bbox": {
+    "x1": 12,
+    "y1": 44,
+    "x2": 43,
+    "y2": 75
+  },
+  "iou": 0.3205,
+  "center_error_px": 3.81,
+  "elapsed_sec": 17.54,
+  "annotated": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260522-181534-qwen36-iq4xs-ocr-reasonoff\\browser-back-annotated.png",
+  "content": "```json\n{\n  \"bbox\": {\n    \"x1\": 36,\n    \"y1\": 390,\n    \"x2\": 96,\n    \"y2\": 500\n  },\n  \"used_anchor_ids\": [\n    \"ocr_anchor_2\"\n  ],\n  \"confidence\": 0.95\n}\n```",
+  "reasoning_content": null
+}

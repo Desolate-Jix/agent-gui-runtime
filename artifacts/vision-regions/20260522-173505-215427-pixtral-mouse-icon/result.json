@@ -1,0 +1,30 @@
+{
+  "case": "pixtral-mouse-icon",
+  "model": "pixtral-12b-Q4_K_M.gguf",
+  "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\mousetester-qwen36-mouse-roi.png",
+  "annotated_image_path": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260522-173505-215427-pixtral-mouse-icon\\pixtral-mouse-icon.annotated.png",
+  "valid_bbox_before_clamp": true,
+  "parsed": {
+    "provider": "pixtral-12b-Q4_K_M.gguf",
+    "region": {
+      "label": "mouse_illustration",
+      "role": "icon",
+      "diagonal": {
+        "x1": 150,
+        "y1": 100,
+        "x2": 450,
+        "y2": 630
+      },
+      "text_inclusion_policy": "exclude_text",
+      "confidence": 0.95,
+      "reason": "The bounding box includes the complete large mouse illustration, excluding the Chinese labels below and the title text above."
+    }
+  },
+  "raw_text": "```json\n{\n  \"provider\": \"pixtral-12b-Q4_K_M.gguf\",\n  \"region\": {\n    \"label\": \"mouse_illustration\",\n    \"role\": \"icon\",\n    \"diagonal\": {\n      \"x1\": 150,\n      \"y1\": 100,\n      \"x2\": 450,\n      \"y2\": 630\n    },\n    \"text_inclusion_policy\": \"exclude_text\",\n    \"confidence\": 0.95,\n    \"reason\": \"The bounding box includes the complete large mouse illustration, excluding the Chinese labels below and the title text above.\"\n  }\n}\n```",
+  "clamped_draw_diagonal": {
+    "x1": 150,
+    "y1": 100,
+    "x2": 450,
+    "y2": 630
+  }
+}

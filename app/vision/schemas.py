@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -68,6 +69,8 @@ class VisionRegion:
     ocr_text: str = ""
     text_lines: list[str] = field(default_factory=list)
     possible_destinations: list[str] = field(default_factory=list)
+    anchor_relations: list[dict[str, Any]] = field(default_factory=list)
+    grounding_constraints: dict[str, Any] = field(default_factory=dict)
     confidence: float = 0.0
     layout_key: str = ""
     content_key: str = ""
@@ -85,6 +88,8 @@ class VisionRegion:
             "ocr_text": self.ocr_text,
             "text_lines": list(self.text_lines),
             "possible_destinations": list(self.possible_destinations),
+            "anchor_relations": copy.deepcopy(self.anchor_relations),
+            "grounding_constraints": copy.deepcopy(self.grounding_constraints),
             "confidence": float(self.confidence),
             "layout_key": self.layout_key,
             "content_key": self.content_key,

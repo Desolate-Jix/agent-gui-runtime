@@ -126,11 +126,11 @@ For the current phase, the project is intentionally:
 
 ## Current Progress Snapshot
 
-Last updated: 2026-05-13.
+Last updated: 2026-05-19.
 
 The project has moved from raw full-page visual coordinates toward an inspectable staged recognition MVP plus a gated execution bridge:
 
-`screenshot -> vision_regions_v1 + OCR -> page_structure_v1 -> screen_reading_v1 -> candidate_rank_v1 -> narrow_search_v1 -> pre_click_decision_v1`
+`screenshot -> OCR anchors -> vision_regions_v1 + OCR -> page_structure_v1 -> screen_reading_v1 -> candidate_rank_v1 -> narrow_search_v1 -> pre_click_decision_v1`
 
 Execution bridge:
 
@@ -142,8 +142,11 @@ Architecture map:
 
 Current verified status:
 
-- Local Qwen3-VL-style vision endpoint is reachable through the OpenAI-compatible local provider.
+- Local InternVL3.5/Qwen-style vision endpoints are reachable through the OpenAI-compatible local provider.
 - `POST /vision/recognition_plan` runs the full no-click recognition plan.
+- `POST /vision/recognition_plan` now builds `ocr_anchors_v1` before the vision call and passes all OCR text boxes to the local provider as spatial anchors for icon/button/card grounding unless `metadata.ocr_anchors.max_anchors` explicitly limits them.
+- OCR-anchor prompting is conservative: anchors are scaled into the provider inference coordinate space and compacted in the prompt as `id/t/b/c/s/g` fields, and if the anchored provider call fails the route retries once without anchors. The local multimodal server scripts use `-c 8192 --parallel 1` so full-page OCR anchors fit in one request.
+- `vision_regions_v1` now preserves `anchor_relations` and `grounding_constraints` per region, so the model must connect OCR anchors to bbox edges, center alignment, size expectations, and exclusion zones before finalizing coordinates.
 - `POST /vision/screen_reading` exposes a READ-facing UI layer with OCR-backed elements, visual-only UI candidates, module grouping, a connected Windows UIA scanner, a connected Microsoft Fluent System Icons catalog matcher, and reserved slots for future browser accessibility and learned-UI providers.
 - The Windows UIA scanner has passed a live Edge/MouseTester smoke and now tolerates unavailable pywinauto pattern descriptors during control enumeration.
 - `scripts/record_uia_smoke.py` can now record repeatable `uia_smoke_trace_v1` evidence and score expected UIA controls.
@@ -417,7 +420,7 @@ Key rules:
 
 The prompt template that enforces this output format now lives in `app/vision/prompting.py`.
 
-### Local Qwen3-VL backend
+### Local multimodal backend
 
 `app/vision/local_provider.py` can now call a local OpenAI-compatible multimodal chat endpoint instead of always returning stub data.
 
@@ -432,27 +435,38 @@ The default local configuration in `configs/vision.json` targets:
 
 ```json
 {
-  "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+  "timeout_seconds": 180,
+  "model_name": "InternVL3_5-8B-Q4_K_M.gguf",
   "endpoint": "http://127.0.0.1:1234/v1/chat/completions"
 }
 ```
 
-This matches the common LM Studio local server shape. For this machine class, prefer a 4-bit GGUF quantization of `Qwen3-VL-8B-Instruct`; keep RapidOCR/PaddleOCR enabled for text boxes and use Qwen3-VL for semantic screen understanding and `vision_regions_v1` JSON generation.
+This matches the common OpenAI-compatible local server shape. The active default is now `InternVL3_5-8B-Q4_K_M.gguf` through the existing llama.cpp server path. The previous Qwen3.6 27B files were removed after proving too slow for this local interactive GUI-recognition loop; the older Qwen3-VL 8B files remain as rollback assets.
 
 The checked local deployment uses:
 
-- `models/qwen3-vl-8b-instruct-gguf/Qwen3VL-8B-Instruct-Q4_K_M.gguf`
-- `models/qwen3-vl-8b-instruct-gguf/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf`
+- `models/internvl3_5-8b-gguf/InternVL3_5-8B-Q4_K_M.gguf`
+- `models/internvl3_5-8b-gguf/mmproj-model-f16.gguf`
+- rollback model: `models/qwen3-vl-8b-instruct-gguf/Qwen3VL-8B-Instruct-Q4_K_M.gguf`
+- rollback mmproj: `models/qwen3-vl-8b-instruct-gguf/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf`
 - `tools/llama.cpp-b8892-cuda13/llama-server.exe`
 
 Start and stop helpers:
 
 ```powershell
-.\scripts\serve_qwen3_vl_server.ps1
-.\scripts\stop_qwen3_vl_server.ps1
+.\scripts\serve_internvl3_5_server.ps1
+.\scripts\stop_local_vision_server.ps1
 ```
 
-`serve_qwen3_vl_server.ps1` runs in the foreground. Keep that terminal open while using `/vision/analyze`.
+`serve_internvl3_5_server.ps1` runs in the foreground when launched directly. Keep that terminal open while using `/vision/analyze`, or launch it in a hidden/background process and stop it with `stop_local_vision_server.ps1`.
+The local provider also requests JSON-object output and caps model output at 2048 tokens for the same reason.
+To test another OpenAI-compatible vision model or roll back to the old 8B model, pass explicit paths and keep `configs/vision.json` pointed at the same endpoint:
+
+```powershell
+.\scripts\serve_qwen3_vl_server.ps1 -ModelPath .\models\qwen3-vl-8b-instruct-gguf\Qwen3VL-8B-Instruct-Q4_K_M.gguf -MmprojPath .\models\qwen3-vl-8b-instruct-gguf\mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf -ContextSize 8192
+```
+
+Latest local InternVL3.5 smoke status: the server loads and `/v1/models` reports `InternVL3_5-8B-Q4_K_M.gguf`. A synthetic Start-button smoke returned one boxed region in about 6 seconds, but the bbox was vertically shifted. A MouseTester mouse-ROI smoke returned the mouse illustration in about 22 seconds, but the bbox captured the right half of the mouse rather than the full icon; adding OCR anchors did not improve that ROI box. Treat InternVL3.5 8B as runnable but not yet coordinate-trusted for execution.
 
 If no local vision server is running, `/vision/analyze` will fail with a connection error when this endpoint is configured. Set the endpoint back to `null` to use stub mode.
 
@@ -483,6 +497,9 @@ The design intent is:
 - `vision_regions_v1`
   - detailed learning layer
   - used for screenshot grounding, cropping, annotation, OCR text retention, and region matching
+- `ocr_anchors_v1`
+  - provider-prompt grounding hint layer
+  - gives the vision model OCR text boxes and centers as relative-position anchors for nearby visual controls
 - `page_structure_v1`
   - decision layer for the agent
   - used to describe executable elements, OCR-backed click points, verification hints, and memory keys
@@ -686,6 +703,15 @@ The project design now treats this as the planned MVP direction:
 The first candidate-ranking contract is available internally as `candidate_rank_v1` under `app/recognition/`.
 The no-click planning endpoint is now available as `POST /vision/recognition_plan`.
 It returns `recognition_plan_v1` with `parse_result`, `candidate_result`, `narrow_search_result`, `pre_click_decision`, `verification_plan`, and `recommended_target`.
+Before calling the vision provider, this endpoint can run OCR and attach `ocr_anchors_v1` to the provider prompt. The anchor payload includes all OCR text boxes by default, plus centers, confidence, and goal similarity, so the visual model can reason about nearby icons and surrounding controls by relative position. The prompt represents those anchors compactly as `id`, `t`, `b=[x,y,w,h]`, `c=[center_x,center_y]`, `s`, and `g` to keep full-page text coordinates affordable. If the provider rejects or fails the anchored prompt, the route falls back to the same request without anchors. Use `metadata.ocr_anchors.max_anchors` only when a smaller prompt is needed.
+The provider prompt also requires each returned region to include `anchor_relations` and `grounding_constraints`. `anchor_relations` records the OCR anchors and geometry involved, while `grounding_constraints` explains the reference frame, text-anchor frame, relative frame position, text inclusion policy, bbox edge constraints, center alignment, size expectations, negative/exclusion constraints, and final bbox reason. This makes drift easier to debug because a wrong box now carries inspectable coordinate evidence instead of only raw coordinates.
+
+The OCR-assisted grounding contract treats text boxes as boundary-line rulers:
+
+- For visual icons or illustrations without text inside, the model must set `text_inclusion_policy` to `exclude_text`, use nearby OCR boxes only as edge/alignment/negative constraints, report the icon's approximate fraction and position inside the text-anchor frame, and keep the final bbox away from OCR text boxes.
+- For controls where the visible target includes text, the model must set `text_inclusion_policy` to `include_referenced_text`, cite the OCR anchors, and return a bbox that includes those text boxes plus the visible control/icon pixels.
+
+`POST /vision/recognition_plan` now evaluates these constraints after provider normalization. It writes `grounding_constraints.grounding_evaluation` with referenced anchor ids, included/excluded anchor ids, any policy violations, the anchor-frame bbox, and an `anchor_corrected_bbox` suggestion when referenced text should have been included but was missed.
 Candidate ranking now preserves the original fused element bbox and may add `refined_bbox` when the element is tied to OCR `source_text_ids` and the OCR union produces a tighter box; when possible, refinement first uses the source OCR text that matches the current goal instead of unioning every line in the card. It also consumes `screen_reading_v1` evidence: UIA accessible names can improve goal text matching, and UIA/icon matches add `screen_reading_score` plus explicit candidate reasons. Blocked/ad-like interaction policy still wins, so screen-reading evidence cannot make a blocked target executable by itself.
 The first local search contract is available as `narrow_search_v1`; it crops the candidate `refined_bbox` when available, otherwise the original element bbox, runs local OCR on each crop, and maps matching local text centers back to full-image coordinates.
 The first pre-click verifier contract is available as `pre_click_decision_v1`; it rejects weak, blocked, ad-like, goal-mismatched, locally mismatched, or out-of-bounds candidates before any click is allowed, and uses `refined_bbox` for the bounds check when present.
