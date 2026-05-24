@@ -40,8 +40,8 @@ class VisionProviderFactory:
         cfg = config or VisionProviderFactory.load_config()
         vision_cfg = cfg.get("vision") or {}
         selected_mode = str(mode or vision_cfg.get("mode") or "local").strip().lower()
-        if selected_mode == "local":
-            local_cfg = vision_cfg.get("local") or {}
+        if selected_mode in {"local", "local_understanding", "local_grounding"}:
+            local_cfg = _select_local_config(vision_cfg, selected_mode)
             return LocalVisionProvider(
                 endpoint=local_cfg.get("endpoint"),
                 model_name=local_cfg.get("model_name"),
@@ -55,3 +55,11 @@ class VisionProviderFactory:
                 provider_name=api_cfg.get("provider"),
             )
         raise ValueError(f"Unsupported vision mode: {selected_mode}")
+
+
+def _select_local_config(vision_cfg: dict[str, Any], selected_mode: str) -> dict[str, Any]:
+    if selected_mode == "local_understanding":
+        return vision_cfg.get("local_understanding") or vision_cfg.get("local_small") or vision_cfg.get("local") or {}
+    if selected_mode == "local_grounding":
+        return vision_cfg.get("local_grounding") or vision_cfg.get("local_large") or vision_cfg.get("local") or {}
+    return vision_cfg.get("local") or {}

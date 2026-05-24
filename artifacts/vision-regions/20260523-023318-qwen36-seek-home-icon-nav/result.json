@@ -1,0 +1,66 @@
+{
+  "roi": {
+    "x": 140,
+    "y": 85,
+    "w": 900,
+    "h": 75
+  },
+  "bbox_roi": {
+    "x1": 61,
+    "y1": 13,
+    "x2": 270,
+    "y2": 55
+  },
+  "bbox_window": {
+    "x1": 201,
+    "y1": 98,
+    "x2": 410,
+    "y2": 140
+  },
+  "manual_window_bbox_approx": {
+    "x1": 166,
+    "y1": 97,
+    "x2": 273,
+    "y2": 134
+  },
+  "iou_approx": 0.2555,
+  "click_point_window": {
+    "x": 306,
+    "y": 119
+  },
+  "elapsed_sec": 17.422,
+  "raw_content": "```json\n[\n\t{\"bbox_2d\": [68, 170, 300, 730], \"label\": \"homepage navigation logo: the blue circular dotted SEEK icon plus the adjacent black 'seek' wordmark at the left side of the navigation bar.\"}\n]\n```",
+  "raw_obj": [
+    {
+      "bbox_2d": [
+        68,
+        170,
+        300,
+        730
+      ],
+      "label": "homepage navigation logo: the blue circular dotted SEEK icon plus the adjacent black 'seek' wordmark at the left side of the navigation bar."
+    }
+  ],
+  "usage": {
+    "completion_tokens": 69,
+    "prompt_tokens": 1231,
+    "total_tokens": 1300,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    }
+  },
+  "timings": {
+    "cache_n": 0,
+    "prompt_n": 1231,
+    "prompt_ms": 14436.714,
+    "prompt_per_token_ms": 11.727631194151096,
+    "prompt_per_second": 85.26871142560559,
+    "predicted_n": 69,
+    "predicted_ms": 2900.332,
+    "predicted_per_token_ms": 42.033797101449274,
+    "predicted_per_second": 23.79037985996086
+  },
+  "roi_image": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260523-023318-qwen36-seek-home-icon-nav\\seek-navbar-logo-roi.png",
+  "annotated_full": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260523-023318-qwen36-seek-home-icon-nav\\seek-home-icon-qwen36-annotated.png",
+  "annotated_roi": "D:\\agent-gui-runtime\\artifacts\\vision-regions\\20260523-023318-qwen36-seek-home-icon-nav\\seek-navbar-logo-roi-annotated.png"
+}

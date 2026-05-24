@@ -272,6 +272,21 @@ def test_prompt_builder_includes_all_ocr_anchors_without_truncation() -> None:
     assert '"t":"Text 29"' in prompt
 
 
+def test_prompt_builder_includes_custom_prompt_rules() -> None:
+    prompt = build_region_analysis_prompt(
+        VisionAnalyzeRequest(
+            image_path="screen.png",
+            task="click_target",
+            goal="find home icon",
+            metadata={"prompt_overrides": {"additional_rules": "Prefer the leftmost logo mark in the navigation bar."}},
+        ),
+        ImageSize(width=800, height=600),
+    )
+
+    assert "Additional user-configured grounding rules" in prompt
+    assert "Prefer the leftmost logo mark in the navigation bar." in prompt
+
+
 def test_normalizer_skips_non_object_region_target_and_observer_items() -> None:
     normalizer = VisionResultNormalizer()
 

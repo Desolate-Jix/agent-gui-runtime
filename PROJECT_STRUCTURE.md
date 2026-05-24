@@ -63,6 +63,25 @@ Use it when you need to answer:
   - binds a target window, collects a Windows UIA snapshot, writes a `uia_smoke_trace_v1` trace, and scores it
   - default target is MouseTester.cn in Microsoft Edge
   - writes JSON reports under `logs/evaluations/`
+- `scripts/settings_panel.py`
+  - thin launcher for the modular Tkinter desktop settings panel in `app/settings_panel/`
+
+### Desktop settings panel
+
+- `app/settings_panel/`
+  - modular bilingual desktop control surface for stage-by-stage runtime testing
+  - keeps the left sidebar aligned with the agent workflow: workflow diagram, app discovery, open/bind, screenshot capture, whole-screen understanding, precise localization, and dry-run gated clicking
+  - each stage page exposes the parameters for that stage API and shows returned JSON on the same screen through the fixed response panel
+  - keeps local/API model configuration on a bottom sidebar gear page
+  - supports two local model profiles in `configs/vision.json`: `local_understanding` for small-model screen understanding and `local_grounding` for large-model precise localization
+- `app/settings_panel/desktop.py`
+  - Tkinter shell, page composition, workflow diagram, and API button handlers
+- `app/settings_panel/api_client.py`
+  - stdlib HTTP client for the local FastAPI runtime
+- `app/settings_panel/config_store.py`
+  - paths and JSON load/save helpers for `configs/vision.json`, `configs/settings_panel.json`, and panel artifacts
+- `app/settings_panel/i18n.py`
+  - Chinese/English labels for the panel UI
 
 ### Project memory and takeover docs
 
@@ -78,6 +97,8 @@ Use it when you need to answer:
   - recovered implementation knowledge
 - `ACCURACY_EVALUATION_STANDARD.md`
   - stage-by-stage completion rubric, accuracy thresholds, and optimization workflow
+- `AGENT_API_WORKFLOW.md`
+  - required API-first workflow for upper-layer agents, including endpoint order, request/response shapes, OCR-anchor prompt handoff, and gated click decision rules
 - `RUNTIME_STATE_GRAPH.md`
   - English design/reference doc for runtime state graph growth and reuse
 - `RUNTIME_STATE_GRAPH.zh-CN.md`
@@ -96,6 +117,14 @@ Use it when you need to answer:
 
 ### API routes
 
+- `app/api/apps.py`
+  - `GET /apps`
+  - `POST /apps/open`
+  - responsibility:
+    - expose `app_discovery_v1` with configured launchable apps, visible windows, current bound window, and agent next-step hints
+    - launch catalog apps from `configs/app_catalog.json`
+    - optionally bind the launched app window
+
 - `app/api/session.py`
   - `GET /session/windows`
   - `POST /session/bind_window`
@@ -111,6 +140,8 @@ Use it when you need to answer:
   - `POST /vision/analyze`
   - `POST /vision/page_structure`
   - `POST /vision/screen_reading`
+  - `POST /vision/observe_screen`
+  - `POST /vision/locate_target`
   - `POST /vision/recognition_plan`
   - `POST /vision/layer_trace`
   - `POST /vision/render_review_overlay`
@@ -121,6 +152,8 @@ Use it when you need to answer:
     - normalize learned regions
     - fuse semantic regions with OCR text boxes into `page_structure_v1`
     - build `screen_reading_v1` as the READ-facing UI layer, including connected Windows UIA and Microsoft Fluent icon providers plus reserved browser/learned-UI provider slots
+    - expose `screen_observation_v1` as the agent-facing broad screen-understanding step before target choice
+    - expose `target_location_v1` as the no-click precise target localization step before gated action execution
     - return a no-click staged recognition plan with ranked candidates, including bounded screen-reading rank evidence
     - expose a test/debug trace that shows every layer result and schema validation
     - redraw region/OCR boxes on the original screenshot for human review
@@ -249,6 +282,7 @@ Key files:
   - includes optional `ocr_anchors_v1` guidance so the model can use OCR text boxes as relative-position anchors for nearby visual controls
   - compacts OCR anchors for the prompt as `id/t/b/c/s/g` while preserving all text boxes and coordinates
   - requires `anchor_relations` and `grounding_constraints` so each returned region records which OCR anchors constrained its bbox and how those anchors set edges, centers, size, exclusions, text-anchor frame, relative frame position, and text inclusion policy
+  - appends `metadata.prompt_overrides.additional_rules` when the settings panel or an agent supplies extra grounding rules
 - `ocr_anchors.py`
   - builds compact OCR anchor payloads from `OCRResult`
   - sorts anchors by goal similarity and confidence
@@ -619,6 +653,19 @@ Used by:
 
 ## configs/
 
+### `configs/app_catalog.json`
+
+Current purpose:
+
+- list launchable apps for `GET /apps`
+- define each app's `app_id`, display name, launch command, process/title binding hints, and capability tags
+- let an upper-layer agent discover what local software can be opened before it decides how to act
+
+Current entries:
+
+- `edge`
+- `notepad`
+
 ### `configs/vision.json`
 
 Current purpose:
@@ -639,9 +686,8 @@ Current shape:
 Current reality:
 
 - local and API provider entries exist
-- local defaults target `InternVL3_5-8B-Q4_K_M.gguf` through `http://127.0.0.1:1234/v1/chat/completions`
-- local default provider timeout is `180` seconds for the current InternVL3.5 8B GGUF default
-- the previous `Qwen3VL-8B-Instruct-Q4_K_M.gguf` deployment remains on disk and can be used by passing explicit `-ModelPath` and `-MmprojPath`; the Qwen3.6 27B files were deleted after proving too slow for the local interactive loop
+- local defaults target `Qwen-Qwen3.6-35B-A3B-IQ4_XS.gguf` through `http://127.0.0.1:1234/v1/chat/completions`
+- local default provider timeout is `180` seconds for the current qwen3.6 IQ4_XS GGUF baseline
 - full-page stability is now improved in provider code through inference scaling plus compact retry fallback
 - local deployment assets are stored under ignored `models/` and `tools/` directories
 - API provider remains a stub unless replaced with a real endpoint
@@ -650,7 +696,7 @@ Current reality:
 
 Current status:
 
-- no additional config subdirectories are present in the repo right now
+- `configs/settings_panel.json` may be created by `scripts/settings_panel.py` to persist the desktop panel's runtime base URL, selected workflow mode, language, and prompt override text
 - older ROI/scene/template config ideas are not part of the active mainline runtime path
 
 ## logs/
@@ -666,6 +712,9 @@ Important runtime persistence paths:
 
 - `artifacts/vision-regions/`
   - annotated screenshots, crops, and `regions.json` manifests
+
+- `artifacts/settings-panel/`
+  - desktop settings panel manual-box overlays and review images
 
 - `artifacts/review-overlays/`
   - human-review overlay images rendered from saved traces

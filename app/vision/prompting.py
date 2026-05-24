@@ -39,6 +39,7 @@ def build_region_analysis_prompt(
 - report coordinates against the original screenshot pixels, not grid cell indexes
 """.rstrip()
     ocr_anchor_rules = _ocr_anchor_rules(req)
+    custom_rules = _custom_prompt_rules(req)
     return f"""
 You are analyzing a GUI screenshot for a local desktop agent runtime.
 
@@ -99,6 +100,7 @@ Region rules:
 {compact_rules}
 {grid_rules}
 {ocr_anchor_rules}
+{custom_rules}
 """.strip()
 
 
@@ -160,3 +162,18 @@ def _compact_anchor_for_prompt(anchor: object) -> dict[str, object]:
         "s": anchor.get("confidence"),
         "g": anchor.get("goal_similarity"),
     }
+
+
+def _custom_prompt_rules(req: VisionAnalyzeRequest) -> str:
+    metadata = req.metadata or {}
+    raw_overrides = metadata.get("prompt_overrides")
+    if not isinstance(raw_overrides, dict):
+        return ""
+    additional_rules = str(raw_overrides.get("additional_rules") or "").strip()
+    if not additional_rules:
+        return ""
+    return f"""
+
+Additional user-configured grounding rules:
+{additional_rules}
+""".rstrip()

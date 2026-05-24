@@ -1,0 +1,8 @@
+{
+  "runtime_base_url": "http://127.0.0.1:8000",
+  "mode": "local_flow",
+  "language": "zh-CN",
+  "prompt_overrides": {
+    "additional_rules": "For navigation icons, first identify nearby OCR text boxes as boundary rulers. Do not include adjacent navigation labels unless they are part of the target."
+  }
+}

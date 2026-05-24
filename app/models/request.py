@@ -21,6 +21,17 @@ class BindWindowRequest(BaseModel):
     title: Optional[str] = None
 
 
+class OpenAppRequest(BaseModel):
+    """Request model for opening an application from the runtime app catalog."""
+
+    app_id: Optional[str] = None
+    command: Optional[list[str]] = None
+    process_name: Optional[str] = None
+    title: Optional[str] = None
+    bind_after_open: bool = True
+    wait_seconds: float = Field(default=1.5, ge=0.0, le=10.0)
+
+
 class CaptureWindowRequest(BaseModel):
     """Request model for capturing the currently bound window."""
 
@@ -102,6 +113,32 @@ class VisionRecognitionPlanRequestModel(VisionAnalyzeRequestModel):
     """Request model for no-click staged recognition planning."""
 
     top_k: int = Field(default=5, ge=1, le=20)
+
+
+class VisionObserveScreenRequestModel(BaseModel):
+    """Request model for capturing and understanding the current bound screen."""
+
+    task: str = Field(default="observe_screen", min_length=1)
+    app_name: Optional[str] = None
+    state_hint: Optional[str] = None
+    provider_mode: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    capture_live: bool = True
+    image_path: Optional[str] = None
+
+
+class VisionLocateTargetRequestModel(BaseModel):
+    """Request model for precise no-click target localization."""
+
+    goal: str = Field(min_length=1)
+    task: str = Field(default="click_target", min_length=1)
+    app_name: Optional[str] = None
+    state_hint: Optional[str] = None
+    provider_mode: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    top_k: int = Field(default=5, ge=1, le=20)
+    capture_live: bool = True
+    image_path: Optional[str] = None
 
 
 class VisionReviewOverlayRequestModel(BaseModel):

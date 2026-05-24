@@ -10,6 +10,8 @@ from app.core.runtime_artifacts import write_trace
 from app.core.screenshot import screenshot_service
 from app.models.request import (
     VisionAnalyzeRequestModel,
+    VisionLocateTargetRequestModel,
+    VisionObserveScreenRequestModel,
     VisionRecognitionPlanOverlayRequestModel,
     VisionRecognitionPlanRequestModel,
     VisionReviewOverlayRequestModel,
@@ -150,6 +152,21 @@ def _vision_request_without_ocr_anchors(request: VisionRecognitionPlanRequestMod
         provider_mode=request.provider_mode,
         metadata=metadata,
     )
+
+
+def _image_path_for_live_or_saved(
+    *,
+    capture_live: bool,
+    image_path: str | None,
+    purpose: str,
+    app_name: str | None = None,
+) -> tuple[str, dict | None]:
+    if capture_live:
+        capture = screenshot_service.capture_window(save_image=True, purpose=purpose, name_hint=app_name or purpose)
+        return str(Path(str(capture["image_path"])).resolve()), capture
+    if image_path:
+        return image_path, None
+    raise ValueError("Provide image_path or set capture_live=true")
 
 
 @router.post("/ocr_region", response_model=APIResponse)
@@ -394,6 +411,132 @@ def screen_reading(request: VisionAnalyzeRequestModel) -> APIResponse:
             message="Screen reading failed",
             data={"trace_path": trace_path},
             error=ErrorModel(code="screen_reading_failed", details=str(exc)),
+        )
+
+
+@router.post("/observe_screen", response_model=APIResponse)
+def observe_screen(request: VisionObserveScreenRequestModel) -> APIResponse:
+    """Capture or read a screen and return broad UI understanding for agent planning."""
+    try:
+        image_path, live_capture = _image_path_for_live_or_saved(
+            capture_live=request.capture_live,
+            image_path=request.image_path,
+            purpose="observe_screen",
+            app_name=request.app_name,
+        )
+        screen_request = VisionAnalyzeRequestModel(
+            image_path=image_path,
+            task=request.task,
+            app_name=request.app_name,
+            goal="understand the current interface, visible controls, and likely actions",
+            state_hint=request.state_hint,
+            provider_mode=request.provider_mode or "local_understanding",
+            metadata={
+                **dict(request.metadata or {}),
+                "ocr_anchors": {"enabled": True, "max_anchors": "all", **dict((request.metadata or {}).get("ocr_anchors") or {})}
+                if isinstance((request.metadata or {}).get("ocr_anchors"), dict)
+                else (request.metadata or {}).get("ocr_anchors", {"enabled": True, "max_anchors": "all"}),
+            },
+        )
+        response = screen_reading(screen_request)
+        if not response.success or not response.data:
+            return response
+        result = response.data["result"]
+        result["contract_version"] = "screen_observation_v1"
+        result["live_capture"] = live_capture
+        result["agent_next_steps"] = [
+            "Read screen_reading.ui.elements and ui.icon_candidates to decide what the user likely wants.",
+            "When a concrete target is chosen, call POST /vision/locate_target with that goal.",
+            "Execute only through POST /action/execute_recognition_plan after pre_click_decision allows it.",
+        ]
+        result["trace_path"] = write_trace(
+            category="vision",
+            operation="observe_screen",
+            payload={"success": True, "request": request.model_dump(), "result": result},
+            name_hint=request.app_name or Path(image_path).stem,
+        )
+        data = VisionResultData(result=result)
+        return APIResponse(success=True, message="Screen observation completed", data=data.model_dump(), error=None)
+    except Exception as exc:
+        trace_path = write_trace(
+            category="vision",
+            operation="observe_screen",
+            payload={"success": False, "request": request.model_dump(), "error": str(exc)},
+            name_hint=request.app_name or "observe_screen",
+        )
+        return APIResponse(
+            success=False,
+            message="Screen observation failed",
+            data={"trace_path": trace_path},
+            error=ErrorModel(code="observe_screen_failed", details=str(exc)),
+        )
+
+
+@router.post("/locate_target", response_model=APIResponse)
+def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
+    """Precisely locate a chosen target without clicking."""
+    try:
+        image_path, live_capture = _image_path_for_live_or_saved(
+            capture_live=request.capture_live,
+            image_path=request.image_path,
+            purpose="locate_target",
+            app_name=request.app_name,
+        )
+        plan_request = VisionRecognitionPlanRequestModel(
+            image_path=image_path,
+            task=request.task,
+            app_name=request.app_name,
+            goal=request.goal,
+            state_hint=request.state_hint,
+            provider_mode=request.provider_mode or "local_grounding",
+            metadata={
+                **dict(request.metadata or {}),
+                "ocr_anchors": {"enabled": True, "max_anchors": "all", **dict((request.metadata or {}).get("ocr_anchors") or {})}
+                if isinstance((request.metadata or {}).get("ocr_anchors"), dict)
+                else (request.metadata or {}).get("ocr_anchors", {"enabled": True, "max_anchors": "all"}),
+            },
+            top_k=request.top_k,
+        )
+        response = recognition_plan(plan_request)
+        if not response.success or not response.data:
+            return response
+        result = response.data["result"]
+        locate_result = {
+            "contract_version": "target_location_v1",
+            "goal": request.goal,
+            "image_path": image_path,
+            "live_capture": live_capture,
+            "recognition_plan": result,
+            "pre_click_decision": result.get("pre_click_decision"),
+            "selected_click_point": ((result.get("pre_click_decision") or {}).get("selected_click_point")),
+            "recommended_target": result.get("recommended_target"),
+            "execution_path": {
+                **dict(result.get("execution_path") or {}),
+                "action_executed": False,
+                "coordinate_source": "pre_click_decision_v1.selected_click_point",
+                "agent_must_call_for_click": "POST /action/execute_recognition_plan",
+            },
+        }
+        locate_result["trace_path"] = write_trace(
+            category="vision",
+            operation="locate_target",
+            payload={"success": True, "request": request.model_dump(), "result": locate_result},
+            name_hint=request.app_name or Path(image_path).stem,
+        )
+        data = VisionResultData(result=locate_result)
+        return APIResponse(success=True, message="Target located", data=data.model_dump(), error=None)
+    except Exception as exc:
+        trace_path = write_trace(
+            category="vision",
+            operation="locate_target",
+            payload={"success": False, "request": request.model_dump(), "error": str(exc)},
+            name_hint=request.app_name or "locate_target",
+        )
+        return APIResponse(
+            success=False,
+            message="Target location failed",
+            data={"trace_path": trace_path},
+            error=ErrorModel(code="locate_target_failed", details=str(exc)),
         )
 
 

@@ -1,0 +1,23 @@
+{
+  "contract_version": "app_catalog_v1",
+  "apps": [
+    {
+      "app_id": "edge",
+      "name": "Microsoft Edge",
+      "description": "Web browser for website and web-app tasks.",
+      "launch_command": ["msedge.exe"],
+      "process_name": "msedge.exe",
+      "title_hint": "Microsoft Edge",
+      "capabilities": ["open_url", "web_navigation", "web_forms", "browser_ui"]
+    },
+    {
+      "app_id": "notepad",
+      "name": "Notepad",
+      "description": "Plain text editor for simple local text editing tasks.",
+      "launch_command": ["notepad.exe"],
+      "process_name": "notepad.exe",
+      "title_hint": "Notepad",
+      "capabilities": ["text_editing", "file_text_review"]
+    }
+  ]
+}

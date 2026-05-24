@@ -7,6 +7,14 @@
       "model_name": "Qwen-Qwen3.6-35B-A3B-IQ4_XS.gguf",
       "endpoint": "http://127.0.0.1:1234/v1/chat/completions"
     },
+    "local_understanding": {
+      "model_name": "small_screen_understanding_model",
+      "endpoint": "http://127.0.0.1:1234/v1/chat/completions"
+    },
+    "local_grounding": {
+      "model_name": "Qwen-Qwen3.6-35B-A3B-IQ4_XS.gguf",
+      "endpoint": "http://127.0.0.1:1234/v1/chat/completions"
+    },
     "api": {
       "provider": "api_stub",
       "model": "api_stub",

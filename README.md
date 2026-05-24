@@ -14,6 +14,7 @@ Expected sync targets in this repo:
 - `PROJECT_SUMMARY.md`
 - `CURRENT_STATE.md`
 - `NEXT_STEPS.md`
+- `AGENT_API_WORKFLOW.md`
 - `PROJECT_STRUCTURE.md`
 - `PROJECT_CONTEXT.md`
 - `RULES.md`
@@ -118,7 +119,7 @@ For the current phase, the project is intentionally:
 - local-only HTTP API
 - vision-first
 - single-session
-- no frontend
+- no web frontend; a draft desktop workflow test panel is available under `scripts/settings_panel.py`
 - file-based persistence under `logs/` and `artifacts/`
 - software-specific before software-general
 
@@ -126,7 +127,7 @@ For the current phase, the project is intentionally:
 
 ## Current Progress Snapshot
 
-Last updated: 2026-05-23.
+Last updated: 2026-05-24.
 
 The project has moved from raw full-page visual coordinates toward an inspectable staged recognition MVP plus a gated execution bridge:
 
@@ -149,6 +150,10 @@ Current verified status:
 - OCR-anchor prompting is conservative: anchors are scaled into the provider inference coordinate space and compacted in the prompt as `id/t/b/c/s/g` fields, and if the anchored provider call fails the route retries once without anchors. The local multimodal server scripts use `-c 8192 --parallel 1` so full-page OCR anchors fit in one request.
 - `vision_regions_v1` now preserves `anchor_relations` and `grounding_constraints` per region, so the model must connect OCR anchors to bbox edges, center alignment, size expectations, and exclusion zones before finalizing coordinates.
 - `POST /vision/screen_reading` exposes a READ-facing UI layer with OCR-backed elements, visual-only UI candidates, module grouping, a connected Windows UIA scanner, a connected Microsoft Fluent System Icons catalog matcher, and reserved slots for future browser accessibility and learned-UI providers.
+- `GET /apps` returns an app catalog, visible windows, current bound window, and agent next-step hints so an agent can discover what software exists and what each app can do before acting.
+- `POST /apps/open` launches a catalog app such as Edge or Notepad and can bind the resulting window.
+- `POST /vision/observe_screen` captures or reads the current screen and returns `screen_observation_v1`, a broad UI understanding layer for agent planning before target-specific localization. The desktop panel sends this through `provider_mode: local_understanding`, intended for the smaller whole-screen understanding model.
+- `POST /vision/locate_target` returns `target_location_v1`, a precise no-click target localization wrapper around the recognition plan; the agent must still execute only through `POST /action/execute_recognition_plan`. The desktop panel sends this through `provider_mode: local_grounding`, intended for the larger precise localization model.
 - The Windows UIA scanner has passed a live Edge/MouseTester smoke and now tolerates unavailable pywinauto pattern descriptors during control enumeration.
 - `scripts/record_uia_smoke.py` can now record repeatable `uia_smoke_trace_v1` evidence and score expected UIA controls.
 - `POST /vision/recognition_plan` now builds `screen_reading_v1` inside the planning path and passes its UIA/icon evidence into `candidate_rank_v1`.
@@ -158,6 +163,7 @@ Current verified status:
 - Candidate ranking preserves original element geometry, adds optional `refined_bbox` from goal-matching OCR text when that evidence is tighter, and uses `screen_reading_v1` accessible-name/provider evidence as a bounded ranking signal.
 - Local grounding crops the refined candidate ROI, reruns OCR, and maps the matched text center back to full-screen coordinates.
 - Pre-click verification rejects blocked, ad-like, goal-mismatched, locally mismatched, ambiguous-margin, or out-of-bounds candidates before any action execution is attached.
+- A draft modular desktop workflow test panel is available through `uv run python scripts/settings_panel.py`. The launcher delegates to `app/settings_panel/`, which separates HTTP calls, config persistence, i18n, and UI code. The left sidebar now follows the actual agent workflow: workflow diagram, app discovery, open/bind, screenshot capture, whole-screen understanding, precise localization, and dry-run gated execution. Model/API configuration stays on the bottom sidebar gear page. Every stage page exposes the API parameters for that stage and shows returned JSON in the same screen through a fixed response panel. The panel supports Chinese/English switching from a single top-right toggle, can edit `configs/vision.json`, capture screenshots, generate manual review boxes, render overlays, and pass user-configured grounding rules into the vision prompt through `metadata.prompt_overrides.additional_rules`. Local vision config is split into `local_understanding` for the smaller screen-understanding model and `local_grounding` for the larger precise-localization model.
 
 Latest real MouseTester evidence:
 
@@ -409,6 +415,8 @@ Most action and vision results now also include:
   - says what coordinate source was used
 - `trace_path`
   - points to a structured JSON trace file under `logs/traces/`
+
+For the exact agent-facing API call order, request bodies, response fields, OCR-anchor prompt handoff, and final click decision rules, see [`AGENT_API_WORKFLOW.md`](./AGENT_API_WORKFLOW.md). Upper-layer agents should treat that document as the required API workflow: bind a window, build a dry-run recognition plan with OCR anchors, inspect `pre_click_decision_v1`, and execute only through `POST /action/execute_recognition_plan`.
 
 ## Vision region contract
 
@@ -926,10 +934,14 @@ The remaining high-value work is end-to-end runtime verification with a real bou
 - `GET /session/windows`
 - `GET /state`
 - `POST /state/capture_window`
+- `GET /apps`
+- `POST /apps/open`
 - `POST /vision/ocr_region`
 - `POST /vision/analyze`
 - `POST /vision/page_structure`
 - `POST /vision/screen_reading`
+- `POST /vision/observe_screen`
+- `POST /vision/locate_target`
 - `POST /vision/recognition_plan`
 - `POST /vision/layer_trace`
 - `POST /vision/render_review_overlay`
