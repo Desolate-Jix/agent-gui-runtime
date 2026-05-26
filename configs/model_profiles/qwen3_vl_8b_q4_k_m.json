@@ -1,0 +1,23 @@
+{
+  "profile_id": "qwen3_vl_8b_q4_k_m",
+  "label": "Qwen3-VL 8B Q4_K_M",
+  "role": ["understanding"],
+  "provider_mode": "local_understanding",
+  "input_format": "openai_compatible_vision",
+  "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+  "model_path": "models/qwen3-vl-8b-instruct-q4_k_m-gguf/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+  "mmproj_path": "models/qwen3-vl-8b-instruct-q4_k_m-gguf/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf",
+  "server_path": "tools/llama.cpp-b8892-cuda13/llama-server.exe",
+  "endpoint": "http://127.0.0.1:1240/v1/chat/completions",
+  "start_script": "scripts/model_servers/start_llama_vision_server.ps1",
+  "stop_script": "scripts/model_servers/stop_local_vision_server.ps1",
+  "pid_file": "logs/qwen3-vl-8b-q4_k_m-server.pid",
+  "port": 1240,
+  "context_size": 8192,
+  "gpu_layers": 99,
+  "image_min_tokens": 1024,
+  "supports_ocr_anchors": true,
+  "launchable": true,
+  "best_for": "Faster whole-screen UI understanding before precise grounding.",
+  "limitations": "Use as a planning and screen-understanding model; keep Qwen3.6 for final precise localization."
+}

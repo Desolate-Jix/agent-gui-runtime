@@ -13,6 +13,20 @@ def build_region_analysis_prompt(
     max_regions: int = 8,
     grid_overlay_spacing: int | None = None,
 ) -> str:
+    if req.task == "observe_screen":
+        return _build_screen_observation_prompt(
+            req,
+            image_size,
+            max_regions=max_regions,
+            grid_overlay_spacing=grid_overlay_spacing,
+        )
+    if req.task == "click_target":
+        return _build_precise_target_prompt(
+            req,
+            image_size,
+            grid_overlay_spacing=grid_overlay_spacing,
+        )
+
     app_name = req.app_name or "unknown_app"
     goal = req.goal or "understand the current screenshot and prepare local learning data"
     state_hint = req.state_hint or "unknown"
@@ -104,6 +118,163 @@ Region rules:
 """.strip()
 
 
+def _build_precise_target_prompt(
+    req: VisionAnalyzeRequest,
+    image_size: ImageSize,
+    *,
+    grid_overlay_spacing: int | None,
+) -> str:
+    app_name = req.app_name or "unknown_app"
+    goal = req.goal or "locate the requested target"
+    state_hint = req.state_hint or "unknown"
+    grid_rules = ""
+    if grid_overlay_spacing is not None:
+        grid_rules = (
+            f"- A light coordinate grid is visible with major grid spacing of {grid_overlay_spacing} pixels; "
+            "use it only as secondary coordinate evidence.\n"
+        )
+    anchor_reference = _ocr_precision_reference(req)
+    custom_rules = _custom_prompt_rules(req)
+    return f"""
+You are the precise target-localization stage for a desktop automation agent.
+Return valid JSON only. Locate only the requested target; do not enumerate other controls.
+
+Input:
+- app_name: {app_name}
+- goal: {goal}
+- state_hint: {state_hint}
+- image_size: {{"width": {image_size.width}, "height": {image_size.height}}}
+- coordinates are image pixels and diagonal is {{"x1": left, "y1": top, "x2": right, "y2": bottom}}
+
+Required JSON:
+{{
+  "contract_version": "vision_regions_v1",
+  "image_size": {{"width": {image_size.width}, "height": {image_size.height}}},
+  "screen_summary": "short context",
+  "state_guess": "short state",
+  "regions": [
+    {{
+      "region_id": "target_1",
+      "label": "target label",
+      "role": "icon|button|input|tab|nav|other",
+      "diagonal": {{"x1": 0, "y1": 0, "x2": 1, "y2": 1}},
+      "description": "why this is the requested target",
+      "ocr_text": "",
+      "text_lines": [],
+      "possible_destinations": [],
+      "anchor_relations": [],
+      "grounding_constraints": {{
+        "reference_frame": "smallest containing UI area",
+        "text_inclusion_policy": "exclude_text|include_referenced_text",
+        "text_anchor_frame": {{}},
+        "relative_frame_position": {{}},
+        "edge_constraints": {{"top": "", "bottom": "", "left": "", "right": ""}},
+        "center_constraints": {{}},
+        "size_constraints": {{}},
+        "negative_constraints": [],
+        "final_bbox_reason": "reason"
+      }},
+      "confidence": 0.0
+    }}
+  ],
+  "targets": [],
+  "observers": [],
+  "notes": []
+}}
+
+Rules:
+- Return exactly one best target region, or an empty regions list if the target cannot be reliably located.
+- First decide whether the target is a visual-only icon or a clickable control whose visible surface includes text.
+- For a visual-only icon, set text_inclusion_policy="exclude_text"; use nearby OCR boxes as boundary rulers only, and tightly cover the icon pixels without nearby label text.
+- For a text-bearing control, set text_inclusion_policy="include_referenced_text"; its diagonal must include the referenced visible text and clickable surface.
+- Cite only supplied OCR anchor ids in anchor_relations and text_anchor_frame. Never invent an anchor id.
+- Explain top, bottom, left, and right bbox edges in edge_constraints, plus useful center, size, exclusion, and final_bbox reasoning.
+- Keep labels and descriptions short and do not output unrelated buttons or text.
+{grid_rules}{anchor_reference}
+{custom_rules}
+""".strip()
+
+
+def _build_screen_observation_prompt(
+    req: VisionAnalyzeRequest,
+    image_size: ImageSize,
+    *,
+    max_regions: int,
+    grid_overlay_spacing: int | None,
+) -> str:
+    app_name = req.app_name or "unknown_app"
+    state_hint = req.state_hint or "unknown"
+    grid_rules = ""
+    if grid_overlay_spacing is not None and grid_overlay_spacing > 0:
+        grid_rules = f"""
+- a coordinate grid is visible with {int(grid_overlay_spacing)} pixel spacing; use it only to estimate candidate diagonals
+""".rstrip()
+    ocr_reference = _ocr_observation_reference(req)
+    custom_rules = _custom_prompt_rules(req)
+    return f"""
+You are the fast screen-understanding stage for a desktop automation agent.
+
+Goal:
+- briefly identify what the interface is for
+- return a short index of visible controls the agent may choose to locate precisely later
+- do not perform precise target grounding or choose a click
+
+Screenshot:
+- app_name: {app_name}
+- state_hint: {state_hint}
+- coordinate size: width={image_size.width}, height={image_size.height}
+- diagonals use pixel integers: {{"x1": left, "y1": top, "x2": right, "y2": bottom}}
+
+Return JSON only with this compact shape:
+{{
+  "contract_version": "vision_regions_v1",
+  "image_size": {{"width": {image_size.width}, "height": {image_size.height}}},
+  "screen_summary": "short purpose",
+  "state_guess": "short state",
+  "regions": [
+    {{"region_id": "c1", "label": "visible label or icon name", "role": "button|icon|input|tab|nav|menu_item|link|toggle|other", "diagonal": {{"x1": 0, "y1": 0, "x2": 1, "y2": 1}}, "description": "likely action", "confidence": 0.0}}
+  ],
+  "targets": [],
+  "observers": [],
+  "notes": []
+}}
+
+Rules:
+- return at most {max_regions} independently clickable candidate controls, not large containing panels
+- prioritize navigation, icon-only buttons, primary buttons, tabs, inputs, toggles, menus, and title-bar controls
+- keep screen_summary and state_guess under 12 words each
+- keep label and description short; description is at most 6 words
+- do not emit ocr_text, text_lines, possible_destinations, anchor_relations, or grounding_constraints
+- do not repeat OCR anchors or their coordinates in the response; the runtime already owns them
+- for text controls, bbox may include the visible clickable label; for icon-only controls, bbox should cover only the icon pixels
+- if a control is uncertain, include it with lower confidence instead of explaining uncertainty at length
+{grid_rules}
+{ocr_reference}
+{custom_rules}
+""".strip()
+
+
+def _ocr_precision_reference(req: VisionAnalyzeRequest) -> str:
+    metadata = req.metadata or {}
+    payload = metadata.get("ocr_anchors")
+    if not isinstance(payload, dict):
+        return ""
+    anchors = payload.get("anchors") or []
+    if not isinstance(anchors, list) or not anchors:
+        return ""
+    compact_payload = {
+        "coordinate_space": payload.get("coordinate_space") or "current_image",
+        "anchor_count": int(payload.get("anchor_count") or len(anchors)),
+        "anchors": [_compact_anchor_for_prompt(anchor) for anchor in anchors],
+    }
+    anchor_json = json.dumps(compact_payload, ensure_ascii=False, separators=(",", ":"))
+    return f"""
+OCR anchors are read-only geometric evidence in the same image coordinates.
+Compact fields are id/text/bbox/center/score/goal_similarity as id/t/b/c/s/g.
+OCR anchor payload: {anchor_json}
+""".rstrip()
+
+
 def _ocr_anchor_rules(req: VisionAnalyzeRequest) -> str:
     metadata = req.metadata or {}
     payload = metadata.get("ocr_anchors")
@@ -138,6 +309,29 @@ OCR anchor hints:
 - do not invent text that is not visible; if an anchor helps identify a visual-only icon, explain the relation in anchor_relations and description
 - if the screenshot pixels and OCR anchors conflict, prefer the screenshot and keep confidence lower
 - OCR anchor payload: {anchor_json}
+""".rstrip()
+
+
+def _ocr_observation_reference(req: VisionAnalyzeRequest) -> str:
+    metadata = req.metadata or {}
+    payload = metadata.get("ocr_anchors")
+    if not isinstance(payload, dict):
+        return ""
+    anchors = payload.get("anchors") or []
+    if not isinstance(anchors, list) or not anchors:
+        return ""
+    compact_payload = {
+        "coordinate_space": payload.get("coordinate_space") or "current_image",
+        "anchors": [_compact_anchor_for_prompt(anchor) for anchor in anchors],
+    }
+    anchor_json = json.dumps(compact_payload, ensure_ascii=False, separators=(",", ":"))
+    return f"""
+
+Read-only OCR reference:
+- these OCR boxes are already stored by the runtime; use them only to recognize nearby controls and estimate rough boxes
+- never copy this list, anchor ids, anchor coordinates, or anchor relationships into the JSON response
+- compact OCR fields are id=text-box id, t=text, b=[x,y,w,h], c=[center_x,center_y]
+- OCR reference: {anchor_json}
 """.rstrip()
 
 

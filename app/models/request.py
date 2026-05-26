@@ -90,6 +90,17 @@ class ExecuteRecognitionPlanRequest(BaseModel):
     dry_run: bool = False
 
 
+class ExecuteConfirmedPointRequest(BaseModel):
+    """Execute a human-confirmed point relative to the currently bound window."""
+
+    x: int = Field(ge=0)
+    y: int = Field(ge=0)
+    bbox: Optional[ROIModel] = None
+    label: Optional[str] = None
+    source_trace_path: Optional[str] = None
+    dry_run: bool = True
+
+
 class WaitForSceneRequest(BaseModel):
     """Request model for waiting until a named scene is detected."""
 

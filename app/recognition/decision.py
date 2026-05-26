@@ -38,6 +38,18 @@ def decide_pre_click(
             )
         )
 
+    precision_visual_top_blocked = bool(
+        decisions
+        and candidates.candidates[0].element.interaction_policy.zone_type == "precise_visual_target"
+        and not decisions[0].allowed
+    )
+    if precision_visual_top_blocked:
+        for decision in decisions[1:]:
+            if decision.allowed:
+                decision.allowed = False
+                decision.reasons = [item for item in decision.reasons if item != "pre_click_checks_passed"]
+                decision.reasons.append("higher_ranked_precision_visual_target_requires_confirmation")
+
     top_margin_ok = _top_margin_ok(candidates, min_margin=min_margin)
     if not top_margin_ok:
         for decision in decisions:
@@ -91,6 +103,9 @@ def _candidate_decision(
     if not policy.allowed:
         allowed = False
         reasons.append("interaction_policy_blocked")
+    if policy.zone_type == "precise_visual_target":
+        allowed = False
+        reasons.append("precision_visual_target_requires_confirmation")
     if policy.zone_type == "ad_candidate" or policy.ad_risk >= 0.6:
         allowed = False
         reasons.append("ad_like_candidate")

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
 from pathlib import Path
+from urllib.error import HTTPError
 
 from PIL import Image
 
@@ -56,6 +58,7 @@ def test_local_provider_calls_openai_compatible_vision_endpoint(tmp_path, monkey
         assert timeout == 12.0
         body = json.loads(request.data.decode("utf-8"))
         assert body["model"] == "Qwen3-VL-8B-Instruct-GGUF"
+        assert body["max_tokens"] == 2048
         assert body["messages"][1]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
         return _FakeHTTPResponse({"choices": [{"message": {"content": json.dumps(model_json)}}]})
 
@@ -76,6 +79,93 @@ def test_local_provider_calls_openai_compatible_vision_endpoint(tmp_path, monkey
     assert result.raw_text is not None
     assert result.raw_response is not None
     assert result.raw_response["attempts"][0]["status"] == "success"
+
+
+def test_local_provider_caps_fast_screen_understanding_output(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "observe.png"
+    Image.new("RGB", (200, 120), color=(255, 255, 255)).save(image_path)
+
+    def fake_urlopen(request, timeout):
+        body = json.loads(request.data.decode("utf-8"))
+        assert body["max_tokens"] == 1024
+        prompt = body["messages"][1]["content"][0]["text"]
+        assert "fast screen-understanding stage" in prompt
+        assert "do not emit ocr_text" in prompt
+        return _FakeHTTPResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "screen_summary": "actionable screen",
+                                    "regions": [],
+                                    "targets": [],
+                                    "observers": [],
+                                }
+                            )
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("app.vision.local_provider.urlopen", fake_urlopen)
+    result = LocalVisionProvider(endpoint="http://127.0.0.1:1234/v1/chat/completions").analyze(
+        VisionAnalyzeRequest(image_path=str(image_path), task="observe_screen")
+    )
+
+    assert result.screen_summary == "actionable screen"
+    assert result.raw_response["attempts"][0]["max_regions"] == 12
+
+
+def test_local_provider_waits_for_loading_model_then_runs_same_attempt(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "loading-observe.png"
+    Image.new("RGB", (200, 120), color=(255, 255, 255)).save(image_path)
+    calls: list[str] = []
+    sleeps: list[float] = []
+
+    def fake_urlopen(request, timeout):
+        calls.append(request.full_url)
+        if len(calls) == 1:
+            raise HTTPError(
+                request.full_url,
+                503,
+                "Service Unavailable",
+                {},
+                BytesIO(b'{"error":{"message":"Loading model"}}'),
+            )
+        return _FakeHTTPResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "screen_summary": "loaded screen",
+                                    "regions": [],
+                                    "targets": [],
+                                    "observers": [],
+                                }
+                            )
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("app.vision.local_provider.urlopen", fake_urlopen)
+    monkeypatch.setattr("app.vision.local_provider.time.sleep", lambda seconds: sleeps.append(seconds))
+
+    result = LocalVisionProvider(endpoint="http://127.0.0.1:1240/v1/chat/completions", timeout_seconds=12).analyze(
+        VisionAnalyzeRequest(image_path=str(image_path), task="observe_screen")
+    )
+
+    assert len(calls) == 2
+    assert sleeps == [1.0]
+    assert result.screen_summary == "loaded screen"
+    assert "model_loading_wait_retries=1" in result.notes
+    assert len(result.raw_response["attempts"]) == 1
 
 
 def test_local_provider_remaps_coordinates_from_scaled_inference_image(tmp_path, monkeypatch) -> None:
@@ -125,6 +215,42 @@ def test_local_provider_remaps_coordinates_from_scaled_inference_image(tmp_path,
     assert result.image_size.to_dict() == {"width": 2000, "height": 1000}
     assert result.regions[0].bbox.to_dict() == {"x": 200, "y": 100, "w": 600, "h": 300}
     assert "coordinate_remap" in result.raw_response["attempts"][0]
+
+
+def test_local_provider_recovers_normalized_1000_coordinates_before_scaled_image_remap(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "qq-window.png"
+    Image.new("RGB", (820, 1303), color=(255, 255, 255)).save(image_path)
+
+    def fake_urlopen(request, timeout):
+        model_json = {
+            "provider": "local",
+            "contract_version": "vision_regions_v1",
+            "image_size": {"width": 806, "height": 1280},
+            "screen_summary": "QQ window",
+            "state_guess": "open",
+            "regions": [
+                {
+                    "region_id": "close",
+                    "label": "close window button",
+                    "role": "button",
+                    "diagonal": {"x1": 965, "y1": 10, "x2": 985, "y2": 30},
+                    "confidence": 1.0,
+                }
+            ],
+            "targets": [],
+            "observers": [],
+            "notes": [],
+        }
+        return _FakeHTTPResponse({"choices": [{"message": {"content": json.dumps(model_json)}}]})
+
+    monkeypatch.setattr("app.vision.local_provider.urlopen", fake_urlopen)
+
+    result = LocalVisionProvider(endpoint="http://127.0.0.1:1234/v1/chat/completions", timeout_seconds=12).analyze(
+        VisionAnalyzeRequest(image_path=str(image_path), task="click_target")
+    )
+
+    assert result.regions[0].bbox.to_dict() == {"x": 792, "y": 13, "w": 16, "h": 26}
+    assert "coordinate_space_recovered=normalized_1000;items=1" in result.notes
 
 
 def test_local_provider_scales_ocr_anchors_for_resized_inference_image(tmp_path, monkeypatch) -> None:

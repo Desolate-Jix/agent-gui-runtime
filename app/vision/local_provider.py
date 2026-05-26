@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -31,8 +32,10 @@ class LocalVisionProvider:
         self.endpoint = endpoint
         self.model_name = model_name or "local_stub"
         self.timeout_seconds = float(timeout_seconds)
+        self._model_loading_retries = 0
 
     def analyze(self, req: VisionAnalyzeRequest) -> VisionAnalyzeResponse:
+        self._model_loading_retries = 0
         image_path = Path(req.image_path)
         with Image.open(image_path) as image:
             original_image_size = ImageSize(width=image.width, height=image.height)
@@ -69,7 +72,7 @@ class LocalVisionProvider:
         attempt_records: list[dict[str, Any]] = []
         last_error: Exception | None = None
 
-        for attempt in self._build_attempt_plan(original_image_size):
+        for attempt in self._build_attempt_plan(original_image_size, task=req.task):
             attempt_record = {
                 "tag": attempt.tag,
                 "compact_prompt": attempt.compact_prompt,
@@ -102,6 +105,8 @@ class LocalVisionProvider:
 
         if len(attempt_records) > 1:
             notes.append(f"provider_retry_count={len(attempt_records) - 1}")
+        if self._model_loading_retries:
+            notes.append(f"model_loading_wait_retries={self._model_loading_retries}")
 
         parsed["provider"] = self.model_name or "local"
         parsed.setdefault("contract_version", "vision_regions_v1")
@@ -124,11 +129,11 @@ class LocalVisionProvider:
         normalized.notes.extend([note for note in notes if note not in normalized.notes])
         return normalized
 
-    def _call_openai_compatible_endpoint(self, image_path: Path, prompt: str) -> dict[str, Any]:
+    def _call_openai_compatible_endpoint(self, image_path: Path, prompt: str, *, max_tokens: int = 2048) -> dict[str, Any]:
         payload = {
             "model": self.model_name,
             "temperature": 0.1,
-            "max_tokens": 2048,
+            "max_tokens": max_tokens,
             "response_format": {"type": "json_object"},
             "messages": [
                 {
@@ -145,20 +150,29 @@ class LocalVisionProvider:
             ],
         }
         body = json.dumps(payload).encode("utf-8")
-        request = Request(
-            self._chat_completions_url(),
-            data=body,
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
-            method="POST",
-        )
-        try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except HTTPError as exc:
-            details = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"local vision endpoint returned HTTP {exc.code}: {details}") from exc
-        except URLError as exc:
-            raise RuntimeError(f"failed to reach local vision endpoint {self.endpoint}: {exc.reason}") from exc
+        loading_deadline = time.monotonic() + self.timeout_seconds
+        while True:
+            request = Request(
+                self._chat_completions_url(),
+                data=body,
+                headers={"Content-Type": "application/json", "Accept": "application/json"},
+                method="POST",
+            )
+            try:
+                with urlopen(request, timeout=self.timeout_seconds) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except HTTPError as exc:
+                details = exc.read().decode("utf-8", errors="replace")
+                if self._model_is_loading(exc.code, details) and time.monotonic() < loading_deadline:
+                    self._model_loading_retries += 1
+                    time.sleep(min(1.0, max(0.0, loading_deadline - time.monotonic())))
+                    continue
+                raise RuntimeError(f"local vision endpoint returned HTTP {exc.code}: {details}") from exc
+            except URLError as exc:
+                raise RuntimeError(f"failed to reach local vision endpoint {self.endpoint}: {exc.reason}") from exc
+
+    def _model_is_loading(self, status_code: int, details: str) -> bool:
+        return status_code == 503 and "loading model" in details.casefold()
 
     def _chat_completions_url(self) -> str:
         endpoint = str(self.endpoint or "").rstrip("/")
@@ -211,8 +225,23 @@ class LocalVisionProvider:
             raise RuntimeError("local vision endpoint JSON root must be an object")
         return parsed
 
-    def _build_attempt_plan(self, image_size: ImageSize) -> list[_InferenceAttempt]:
+    def _build_attempt_plan(self, image_size: ImageSize, *, task: str | None = None) -> list[_InferenceAttempt]:
         max_dim = max(image_size.width, image_size.height)
+        if task == "observe_screen":
+            return [
+                _InferenceAttempt(
+                    tag="fast_observation",
+                    max_edge=1280 if max_dim > 1280 else None,
+                    compact_prompt=True,
+                    max_regions=12,
+                ),
+                _InferenceAttempt(
+                    tag="fast_observation_retry",
+                    max_edge=1024 if max_dim > 1024 else None,
+                    compact_prompt=True,
+                    max_regions=8,
+                ),
+            ]
         attempts = [
             _InferenceAttempt(
                 tag="default",
@@ -284,7 +313,11 @@ class LocalVisionProvider:
             grid_overlay_spacing=grid_spacing,
         )
         try:
-            raw_response = self._call_openai_compatible_endpoint(inference_path, prompt)
+            raw_response = self._call_openai_compatible_endpoint(
+                inference_path,
+                prompt,
+                max_tokens=self._max_output_tokens(req),
+            )
             raw_text = self._extract_message_text(raw_response)
             parsed = self._parse_json_object(raw_text)
             parsed = self._remap_to_original_image(parsed, inference_size, original_image_size)
@@ -313,6 +346,16 @@ class LocalVisionProvider:
         finally:
             if temp_dir is not None:
                 temp_dir.cleanup()
+
+    def _max_output_tokens(self, req: VisionAnalyzeRequest) -> int:
+        metadata = req.metadata or {}
+        configured = metadata.get("max_output_tokens")
+        if configured is not None:
+            try:
+                return max(256, min(4096, int(configured)))
+            except (TypeError, ValueError):
+                pass
+        return 1024 if req.task == "observe_screen" else 2048
 
     def _request_for_inference_prompt(
         self,
@@ -382,6 +425,11 @@ class LocalVisionProvider:
         inference_size: ImageSize,
         original_image_size: ImageSize,
     ) -> dict[str, Any]:
+        recovered_count = self._recover_normalized_1000_items(parsed, inference_size)
+        if recovered_count:
+            notes = parsed.setdefault("notes", [])
+            if isinstance(notes, list):
+                notes.append(f"coordinate_space_recovered=normalized_1000;items={recovered_count}")
         if inference_size == original_image_size:
             parsed["image_size"] = original_image_size.to_dict()
             return parsed
@@ -412,6 +460,61 @@ class LocalVisionProvider:
                     )
         parsed["image_size"] = original_image_size.to_dict()
         return parsed
+
+    def _recover_normalized_1000_items(self, parsed: dict[str, Any], image_size: ImageSize) -> int:
+        recovered_count = 0
+        for collection_name in ("regions", "targets", "observers"):
+            items = parsed.get(collection_name) or []
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                diagonal = item.get("diagonal")
+                if isinstance(diagonal, dict) and self._diagonal_is_normalized_1000(diagonal, image_size):
+                    item["diagonal"] = self._scale_diagonal(
+                        diagonal,
+                        scale_x=float(image_size.width) / 1000.0,
+                        scale_y=float(image_size.height) / 1000.0,
+                        max_width=image_size.width,
+                        max_height=image_size.height,
+                    )
+                    recovered_count += 1
+                bbox = item.get("bbox")
+                if isinstance(bbox, dict) and self._bbox_is_normalized_1000(bbox, image_size):
+                    item["bbox"] = self._scale_bbox(
+                        bbox,
+                        scale_x=float(image_size.width) / 1000.0,
+                        scale_y=float(image_size.height) / 1000.0,
+                        max_width=image_size.width,
+                        max_height=image_size.height,
+                    )
+                    recovered_count += 1
+        return recovered_count
+
+    def _diagonal_is_normalized_1000(self, diagonal: dict[str, Any], image_size: ImageSize) -> bool:
+        values = self._float_coordinates(diagonal, ("x1", "y1", "x2", "y2"))
+        if values is None:
+            return False
+        x1, y1, x2, y2 = values
+        exceeds_pixel_bounds = max(x1, x2) > image_size.width or max(y1, y2) > image_size.height
+        within_normalized_bounds = all(0.0 <= value <= 1000.0 for value in values)
+        return exceeds_pixel_bounds and within_normalized_bounds
+
+    def _bbox_is_normalized_1000(self, bbox: dict[str, Any], image_size: ImageSize) -> bool:
+        values = self._float_coordinates(bbox, ("x", "y", "w", "h"))
+        if values is None:
+            return False
+        x, y, w, h = values
+        exceeds_pixel_bounds = x + w > image_size.width or y + h > image_size.height
+        within_normalized_bounds = all(0.0 <= value <= 1000.0 for value in values)
+        return exceeds_pixel_bounds and within_normalized_bounds
+
+    def _float_coordinates(self, values: dict[str, Any], keys: tuple[str, ...]) -> tuple[float, ...] | None:
+        try:
+            return tuple(float(values[key]) for key in keys)
+        except (KeyError, TypeError, ValueError):
+            return None
 
     def _scale_diagonal(
         self,

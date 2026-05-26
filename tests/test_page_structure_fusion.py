@@ -157,3 +157,86 @@ def test_build_page_structure_rejects_far_ambiguous_short_text_binding() -> None
     assert element["source_text_ids"] == []
     assert element["bbox"] == {"x": 980, "y": 500, "w": 120, "h": 90}
     assert result["links"][0]["relation"] == "semantic_only"
+
+
+def test_build_page_structure_keeps_precisely_grounded_visual_icon_for_review() -> None:
+    icon = _region("region_search", "Search Icon", "icon", 638, 30, 20, 28)
+    icon.ocr_text = ""
+    icon.text_lines = []
+    icon.grounding_constraints = {
+        "text_inclusion_policy": "exclude_text",
+        "edge_constraints": {
+            "top": "top edge of glyph",
+            "bottom": "bottom edge of glyph",
+            "left": "left edge of glyph",
+            "right": "before nearby label",
+        },
+        "final_bbox_reason": "Tightly covers only the magnifying-glass glyph.",
+    }
+    vision = VisionAnalyzeResponse(
+        provider="local",
+        image_size=ImageSize(width=1000, height=690),
+        screen_summary="toolbar",
+        state_guess="search",
+        regions=[icon],
+    )
+
+    structure = build_page_structure(vision, OCRResult(image_path="screen.png", metadata={"engine": "rapidocr_onnxruntime"}, matches=[]))
+    result = structure.to_dict()
+
+    assert len(result["elements"]) == 1
+    target = result["elements"][0]
+    assert target["role"] == "icon"
+    assert target["text"] == ""
+    assert target["bbox"] == {"x": 638, "y": 30, "w": 20, "h": 28}
+    assert target["click_strategy"] == "vision_grounded_icon_center"
+    assert target["interaction_policy"]["allowed"] is False
+    assert target["interaction_policy"]["zone_type"] == "precise_visual_target"
+    assert result["links"][0]["relation"] == "precise_visual_grounding"
+
+
+def test_build_page_structure_keeps_precisely_grounded_visual_close_button_for_review() -> None:
+    close = _region("region_close", "close window button", "button", 792, 13, 16, 26)
+    close.ocr_text = ""
+    close.text_lines = []
+    close.grounding_constraints = {
+        "text_inclusion_policy": "exclude_text",
+        "edge_constraints": {
+            "top": "titlebar top",
+            "bottom": "titlebar bottom",
+            "left": "after maximize",
+            "right": "window right",
+        },
+        "final_bbox_reason": "Tightly covers only the close X.",
+    }
+    vision = VisionAnalyzeResponse(
+        provider="local",
+        image_size=ImageSize(width=820, height=1303),
+        screen_summary="QQ window",
+        state_guess="open",
+        regions=[close],
+    )
+
+    structure = build_page_structure(vision, OCRResult(image_path="screen.png", metadata={}, matches=[]))
+    result = structure.to_dict()
+
+    assert len(result["elements"]) == 1
+    assert result["elements"][0]["role"] == "button"
+    assert result["elements"][0]["interaction_policy"]["zone_type"] == "precise_visual_target"
+    assert result["elements"][0]["click_point"] == {"x": 800, "y": 26}
+
+
+def test_build_page_structure_does_not_promote_unproven_visual_icon() -> None:
+    icon = _region("region_search", "Search Icon", "icon", 638, 30, 20, 28)
+    icon.grounding_constraints = {"text_inclusion_policy": "exclude_text"}
+    vision = VisionAnalyzeResponse(
+        provider="local",
+        image_size=ImageSize(width=1000, height=690),
+        screen_summary="toolbar",
+        state_guess="search",
+        regions=[icon],
+    )
+
+    structure = build_page_structure(vision, OCRResult(image_path="screen.png", metadata={}, matches=[]))
+
+    assert structure.elements == []

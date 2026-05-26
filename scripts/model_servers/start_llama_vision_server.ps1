@@ -10,7 +10,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$root = Resolve-Path (Join-Path $PSScriptRoot "..")
+$root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $serverInput = if ($ServerPath) { $ServerPath } else { Join-Path $root "tools\llama.cpp-b8892-cuda13\llama-server.exe" }
 $modelInput = if ($ModelPath) { $ModelPath } else { Join-Path $root "models\qwen3_6-35b-a3b-iq4_xs-gguf\Qwen-Qwen3.6-35B-A3B-IQ4_XS.gguf" }
 $mmprojInput = if ($MmprojPath) { $MmprojPath } else { Join-Path $root "models\qwen3_6-35b-a3b-iq4_xs-gguf\mmproj-Qwen3.6-35B-A3B-Q6_K.gguf" }

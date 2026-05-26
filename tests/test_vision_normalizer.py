@@ -285,6 +285,43 @@ def test_prompt_builder_includes_custom_prompt_rules() -> None:
 
     assert "Additional user-configured grounding rules" in prompt
     assert "Prefer the leftmost logo mark in the navigation bar." in prompt
+    assert "precise target-localization stage" in prompt
+    assert "Return exactly one best target region" in prompt
+    assert "do not enumerate other controls" in prompt
+    assert "every important interactive area should become a region" not in prompt
+
+
+def test_observe_prompt_uses_compact_candidate_contract_without_grounding_proof() -> None:
+    prompt = build_region_analysis_prompt(
+        VisionAnalyzeRequest(
+            image_path="screen.png",
+            task="observe_screen",
+            metadata={
+                "ocr_anchors": {
+                    "coordinate_space": "inference_image",
+                    "anchors": [
+                        {
+                            "anchor_id": "ocr_anchor_1",
+                            "text": "Home",
+                            "bbox": {"x": 12, "y": 16, "w": 40, "h": 16},
+                            "center": {"x": 32, "y": 24},
+                            "confidence": 0.95,
+                        }
+                    ],
+                }
+            },
+        ),
+        ImageSize(width=800, height=600),
+        max_regions=12,
+    )
+
+    assert "fast screen-understanding stage" in prompt
+    assert "at most 12 independently clickable candidate controls" in prompt
+    assert "do not emit ocr_text" in prompt
+    assert "never copy this list" in prompt
+    assert '"t":"Home"' in prompt
+    assert "anchor_relations must be a list" not in prompt
+    assert "grounding_constraints must be an object" not in prompt
 
 
 def test_normalizer_skips_non_object_region_target_and_observer_items() -> None:

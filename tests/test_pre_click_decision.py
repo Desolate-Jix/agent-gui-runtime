@@ -20,6 +20,7 @@ def _candidate(
     allowed: bool = True,
     ad_risk: float = 0.0,
     zone_type: str = "test_module",
+    eligible: bool | None = None,
     refined_bbox: dict[str, int] | None = None,
 ) -> RecognitionCandidate:
     element = PageElement(
@@ -49,7 +50,7 @@ def _candidate(
         role=element.role,
         text=element.text,
         score=score,
-        eligible=allowed,
+        eligible=allowed if eligible is None else eligible,
         reasons=[],
         score_breakdown=ScoreBreakdown(text_similarity=text_similarity),
         element=element,
@@ -200,3 +201,34 @@ def test_pre_click_decision_removes_passed_reason_when_margin_later_rejects() ->
     assert result.allowed is False
     assert "top_candidate_margin_too_small" in result.candidate_decisions[0].reasons
     assert "pre_click_checks_passed" not in result.candidate_decisions[0].reasons
+
+
+def test_pre_click_decision_does_not_fall_back_from_precise_icon_to_nearby_text() -> None:
+    icon = _candidate(
+        candidate_id="candidate_icon",
+        score=0.93,
+        allowed=False,
+        eligible=True,
+        zone_type="precise_visual_target",
+    )
+    text_control = _candidate(candidate_id="candidate_text", score=0.75)
+    rank_result = CandidateRankResult(
+        goal="定位搜索游戏左侧的放大镜图标",
+        candidates=[icon, text_control],
+        recommended_candidate_id=icon.candidate_id,
+        margin_to_second=0.18,
+    )
+    grounding = LocalGroundingResult(
+        goal=rank_result.goal,
+        results=[
+            _grounding(candidate_id="candidate_icon").results[0],
+            _grounding(candidate_id="candidate_text").results[0],
+        ],
+    )
+
+    result = decide_pre_click(goal=rank_result.goal, candidates=rank_result, grounding=grounding)
+
+    assert result.allowed is False
+    assert result.selected_click_point is None
+    assert "precision_visual_target_requires_confirmation" in result.candidate_decisions[0].reasons
+    assert "higher_ranked_precision_visual_target_requires_confirmation" in result.candidate_decisions[1].reasons

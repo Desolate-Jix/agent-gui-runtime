@@ -501,6 +501,11 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
         if not response.success or not response.data:
             return response
         result = response.data["result"]
+        recommended_target = result.get("recommended_target") or {}
+        recommended_element = recommended_target.get("element") if isinstance(recommended_target, dict) else {}
+        recommended_element = recommended_element if isinstance(recommended_element, dict) else {}
+        selected_click_point = ((result.get("pre_click_decision") or {}).get("selected_click_point"))
+        located_point = recommended_element.get("click_point")
         locate_result = {
             "contract_version": "target_location_v1",
             "goal": request.goal,
@@ -508,12 +513,16 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
             "live_capture": live_capture,
             "recognition_plan": result,
             "pre_click_decision": result.get("pre_click_decision"),
-            "selected_click_point": ((result.get("pre_click_decision") or {}).get("selected_click_point")),
-            "recommended_target": result.get("recommended_target"),
+            "selected_click_point": selected_click_point,
+            "recommended_target": recommended_target,
+            "located_bbox": recommended_element.get("bbox"),
+            "located_point": located_point,
+            "location_status": "pre_click_verified" if selected_click_point else ("requires_pre_click_confirmation" if located_point else "not_located"),
             "execution_path": {
                 **dict(result.get("execution_path") or {}),
                 "action_executed": False,
                 "coordinate_source": "pre_click_decision_v1.selected_click_point",
+                "located_coordinate_source": "recommended_target.element.click_point",
                 "agent_must_call_for_click": "POST /action/execute_recognition_plan",
             },
         }

@@ -1,1056 +1,406 @@
-﻿# agent-gui-runtime
+# agent-gui-runtime
 
-A local Windows-only GUI automation runtime for AI agents.
+Windows 本地 GUI 自动化运行时。它不是完整 Agent，而是给上层 Agent 提供稳定的本地 HTTP API，用来发现应用、绑定窗口、截图、OCR/视觉识别、生成点击计划、执行受控点击和验证结果。
 
-`agent-gui-runtime` is **not** a full agent. It is an execution layer that exposes stable visual and action APIs over local HTTP so an upper-layer LLM/agent can interact with desktop applications in a more controlled way.
-
-## Maintenance workflow
-
-When code changes affect runtime behavior, API shape, architecture, or current progress, update the docs in the same work session.
-
-Expected sync targets in this repo:
-
-- `README.md`
-- `PROJECT_SUMMARY.md`
-- `CURRENT_STATE.md`
-- `NEXT_STEPS.md`
-- `AGENT_API_WORKFLOW.md`
-- `PROJECT_STRUCTURE.md`
-- `PROJECT_CONTEXT.md`
-- `RULES.md`
-- `KNOWLEDGE_BASE.md`
-- `ACCURACY_EVALUATION_STANDARD.md`
-- `RUNTIME_STATE_GRAPH.md`
-- `RUNTIME_STATE_GRAPH.zh-CN.md`
-
-When implementing code, follow the execution loop in `skills/code-implementation-loop/SKILL.md`: make the smallest useful change, run the narrowest meaningful verification, inspect results, fix failures, and rerun until the path is verified or a real blocker remains.
-
----
-
-## Project positioning
-
-This project is designed as a **GUI execution runtime** rather than a planning or reasoning system.
-
-It is responsible for:
-
-- binding to a target window/session
-- capturing the bound window
-- running vision operations such as template matching and OCR
-- dispatching controlled GUI actions
-- validating execution results
-- returning structured JSON responses to an upper-layer agent
-
-It is **not** responsible for:
-
-- natural language task planning
-- becoming a full desktop agent by itself
-- unrestricted autonomous exploration of unknown software
-
-It now also includes an early **software-specific state memory layer** for known apps/pages, but that layer is still subordinate to the runtime role: it helps the execution layer recognize known states, reuse known action targets, and record transitions. It is not a general reasoning or planning system.
-
-In short:
-
-> Agent -> local HTTP API -> GUI runtime -> target window
-
----
-
-## Runtime model
-
-This runtime now has **two complementary execution modes**.
-
-### 1. Generic visual execution
-
-The original runtime model:
-
-- bind a window
-- capture the window or ROI
-- run OCR/template matching
-- click or verify
-- return structured results
-
-This is still the compatibility baseline.
-
-### 2. Software-specific state-aware execution (V1)
-
-A new V1 layer has been added for known software/layouts.
-
-This layer can:
-
-- recognize whether the current screen matches a known `AppState`
-- load known `ActionTarget` definitions for that state
-- prefer historically successful click strategies
-- record `TransitionRecord` and `ReplayCase` artifacts after execution
-- preserve validator-based closed-loop verification
-- fall back to existing `region_click` behavior if state-aware reuse is not enough
-
-Important V1 scope boundaries:
-
-- it does **not** do blind exploration in unknown states
-- it does **not** try to autonomously learn every clickable target in arbitrary software
-- it does **not** use LLM visual reasoning inside the runtime
-- it is intentionally conservative: unknown recognition should return `unknown`, not a forced guess
-
----
-
-## MVP / V1 scope
-
-### Baseline runtime goals
-
-1. bind to a target window
-2. inspect runtime state
-3. capture the bound window
-4. find templates inside the bound window
-5. run OCR in a region of interest
-6. click based on template or text
-7. wait for a named scene/state
-
-### Current state-aware V1 goals
-
-1. recognize a known app state for a known software/layout
-2. load known action targets for that state
-3. prefer history-backed click reuse
-4. preserve validator closed loop
-5. record state transition experience
-6. keep generic `region_click` as fallback
-
-For the current phase, the project is intentionally:
-
-- Windows only
-- local-only HTTP API
-- vision-first
-- single-session
-- no web frontend; a draft desktop workflow test panel is available under `scripts/settings_panel.py`
-- file-based persistence under `logs/` and `artifacts/`
-- software-specific before software-general
-
----
-
-## Current Progress Snapshot
-
-Last updated: 2026-05-24.
-
-The project has moved from raw full-page visual coordinates toward an inspectable staged recognition MVP plus a gated execution bridge:
-
-`screenshot -> OCR anchors -> vision_regions_v1 + OCR -> page_structure_v1 -> screen_reading_v1 -> candidate_rank_v1 -> narrow_search_v1 -> pre_click_decision_v1`
-
-Execution bridge:
-
-`live bound-window capture -> recognition_plan_v1 -> pre_click_decision_v1 gate -> selected refined click point -> generic post-click verifier`
-
-Architecture map:
-
-![GUI Agent Runtime layer map](docs/gui-agent-runtime-layer-map.svg)
-
-Current verified status:
-
-- Local InternVL3.5/Qwen-style vision endpoints are reachable through the OpenAI-compatible local provider.
-- Latest local-model experiment: `Qwen-Qwen3.6-35B-A3B-IQ4_XS.gguf` loads through llama.cpp with `mmproj-Qwen3.6-35B-A3B-Q6_K.gguf`, and with reasoning disabled it returns stable JSON for OCR-assisted GUI grounding. OCR anchors improved the browser Back icon center error from about `51.58px` to `3.81px`; the model remains better for large icons than tiny icon boundaries.
-- `POST /vision/recognition_plan` runs the full no-click recognition plan.
-- `POST /vision/recognition_plan` now builds `ocr_anchors_v1` before the vision call and passes all OCR text boxes to the local provider as spatial anchors for icon/button/card grounding unless `metadata.ocr_anchors.max_anchors` explicitly limits them.
-- OCR-anchor prompting is conservative: anchors are scaled into the provider inference coordinate space and compacted in the prompt as `id/t/b/c/s/g` fields, and if the anchored provider call fails the route retries once without anchors. The local multimodal server scripts use `-c 8192 --parallel 1` so full-page OCR anchors fit in one request.
-- `vision_regions_v1` now preserves `anchor_relations` and `grounding_constraints` per region, so the model must connect OCR anchors to bbox edges, center alignment, size expectations, and exclusion zones before finalizing coordinates.
-- `POST /vision/screen_reading` exposes a READ-facing UI layer with OCR-backed elements, visual-only UI candidates, module grouping, a connected Windows UIA scanner, a connected Microsoft Fluent System Icons catalog matcher, and reserved slots for future browser accessibility and learned-UI providers.
-- `GET /apps` returns an app catalog, visible windows, current bound window, and agent next-step hints so an agent can discover what software exists and what each app can do before acting.
-- `POST /apps/open` launches a catalog app such as Edge or Notepad and can bind the resulting window.
-- `POST /vision/observe_screen` captures or reads the current screen and returns `screen_observation_v1`, a broad UI understanding layer for agent planning before target-specific localization. The desktop panel sends this through `provider_mode: local_understanding`, intended for the smaller whole-screen understanding model.
-- `POST /vision/locate_target` returns `target_location_v1`, a precise no-click target localization wrapper around the recognition plan; the agent must still execute only through `POST /action/execute_recognition_plan`. The desktop panel sends this through `provider_mode: local_grounding`, intended for the larger precise localization model.
-- The Windows UIA scanner has passed a live Edge/MouseTester smoke and now tolerates unavailable pywinauto pattern descriptors during control enumeration.
-- `scripts/record_uia_smoke.py` can now record repeatable `uia_smoke_trace_v1` evidence and score expected UIA controls.
-- `POST /vision/recognition_plan` now builds `screen_reading_v1` inside the planning path and passes its UIA/icon evidence into `candidate_rank_v1`.
-- `POST /vision/render_recognition_plan_overlay` produces human-review overlays for candidate boxes, OCR-refined boxes, local OCR matches, and refined click points.
-- `POST /action/execute_recognition_plan` executes only a `pre_click_decision_v1`-approved selected point from a live bound-window capture.
-- `page_structure_v1` now guards against far/short OCR text binding so repeated fragments such as single-letter labels do not inflate element boxes.
-- Candidate ranking preserves original element geometry, adds optional `refined_bbox` from goal-matching OCR text when that evidence is tighter, and uses `screen_reading_v1` accessible-name/provider evidence as a bounded ranking signal.
-- Local grounding crops the refined candidate ROI, reruns OCR, and maps the matched text center back to full-screen coordinates.
-- Pre-click verification rejects blocked, ad-like, goal-mismatched, locally mismatched, ambiguous-margin, or out-of-bounds candidates before any action execution is attached.
-- A draft modular desktop workflow test panel is available through `uv run python scripts/settings_panel.py`. The launcher delegates to `app/settings_panel/`, which separates HTTP calls, config persistence, i18n, and UI code. The left sidebar now follows the actual agent workflow: workflow diagram, app discovery, open/bind, screenshot capture, whole-screen understanding, precise localization, and dry-run gated execution. Model/API configuration stays on the bottom sidebar gear page. Every stage page exposes the API parameters for that stage and shows returned JSON in the same screen through a fixed response panel. The panel supports Chinese/English switching from a single top-right toggle, can edit `configs/vision.json`, capture screenshots, generate manual review boxes, render overlays, and pass user-configured grounding rules into the vision prompt through `metadata.prompt_overrides.additional_rules`. Local vision config is split into `local_understanding` for the smaller screen-understanding model and `local_grounding` for the larger precise-localization model.
-
-Latest real MouseTester evidence:
-
-- Date: 2026-05-13.
-- Golden baseline: `artifacts/golden-traces/mousetester-live-execute-20260513-182111-unicode-goal/`
-- Recognition trace: `logs/traces/vision/20260513-182111-330997__recognition-plan__mousetesterweb.json`
-- Action trace: `logs/traces/actions/20260513-182115-605129__execute-recognition-plan__mousetesterweb.json`
-- Execute response: `logs/live-execute-unicode-goal/execute-response.json`
-- Baseline contents: copied recognition/action traces, execute response, before/after screenshots, diff image, validation summary, and manual regression checklist.
-- Bound window: MouseTester.cn in Microsoft Edge.
-- Selected click point: `{x: 1434, y: 433}`
-- Result: live click executed from the gated recognition plan, the internal recognition trace preserved goal `点击此处测试`, the top candidate carried UIA name/Invoke evidence, and validation passed through generic screenshot/focus evidence plus MouseTester target-area semantic OCR verification.
-
-Latest live UIA evidence:
-
-- Date: 2026-05-13.
-- Bound window: MouseTester.cn in Microsoft Edge.
-- Result: UIA smoke evaluation passed `1/1` cases; the scan returned `249` controls and `26` buttons, including browser Back/Refresh, address edit `https://www.mousetester.cn`, `RootWebArea`, and page controls such as `点击此处测试`.
-- Trace: `logs/traces/evaluation/20260513-162852-157632__uia-smoke__mousetester.json`
-- Report: `logs/evaluations/uia-smoke-eval-20260513-162852.json`
-
-Latest local vision model evidence:
-
-- Date: 2026-05-22 / 2026-05-23.
-- Model: `Qwen-Qwen3.6-35B-A3B-IQ4_XS.gguf` with `mmproj-Qwen3.6-35B-A3B-Q6_K.gguf`.
-- Runtime: llama.cpp b8892 CUDA 13, `-ngl 26`, `-c 4096`, `--image-min-tokens 1024`, `--reasoning off`, `--reasoning-budget 0`.
-- Accuracy result: large MouseTester mouse illustration was usable but still missed the left-side buttons; OCR anchors did not materially change the large-icon box.
-- Accuracy result: tiny browser Back icon was poor with pure visual grounding but became well-centered with OCR-anchor context, though the returned box was still too tight.
-- Speed result: text-only JSON averaged `2.10s` and about `29.0 generated tokens/s`; OCR-assisted image grounding averaged about `23-24 generated tokens/s`, with first image calls taking about `17-20s` and warm cached calls taking about `2.5-6.0s`.
-- Trace artifacts: `artifacts/vision-regions/20260522-181534-qwen36-iq4xs-ocr-reasonoff/` and `artifacts/vision-regions/20260523-020346-qwen36-iq4xs-speed/`.
-
-Previous no-click recognition evidence:
-
-- Trace: `logs/traces/vision/20260509-191124-406879__recognition-plan__mousetesterweb.json`
-- Overlay: `artifacts/review-overlays/20260509-191124-406879-recognition-plan-mousetesterweb__recognition-plan-overlay__20260509-191124-668878.png`
-- Target goal: `点击此处测试`
-- Top candidate: double-click test card with `text_similarity=0.9`
-- `refined_bbox`: narrowed to the goal text line through `goal_text_ids_union:1`
-- Local OCR matched text: `点击此处测试`
-- Pre-click decision: allowed, no click executed
-- Test suite: `77 passed`
-
-Current limitation:
-
-- The system has a gated execution route, a golden live MouseTester click baseline, MouseTester-specific target-area semantic verification, bounded retry for retry-safe verification failures, and a 5-case trace-based MouseTester smoke set. It is not a production autonomous click loop yet: it needs a broader evaluation set across more states and negative cases.
-
-Primary next step:
-
-- Build the Single-page stable loop for MouseTester: fixed website, fixed task, repeated stable execution across sessions.
-
-Longer roadmap:
-
-1. Single-page stable loop: fixed website, fixed task, stable execution. MouseTester is the current baseline and proves structured reasoning rather than random coordinate success. Next, successful validated runs should be written back as reusable learning records, not only traces.
-2. Cross-session stability: prove the same task and its learned records still work across days, window sizes, DPI/display scaling, OCR fluctuation, and visual-model fluctuation.
-3. Semantic generalization: map equivalent task intent across labels such as `点击此处测试`, `开始测速`, `Launch Test`, `Run Benchmark`, and `Start`.
-4. Multi-step stateful workflows: handle login, navigation, popups, menus, forms, and result validation with durable state and planning.
-5. Recovery and self-healing: re-observe, explain failure, re-plan, and retry safely when buttons are missing, pages stall, OCR fails, popups block targets, clicks have no effect, or validation fails.
-
----
-
-## Environment
-
-### Target platform
-
-- **OS:** Windows only
-- **Python:** 3.11
-- **Runtime style:** local FastAPI service
-- **Package/dependency management:** `uv`
-
-### Recommended development environment
-
-- Windows 10 / Windows 11
-- Python 3.11 installed
-- `uv` installed
-- a desktop application window available for local testing
-
-### Current working assumptions
-
-- only one active bound window/session is needed for the MVP/V1
-- all GUI operations should go through this runtime
-- no ad-hoc scripts should bypass the runtime once APIs are in place
-- software-specific memory is file-based and local-first in the current phase
-
----
-
-## Tech stack
-
-### Core framework
-
-- **FastAPI** - local HTTP API service
-- **Pydantic v2** - structured request/response models
-- **Uvicorn** - ASGI server
-- **loguru** - runtime logging
-
-### Windows GUI automation
-
-- **pywinauto** - window discovery and control primitives
-- **pywin32** - lower-level Windows API integration
-
-### Vision and image processing
-
-- **mss** - screenshot capture
-- **opencv-python** - template matching and image utilities
-- **numpy** - image array operations
-- **Pillow** - image helpers and conversions
-- **RapidOCR + PaddleOCR fallback** - OCR backends for text recognition
-- **paddlepaddle 3.2.2** - PaddleOCR runtime pinned to avoid known CPU inference issues in newer 3.3.x builds
-
-### Tooling
-
-- **uv** - virtual environment and dependency management
-
----
-
-## High-level architecture
-
-The runtime is now organized into these layers:
-
-### 1. API layer
-Exposes local HTTP endpoints that upper-layer agents can call.
-
-### 2. Session / window binding layer
-Tracks which window is currently bound and stores runtime session state.
-
-### 3. Screenshot layer
-Captures the currently bound window or ROI.
-
-### 4. Vision layer
-Performs template matching, OCR, page fingerprinting, ROI comparison, and normalized screenshot-region analysis for local learning.
-
-### 5. Input / action layer
-Dispatches GUI actions such as clicks based on structured requests.
-
-### 6. Verification layer
-Confirms whether an action produced the expected change.
-
-### 7. State-aware memory layer (V1)
-Stores known states, known action targets, validator profiles, replay cases, and transition history for specific software/layouts.
-
-This separation is intentional so the runtime can stay small while still being extensible.
-
----
-
-## Current project structure
+核心链路：
 
 ```text
-agent-gui-runtime/
-|-- app/
-|   |-- actions/
-|   |   `-- known_action_runner.py
-|   |-- api/
-|   |   |-- action.py
-|   |   |-- session.py
-|   |   |-- state.py
-|   |   `-- vision.py
-|   |-- core/
-|   |   |-- action_registry.py
-|   |   |-- input_controller.py
-|   |   |-- ocr_service.py
-|   |   |-- replay_case_store.py
-|   |   |-- screenshot.py
-|   |   |-- transition_memory.py
-|   |   |-- verifier.py
-|   |   `-- window_manager.py
-|   |-- models/
-|   |   |-- request.py
-|   |   `-- response.py
-|   |-- page_structure/
-|   |-- schemas/
-|   |-- vision/
-|   |-- vision_protocol/
-|   `-- main.py
-|-- configs/
-|   `-- vision.json
-|-- artifacts/
-|   |-- recognition-crops/
-|   |-- screenshots/
-|   |-- verification/
-|   `-- vision-regions/
-|-- logs/
-|   `-- traces/
-|-- modules/
-|   |-- click/
-|   |-- ocr/
-|   |-- region/
-|   `-- validation/
-|-- scripts/
-|-- tests/
-|-- AGENTS.md
-|-- KNOWLEDGE_BASE.md
-|-- PROJECT_CONTEXT.md
-|-- PROJECT_STRUCTURE.md
-|-- README.md
-|-- RULES.md
-|-- RUNTIME_STATE_GRAPH.md
-|-- RUNTIME_STATE_GRAPH.zh-CN.md
-`-- pyproject.toml
+Agent -> local HTTP API -> GUI runtime -> bound Windows window
 ```
 
-For a detailed folder-by-folder map, feature-to-file ownership, config locations, and persistence paths, see `PROJECT_STRUCTURE.md`.
+## 部署和启动
 
-For a stage-by-stage completion and accuracy scoring rubric, see `ACCURACY_EVALUATION_STANDARD.md`.
+### 1. 环境要求
 
-For the detailed runtime logic covering state graph growth, target patch persistence, field definitions, and runtime reuse, see:
+- Windows 10 / Windows 11
+- Python 3.11
+- `uv`
+- 本地视觉模型可选；没有模型时仍可打开测试面板和测试基础 API
 
-- English: `RUNTIME_STATE_GRAPH.md`
-- Chinese: `RUNTIME_STATE_GRAPH.zh-CN.md`
-
-These two files should be kept in sync.
-
-
-
----
-
-## API design principles
-
-The runtime uses a unified JSON envelope for endpoint responses:
-
-```json
-{
-  "success": true,
-  "message": "...",
-  "data": {},
-  "error": null
-}
-```
-
-Design principles:
-
-- stable interfaces over raw scripts
-- structured JSON over unstructured console output
-- vision-first interaction model
-- closed-loop verification over blind clicking
-- conservative state recognition over forced guesses
-- keep generic execution working while layering state-aware reuse on top
-
-For action and vision routes, runtime evidence now follows this split:
-
-- image artifacts such as screenshots, pre/post captures, verification diffs, and vision region crops go under `artifacts/`
-- local recognition candidate crops go under `artifacts/recognition-crops/`
-- human review overlays such as red region boxes and blue OCR boxes go under `artifacts/review-overlays/`
-- text logs and structured JSON traces go under `logs/`
-
-Most action and vision results now also include:
-
-- `execution_path`
-  - says whether a vision model was used
-  - says whether `page_structure_v1` participated
-  - says what coordinate source was used
-- `trace_path`
-  - points to a structured JSON trace file under `logs/traces/`
-
-For the exact agent-facing API call order, request bodies, response fields, OCR-anchor prompt handoff, and final click decision rules, see [`AGENT_API_WORKFLOW.md`](./AGENT_API_WORKFLOW.md). Upper-layer agents should treat that document as the required API workflow: bind a window, build a dry-run recognition plan with OCR anchors, inspect `pre_click_decision_v1`, and execute only through `POST /action/execute_recognition_plan`.
-
-## Vision region contract
-
-`POST /vision/analyze` now centers on a standard region contract named `vision_regions_v1`.
-
-The goal of this contract is to let an upper-layer model return screen understanding in a format that can be matched by the local runtime and later reused by the local learning layer.
-
-Key rules:
-
-- the response includes the screenshot resolution in `image_size`
-- every semantic region is defined by a diagonal:
-  - top-left `(x1, y1)`
-  - bottom-right `(x2, y2)`
-- the runtime computes normalized diagonal coordinates so matching can survive resolution changes
-- every region should include:
-  - visible content description
-  - OCR text and text lines
-  - likely destination/page/panel transition after interaction
-  - deterministic `layout_key`, `content_key`, and `match_key`
-
-The prompt template that enforces this output format now lives in `app/vision/prompting.py`.
-
-### Local multimodal backend
-
-`app/vision/local_provider.py` can now call a local OpenAI-compatible multimodal chat endpoint instead of always returning stub data.
-
-For large screenshots, the local provider now adds a stability pass before giving up:
-
-- it scales the inference image down for the model when the page is large
-- it remaps returned coordinates back to the original screenshot size
-- if the first model response is truncated or malformed, it retries once or twice with a more compact prompt and fewer regions
-- the winning attempt is recorded in `raw_response.attempts`, and scaling evidence is added to `notes`
-
-The default local configuration in `configs/vision.json` targets:
-
-```json
-{
-  "timeout_seconds": 180,
-  "model_name": "Qwen-Qwen3.6-35B-A3B-IQ4_XS.gguf",
-  "endpoint": "http://127.0.0.1:1234/v1/chat/completions"
-}
-```
-
-This matches the common OpenAI-compatible local server shape. The checked local model is now Qwen3.6 35B A3B `IQ4_XS`, because it gave the best small-icon result when OCR anchors were included. The previous 7B/8B/14B comparison assets and older Qwen3-VL rollback files were removed after the qwen3.6 result became the working baseline.
-
-The checked local deployment uses:
-
-- model: `models/qwen3_6-35b-a3b-iq4_xs-gguf/Qwen-Qwen3.6-35B-A3B-IQ4_XS.gguf`
-- mmproj: `models/qwen3_6-35b-a3b-iq4_xs-gguf/mmproj-Qwen3.6-35B-A3B-Q6_K.gguf`
-- server: `tools/llama.cpp-b8892-cuda13/llama-server.exe`
-
-Start and stop helpers:
+### 2. 安装依赖
 
 ```powershell
-.\scripts\serve_qwen3_6_iq4_xs_server.ps1
-.\scripts\stop_local_vision_server.ps1
+uv sync
 ```
 
-`serve_qwen3_6_iq4_xs_server.ps1` runs in the foreground when launched directly. Keep that terminal open while using `/vision/analyze`, or launch it in a hidden/background process and stop it with `stop_local_vision_server.ps1`.
-The local provider also requests JSON-object output and caps model output at 2048 tokens for the same reason.
-To test another OpenAI-compatible vision model, pass explicit paths and keep `configs/vision.json` pointed at the same endpoint:
+### 3. 一键启动测试面板
+
+双击根目录：
+
+```text
+start_test_panel.bat
+```
+
+它会调用 `scripts/start_test_panel.ps1`：
+
+- 如果 `http://127.0.0.1:8000/health` 不可用，会自动启动 FastAPI runtime
+- 然后打开桌面测试面板
+- 如果 runtime 是脚本启动的，关闭面板后会自动停止该 runtime
+
+命令行启动：
 
 ```powershell
-.\scripts\serve_qwen3_6_iq4_xs_server.ps1 -ModelPath .\models\some-model.gguf -MmprojPath .\models\some-mmproj.gguf
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\start_test_panel.ps1
 ```
 
-### Local model notes
+只检查启动路径：
 
-Latest Qwen3.6 IQ4_XS experiment:
-
-- Source repo: `batiai/Qwen3.6-35B-A3B-GGUF`.
-- Files: `Qwen-Qwen3.6-35B-A3B-IQ4_XS.gguf` (`18.7GB`) plus `mmproj-Qwen3.6-35B-A3B-Q6_K.gguf` (`607MB`).
-- Startup parameters used for the successful run: `-ngl 26 -c 4096 --parallel 1 --image-min-tokens 1024 --jinja --reasoning off --reasoning-budget 0`.
-- Reasoning must be disabled for this model in the local server; otherwise it can spend the whole response budget in `reasoning_content` and return an empty `content` payload.
-- The model often returns Qwen-style `0-1000` coordinates even when asked for pixel coordinates, so small-image responses should be normalized back to real pixels before evaluation.
-
-Qwen3.6 IQ4_XS accuracy evidence:
-
-| Target | Prompt mode | Returned pixel bbox | Reference bbox | IoU | Center error |
-| --- | --- | --- | --- | --- | --- |
-| Browser Back icon | pure vision | `{52,36,102,54}` | `{12,44,43,75}` | `0.0` | `51.58px` |
-| Browser Back icon | OCR anchors | `{13,51,35,65}` | `{12,44,43,75}` | `0.3205` | `3.81px` |
-| Mouse illustration | pure vision | `{258,142,418,420}` | `{188,133,422,427}` | `0.6465` | `33.02px` |
-| Mouse illustration | OCR anchors | `{258,142,418,423}` | `{188,133,422,427}` | `0.6535` | `33.09px` |
-
-OCR-assisted overlay legend: magenta is the model bbox, green is the manual reference bbox, and blue is the OCR text-anchor bbox.
-
-![Qwen3.6 IQ4_XS OCR-assisted browser Back icon overlay](artifacts/vision-regions/20260522-181534-qwen36-iq4xs-ocr-reasonoff/browser-back-annotated.png)
-
-![Qwen3.6 IQ4_XS OCR-assisted MouseTester mouse icon overlay](artifacts/vision-regions/20260522-181534-qwen36-iq4xs-ocr-reasonoff/mouse-icon-annotated.png)
-
-Qwen3.6 IQ4_XS speed evidence:
-
-| Case | Runs | Average client time | Cold/warm client time | Average generated tokens/s | Notes |
-| --- | ---: | ---: | --- | ---: | --- |
-| Text-only compact JSON | 3 | `2.10s` | `1.90-2.26s` | `29.0 tok/s` | No image encoder cost |
-| Browser Back icon with OCR anchors | 2 | `9.69s` | `16.85s / 2.52s` | `24.45 tok/s` | Warm call benefits from prompt/cache state |
-| Mouse illustration with OCR anchors | 2 | `12.94s` | `19.87s / 6.02s` | `23.23 tok/s` | Larger crop and longer output |
-
-Evidence artifacts:
-
-- OCR-assisted result overlays: `artifacts/vision-regions/20260522-181534-qwen36-iq4xs-ocr-reasonoff/`
-- Speed benchmark JSON: `artifacts/vision-regions/20260523-020346-qwen36-iq4xs-speed/speed-summary.json`
-
-Interpretation:
-
-- Qwen3.6 IQ4_XS is currently the strongest local result for small GUI icon grounding when OCR anchors are included.
-- Large icon grounding is already usable, but it still needs contour/candidate post-processing to recover tight shape boundaries such as the mouse side buttons.
-- Tiny icon execution should not trust the raw model bbox alone; use OCR anchors to locate the icon neighborhood, then use local icon-candidate geometry or padding to produce the final click-safe target.
-
-Removed local model attempts: InternVL3.5 8B, Qwen3-VL 8B, Qwen2.5-VL 7B, GUI-Actor 7B, UI-TARS 7B, Gemma4 E2B, and InternVL3 14B local directories were removed from this workspace after they were either weaker, incomplete, or not part of the current qwen3.6 OCR-anchor baseline.
-
-If no local vision server is running, `/vision/analyze` will fail with a connection error when this endpoint is configured. Set the endpoint back to `null` to use stub mode.
-
-After `/vision/analyze` normalizes the response, the runtime now persists local region artifacts under `artifacts/vision-regions/`:
-
-- one full annotated screenshot with region boxes
-- one crop per region
-- one annotated crop per region
-- one `regions.json` manifest that maps `region_id`, `bbox`, `match_key`, and saved file paths
-
----
-
-## Page structure contract
-
-The long-term consumer of learned screenshot knowledge should not be the raw `regions` list directly.
-
-Instead, the intended decision flow is:
-
-1. capture a screenshot
-2. analyze it into `vision_regions_v1`
-3. run OCR on the same image
-4. build a higher-level `page_structure_v1`
-5. give that `page_structure` to the upper-layer agent
-6. let the agent choose the next action based on page semantics rather than raw OCR or raw coordinates
-
-The design intent is:
-
-- `vision_regions_v1`
-  - detailed learning layer
-  - used for screenshot grounding, cropping, annotation, OCR text retention, and region matching
-- `ocr_anchors_v1`
-  - provider-prompt grounding hint layer
-  - gives the vision model OCR text boxes and centers as relative-position anchors for nearby visual controls
-- `page_structure_v1`
-  - decision layer for the agent
-  - used to describe executable elements, OCR-backed click points, verification hints, and memory keys
-
-The runtime should therefore separate:
-
-- learning output
-  - image evidence
-  - region coordinates
-  - OCR text
-  - `match_key`
-  - saved crops / annotations
-- agent-facing structure
-  - `screen_summary`
-  - `elements[]`
-  - `texts[]`
-  - `links[]`
-  - `interaction_type`
-  - `interaction_policy`
-  - `verification_hints`
-  - `memory_key`
-  - `learning_summary`
-
-In other words:
-
-> collect evidence first, fuse it into executable elements, then let the agent decide
-
-The agent should not be forced to infer the next step from raw region geometry alone.
-
-### Screen reading contract
-
-`POST /vision/screen_reading` returns `screen_reading_v1`, the current READ-facing contract. It sits above `page_structure_v1` and keeps the UI-specific layer separate from action execution.
-
-The contract includes:
-
-- `texts`: normalized OCR text boxes
-- `ui.elements`: executable or potentially executable UI objects
-- `ui.modules`: grouped screen areas inferred from semantic regions
-- `ui.icon_candidates`: no-text or icon-like controls, including Microsoft Fluent catalog matches when label/context is strong enough, that require stronger grounding before execution
-- `ui.provider_slots`: integration points for the connected Windows UIA scanner, browser accessibility, the connected Microsoft Fluent icon catalog, and learned UI memory
-- `source_layers.windows_uia`: UIA scan status and control count for the current bound window, when available
-- `ui.learning_hooks`: candidate records that can later be written into UI memory after manual review or verified actions
-- `execution_relevance`: safe, risky, and unknown UI candidate ids
-
-This route is intentionally conservative. OCR-backed/page-structure elements can be considered by later grounding, while visual-only icon candidates are exposed for review, Windows UIA matching, and Microsoft Fluent catalog matching instead of being treated as immediately safe click targets.
-
-### Page structure shape
-
-`POST /vision/page_structure` returns:
-
-```json
-{
-  "contract_version": "page_structure_v1",
-  "image_size": {"width": 420, "height": 220},
-  "screen_summary": "Main menu with Start and Settings controls.",
-  "state_guess": "home",
-  "regions": [],
-  "elements": [
-    {
-      "element_id": "element_start_12345678",
-      "label": "Start",
-      "role": "button",
-      "interaction_type": "click",
-      "description": "Start button that opens the main screen.",
-      "text": "Start",
-      "bbox": {"x": 77, "y": 68, "w": 24, "h": 13},
-      "semantic_bbox": {"x": 80, "y": 120, "w": 140, "h": 100},
-      "click_point": {"x": 89, "y": 74},
-      "click_strategy": "ocr_text_center",
-      "possible_destinations": ["main"],
-      "verification_hints": {
-        "expected_changes": ["state_change", "new_region", "content_change"],
-        "target_scope": "page"
-      },
-      "interaction_policy": {
-        "allowed": true,
-        "zone_type": "test_module",
-        "priority": "high",
-        "ad_risk": 0.0,
-        "reasons": ["test_like_keyword"]
-      },
-      "fusion_confidence": 0.93,
-      "coordinate_confidence": "high",
-      "memory_key": "role:button|label:start|text:start|layout:layout_start",
-      "sources": ["qwen3_vl", "rapidocr_onnxruntime"],
-      "source_region_ids": ["region_start"],
-      "source_text_ids": ["text_1"],
-      "evidence": {}
-    }
-  ],
-  "texts": [],
-  "links": [],
-  "learning_summary": {
-    "profile": "rule_based_interaction_learning_v1",
-    "safe_element_ids": ["element_start_12345678"],
-    "blocked_element_ids": [],
-    "ad_like_element_ids": [],
-    "allowed_element_count": 1,
-    "blocked_element_count": 0
-  },
-  "raw_ocr": {},
-  "raw_vision_regions": []
-}
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\start_test_panel.ps1 -CheckOnly
 ```
 
-Important element fields:
+### 4. 手动启动 runtime
 
-- `interaction_type`: how to operate the element, such as `click` or `focus`
-- `interaction_policy`: whether the element should currently be considered safe to click, what zone type it belongs to, and why
-- `verification_hints`: expected post-action evidence for the validator
-- `memory_key`: stable learning key for successful click strategy and validation outcomes
-- `bbox`: execution bbox chosen by fusion, OCR-backed when possible
-- `semantic_bbox`: original Qwen region bbox, kept for evidence and layout memory
-- `click_point`: selected interaction coordinate
-- `click_strategy`: why that coordinate was selected
-- `fusion_confidence`: confidence in the semantic/text binding
-- `coordinate_confidence`: confidence in the coordinate source
-- `learning_summary`: page-level rule output that groups safe elements, blocked elements, and ad-like candidates
+```powershell
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
 
-For test and inspection, `POST /vision/layer_trace` returns `vision_layer_trace_v1`.
+打开接口文档：
 
-It includes one ordered record per layer:
+```text
+http://127.0.0.1:8000/docs
+```
 
-- `input_image`
-- `vision_provider_raw`
-- `vision_regions_v1`
-- `ocr_result`
-- `page_structure_v1`
+手动打开测试面板：
 
-Each record includes:
+```powershell
+uv run python scripts\settings_panel.py
+```
 
-- `summary`: compact counters such as region count, OCR text count, and element count
-- `validation`: missing fields, item-level field errors, warnings, and runtime errors
-- `result`: the full returned payload for that layer
+### 5. 启动本地视觉模型
 
-Use `/vision/layer_trace` when validating a new webpage screenshot before letting action code consume the result.
+推荐通过测试面板启动：
 
-For local-model runs, `vision_provider_raw.result.raw_response.attempts` now shows whether the provider used scaled inference, whether a compact retry was needed, and whether coordinates were remapped back to the original image.
+1. 打开 `整屏理解` 或 `精准定位` 阶段
+2. 选择模型 profile
+3. 点击 `启动本地视觉模型`
+4. 点击 `测试模型 /v1/models`
 
-For bbox-precision experiments, `/vision/analyze`, `/vision/page_structure`, and `/vision/layer_trace` also accept `metadata.grid_overlay`.
-Supported values:
+模型刚启动时，`/v1/models` 可能短暂返回 `Loading model`。测试面板会将其显示为“模型正在加载”而不是服务失败；在此期间调用整屏理解或精准定位，runtime 会等待模型可用后继续当前识别请求。
 
-- `true` to enable a default `100px` light grid
-- an integer such as `120` to use that pixel spacing
-- an object such as `{"enabled": true, "spacing": 100}`
+模型统一放在：
 
-When enabled, the local provider renders a light pixel grid and tick-label reference image for inference, using denser minor guide lines between major marks, records `grid_overlay_spacing=...` in `vision_provider_raw.result.notes`, and stores the saved reference image path under `vision_provider_raw.result.raw_response.attempts[*].grid_overlay.artifact_path`.
+```text
+configs/model_profiles/
+```
 
-For OCR-assisted bbox correction experiments, the same routes also accept `metadata.ocr_region_refine`.
-Supported values:
+启动脚本统一放在：
 
-- `true` to enable the default OCR-anchor refinement pass
-- an object such as `{"enabled": true, "min_text_score": 0.58, "padding": 16}`
+```text
+scripts/model_servers/
+```
 
-When enabled, the runtime keeps the original model regions intact, adds an OCR-assisted refinement pass, and records `ocr_region_refine=...` in the refined notes.
-`/vision/layer_trace` also adds an extra `vision_regions_refined_v1` layer so raw model boxes and OCR-adjusted boxes can be compared side by side.
+当前已有 profile：
 
-To visually audit a saved trace, call `POST /vision/render_review_overlay`.
-It reads a `vision_layer_trace_v1` JSON file, redraws region boxes and OCR boxes on the original screenshot, and writes the review image under `artifacts/review-overlays/`.
-Use `region_layer = "vision_provider_raw"` when checking the visual model's raw returned regions.
-Use `region_layer = "vision_regions_refined_v1"` when checking the OCR-assisted experiment output.
+- `configs/model_profiles/qwen3_6_iq4_xs.json`
+- `configs/model_profiles/qwen3_vl_8b_q4_k_m.json`
 
-To visually audit a staged recognition plan, call `POST /vision/render_recognition_plan_overlay`.
-It reads a `recognition_plan_v1` trace, redraws ranked candidates, OCR-refined candidate boxes, pre-click allow/reject state, local OCR matches, and refined click points on the original screenshot.
+手动启动 llama.cpp 视觉模型：
 
-Current status:
+```powershell
+.\scripts\model_servers\start_llama_vision_server.ps1
+```
 
-- `vision_regions_v1` is implemented
-- region artifact persistence is implemented
-- `page_structure_v1` is implemented as deterministic fusion over normalized Qwen regions and OCR boxes
-- `page_structure_v1` uses stricter OCR binding guards for far/short text so repeated UI fragments such as single-letter labels do not inflate executable element boxes
-- `page_structure_v1` now includes rule-based interaction learning that marks test modules, navigation controls, and ad-like action candidates
+停止本地视觉模型：
 
-### Recommended recognition flow
+```powershell
+.\scripts\model_servers\stop_local_vision_server.ps1
+```
 
-For higher-accuracy GUI targeting, the preferred direction is no longer "one full screenshot -> one final coordinate".
-The recommended flow is:
+指定其他 GGUF 模型：
 
-1. `parse`
-   - turn one screenshot into structured regions, OCR text, and executable elements
-   - current evidence sources: `vision_regions_v1`, `ocr_result`, `page_structure_v1`
-2. `candidate`
-   - score only the small set of elements that could satisfy the current task
-   - use text match, zone trust, actionability, and ad-blocking rules
-3. `narrow search`
-   - crop the top candidates and run a second local analysis on the smaller ROI
-   - prefer local re-grounding over trusting one full-screen bbox
-4. `verify`
-   - confirm before click that the chosen candidate is sufficiently ahead of alternatives
-   - confirm after click that page state, OCR, focus, or URL changed as expected
+```powershell
+.\scripts\model_servers\start_llama_vision_server.ps1 `
+  -ModelPath .\models\some-model.gguf `
+  -MmprojPath .\models\some-mmproj.gguf
+```
 
-This architecture is the preferred path for improving recognition accuracy because it reduces full-screen ambiguity instead of asking one model call to solve parsing, selection, and pixel-accurate grounding all at once.
+## 测试面板
 
-The project design now treats this as the planned MVP direction:
+测试面板是当前最推荐的调试入口。它不是网页，而是 Tkinter 桌面界面。
 
-- first build a no-click `recognition_plan`
-- then rank `top-k` candidates
-- then rerun local grounding on cropped ROIs
-- only attach real click execution after verification is measurable
+左侧栏按 Agent workflow 排列：
 
-The first candidate-ranking contract is available internally as `candidate_rank_v1` under `app/recognition/`.
-The no-click planning endpoint is now available as `POST /vision/recognition_plan`.
-It returns `recognition_plan_v1` with `parse_result`, `candidate_result`, `narrow_search_result`, `pre_click_decision`, `verification_plan`, and `recommended_target`.
-Before calling the vision provider, this endpoint can run OCR and attach `ocr_anchors_v1` to the provider prompt. The anchor payload includes all OCR text boxes by default, plus centers, confidence, and goal similarity, so the visual model can reason about nearby icons and surrounding controls by relative position. The prompt represents those anchors compactly as `id`, `t`, `b=[x,y,w,h]`, `c=[center_x,center_y]`, `s`, and `g` to keep full-page text coordinates affordable. If the provider rejects or fails the anchored prompt, the route falls back to the same request without anchors. Use `metadata.ocr_anchors.max_anchors` only when a smaller prompt is needed.
-The provider prompt also requires each returned region to include `anchor_relations` and `grounding_constraints`. `anchor_relations` records the OCR anchors and geometry involved, while `grounding_constraints` explains the reference frame, text-anchor frame, relative frame position, text inclusion policy, bbox edge constraints, center alignment, size expectations, negative/exclusion constraints, and final bbox reason. This makes drift easier to debug because a wrong box now carries inspectable coordinate evidence instead of only raw coordinates.
+1. 流程图
+2. 应用发现
+3. 打开/绑定
+4. 截图阶段
+5. 整屏理解
+6. 精准定位
+7. 点击闸门
+8. 模型设置
 
-The OCR-assisted grounding contract treats text boxes as boundary-line rulers:
+主要能力：
 
-- For visual icons or illustrations without text inside, the model must set `text_inclusion_policy` to `exclude_text`, use nearby OCR boxes only as edge/alignment/negative constraints, report the icon's approximate fraction and position inside the text-anchor frame, and keep the final bbox away from OCR text boxes.
-- For controls where the visible target includes text, the model must set `text_inclusion_policy` to `include_referenced_text`, cite the OCR anchors, and return a bbox that includes those text boxes plus the visible control/icon pixels.
+- `GET /apps` 应用发现
+- `POST /apps/open` 打开应用
+- `GET /session/windows` 自动读取当前打开窗口
+- `POST /session/bind_window` 绑定窗口
+- `POST /state/capture_window` 截图
+- 拖拽图片作为测试截图
+- `POST /vision/observe_screen` 整屏理解
+- `POST /vision/locate_target` 精准定位
+- 在精准定位阶段手动生成并预览候选框，用于核对模型定位结果
+- `POST /action/execute_recognition_plan` dry-run 点击闸门
+- 渲染识别 overlay
+- 启动/停止本地视觉模型
+- 检查模型服务 `/v1/models`（仅确认服务和已加载模型，不执行截图理解；结果会显示在模型卡片状态行和返回内容中）
+- 修改附加视觉提示词
+- 查看每个阶段的原始 JSON 返回
 
-`POST /vision/recognition_plan` now evaluates these constraints after provider normalization. It writes `grounding_constraints.grounding_evaluation` with referenced anchor ids, included/excluded anchor ids, any policy violations, the anchor-frame bbox, and an `anchor_corrected_bbox` suggestion when referenced text should have been included but was missed.
-Candidate ranking now preserves the original fused element bbox and may add `refined_bbox` when the element is tied to OCR `source_text_ids` and the OCR union produces a tighter box; when possible, refinement first uses the source OCR text that matches the current goal instead of unioning every line in the card. It also consumes `screen_reading_v1` evidence: UIA accessible names can improve goal text matching, and UIA/icon matches add `screen_reading_score` plus explicit candidate reasons. Blocked/ad-like interaction policy still wins, so screen-reading evidence cannot make a blocked target executable by itself.
-The first local search contract is available as `narrow_search_v1`; it crops the candidate `refined_bbox` when available, otherwise the original element bbox, runs local OCR on each crop, and maps matching local text centers back to full-image coordinates.
-The first pre-click verifier contract is available as `pre_click_decision_v1`; it rejects weak, blocked, ad-like, goal-mismatched, locally mismatched, or out-of-bounds candidates before any click is allowed, and uses `refined_bbox` for the bounds check when present.
+耗时的视觉请求在后台运行，调用整屏理解、精准定位或 dry-run 时测试面板仍可继续响应。整屏理解与精准定位分别保存提示词：整屏理解是快速候选发现阶段，只要求简短界面摘要和可操作控件候选框，不让小模型复述 OCR 坐标或生成详细关系证据；精准定位阶段只处理 agent 指定的目标，区分纯图标与含文字控件，并要求输出 OCR anchor 关系、四边约束、中心/尺寸/排除约束以及最终框理由。对不含文字的小图标，满足这些证据的大模型框会作为 `located_bbox` / `located_point` 返回供检查，但不会自动改点相邻 OCR 文字，也不会直接成为可执行坐标。
 
-See [PROJECT_STRUCTURE.md](./PROJECT_STRUCTURE.md) for the concrete MVP module plan and endpoint outline.
+最新的同图测试中，`Qwen3-VL 8B Q4_K_M` 整屏理解从旧详细输出流程的约 `84.17s` 降至轻量候选流程的约 `16.08s`。新流程单次返回 `10` 个可操作候选和 `2` 个图标候选，没有触发模型重试。
 
----
+精准定位现在对 `click_target` 使用单目标视觉模板，不再要求大模型枚举整屏控件。2026-05-26 的同图真实测试中，`Qwen3.6 35B A3B IQ4_XS` 对“`搜索游戏` 左侧的放大镜搜索图标”返回 `Search Icon`，`located_bbox={x:635,y:25,w:25,h:30}`，`text_inclusion_policy=exclude_text`，耗时约 `75.59s`；系统没有退回选择旁边的输入文字，且因图标尚无额外执行确认，`selected_click_point=null`。
 
-## Region click model
+同日的 QQ “关闭窗口”样例正确识别了语义目标，但在 `806px` 宽推理图上返回了越界横坐标 `965..985`，原结果因此被裁为空框并显示 `not_located`。运行时现在会在裁边前恢复这种 `0..1000` 比例坐标，使关闭按钮成为仍需人工确认的候选。测试面板会把定位返回的首候选自动填入“候选框校验”和“点击闸门”；操作者按下真实点击按钮后，`POST /action/execute_confirmed_point` 才向当前绑定窗口发送该窗口相对坐标。
 
-The current non-text click path is no longer purely OCR-anchor driven.
+修复后的同图真实复测在 `69.35s` 内返回 `close_window_button`、`located_bbox={x:797,y:13,w:17,h:26}`、`located_point={x:806,y:26}` 和 `location_status=requires_pre_click_confirmation`；`selected_click_point` 仍为空，因此复测没有触发点击。
 
-The runtime now supports a **region-anchored click** flow for known UI layouts:
+## 模型管理
 
-1. locate a panel
-2. resolve a target zone inside that panel
-3. generate candidate points (grid / preferred memory-backed point)
-4. dispatch click via `SendInput`
-5. observe before/after state
-6. evaluate strict / weak success
-7. cache successful click point geometry
-8. persist replay/debug case artifacts
+模型配置现在由 registry 管理：
 
-This path remains the baseline execution primitive underneath the new state-aware V1 layer.
+```text
+configs/model_profiles/*.json
+```
 
----
+一个 profile 描述一个模型：
 
-## State-aware memory model (V1)
+- `profile_id`
+- `label`
+- `role`
+- `provider_mode`
+- `input_format`
+- `model_name`
+- `endpoint`
+- `model_path`
+- `mmproj_path`
+- `server_path`
+- `start_script`
+- `stop_script`
+- `port`
+- `context_size`
+- `gpu_layers`
+- `image_min_tokens`
+- `supports_ocr_anchors`
+- `best_for`
+- `limitations`
 
-The new V1 memory layer introduces five persisted object types.
+运行时当前选择写入：
 
-### AppState
-Represents a known screen/page/state for a specific app and window-size bucket.
+```text
+configs/vision.json
+```
 
-### ActionTarget
-Represents a known action target inside a known state.
+当前拆成两个本地视觉角色：
 
-### ValidatorProfile
-Defines how a target should be verified, including target ROI, OCR ROI, and scoring rules.
+- `vision.local_understanding`：小模型，负责快速整屏理解和候选控件索引
+- `vision.local_grounding`：大模型，负责精准定位
 
-### TransitionRecord
-Stores a recorded transition such as:
+测试面板的模型下拉只读取 `configs/model_profiles/`，避免同一个模型从多个来源重复出现。
 
-> state A + action B -> state C
+## Agent 工作流
 
-### ReplayCase
-Stores replay/debug artifacts for a concrete execution attempt.
+上层 Agent 应该按 API-first 的流程操作，不直接使用模型返回的原始坐标点击。
 
-Persistence is currently file-based under `logs/`.
+推荐顺序：
 
----
+```text
+GET  /apps
+POST /apps/open                 可选
+GET  /session/windows
+POST /session/bind_window
+POST /state/capture_window      可选，接口内部也可 live capture
+POST /vision/observe_screen
+POST /vision/locate_target
+POST /action/execute_recognition_plan  dry_run=true
+POST /action/execute_recognition_plan  dry_run=false，仅在 pre_click_decision 允许时
+```
 
-## Recognition strategy (current V1)
+关键原则：
 
-The current recognizer is intentionally conservative.
+- 先用整屏理解得到简短候选列表，再对选中的目标精准定位
+- OCR anchors 默认参与视觉定位；整屏理解中它们只作为输入参考，不由模型重复输出
+- `observe_screen` 只用于界面摘要和候选发现，不用于点击或最终坐标证明
+- `locate_target` 只返回 no-click 定位结果
+- `located_bbox` / `located_point` 是精准视觉模型建议的目标位置；只有 `selected_click_point` 表示已通过点击前闸门的可执行坐标
+- 自主 agent 的真正点击只能走 `execute_recognition_plan`
+- 测试面板的 `execute_confirmed_point` 仅用于操作者已查看候选框后的显式坐标点击，不是自动执行旁路
+- 执行前必须通过 `pre_click_decision_v1`
 
-It uses a lightweight three-stage strategy:
+完整 Agent API 调用规范见：
 
-1. `window_size_bucket` filtering
-2. `thumbnail_hash` coarse matching
-3. anchor patch hit scoring
+```text
+AGENT_API_WORKFLOW.md
+```
 
-If confidence is insufficient, the recognizer should return `unknown` rather than force a match.
+## 主要接口
 
-This is deliberate: a false positive state match is often worse than no match.
+应用和窗口：
 
----
-
-## Validation strategy (current V1)
-
-Validation is moving from large noisy OCR-only checks toward **local target validation**.
-
-Current direction:
-
-- separate `target_roi` from `ocr_roi`
-- run OCR only on a smaller localized ROI when configured
-- include ROI diff evidence
-- compute `strict_score` in addition to `strict_success` / `weak_success`
-
-The long-term goal is a more stable validator based on:
-
-- target ROI
-- localized OCR
-- local diff
-- structured success scoring
-
-This is especially important for noisy numeric counters such as MouseTester.
-
----
-
-## Current implementation status
-
-### Working / verified in the current codebase
-
-- FastAPI app imports successfully in the project `.venv`
-- routers are registered
-- `modules/` boundaries now exist for `ocr`, `click`, `region`, and `validation`
-- pytest coverage now exists for OCR matching, click geometry, region geometry, validator logic, `click_text`, and state-hint persistence
-- `/vision/ocr_region` is restored on top of a RapidOCR-first adapter with PaddleOCR fallback
-- `/action/click_text` is restored with OCR matching, ROI-aware coordinate translation, and retry-based fallback
-- `/action/click_mouse_tester_left_region` remains the main action entrypoint
-- `/vision/analyze` now normalizes provider output into `vision_regions_v1` with diagonal coordinates and stable region match keys
-- the local vision provider can call an OpenAI-compatible local multimodal endpoint for Qwen3-VL-style screenshot analysis
-- `/vision/page_structure` fuses Qwen semantic regions with OCR text boxes into `page_structure_v1`
-- `/vision/layer_trace` returns every layer's result and validation report for screenshot testing
-- schema + storage layer objects can be written and read back
-- state-aware action wiring exists for MouseTester
-
-### State-aware components already added
-
-- `AppState`
-- `ActionTarget`
-- `ValidatorProfile`
-- `TransitionRecord`
-- `ReplayCase`
-- `state_memory`
-- `action_registry`
-- `transition_memory`
-- `replay_case_store`
-- `page_fingerprint`
-- `state_recognizer`
-- `known_action_runner`
-
-### MouseTester integration status
-
-The first state-aware action path has been wired into:
-
-- `POST /action/click_mouse_tester_left_region`
-
-Current behavior:
-
-- ensure known MouseTester state/action/validator assets exist
-- recognize state before action
-- run known action using region click
-- recognize state after action
-- persist replay case and transition artifacts
-- keep fallback strategy available
-
-A second alternate action target has also been added for the same known state so the V1 system can try a fallback target profile rather than only a single hardcoded region.
-
-### Not complete yet
-
-The remaining high-value work is end-to-end runtime verification with a real bound target window:
-
-1. bind real MouseTester window
-2. execute both `click_text` and state-aware region-click against a live target
-3. confirm automatic bootstrap of persisted state/action/validator files
-4. confirm transition and replay-case persistence after real execution
-5. continue strengthening validator stability
-6. run `/vision/page_structure` against an actual bound-window screenshot and compare fused click points with live UI behavior
-
----
-
-## Runtime endpoints
-
-### Core runtime endpoints
-
-- `POST /session/bind_window`
-- `GET /session/windows`
-- `GET /state`
-- `POST /state/capture_window`
 - `GET /apps`
 - `POST /apps/open`
-- `POST /vision/ocr_region`
+- `GET /session/windows`
+- `POST /session/bind_window`
+- `GET /state`
+- `POST /state/capture_window`
+
+`POST /state/capture_window` uses screen-coordinate capture, so it lightly restores the bound window and attempts to bring it to the foreground before grabbing pixels.
+
+视觉：
+
 - `POST /vision/analyze`
 - `POST /vision/page_structure`
 - `POST /vision/screen_reading`
 - `POST /vision/observe_screen`
 - `POST /vision/locate_target`
 - `POST /vision/recognition_plan`
-- `POST /vision/layer_trace`
-- `POST /vision/render_review_overlay`
 - `POST /vision/render_recognition_plan_overlay`
+
+动作：
+
 - `POST /action/execute_recognition_plan`
+- `POST /action/execute_confirmed_point` (operator-reviewed coordinate click from the desktop panel)
 - `POST /action/click_text`
 - `POST /action/click_mouse_tester_left_region`
-- `GET /health`
 
----
+## 识别管线
 
-## Development roadmap
+当前主路径：
 
-### Phase 1 - first real capability
-
-1. real `bind_window`
-2. real `get_state`
-3. real `capture_window`
-
-Milestone:
-
-> Agent -> bind_window -> capture_window -> can see the target window
-
-### Phase 2 - first closed loop
-
-4. `ocr_region`
-5. `click_text`
-
-Milestone:
-
-> Agent can locate text in a target window and perform a validated click
-
-### Phase 3 - region-aware interaction
-
-6. reusable `region_click`
-7. point memory cache
-8. replay/debug case persistence
-
-Milestone:
-
-> Agent can act on non-text UI targets using panel-relative geometry and closed-loop validation
-
-### Phase 4 - software-specific state-aware V1
-
-9. known `AppState` recognition
-10. known `ActionTarget` reuse
-11. `TransitionRecord` persistence
-12. `ReplayCase` persistence
-13. validator-profile-driven local verification
-14. fallback from known target profile to compatible region-click behavior
-
-Milestone:
-
-> Agent can recognize a known software state, reuse learned action targets, remember transitions, and keep action verification in the loop
-
----
-
-## How to run
-
-### 1. Create venv and install dependencies
-
-```bash
-uv venv
-uv sync
+```text
+screenshot
+-> OCR anchors
+-> vision_regions_v1 + OCR
+-> page_structure_v1
+-> screen_reading_v1
+-> candidate_rank_v1
+-> narrow_search_v1
+-> pre_click_decision_v1
+-> gated action
 ```
 
-PaddleOCR stores its warmed model cache under the local `.paddlex/` directory by default, and Paddle's own runtime cache is redirected to `.paddle-home/` during OCR initialization. The first PaddleOCR run may download the detection and recognition models; later runs reuse the cached files.
+重点：
 
-For a quick dependency and OCR smoke check:
+- OCR 文字框会作为空间锚点传给视觉模型
+- 图标和文字的关系会进入 grounding 证据
+- 小图标定位优先参考 OCR anchors
+- 候选点击点必须经过本地 ranking、narrow search 和 pre-click gate
+- overlay 可用于人工复核
+
+## 项目结构
+
+```text
+app/
+  api/                FastAPI routes
+  core/               window, screenshot, OCR, input, verifier
+  settings_panel/     Tkinter desktop test panel
+  vision/             local/API vision providers and prompting
+  page_structure/     page structure and screen reading logic
+  models/             request/response schemas
+configs/
+  app_catalog.json
+  settings_panel.json
+  vision.json
+  model_profiles/     model registry
+scripts/
+  start_test_panel.ps1
+  settings_panel.py
+  model_servers/      model server start/stop scripts
+tests/
+artifacts/
+logs/
+```
+
+详细目录说明见：
+
+```text
+PROJECT_STRUCTURE.md
+```
+
+## 当前状态
+
+已具备：
+
+- 本地 FastAPI runtime
+- Windows 窗口发现和绑定
+- 截图和 ROI 截图
+- OCR anchors
+- local/API 视觉 provider 抽象
+- `observe_screen` 整屏理解接口
+- `locate_target` 精准定位接口
+- no-click recognition plan
+- pre-click decision gate
+- gated click execution
+- recognition overlay
+- MouseTester 真实点击基线
+- 桌面测试面板
+- 模型 registry 和统一模型启动脚本目录
+
+最新重点模型实验：
+
+- 模型：`Qwen-Qwen3.6-35B-A3B-IQ4_XS.gguf`
+- mmproj：`mmproj-Qwen3.6-35B-A3B-Q6_K.gguf`
+- 后端：llama.cpp CUDA
+- 结论：OCR anchors 对浏览器 Back 这类小图标帮助明显；大图标形状完整性仍需要 crop/ROI 或其他模型继续对比
+
+当前边界：
+
+- 还不是生产级通用桌面 Agent
+- 还需要更多页面、更多负例、更多窗口尺寸/DPI/缩放变化测试
+- 学习写回还未成为主线能力
+
+## 验证
+
+最近针对测试面板、模型 registry、应用发现、视觉定位 wrapper 的检查：
 
 ```powershell
-$env:PYTHONPATH="."
-uv run pytest
+uv run pytest tests/test_settings_panel_modules.py tests/test_apps_route.py tests/test_vision_observe_locate.py tests/test_vision_normalizer.py
 ```
 
-### 2. Start the server
+当前结果：
 
-```bash
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```text
+14 passed
 ```
 
-For cleaner single-instance debugging, a non-`--reload` run is often preferable once the code path under test is known.
+PowerShell 模型脚本也做过语法解析检查。
 
-### 3. Open docs
+## 重要文档
 
-- Swagger UI: <http://127.0.0.1:8000/docs>
-- Health: <http://127.0.0.1:8000/health>
+- `AGENT_API_WORKFLOW.md`：Agent 调用 API 的标准流程
+- `PROJECT_STRUCTURE.md`：文件结构、配置、产物位置
+- `PROJECT_SUMMARY.md`：项目摘要
+- `CURRENT_STATE.md`：当前状态
+- `NEXT_STEPS.md`：下一步计划
+- `ACCURACY_EVALUATION_STANDARD.md`：准确率评估标准
+- `RUNTIME_STATE_GRAPH.md` / `RUNTIME_STATE_GRAPH.zh-CN.md`：状态图设计
 
----
+## 开发规则
 
-## Minimal state-aware test flow
+本仓库要求代码和文档同步。行为、API、架构、配置、进度或限制发生变化时，需要同步更新相关文档。
 
-A practical current test flow for MouseTester is:
+实现代码时遵循：
 
-1. open the target app/window
-2. call `GET /session/windows`
-3. bind the correct target with `POST /session/bind_window`
-4. call `POST /vision/ocr_region` or `POST /action/click_text`
-5. call `POST /action/click_mouse_tester_left_region`
-6. inspect persisted artifacts under `logs/`
+```text
+skills/code-implementation-loop/SKILL.md
+```
 
----
+最小闭环：
 
-## Development notes
+1. 做最小有意义改动
+2. 跑最窄验证
+3. 看结果
+4. 修失败
+5. 重跑直到通过或记录真实 blocker
 
-- Keep the runtime small and working.
-- Do not over-engineer software-general learning before state-specific reuse works.
-- Prefer verified vertical slices over speculative abstraction.
-- Preserve compatibility with the existing screenshot/OCR/region-click execution model while layering software-specific state memory on top.
-- Continue evolving this README together with the implementation.
+## 维护备注
 
-
+- Windows only
+- local-only HTTP API
+- 单 session / 单绑定窗口优先
+- 不允许直接从模型原始 bbox 点击
+- 所有真实点击都应走 gated action API
+- 历史细节不要继续塞进 README，放到专门文档里

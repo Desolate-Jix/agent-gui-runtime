@@ -306,3 +306,49 @@ def test_rank_candidates_keeps_blocked_screen_reading_match_rejected() -> None:
     assert result.rejected[0].element_id == "element_blocked"
     assert result.rejected[0].score_breakdown.screen_reading_score > 0
     assert "blocked_by_interaction_policy" in result.rejected[0].reasons
+
+
+def test_rank_candidates_prefers_precise_visual_icon_over_nearby_text_for_icon_goal() -> None:
+    structure = _structure(
+        [
+            _element(
+                "element_search_icon",
+                "Search Icon",
+                role="icon",
+                allowed=False,
+                zone_type="precise_visual_target",
+                priority="review",
+                coordinate_confidence="medium",
+            ),
+            _element("element_search_text", "搜索游戏", role="input"),
+        ]
+    )
+
+    result = rank_candidates(CandidateRankRequest(goal="定位搜索游戏左侧的放大镜图标", page_structure=structure, top_k=2))
+
+    assert result.candidates[0].element_id == "element_search_icon"
+    assert result.candidates[0].eligible is True
+    assert "precision_visual_target_matches_icon_goal" in result.candidates[0].reasons
+    assert "text_control_does_not_satisfy_icon_goal" in result.candidates[1].reasons
+
+
+def test_rank_candidates_returns_precise_visual_close_button_for_chinese_close_goal() -> None:
+    structure = _structure(
+        [
+            _element(
+                "element_close",
+                "close window button",
+                role="button",
+                allowed=False,
+                zone_type="precise_visual_target",
+                priority="review",
+                coordinate_confidence="medium",
+            )
+        ]
+    )
+
+    result = rank_candidates(CandidateRankRequest(goal="\u5173\u95ed\u7a97\u53e3", page_structure=structure, top_k=1))
+
+    assert result.candidates[0].element_id == "element_close"
+    assert result.candidates[0].eligible is True
+    assert "precision_visual_target_matches_icon_goal" in result.candidates[0].reasons

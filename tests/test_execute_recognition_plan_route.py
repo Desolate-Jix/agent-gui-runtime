@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from app.api import action as action_api
-from app.models.request import ExecuteRecognitionPlanRequest
+from app.models.request import ExecuteConfirmedPointRequest, ExecuteRecognitionPlanRequest, ROIModel
 from app.models.response import APIResponse, VisionResultData
 from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
 
@@ -374,3 +374,74 @@ def test_execute_recognition_plan_blocks_saved_image_execution_without_override(
     assert response.error is not None
     assert response.error.code == "saved_image_execution_not_allowed"
     assert response.data["trace_path"].endswith("saved-image-blocked.json")
+
+
+def test_execute_confirmed_point_dry_run_validates_bbox_without_clicking(monkeypatch) -> None:
+    monkeypatch.setattr(
+        action_api.window_manager,
+        "get_bound_window",
+        lambda: SimpleNamespace(
+            handle=5,
+            title="QQ",
+            rect=SimpleNamespace(left=100, top=200, right=920, bottom=1503),
+        ),
+    )
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/confirmed-dry-run.json")
+    clicked = False
+
+    def fake_click(*args, **kwargs):
+        nonlocal clicked
+        clicked = True
+        return {"clicked": True}
+
+    monkeypatch.setattr(action_api.input_controller, "click_point", fake_click)
+
+    response = action_api.execute_confirmed_point(
+        ExecuteConfirmedPointRequest(
+            x=800,
+            y=26,
+            bbox=ROIModel(x=792, y=13, width=16, height=26),
+            label="close window button",
+            dry_run=True,
+        )
+    )
+
+    assert response.success is True
+    assert clicked is False
+    assert response.data["result"]["confirmed_point"] == {"x": 800, "y": 26}
+    assert response.data["result"]["execution_path"]["action_executed"] is False
+
+
+def test_execute_confirmed_point_dispatches_real_window_relative_click(monkeypatch) -> None:
+    monkeypatch.setattr(
+        action_api.window_manager,
+        "get_bound_window",
+        lambda: SimpleNamespace(
+            handle=5,
+            title="QQ",
+            rect=SimpleNamespace(left=100, top=200, right=920, bottom=1503),
+        ),
+    )
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/confirmed-real-click.json")
+    clicked: dict[str, int] = {}
+
+    def fake_click(x: int, y: int, **kwargs):
+        clicked.update({"x": x, "y": y})
+        return {"clicked": True, "window_point": {"x": x, "y": y}}
+
+    monkeypatch.setattr(action_api.input_controller, "click_point", fake_click)
+
+    response = action_api.execute_confirmed_point(
+        ExecuteConfirmedPointRequest(
+            x=800,
+            y=26,
+            bbox=ROIModel(x=792, y=13, width=16, height=26),
+            label="close window button",
+            dry_run=False,
+        )
+    )
+
+    assert response.success is True
+    assert clicked == {"x": 800, "y": 26}
+    assert response.data["result"]["execution_path"]["coordinate_source"] == "human_confirmed_candidate_center"
+    assert response.data["result"]["execution_path"]["action_executed"] is True

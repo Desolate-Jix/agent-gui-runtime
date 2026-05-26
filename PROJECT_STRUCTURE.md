@@ -55,6 +55,13 @@ Use it when you need to answer:
 
 ### Scripts
 
+- `start_test_panel.bat`
+  - root-level double-click launcher for the desktop workflow test panel
+  - delegates to `scripts/start_test_panel.ps1`
+- `scripts/start_test_panel.ps1`
+  - one-command launcher for the desktop workflow test panel
+  - can start the FastAPI runtime if `/health` is not already reachable, then open the Tkinter panel
+  - supports `-CheckOnly` for startup-path verification without opening the GUI
 - `scripts/evaluate_mousetester_traces.py`
   - evaluates saved MouseTester recognition/action traces
   - writes JSON reports under `logs/evaluations/`
@@ -63,6 +70,10 @@ Use it when you need to answer:
   - binds a target window, collects a Windows UIA snapshot, writes a `uia_smoke_trace_v1` trace, and scores it
   - default target is MouseTester.cn in Microsoft Edge
   - writes JSON reports under `logs/evaluations/`
+- `scripts/model_servers/`
+  - unified PowerShell launch/stop scripts for local multimodal servers
+  - `start_llama_vision_server.ps1` starts a llama.cpp-compatible vision model from profile-supplied paths and runtime parameters
+  - `stop_local_vision_server.ps1` stops a model server by profile PID file and/or port
 - `scripts/settings_panel.py`
   - thin launcher for the modular Tkinter desktop settings panel in `app/settings_panel/`
 
@@ -72,8 +83,10 @@ Use it when you need to answer:
   - modular bilingual desktop control surface for stage-by-stage runtime testing
   - keeps the left sidebar aligned with the agent workflow: workflow diagram, app discovery, open/bind, screenshot capture, whole-screen understanding, precise localization, and dry-run gated clicking
   - each stage page exposes the parameters for that stage API and shows returned JSON on the same screen through the fixed response panel
+  - each stage page is scrollable, so long model/API sections are still reachable in smaller windows
   - keeps local/API model configuration on a bottom sidebar gear page
   - supports two local model profiles in `configs/vision.json`: `local_understanding` for small-model screen understanding and `local_grounding` for large-model precise localization
+  - reads model registry files from `configs/model_profiles/` as the dropdown source of truth, writes selected profiles into `configs/vision.json`, launches profile-specified scripts from `scripts/model_servers/`, tests `/v1/models`, refreshes open windows for binding, and accepts dragged image files when `tkinterdnd2` is available
 - `app/settings_panel/desktop.py`
   - Tkinter shell, page composition, workflow diagram, and API button handlers
 - `app/settings_panel/api_client.py`
@@ -691,6 +704,20 @@ Current reality:
 - full-page stability is now improved in provider code through inference scaling plus compact retry fallback
 - local deployment assets are stored under ignored `models/` and `tools/` directories
 - API provider remains a stub unless replaced with a real endpoint
+
+### `configs/model_profiles/`
+
+Current purpose:
+
+- one JSON file per model profile
+- centralizes model label, role, endpoint, input format, local model path, mmproj path, start/stop script paths, port, context size, GPU layers, image token budget, and known strengths/limitations
+- powers the desktop panel's model dropdowns for the whole-screen understanding and precise-localization stages
+- launchable local GGUF profiles include `model_path` and `mmproj_path`; endpoint-only profiles can be tested but not started by the local script
+
+Current entries:
+
+- `qwen3_6_iq4_xs.json`
+- `small_screen_understanding_endpoint.json`
 
 ### Other config folders
 

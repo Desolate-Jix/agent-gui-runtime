@@ -112,6 +112,8 @@ def _score_element(
 ) -> tuple[ScoreBreakdown, list[str], bool]:
     policy = element.interaction_policy
     reasons: list[str] = []
+    precision_visual_match = _is_precision_visual_goal_match(element, goal)
+    visual_goal = _goal_requests_visual_icon(goal)
     base_text_similarity = _best_text_similarity(goal, _element_text_values(element))
     screen_text_similarity = _best_text_similarity(goal, _screen_reading_text_values(screen_evidence))
     text_similarity = max(base_text_similarity, screen_text_similarity)
@@ -121,7 +123,16 @@ def _score_element(
     state_score = _state_score(element, state_hint)
     screen_reading_score, screen_reasons = _screen_reading_score(goal=goal, element=element, screen_evidence=screen_evidence)
     ad_penalty = max(0.0, min(float(policy.ad_risk), 1.0))
-    blocked_penalty = 1.0 if not policy.allowed else 0.0
+    blocked_penalty = 1.0 if not policy.allowed and not precision_visual_match else 0.0
+
+    if precision_visual_match:
+        text_similarity = max(text_similarity, 0.92)
+        role_score = max(role_score, 1.0)
+        policy_score = max(policy_score, 0.75)
+        reasons.append("precision_visual_target_matches_icon_goal")
+    elif visual_goal and element.role not in {"icon", "icon_button", "toolbar_button"}:
+        text_similarity = min(text_similarity, 0.35)
+        reasons.append("text_control_does_not_satisfy_icon_goal")
 
     if screen_text_similarity > base_text_similarity:
         reasons.append("screen_reading_text_match")
@@ -151,10 +162,31 @@ def _score_element(
         ad_penalty=ad_penalty,
         blocked_penalty=blocked_penalty,
     )
-    eligible = bool(policy.allowed) and element.interaction_type in SUPPORTED_INTERACTIONS and breakdown.total() >= 0.18
+    eligible = (bool(policy.allowed) or precision_visual_match) and element.interaction_type in SUPPORTED_INTERACTIONS and breakdown.total() >= 0.18
     if not eligible and "low_candidate_score" not in reasons and bool(policy.allowed):
         reasons.append("low_candidate_score")
     return breakdown, _unique(reasons), eligible
+
+
+def _goal_requests_visual_icon(goal: str) -> bool:
+    normalized = _normalize_text(goal)
+    if any(
+        hint in normalized
+        for hint in (
+            "\u5173\u95ed\u7a97\u53e3",
+            "\u5173\u95ed\u6309\u94ae",
+            "close window",
+            "close button",
+            "x button",
+        )
+    ):
+        return True
+    hints = ("图标", "放大镜", "箭头", "返回键", "icon", "magnifying", "arrow", "toolbar glyph")
+    return any(hint in normalized for hint in hints)
+
+
+def _is_precision_visual_goal_match(element: PageElement, goal: str) -> bool:
+    return element.interaction_policy.zone_type == "precise_visual_target" and _goal_requests_visual_icon(goal)
 
 
 def _element_text_values(element: PageElement) -> list[str]:

@@ -76,6 +76,21 @@ def build_page_structure(vision: VisionAnalyzeResponse, ocr: OCRResult) -> PageS
 
     for region in vision.regions:
         role = _normalize_role(region.role)
+        if _is_precise_visual_icon_region(region, role=role):
+            element = _element_from_precise_visual_icon(region, role)
+            elements.append(element)
+            links.append(
+                PageLink(
+                    link_id=f"link_{element.element_id}",
+                    relation="precise_visual_grounding",
+                    region_id=region.region_id,
+                    element_id=element.element_id,
+                    text_ids=[],
+                    score=round(float(region.confidence), 4),
+                    reasons=["icon_only_bbox_from_precise_vision_grounding", "requires_pre_click_confirmation"],
+                )
+            )
+            continue
         if role not in SUPPORTED_ROLES:
             continue
 
@@ -319,6 +334,61 @@ def _element_from_semantic_region(region: VisionRegion, role: str) -> PageElemen
             "semantic_match_key": region.match_key,
             "reason": "no_ocr_text_bound",
         },
+    )
+
+
+def _element_from_precise_visual_icon(region: VisionRegion, role: str) -> PageElement:
+    label = _best_label(region, "")
+    bbox = region.bbox
+    policy = InteractionPolicy(
+        allowed=False,
+        zone_type="precise_visual_target",
+        priority="review",
+        ad_risk=0.0,
+        reasons=["precision_visual_grounding_requires_confirmation"],
+    )
+    return PageElement(
+        element_id=_element_id(role, label, region.region_id),
+        label=label,
+        role=role,
+        interaction_type="click",
+        description=region.description,
+        text="",
+        bbox=bbox,
+        semantic_bbox=bbox,
+        click_point=_bbox_center(bbox),
+        click_strategy="vision_grounded_icon_center",
+        possible_destinations=list(region.possible_destinations),
+        verification_hints=_verification_hints(role),
+        interaction_policy=policy,
+        fusion_confidence=round(max(0.0, min(float(region.confidence), 1.0)), 4),
+        coordinate_confidence="medium",
+        memory_key=_memory_key(role=role, label=label, text="", layout_key=region.layout_key),
+        sources=["qwen3_vl", "ocr_anchor_guided_visual_grounding"],
+        source_region_ids=[region.region_id],
+        source_text_ids=[],
+        evidence={
+            "semantic_match_key": region.match_key,
+            "reason": "precise_visual_icon_grounding",
+            "text_inclusion_policy": "exclude_text",
+            "grounding_constraints": dict(region.grounding_constraints),
+            "anchor_relations": list(region.anchor_relations),
+        },
+    )
+
+
+def _is_precise_visual_icon_region(region: VisionRegion, *, role: str) -> bool:
+    if role not in {"icon", "icon_button", "toolbar_button", "button"}:
+        return False
+    constraints = region.grounding_constraints or {}
+    policy = str(constraints.get("text_inclusion_policy") or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if policy != "exclude_text" or float(region.confidence) < 0.7:
+        return False
+    edges = constraints.get("edge_constraints")
+    return bool(
+        isinstance(edges, dict)
+        and all(edges.get(edge) for edge in ("top", "bottom", "left", "right"))
+        and constraints.get("final_bbox_reason")
     )
 
 

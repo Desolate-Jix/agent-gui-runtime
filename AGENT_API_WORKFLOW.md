@@ -6,6 +6,8 @@ The core rule is:
 
 > The agent must not click from raw visual-model coordinates. It must call the runtime APIs, let the runtime attach OCR anchors, inspect the recognition plan, and only execute a click through the gated action endpoint.
 
+The desktop test panel also exposes `POST /action/execute_confirmed_point` for an operator who has visibly reviewed a candidate bbox and deliberately presses its coordinate-click button. This diagnostic path is not an autonomous agent execution path and does not replace `pre_click_decision_v1`.
+
 ## Response Envelope
 
 All endpoints return the same envelope:
@@ -352,9 +354,21 @@ Expected response:
         "x": 221,
         "y": 119
       },
+      "located_bbox": {
+        "x": 211,
+        "y": 109,
+        "w": 20,
+        "h": 20
+      },
+      "located_point": {
+        "x": 221,
+        "y": 119
+      },
+      "location_status": "pre_click_verified",
       "execution_path": {
         "action_executed": false,
         "coordinate_source": "pre_click_decision_v1.selected_click_point",
+        "located_coordinate_source": "recommended_target.element.click_point",
         "agent_must_call_for_click": "POST /action/execute_recognition_plan"
       }
     }
@@ -368,7 +382,10 @@ Agent decision:
 - Treat this as precise no-click localization.
 - Prefer `provider_mode: local_grounding` here. It is intended for the larger local model that performs precise OCR-assisted target localization.
 - Use `pre_click_decision.allowed` as the quality gate.
+- Read `located_bbox` and `located_point` as the large model's no-click target proposal. For a visual-only icon it may be present while `selected_click_point` is null and `location_status` is `requires_pre_click_confirmation`.
+- Treat only `selected_click_point` as executable. An icon proposal must not silently fall back to nearby OCR text merely because that text is easier to ground.
 - Still do not click directly. To click, call `POST /action/execute_recognition_plan`, which re-captures and rechecks before dispatching input.
+- If a visual model emits out-of-bounds values consistent with `0..1000` normalized coordinates, the provider restores them before pixel clamping and records `coordinate_space_recovered=normalized_1000`; that restored bbox is still a no-click proposal.
 
 ### 8. Build A No-Click Live Recognition Plan
 
@@ -496,6 +513,28 @@ Agent decision:
 - Do not use raw `vision_regions.regions[*].bbox` as a click coordinate.
 - If `ocr_anchor_grounding_used == false`, treat the plan as lower confidence and inspect `ocr_anchor_grounding_fallback_used`.
 - If `pre_click_decision.allowed == false`, do not click. Re-observe, narrow the ROI, improve the goal text, or ask the user.
+
+### Operator-Reviewed Coordinate Test Path
+
+The desktop panel copies the first returned localization candidate into bbox-review fields and its coordinate click gate. Once the operator visibly checks that box, the panel can validate or explicitly dispatch its bound-window-relative center:
+
+```http
+POST /action/execute_confirmed_point
+Content-Type: application/json
+```
+
+```json
+{
+  "x": 800,
+  "y": 26,
+  "bbox": {"x": 792, "y": 13, "width": 16, "height": 26},
+  "label": "close window button",
+  "source_trace_path": "logs/traces/vision/...",
+  "dry_run": true
+}
+```
+
+With `dry_run: false`, this route dispatches that exact point through the real input controller and writes an action trace. It rejects a point outside its reviewed bbox or the currently bound window. Upper-layer agents must not use this operator-only route to bypass recognition gating.
 
 ### 9. Execute The Click Only After The Plan Is Accepted
 

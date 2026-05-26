@@ -1,0 +1,23 @@
+{
+  "profile_id": "qwen3_6_iq4_xs",
+  "label": "Qwen3.6 35B A3B IQ4_XS",
+  "role": ["grounding", "ocr_anchor_grounding"],
+  "provider_mode": "local_grounding",
+  "input_format": "openai_compatible_vision",
+  "model_name": "Qwen-Qwen3.6-35B-A3B-IQ4_XS.gguf",
+  "model_path": "models/qwen3_6-35b-a3b-iq4_xs-gguf/Qwen-Qwen3.6-35B-A3B-IQ4_XS.gguf",
+  "mmproj_path": "models/qwen3_6-35b-a3b-iq4_xs-gguf/mmproj-Qwen3.6-35B-A3B-Q6_K.gguf",
+  "server_path": "tools/llama.cpp-b8892-cuda13/llama-server.exe",
+  "endpoint": "http://127.0.0.1:1234/v1/chat/completions",
+  "start_script": "scripts/model_servers/start_llama_vision_server.ps1",
+  "stop_script": "scripts/model_servers/stop_local_vision_server.ps1",
+  "pid_file": "logs/qwen3_6-iq4_xs-server.pid",
+  "port": 1234,
+  "context_size": 4096,
+  "gpu_layers": 26,
+  "image_min_tokens": 1024,
+  "supports_ocr_anchors": true,
+  "launchable": true,
+  "best_for": "OCR-assisted precise localization of small GUI icons and targets.",
+  "limitations": "Cold image requests are slow; tiny icon bboxes can be too tight."
+}

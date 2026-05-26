@@ -16,6 +16,7 @@ dependencies = [
   "paddleocr",
   "rapidocr-onnxruntime",
   "pillow",
+  "tkinterdnd2",
   "loguru",
   "psutil",
   "paddlepaddle==3.2.2",

@@ -12,6 +12,7 @@ WINDOWS_BACKEND_IMPORT_ERROR: Optional[str] = None
 try:
     from pywinauto import Desktop
     from pywinauto.controls.hwndwrapper import HwndWrapper
+    import win32con
     import win32gui
     import win32process
 
@@ -19,6 +20,7 @@ try:
 except Exception as exc:  # pragma: no cover - depends on runtime platform/environment
     Desktop = None  # type: ignore[assignment]
     HwndWrapper = object  # type: ignore[assignment]
+    win32con = None  # type: ignore[assignment]
     win32gui = None  # type: ignore[assignment]
     win32process = None  # type: ignore[assignment]
     WINDOWS_BACKEND_IMPORT_ERROR = str(exc)
@@ -91,17 +93,9 @@ class WindowManager:
             raise ValueError("No bound window available to focus")
 
         logger.info("Focusing bound window: handle={}, title={}", bound.handle, bound.title)
-        try:
-            win32gui.ShowWindow(bound.handle, 9)  # type: ignore[union-attr]
-        except Exception as exc:
-            logger.warning("ShowWindow failed for handle {}: {}", bound.handle, exc)
+        self._activate_window(bound.handle)
 
-        try:
-            win32gui.SetForegroundWindow(bound.handle)  # type: ignore[union-attr]
-        except Exception as exc:
-            logger.warning("SetForegroundWindow failed for handle {}: {}", bound.handle, exc)
-
-        time.sleep(0.25)
+        time.sleep(0.1)
         refreshed = self.get_bound_window()
         if refreshed is None:
             raise ValueError("Bound window disappeared after focus attempt")
@@ -219,6 +213,37 @@ class WindowManager:
             rect=WindowRect(left=left, top=top, right=right, bottom=bottom),
             is_active=active_handle == wrapper.handle,
         )
+
+    def _activate_window(self, handle: int) -> None:
+        """Best-effort lightweight foreground activation for screen-coordinate capture."""
+        try:
+            win32gui.ShowWindow(handle, win32con.SW_RESTORE)  # type: ignore[union-attr]
+        except Exception as exc:
+            logger.warning("ShowWindow(SW_RESTORE) failed for handle {}: {}", handle, exc)
+
+        try:
+            win32gui.BringWindowToTop(handle)  # type: ignore[union-attr]
+            win32gui.SetWindowPos(  # type: ignore[union-attr]
+                handle,
+                win32con.HWND_TOPMOST,  # type: ignore[union-attr]
+                0,
+                0,
+                0,
+                0,
+                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_SHOWWINDOW,  # type: ignore[union-attr]
+            )
+            win32gui.SetWindowPos(  # type: ignore[union-attr]
+                handle,
+                win32con.HWND_NOTOPMOST,  # type: ignore[union-attr]
+                0,
+                0,
+                0,
+                0,
+                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_SHOWWINDOW,  # type: ignore[union-attr]
+            )
+            win32gui.SetForegroundWindow(handle)  # type: ignore[union-attr]
+        except Exception as exc:
+            logger.warning("Foreground activation failed for handle {}: {}", handle, exc)
 
     def _get_process_id(self, handle: int) -> Optional[int]:
         """Return the process id for a window handle."""

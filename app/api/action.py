@@ -17,7 +17,13 @@ from app.core.runtime_artifacts import write_trace
 from app.core.screenshot import screenshot_service
 from app.core.verifier import verifier
 from app.core.window_manager import window_manager
-from app.models.request import ClickTextRequest, ExecuteRecognitionPlanRequest, VisionRecognitionPlanOverlayRequestModel, VisionRecognitionPlanRequestModel
+from app.models.request import (
+    ClickTextRequest,
+    ExecuteConfirmedPointRequest,
+    ExecuteRecognitionPlanRequest,
+    VisionRecognitionPlanOverlayRequestModel,
+    VisionRecognitionPlanRequestModel,
+)
 from app.models.response import APIResponse, ActionResultData, ErrorModel
 from app.schemas.action_target import ActionTarget
 from app.schemas.state import AppState
@@ -670,6 +676,93 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
 
     data = ActionResultData(action="execute_recognition_plan", result=base_result)
     return APIResponse(success=True, message="Recognition-plan click executed and verified", data=data.model_dump(), error=None)
+
+
+@router.post("/execute_confirmed_point", response_model=APIResponse)
+def execute_confirmed_point(request: ExecuteConfirmedPointRequest) -> APIResponse:
+    """Dispatch a point explicitly confirmed in the review UI."""
+    bound = window_manager.get_bound_window()
+    if bound is None:
+        return APIResponse(
+            success=False,
+            message="No bound window is currently available",
+            data=None,
+            error=ErrorModel(code="no_bound_window", details="Bind a target window before executing a confirmed point"),
+        )
+
+    point = {"x": int(request.x), "y": int(request.y)}
+    bbox = request.bbox.model_dump() if request.bbox is not None else None
+    if bbox is not None and not _point_in_rect(point, bbox):
+        return APIResponse(
+            success=False,
+            message="Confirmed point is outside its reviewed candidate box",
+            data={"point": point, "bbox": bbox},
+            error=ErrorModel(code="confirmed_point_outside_bbox", details={"point": point, "bbox": bbox}),
+        )
+
+    rect = _window_rect(bound)
+    if not _point_in_rect(point, {"x": 0, "y": 0, "width": rect["width"] - 1, "height": rect["height"] - 1}):
+        return APIResponse(
+            success=False,
+            message="Confirmed point is outside the currently bound window",
+            data={"point": point, "window_size": {"width": rect["width"], "height": rect["height"]}},
+            error=ErrorModel(code="confirmed_point_outside_window", details=point),
+        )
+
+    result: dict[str, Any] = {
+        "contract_version": "execute_confirmed_point_v1",
+        "label": request.label,
+        "confirmed_point": point,
+        "candidate_bbox": bbox,
+        "source_trace_path": request.source_trace_path,
+        "bound_window": {"handle": int(bound.handle), "title": bound.title, "width": rect["width"], "height": rect["height"]},
+        "execution_path": {
+            "coordinate_source": "human_confirmed_candidate_center",
+            "selection_source": "settings_panel_candidate_review",
+            "action_executed": False,
+            "dry_run": bool(request.dry_run),
+        },
+    }
+    if request.dry_run:
+        result["trace_path"] = write_trace(
+            category="actions",
+            operation="execute_confirmed_point",
+            payload={"success": True, "request": request.model_dump(), "result": result},
+            name_hint=request.label or "confirmed_point",
+        )
+        data = ActionResultData(action="execute_confirmed_point", result=result)
+        return APIResponse(success=True, message="Confirmed point accepted; dry run did not click", data=data.model_dump(), error=None)
+
+    try:
+        result["click_result"] = input_controller.click_point(
+            point["x"],
+            point["y"],
+            move_before_click=True,
+            settle_ms=100,
+            hold_ms=70,
+        )
+        result["execution_path"]["action_executed"] = True
+        result["trace_path"] = write_trace(
+            category="actions",
+            operation="execute_confirmed_point",
+            payload={"success": True, "request": request.model_dump(), "result": result},
+            name_hint=request.label or "confirmed_point",
+        )
+        data = ActionResultData(action="execute_confirmed_point", result=result)
+        return APIResponse(success=True, message="Confirmed coordinate click dispatched", data=data.model_dump(), error=None)
+    except Exception as exc:
+        result["trace_path"] = write_trace(
+            category="actions",
+            operation="execute_confirmed_point",
+            payload={"success": False, "request": request.model_dump(), "result": result, "error": str(exc)},
+            name_hint=request.label or "confirmed_point",
+        )
+        return APIResponse(
+            success=False,
+            message="Confirmed coordinate click failed",
+            data=result,
+            error=ErrorModel(code="confirmed_point_click_failed", details=str(exc)),
+        )
 
 
 def _ensure_mouse_tester_state_assets(bound: Any) -> tuple[Optional[AppState], list[ActionTarget], dict[str, ValidatorProfile]]:
