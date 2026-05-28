@@ -25,6 +25,14 @@ Agent -> local HTTP API -> GUI runtime -> bound Windows window
 uv sync
 ```
 
+`FastAPI` 和 `uvicorn[standard]` 已写在 `pyproject.toml` 的依赖列表里，执行 `uv sync` 会自动安装，不需要单独 `pip install fastapi`。
+
+可选验证：
+
+```powershell
+uv run python -c "import fastapi, uvicorn; print('FastAPI runtime deps ok')"
+```
+
 ### 3. 一键启动测试面板
 
 双击根目录：
@@ -38,6 +46,12 @@ start_test_panel.bat
 - 如果 `http://127.0.0.1:8000/health` 不可用，会自动启动 FastAPI runtime
 - 然后打开桌面测试面板
 - 如果 runtime 是脚本启动的，关闭面板后会自动停止该 runtime
+
+如果要跑 agent 冒烟测试并在打开面板前检查/启动本地视觉模型服务，可以加 `-PrepareRuntime`：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\start_test_panel.ps1 -PrepareRuntime
+```
 
 命令行启动：
 
@@ -223,6 +237,7 @@ configs/vision.json
 
 ```text
 GET  /apps
+POST /runtime/prepare            可选，启动/探活本地视觉模型
 POST /apps/open                 可选
 GET  /session/windows
 POST /session/bind_window
@@ -230,13 +245,14 @@ POST /state/capture_window      可选，接口内部也可 live capture
 POST /vision/observe_screen
 POST /vision/locate_target
 POST /action/execute_recognition_plan  dry_run=true
-POST /action/execute_recognition_plan  dry_run=false，仅在 pre_click_decision 允许时
+POST /action/execute_recognition_plan  dry_run=false，携带 approved_plan_id
 ```
 
 关键原则：
 
 - 先用整屏理解得到简短候选列表，再对选中的目标精准定位
 - `observe_screen.suggested_state_hint` 是下一次 `locate_target.state_hint` 的默认建议；测试面板会自动填入，agent 仍可按目标覆盖
+- 上层 Agent 应保留用户原文用于 trace，但发给视觉模型的 `goal` / `state_hint` / 排除约束建议规范化为英文；例如用户说“点击第一个自然搜索结果”，模型侧可写成 `Click the first organic Google search result title` 和 `main organic search results list below Google navigation tabs`
 - OCR anchors 默认参与视觉定位；精准定位保留完整 OCR 结果用于校验，但向模型发送受预算控制的几何投影，只有目标文字高匹配时才附带文字
 - `observe_screen` 只用于界面摘要和候选发现，不用于点击或最终坐标证明
 - `locate_target` 只返回 no-click 定位结果
@@ -244,6 +260,7 @@ POST /action/execute_recognition_plan  dry_run=false，仅在 pre_click_decision
 - 自主 agent 的真正点击只能走 `execute_recognition_plan`
 - 测试面板的 `execute_confirmed_point` 仅用于操作者已查看候选框后的显式坐标点击，不是自动执行旁路
 - 执行前必须通过 `pre_click_decision_v1`
+- 成功 dry-run 会返回 `approved_plan_id`；真实点击应复用这个 ID，runtime 校验同一窗口和已批准点位后直接点击，不再第二次运行大视觉模型
 
 完整 Agent API 调用规范见：
 
@@ -270,6 +287,9 @@ For list-style text targets, fusion also records an `above_exclusion_boundary` f
 应用和窗口：
 
 - `GET /apps`
+- `POST /runtime/prepare`
+- `GET /runtime/models`
+- `POST /runtime/models/start`
 - `POST /apps/open`
 - `GET /session/windows`
 - `POST /session/bind_window`
@@ -292,6 +312,7 @@ For list-style text targets, fusion also records an `above_exclusion_boundary` f
 
 - `POST /action/execute_recognition_plan`
 - `POST /action/execute_confirmed_point` (operator-reviewed coordinate click from the desktop panel)
+- `POST /action/type_text`
 - `POST /action/click_text`
 - `POST /action/click_mouse_tester_left_region`
 
@@ -310,6 +331,8 @@ screenshot
 -> pre_click_decision_v1
 -> gated action
 ```
+
+主要 agent 路径现在会返回 `timings`：其中 `total_ms` 是整次调用耗时，`steps[]` 会拆出模型启动、截图、OCR anchor 准备、视觉推理、候选排序、点击前闸门、真实点击和点击后验证等阶段。它只用于性能诊断和 trace 复盘；是否允许点击仍以 `pre_click_decision_v1` 为准。
 
 重点：
 

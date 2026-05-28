@@ -26,6 +26,7 @@ class OpenAppRequest(BaseModel):
 
     app_id: Optional[str] = None
     command: Optional[list[str]] = None
+    url: Optional[str] = None
     process_name: Optional[str] = None
     title: Optional[str] = None
     bind_after_open: bool = True
@@ -72,10 +73,42 @@ class ClickTextRequest(BaseModel):
     max_retries: int = Field(default=3, ge=1, le=6)
 
 
+class TypeTextRequest(BaseModel):
+    """Request model for typing text into the currently bound window."""
+
+    text: str = Field(min_length=1)
+    x: Optional[int] = Field(default=None, ge=0)
+    y: Optional[int] = Field(default=None, ge=0)
+    click_before_typing: bool = False
+    clear_existing: bool = False
+    submit: bool = False
+    restore_clipboard: bool = True
+    dry_run: bool = False
+
+
+class RuntimePrepareRequest(BaseModel):
+    """Request model for preparing local runtime dependencies before an agent run."""
+
+    start_models: bool = True
+    stages: list[str] = Field(default_factory=lambda: ["observe", "locate"])
+    wait_until_ready: bool = False
+    wait_seconds: float = Field(default=0.0, ge=0.0, le=120.0)
+
+
+class ModelServerRequest(BaseModel):
+    """Request model for starting or checking a local vision model profile."""
+
+    stage: str = Field(default="locate", min_length=1)
+    profile_id: Optional[str] = None
+    wait_until_ready: bool = False
+    wait_seconds: float = Field(default=0.0, ge=0.0, le=120.0)
+
+
 class ExecuteRecognitionPlanRequest(BaseModel):
     """Request model for executing a gated recognition plan against a bound window."""
 
     goal: str = Field(min_length=1)
+    approved_plan_id: Optional[str] = None
     task: str = Field(default="click_target", min_length=1)
     app_name: Optional[str] = None
     state_hint: Optional[str] = None

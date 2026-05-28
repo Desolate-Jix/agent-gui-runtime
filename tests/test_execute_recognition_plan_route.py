@@ -146,6 +146,117 @@ def test_execute_recognition_plan_clicks_allowed_live_capture(monkeypatch) -> No
     assert result["trace_path"].endswith("execute-recognition-plan.json")
 
 
+def test_execute_recognition_plan_reuses_approved_dry_run_plan(monkeypatch, tmp_path) -> None:
+    bound = SimpleNamespace(
+        handle=1,
+        title="MouseTester",
+        process_id=1234,
+        process_name="msedge.exe",
+        rect=SimpleNamespace(left=0, top=0, right=800, bottom=600),
+        is_active=True,
+    )
+    monkeypatch.setattr(action_api, "APPROVED_PLANS_DIR", tmp_path / "approved-plans")
+    action_api.APPROVED_PLANS_DIR.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: bound)
+    monkeypatch.setattr(
+        action_api.screenshot_service,
+        "capture_window",
+        lambda **kwargs: {
+            "image_path": "capture.png",
+            "roi": None,
+            "roi_adjusted": False,
+            "window_size": {"width": 800, "height": 600},
+        },
+    )
+    recognition_calls = {"count": 0}
+
+    def fake_recognition_plan(request):
+        recognition_calls["count"] += 1
+        return APIResponse(
+            success=True,
+            message="ok",
+            data=VisionResultData(result=_allowed_plan({"x": 320, "y": 240})).model_dump(),
+            error=None,
+        )
+
+    monkeypatch.setattr(action_api, "_run_recognition_plan_for_execution", fake_recognition_plan)
+    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", lambda trace_path: None)
+    monkeypatch.setattr(action_api.verifier, "capture_pre_action_state", lambda action_name=None: {"image_path": "before.png"})
+    monkeypatch.setattr(action_api.verifier, "verify_action", lambda *args, **kwargs: {"verified": True})
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/execute-recognition-plan.json")
+    clicked: dict[str, int] = {}
+    monkeypatch.setattr(
+        action_api.input_controller,
+        "click_point",
+        lambda x, y, **kwargs: clicked.update({"x": x, "y": y}) or {"clicked": True, "window_point": {"x": x, "y": y}},
+    )
+
+    dry = action_api.execute_recognition_plan(ExecuteRecognitionPlanRequest(goal="Target test", app_name="demo", dry_run=True))
+    approved_plan_id = dry.data["result"]["approved_plan_id"]
+
+    real = action_api.execute_recognition_plan(
+        ExecuteRecognitionPlanRequest(goal="Target test", app_name="demo", approved_plan_id=approved_plan_id, dry_run=False)
+    )
+
+    assert dry.success is True
+    assert real.success is True
+    assert recognition_calls["count"] == 1
+    assert clicked == {"x": 320, "y": 240}
+    result = real.data["result"]
+    assert result["execution_path"]["approved_plan_reused"] is True
+    assert result["execution_path"]["vision_model_used"] is False
+    assert result["approved_plan_reuse_validation"]["valid"] is True
+    assert "recognition_plan" not in [step["name"] for step in result["timings"]["steps"]]
+
+
+def test_execute_recognition_plan_rejects_approved_plan_window_mismatch(monkeypatch, tmp_path) -> None:
+    original_bound = SimpleNamespace(
+        handle=1,
+        title="MouseTester",
+        process_id=1234,
+        process_name="msedge.exe",
+        rect=SimpleNamespace(left=0, top=0, right=800, bottom=600),
+        is_active=True,
+    )
+    current_bound = SimpleNamespace(
+        handle=2,
+        title="Other Window",
+        process_id=5678,
+        process_name="msedge.exe",
+        rect=SimpleNamespace(left=0, top=0, right=800, bottom=600),
+        is_active=True,
+    )
+    monkeypatch.setattr(action_api, "APPROVED_PLANS_DIR", tmp_path / "approved-plans")
+    action_api.APPROVED_PLANS_DIR.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: original_bound)
+    monkeypatch.setattr(action_api.screenshot_service, "capture_window", lambda **kwargs: {"image_path": "capture.png"})
+    monkeypatch.setattr(
+        action_api,
+        "_run_recognition_plan_for_execution",
+        lambda request: APIResponse(
+            success=True,
+            message="ok",
+            data=VisionResultData(result=_allowed_plan()).model_dump(),
+            error=None,
+        ),
+    )
+    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", lambda trace_path: None)
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/execute-recognition-plan.json")
+
+    dry = action_api.execute_recognition_plan(ExecuteRecognitionPlanRequest(goal="Target test", app_name="demo", dry_run=True))
+    approved_plan_id = dry.data["result"]["approved_plan_id"]
+    monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: current_bound)
+
+    real = action_api.execute_recognition_plan(
+        ExecuteRecognitionPlanRequest(goal="Target test", app_name="demo", approved_plan_id=approved_plan_id, dry_run=False)
+    )
+
+    assert real.success is False
+    assert real.error is not None
+    assert real.error.code == "approved_plan_reuse_failed"
+    assert real.error.details == "approved_plan_window_handle_mismatch"
+
+
 def test_execute_recognition_plan_uses_mouse_tester_semantic_verification(monkeypatch) -> None:
     monkeypatch.setattr(
         action_api.window_manager,

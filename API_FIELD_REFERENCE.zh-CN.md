@@ -52,6 +52,14 @@
 | `capture_live` | boolean | 是否从当前绑定窗口实时截图。为 `false` 时通常需要提供 `image_path`。 |
 | `live_capture` | object/null | live capture 产生的截图信息。用于证明识别基于当前绑定窗口，而不是旧图片。 |
 
+模型输入语言建议：
+
+- `goal_original`：保留用户原文，放在 `metadata` 里用于 trace 和审计。
+- `goal` / `metadata.goal_model`：建议由上层 Agent 转成简洁英文后再发给视觉模型。
+- `state_hint` / `metadata.state_hint_model`：建议使用英文空间区域约束，例如 `main organic search results list below Google navigation tabs`。
+- `metadata.negative_constraints`：建议用英文列出排除项，例如 `exclude search box`、`exclude AI Overview`、`exclude ads`。
+- 不要把最醒目的排除词放成主目标。比如目标是“第一条自然结果”时，`goal` 不应以 `AI Overview` 为最清晰的词。
+
 ## 坐标字段约定
 
 | 字段 | 类型 | 作用 |
@@ -63,6 +71,31 @@
 | `bbox` | object | 候选框，通常形如 `{x,y,w,h}` 或 `{x,y,width,height}`，具体看接口说明。 |
 | `located_point` | object/null | 精准定位模型建议的点，不能直接点击。 |
 | `selected_click_point` | object/null | 已通过点击前闸门的可执行点。只有它代表可自动执行坐标。 |
+
+## 通用耗时字段 `timings`
+
+部分 agent 主路径接口会在 `data` 或 `data.result` 中返回 `timings`，并把同一份数据写入 trace。它用于复盘“慢在哪里”，不用于判断能不能点击。
+
+| 字段 | 类型 | 作用 |
+| --- | --- | --- |
+| `contract_version` | string | 固定为 `runtime_timing_v1`。 |
+| `total_ms` | number | 本次 API 从入口到返回前的总耗时，单位毫秒。 |
+| `started_at` / `ended_at` | string | 本次 API 计时开始和结束时间。 |
+| `steps` | array | 分段耗时列表。 |
+
+`timings.steps[]` 字段：
+
+| 字段 | 类型 | 作用 |
+| --- | --- | --- |
+| `name` | string | 阶段名，例如 `resolve_image_source`、`vision_provider_analyze`、`rank_candidates`、`pre_click_decision`、`click_point`。 |
+| `elapsed_ms` | number | 该阶段耗时，单位毫秒。 |
+| `started_at` / `ended_at` | string | 该阶段开始和结束时间。 |
+| 其他字段 | any | 阶段上下文，例如 `stage`、`attempt`、`candidate_count`、`provider_mode`。 |
+
+读取建议：
+- `total_ms` 用来判断整次调用是否超时或变慢。
+- `steps` 用来定位慢在模型启动、截图、OCR anchor 准备、视觉推理、候选排序、点击前闸门、真实点击还是点击后验证。
+- `timings` 只是性能诊断证据；是否允许真实点击仍然只看 `pre_click_decision_v1` 和动作接口返回。
 
 ## GET /health
 
@@ -78,6 +111,50 @@
 | `service` | string | 服务名，正常为 `agent-gui-runtime`。 |
 
 使用注意：只能证明 FastAPI 服务可用，不能证明本地视觉模型、窗口绑定或 OCR 可用。
+
+## POST /runtime/prepare
+
+设计目的：给上层 Agent 一个“执行前准备”入口。调用它可以确认 runtime 本身可用，并按阶段检查/启动本地视觉模型服务。它不绑定窗口、不截图、不点击。
+
+请求字段：
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `start_models` | boolean | true | 是否自动启动不可达的模型服务。为 false 时只做状态检查。 |
+| `stages` | array | `["observe","locate"]` | 要检查的阶段。`observe` 默认对应整屏理解小模型，`locate` 默认对应精准定位大模型。 |
+| `wait_until_ready` | boolean | false | 启动模型后是否等待 `/v1/models` 变为可用。 |
+| `wait_seconds` | number | 0 | 最大等待秒数，范围 `0..120`。 |
+
+返回 `data` 字段：
+
+| 字段 | 类型 | 作用 |
+| --- | --- | --- |
+| `contract_version` | string | 固定为 `runtime_prepare_v1`。 |
+| `runtime` | object | runtime 自身健康状态。 |
+| `start_models` | boolean | 本次是否尝试自动启动模型。 |
+| `stages` | array | 每个阶段的 profile、启动前状态、是否启动、启动进程和可选等待结果。 |
+| `trace_path` | string | 准备过程 trace。 |
+
+## GET /runtime/models
+
+设计目的：列出本地模型 profile，并探测每个 profile 的 `/v1/models` 当前状态。
+
+返回字段：`data.models[]` 中包含 `profile` 和 `status`。`status.status` 常见值为 `running`、`loading`、`unreachable`。
+
+## POST /runtime/models/start
+
+设计目的：按单个阶段或 profile 启动本地视觉模型服务。
+
+请求字段：
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `stage` | string | `locate` | 要启动的阶段，例如 `observe` 或 `locate`。 |
+| `profile_id` | string/null | null | 明确指定模型 profile；为空时由 stage 映射。 |
+| `wait_until_ready` | boolean | false | 是否等待模型可用。 |
+| `wait_seconds` | number | 0 | 最大等待秒数。 |
+
+返回字段：与 `/runtime/prepare` 的单个 stage 结果相同。
 
 ## GET /apps
 
@@ -95,6 +172,7 @@
 | `catalog.apps[].name` | string | 人类可读应用名。 |
 | `catalog.apps[].description` | string | 应用用途说明。 |
 | `catalog.apps[].launch_command` | array | 启动命令，例如 `["msedge.exe"]`。 |
+| `catalog.apps[].executable_candidates` | array | 当 `launch_command[0]` 不在 PATH 时的候选可执行文件路径。 |
 | `catalog.apps[].process_name` | string | 绑定窗口时优先匹配的进程名。 |
 | `catalog.apps[].title_hint` | string | 绑定窗口时优先匹配的标题片段。 |
 | `catalog.apps[].capabilities` | array | 应用能力标签，例如 `web_navigation`、`text_editing`。 |
@@ -116,6 +194,7 @@
 | --- | --- | --- | --- |
 | `app_id` | string/null | null | 从 app catalog 里选择应用。 |
 | `command` | array/null | null | 显式启动命令。没有 `app_id` 时可用。 |
+| `url` | string/null | null | 可选 URL。用于浏览器时会追加到启动命令末尾，例如直接打开 Google 搜索页。 |
 | `process_name` | string/null | null | 覆盖目录里的进程名，用于启动后绑定。 |
 | `title` | string/null | null | 覆盖目录里的标题提示，用于启动后绑定。 |
 | `bind_after_open` | boolean | true | 启动后是否尝试自动绑定窗口。 |
@@ -576,6 +655,12 @@
 - 闸门拒绝：`success=false`，`error.code=pre_click_rejected`，不会点击。
 - 真实点击后验证失败：`success=false`，但 `execution_path.action_executed=true`，需要读验证字段。
 
+Approved plan 复用：
+- `dry_run=true` 且闸门通过时，`data.result.approved_plan_id` 会返回一个短期有效的已批准计划 ID。
+- 后续真实点击应传入同一个 `goal` 和 `approved_plan_id`，并设置 `dry_run=false`。
+- 复用时 runtime 会校验同一绑定窗口、窗口尺寸、目标文本、有效期和 `selected_click_point` 是否仍在窗口内；校验通过后直接点击，不再重新运行大视觉模型。
+- 如果不传 `approved_plan_id`，`dry_run=false` 仍会走旧路径：重新截图、重新识别、重新过闸门，然后点击。
+
 ## POST /action/execute_confirmed_point
 
 设计目的：桌面测试面板的人类复核路径。操作者看过候选框和点位后，手动确认一个窗口相对坐标。
@@ -606,6 +691,32 @@
 | `trace_path` | string | action trace。 |
 
 使用注意：这不是自主 Agent 的主路径。自主执行仍应使用 `/action/execute_recognition_plan`。
+
+## POST /action/type_text
+
+设计目的：向当前绑定窗口发送真实文本输入。它用于“搜索词输入”“表单填写”等场景，不做视觉定位；如果需要先聚焦输入框，可以传入窗口相对坐标并设置 `click_before_typing=true`。
+
+请求字段：
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `text` | string | 必填 | 要输入的文本。trace 不写入明文，只记录长度。 |
+| `x`, `y` | integer/null | null | 可选窗口相对坐标。 |
+| `click_before_typing` | boolean | false | 输入前是否先点击 `x,y` 聚焦。 |
+| `clear_existing` | boolean | false | 输入前是否发送 Ctrl+A 清空现有内容。 |
+| `submit` | boolean | false | 输入后是否按 Enter。 |
+| `restore_clipboard` | boolean | true | 使用剪贴板粘贴后是否恢复原文本剪贴板内容。 |
+| `dry_run` | boolean | false | 只校验请求，不发送输入。 |
+
+返回 `data.result` 字段：
+
+| 字段 | 类型 | 作用 |
+| --- | --- | --- |
+| `contract_version` | string | 固定为 `type_text_result_v1`。 |
+| `text_length` | integer | 输入文本长度，不包含明文。 |
+| `type_result` | object | 真实输入时的 SendInput/clipboard 执行结果。 |
+| `execution_path.action_executed` | boolean | 是否真的发送了输入。 |
+| `trace_path` | string | 动作 trace。 |
 
 ## POST /action/click_text
 
@@ -649,4 +760,3 @@
 8. `pre_click_decision`：看为什么允许或拒绝。
 9. `selected_click_point`：只有这里有值，才表示自动执行链路有最终点击点。
 10. `post_click_verification`：真实点击后看结果是否被验证。
-

@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from app.api import action as action_api
-from app.models.request import ClickTextRequest, ROIModel
+from app.models.request import ClickTextRequest, ROIModel, TypeTextRequest
 from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
 
 
@@ -94,6 +94,71 @@ def test_click_text_returns_text_not_found(monkeypatch) -> None:
     assert response.error is not None
     assert response.error.code == "text_not_found"
     assert response.data["trace_path"].endswith("click_text-not-found.json")
+
+
+def test_type_text_dispatches_real_input(monkeypatch) -> None:
+    monkeypatch.setattr(
+        action_api.window_manager,
+        "get_bound_window",
+        lambda: SimpleNamespace(
+            handle=1,
+            title="Demo",
+            rect=SimpleNamespace(left=0, top=0, right=800, bottom=600),
+        ),
+    )
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/type_text.json")
+
+    typed: dict[str, object] = {}
+
+    def fake_type_text(text: str, **kwargs):
+        typed.update({"text": text, **kwargs})
+        return {"typed": True, "text_length": len(text)}
+
+    monkeypatch.setattr(action_api.input_controller, "type_text", fake_type_text)
+
+    response = action_api.type_text(
+        TypeTextRequest(
+            text="ai latest progress",
+            x=20,
+            y=30,
+            click_before_typing=True,
+            clear_existing=True,
+            submit=True,
+        )
+    )
+
+    assert response.success is True
+    assert typed["text"] == "ai latest progress"
+    assert typed["x"] == 20
+    assert typed["y"] == 30
+    assert typed["click_before_typing"] is True
+    assert typed["clear_existing"] is True
+    assert typed["submit"] is True
+    assert response.data["result"]["execution_path"]["action_executed"] is True
+
+
+def test_type_text_dry_run_does_not_dispatch(monkeypatch) -> None:
+    monkeypatch.setattr(
+        action_api.window_manager,
+        "get_bound_window",
+        lambda: SimpleNamespace(
+            handle=1,
+            title="Demo",
+            rect=SimpleNamespace(left=0, top=0, right=800, bottom=600),
+        ),
+    )
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/type_text-dry-run.json")
+    monkeypatch.setattr(
+        action_api.input_controller,
+        "type_text",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("dry run should not type")),
+    )
+
+    response = action_api.type_text(TypeTextRequest(text="dry", dry_run=True))
+
+    assert response.success is True
+    assert response.data["result"]["dry_run"] is True
+    assert response.data["result"]["execution_path"]["action_executed"] is False
 
 
 def test_click_text_retries_next_candidate_when_validation_fails(monkeypatch) -> None:

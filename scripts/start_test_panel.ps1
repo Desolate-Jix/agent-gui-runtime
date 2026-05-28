@@ -1,6 +1,8 @@
 param(
     [string]$RuntimeUrl = "http://127.0.0.1:8000",
     [bool]$StartRuntime = $true,
+    [switch]$PrepareRuntime,
+    [int]$WaitForModelsSeconds = 0,
     [switch]$CheckOnly
 )
 
@@ -24,6 +26,20 @@ function Test-RuntimeReady {
     catch {
         return $false
     }
+}
+
+function Invoke-RuntimePrepare {
+    param(
+        [string]$BaseUrl,
+        [int]$WaitSeconds
+    )
+    $body = @{
+        start_models = $true
+        stages = @("observe", "locate")
+        wait_until_ready = $WaitSeconds -gt 0
+        wait_seconds = $WaitSeconds
+    } | ConvertTo-Json
+    return Invoke-RestMethod -Uri "$BaseUrl/runtime/prepare" -Method Post -Body $body -ContentType "application/json" -TimeoutSec ([Math]::Max(30, $WaitSeconds + 10))
 }
 
 if (-not (Test-CommandExists "uv")) {
@@ -64,6 +80,10 @@ try {
         if (-not (Test-RuntimeReady $RuntimeUrl)) {
             throw "Runtime did not become ready at $RuntimeUrl. See log: $runtimeLog"
         }
+    }
+
+    if ($PrepareRuntime) {
+        Invoke-RuntimePrepare -BaseUrl $RuntimeUrl -WaitSeconds $WaitForModelsSeconds | Out-Host
     }
 
     try {

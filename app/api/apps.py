@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -8,7 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from app.core.runtime_artifacts import write_trace
+from app.core.runtime_artifacts import RuntimeTimer, write_trace
 from app.core.window_manager import window_manager
 from app.models.request import OpenAppRequest
 from app.models.response import APIResponse, ErrorModel
@@ -25,8 +27,26 @@ DEFAULT_APP_CATALOG = {
             "name": "Microsoft Edge",
             "description": "Web browser for website and web-app tasks.",
             "launch_command": ["msedge.exe"],
+            "executable_candidates": [
+                r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+            ],
             "process_name": "msedge.exe",
             "title_hint": "Microsoft Edge",
+            "capabilities": ["open_url", "web_navigation", "web_forms", "browser_ui"],
+        },
+        {
+            "app_id": "chrome",
+            "name": "Google Chrome",
+            "description": "Chrome browser for website and web-app tasks.",
+            "launch_command": ["chrome.exe"],
+            "executable_candidates": [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe",
+            ],
+            "process_name": "chrome.exe",
+            "title_hint": "Google Chrome",
             "capabilities": ["open_url", "web_navigation", "web_forms", "browser_ui"],
         },
         {
@@ -77,27 +97,36 @@ def list_apps() -> APIResponse:
 @router.post("/open", response_model=APIResponse)
 def open_app(request: OpenAppRequest) -> APIResponse:
     """Open an app from the catalog or from an explicit command, then optionally bind a matching window."""
+    timer = RuntimeTimer()
     try:
-        catalog = _load_app_catalog()
-        app = _resolve_app(catalog, request)
-        command = request.command or app.get("launch_command")
+        with timer.step("load_app_catalog"):
+            catalog = _load_app_catalog()
+        with timer.step("resolve_app", app_id=request.app_id):
+            app = _resolve_app(catalog, request)
+        with timer.step("resolve_launch_command", app_id=app.get("app_id")):
+            command = _resolve_launch_command(app, request)
         if not command:
+            timings = timer.to_dict()
             return APIResponse(
                 success=False,
                 message="No launch command available",
-                data={"app": app},
+                data={"app": app, "timings": timings},
                 error=ErrorModel(code="missing_launch_command", details="Provide app_id with launch_command or request.command"),
             )
-        process = subprocess.Popen(command)
-        time.sleep(float(request.wait_seconds))
-        windows = window_manager.list_visible_windows()
+        with timer.step("launch_process", executable=command[0] if command else None):
+            process = subprocess.Popen(command)
+        with timer.step("wait_after_open", wait_seconds=request.wait_seconds):
+            time.sleep(float(request.wait_seconds))
+        with timer.step("list_visible_windows"):
+            windows = window_manager.list_visible_windows()
         bound_payload = None
         bind_error = None
         process_name = request.process_name or app.get("process_name")
         title = request.title or app.get("title_hint")
         if request.bind_after_open:
             try:
-                bound = window_manager.bind_window(process_name=process_name, title=title)
+                with timer.step("bind_window", process_name=process_name, title=title):
+                    bound = window_manager.bind_window(process_name=process_name, title=title)
                 bound_payload = _bound_window_payload(bound)
             except Exception as exc:
                 bind_error = str(exc)
@@ -111,6 +140,7 @@ def open_app(request: OpenAppRequest) -> APIResponse:
             "bind_error": bind_error,
             "running_windows": windows,
         }
+        result["timings"] = timer.to_dict()
         result["trace_path"] = write_trace(
             category="apps",
             operation="open_app",
@@ -119,16 +149,17 @@ def open_app(request: OpenAppRequest) -> APIResponse:
         )
         return APIResponse(success=True, message="App open requested", data=result, error=None)
     except Exception as exc:
+        timings = timer.to_dict()
         trace_path = write_trace(
             category="apps",
             operation="open_app",
-            payload={"success": False, "request": request.model_dump(), "error": str(exc)},
+            payload={"success": False, "request": request.model_dump(), "error": str(exc), "timings": timings},
             name_hint=request.app_id or "custom_app",
         )
         return APIResponse(
             success=False,
             message="App open failed",
-            data={"trace_path": trace_path},
+            data={"trace_path": trace_path, "timings": timings},
             error=ErrorModel(code="app_open_failed", details=str(exc)),
         )
 
@@ -161,6 +192,33 @@ def _resolve_app(catalog: dict[str, Any], request: OpenAppRequest) -> dict[str, 
             "capabilities": ["custom_launch"],
         }
     raise ValueError("Provide app_id or command")
+
+
+def _resolve_launch_command(app: dict[str, Any], request: OpenAppRequest) -> list[str] | None:
+    command = list(request.command or app.get("launch_command") or [])
+    if not command:
+        return None
+    command[0] = _resolve_executable(command[0], app.get("executable_candidates") or [])
+    if request.url:
+        command.append(request.url)
+    return command
+
+
+def _resolve_executable(executable: str, candidates: list[Any]) -> str:
+    expanded = os.path.expandvars(str(executable))
+    path = Path(expanded)
+    if path.is_absolute() and path.exists():
+        return str(path)
+    if "\\" in expanded or "/" in expanded:
+        return expanded
+    found = shutil.which(expanded)
+    if found:
+        return found
+    for candidate in candidates:
+        candidate_path = Path(os.path.expandvars(str(candidate)))
+        if candidate_path.exists():
+            return str(candidate_path)
+    return expanded
 
 
 def _bound_window_payload(bound: Any) -> dict[str, Any] | None:

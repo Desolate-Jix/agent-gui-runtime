@@ -44,3 +44,17 @@ def test_write_trace_writes_json(monkeypatch, tmp_path) -> None:
     payload = json.loads(saved.read_text(encoding="utf-8"))
     assert payload["success"] is True
     assert payload["result"]["final_ok"] is True
+
+
+def test_runtime_timer_records_steps() -> None:
+    timer = runtime_artifacts.RuntimeTimer()
+
+    with timer.step("demo_step", stage="demo"):
+        pass
+
+    payload = timer.to_dict()
+    assert payload["contract_version"] == "runtime_timing_v1"
+    assert payload["total_ms"] >= 0
+    assert payload["steps"][0]["name"] == "demo_step"
+    assert payload["steps"][0]["stage"] == "demo"
+    assert payload["steps"][0]["elapsed_ms"] >= 0

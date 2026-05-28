@@ -54,3 +54,52 @@ def test_open_app_launches_catalog_entry_and_binds(monkeypatch) -> None:
     assert response.success is True
     assert response.data["command"] == ["demo.exe"]
     assert response.data["bound_window"]["process_name"] == "demo.exe"
+    assert response.data["timings"]["contract_version"] == "runtime_timing_v1"
+    assert [step["name"] for step in response.data["timings"]["steps"]] == [
+        "load_app_catalog",
+        "resolve_app",
+        "resolve_launch_command",
+        "launch_process",
+        "wait_after_open",
+        "list_visible_windows",
+        "bind_window",
+    ]
+
+
+def test_open_app_resolves_executable_candidate_and_appends_url(monkeypatch, tmp_path) -> None:
+    exe = tmp_path / "browser.exe"
+    exe.write_text("demo", encoding="utf-8")
+    monkeypatch.setattr(
+        apps_api,
+        "_load_app_catalog",
+        lambda: {
+            "contract_version": "app_catalog_v1",
+            "apps": [
+                {
+                    "app_id": "browser",
+                    "launch_command": ["missing-browser.exe"],
+                    "executable_candidates": [str(exe)],
+                    "process_name": "browser.exe",
+                    "title_hint": "Browser",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(apps_api.time, "sleep", lambda _seconds: None)
+    launched: dict[str, object] = {}
+
+    def fake_popen(command):
+        launched["command"] = command
+        return SimpleNamespace(pid=1234, command=command)
+
+    monkeypatch.setattr(apps_api.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(apps_api.window_manager, "list_visible_windows", lambda: [])
+    monkeypatch.setattr(apps_api.window_manager, "bind_window", lambda process_name, title: None)
+    monkeypatch.setattr(apps_api, "write_trace", lambda **_kwargs: "trace.json")
+
+    response = apps_api.open_app(OpenAppRequest(app_id="browser", url="https://www.google.com"))
+
+    assert response.success is True
+    assert launched["command"] == [str(exe), "https://www.google.com"]
+    assert response.data["command"] == [str(exe), "https://www.google.com"]
+    assert response.data["timings"]["steps"][0]["name"] == "load_app_catalog"

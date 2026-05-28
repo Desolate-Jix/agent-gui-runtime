@@ -61,6 +61,7 @@ Use it when you need to answer:
 - `scripts/start_test_panel.ps1`
   - one-command launcher for the desktop workflow test panel
   - can start the FastAPI runtime if `/health` is not already reachable, then open the Tkinter panel
+  - can call `/runtime/prepare` with `-PrepareRuntime` to check/start local vision model services before opening the panel
   - supports `-CheckOnly` for startup-path verification without opening the GUI
 - `scripts/evaluate_mousetester_traces.py`
   - evaluates saved MouseTester recognition/action traces
@@ -135,8 +136,17 @@ Use it when you need to answer:
   - `POST /apps/open`
   - responsibility:
     - expose `app_discovery_v1` with configured launchable apps, visible windows, current bound window, and agent next-step hints
-    - launch catalog apps from `configs/app_catalog.json`
+    - launch catalog apps from `configs/app_catalog.json`, including browser URL arguments and executable fallback candidates
     - optionally bind the launched app window
+
+- `app/api/runtime.py`
+  - `GET /runtime/models`
+  - `POST /runtime/models/start`
+  - `POST /runtime/prepare`
+  - responsibility:
+    - expose configured local vision model profile status
+    - start observe/locate model servers through profile-defined scripts
+    - provide an API-first preparation step before an agent asks vision routes to run
 
 - `app/api/session.py`
   - `GET /session/windows`
@@ -177,12 +187,16 @@ Use it when you need to answer:
 
 - `app/api/action.py`
   - `POST /action/execute_recognition_plan`
+  - `POST /action/execute_confirmed_point`
+  - `POST /action/type_text`
   - `POST /action/click_text`
   - `POST /action/click_mouse_tester_left_region`
   - responsibility:
     - controlled execution of a `recognition_plan_v1` selected click point after `pre_click_decision_v1` allows it
     - MouseTester target-area semantic post-click verification
     - bounded retry for retry-safe post-click verification failures
+    - operator-reviewed coordinate click diagnostic path
+    - real bound-window text input through SendInput plus clipboard paste
     - OCR-driven text click
     - MouseTester-specific region click with validation and persistence
 
@@ -211,7 +225,12 @@ Use it when you need to answer:
   - converts raw OCR output into `modules.ocr` contracts
 
 - `app/core/input_controller.py`
-  - low-level mouse movement and click dispatch through `SendInput`
+  - low-level mouse movement, click dispatch, and text input through `SendInput`
+
+- `app/core/model_server.py`
+  - loads model profiles from `configs/model_profiles/`
+  - checks OpenAI-compatible `/v1/models`
+  - starts profile-defined local llama.cpp-compatible model servers
 
 - `app/core/verifier.py`
   - before/after capture
@@ -248,6 +267,9 @@ Use it when you need to answer:
     - `CaptureWindowRequest`
     - `OCRRegionRequest`
     - `ClickTextRequest`
+    - `TypeTextRequest`
+    - `RuntimePrepareRequest`
+    - `ModelServerRequest`
     - `VisionAnalyzeRequestModel`
 
 - `app/models/response.py`

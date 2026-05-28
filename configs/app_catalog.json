@@ -6,8 +6,26 @@
       "name": "Microsoft Edge",
       "description": "Web browser for website and web-app tasks.",
       "launch_command": ["msedge.exe"],
+      "executable_candidates": [
+        "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+        "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"
+      ],
       "process_name": "msedge.exe",
       "title_hint": "Microsoft Edge",
+      "capabilities": ["open_url", "web_navigation", "web_forms", "browser_ui"]
+    },
+    {
+      "app_id": "chrome",
+      "name": "Google Chrome",
+      "description": "Chrome browser for website and web-app tasks.",
+      "launch_command": ["chrome.exe"],
+      "executable_candidates": [
+        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+        "%LOCALAPPDATA%\\Google\\Chrome\\Application\\chrome.exe"
+      ],
+      "process_name": "chrome.exe",
+      "title_hint": "Google Chrome",
       "capabilities": ["open_url", "web_navigation", "web_forms", "browser_ui"]
     },
     {

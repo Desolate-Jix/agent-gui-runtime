@@ -10,6 +10,38 @@ The core rule is:
 
 The desktop test panel also exposes `POST /action/execute_confirmed_point` for an operator who has visibly reviewed a candidate bbox and deliberately presses its coordinate-click button. This diagnostic path is not an autonomous agent execution path and does not replace `pre_click_decision_v1`.
 
+## Model-Facing Language Rule
+
+The upper-layer agent should keep the user's original instruction for audit, but send normalized English task fields to vision-model routes whenever possible.
+
+Recommended request shape:
+
+```json
+{
+  "goal": "Click the first organic Google search result title.",
+  "state_hint": "main organic search results list below Google navigation tabs",
+  "metadata": {
+    "goal_original": "点击 Google 搜索结果页的第一个自然搜索结果链接",
+    "goal_model": "Click the first organic Google search result title.",
+    "state_hint_model": "main organic search results list below Google navigation tabs",
+    "negative_constraints": [
+      "exclude search box",
+      "exclude top navigation tabs",
+      "exclude AI Overview",
+      "exclude ads",
+      "exclude side panels"
+    ]
+  }
+}
+```
+
+Reasoning:
+
+- The runtime trace must preserve `goal_original` for review.
+- The local vision model generally follows concise English grounding constraints more reliably.
+- English also avoids upstream shell/client encoding damage in model-facing `goal` and `state_hint`.
+- Put excluded English phrases such as `AI Overview` in `metadata.negative_constraints`, not as the clearest phrase in the main `goal`.
+
 ## Response Envelope
 
 All endpoints return the same envelope:
@@ -37,9 +69,56 @@ On failure:
 }
 ```
 
+Many agent-facing routes also return a `timings` object in `data` or `data.result`, and write the same object into their trace:
+
+```json
+{
+  "contract_version": "runtime_timing_v1",
+  "total_ms": 1234.56,
+  "steps": [
+    {
+      "name": "recognition_plan",
+      "elapsed_ms": 1180.25
+    }
+  ]
+}
+```
+
+Agent decision:
+
+- Use `timings.total_ms` for end-to-end latency.
+- Use `timings.steps[*].name` and `elapsed_ms` to identify slow stages such as model startup, screenshot capture, OCR anchor preparation, vision inference, candidate ranking, pre-click gate, real click dispatch, and post-click verification.
+- Treat `timings` as diagnostic evidence only. It does not prove a target is safe to click; click safety still comes from `pre_click_decision_v1`.
+
 ## Required Live Agent Flow
 
 Use this flow when the agent is controlling a real visible application window.
+
+### 0. Prepare Runtime Dependencies
+
+Before opening apps or asking vision to reason about a screen, the agent should ensure the local model services it plans to use are reachable. If the FastAPI runtime itself is not running, start it outside the API first; once `/health` is reachable, call:
+
+```http
+POST /runtime/prepare
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "start_models": true,
+  "stages": ["observe", "locate"],
+  "wait_until_ready": false,
+  "wait_seconds": 0
+}
+```
+
+Agent decision:
+
+- If a model returns `status: "running"`, continue.
+- If a model returns `status: "loading"`, wait or call again with `wait_until_ready: true`.
+- If startup fails, do not continue into vision recognition; report the model service blocker.
 
 ### 1. Discover Available Apps And Windows
 
@@ -63,6 +142,7 @@ Expected response:
           "name": "Microsoft Edge",
           "description": "Web browser for website and web-app tasks.",
           "launch_command": ["msedge.exe"],
+          "executable_candidates": ["C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"],
           "process_name": "msedge.exe",
           "title_hint": "Microsoft Edge",
           "capabilities": ["open_url", "web_navigation", "web_forms", "browser_ui"]
@@ -96,6 +176,7 @@ Request:
 ```json
 {
   "app_id": "edge",
+  "url": "https://www.google.com/search?q=ai%E7%9A%84%E6%9C%80%E6%96%B0%E8%BF%9B%E5%B1%95",
   "bind_after_open": true,
   "wait_seconds": 1.5
 }
@@ -113,7 +194,7 @@ Expected response:
       "app_id": "edge",
       "name": "Microsoft Edge"
     },
-    "command": ["msedge.exe"],
+    "command": ["C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", "https://www.google.com/search?q=..."],
     "process_id": 1234,
     "bound_window": {
       "bound": true,
@@ -130,6 +211,7 @@ Agent decision:
 
 - Continue when `success == true`.
 - If `bound_window == null`, inspect `running_windows` and bind manually with `POST /session/bind_window`.
+- Prefer `url` for browser navigation during app launch instead of launching the browser and then typing a URL by hand.
 
 ### 3. List Candidate Windows
 
@@ -212,6 +294,34 @@ Agent decision:
 
 - Continue only when `success == true` and `data.bound == true`.
 - Keep the returned window identity for trace review.
+
+### 4.5 Type Text Into A Focused Control When Needed
+
+Use this only after the target window is bound. If the input box is not already focused, provide a reviewed window-relative point and set `click_before_typing`.
+
+```http
+POST /action/type_text
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "text": "ai latest progress",
+  "x": 320,
+  "y": 84,
+  "click_before_typing": true,
+  "clear_existing": true,
+  "submit": true
+}
+```
+
+Agent decision:
+
+- This route sends real input through `SendInput+clipboard`; it is not a vision locator.
+- Use `dry_run: true` when checking payload shape without typing.
+- For browser searches, prefer `/apps/open` with `url` when the target URL is already known.
 
 ### 5. Read Runtime State
 
@@ -442,7 +552,8 @@ Internal runtime steps:
 10. Run local narrow search on candidate crops.
 11. Build `pre_click_decision_v1`.
 12. Render a recognition-plan overlay when a trace is available.
-13. Return the selected point without clicking because `dry_run == true`.
+13. Save an `approved_recognition_plan_v1` record when the pre-click gate allows the selected point.
+14. Return the selected point and `approved_plan_id` without clicking because `dry_run == true`.
 
 Expected response shape:
 
@@ -502,6 +613,8 @@ Expected response shape:
         "x": 221,
         "y": 119
       },
+      "approved_plan_id": "86a4a4f0e6f24e70b3f58f26f285c943",
+      "approved_plan_path": "logs/approved-plans/86a4a4f0e6f24e70b3f58f26f285c943.json",
       "execution_path": {
         "dry_run": true,
         "coordinate_source": "pre_click_decision_v1.selected_click_point",
@@ -546,7 +659,7 @@ With `dry_run: false`, this route dispatches that exact point through the real i
 
 ### 9. Execute The Click Only After The Plan Is Accepted
 
-If the dry run is accepted and the user/agent wants to execute, call the same endpoint with `dry_run: false`. The runtime captures the live window again and re-runs the recognition gate before clicking.
+If the dry run is accepted and the user/agent wants to execute, reuse the `approved_plan_id` returned by the dry run. The runtime validates that the same bound window is still active, the goal matches, the approval has not expired, and the approved click point is still inside the window. It then dispatches the click and runs post-click verification without running the large vision model again.
 
 ```http
 POST /action/execute_recognition_plan
@@ -577,6 +690,19 @@ Request:
 }
 ```
 
+Preferred fast execution request after a successful dry-run:
+
+```json
+{
+  "goal": "Click the first organic Google search result title.",
+  "approved_plan_id": "86a4a4f0e6f24e70b3f58f26f285c943",
+  "app_name": "browser",
+  "dry_run": false,
+  "enable_post_click_verification": true,
+  "max_execution_attempts": 2
+}
+```
+
 Expected response:
 
 ```json
@@ -592,8 +718,15 @@ Expected response:
       },
       "execution_path": {
         "action_executed": true,
+        "approved_plan_reused": true,
+        "recognition_plan_reused": true,
+        "vision_model_used": false,
         "post_click_verification_used": true,
-        "coordinate_source": "pre_click_decision_v1.selected_click_point"
+        "coordinate_source": "approved_plan_v1.selected_click_point"
+      },
+      "approved_plan_id": "86a4a4f0e6f24e70b3f58f26f285c943",
+      "approved_plan_reuse_validation": {
+        "valid": true
       },
       "recognition_plan_trace_path": "logs/traces/vision/...",
       "trace_path": "logs/traces/actions/..."
@@ -605,6 +738,7 @@ Expected response:
 
 Agent decision:
 
+- Prefer `approved_plan_id` reuse for the real click. Calling `dry_run: false` without an approved plan is still supported, but it re-runs recognition and is slower.
 - Treat the action as successful only when `success == true` and post-click verification did not reject the result.
 - Save or report both the recognition trace and action trace.
 
@@ -948,11 +1082,13 @@ If blocked, the agent should:
 For live execution:
 
 ```text
+POST /runtime/prepare            check/start local vision models
 GET  /apps
 POST /apps/open                  optional, when the software is not running
 GET  /session/windows
 POST /session/bind_window
 GET  /state
+POST /action/type_text           optional, for text entry after binding/focusing
 POST /vision/observe_screen
 POST /vision/locate_target
 POST /action/execute_recognition_plan  dry_run=true

@@ -7,7 +7,7 @@ from fastapi import APIRouter
 from PIL import Image
 
 from app.core.ocr_service import ocr_service
-from app.core.runtime_artifacts import write_trace
+from app.core.runtime_artifacts import RuntimeTimer, write_trace
 from app.core.screenshot import screenshot_service
 from app.models.request import (
     VisionAnalyzeRequestModel,
@@ -437,13 +437,15 @@ def screen_reading(request: VisionAnalyzeRequestModel) -> APIResponse:
 @router.post("/observe_screen", response_model=APIResponse)
 def observe_screen(request: VisionObserveScreenRequestModel) -> APIResponse:
     """Capture or read a screen and return broad UI understanding for agent planning."""
+    timer = RuntimeTimer()
     try:
-        image_path, live_capture = _image_path_for_live_or_saved(
-            capture_live=request.capture_live,
-            image_path=request.image_path,
-            purpose="observe_screen",
-            app_name=request.app_name,
-        )
+        with timer.step("resolve_image_source", capture_live=request.capture_live):
+            image_path, live_capture = _image_path_for_live_or_saved(
+                capture_live=request.capture_live,
+                image_path=request.image_path,
+                purpose="observe_screen",
+                app_name=request.app_name,
+            )
         screen_request = VisionAnalyzeRequestModel(
             image_path=image_path,
             task=request.task,
@@ -458,8 +460,11 @@ def observe_screen(request: VisionObserveScreenRequestModel) -> APIResponse:
                 else (request.metadata or {}).get("ocr_anchors", {"enabled": True, "max_anchors": "all"}),
             },
         )
-        response = screen_reading(screen_request)
+        with timer.step("screen_reading"):
+            response = screen_reading(screen_request)
         if not response.success or not response.data:
+            if isinstance(response.data, dict):
+                response.data["timings"] = timer.to_dict()
             return response
         result = response.data["result"]
         result["contract_version"] = "screen_observation_v1"
@@ -471,6 +476,7 @@ def observe_screen(request: VisionObserveScreenRequestModel) -> APIResponse:
             "When a concrete target is chosen, call POST /vision/locate_target with that goal.",
             "Execute only through POST /action/execute_recognition_plan after pre_click_decision allows it.",
         ]
+        result["timings"] = timer.to_dict()
         result["trace_path"] = write_trace(
             category="vision",
             operation="observe_screen",
@@ -480,16 +486,17 @@ def observe_screen(request: VisionObserveScreenRequestModel) -> APIResponse:
         data = VisionResultData(result=result)
         return APIResponse(success=True, message="Screen observation completed", data=data.model_dump(), error=None)
     except Exception as exc:
+        timings = timer.to_dict()
         trace_path = write_trace(
             category="vision",
             operation="observe_screen",
-            payload={"success": False, "request": request.model_dump(), "error": str(exc)},
+            payload={"success": False, "request": request.model_dump(), "error": str(exc), "timings": timings},
             name_hint=request.app_name or "observe_screen",
         )
         return APIResponse(
             success=False,
             message="Screen observation failed",
-            data={"trace_path": trace_path},
+            data={"trace_path": trace_path, "timings": timings},
             error=ErrorModel(code="observe_screen_failed", details=str(exc)),
         )
 
@@ -517,13 +524,15 @@ def _compact_state_hint(value: Any) -> str:
 @router.post("/locate_target", response_model=APIResponse)
 def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
     """Precisely locate a chosen target without clicking."""
+    timer = RuntimeTimer()
     try:
-        image_path, live_capture = _image_path_for_live_or_saved(
-            capture_live=request.capture_live,
-            image_path=request.image_path,
-            purpose="locate_target",
-            app_name=request.app_name,
-        )
+        with timer.step("resolve_image_source", capture_live=request.capture_live):
+            image_path, live_capture = _image_path_for_live_or_saved(
+                capture_live=request.capture_live,
+                image_path=request.image_path,
+                purpose="locate_target",
+                app_name=request.app_name,
+            )
         plan_request = VisionRecognitionPlanRequestModel(
             image_path=image_path,
             task=request.task,
@@ -539,8 +548,11 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
             },
             top_k=request.top_k,
         )
-        response = recognition_plan(plan_request)
+        with timer.step("recognition_plan"):
+            response = recognition_plan(plan_request)
         if not response.success or not response.data:
+            if isinstance(response.data, dict):
+                response.data["timings"] = timer.to_dict()
             return response
         result = response.data["result"]
         recommended_target = result.get("recommended_target") or {}
@@ -568,6 +580,7 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
                 "agent_must_call_for_click": "POST /action/execute_recognition_plan",
             },
         }
+        locate_result["timings"] = timer.to_dict()
         locate_result["trace_path"] = write_trace(
             category="vision",
             operation="locate_target",
@@ -577,92 +590,110 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
         data = VisionResultData(result=locate_result)
         return APIResponse(success=True, message="Target located", data=data.model_dump(), error=None)
     except Exception as exc:
+        timings = timer.to_dict()
         trace_path = write_trace(
             category="vision",
             operation="locate_target",
-            payload={"success": False, "request": request.model_dump(), "error": str(exc)},
+            payload={"success": False, "request": request.model_dump(), "error": str(exc), "timings": timings},
             name_hint=request.app_name or "locate_target",
         )
         return APIResponse(
             success=False,
             message="Target location failed",
-            data={"trace_path": trace_path},
+            data={"trace_path": trace_path, "timings": timings},
             error=ErrorModel(code="locate_target_failed", details=str(exc)),
         )
 
 
 @router.post("/recognition_plan", response_model=APIResponse)
 def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
+    timer = RuntimeTimer()
     image_path = Path(request.image_path)
     if not image_path.exists():
+        timings = timer.to_dict()
         return APIResponse(
             success=False,
             message="Image path not found",
-            data=None,
+            data={"timings": timings},
             error=ErrorModel(code="image_not_found", details=str(image_path)),
         )
 
     try:
-        config = VisionProviderFactory.load_config()
-        provider = VisionProviderFactory.create(mode=request.provider_mode, config=config)
-        with Image.open(image_path) as image:
-            input_image_size = ImageSize(width=image.width, height=image.height)
-        vision_request, ocr_result, ocr_anchor_payload, ocr_anchor_status = _recognition_vision_request_with_ocr_anchors(
-            request,
-            image_path=image_path,
-            image_size=input_image_size,
-        )
+        with timer.step("load_vision_provider"):
+            config = VisionProviderFactory.load_config()
+            provider = VisionProviderFactory.create(mode=request.provider_mode, config=config)
+        with timer.step("read_image_size"):
+            with Image.open(image_path) as image:
+                input_image_size = ImageSize(width=image.width, height=image.height)
+        with timer.step("prepare_ocr_anchors"):
+            vision_request, ocr_result, ocr_anchor_payload, ocr_anchor_status = _recognition_vision_request_with_ocr_anchors(
+                request,
+                image_path=image_path,
+                image_size=input_image_size,
+            )
         try:
-            response = provider.analyze(vision_request)
+            with timer.step("vision_provider_analyze", provider_mode=request.provider_mode):
+                response = provider.analyze(vision_request)
         except Exception as exc:
             if not ocr_anchor_status.get("used"):
                 raise
             ocr_anchor_status.update({"used": False, "fallback_used": True, "provider_error": str(exc)})
             ocr_anchor_payload = None
-            response = provider.analyze(_vision_request_without_ocr_anchors(request, image_path=image_path))
-        response, refine_ocr_result, refine_options = _maybe_refine_with_ocr(response, request=request, image_path=image_path)
+            with timer.step("vision_provider_analyze_without_ocr_anchors", provider_mode=request.provider_mode):
+                response = provider.analyze(_vision_request_without_ocr_anchors(request, image_path=image_path))
+        with timer.step("ocr_region_refine"):
+            response, refine_ocr_result, refine_options = _maybe_refine_with_ocr(response, request=request, image_path=image_path)
         if refine_ocr_result is not None:
             ocr_result = refine_ocr_result
-        normalized = normalizer.normalize(response.to_dict(), response.provider)
+        with timer.step("normalize_vision_regions", provider=response.provider):
+            normalized = normalizer.normalize(response.to_dict(), response.provider)
         if normalized.image_size is None:
             normalized.image_size = input_image_size
-        normalized = apply_anchor_grounding_evaluation(normalized, ocr_anchor_payload)
+        with timer.step("anchor_grounding_evaluation", anchor_count=ocr_anchor_status.get("anchor_count")):
+            normalized = apply_anchor_grounding_evaluation(normalized, ocr_anchor_payload)
         if ocr_result is None:
-            ocr_result = ocr_service.scan_image(str(image_path))
-        structure = build_page_structure(normalized, ocr_result)
-        uia_snapshot = uia_provider.snapshot_bound_window()
-        screen_reading_payload = build_screen_reading(
-            image_path=str(image_path),
-            vision=normalized,
-            ocr=ocr_result,
-            page_structure=structure,
-            app_name=request.app_name,
-            uia_snapshot=uia_snapshot,
-        )
-        goal = request.goal or request.task
-        candidate_result = rank_candidates(
-            CandidateRankRequest(
-                goal=goal,
-                page_structure=structure,
-                top_k=request.top_k,
-                state_hint=request.state_hint,
-                screen_reading=screen_reading_payload,
-            )
-        )
-        narrow_search_result = run_local_grounding(
-            LocalGroundingRequest(
+            with timer.step("ocr_scan"):
+                ocr_result = ocr_service.scan_image(str(image_path))
+        with timer.step("build_page_structure"):
+            structure = build_page_structure(normalized, ocr_result)
+        with timer.step("uia_snapshot"):
+            uia_snapshot = uia_provider.snapshot_bound_window()
+        with timer.step("build_screen_reading"):
+            screen_reading_payload = build_screen_reading(
                 image_path=str(image_path),
-                goal=goal,
-                candidates=candidate_result.candidates,
-                ocr_scan=ocr_service.scan_image,
+                vision=normalized,
+                ocr=ocr_result,
+                page_structure=structure,
                 app_name=request.app_name,
+                uia_snapshot=uia_snapshot,
             )
-        )
-        pre_click_decision = decide_pre_click(
-            goal=goal,
-            candidates=candidate_result,
-            grounding=narrow_search_result,
-        )
+        goal = request.goal or request.task
+        with timer.step("rank_candidates", top_k=request.top_k):
+            candidate_result = rank_candidates(
+                CandidateRankRequest(
+                    goal=goal,
+                    page_structure=structure,
+                    top_k=request.top_k,
+                    state_hint=request.state_hint,
+                    screen_reading=screen_reading_payload,
+                )
+            )
+        with timer.step("run_local_grounding", candidate_count=len(candidate_result.candidates)):
+            narrow_search_result = run_local_grounding(
+                LocalGroundingRequest(
+                    image_path=str(image_path),
+                    goal=goal,
+                    candidates=candidate_result.candidates,
+                    ocr_scan=ocr_service.scan_image,
+                    app_name=request.app_name,
+                )
+            )
+        with timer.step("pre_click_decision"):
+            pre_click_decision = decide_pre_click(
+                goal=goal,
+                candidates=candidate_result,
+                grounding=narrow_search_result,
+            )
         recommended = candidate_result.candidates[0].to_dict() if candidate_result.candidates else None
         result_payload = {
             "contract_version": "recognition_plan_v1",
@@ -714,6 +745,7 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
                 "action_executed": False,
             },
         }
+        result_payload["timings"] = timer.to_dict()
         result_payload["trace_path"] = write_trace(
             category="vision",
             operation="recognition_plan",
@@ -723,16 +755,17 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
         data = VisionResultData(result=result_payload)
         return APIResponse(success=True, message="Recognition plan completed", data=data.model_dump(), error=None)
     except Exception as exc:
+        timings = timer.to_dict()
         trace_path = write_trace(
             category="vision",
             operation="recognition_plan",
-            payload={"success": False, "request": request.model_dump(), "error": str(exc)},
+            payload={"success": False, "request": request.model_dump(), "error": str(exc), "timings": timings},
             name_hint=request.app_name or image_path.stem,
         )
         return APIResponse(
             success=False,
             message="Recognition plan failed",
-            data={"trace_path": trace_path},
+            data={"trace_path": trace_path, "timings": timings},
             error=ErrorModel(code="recognition_plan_failed", details=str(exc)),
         )
 

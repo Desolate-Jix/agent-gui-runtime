@@ -27,6 +27,14 @@ Agent -> local HTTP API -> GUI runtime -> bound Windows window
 uv sync
 ```
 
+`FastAPI` and `uvicorn[standard]` are declared in `pyproject.toml`, so `uv sync` installs them automatically. You do not need a separate `pip install fastapi`.
+
+Optional verification:
+
+```powershell
+uv run python -c "import fastapi, uvicorn; print('FastAPI runtime deps ok')"
+```
+
 ### 3. One-Click Test Panel Startup
 
 Double-click from the repository root:
@@ -40,6 +48,12 @@ It delegates to `scripts/start_test_panel.ps1`:
 - If `http://127.0.0.1:8000/health` is unavailable, it starts the FastAPI runtime.
 - It opens the desktop test panel.
 - If the script started the runtime, closing the panel stops that runtime process.
+
+For agent smoke tests that should also check/start the local vision model services, add `-PrepareRuntime`:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\start_test_panel.ps1 -PrepareRuntime
+```
 
 Command-line startup:
 
@@ -213,6 +227,7 @@ Recommended sequence:
 
 ```text
 GET  /apps
+POST /runtime/prepare            optional, checks/starts local vision models
 POST /apps/open                 optional
 GET  /session/windows
 POST /session/bind_window
@@ -220,13 +235,14 @@ POST /state/capture_window      optional; APIs can also capture live
 POST /vision/observe_screen
 POST /vision/locate_target
 POST /action/execute_recognition_plan  dry_run=true
-POST /action/execute_recognition_plan  dry_run=false, only when pre_click_decision allows it
+POST /action/execute_recognition_plan  dry_run=false with approved_plan_id
 ```
 
 Key rules:
 
 - First use screen understanding to get a compact candidate list, then precisely locate the chosen target.
 - `observe_screen.suggested_state_hint` is the default suggestion for the next `locate_target.state_hint`. The panel auto-fills it, and an agent can still override it.
+- The upper-layer agent should preserve the user's original instruction for trace review, but send normalized English `goal`, `state_hint`, and negative constraints to the vision model. Example: `Click the first organic Google search result title` with `main organic search results list below Google navigation tabs`.
 - OCR anchors participate in visual localization by default. The runtime keeps full OCR evidence for traces and validation, but precise localization sends a bounded projection to the model.
 - `observe_screen` is for screen summary and candidate discovery, not click proof.
 - `locate_target` returns a no-click localization result.
@@ -234,6 +250,8 @@ Key rules:
 - Autonomous agents should execute real clicks only through `execute_recognition_plan`.
 - The test panel's `execute_confirmed_point` endpoint is only for an operator-reviewed coordinate click after a human has inspected the candidate box.
 - Execution must pass `pre_click_decision_v1`.
+- A successful dry-run returns `approved_plan_id`. Reuse that ID for the real click so the runtime validates the same window and approved point, then clicks without running the large vision model a second time.
+- Agent-facing runtime, app, vision, and recognition-execution paths now include `timings` with `total_ms` and `steps[]` so agents can see whether time was spent in model startup, screenshot capture, OCR anchor preparation, vision inference, ranking, the pre-click gate, click dispatch, or post-click verification.
 
 Full agent workflow:
 
@@ -258,6 +276,9 @@ For list-style text targets, fusion records an `above_exclusion_boundary` from t
 Apps and windows:
 
 - `GET /apps`
+- `POST /runtime/prepare`
+- `GET /runtime/models`
+- `POST /runtime/models/start`
 - `POST /apps/open`
 - `GET /session/windows`
 - `POST /session/bind_window`
@@ -278,6 +299,7 @@ Actions:
 
 - `POST /action/execute_recognition_plan`
 - `POST /action/execute_confirmed_point`
+- `POST /action/type_text`
 - `POST /action/click_text`
 - `POST /action/click_mouse_tester_left_region`
 
@@ -413,4 +435,3 @@ Smallest useful loop:
 - Do not click directly from raw model bboxes
 - All real clicks should go through the gated action API
 - Keep historical experiment details in dedicated docs instead of growing the README indefinitely
-

@@ -15,17 +15,20 @@ WINDOWS_INPUT_IMPORT_ERROR: Optional[str] = None
 try:
     import win32api
     import win32con
+    import win32clipboard
     import win32gui
 
     WINDOWS_INPUT_AVAILABLE = True
 except Exception as exc:  # pragma: no cover - depends on runtime platform/environment
     win32api = None  # type: ignore[assignment]
     win32con = None  # type: ignore[assignment]
+    win32clipboard = None  # type: ignore[assignment]
     win32gui = None  # type: ignore[assignment]
     WINDOWS_INPUT_IMPORT_ERROR = str(exc)
 
 
 INPUT_MOUSE = 0
+INPUT_KEYBOARD = 1
 MOUSEEVENTF_MOVE = 0x0001
 MOUSEEVENTF_ABSOLUTE = 0x8000
 MOUSEEVENTF_LEFTDOWN = 0x0002
@@ -34,6 +37,11 @@ MOUSEEVENTF_RIGHTDOWN = 0x0008
 MOUSEEVENTF_RIGHTUP = 0x0010
 MOUSEEVENTF_MIDDLEDOWN = 0x0020
 MOUSEEVENTF_MIDDLEUP = 0x0040
+KEYEVENTF_KEYUP = 0x0002
+VK_CONTROL = 0x11
+VK_A = 0x41
+VK_RETURN = 0x0D
+VK_V = 0x56
 SM_CXSCREEN = 0
 SM_CYSCREEN = 1
 
@@ -49,8 +57,18 @@ class MOUSEINPUT(ctypes.Structure):
     ]
 
 
+class KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk", ctypes.c_ushort),
+        ("wScan", ctypes.c_ushort),
+        ("dwFlags", ctypes.c_ulong),
+        ("time", ctypes.c_ulong),
+        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+    ]
+
+
 class INPUT_UNION(ctypes.Union):
-    _fields_ = [("mi", MOUSEINPUT)]
+    _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT)]
 
 
 class INPUT(ctypes.Structure):
@@ -174,6 +192,53 @@ class InputController:
         logger.info("Click result: {}", result)
         return result
 
+    def type_text(
+        self,
+        text: str,
+        *,
+        x: int | None = None,
+        y: int | None = None,
+        click_before_typing: bool = False,
+        clear_existing: bool = False,
+        submit: bool = False,
+        restore_clipboard: bool = True,
+    ) -> dict[str, Any]:
+        """Type text into the bound window using clipboard paste plus real key events."""
+        self._ensure_windows_input()
+        bound = self._require_bound_window()
+        click_result = None
+        if click_before_typing:
+            if x is None or y is None:
+                raise ValueError("x and y are required when click_before_typing=true")
+            click_result = self.click_point(x, y, move_before_click=True, settle_ms=100, hold_ms=50)
+        else:
+            self._focus_window(bound.handle)
+
+        clipboard_before = self._get_clipboard_text()
+        if clear_existing:
+            self._press_chord([VK_CONTROL, VK_A])
+            time.sleep(0.03)
+        self._set_clipboard_text(text)
+        self._press_chord([VK_CONTROL, VK_V])
+        if submit:
+            time.sleep(0.03)
+            self._press_key(VK_RETURN)
+        if restore_clipboard:
+            self._set_clipboard_text(clipboard_before or "")
+
+        return {
+            "typed": True,
+            "input_backend": "SendInput+clipboard",
+            "window_handle": int(bound.handle),
+            "window_title": bound.title,
+            "text_length": len(text),
+            "click_before_typing": bool(click_before_typing),
+            "click_result": click_result,
+            "clear_existing": bool(clear_existing),
+            "submit": bool(submit),
+            "restore_clipboard": bool(restore_clipboard),
+        }
+
     def _require_bound_window(self) -> Any:
         bound = window_manager.get_bound_window()
         if bound is None:
@@ -237,6 +302,58 @@ class InputController:
         sent = ctypes.windll.user32.SendInput(1, ctypes.byref(input_struct), ctypes.sizeof(INPUT))
         if sent != 1:
             raise RuntimeError(f"SendInput failed, sent={sent}, flags={flags}")
+
+    def _press_chord(self, keys: list[int]) -> None:
+        for key in keys:
+            self._send_key(key, key_up=False)
+        for key in reversed(keys):
+            self._send_key(key, key_up=True)
+
+    def _press_key(self, key: int) -> None:
+        self._send_key(key, key_up=False)
+        self._send_key(key, key_up=True)
+
+    def _send_key(self, key: int, *, key_up: bool) -> None:
+        input_struct = INPUT(
+            type=INPUT_KEYBOARD,
+            union=INPUT_UNION(
+                ki=KEYBDINPUT(
+                    wVk=int(key),
+                    wScan=0,
+                    dwFlags=KEYEVENTF_KEYUP if key_up else 0,
+                    time=0,
+                    dwExtraInfo=None,
+                )
+            ),
+        )
+        sent = ctypes.windll.user32.SendInput(1, ctypes.byref(input_struct), ctypes.sizeof(INPUT))
+        if sent != 1:
+            raise RuntimeError(f"SendInput keyboard failed, sent={sent}, key={key}, key_up={key_up}")
+
+    def _get_clipboard_text(self) -> str | None:
+        if win32clipboard is None:
+            return None
+        try:
+            win32clipboard.OpenClipboard()  # type: ignore[union-attr]
+            try:
+                if win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT):  # type: ignore[union-attr]
+                    return str(win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT))  # type: ignore[union-attr]
+                return None
+            finally:
+                win32clipboard.CloseClipboard()  # type: ignore[union-attr]
+        except Exception as exc:
+            logger.warning("Reading clipboard text failed: {}", exc)
+            return None
+
+    def _set_clipboard_text(self, text: str) -> None:
+        if win32clipboard is None:
+            raise RuntimeError("win32clipboard is unavailable; cannot paste text")
+        win32clipboard.OpenClipboard()  # type: ignore[union-attr]
+        try:
+            win32clipboard.EmptyClipboard()  # type: ignore[union-attr]
+            win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, text)  # type: ignore[union-attr]
+        finally:
+            win32clipboard.CloseClipboard()  # type: ignore[union-attr]
 
     def _ensure_windows_input(self) -> None:
         if not WINDOWS_INPUT_AVAILABLE:

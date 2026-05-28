@@ -3,9 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 
 LOGS_DIR = Path("logs")
@@ -105,3 +107,42 @@ def write_trace(*, category: str, operation: str, payload: dict[str, Any], name_
     path = category_dir / ("__".join(parts) + ".json")
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return str(path.resolve())
+
+
+class RuntimeTimer:
+    """Collect lightweight stage timings for API responses and traces."""
+
+    def __init__(self, *, contract_version: str = "runtime_timing_v1") -> None:
+        self.contract_version = contract_version
+        self.started_at = datetime.now().isoformat()
+        self._started_perf = time.perf_counter()
+        self.steps: list[dict[str, Any]] = []
+
+    @contextmanager
+    def step(self, name: str, **metadata: Any) -> Iterator[None]:
+        started_at = datetime.now().isoformat()
+        started_perf = time.perf_counter()
+        step: dict[str, Any] = {
+            "name": name,
+            "started_at": started_at,
+        }
+        for key, value in metadata.items():
+            if value is not None:
+                step[key] = value
+        self.steps.append(step)
+        try:
+            yield
+        finally:
+            ended_at = datetime.now().isoformat()
+            elapsed_ms = (time.perf_counter() - started_perf) * 1000
+            step["ended_at"] = ended_at
+            step["elapsed_ms"] = round(elapsed_ms, 3)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "contract_version": self.contract_version,
+            "started_at": self.started_at,
+            "ended_at": datetime.now().isoformat(),
+            "total_ms": round((time.perf_counter() - self._started_perf) * 1000, 3),
+            "steps": list(self.steps),
+        }

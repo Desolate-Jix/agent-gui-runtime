@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+import uuid
+from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -13,7 +14,7 @@ from app.actions.known_action_runner import run_known_action
 from app.core.action_registry import action_registry
 from app.core.input_controller import input_controller
 from app.core.ocr_service import ocr_service
-from app.core.runtime_artifacts import write_trace
+from app.core.runtime_artifacts import RuntimeTimer, write_trace
 from app.core.screenshot import screenshot_service
 from app.core.verifier import verifier
 from app.core.window_manager import window_manager
@@ -21,6 +22,7 @@ from app.models.request import (
     ClickTextRequest,
     ExecuteConfirmedPointRequest,
     ExecuteRecognitionPlanRequest,
+    TypeTextRequest,
     VisionRecognitionPlanOverlayRequestModel,
     VisionRecognitionPlanRequestModel,
 )
@@ -44,6 +46,9 @@ CACHE_DIR = Path("logs/region-click-cache")
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 CASES_DIR = Path("logs/region-click-cases")
 CASES_DIR.mkdir(parents=True, exist_ok=True)
+APPROVED_PLANS_DIR = Path("logs/approved-plans")
+APPROVED_PLANS_DIR.mkdir(parents=True, exist_ok=True)
+APPROVED_PLAN_TTL_SECONDS = 300
 
 RegionClickPanelLocator = Callable[[Any], dict[str, Any]]
 RegionClickZoneResolver = Callable[[dict[str, Any]], dict[str, Any]]
@@ -396,122 +401,337 @@ def _capture_bound_window_image(bound: Any, name_prefix: str) -> Optional[str]:
     return str(Path(image_path).resolve())
 
 
+def _bound_window_snapshot(bound: Any) -> dict[str, Any]:
+    rect = _window_rect(bound)
+    return {
+        "handle": int(bound.handle),
+        "title": bound.title,
+        "process_id": getattr(bound, "process_id", None),
+        "process_name": getattr(bound, "process_name", None),
+        "rect": rect,
+    }
+
+
+def _approved_plan_path(approved_plan_id: str) -> Path:
+    safe_id = re.sub(r"[^a-zA-Z0-9_.-]+", "", approved_plan_id)
+    if not safe_id:
+        raise ValueError("approved_plan_id is empty or invalid")
+    return APPROVED_PLANS_DIR / f"{safe_id}.json"
+
+
+def _save_approved_plan(
+    *,
+    request: ExecuteRecognitionPlanRequest,
+    bound: Any,
+    image_path: str,
+    live_capture: Optional[dict[str, Any]],
+    plan: dict[str, Any],
+    pre_click: dict[str, Any],
+    selected_point: dict[str, Any],
+    plan_trace_path: Optional[str],
+    overlay: Optional[dict[str, Any]],
+) -> dict[str, Any]:
+    approved_plan_id = uuid.uuid4().hex
+    created_at = datetime.now(timezone.utc)
+    expires_at = created_at + timedelta(seconds=APPROVED_PLAN_TTL_SECONDS)
+    record = {
+        "contract_version": "approved_recognition_plan_v1",
+        "approved_plan_id": approved_plan_id,
+        "created_at": created_at.isoformat(),
+        "expires_at": expires_at.isoformat(),
+        "ttl_seconds": APPROVED_PLAN_TTL_SECONDS,
+        "goal": request.goal,
+        "task": request.task,
+        "app_name": request.app_name,
+        "state_hint": request.state_hint,
+        "provider_mode": request.provider_mode,
+        "top_k": request.top_k,
+        "request_metadata": request.metadata,
+        "bound_window": _bound_window_snapshot(bound),
+        "image_path": image_path,
+        "live_capture": live_capture,
+        "recognition_plan": plan,
+        "recognition_plan_trace_path": plan_trace_path,
+        "recognition_plan_overlay": overlay,
+        "pre_click_decision": pre_click,
+        "selected_click_point": selected_point,
+    }
+    path = _approved_plan_path(approved_plan_id)
+    path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {
+        "approved_plan_id": approved_plan_id,
+        "approved_plan_path": str(path.resolve()),
+        "expires_at": expires_at.isoformat(),
+        "ttl_seconds": APPROVED_PLAN_TTL_SECONDS,
+    }
+
+
+def _load_approved_plan(approved_plan_id: str) -> dict[str, Any]:
+    path = _approved_plan_path(approved_plan_id)
+    if not path.exists():
+        raise ValueError(f"approved_plan_id not found: {approved_plan_id}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or payload.get("contract_version") != "approved_recognition_plan_v1":
+        raise ValueError("approved plan has an invalid contract")
+    return payload
+
+
+def _validate_approved_plan_reuse(
+    *,
+    request: ExecuteRecognitionPlanRequest,
+    bound: Any,
+    record: dict[str, Any],
+    selected_point: dict[str, Any],
+) -> dict[str, Any]:
+    expires_at = datetime.fromisoformat(str(record.get("expires_at")))
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    if now > expires_at:
+        raise ValueError("approved_plan_expired")
+    if request.goal != record.get("goal"):
+        raise ValueError("approved_plan_goal_mismatch")
+
+    current_window = _bound_window_snapshot(bound)
+    approved_window = record.get("bound_window") if isinstance(record.get("bound_window"), dict) else {}
+    if int(current_window.get("handle") or 0) != int(approved_window.get("handle") or 0):
+        raise ValueError("approved_plan_window_handle_mismatch")
+
+    current_rect = current_window.get("rect") or {}
+    approved_rect = approved_window.get("rect") or {}
+    current_size = {"width": int(current_rect.get("width") or 0), "height": int(current_rect.get("height") or 0)}
+    approved_size = {"width": int(approved_rect.get("width") or 0), "height": int(approved_rect.get("height") or 0)}
+    if current_size != approved_size:
+        raise ValueError("approved_plan_window_size_mismatch")
+
+    if not _point_in_rect(selected_point, {"x": 0, "y": 0, "width": current_size["width"] - 1, "height": current_size["height"] - 1}):
+        raise ValueError("approved_plan_point_outside_window")
+
+    return {
+        "contract_version": "approved_plan_reuse_validation_v1",
+        "approved_plan_id": record.get("approved_plan_id"),
+        "valid": True,
+        "checked_at": now.isoformat(),
+        "expires_at": expires_at.isoformat(),
+        "current_window": current_window,
+        "approved_window": approved_window,
+        "selected_click_point": selected_point,
+    }
+
+
 @router.post("/execute_recognition_plan", response_model=APIResponse)
 def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIResponse:
+    timer = RuntimeTimer()
     bound = window_manager.get_bound_window()
     live_capture: Optional[dict[str, Any]] = None
 
-    if request.capture_live:
+    def attach_timings(result: dict[str, Any]) -> dict[str, Any]:
+        result["timings"] = timer.to_dict()
+        return result
+
+    if request.approved_plan_id and request.dry_run:
+        timings = timer.to_dict()
+        return APIResponse(
+            success=False,
+            message="approved_plan_id can only be used for real execution",
+            data={"approved_plan_id": request.approved_plan_id, "timings": timings},
+            error=ErrorModel(code="approved_plan_dry_run_not_allowed", details="First create the approved plan with dry_run=true, then reuse it with dry_run=false"),
+        )
+
+    approval_reuse_validation: dict[str, Any] | None = None
+    if request.approved_plan_id:
         if bound is None:
+            timings = timer.to_dict()
             return APIResponse(
                 success=False,
                 message="No bound window is currently available",
-                data=None,
+                data={"timings": timings},
                 error=ErrorModel(
                     code="no_bound_window",
-                    details="Bind the MouseTester window before calling /action/execute_recognition_plan with live capture",
+                    details="Bind the target window before reusing an approved recognition plan",
                 ),
             )
         try:
-            live_capture = screenshot_service.capture_window(
-                save_image=True,
-                purpose="recognition_plan_execution",
-                name_hint=request.app_name or "recognition_plan",
-            )
+            with timer.step("load_approved_plan"):
+                approved_record = _load_approved_plan(request.approved_plan_id)
+            plan = approved_record["recognition_plan"]
+            pre_click = approved_record.get("pre_click_decision") or {}
+            selected_point = approved_record.get("selected_click_point")
+            if not isinstance(selected_point, dict):
+                raise ValueError("approved_plan_missing_selected_click_point")
+            with timer.step("validate_approved_plan_reuse"):
+                approval_reuse_validation = _validate_approved_plan_reuse(
+                    request=request,
+                    bound=bound,
+                    record=approved_record,
+                    selected_point=selected_point,
+                )
+            image_path = str(approved_record.get("image_path") or "")
+            live_capture = approved_record.get("live_capture") if isinstance(approved_record.get("live_capture"), dict) else None
+            plan_trace_path = approved_record.get("recognition_plan_trace_path") or plan.get("trace_path")
+            overlay = approved_record.get("recognition_plan_overlay") if isinstance(approved_record.get("recognition_plan_overlay"), dict) else None
         except Exception as exc:
-            trace_path = write_trace(
-                category="actions",
-                operation="execute_recognition_plan",
-                payload={"success": False, "request": request.model_dump(), "error": str(exc)},
-                name_hint=request.app_name or "recognition_plan",
-            )
-            return APIResponse(
-                success=False,
-                message="Live capture failed",
-                data={"trace_path": trace_path},
-                error=ErrorModel(code="live_capture_failed", details=str(exc)),
-            )
-        image_path = str(Path(str(live_capture["image_path"])).resolve())
-    elif request.image_path:
-        image_path = request.image_path
-        if not request.allow_saved_image_execution and not request.dry_run:
+            timings = timer.to_dict()
             trace_path = write_trace(
                 category="actions",
                 operation="execute_recognition_plan",
                 payload={
                     "success": False,
                     "request": request.model_dump(),
-                    "failure_reason": "saved_image_execution_not_allowed",
+                    "approved_plan_id": request.approved_plan_id,
+                    "failure_reason": "approved_plan_reuse_failed",
+                    "error": str(exc),
+                    "timings": timings,
                 },
                 name_hint=request.app_name or "recognition_plan",
             )
             return APIResponse(
                 success=False,
-                message="Saved-image execution requires explicit override",
-                data={"trace_path": trace_path},
-                error=ErrorModel(
-                    code="saved_image_execution_not_allowed",
-                    details="Use capture_live=true, dry_run=true, or allow_saved_image_execution=true",
-                ),
+                message="Approved recognition plan could not be reused",
+                data={"trace_path": trace_path, "approved_plan_id": request.approved_plan_id, "timings": timings},
+                error=ErrorModel(code="approved_plan_reuse_failed", details=str(exc)),
             )
+        execution_path = {
+            "vision_model_used": False,
+            "page_structure_used": False,
+            "candidate_rank_used": False,
+            "narrow_search_used": False,
+            "pre_click_decision_used": True,
+            "post_click_verification_used": bool(request.enable_post_click_verification),
+            "coordinate_source": "approved_plan_v1.selected_click_point",
+            "selection_source": "approved_recognition_plan_v1",
+            "approved_plan_reused": True,
+            "recognition_plan_reused": True,
+            "action_executed": False,
+            "dry_run": False,
+            "retry_policy_used": True,
+            "max_execution_attempts": int(request.max_execution_attempts),
+        }
     else:
-        return APIResponse(
-            success=False,
-            message="No screenshot source provided",
-            data=None,
-            error=ErrorModel(code="missing_image_source", details="Provide image_path or set capture_live=true"),
-        )
+        if request.capture_live:
+            if bound is None:
+                timings = timer.to_dict()
+                return APIResponse(
+                    success=False,
+                    message="No bound window is currently available",
+                    data={"timings": timings},
+                    error=ErrorModel(
+                        code="no_bound_window",
+                        details="Bind the MouseTester window before calling /action/execute_recognition_plan with live capture",
+                    ),
+                )
+            try:
+                with timer.step("capture_live_window"):
+                    live_capture = screenshot_service.capture_window(
+                        save_image=True,
+                        purpose="recognition_plan_execution",
+                        name_hint=request.app_name or "recognition_plan",
+                    )
+            except Exception as exc:
+                timings = timer.to_dict()
+                trace_path = write_trace(
+                    category="actions",
+                    operation="execute_recognition_plan",
+                    payload={"success": False, "request": request.model_dump(), "error": str(exc), "timings": timings},
+                    name_hint=request.app_name or "recognition_plan",
+                )
+                return APIResponse(
+                    success=False,
+                    message="Live capture failed",
+                    data={"trace_path": trace_path, "timings": timings},
+                    error=ErrorModel(code="live_capture_failed", details=str(exc)),
+                )
+            image_path = str(Path(str(live_capture["image_path"])).resolve())
+        elif request.image_path:
+            with timer.step("use_saved_image_source"):
+                image_path = request.image_path
+            if not request.allow_saved_image_execution and not request.dry_run:
+                timings = timer.to_dict()
+                trace_path = write_trace(
+                    category="actions",
+                    operation="execute_recognition_plan",
+                    payload={
+                        "success": False,
+                        "request": request.model_dump(),
+                        "failure_reason": "saved_image_execution_not_allowed",
+                        "timings": timings,
+                    },
+                    name_hint=request.app_name or "recognition_plan",
+                )
+                return APIResponse(
+                    success=False,
+                    message="Saved-image execution requires explicit override",
+                    data={"trace_path": trace_path, "timings": timings},
+                    error=ErrorModel(
+                        code="saved_image_execution_not_allowed",
+                        details="Use capture_live=true, dry_run=true, or allow_saved_image_execution=true",
+                    ),
+                )
+        else:
+            timings = timer.to_dict()
+            return APIResponse(
+                success=False,
+                message="No screenshot source provided",
+                data={"timings": timings},
+                error=ErrorModel(code="missing_image_source", details="Provide image_path or set capture_live=true"),
+            )
 
-    plan_request = VisionRecognitionPlanRequestModel(
-        image_path=image_path,
-        task=request.task,
-        app_name=request.app_name,
-        goal=request.goal,
-        state_hint=request.state_hint,
-        provider_mode=request.provider_mode,
-        metadata=request.metadata,
-        top_k=request.top_k,
-    )
-    plan_response = _run_recognition_plan_for_execution(plan_request)
-    if not plan_response.success or not plan_response.data:
-        trace_path = write_trace(
-            category="actions",
-            operation="execute_recognition_plan",
-            payload={
-                "success": False,
-                "request": request.model_dump(),
-                "live_capture": live_capture,
-                "recognition_plan_response": plan_response.model_dump(),
-                "failure_reason": "recognition_plan_failed",
-            },
-            name_hint=request.app_name or "recognition_plan",
+        plan_request = VisionRecognitionPlanRequestModel(
+            image_path=image_path,
+            task=request.task,
+            app_name=request.app_name,
+            goal=request.goal,
+            state_hint=request.state_hint,
+            provider_mode=request.provider_mode,
+            metadata=request.metadata,
+            top_k=request.top_k,
         )
-        return APIResponse(
-            success=False,
-            message="Recognition plan failed",
-            data={"trace_path": trace_path, "recognition_plan_response": plan_response.model_dump()},
-            error=ErrorModel(code="recognition_plan_failed", details=plan_response.error.model_dump() if plan_response.error else None),
-        )
+        with timer.step("recognition_plan"):
+            plan_response = _run_recognition_plan_for_execution(plan_request)
+        if not plan_response.success or not plan_response.data:
+            timings = timer.to_dict()
+            trace_path = write_trace(
+                category="actions",
+                operation="execute_recognition_plan",
+                payload={
+                    "success": False,
+                    "request": request.model_dump(),
+                    "live_capture": live_capture,
+                    "recognition_plan_response": plan_response.model_dump(),
+                    "failure_reason": "recognition_plan_failed",
+                    "timings": timings,
+                },
+                name_hint=request.app_name or "recognition_plan",
+            )
+            return APIResponse(
+                success=False,
+                message="Recognition plan failed",
+                data={"trace_path": trace_path, "recognition_plan_response": plan_response.model_dump(), "timings": timings},
+                error=ErrorModel(code="recognition_plan_failed", details=plan_response.error.model_dump() if plan_response.error else None),
+            )
 
-    plan = plan_response.data["result"]
-    pre_click = plan.get("pre_click_decision") or {}
-    selected_point = _extract_action_point(plan)
-    plan_trace_path = plan.get("trace_path")
-    overlay = _render_recognition_plan_overlay_for_execution(plan_trace_path) if plan_trace_path else None
-    execution_path = {
-        "vision_model_used": bool((plan.get("execution_path") or {}).get("vision_model_used")),
-        "page_structure_used": True,
-        "candidate_rank_used": True,
-        "narrow_search_used": True,
-        "pre_click_decision_used": True,
-        "post_click_verification_used": bool(request.enable_post_click_verification and not request.dry_run),
-        "coordinate_source": "pre_click_decision_v1.selected_click_point",
-        "selection_source": "recognition_plan_v1",
-        "action_executed": False,
-        "dry_run": bool(request.dry_run),
-        "retry_policy_used": True,
-        "max_execution_attempts": int(request.max_execution_attempts),
-    }
+        plan = plan_response.data["result"]
+        pre_click = plan.get("pre_click_decision") or {}
+        selected_point = _extract_action_point(plan)
+        plan_trace_path = plan.get("trace_path")
+        with timer.step("render_recognition_plan_overlay", has_plan_trace=bool(plan_trace_path)):
+            overlay = _render_recognition_plan_overlay_for_execution(plan_trace_path) if plan_trace_path else None
+        execution_path = {
+            "vision_model_used": bool((plan.get("execution_path") or {}).get("vision_model_used")),
+            "page_structure_used": True,
+            "candidate_rank_used": True,
+            "narrow_search_used": True,
+            "pre_click_decision_used": True,
+            "post_click_verification_used": bool(request.enable_post_click_verification and not request.dry_run),
+            "coordinate_source": "pre_click_decision_v1.selected_click_point",
+            "selection_source": "recognition_plan_v1",
+            "approved_plan_reused": False,
+            "recognition_plan_reused": False,
+            "action_executed": False,
+            "dry_run": bool(request.dry_run),
+            "retry_policy_used": True,
+            "max_execution_attempts": int(request.max_execution_attempts),
+        }
 
     base_result: dict[str, Any] = {
         "contract_version": "execute_recognition_plan_v1",
@@ -523,10 +743,13 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         "recognition_plan_overlay": overlay,
         "pre_click_decision": pre_click,
         "selected_click_point": selected_point,
+        "approved_plan_id": request.approved_plan_id,
+        "approved_plan_reuse_validation": approval_reuse_validation,
         "execution_path": execution_path,
     }
 
     if not pre_click.get("allowed") or selected_point is None:
+        attach_timings(base_result)
         base_result["trace_path"] = write_trace(
             category="actions",
             operation="execute_recognition_plan",
@@ -546,6 +769,22 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         )
 
     if request.dry_run:
+        if bound is not None and selected_point is not None:
+            with timer.step("save_approved_plan"):
+                approval = _save_approved_plan(
+                    request=request,
+                    bound=bound,
+                    image_path=image_path,
+                    live_capture=live_capture,
+                    plan=plan,
+                    pre_click=pre_click,
+                    selected_point=selected_point,
+                    plan_trace_path=plan_trace_path,
+                    overlay=overlay,
+                )
+            base_result.update(approval)
+            base_result["approved_plan_id"] = approval["approved_plan_id"]
+        attach_timings(base_result)
         base_result["trace_path"] = write_trace(
             category="actions",
             operation="execute_recognition_plan",
@@ -559,47 +798,56 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
     final_attempt: dict[str, Any] | None = None
     try:
         for attempt_index in range(1, int(request.max_execution_attempts) + 1):
-            before_state = (
-                verifier.capture_pre_action_state(action_name="execute_recognition_plan")
-                if request.enable_post_click_verification
-                else None
-            )
-            click_result = input_controller.click_point(
-                selected_point["x"],
-                selected_point["y"],
-                move_before_click=True,
-                settle_ms=100,
-                hold_ms=70,
-            )
-            post_click_verification = (
-                verifier.verify_action(
-                    "execute_recognition_plan",
-                    before_state=before_state,
-                    click_result=click_result,
-                )
-                if request.enable_post_click_verification
-                else {"verified": None, "verification_skipped": True}
-            )
-            semantic_post_click_verification = (
-                _verify_mouse_tester_post_click_semantics(
+            with timer.step("execution_attempt", attempt=attempt_index):
+                with timer.step("capture_pre_action_state", attempt=attempt_index, enabled=request.enable_post_click_verification):
+                    before_state = (
+                        verifier.capture_pre_action_state(action_name="execute_recognition_plan")
+                        if request.enable_post_click_verification
+                        else None
+                    )
+                with timer.step("click_point", attempt=attempt_index):
+                    click_result = input_controller.click_point(
+                        selected_point["x"],
+                        selected_point["y"],
+                        move_before_click=True,
+                        settle_ms=100,
+                        hold_ms=70,
+                    )
+                with timer.step("post_click_verification", attempt=attempt_index, enabled=request.enable_post_click_verification):
+                    post_click_verification = (
+                        verifier.verify_action(
+                            "execute_recognition_plan",
+                            before_state=before_state,
+                            click_result=click_result,
+                        )
+                        if request.enable_post_click_verification
+                        else {"verified": None, "verification_skipped": True}
+                    )
+                with timer.step(
+                    "semantic_post_click_verification",
+                    attempt=attempt_index,
+                    enabled=request.enable_post_click_verification and _should_verify_mouse_tester_semantics(request, plan),
+                ):
+                    semantic_post_click_verification = (
+                        _verify_mouse_tester_post_click_semantics(
+                            request=request,
+                            plan=plan,
+                            generic_verification=post_click_verification,
+                        )
+                        if request.enable_post_click_verification and _should_verify_mouse_tester_semantics(request, plan)
+                        else {"applicable": False, "verified": None, "verification_skipped": True}
+                    )
+                attempt_verified = _execution_attempt_verified(
                     request=request,
-                    plan=plan,
-                    generic_verification=post_click_verification,
+                    post_click_verification=post_click_verification,
+                    semantic_post_click_verification=semantic_post_click_verification,
                 )
-                if request.enable_post_click_verification and _should_verify_mouse_tester_semantics(request, plan)
-                else {"applicable": False, "verified": None, "verification_skipped": True}
-            )
-            attempt_verified = _execution_attempt_verified(
-                request=request,
-                post_click_verification=post_click_verification,
-                semantic_post_click_verification=semantic_post_click_verification,
-            )
-            retry_allowed, retry_reason = _retry_allowed_after_attempt(
-                request=request,
-                pre_click=pre_click,
-                attempt_index=attempt_index,
-                attempt_verified=attempt_verified,
-            )
+                retry_allowed, retry_reason = _retry_allowed_after_attempt(
+                    request=request,
+                    pre_click=pre_click,
+                    attempt_index=attempt_index,
+                    attempt_verified=attempt_verified,
+                )
             attempt = {
                 "attempt": attempt_index,
                 "click_point": selected_point,
@@ -617,6 +865,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
     except Exception as exc:
         base_result["execution_path"]["action_executed"] = bool(attempts)
         base_result["attempts"] = attempts
+        attach_timings(base_result)
         base_result["trace_path"] = write_trace(
             category="actions",
             operation="execute_recognition_plan",
@@ -652,6 +901,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
     base_result["execution_path"]["execution_attempt_count"] = len(attempts)
     base_result["execution_path"]["retry_count"] = max(0, len(attempts) - 1)
     base_result["execution_path"]["semantic_post_click_verification_used"] = bool(semantic_post_click_verification.get("applicable"))
+    attach_timings(base_result)
     base_result["trace_path"] = write_trace(
         category="actions",
         operation="execute_recognition_plan",
@@ -681,31 +931,38 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
 @router.post("/execute_confirmed_point", response_model=APIResponse)
 def execute_confirmed_point(request: ExecuteConfirmedPointRequest) -> APIResponse:
     """Dispatch a point explicitly confirmed in the review UI."""
-    bound = window_manager.get_bound_window()
+    timer = RuntimeTimer()
+    with timer.step("get_bound_window"):
+        bound = window_manager.get_bound_window()
     if bound is None:
+        timings = timer.to_dict()
         return APIResponse(
             success=False,
             message="No bound window is currently available",
-            data=None,
+            data={"timings": timings},
             error=ErrorModel(code="no_bound_window", details="Bind a target window before executing a confirmed point"),
         )
 
-    point = {"x": int(request.x), "y": int(request.y)}
-    bbox = request.bbox.model_dump() if request.bbox is not None else None
+    with timer.step("validate_confirmed_point"):
+        point = {"x": int(request.x), "y": int(request.y)}
+        bbox = request.bbox.model_dump() if request.bbox is not None else None
     if bbox is not None and not _point_in_rect(point, bbox):
+        timings = timer.to_dict()
         return APIResponse(
             success=False,
             message="Confirmed point is outside its reviewed candidate box",
-            data={"point": point, "bbox": bbox},
+            data={"point": point, "bbox": bbox, "timings": timings},
             error=ErrorModel(code="confirmed_point_outside_bbox", details={"point": point, "bbox": bbox}),
         )
 
-    rect = _window_rect(bound)
+    with timer.step("validate_bound_window_rect"):
+        rect = _window_rect(bound)
     if not _point_in_rect(point, {"x": 0, "y": 0, "width": rect["width"] - 1, "height": rect["height"] - 1}):
+        timings = timer.to_dict()
         return APIResponse(
             success=False,
             message="Confirmed point is outside the currently bound window",
-            data={"point": point, "window_size": {"width": rect["width"], "height": rect["height"]}},
+            data={"point": point, "window_size": {"width": rect["width"], "height": rect["height"]}, "timings": timings},
             error=ErrorModel(code="confirmed_point_outside_window", details=point),
         )
 
@@ -724,6 +981,7 @@ def execute_confirmed_point(request: ExecuteConfirmedPointRequest) -> APIRespons
         },
     }
     if request.dry_run:
+        result["timings"] = timer.to_dict()
         result["trace_path"] = write_trace(
             category="actions",
             operation="execute_confirmed_point",
@@ -734,14 +992,16 @@ def execute_confirmed_point(request: ExecuteConfirmedPointRequest) -> APIRespons
         return APIResponse(success=True, message="Confirmed point accepted; dry run did not click", data=data.model_dump(), error=None)
 
     try:
-        result["click_result"] = input_controller.click_point(
-            point["x"],
-            point["y"],
-            move_before_click=True,
-            settle_ms=100,
-            hold_ms=70,
-        )
+        with timer.step("click_point"):
+            result["click_result"] = input_controller.click_point(
+                point["x"],
+                point["y"],
+                move_before_click=True,
+                settle_ms=100,
+                hold_ms=70,
+            )
         result["execution_path"]["action_executed"] = True
+        result["timings"] = timer.to_dict()
         result["trace_path"] = write_trace(
             category="actions",
             operation="execute_confirmed_point",
@@ -751,6 +1011,7 @@ def execute_confirmed_point(request: ExecuteConfirmedPointRequest) -> APIRespons
         data = ActionResultData(action="execute_confirmed_point", result=result)
         return APIResponse(success=True, message="Confirmed coordinate click dispatched", data=data.model_dump(), error=None)
     except Exception as exc:
+        result["timings"] = timer.to_dict()
         result["trace_path"] = write_trace(
             category="actions",
             operation="execute_confirmed_point",
@@ -1006,6 +1267,83 @@ def click_text(request: ClickTextRequest) -> APIResponse:
             message="Text click failed",
             data=None,
             error=ErrorModel(code="click_text_failed", details=str(exc)),
+        )
+
+
+@router.post("/type_text", response_model=APIResponse)
+def type_text(request: TypeTextRequest) -> APIResponse:
+    bound = window_manager.get_bound_window()
+    if bound is None:
+        return APIResponse(
+            success=False,
+            message="No bound window is currently available",
+            data=None,
+            error=ErrorModel(code="no_bound_window", details="Bind a target window before calling /action/type_text"),
+        )
+    if request.click_before_typing and (request.x is None or request.y is None):
+        return APIResponse(
+            success=False,
+            message="Text input point is incomplete",
+            data=None,
+            error=ErrorModel(code="missing_input_point", details="Provide x and y when click_before_typing=true"),
+        )
+
+    result: dict[str, Any] = {
+        "contract_version": "type_text_result_v1",
+        "dry_run": request.dry_run,
+        "text_length": len(request.text),
+        "click_before_typing": request.click_before_typing,
+        "point": {"x": request.x, "y": request.y} if request.x is not None and request.y is not None else None,
+        "clear_existing": request.clear_existing,
+        "submit": request.submit,
+        "execution_path": {
+            "vision_model_used": False,
+            "page_structure_used": False,
+            "input_backend": "SendInput+clipboard",
+            "action_executed": False,
+        },
+    }
+    if request.dry_run:
+        result["trace_path"] = write_trace(
+            category="actions",
+            operation="type_text",
+            payload={"success": True, "request": request.model_dump(exclude={"text"}), "result": result},
+            name_hint="type_text_dry_run",
+        )
+        data = ActionResultData(action="type_text", result=result)
+        return APIResponse(success=True, message="Text input dry-run validated", data=data.model_dump(), error=None)
+
+    try:
+        result["type_result"] = input_controller.type_text(
+            request.text,
+            x=request.x,
+            y=request.y,
+            click_before_typing=request.click_before_typing,
+            clear_existing=request.clear_existing,
+            submit=request.submit,
+            restore_clipboard=request.restore_clipboard,
+        )
+        result["execution_path"]["action_executed"] = True
+        result["trace_path"] = write_trace(
+            category="actions",
+            operation="type_text",
+            payload={"success": True, "request": request.model_dump(exclude={"text"}), "result": result},
+            name_hint="type_text",
+        )
+        data = ActionResultData(action="type_text", result=result)
+        return APIResponse(success=True, message="Text input dispatched", data=data.model_dump(), error=None)
+    except Exception as exc:
+        result["trace_path"] = write_trace(
+            category="actions",
+            operation="type_text",
+            payload={"success": False, "request": request.model_dump(exclude={"text"}), "result": result, "error": str(exc)},
+            name_hint="type_text",
+        )
+        return APIResponse(
+            success=False,
+            message="Text input failed",
+            data=result,
+            error=ErrorModel(code="type_text_failed", details=str(exc)),
         )
 
 
