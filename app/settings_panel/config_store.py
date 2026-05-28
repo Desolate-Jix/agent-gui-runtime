@@ -10,8 +10,11 @@ PANEL_CONFIG_PATH = ROOT_DIR / "configs" / "settings_panel.json"
 MODEL_PROFILE_DIR = ROOT_DIR / "configs" / "model_profiles"
 ARTIFACT_DIR = ROOT_DIR / "artifacts" / "settings-panel"
 
-DEFAULT_OBSERVE_PROMPT = """Screen-understanding stage only:
+OBSERVE_STATE_HINT_RULE = "- Make state_guess the best concise hint to pass into the next precise localization state_hint field, for example top navigation bar, job results list, chat title bar, left sidebar, settings dialog, or main content list."
+
+DEFAULT_OBSERVE_PROMPT = f"""Screen-understanding stage only:
 - Explain the interface purpose briefly in screen_summary.
+{OBSERVE_STATE_HINT_RULE}
 - Return a compact index of independently clickable controls: navigation, buttons, icon-only buttons, tabs, inputs, toggles, menus, and title-bar controls.
 - Include small or uncertain icon controls with lower confidence rather than long explanations.
 - Keep every label and likely action short; this is a fast discovery pass before precise localization.

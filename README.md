@@ -1,5 +1,7 @@
 # agent-gui-runtime
 
+[中文](README.md) | [English](README.en.md)
+
 Windows 本地 GUI 自动化运行时。它不是完整 Agent，而是给上层 Agent 提供稳定的本地 HTTP API，用来发现应用、绑定窗口、截图、OCR/视觉识别、生成点击计划、执行受控点击和验证结果。
 
 核心链路：
@@ -148,7 +150,7 @@ scripts/model_servers/
 - 修改附加视觉提示词
 - 查看每个阶段的原始 JSON 返回
 
-耗时的视觉请求在后台运行，调用整屏理解、精准定位或 dry-run 时测试面板仍可继续响应。整屏理解与精准定位分别保存提示词：整屏理解是快速候选发现阶段，只要求简短界面摘要和可操作控件候选框，不让小模型复述 OCR 坐标或生成详细关系证据；精准定位阶段只处理 agent 指定的目标，区分纯图标与含文字控件，并要求输出 OCR anchor 关系、四边约束、中心/尺寸/排除约束以及最终框理由。对不含文字的小图标，满足这些证据的大模型框会作为 `located_bbox` / `located_point` 返回供检查，但不会自动改点相邻 OCR 文字，也不会直接成为可执行坐标。
+耗时的视觉请求在后台运行，调用整屏理解、精准定位或 dry-run 时测试面板仍可继续响应。整屏理解与精准定位分别保存提示词：整屏理解是快速候选发现阶段，只要求简短界面摘要和可操作控件候选框，不让小模型复述 OCR 坐标或生成详细关系证据；整屏理解现在还要求 `state_guess` 输出可直接传给精准定位 `state_hint` 的短区域提示，并在 `POST /vision/observe_screen` 返回 `suggested_state_hint`。测试面板收到成功的整屏理解结果后会自动把该提示填入精准定位的 State hint 输入框；旧的本地面板配置也会在加载时补上这条提示词规则。精准定位阶段只处理 agent 指定的目标，区分纯图标与含文字控件，并要求输出 OCR anchor 关系、四边约束、中心/尺寸/排除约束以及最终框理由。对不含文字的小图标，满足这些证据的大模型框会作为 `located_bbox` / `located_point` 返回供检查，但不会自动改点相邻 OCR 文字，也不会直接成为可执行坐标。
 
 最新的同图测试中，`Qwen3-VL 8B Q4_K_M` 整屏理解从旧详细输出流程的约 `84.17s` 降至轻量候选流程的约 `16.08s`。新流程单次返回 `10` 个可操作候选和 `2` 个图标候选，没有触发模型重试。
 
@@ -157,6 +159,18 @@ scripts/model_servers/
 同日的 QQ “关闭窗口”样例正确识别了语义目标，但在 `806px` 宽推理图上返回了越界横坐标 `965..985`，原结果因此被裁为空框并显示 `not_located`。运行时现在会在裁边前恢复这种 `0..1000` 比例坐标，使关闭按钮成为仍需人工确认的候选。测试面板会把定位返回的首候选自动填入“候选框校验”和“点击闸门”；操作者按下真实点击按钮后，`POST /action/execute_confirmed_point` 才向当前绑定窗口发送该窗口相对坐标。
 
 修复后的同图真实复测在 `69.35s` 内返回 `close_window_button`、`located_bbox={x:797,y:13,w:17,h:26}`、`located_point={x:806,y:26}` 和 `location_status=requires_pre_click_confirmation`；`selected_click_point` 仍为空，因此复测没有触发点击。
+
+2026-05-27 的后续工作压缩了精准定位输入：运行时仍保留全部 OCR 框用于 trace 与后验检查，`click_target` 当前默认按预算选择最多 `48` 个 anchor，使用 `relation_matrix_compact` 矩阵发送每个入选框的文字、坐标和目标匹配标记。矩阵还携带包含/排除关系策略，并要求在存在相关文字行时于 `anchor_relations` 中引用至少一个 anchor：关闭按钮这类纯视觉图标仍可利用附近文字定位边界，但最终 bbox 必须排除文字区域。此前不携带图标周围文字的 `geometry_compact` 试验已被这一契约替代。
+
+最终 no-click 复测向模型发送了 `32` 行矩阵和 `32` 条文字（`prompt_goal_match_count=0`），模型输入为 `2735` tokens，低于当前 `4096` context；请求未 fallback，也未触发点击，返回 `located_bbox={x:783,y:5,w:27,h:27}`、`located_point={x:796,y:18}`。当前 Qwen 输出遵守了 `text_inclusion_policy=exclude_text`，但仍未回填 `anchor_relations`，因此显式关系引用仍作为已知模型限制继续观察。Trace: `logs/traces/vision/20260527-174308-069367__locate-target__browser.json`。
+
+当 OCR 中存在与目标强匹配的文字时，精准定位矩阵现在优先扩展该文字附近的排布证据：默认在总共 `48` 行以内，为强匹配文字最多优先加入 `12` 个同排左右或同列上下邻居，并写入紧凑 `focus_relation_rows=[focus_id,neighbor_id,L|R|A|B,gap_px]`。调用方可通过 `metadata.ocr_anchors.prompt_focus_neighbor_limit` 调整该局部份额；这不会对没有目标文字命中的关闭按钮伪造关系。
+
+在同一张 QQ 截图上用画面内文字 `若只群` 构造精准定位 prompt 时，运行时找到 `2` 个强匹配 anchor，并在仍为 `32` 行的矩阵中优先写入 `9` 条邻域排布关系；与关闭焦点扩展相比，完整文本 prompt 从 `1697` 增到 `1866` tokens，仅增加 `169` tokens。
+
+同目标的实际 `POST /vision/locate_target` no-click 调用在 trace 中记录了 `prompt_goal_match_count=2`、`prompt_focus_relation_count=9`，模型总输入为 `2963` tokens，未触发 OCR fallback 或真实点击。因为画面中 `若只群` 同时出现在标题和会话列表，该运行只验证焦点排布证据成功入模，不证明重复文字目标已唯一消歧。Trace: `logs/traces/vision/20260527-182704-779212__locate-target__browser.json`。
+
+将默认矩阵预算提升到 `48` 后，QQ `关闭窗口` 的真实 no-click 回归记录了 `prompt_anchor_count=48`、`prompt_text_anchor_count=48`，模型输入 `3165` tokens、总处理 `3608` tokens，仍在当前 `4096` context 内且未截断或 fallback；定位结果为 `located_bbox={x:787,y:0,w:21,h:36}`、`located_point={x:798,y:18}`，动作保持未执行。Trace: `logs/traces/vision/20260527-183444-432196__locate-target__browser.json`。
 
 ## 模型管理
 
@@ -222,7 +236,8 @@ POST /action/execute_recognition_plan  dry_run=false，仅在 pre_click_decision
 关键原则：
 
 - 先用整屏理解得到简短候选列表，再对选中的目标精准定位
-- OCR anchors 默认参与视觉定位；整屏理解中它们只作为输入参考，不由模型重复输出
+- `observe_screen.suggested_state_hint` 是下一次 `locate_target.state_hint` 的默认建议；测试面板会自动填入，agent 仍可按目标覆盖
+- OCR anchors 默认参与视觉定位；精准定位保留完整 OCR 结果用于校验，但向模型发送受预算控制的几何投影，只有目标文字高匹配时才附带文字
 - `observe_screen` 只用于界面摘要和候选发现，不用于点击或最终坐标证明
 - `locate_target` 只返回 no-click 定位结果
 - `located_bbox` / `located_point` 是精准视觉模型建议的目标位置；只有 `selected_click_point` 表示已通过点击前闸门的可执行坐标
@@ -235,6 +250,20 @@ POST /action/execute_recognition_plan  dry_run=false，仅在 pre_click_decision
 ```text
 AGENT_API_WORKFLOW.md
 ```
+
+每个 API 的字段含义、设计目的、返回结构见：
+
+```text
+API_FIELD_REFERENCE.zh-CN.md
+```
+
+### Text-Card Localization Safety
+
+Text-bearing clickable cards now have a conservative review path. A `card` region is retained only when it declares `include_referenced_text`, a destination, complete edge evidence, and bindable OCR text. Its proposed bbox and point come from matched OCR text rather than a drifting visual card boundary, and it is not an autonomous click approval.
+
+A 2026-05-27 saved Seek localization for Serato showed that a dense page can overflow the anchor-enriched 48-row attempt and use the existing OCR-anchor fallback. Downstream OCR binding still corrected the reviewed candidate to `{x:58,y:649,w:276,h:51}` / `{x:196,y:674}` without clicking.
+
+For list-style text targets, fusion also records an `above_exclusion_boundary` from the nearest aligned OCR text above the target. If the model's semantic card bbox crosses that neighboring boundary, the target is forced into confirmation-only review mode while its OCR-derived candidate bbox remains usable for inspection.
 
 ## 主要接口
 
@@ -284,7 +313,7 @@ screenshot
 
 重点：
 
-- OCR 文字框会作为空间锚点传给视觉模型
+- OCR 文字框会作为空间锚点传给视觉模型；`click_target` 默认发送 `relation_matrix_compact` 文字坐标与包含/排除策略矩阵，并按预算选择 anchor 而非注入整页冗长结构
 - 图标和文字的关系会进入 grounding 证据
 - 小图标定位优先参考 OCR anchors
 - 候选点击点必须经过本地 ranking、narrow search 和 pre-click gate
@@ -370,7 +399,9 @@ PowerShell 模型脚本也做过语法解析检查。
 
 ## 重要文档
 
+- `README.en.md`：英文版 README
 - `AGENT_API_WORKFLOW.md`：Agent 调用 API 的标准流程
+- `API_FIELD_REFERENCE.zh-CN.md`：每个 API 的字段级中文设计参考
 - `PROJECT_STRUCTURE.md`：文件结构、配置、产物位置
 - `PROJECT_SUMMARY.md`：项目摘要
 - `CURRENT_STATE.md`：当前状态

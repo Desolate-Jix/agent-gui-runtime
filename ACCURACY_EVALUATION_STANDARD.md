@@ -647,7 +647,6 @@ Scope:
 - `screen_reading_v1`
 - `app/screen_reading/builder.py`
 - `app/screen_reading/uia_provider.py`
-- `app/screen_reading/icon_library.py`
 
 Goal:
 
@@ -658,11 +657,10 @@ Completion checks:
 - OCR-backed page elements appear in `ui.elements`
 - visual-only or icon-like candidates appear in `ui.icon_candidates`
 - visual-only/icon candidates are not marked as safe execution targets without stronger grounding
-- provider slots are present for UIA, browser accessibility, Microsoft Fluent icon catalog, and learned UI memory
+- provider slots are present for UIA, browser accessibility, and learned UI memory
 - UIA scan status and control count appear in `source_layers.windows_uia`
 - UIA matches appear on supported bound-window controls when overlap/name evidence is available
-- Microsoft Fluent catalog matches appear for supported contextual icon candidates
-- uncertainties explicitly describe missing catalog or grounding evidence
+- uncertainties explicitly describe visual-only grounding evidence gaps
 
 Metrics:
 
@@ -671,8 +669,6 @@ Metrics:
   - expected UI elements represented / expected UI elements
 - `icon_candidate_recall`
   - expected no-text icons represented / expected no-text icons
-- `icon_catalog_match_rate`
-  - expected Microsoft Fluent matches found / expected supported icon candidates
 - `uia_control_match_rate`
   - expected UIA controls merged / expected supported bound-window controls
 - `uia_smoke_pass_rate`
@@ -686,7 +682,6 @@ Target thresholds for the current phase:
 - `screen_reading_contract_pass_rate = 1.00`
 - `ui_element_recall >= 0.90`
 - `icon_candidate_recall >= 0.80`
-- `icon_catalog_match_rate >= 0.80` for supported common browser/UI icons
 - `uia_control_match_rate >= 0.80` for supported bound-window controls
 - `uia_smoke_pass_rate = 1.00` for the current MouseTester/Edge smoke case
 - `unsafe_icon_block_rate = 1.00`

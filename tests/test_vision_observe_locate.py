@@ -16,7 +16,12 @@ def test_observe_screen_wraps_live_capture_and_screen_reading(monkeypatch) -> No
     def fake_screen_reading(request):
         assert request.image_path == "screen.png"
         assert request.metadata["ocr_anchors"]["enabled"] is True
-        return APIResponse(success=True, message="ok", data={"result": {"screen_reading": {"ui": {"elements": []}}}}, error=None)
+        return APIResponse(
+            success=True,
+            message="ok",
+            data={"result": {"state_guess": "job results list", "screen_reading": {"ui": {"elements": []}}}},
+            error=None,
+        )
 
     monkeypatch.setattr(vision_api, "screen_reading", fake_screen_reading)
 
@@ -26,7 +31,9 @@ def test_observe_screen_wraps_live_capture_and_screen_reading(monkeypatch) -> No
     result = response.data["result"]
     assert result["contract_version"] == "screen_observation_v1"
     assert result["live_capture"]["image_path"] == "screen.png"
-    assert "POST /vision/locate_target" in result["agent_next_steps"][1]
+    assert result["suggested_state_hint"] == "job results list"
+    assert "suggested_state_hint" in result["agent_next_steps"][1]
+    assert "POST /vision/locate_target" in result["agent_next_steps"][2]
 
 
 def test_locate_target_wraps_recognition_plan_without_clicking(monkeypatch) -> None:

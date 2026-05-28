@@ -352,3 +352,47 @@ def test_rank_candidates_returns_precise_visual_close_button_for_chinese_close_g
     assert result.candidates[0].element_id == "element_close"
     assert result.candidates[0].eligible is True
     assert "precision_visual_target_matches_icon_goal" in result.candidates[0].reasons
+
+
+def test_rank_candidates_returns_matching_precise_text_card_for_review() -> None:
+    structure = _structure(
+        [
+            _element(
+                "element_serato",
+                "Junior Software Engineer C++ Serato Limited",
+                role="card",
+                allowed=False,
+                zone_type="precise_text_target",
+                priority="review",
+                coordinate_confidence="high",
+            )
+        ]
+    )
+
+    result = rank_candidates(
+        CandidateRankRequest(goal="\u6253\u5f00serato\u7684\u804c\u4e1a\u754c\u9762", page_structure=structure, top_k=1)
+    )
+
+    assert result.candidates[0].element_id == "element_serato"
+    assert result.candidates[0].eligible is True
+    assert "precision_text_target_matches_goal" in result.candidates[0].reasons
+
+
+def test_rank_candidates_rejects_unmatched_precise_text_card() -> None:
+    structure = _structure(
+        [
+            _element(
+                "element_serato",
+                "Junior Software Engineer C++ Serato Limited",
+                role="card",
+                allowed=False,
+                zone_type="precise_text_target",
+                priority="review",
+            )
+        ]
+    )
+
+    result = rank_candidates(CandidateRankRequest(goal="open blackpepper role", page_structure=structure, top_k=1))
+
+    assert result.candidates == []
+    assert result.rejected[0].element_id == "element_serato"

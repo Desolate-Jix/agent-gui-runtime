@@ -261,7 +261,7 @@ def test_local_provider_scales_ocr_anchors_for_resized_inference_image(tmp_path,
         body = json.loads(request.data.decode("utf-8"))
         prompt = body["messages"][1]["content"][0]["text"]
         assert '"coordinate_space":"inference_image"' in prompt
-        assert '"b":[640,320,128,32]' in prompt
+        assert '[1,"Start",640,320,128,32,1]' in prompt
         model_json = {
             "provider": "local",
             "contract_version": "vision_regions_v1",
@@ -285,6 +285,7 @@ def test_local_provider_scales_ocr_anchors_for_resized_inference_image(tmp_path,
     result = provider.analyze(
         VisionAnalyzeRequest(
             image_path=str(image_path),
+            task="click_target",
             app_name="demo",
             metadata={
                 "ocr_anchors": {
@@ -311,6 +312,11 @@ def test_local_provider_scales_ocr_anchors_for_resized_inference_image(tmp_path,
     assert attempt["ocr_anchors"]["enabled"] is True
     assert attempt["ocr_anchors"]["coordinate_space"] == "inference_image"
     assert attempt["ocr_anchors"]["anchor_count"] == 1
+    assert attempt["ocr_anchors"]["prompt_profile"] == "relation_matrix_compact"
+    assert attempt["ocr_anchors"]["prompt_anchor_count"] == 1
+    assert attempt["ocr_anchors"]["prompt_text_anchor_count"] == 1
+    assert attempt["ocr_anchors"]["prompt_goal_match_count"] == 1
+    assert attempt["ocr_anchors"]["prompt_focus_relation_count"] == 0
 
 
 def test_local_provider_retries_with_compact_prompt_after_truncated_json(tmp_path, monkeypatch) -> None:

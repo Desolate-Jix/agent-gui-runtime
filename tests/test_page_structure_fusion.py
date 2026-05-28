@@ -240,3 +240,117 @@ def test_build_page_structure_does_not_promote_unproven_visual_icon() -> None:
     structure = build_page_structure(vision, OCRResult(image_path="screen.png", metadata={}, matches=[]))
 
     assert structure.elements == []
+
+
+def test_build_page_structure_keeps_clickable_text_card_for_review_using_ocr_bbox() -> None:
+    card = _region("region_serato", "Serato Job Listing", "card", 35, 543, 556, 206)
+    card.ocr_text = "Junior Software Engineer C++ Serato Limited"
+    card.text_lines = ["Junior Software Engineer C++", "Serato Limited"]
+    card.possible_destinations = ["Job detail page"]
+    card.grounding_constraints = {
+        "text_inclusion_policy": "include_referenced_text",
+        "edge_constraints": {
+            "top": "top edge of card",
+            "bottom": "bottom edge of card",
+            "left": "left edge of card",
+            "right": "right edge of card",
+        },
+        "final_bbox_reason": "Clickable listing card containing the target employer text.",
+    }
+    vision = VisionAnalyzeResponse(
+        provider="local",
+        image_size=ImageSize(width=1294, height=1164),
+        screen_summary="job list",
+        state_guess="recommended jobs",
+        regions=[card],
+    )
+    ocr = OCRResult(
+        image_path="screen.png",
+        metadata={"engine": "rapidocr_onnxruntime"},
+        matches=[
+            OCRTextMatch(text="Blackpepper", score=0.99, bbox=OCRBoundingBox(x=60, y=590, width=112, height=20)),
+            OCRTextMatch(text="Junior Software Engineer C++", score=0.99, bbox=OCRBoundingBox(x=60, y=652, width=245, height=22)),
+            OCRTextMatch(text="Serato Limited", score=0.99, bbox=OCRBoundingBox(x=60, y=681, width=122, height=20)),
+        ],
+    )
+
+    result = build_page_structure(vision, ocr).to_dict()
+
+    assert len(result["elements"]) == 1
+    target = result["elements"][0]
+    assert target["role"] == "card"
+    assert target["bbox"] == {"x": 60, "y": 652, "w": 245, "h": 49}
+    assert target["semantic_bbox"] == {"x": 35, "y": 543, "w": 556, "h": 206}
+    assert target["click_point"] == {"x": 182, "y": 676}
+    assert target["click_strategy"] == "ocr_text_center_review"
+    assert target["interaction_policy"]["allowed"] is False
+    assert target["interaction_policy"]["zone_type"] == "precise_text_target"
+    assert result["links"][0]["relation"] == "precise_text_grounding"
+    assert target["evidence"]["above_exclusion_boundary"] == {
+        "text_id": "text_1",
+        "text": "Blackpepper",
+        "bbox": {"x": 60, "y": 590, "w": 112, "h": 20},
+        "relation": "above_target_text",
+        "vertical_gap_px": 42,
+        "semantic_bbox_crosses_boundary": True,
+        "candidate_bbox_crosses_boundary": False,
+        "enforcement": "candidate_bbox_uses_target_ocr_text_only",
+    }
+    assert target["evidence"]["semantic_bbox_violations"] == ["crosses_above_exclusion_boundary"]
+    assert "above_exclusion_boundary_applied" in result["links"][0]["reasons"]
+    assert "semantic_bbox_crossed_above_exclusion_boundary" in result["links"][0]["reasons"]
+
+
+def test_build_page_structure_does_not_promote_unproven_card() -> None:
+    card = _region("region_card", "Serato Job Listing", "card", 35, 543, 556, 206)
+    vision = VisionAnalyzeResponse(
+        provider="local",
+        image_size=ImageSize(width=1294, height=1164),
+        screen_summary="job list",
+        state_guess="recommended jobs",
+        regions=[card],
+    )
+    ocr = OCRResult(
+        image_path="screen.png",
+        metadata={"engine": "rapidocr_onnxruntime"},
+        matches=[OCRTextMatch(text="Serato Limited", score=0.99, bbox=OCRBoundingBox(x=60, y=681, width=122, height=20))],
+    )
+
+    structure = build_page_structure(vision, ocr)
+
+    assert structure.elements == []
+
+
+def test_build_page_structure_applies_above_boundary_to_supported_text_click_target() -> None:
+    target = _region("region_serato", "Serato Job Listing", "nav", 35, 543, 556, 206)
+    target.ocr_text = "Junior Software Engineer C++ Serato Limited"
+    target.text_lines = ["Junior Software Engineer C++", "Serato Limited"]
+    target.grounding_constraints = {"text_inclusion_policy": "include_referenced_text"}
+    vision = VisionAnalyzeResponse(
+        provider="local",
+        image_size=ImageSize(width=1294, height=1164),
+        screen_summary="job list",
+        state_guess="recommended jobs",
+        regions=[target],
+    )
+    ocr = OCRResult(
+        image_path="screen.png",
+        metadata={"engine": "rapidocr_onnxruntime"},
+        matches=[
+            OCRTextMatch(text="9d ago", score=0.98, bbox=OCRBoundingBox(x=60, y=590, width=60, height=18)),
+            OCRTextMatch(text="Junior Software Engineer C++", score=0.99, bbox=OCRBoundingBox(x=60, y=652, width=245, height=22)),
+            OCRTextMatch(text="Serato Limited", score=0.99, bbox=OCRBoundingBox(x=60, y=681, width=122, height=20)),
+        ],
+    )
+
+    result = build_page_structure(vision, ocr).to_dict()
+    element = result["elements"][0]
+
+    assert element["role"] == "menu_item"
+    assert element["bbox"] == {"x": 60, "y": 652, "w": 245, "h": 49}
+    assert element["interaction_policy"]["allowed"] is False
+    assert element["interaction_policy"]["zone_type"] == "precise_text_target"
+    assert element["click_strategy"] == "ocr_text_center_review"
+    assert element["evidence"]["above_exclusion_boundary"]["text"] == "9d ago"
+    assert element["evidence"]["above_exclusion_boundary"]["semantic_bbox_crosses_boundary"] is True
+    assert element["evidence"]["above_exclusion_boundary"]["candidate_bbox_crosses_boundary"] is False

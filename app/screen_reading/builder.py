@@ -4,7 +4,6 @@ import re
 from typing import Any
 
 from app.page_structure.schemas import PageElement, PageStructure, PageText
-from app.screen_reading.icon_library import FLUENT_FAMILY, MicrosoftFluentIconLibrary
 from app.screen_reading.uia_provider import WindowsUIAProvider
 from app.vision.schemas import BBox, VisionAnalyzeResponse, VisionRegion
 from modules.ocr.contracts import OCRResult
@@ -56,13 +55,11 @@ def build_screen_reading(
     ocr: OCRResult,
     page_structure: PageStructure,
     app_name: str | None = None,
-    icon_library: MicrosoftFluentIconLibrary | None = None,
     uia_provider: WindowsUIAProvider | None = None,
     uia_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the agent-facing READ contract from current vision/OCR/fusion evidence."""
 
-    icon_library = icon_library or MicrosoftFluentIconLibrary()
     uia_provider = uia_provider or WindowsUIAProvider()
     texts = [_text_to_dict(item) for item in page_structure.texts]
     elements = [_element_from_page_element(item) for item in page_structure.elements]
@@ -82,7 +79,7 @@ def build_screen_reading(
     _attach_uia_matches(elements, uia_snapshot)
 
     modules = _build_modules(vision.regions, elements, page_structure.texts)
-    icon_candidates = [_icon_candidate(item, icon_library=icon_library) for item in elements if _is_icon_candidate(item)]
+    icon_candidates = [_icon_candidate(item) for item in elements if _is_icon_candidate(item)]
     execution_relevance = _execution_relevance(elements)
     uncertainties = _uncertainties(elements, icon_candidates)
 
@@ -97,7 +94,7 @@ def build_screen_reading(
         "elements": elements,
         "modules": modules,
         "icon_candidates": icon_candidates,
-        "provider_slots": _provider_slots(icon_library, uia_provider, uia_snapshot),
+        "provider_slots": _provider_slots(uia_provider, uia_snapshot),
         "learning_hooks": _learning_hooks(elements),
     }
 
@@ -267,8 +264,7 @@ def _build_modules(regions: list[VisionRegion], elements: list[dict[str, Any]], 
     return modules
 
 
-def _icon_candidate(element: dict[str, Any], *, icon_library: MicrosoftFluentIconLibrary) -> dict[str, Any]:
-    icon_library_match = icon_library.match(element)
+def _icon_candidate(element: dict[str, Any]) -> dict[str, Any]:
     return {
         "element_id": element["id"],
         "role_guess": element["role_guess"],
@@ -276,11 +272,10 @@ def _icon_candidate(element: dict[str, Any], *, icon_library: MicrosoftFluentIco
         "bbox": element["bbox"],
         "click_point": element["click_point"],
         "confidence": element["confidence"],
-        "icon_library_match": icon_library_match,
         "uia_match": element.get("provider_matches", {}).get("uia"),
-        "catalog_status": "matched" if icon_library_match is not None else "no_catalog_match",
+        "visual_recognition_status": "reserved_for_grounding",
         "learning_status": "reserved_for_ui_memory",
-        "needed_evidence": _needed_icon_evidence(icon_library_match),
+        "needed_evidence": _needed_icon_evidence(),
     }
 
 
@@ -305,15 +300,6 @@ def _execution_relevance(elements: list[dict[str, Any]]) -> dict[str, list[str]]
 
 def _uncertainties(elements: list[dict[str, Any]], icon_candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
-    unmatched_icons = [item["element_id"] for item in icon_candidates if item.get("catalog_status") != "matched"]
-    if unmatched_icons:
-        items.append(
-            {
-                "code": "icon_library_match_missing",
-                "message": "Icon-like UI candidates were checked against the Microsoft Fluent icon catalog but no catalog match was found.",
-                "affected_element_ids": unmatched_icons,
-            }
-        )
     visual_only = [item["id"] for item in elements if item["evidence_level"] == "visual_region_only"]
     if visual_only:
         items.append(
@@ -327,7 +313,6 @@ def _uncertainties(elements: list[dict[str, Any]], icon_candidates: list[dict[st
 
 
 def _provider_slots(
-    icon_library: MicrosoftFluentIconLibrary,
     uia_provider: WindowsUIAProvider,
     uia_snapshot: dict[str, Any] | None,
 ) -> dict[str, dict[str, Any]]:
@@ -339,7 +324,6 @@ def _provider_slots(
             "expected_fields": ["role", "name", "backend_node_id", "bounding_box", "states"],
             "merge_keys": ["bbox_overlap", "accessible_name", "role"],
         },
-        "icon_library": icon_library.describe_slot(),
         "learned_ui_memory": {
             "status": "reserved",
             "intended_use": "Store successful UI element signatures, click points, verification outcomes, and app/window context.",
@@ -349,10 +333,8 @@ def _provider_slots(
     }
 
 
-def _needed_icon_evidence(icon_library_match: dict[str, Any] | None) -> list[str]:
-    if icon_library_match is None:
-        return ["icon_shape_match", "nearby_context", "post_action_verification_plan"]
-    return ["shape_or_accessibility_confirmation", "nearby_context", "post_action_verification_plan"]
+def _needed_icon_evidence() -> list[str]:
+    return ["uia_or_browser_accessibility", "icon_shape_match", "nearby_context", "post_action_verification_plan"]
 
 
 def _learning_hooks(elements: list[dict[str, Any]]) -> dict[str, Any]:
@@ -400,11 +382,6 @@ def _locator_hints(
                 "candidate_query": {"name": label or None, "control_type": role},
             },
             "browser_accessibility": {"status": "reserved", "candidate_query": {"role": role, "name": label or None}},
-            "icon_library": {
-                "status": "connected",
-                "provider": FLUENT_FAMILY,
-                "candidate_query": {"role_guess": role, "bbox": bbox.to_dict()},
-            },
             "learned_ui_memory": {"status": "reserved", "candidate_query": {"memory_key": memory_key}},
         },
     }

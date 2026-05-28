@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter
 from PIL import Image
@@ -39,7 +40,12 @@ from app.vision.layer_trace import (
     validate_vision_regions_layer,
 )
 from app.vision.normalizer import normalizer
-from app.vision.ocr_anchors import build_ocr_anchor_payload
+from app.vision.ocr_anchors import (
+    DEFAULT_PROMPT_ANCHOR_LIMIT,
+    DEFAULT_PROMPT_FOCUS_NEIGHBOR_LIMIT,
+    DEFAULT_PROMPT_TEXT_MATCH_THRESHOLD,
+    build_ocr_anchor_payload,
+)
 from app.vision.ocr_region_refiner import parse_ocr_region_refine_options, refine_vision_regions_with_ocr
 from app.vision.review_overlay import render_review_overlay
 from app.vision.schemas import ImageSize, VisionAnalyzeRequest
@@ -106,6 +112,21 @@ def _recognition_vision_request_with_ocr_anchors(
                 goal=request.goal or request.task,
                 max_anchors=max_anchors,
                 min_score=min_score,
+            )
+            anchor_payload["prompt_max_anchors"] = (
+                int(raw_options.get("prompt_max_anchors", DEFAULT_PROMPT_ANCHOR_LIMIT))
+                if isinstance(raw_options, dict)
+                else DEFAULT_PROMPT_ANCHOR_LIMIT
+            )
+            anchor_payload["prompt_text_match_threshold"] = (
+                float(raw_options.get("prompt_text_match_threshold", DEFAULT_PROMPT_TEXT_MATCH_THRESHOLD))
+                if isinstance(raw_options, dict)
+                else DEFAULT_PROMPT_TEXT_MATCH_THRESHOLD
+            )
+            anchor_payload["prompt_focus_neighbor_limit"] = (
+                int(raw_options.get("prompt_focus_neighbor_limit", DEFAULT_PROMPT_FOCUS_NEIGHBOR_LIMIT))
+                if isinstance(raw_options, dict)
+                else DEFAULT_PROMPT_FOCUS_NEIGHBOR_LIMIT
             )
             metadata["ocr_anchors"] = anchor_payload
             anchor_status.update(
@@ -387,7 +408,6 @@ def screen_reading(request: VisionAnalyzeRequestModel) -> APIResponse:
             ),
             "screen_reading_used": True,
             "ui_provider_slots_available": True,
-            "icon_library_provider_connected": True,
             "uia_provider_connected": True,
             "uia_scan_status": uia_snapshot.get("status"),
         }
@@ -444,8 +464,10 @@ def observe_screen(request: VisionObserveScreenRequestModel) -> APIResponse:
         result = response.data["result"]
         result["contract_version"] = "screen_observation_v1"
         result["live_capture"] = live_capture
+        result["suggested_state_hint"] = _suggested_state_hint_from_observation(result)
         result["agent_next_steps"] = [
             "Read screen_reading.ui.elements and ui.icon_candidates to decide what the user likely wants.",
+            "Use suggested_state_hint as the default state_hint for POST /vision/locate_target unless the user overrides it.",
             "When a concrete target is chosen, call POST /vision/locate_target with that goal.",
             "Execute only through POST /action/execute_recognition_plan after pre_click_decision allows it.",
         ]
@@ -470,6 +492,26 @@ def observe_screen(request: VisionObserveScreenRequestModel) -> APIResponse:
             data={"trace_path": trace_path},
             error=ErrorModel(code="observe_screen_failed", details=str(exc)),
         )
+
+
+def _suggested_state_hint_from_observation(result: dict[str, Any]) -> str:
+    for value in (result.get("state_guess"), result.get("screen_summary")):
+        hint = _compact_state_hint(value)
+        if hint:
+            return hint
+    screen_reading = result.get("screen_reading") if isinstance(result.get("screen_reading"), dict) else {}
+    for value in (screen_reading.get("state_guess"), screen_reading.get("screen_summary")):
+        hint = _compact_state_hint(value)
+        if hint:
+            return hint
+    return ""
+
+
+def _compact_state_hint(value: Any) -> str:
+    text = " ".join(str(value or "").strip().split())
+    if not text or text.casefold() in {"unknown", "none", "null"}:
+        return ""
+    return text[:80]
 
 
 @router.post("/locate_target", response_model=APIResponse)

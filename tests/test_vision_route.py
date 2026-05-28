@@ -235,12 +235,10 @@ def test_vision_screen_reading_returns_ui_provider_slots(tmp_path, monkeypatch) 
     assert result["ui"]["summary"]["icon_candidate_count"] == 1
     assert result["ui"]["provider_slots"]["uia"]["status"] == "connected"
     assert result["ui"]["provider_slots"]["uia"]["last_scan_status"] == "unavailable"
-    assert result["ui"]["provider_slots"]["icon_library"]["status"] == "connected"
-    assert result["ui"]["provider_slots"]["icon_library"]["provider"] == "microsoft_fluent_system_icons"
-    assert result["ui"]["icon_candidates"][0]["catalog_status"] == "matched"
-    assert result["ui"]["icon_candidates"][0]["icon_library_match"]["icon_id"] == "arrow_left_24_regular"
+    assert "icon_library" not in result["ui"]["provider_slots"]
+    assert result["ui"]["icon_candidates"][0]["visual_recognition_status"] == "reserved_for_grounding"
+    assert "icon_library_match" not in result["ui"]["icon_candidates"][0]
     assert result["execution_path"]["screen_reading_used"] is True
-    assert result["execution_path"]["icon_library_provider_connected"] is True
     assert result["execution_path"]["uia_provider_connected"] is True
     assert result["execution_path"]["uia_scan_status"] == "unavailable"
     assert Path(result["trace_path"]).exists()

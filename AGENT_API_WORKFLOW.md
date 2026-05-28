@@ -2,6 +2,8 @@
 
 This document defines the API-first workflow an upper-layer agent must follow when using this runtime.
 
+For a Chinese field-by-field explanation of every endpoint, see `API_FIELD_REFERENCE.zh-CN.md`.
+
 The core rule is:
 
 > The agent must not click from raw visual-model coordinates. It must call the runtime APIs, let the runtime attach OCR anchors, inspect the recognition plan, and only execute a click through the gated action endpoint.
@@ -286,8 +288,10 @@ Expected response:
         "page_structure_used": true,
         "screen_reading_used": true
       },
+      "suggested_state_hint": "top navigation bar",
       "agent_next_steps": [
         "Read screen_reading.ui.elements and ui.icon_candidates to decide what the user likely wants.",
+        "Use suggested_state_hint as the default state_hint for POST /vision/locate_target unless the user overrides it.",
         "When a concrete target is chosen, call POST /vision/locate_target with that goal.",
         "Execute only through POST /action/execute_recognition_plan after pre_click_decision allows it."
       ],
@@ -302,6 +306,7 @@ Agent decision:
 
 - Use this response to understand what the interface contains and what controls can probably do.
 - Prefer `provider_mode: local_understanding` here. It is intended for the smaller local model that summarizes the whole screen for agent planning.
+- Use `suggested_state_hint` as the next precise-localization `state_hint` default. It comes from the observation model's concise `state_guess`.
 - Do not click from this response.
 - Pick a concrete goal such as `点击 SEEK 导航栏的首页图标`, then call `POST /vision/locate_target`.
 
@@ -383,6 +388,8 @@ Agent decision:
 - Prefer `provider_mode: local_grounding` here. It is intended for the larger local model that performs precise OCR-assisted target localization.
 - Use `pre_click_decision.allowed` as the quality gate.
 - Read `located_bbox` and `located_point` as the large model's no-click target proposal. For a visual-only icon it may be present while `selected_click_point` is null and `location_status` is `requires_pre_click_confirmation`.
+- For a text-bearing clickable card, a target-matched review candidate may be retained only with explicit destination and OCR text evidence. In that case `located_bbox` / `located_point` are derived from matching OCR text inside the card, and the card remains confirmation-required.
+- For list-like text targets, inspect `recommended_target.element.evidence.above_exclusion_boundary`. If `semantic_bbox_crosses_boundary == true`, the visual container intruded into the preceding item; the runtime keeps only the OCR-grounded review candidate and blocks autonomous execution.
 - Treat only `selected_click_point` as executable. An icon proposal must not silently fall back to nearby OCR text merely because that text is easier to ground.
 - Still do not click directly. To click, call `POST /action/execute_recognition_plan`, which re-captures and rechecks before dispatching input.
 - If a visual model emits out-of-bounds values consistent with `0..1000` normalized coordinates, the provider restores them before pixel clamping and records `coordinate_space_recovered=normalized_1000`; that restored bbox is still a no-click proposal.
@@ -426,8 +433,8 @@ Internal runtime steps:
 1. Capture the currently bound live window.
 2. Call `POST /vision/recognition_plan` internally with the captured `image_path`.
 3. Run OCR over the same screenshot.
-4. Build `ocr_anchors_v1` from all OCR text boxes by default.
-5. Attach OCR anchors to the visual-model prompt.
+4. Build and retain `ocr_anchors_v1` from all OCR text boxes by default.
+5. For `click_target`, attach a bounded `relation_matrix_compact` prompt projection: every selected row keeps OCR text and bbox coordinates, plus compact inclusion/exclusion policy rows.
 6. Normalize model regions into `vision_regions_v1`.
 7. Fuse vision and OCR into `page_structure_v1`.
 8. Build `screen_reading_v1`.
@@ -512,6 +519,7 @@ Agent decision:
 - Use `data.result.selected_click_point` as the only executable coordinate.
 - Do not use raw `vision_regions.regions[*].bbox` as a click coordinate.
 - If `ocr_anchor_grounding_used == false`, treat the plan as lower confidence and inspect `ocr_anchor_grounding_fallback_used`.
+- The default 48-row prompt budget is not guaranteed to fit every dense page. A saved Seek/Serato test exhausted the anchored context and safely retried without prompt anchors; retained OCR then grounded the reviewed text-card point.
 - If `pre_click_decision.allowed == false`, do not click. Re-observe, narrow the ROI, improve the goal text, or ask the user.
 
 ### Operator-Reviewed Coordinate Test Path
@@ -753,7 +761,7 @@ Agent decision:
 
 The agent does not handwrite the final visual-model prompt. The agent sends `goal`, `task`, `state_hint`, `image_path`, and `metadata`. The runtime builds the final prompt in `app/vision/prompting.py`.
 
-For a recognition-plan call with OCR anchors enabled, the visual model receives:
+For a recognition-plan call with OCR anchors enabled, the runtime retains complete OCR evidence, while the visual model receives:
 
 1. The screenshot image.
 2. A system instruction requiring JSON only.
@@ -763,7 +771,7 @@ For a recognition-plan call with OCR anchors enabled, the visual model receives:
    - required `vision_regions_v1` JSON schema
    - bbox coordinate rules
    - OCR anchor grounding rules
-   - compact OCR anchor payload
+   - a bounded OCR text-coordinate relation matrix for `click_target` (`relation_matrix_compact` by default)
    - optional `metadata.prompt_overrides.additional_rules` from the settings panel or agent request
 
 Prompt skeleton:
@@ -789,47 +797,51 @@ Required JSON shape:
 - contract_version must be "vision_regions_v1"
 - each region must include region_id, label, role, diagonal, description, ocr_text, text_lines, possible_destinations, anchor_relations, grounding_constraints, confidence
 
-OCR anchor hints:
-- OCR has already detected high-confidence text boxes
+OCR text-coordinate relation matrix:
+- OCR has already detected text boxes; a prompt budget selects rows, but each selected row keeps visible OCR text and coordinates
 - OCR anchors use the same coordinate system as the image
+- columns are `i,t,x,y,w,h,m`: `i=N` identifies output anchor id `ocr_anchor_N`; `t` is visible text; `m=1` indicates a strong goal-text match
+- when `m=1` rows exist, up to `prompt_focus_neighbor_limit` nearby text rows are selected before global sampling and encoded as `focus_relation_rows=[focus_id,neighbor_id,L|R|A|B,gap_px]`
+- relation policy rows define whether referenced text is excluded from, or included in, the target bbox
 - use anchors as spatial evidence, not as the object itself
-- for icons without internal text, set text_inclusion_policy="exclude_text"
+- for icons without internal text, retain nearby text evidence and set text_inclusion_policy="exclude_text"
 - for controls whose visible target includes text, set text_inclusion_policy="include_referenced_text"
-- OCR anchor payload: <compact JSON>
+- when a spatially relevant matrix row exists, cite at least one row in `anchor_relations` and populate `text_anchor_frame`
+- OCR text-coordinate matrix: <compact JSON>
 ```
 
-Compact OCR anchor payload example:
+Precision-prompt OCR projection example:
 
 ```json
 {
-  "contract_version": "ocr_anchors_v1",
+  "contract_version": "ocr_prompt_matrix_v1",
+  "profile": "relation_matrix_compact",
   "coordinate_space": "current_image",
-  "image_size": {
-    "width": 1280,
-    "height": 900
-  },
-  "total_detected_count": 77,
-  "anchor_count": 77,
-  "anchor_fields": {
-    "id": "anchor_id",
-    "t": "text",
-    "b": "[x,y,w,h]",
-    "c": "[center_x,center_y]",
-    "s": "confidence",
-    "g": "goal_similarity"
-  },
-  "anchors": [
-    {
-      "id": "ocr_anchor_1",
-      "t": "seek",
-      "b": [176, 100, 50, 25],
-      "c": [201, 112],
-      "s": 0.96,
-      "g": 0.72
-    }
+  "source_anchor_count": 77,
+  "anchor_count": 48,
+  "text_anchor_count": 48,
+  "goal_match_count": 1,
+  "columns": ["i", "t", "x", "y", "w", "h", "m"],
+  "rows": [
+    [1, "seek", 176, 100, 50, 25, 1],
+    [2, "filter", 236, 101, 42, 24, 0],
+    [4, "maximize", 1190, 10, 18, 18, 0]
+  ],
+  "focus_relation_columns": ["f", "n", "r", "g"],
+  "focus_relation_rows": [
+    [1, 2, "R", 10]
+  ],
+  "relation_policy_columns": ["target_kind", "text_bbox_policy", "allowed_anchor_relation"],
+  "relation_policy_rows": [
+    ["visual_icon", "exclude_text", "boundary|alignment|exclusion"],
+    ["text_control", "include_referenced_text", "inside|contains|edge"]
   ]
 }
 ```
+
+For visual-only goals such as `关闭窗口`, selected surrounding text remains present in matrix rows as boundary/alignment/exclusion evidence; `exclude_text` controls the returned target bbox rather than deleting OCR context.
+
+`prompt_max_anchors` defaults to `48`. `prompt_focus_neighbor_limit` defaults to `12` and is bounded by that total because focus neighbors consume rows from the same prompt budget. Set it higher when an OCR-matched label has several nearby text landmarks; set it to `0` to disable focus expansion for comparisons.
 
 ## What The Vision Model Must Return
 

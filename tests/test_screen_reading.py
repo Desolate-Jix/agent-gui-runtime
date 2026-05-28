@@ -96,8 +96,7 @@ def test_screen_reading_exposes_ui_layer_with_reserved_icon_and_learning_slots()
     assert result["contract_version"] == "screen_reading_v1"
     assert result["ui"]["summary"]["element_count"] == 2
     assert result["ui"]["summary"]["icon_candidate_count"] == 1
-    assert result["ui"]["provider_slots"]["icon_library"]["status"] == "connected"
-    assert result["ui"]["provider_slots"]["icon_library"]["provider"] == "microsoft_fluent_system_icons"
+    assert "icon_library" not in result["ui"]["provider_slots"]
     assert result["ui"]["provider_slots"]["uia"]["status"] == "connected"
     assert result["ui"]["provider_slots"]["uia"]["last_scan_status"] == "ok"
     assert result["ui"]["provider_slots"]["learned_ui_memory"]["status"] == "reserved"
@@ -105,16 +104,15 @@ def test_screen_reading_exposes_ui_layer_with_reserved_icon_and_learning_slots()
     start = next(item for item in result["ui_elements"] if item["label"] == "Start")
     assert start["evidence_level"] == "ocr_text_and_semantic_region"
     assert start["locator_hints"]["future_providers"]["uia"]["status"] == "connected"
-    assert start["locator_hints"]["future_providers"]["icon_library"]["status"] == "connected"
+    assert "icon_library" not in start["locator_hints"]["future_providers"]
 
     back = next(item for item in result["ui_elements"] if item["role_guess"] == "icon_button")
     assert back["type"] == "icon_button"
     assert back["evidence_level"] == "visual_region_only"
     assert back["id"] in result["execution_relevance"]["risky_candidates"]
     back_icon = next(item for item in result["ui"]["icon_candidates"] if item["element_id"] == back["id"])
-    assert back_icon["catalog_status"] == "matched"
-    assert back_icon["icon_library_match"]["icon_id"] == "arrow_left_24_regular"
-    assert back_icon["icon_library_match"]["family"] == "microsoft_fluent_system_icons"
+    assert back_icon["visual_recognition_status"] == "reserved_for_grounding"
+    assert "icon_library_match" not in back_icon
     assert back_icon["uia_match"]["name"] == "Back"
     assert back_icon["uia_match"]["control_type"] == "Button"
     assert "Invoke" in back_icon["uia_match"]["patterns"]

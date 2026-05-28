@@ -2,6 +2,12 @@ from __future__ import annotations
 
 import json
 
+from app.vision.ocr_anchors import (
+    DEFAULT_PROMPT_ANCHOR_LIMIT,
+    DEFAULT_PROMPT_FOCUS_NEIGHBOR_LIMIT,
+    DEFAULT_PROMPT_TEXT_MATCH_THRESHOLD,
+    build_prompt_anchor_projection,
+)
 from app.vision.schemas import ImageSize, VisionAnalyzeRequest
 
 
@@ -36,6 +42,7 @@ def build_region_analysis_prompt(
 - compact mode is active because the screenshot is large or a previous response was truncated
 - return at most 6 regions and merge nearby cards when possible
 - keep screen_summary and state_guess under 12 words each
+- make state_guess a concise next-step localization hint, such as "top navigation bar", "job results list", "chat title bar", or "settings dialog"
 - keep description under 8 words
 - keep ocr_text under 12 words; use an empty string when the text is too long or noisy
 - keep text_lines to at most 2 short items
@@ -230,7 +237,7 @@ Return JSON only with this compact shape:
   "contract_version": "vision_regions_v1",
   "image_size": {{"width": {image_size.width}, "height": {image_size.height}}},
   "screen_summary": "short purpose",
-  "state_guess": "short state",
+  "state_guess": "short localization state hint",
   "regions": [
     {{"region_id": "c1", "label": "visible label or icon name", "role": "button|icon|input|tab|nav|menu_item|link|toggle|other", "diagonal": {{"x1": 0, "y1": 0, "x2": 1, "y2": 1}}, "description": "likely action", "confidence": 0.0}}
   ],
@@ -243,6 +250,8 @@ Rules:
 - return at most {max_regions} independently clickable candidate controls, not large containing panels
 - prioritize navigation, icon-only buttons, primary buttons, tabs, inputs, toggles, menus, and title-bar controls
 - keep screen_summary and state_guess under 12 words each
+- state_guess must be the best concise hint to pass into a later POST /vision/locate_target state_hint field
+- prefer spatial/functional area phrases such as "top navigation bar", "job results list", "chat title bar", "left sidebar", "settings dialog", or "main content list"
 - keep label and description short; description is at most 6 words
 - do not emit ocr_text, text_lines, possible_destinations, anchor_relations, or grounding_constraints
 - do not repeat OCR anchors or their coordinates in the response; the runtime already owns them
@@ -259,19 +268,25 @@ def _ocr_precision_reference(req: VisionAnalyzeRequest) -> str:
     payload = metadata.get("ocr_anchors")
     if not isinstance(payload, dict):
         return ""
-    anchors = payload.get("anchors") or []
-    if not isinstance(anchors, list) or not anchors:
+    prompt_projection = build_prompt_anchor_projection(
+        payload,
+        max_anchors=int(payload.get("prompt_max_anchors") or DEFAULT_PROMPT_ANCHOR_LIMIT),
+        text_match_threshold=float(payload.get("prompt_text_match_threshold") or DEFAULT_PROMPT_TEXT_MATCH_THRESHOLD),
+        focus_neighbor_limit=int(payload.get("prompt_focus_neighbor_limit", DEFAULT_PROMPT_FOCUS_NEIGHBOR_LIMIT)),
+    )
+    if not prompt_projection:
         return ""
-    compact_payload = {
-        "coordinate_space": payload.get("coordinate_space") or "current_image",
-        "anchor_count": int(payload.get("anchor_count") or len(anchors)),
-        "anchors": [_compact_anchor_for_prompt(anchor) for anchor in anchors],
-    }
-    anchor_json = json.dumps(compact_payload, ensure_ascii=False, separators=(",", ":"))
+    anchor_json = json.dumps(prompt_projection, ensure_ascii=False, separators=(",", ":"))
     return f"""
-OCR anchors are read-only geometric evidence in the same image coordinates.
-Compact fields are id/text/bbox/center/score/goal_similarity as id/t/b/c/s/g.
-OCR anchor payload: {anchor_json}
+OCR anchors are a compact text-coordinate relation matrix in the same image coordinates.
+The runtime retains the full OCR result; prompt-budget selection limits rows, while every selected row keeps its visible OCR text.
+Matrix columns: i=N identifies anchor_id "ocr_anchor_N"; t=visible text; x,y,w,h=text bbox; m=1 means strong goal-text match.
+The relation policy rows specify whether a target bbox excludes nearby text or must include referenced text.
+When strong goal-text matches exist, focus_relation_rows prioritizes their nearby text layout: f=matched row, n=neighbor row, r=L/R/A/B, g=edge gap in pixels.
+For visual icons, use nearby text rows for boundary, alignment, or exclusion evidence even when text_bbox_policy is exclude_text.
+Use only matrix anchor ids in anchor_relations and text_anchor_frame, written as "ocr_anchor_N".
+When a spatially relevant matrix row exists, cite at least one anchor in anchor_relations and fill text_anchor_frame; otherwise state in notes why no row is relevant.
+OCR text-coordinate matrix: {anchor_json}
 """.rstrip()
 
 

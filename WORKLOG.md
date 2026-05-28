@@ -90,28 +90,25 @@ This session ran the live Edge/MouseTester Windows UIA smoke and fixed the first
 ### Remaining follow-up
 
 - Add browser accessibility evidence for web content controls.
-- Add icon shape/template matching so Fluent catalog matches are backed by visual evidence, not only label/context.
+- Add icon shape/template matching for visual-only controls; do not rely on catalog-level icon guesses.
 - Expand the MouseTester evaluation set across more states and negative cases.
 
 ## 2026-05-11
 
 ### Summary
 
-This session connected the first Microsoft icon-library and Windows UIA slices into `screen_reading_v1`:
+This historical session connected the first icon-catalog and Windows UIA slices into `screen_reading_v1`; the icon-catalog slice was later removed, while the Windows UIA slice remains active:
 
-- added a local Microsoft Fluent System Icons catalog matcher in `app/screen_reading/icon_library.py`
 - added a Windows UIA provider in `app/screen_reading/uia_provider.py`
-- wired `build_screen_reading` so `ui.icon_candidates[*].icon_library_match` can contain Fluent ids such as `arrow_left_24_regular`
 - wired `build_screen_reading` so UIA evidence can appear in `ui.elements[*].provider_matches.uia` and `ui.icon_candidates[*].uia_match`
-- changed the `icon_library` provider slot from reserved to connected for the Fluent catalog matcher
 - changed the `uia` provider slot from reserved to connected, with scan status reported separately
-- kept visual-only icon candidates blocked from safe execution; catalog matching is evidence, not action permission
-- updated route metadata with `icon_library_provider_connected`, `uia_provider_connected`, and `uia_scan_status`
-- updated project docs to reflect connected UIA/catalog matching and the remaining browser/shape-verification gap
+- kept visual-only icon candidates blocked from safe execution
+- updated route metadata with `uia_provider_connected` and `uia_scan_status`
+- updated project docs to reflect connected UIA matching and the remaining browser/shape-verification gap
 
 ### Validation completed
 
-- `python -m py_compile app\screen_reading\icon_library.py app\screen_reading\uia_provider.py app\screen_reading\builder.py app\api\vision.py`
+- `python -m py_compile app\screen_reading\uia_provider.py app\screen_reading\builder.py app\api\vision.py`
 - `uv run pytest tests/test_screen_reading.py tests/test_vision_route.py -q`
   - `9 passed`
 - `uv run pytest -q`

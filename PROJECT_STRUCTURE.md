@@ -164,7 +164,7 @@ Use it when you need to answer:
     - run provider-based vision analysis through the `app/vision/` abstraction
     - normalize learned regions
     - fuse semantic regions with OCR text boxes into `page_structure_v1`
-    - build `screen_reading_v1` as the READ-facing UI layer, including connected Windows UIA and Microsoft Fluent icon providers plus reserved browser/learned-UI provider slots
+    - build `screen_reading_v1` as the READ-facing UI layer, including connected Windows UIA provider evidence plus reserved browser/learned-UI provider slots
     - expose `screen_observation_v1` as the agent-facing broad screen-understanding step before target choice
     - expose `target_location_v1` as the no-click precise target localization step before gated action execution
     - return a no-click staged recognition plan with ranked candidates, including bounded screen-reading rank evidence
@@ -481,7 +481,7 @@ Runtime output:
   - keeps UI recognition separate from action execution
   - exposes conservative placeholders for future browser accessibility and learned-UI-memory providers
   - connects a Windows UIA provider for bound-window accessibility controls
-  - connects a small Microsoft Fluent System Icons catalog matcher for common no-text browser/UI icons
+  - keeps icon-like candidates as reserved visual targets without catalog-level icon matching
 
 Key files:
 
@@ -491,11 +491,6 @@ Key files:
   - converts screen-space UIA rectangles into window-relative bboxes for screenshot matching
   - skips unavailable pywinauto UIA pattern descriptors instead of failing the full scan
   - returns structured `unavailable` results when no window is bound or UIA scanning fails
-- `icon_library.py`
-  - defines the Microsoft Fluent System Icons provider
-  - currently performs catalog/context matching for common icons such as back, forward, refresh, close, search, settings, menu, and home
-  - returns Fluent icon ids such as `arrow_left_24_regular`
-  - does not perform shape-template matching, so visual-only icon candidates remain blocked from safe execution
 - `builder.py`
   - consumes normalized `vision_regions_v1`, OCR output, and `page_structure_v1`
   - merges optional Windows UIA matches into `ui.elements[*].provider_matches.uia`
@@ -514,17 +509,16 @@ Runtime output:
 - `ui.elements`
   - UI objects with `role_guess`, `type`, label, bbox, click point, evidence level, locator hints, memory key, and provider matches such as `uia`
 - `ui.icon_candidates`
-  - reserved icon-like candidates with Microsoft Fluent catalog matches when label/context is strong enough
+  - reserved icon-like candidates without catalog-level icon identity matching
   - includes `uia_match` when a bound-window UIA control overlaps the icon candidate
   - candidates still need sufficient combined evidence and post-action verification before execution
 - `ui.provider_slots`
-  - provider interfaces for `uia`, `browser_accessibility`, `icon_library`, and `learned_ui_memory`
+  - provider interfaces for `uia`, `browser_accessibility`, and `learned_ui_memory`
   - `uia` is connected to the Windows UIA scanner; scan status can be `ok` or `unavailable`
-  - `icon_library` is connected to the local Microsoft Fluent System Icons catalog matcher
 - `execution_relevance`
   - safe, risky, and unknown candidate id buckets for later grounding
 - `uncertainties`
-  - explicit gaps such as `icon_library_match_missing` and `visual_only_ui_requires_grounding`
+  - explicit gaps such as `visual_only_ui_requires_grounding`
 
 Route:
 
@@ -1057,7 +1051,7 @@ MVP non-goals:
     - candidate id: stable `candidate_<element_id>` form
     - ranking evidence: `ScoreBreakdown`
     - geometry evidence: original `element.bbox` plus optional OCR-derived `refined_bbox`
-    - optional `screen_reading_v1` evidence can supply UIA accessible names, UIA matches, and Microsoft Fluent icon catalog matches
+    - optional `screen_reading_v1` evidence can supply UIA accessible names and UIA matches
     - `ScoreBreakdown.screen_reading_score` is a bounded rank signal; it does not override blocked/ad-like interaction policy
   - current scoring signals:
     - goal text similarity

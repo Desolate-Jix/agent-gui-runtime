@@ -272,6 +272,52 @@ def test_prompt_builder_includes_all_ocr_anchors_without_truncation() -> None:
     assert '"t":"Text 29"' in prompt
 
 
+def test_precise_target_prompt_projects_ocr_as_compact_text_coordinate_matrix() -> None:
+    anchors = [
+        {
+            "anchor_id": f"ocr_anchor_{index}",
+            "text": "Search" if index == 1 else f"message {index}",
+            "bbox": {"x": index * 8, "y": 12 if index == 2 else index * 10, "w": 20, "h": 14},
+            "center": {"x": index * 8 + 10, "y": index * 10 + 7},
+            "confidence": 0.98,
+            "goal_similarity": 0.9 if index == 1 else 0.0,
+        }
+        for index in range(1, 41)
+    ]
+    prompt = build_region_analysis_prompt(
+        VisionAnalyzeRequest(
+            image_path="screen.png",
+            task="click_target",
+            goal="click Search",
+            metadata={
+                "ocr_anchors": {
+                    "coordinate_space": "inference_image",
+                    "image_size": {"width": 820, "height": 1303},
+                    "prompt_max_anchors": 8,
+                    "anchors": anchors,
+                }
+            },
+        ),
+        ImageSize(width=820, height=1303),
+    )
+
+    assert "compact text-coordinate relation matrix" in prompt
+    assert "cite at least one anchor in anchor_relations" in prompt
+    assert '"contract_version":"ocr_prompt_matrix_v1"' in prompt
+    assert '"profile":"relation_matrix_compact"' in prompt
+    assert '"source_anchor_count":40' in prompt
+    assert '"anchor_count":8' in prompt
+    assert '"columns":["i","t","x","y","w","h","m"]' in prompt
+    assert '[1,"Search",8,10,20,14,1]' in prompt
+    assert '"text_anchor_count":8' in prompt
+    assert '"goal_match_count":1' in prompt
+    assert '"focus_relation_rows":' in prompt
+    assert '"message 40"' not in prompt
+    assert '"c":' not in prompt
+    assert '"s":' not in prompt
+    assert '"g":' not in prompt
+
+
 def test_prompt_builder_includes_custom_prompt_rules() -> None:
     prompt = build_region_analysis_prompt(
         VisionAnalyzeRequest(
@@ -317,6 +363,7 @@ def test_observe_prompt_uses_compact_candidate_contract_without_grounding_proof(
 
     assert "fast screen-understanding stage" in prompt
     assert "at most 12 independently clickable candidate controls" in prompt
+    assert "later POST /vision/locate_target state_hint field" in prompt
     assert "do not emit ocr_text" in prompt
     assert "never copy this list" in prompt
     assert '"t":"Home"' in prompt

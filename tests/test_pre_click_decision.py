@@ -232,3 +232,24 @@ def test_pre_click_decision_does_not_fall_back_from_precise_icon_to_nearby_text(
     assert result.selected_click_point is None
     assert "precision_visual_target_requires_confirmation" in result.candidate_decisions[0].reasons
     assert "higher_ranked_precision_visual_target_requires_confirmation" in result.candidate_decisions[1].reasons
+
+
+def test_pre_click_decision_requires_confirmation_for_precise_text_card() -> None:
+    card = _candidate(
+        candidate_id="candidate_serato",
+        score=0.9,
+        text_similarity=0.9,
+        allowed=False,
+        eligible=True,
+        zone_type="precise_text_target",
+    )
+
+    result = decide_pre_click(
+        goal="\u6253\u5f00serato\u7684\u804c\u4e1a\u754c\u9762",
+        candidates=_rank_result(card),
+        grounding=_grounding(candidate_id="candidate_serato", matched_text="serato"),
+    )
+
+    assert result.allowed is False
+    assert result.selected_click_point is None
+    assert "precision_text_target_requires_confirmation" in result.candidate_decisions[0].reasons

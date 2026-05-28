@@ -37,7 +37,8 @@ class _FakeAsyncClient:
         assert path == "/vision/observe_screen"
         assert "compact index of independently clickable controls" in payload["metadata"]["prompt_overrides"]["additional_rules"]
         assert "do not repeat OCR boxes" in payload["metadata"]["prompt_overrides"]["additional_rules"]
-        return {"success": True, "message": "observed", "data": {"result": {}}, "error": None}
+        assert "next precise localization state_hint" in payload["metadata"]["prompt_overrides"]["additional_rules"]
+        return {"success": True, "message": "observed", "data": {"result": {"suggested_state_hint": "job results list"}}, "error": None}
 
 
 def test_settings_panel_builds_pages_and_switches_language() -> None:
@@ -122,6 +123,7 @@ def test_observe_request_runs_without_blocking_panel_and_uses_understanding_prom
         locate_prompt = app.prompt_texts["locate"].get("1.0", "end")
         assert "compact index of independently clickable controls" in observe_prompt
         assert "do not repeat OCR boxes" in observe_prompt
+        assert "next precise localization state_hint" in observe_prompt
         assert "Precision-localization stage only" in locate_prompt
         assert 'text_inclusion_policy="exclude_text"' in locate_prompt
         assert "grounding_constraints.edge_constraints" in locate_prompt
@@ -134,6 +136,7 @@ def test_observe_request_runs_without_blocking_panel_and_uses_understanding_prom
             time.sleep(0.01)
         assert "observe" not in app.pending_requests
         assert app.last_response and app.last_response["success"] is True
+        assert app.state_hint_var.get() == "job results list"
     finally:
         root.destroy()
 

@@ -27,6 +27,7 @@ from app.settings_panel.config_store import (
     DEFAULT_OBSERVE_PROMPT,
     DEFAULT_PANEL_CONFIG,
     MODEL_PROFILE_DIR,
+    OBSERVE_STATE_HINT_RULE,
     PANEL_CONFIG_PATH,
     ROOT_DIR,
     VISION_CONFIG_PATH,
@@ -126,8 +127,11 @@ class SettingsPanelApp:
             "locate": tk.StringVar(value=self.i18n.t("model_status_unknown")),
         }
         legacy_prompt = str(prompt_overrides.get("additional_rules") or "").strip()
+        observe_prompt = self._ensure_observe_state_hint_rule(
+            str(prompt_overrides.get("observe_additional_rules") or DEFAULT_OBSERVE_PROMPT)
+        )
         self.prompt_defaults = {
-            "observe": str(prompt_overrides.get("observe_additional_rules") or DEFAULT_OBSERVE_PROMPT),
+            "observe": observe_prompt,
             "locate": str(prompt_overrides.get("locate_additional_rules") or legacy_prompt or DEFAULT_LOCATE_PROMPT),
         }
 
@@ -149,6 +153,12 @@ class SettingsPanelApp:
         style.configure("Side.TLabel", background="#f6f6f7", foreground="#667085", font=("Microsoft YaHei UI", 9))
         style.configure("Nav.TButton", anchor="w", padding=(14, 8), font=("Microsoft YaHei UI", 10))
         style.configure("Primary.TButton", padding=(12, 8), font=("Microsoft YaHei UI", 9, "bold"))
+
+    @staticmethod
+    def _ensure_observe_state_hint_rule(prompt: str) -> str:
+        if "next precise localization state_hint" in prompt:
+            return prompt
+        return f"{prompt.rstrip()}\n{OBSERVE_STATE_HINT_RULE}"
 
     def _build_shell(self) -> None:
         self.root.configure(bg="#ffffff")
@@ -683,6 +693,8 @@ class SettingsPanelApp:
             )
             return
         self.set_response(response or {}, summary=summary, workflow_step=workflow_step)
+        if workflow_step == "observe" and response and response.get("success"):
+            self.populate_observed_state_hint(response)
         if workflow_step == "locate" and response and response.get("success"):
             self.populate_first_located_candidate(response)
 
@@ -749,6 +761,17 @@ class SettingsPanelApp:
                 if process:
                     self.process_name_var.set(str(process))
                 return
+
+    def populate_observed_state_hint(self, response: dict[str, Any]) -> None:
+        result = ((response.get("data") or {}).get("result") or {})
+        hint = result.get("suggested_state_hint")
+        if not isinstance(hint, str) or not hint.strip():
+            nested = result.get("screen_reading") if isinstance(result.get("screen_reading"), dict) else {}
+            hint = result.get("state_guess") or nested.get("state_guess") or result.get("screen_summary") or nested.get("screen_summary")
+        if isinstance(hint, str):
+            hint = " ".join(hint.strip().split())
+        if hint and str(hint).casefold() not in {"unknown", "none", "null"}:
+            self.state_hint_var.set(str(hint)[:80])
 
     def call_open_app(self) -> None:
         payload = {"app_id": self.app_id_var.get().strip() or None, "bind_after_open": True}

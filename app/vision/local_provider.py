@@ -14,7 +14,13 @@ from PIL import Image
 
 from app.core.runtime_artifacts import build_review_overlay_path
 from app.vision.grid_overlay import create_grid_overlay_image
-from app.vision.ocr_anchors import scale_ocr_anchor_payload
+from app.vision.ocr_anchors import (
+    DEFAULT_PROMPT_ANCHOR_LIMIT,
+    DEFAULT_PROMPT_FOCUS_NEIGHBOR_LIMIT,
+    DEFAULT_PROMPT_TEXT_MATCH_THRESHOLD,
+    build_prompt_anchor_projection,
+    scale_ocr_anchor_payload,
+)
 from app.vision.prompting import build_region_analysis_prompt
 from app.vision.schemas import ImageSize, VisionAnalyzeRequest, VisionAnalyzeResponse
 
@@ -332,10 +338,25 @@ class LocalVisionProvider:
                     "artifact_path": str(grid_overlay_path.resolve()) if grid_overlay_path is not None else None,
                 }
             if isinstance(prompt_req.metadata.get("ocr_anchors"), dict):
+                prompt_projection = build_prompt_anchor_projection(
+                    prompt_req.metadata["ocr_anchors"],
+                    max_anchors=int(prompt_req.metadata["ocr_anchors"].get("prompt_max_anchors") or DEFAULT_PROMPT_ANCHOR_LIMIT),
+                    text_match_threshold=float(
+                        prompt_req.metadata["ocr_anchors"].get("prompt_text_match_threshold") or DEFAULT_PROMPT_TEXT_MATCH_THRESHOLD
+                    ),
+                    focus_neighbor_limit=int(
+                        prompt_req.metadata["ocr_anchors"].get("prompt_focus_neighbor_limit", DEFAULT_PROMPT_FOCUS_NEIGHBOR_LIMIT)
+                    ),
+                )
                 attempt_meta["ocr_anchors"] = {
                     "enabled": True,
                     "coordinate_space": prompt_req.metadata["ocr_anchors"].get("coordinate_space"),
                     "anchor_count": int(prompt_req.metadata["ocr_anchors"].get("anchor_count") or 0),
+                    "prompt_profile": str((prompt_projection or {}).get("profile") or "relation_matrix_compact"),
+                    "prompt_anchor_count": int((prompt_projection or {}).get("anchor_count") or 0),
+                    "prompt_text_anchor_count": int((prompt_projection or {}).get("text_anchor_count") or 0),
+                    "prompt_goal_match_count": int((prompt_projection or {}).get("goal_match_count") or 0),
+                    "prompt_focus_relation_count": int((prompt_projection or {}).get("focus_relation_count") or 0),
                 }
             if inference_size != original_image_size:
                 attempt_meta["coordinate_remap"] = {

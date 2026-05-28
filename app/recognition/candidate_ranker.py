@@ -115,6 +115,7 @@ def _score_element(
     precision_visual_match = _is_precision_visual_goal_match(element, goal)
     visual_goal = _goal_requests_visual_icon(goal)
     base_text_similarity = _best_text_similarity(goal, _element_text_values(element))
+    precision_text_match = _is_precision_text_goal_match(element, goal=goal, text_similarity=base_text_similarity)
     screen_text_similarity = _best_text_similarity(goal, _screen_reading_text_values(screen_evidence))
     text_similarity = max(base_text_similarity, screen_text_similarity)
     role_score = _role_score(element)
@@ -123,13 +124,17 @@ def _score_element(
     state_score = _state_score(element, state_hint)
     screen_reading_score, screen_reasons = _screen_reading_score(goal=goal, element=element, screen_evidence=screen_evidence)
     ad_penalty = max(0.0, min(float(policy.ad_risk), 1.0))
-    blocked_penalty = 1.0 if not policy.allowed and not precision_visual_match else 0.0
+    blocked_penalty = 1.0 if not policy.allowed and not precision_visual_match and not precision_text_match else 0.0
 
     if precision_visual_match:
         text_similarity = max(text_similarity, 0.92)
         role_score = max(role_score, 1.0)
         policy_score = max(policy_score, 0.75)
         reasons.append("precision_visual_target_matches_icon_goal")
+    elif precision_text_match:
+        text_similarity = max(text_similarity, 0.75)
+        policy_score = max(policy_score, 0.6)
+        reasons.append("precision_text_target_matches_goal")
     elif visual_goal and element.role not in {"icon", "icon_button", "toolbar_button"}:
         text_similarity = min(text_similarity, 0.35)
         reasons.append("text_control_does_not_satisfy_icon_goal")
@@ -162,7 +167,7 @@ def _score_element(
         ad_penalty=ad_penalty,
         blocked_penalty=blocked_penalty,
     )
-    eligible = (bool(policy.allowed) or precision_visual_match) and element.interaction_type in SUPPORTED_INTERACTIONS and breakdown.total() >= 0.18
+    eligible = (bool(policy.allowed) or precision_visual_match or precision_text_match) and element.interaction_type in SUPPORTED_INTERACTIONS and breakdown.total() >= 0.18
     if not eligible and "low_candidate_score" not in reasons and bool(policy.allowed):
         reasons.append("low_candidate_score")
     return breakdown, _unique(reasons), eligible
@@ -187,6 +192,17 @@ def _goal_requests_visual_icon(goal: str) -> bool:
 
 def _is_precision_visual_goal_match(element: PageElement, goal: str) -> bool:
     return element.interaction_policy.zone_type == "precise_visual_target" and _goal_requests_visual_icon(goal)
+
+
+def _is_precision_text_goal_match(element: PageElement, *, goal: str, text_similarity: float) -> bool:
+    if element.interaction_policy.zone_type != "precise_text_target":
+        return False
+    if text_similarity >= 0.75:
+        return True
+    normalized_goal = _normalize_text(goal)
+    normalized_element = " ".join(_normalize_text(value) for value in _element_text_values(element))
+    named_tokens = re.findall(r"[a-z0-9]{3,}", normalized_goal)
+    return any(token in normalized_element for token in named_tokens)
 
 
 def _element_text_values(element: PageElement) -> list[str]:
@@ -225,14 +241,6 @@ def _screen_reading_text_values(screen_evidence: dict[str, Any] | None) -> list[
             )
     icon_candidate = screen_evidence.get("icon_candidate")
     if isinstance(icon_candidate, dict):
-        icon_match = icon_candidate.get("icon_library_match") or {}
-        if isinstance(icon_match, dict):
-            values.extend(
-                [
-                    str(icon_match.get("catalog_name") or ""),
-                    str(icon_match.get("icon_id") or ""),
-                ]
-            )
         uia_match = icon_candidate.get("uia_match") or {}
         if isinstance(uia_match, dict):
             values.append(str(uia_match.get("name") or ""))
@@ -334,14 +342,9 @@ def _screen_reading_score(
                 score += 0.05
                 reasons.append("screen_reading_uia_invoke_pattern")
 
-    if isinstance(icon_candidate, dict):
-        icon_match = icon_candidate.get("icon_library_match")
-        if isinstance(icon_match, dict):
-            score += 0.08
-            reasons.append("screen_reading_icon_catalog_match")
-            if icon_candidate.get("uia_match"):
-                score += 0.08
-                reasons.append("screen_reading_icon_uia_match")
+    if isinstance(icon_candidate, dict) and icon_candidate.get("uia_match"):
+        score += 0.08
+        reasons.append("screen_reading_icon_uia_match")
 
     return round(max(0.0, min(score, 1.0)), 4), _unique(reasons)
 
