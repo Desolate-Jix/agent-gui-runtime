@@ -139,42 +139,44 @@ http://127.0.0.1:8000/panel
 ```
 
 
-The browser panel follows the agent workflow:
+The left sidebar follows the agent workflow:
 
-1. Runtime preparation
-2. App discovery
-3. Open / bind
-4. Screen understanding
-5. Precise localization
-6. Gated execution
+1. Open / Bind
+2. Capture
+3. Observe
+4. Locate
+5. Click Gate
+6. Input
+7. Trace
+8. Models
 
 Main capabilities:
 
-- `GET /health` runtime health
+- `GET /health` runtime health check
 - `GET /runtime/models` model status
 - `POST /runtime/prepare` runtime preparation
 - `POST /runtime/models/start` / `POST /runtime/models/stop` model start and stop
-- Chinese/English UI switching
-- observe / locate model profile dropdowns
-- model start/stop script display
-- model service `/v1/models` status test
+- Language switching (Chinese / English) via toggle buttons
 - `GET /apps` app discovery
 - `POST /apps/open` open app
 - `GET /session/windows` list visible windows
 - `POST /session/bind_window` bind window
-- open-window dropdown selection with process/title binding fields
+- Open-window dropdown selection with process/title binding fields
 - `POST /state/capture_window` screenshot capture and preview
-- Drag or choose a local image and upload it as a saved screenshot test input
+- Drag or choose a local image and upload it as a screenshot test input
 - `POST /vision/observe_screen` screen understanding
 - `POST /vision/locate_target` precise localization
 - Automatic candidate bbox / point fill for operator review
 - `POST /action/execute_recognition_plan` dry-run click gate
-- `POST /action/execute_confirmed_point` operator-reviewed coordinate dry-run / real click
+- `POST /action/execute_confirmed_point` operator-reviewed coordinate click
 - `POST /action/type_text` controlled text input
 - Recognition overlay rendering
 - Observe / locate additional prompt rules
 - Screenshot, uploaded image, overlay image, and candidate-box preview
 - Raw JSON responses for each stage
+- Navigation path graph — records page nodes, transitions, and control click history
+- Trace inspector — parses traces by stage, click a stage node to view raw JSON and image overlays with bbox/click-point rendering
+- Direct model test — send a prompt with optional image directly to a configured vision model
 
 
 Long model-backed requests run in worker threads, so the panel remains responsive during screen understanding, precise localization, and dry-run execution. These requests use the panel `Timeout seconds` value from `configs/vision.json`; the local default is `600` seconds because the large grounding model can legitimately run for several minutes.
@@ -347,6 +349,7 @@ Important points:
 app/
   api/                FastAPI routes
   core/               window, screenshot, OCR, input, verifier
+  web_panel/          browser test panel (HTML/JS/CSS)
   vision/             local/API vision providers and prompting
   page_structure/     page structure and screen reading logic
   models/             request/response schemas
@@ -356,6 +359,7 @@ configs/
   vision.json
   model_profiles/     model registry
 scripts/
+  start_test_panel.bat
   model_servers/      model server start/stop scripts
 tests/
 artifacts/
@@ -384,14 +388,15 @@ Implemented:
 - Gated click execution
 - Recognition overlays
 - MouseTester real-click baseline
-- Desktop test panel
-- Model registry and unified model-server script directory
+- Browser test panel (with Trace stage inspector, direct model test, navigation path graph)
+- Instruction learning mode (`learning_mode="instruction"`) with learned-click reuse
+- Model registry and unified model-server start/stop script directory
 
 Current boundaries:
 
 - This is not yet a production-grade general desktop agent.
 - More pages, negative cases, window sizes, DPI settings, and browser zoom states still need testing.
-- Successful-run learning write-back is not yet a mainline capability.
+- Instruction learning is functional but not yet the default replay path for all targets.
 
 ## Verification
 
