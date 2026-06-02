@@ -1,4 +1,4 @@
-# PROJECT_STRUCTURE
+﻿# PROJECT_STRUCTURE
 
 ## Purpose
 
@@ -56,13 +56,10 @@ Use it when you need to answer:
 ### Scripts
 
 - `start_test_panel.bat`
-  - root-level double-click launcher for the desktop workflow test panel
-  - delegates to `scripts/start_test_panel.ps1`
-- `scripts/start_test_panel.ps1`
-  - one-command launcher for the desktop workflow test panel
-  - can start the FastAPI runtime if `/health` is not already reachable, then open the Tkinter panel
-  - can call `/runtime/prepare` with `-PrepareRuntime` to check/start local vision model services before opening the panel
-  - supports `-CheckOnly` for startup-path verification without opening the GUI
+  - root-level double-click launcher for the browser workflow test panel at `http://127.0.0.1:8000/panel`
+  - pure batch launcher, avoiding `.ps1` quarantine by antivirus tools
+  - can start the FastAPI runtime in a minimized `cmd` window if `/health` is not already reachable, then open the browser panel
+  - writes runtime output to `logs/test-panel-runtime.log`
 - `scripts/evaluate_mousetester_traces.py`
   - evaluates saved MouseTester recognition/action traces
   - writes JSON reports under `logs/evaluations/`
@@ -75,32 +72,36 @@ Use it when you need to answer:
   - unified PowerShell launch/stop scripts for local multimodal servers
   - `start_llama_vision_server.ps1` starts a llama.cpp-compatible vision model from profile-supplied paths and runtime parameters
   - `stop_local_vision_server.ps1` stops a model server by profile PID file and/or port
-- `scripts/settings_panel.py`
-  - thin launcher for the modular Tkinter desktop settings panel in `app/settings_panel/`
+
+### Browser test panel
+
+- `app/api/panel.py`
+  - serves the browser control surface at `GET /panel`
+  - exposes browser-panel support routes for uploaded screenshots and safe artifact/log image preview
+- `app/web_panel/`
+  - static browser panel assets served under `/panel/assets/`
+  - uses existing runtime APIs for health, model start/stop/status, app discovery/open, window binding, screenshot capture, whole-screen observation, precise localization, recognition-plan execution, operator-confirmed point execution, controlled text input, and overlay rendering
+  - provides screenshot/upload/overlay preview and candidate bbox overlay for human review
 
 ### Desktop settings panel
 
-- `app/settings_panel/`
   - modular bilingual desktop control surface for stage-by-stage runtime testing
   - keeps the left sidebar aligned with the agent workflow: workflow diagram, app discovery, open/bind, screenshot capture, whole-screen understanding, precise localization, and dry-run gated clicking
   - each stage page exposes the parameters for that stage API and shows returned JSON on the same screen through the fixed response panel
+  - the fixed response panel also renders an animated action path graph from the latest API response, linking goal, screen capture, OCR/UIA/vision evidence, candidate ranking, pre-click gate, click, verification, timings, and trace artifact nodes
   - each stage page is scrollable, so long model/API sections are still reachable in smaller windows
   - keeps local/API model configuration on a bottom sidebar gear page
   - supports two local model profiles in `configs/vision.json`: `local_understanding` for small-model screen understanding and `local_grounding` for large-model precise localization
-  - reads model registry files from `configs/model_profiles/` as the dropdown source of truth, writes selected profiles into `configs/vision.json`, launches profile-specified scripts from `scripts/model_servers/`, tests `/v1/models`, refreshes open windows for binding, and accepts dragged image files when `tkinterdnd2` is available
-- `app/settings_panel/desktop.py`
-  - Tkinter shell, page composition, workflow diagram, and API button handlers
-- `app/settings_panel/api_client.py`
   - stdlib HTTP client for the local FastAPI runtime
-- `app/settings_panel/config_store.py`
   - paths and JSON load/save helpers for `configs/vision.json`, `configs/settings_panel.json`, and panel artifacts
-- `app/settings_panel/i18n.py`
   - Chinese/English labels for the panel UI
 
 ### Project memory and takeover docs
 
 - `README.md`
   - concise overview, setup, endpoints, roadmap
+- `ACTION_PATH_GRAPH_SPEC.zh-CN.md`
+  - Chinese contract spec for `runtime_path_graph_v1`, including node/edge fields, allowed types/statuses/relations, deterministic generation rules, and how the graph supports stability testing and future learning records
 - `PROJECT_STRUCTURE.md`
   - detailed repository map, file ownership, and persistence/config locations
 - `PROJECT_CONTEXT.md`
@@ -206,7 +207,7 @@ Use it when you need to answer:
 
 - `app/evaluation/uia_smoke_eval.py`
   - trace-evaluation helpers for Windows UIA smoke evidence
-  - scores scan status, control count, button count, and expected control-name substrings such as `返回`, `刷新`, and `点击此处测试`
+  - scores scan status, control count, button count, and expected control-name substrings such as `杩斿洖`, `鍒锋柊`, and `鐐瑰嚮姝ゅ娴嬭瘯`
 
 ### Runtime services
 
@@ -727,7 +728,6 @@ Current purpose:
 
 - one JSON file per model profile
 - centralizes model label, role, endpoint, input format, local model path, mmproj path, start/stop script paths, port, context size, GPU layers, image token budget, and known strengths/limitations
-- powers the desktop panel's model dropdowns for the whole-screen understanding and precise-localization stages
 - launchable local GGUF profiles include `model_path` and `mmproj_path`; endpoint-only profiles can be tested but not started by the local script
 
 Current entries:
@@ -739,7 +739,6 @@ Current entries:
 
 Current status:
 
-- `configs/settings_panel.json` may be created by `scripts/settings_panel.py` to persist the desktop panel's runtime base URL, selected workflow mode, language, and prompt override text
 - older ROI/scene/template config ideas are not part of the active mainline runtime path
 
 ## logs/
@@ -765,6 +764,11 @@ Important runtime persistence paths:
 - `artifacts/recognition-crops/`
   - local candidate ROI crops generated by `narrow_search_v1`
 
+- `artifacts/local-learning/instructions/{id}/`
+  - permanent instruction-learning bundle for `learned_instruction_v1`
+  - contains `learned_instruction.json`, source window screenshot, pre-action screenshot, post-action screenshot, post-action diff image, and target crop
+  - shown by the desktop response path graph as a learning-asset artifact node
+
 - `logs/app-states/`
   - `AppState` JSON files
 
@@ -785,6 +789,10 @@ Important runtime persistence paths:
 
 - `logs/region-click-cases/`
   - per-run region click cases
+
+- `logs/learned-instructions/`
+  - legacy location for early `learned_instruction_v1` JSON-only records
+  - the loader still accepts this path for compatibility, but new learning writes go to `artifacts/local-learning/instructions/{id}/`
 
 - `logs/traces/actions/`
   - structured action traces with request, execution path, attempts, and verification evidence
@@ -1231,7 +1239,7 @@ Goal:
 Current representative target:
 
 - MouseTester.cn in Microsoft Edge
-- task: click `点击此处测试`
+- task: click `鐐瑰嚮姝ゅ娴嬭瘯`
 - route: `POST /action/execute_recognition_plan`
 - golden baseline: `artifacts/golden-traces/mousetester-live-execute-20260513-182111-unicode-goal/`
 
@@ -1247,6 +1255,8 @@ Next work inside this stage:
 
 - turn the one golden success into a stable loop over repeated runs
 - add successful-run learning write-back for the recognition execution mainline
+  - status: first `instruction_learning` slice exists behind `learning_mode="instruction"` and writes `learned_instruction_v1` after verified `execute_recognition_plan` clicks
+  - status: `learned_instruction_id` reuse can skip recognition/model inference after validating the same goal, app name, bound-window handle, window size, and point bounds, while still running post-click verification
 - after recognition, click, and validation all succeed, persist a reusable record with goal, site/app identity, state fingerprint or state hint, candidate id, `memory_key`, bbox/refined bbox, selected/clicked point, OCR/UIA evidence, before/after screenshots, validation result, recognition trace path, and action trace path
 - bridge successful `execute_recognition_plan` runs into the existing memory vocabulary: `ReplayCase`, `TransitionRecord`, future `TargetAsset`, and `learned_ui_memory`
 - use learned records only as additional evidence on later runs; fresh observation, pre-click gate, and post-click validation remain mandatory
@@ -1284,8 +1294,8 @@ Goal:
 
 Example:
 
-- known target: `点击此处测试`
-- possible unknown-site labels: `开始测速`, `Launch Test`, `Run Benchmark`, `Start`
+- known target: `鐐瑰嚮姝ゅ娴嬭瘯`
+- possible unknown-site labels: `寮€濮嬫祴閫焋, `Launch Test`, `Run Benchmark`, `Start`
 
 Core challenge:
 
@@ -1382,3 +1392,10 @@ Keep this split:
   - config and persistence locations
 
 This keeps `README.md` useful for first entry while preserving a real handoff document for development.
+
+## Browser Panel Current Structure (2026-06-02)
+
+- `app/api/panel.py`: serves `/panel`, static artifact files, trace listing/inspection, path graph saving, manual candidate-box rendering, model-profile application, and `POST /panel/model_test` for direct prompt/image calls to configured vision models.
+- `app/web_panel/index.html`: browser-only operator UI. Stage pages are Open/Bind, Capture, Observe, Locate, Execute, Input, Trace, and Models.
+- `app/web_panel/panel.js`: stage-specific layout controller, trace-stage renderer, navigation path graph, model test caller, API response renderer, and browser-panel event wiring.
+- `app/web_panel/panel.css`: browser panel layout and graph/trace/model-test styling.

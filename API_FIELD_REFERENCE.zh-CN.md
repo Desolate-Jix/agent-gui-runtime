@@ -483,12 +483,18 @@
 | `recognition_plan` | object | 内部生成的完整 no-click 识别计划。 |
 | `pre_click_decision` | object | 点击前闸门结果。 |
 | `selected_click_point` | object/null | 若闸门允许，才会有可执行点击点。通常精准定位接口不会直接放行。 |
-| `recommended_target` | object | 推荐目标对象，可能为空。 |
-| `located_bbox` | object/null | 精准模型建议的目标框，仅供复核。 |
-| `located_point` | object/null | 精准模型建议的中心点，仅供复核。 |
+| `recommended_target` | object | 推荐目标对象，可能来自可执行候选，也可能来自 `candidate_result.rejected[0]` 中的 review 候选。 |
+| `located_bbox` | object/null | 精准定位建议的目标框，仅供复核。文本目标优先使用 OCR 收紧后的候选框，而不是漂移的大语义框。 |
+| `located_point` | object/null | 精准定位建议的中心点，仅供复核。 |
 | `location_status` | string | 定位状态，例如 `not_located`、`requires_pre_click_confirmation`。 |
 | `execution_path` | object | provider、OCR、candidate rank、pre-click 等路径信息。 |
 | `trace_path` | string | locate trace。 |
+
+使用注意：
+
+- `located_bbox` / `located_point` 不代表可自动点击；只有 `selected_click_point` 非空才是闸门批准的执行点。
+- 对 `include_referenced_text` 的文本目标，如果视觉语义框里包含未引用 OCR 文本，融合层会写入 `unreferenced_text_contamination` 并将候选保持为 `precise_text_target` review 状态。
+- `locate_target` 会把最佳 review 候选也带回给测试面板填候选框，方便人工生成 overlay 和确认坐标。
 
 使用注意：
 
@@ -609,6 +615,9 @@
 | 字段 | 类型 | 默认值 | 作用 |
 | --- | --- | --- | --- |
 | `goal` | string | 必填 | 用户目标。 |
+| `approved_plan_id` | string/null | null | 成功 dry-run 返回的短期批准计划 ID，用于真实点击复用。 |
+| `learned_instruction_id` | string/null | null | 指令学习记录 ID，用于复用已验证过的同窗口同目标点击点。 |
+| `learning_mode` | string/null | null | `instruction` 时，成功真实点击并验证后写入 `learned_instruction_v1`。 |
 | `task` | string | `click_target` | 识别任务。 |
 | `app_name` | string/null | null | 应用上下文。 |
 | `state_hint` | string/null | null | 界面区域提示。 |
@@ -642,6 +651,12 @@
 | `recognition_plan_overlay` | object/null | 自动生成的复核 overlay。 |
 | `pre_click_decision` | object | 点击前闸门。 |
 | `selected_click_point` | object/null | 通过闸门后的最终点击点。 |
+| `approved_plan_id` | string/null | 复用或新生成的批准计划 ID。 |
+| `learned_instruction_id` | string/null | 复用或新生成的指令学习记录 ID。 |
+| `learned_instruction_reuse_validation` | object/null | 指令学习复用校验结果。 |
+| `learned_instruction_bundle_dir` | string/null | 新生成的永久学习资产目录，例如 `artifacts/local-learning/instructions/{id}/`。 |
+| `learned_instruction_artifacts` | object/null | 永久学习资产清单，包含源窗口截图、点击前截图、点击后截图、diff 图和目标裁剪图路径。 |
+| `learning_mode` | string/null | 本次学习模式。 |
 | `click_result` | object | 真实点击结果，仅实际点击后出现。 |
 | `post_click_verification` | object | 通用点击后验证。 |
 | `semantic_post_click_verification` | object | 语义验证，例如 MouseTester 特化验证。 |
@@ -660,6 +675,14 @@ Approved plan 复用：
 - 后续真实点击应传入同一个 `goal` 和 `approved_plan_id`，并设置 `dry_run=false`。
 - 复用时 runtime 会校验同一绑定窗口、窗口尺寸、目标文本、有效期和 `selected_click_point` 是否仍在窗口内；校验通过后直接点击，不再重新运行大视觉模型。
 - 如果不传 `approved_plan_id`，`dry_run=false` 仍会走旧路径：重新截图、重新识别、重新过闸门，然后点击。
+
+Instruction learning 复用：
+- `learning_mode="instruction"` 且真实点击验证成功时，runtime 写入 `artifacts/local-learning/instructions/{id}/learned_instruction.json`，contract 为 `learned_instruction_v1`。
+- 同一目录还永久保存学习证据图片，不使用滚动清理的普通截图缓存：`source_window.png`、`pre_action.png`、`post_action.png`、`post_action_diff.png`、`target_crop.png`。
+- 后续请求可传入同一 `goal`、`app_name` 和 `learned_instruction_id`。
+- 复用时 runtime 校验同一绑定窗口句柄、窗口尺寸和点击点边界；校验通过后直接使用学习记录中的 `selected_click_point`，不重新运行视觉模型。
+- 指令学习复用仍会执行真实点击后的验证。第一版策略是 `same_window_exact`，只用于稳定性测试和 MouseTester 这类低风险重复界面。
+- 复用成功不会再写一条新的学习记录；如果需要刷新记录，应先走普通识别执行并重新学习。
 
 ## POST /action/execute_confirmed_point
 

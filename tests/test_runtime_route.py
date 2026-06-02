@@ -32,6 +32,30 @@ def test_start_model_ensures_stage(monkeypatch) -> None:
     assert response.data["timings"]["steps"][0]["name"] == "ensure_model_server"
 
 
+def test_stop_model_stops_profile(monkeypatch) -> None:
+    monkeypatch.setattr(runtime_api, "profile_for_stage", lambda stage, profile_id=None: {"profile_id": profile_id or stage})
+    monkeypatch.setattr(
+        runtime_api,
+        "stop_model_server",
+        lambda profile: {
+            "profile": profile,
+            "returncode": 0,
+            "stdout": "stopped",
+            "stderr": "",
+            "stopped": True,
+            "after": {"status": "unreachable"},
+        },
+    )
+    monkeypatch.setattr(runtime_api, "write_trace", lambda **kwargs: "logs/traces/runtime/stop.json")
+
+    response = runtime_api.stop_model(ModelServerRequest(stage="locate"))
+
+    assert response.success is True
+    assert response.data["stopped"] is True
+    assert response.data["trace_path"].endswith("stop.json")
+    assert [step["name"] for step in response.data["timings"]["steps"]] == ["resolve_model_profile", "stop_model_server"]
+
+
 def test_prepare_runtime_starts_requested_model_stages(monkeypatch) -> None:
     calls: list[str] = []
 

@@ -101,10 +101,8 @@ def build_page_structure(vision: VisionAnalyzeResponse, ocr: OCRResult) -> PageS
             element = _element_from_precise_text_card(region, selected_texts, texts)
             elements.append(element)
             link_reasons = ["clickable_card_with_ocr_text_proof", "requires_pre_click_confirmation"]
-            if element.evidence.get("above_exclusion_boundary"):
-                link_reasons.append("above_exclusion_boundary_applied")
-            if element.evidence.get("semantic_bbox_violations"):
-                link_reasons.append("semantic_bbox_crossed_above_exclusion_boundary")
+            if element.evidence.get("unreferenced_text_contamination"):
+                link_reasons.append("unreferenced_text_contamination")
             links.append(
                 PageLink(
                     link_id=f"link_{element.element_id}",
@@ -125,14 +123,11 @@ def build_page_structure(vision: VisionAnalyzeResponse, ocr: OCRResult) -> PageS
         if bound:
             selected_texts = _select_bound_texts(bound, region=region)
             used_text_ids.update(item.text.text_id for item in selected_texts)
-            element = _element_from_region_and_texts(region, role, selected_texts)
-            _apply_above_exclusion_boundary(element, region=region, selected_texts=selected_texts, texts=texts)
+            element = _element_from_region_and_texts(region, role, selected_texts, texts=texts)
             elements.append(element)
             link_reasons = _merge_reasons(item.reasons for item in selected_texts)
-            if element.evidence.get("above_exclusion_boundary"):
-                link_reasons.append("above_exclusion_boundary_applied")
-            if element.evidence.get("semantic_bbox_violations"):
-                link_reasons.append("semantic_bbox_crossed_above_exclusion_boundary")
+            if element.evidence.get("unreferenced_text_contamination"):
+                link_reasons.append("unreferenced_text_contamination")
             links.append(
                 PageLink(
                     link_id=f"link_{element.element_id}",
@@ -282,7 +277,7 @@ def _candidate_is_bindable(candidate: _Candidate) -> bool:
     return True
 
 
-def _element_from_region_and_texts(region: VisionRegion, role: str, candidates: list[_Candidate]) -> PageElement:
+def _element_from_region_and_texts(region: VisionRegion, role: str, candidates: list[_Candidate], texts: list[PageText] | None = None) -> PageElement:
     text_values = [item.text.text for item in candidates]
     text = " ".join(value for value in text_values if value).strip()
     bbox = _union_bbox([item.text.bbox for item in candidates])
@@ -296,7 +291,7 @@ def _element_from_region_and_texts(region: VisionRegion, role: str, candidates: 
     memory_key = _memory_key(role=role, label=label, text=text, layout_key=region.layout_key)
     text_ids = [item.text.text_id for item in candidates]
     policy = _interaction_policy(role=role, label=label, text=text, description=region.description, possible_destinations=region.possible_destinations)
-    return PageElement(
+    element = PageElement(
         element_id=_element_id(role, label, region.region_id),
         label=label,
         role=role,
@@ -330,6 +325,9 @@ def _element_from_region_and_texts(region: VisionRegion, role: str, candidates: 
             "semantic_match_key": region.match_key,
         },
     )
+    if texts is not None:
+        _apply_unreferenced_text_contamination(element, region=region, selected_texts=candidates, texts=texts)
+    return element
 
 
 def _element_from_semantic_region(region: VisionRegion, role: str) -> PageElement:
@@ -410,7 +408,7 @@ def _element_from_precise_visual_icon(region: VisionRegion, role: str) -> PageEl
 
 
 def _element_from_precise_text_card(region: VisionRegion, candidates: list[_Candidate], texts: list[PageText]) -> PageElement:
-    element = _element_from_region_and_texts(region, "card", candidates)
+    element = _element_from_region_and_texts(region, "card", candidates, texts=texts)
     if element.interaction_policy.zone_type != "ad_candidate":
         element.interaction_policy = InteractionPolicy(
             allowed=False,
@@ -432,11 +430,10 @@ def _element_from_precise_text_card(region: VisionRegion, candidates: list[_Cand
             "anchor_relations": list(region.anchor_relations),
         }
     )
-    _apply_above_exclusion_boundary(element, region=region, selected_texts=candidates, texts=texts)
     return element
 
 
-def _apply_above_exclusion_boundary(
+def _apply_unreferenced_text_contamination(
     element: PageElement,
     *,
     region: VisionRegion,
@@ -446,72 +443,56 @@ def _apply_above_exclusion_boundary(
     if not _uses_referenced_text_grounding(region):
         return
     selected_ids = {item.text.text_id for item in selected_texts}
-    target_bbox = _union_bbox([item.text.bbox for item in selected_texts])
-    boundary = _nearest_above_text_boundary(target_bbox, texts=texts, excluded_ids=selected_ids)
-    if boundary is None:
-        return
-    visual_crosses_boundary = _intersects(region.bbox, boundary.bbox)
-    candidate_crosses_boundary = _intersects(element.bbox, boundary.bbox)
-    element.evidence["above_exclusion_boundary"] = {
-        "text_id": boundary.text_id,
-        "text": boundary.text,
-        "bbox": boundary.bbox.to_dict(),
-        "relation": "above_target_text",
-        "vertical_gap_px": target_bbox.y - (boundary.bbox.y + boundary.bbox.h),
-        "semantic_bbox_crosses_boundary": visual_crosses_boundary,
-        "candidate_bbox_crosses_boundary": candidate_crosses_boundary,
-        "enforcement": "candidate_bbox_uses_target_ocr_text_only",
-    }
-    if visual_crosses_boundary:
-        element.evidence["semantic_bbox_violations"] = ["crosses_above_exclusion_boundary"]
-        if element.interaction_policy.zone_type != "ad_candidate":
-            element.interaction_policy = InteractionPolicy(
-                allowed=False,
-                zone_type="precise_text_target",
-                priority="review",
-                ad_risk=element.interaction_policy.ad_risk,
-                reasons=["semantic_bbox_crosses_above_exclusion_boundary", "precision_text_grounding_requires_confirmation"],
-            )
-            element.click_strategy = "ocr_text_center_review"
-
-
-def _nearest_above_text_boundary(target_bbox: BBox, *, texts: list[PageText], excluded_ids: set[str]) -> PageText | None:
-    max_vertical_gap = max(180, target_bbox.h * 4)
-    max_left_offset = max(80, target_bbox.w // 2)
-    boundaries: list[tuple[int, PageText]] = []
+    target_bbox = element.bbox
+    target_frame = _expand_bbox(target_bbox, pad_x=max(12, target_bbox.w // 8), pad_y=max(8, target_bbox.h // 3))
+    contaminants: list[PageText] = []
     for text in texts:
-        if text.text_id in excluded_ids:
+        if text.text_id in selected_ids or float(text.score) < 0.5:
             continue
-        bottom = text.bbox.y + text.bbox.h
-        vertical_gap = target_bbox.y - bottom
-        if vertical_gap < 0 or vertical_gap > max_vertical_gap:
+        if not _contains_center(region.bbox, text.bbox):
             continue
-        horizontally_related = _horizontal_overlap(target_bbox, text.bbox) > 0 or abs(text.bbox.x - target_bbox.x) <= max_left_offset
-        if horizontally_related:
-            boundaries.append((vertical_gap, text))
-    if not boundaries:
-        return None
-    boundaries.sort(key=lambda item: (item[0], abs(item[1].bbox.x - target_bbox.x), -item[1].score))
-    return boundaries[0][1]
+        if _contains_center(target_frame, text.bbox) or _iou(target_bbox, text.bbox) > 0.0:
+            continue
+        contaminants.append(text)
+    if not contaminants:
+        return
+
+    contaminants.sort(key=lambda item: (_center_distance(target_bbox, item.bbox), item.bbox.y, item.bbox.x))
+    element.evidence["unreferenced_text_contamination"] = {
+        "count": len(contaminants),
+        "policy": "include_referenced_text",
+        "meaning": "semantic_bbox_contains_unreferenced_ocr_text_outside_target_text_cluster",
+        "examples": [
+            {
+                "text_id": item.text_id,
+                "text": item.text,
+                "bbox": item.bbox.to_dict(),
+                "distance_to_target_px": round(_center_distance(target_bbox, item.bbox), 2),
+            }
+            for item in contaminants[:6]
+        ],
+    }
+    if element.interaction_policy.zone_type != "ad_candidate":
+        element.interaction_policy = InteractionPolicy(
+            allowed=False,
+            zone_type="precise_text_target",
+            priority="review",
+            ad_risk=element.interaction_policy.ad_risk,
+            reasons=_unique(
+                [
+                    *element.interaction_policy.reasons,
+                    "unreferenced_text_inside_semantic_bbox",
+                    "precision_text_grounding_requires_confirmation",
+                ]
+            ),
+        )
+        element.click_strategy = "ocr_text_center_review"
 
 
 def _uses_referenced_text_grounding(region: VisionRegion) -> bool:
     constraints = region.grounding_constraints or {}
     policy = str(constraints.get("text_inclusion_policy") or "").strip().lower().replace("-", "_").replace(" ", "_")
     return policy == "include_referenced_text"
-
-
-def _horizontal_overlap(left: BBox, right: BBox) -> int:
-    return max(0, min(left.x + left.w, right.x + right.w) - max(left.x, right.x))
-
-
-def _intersects(left: BBox, right: BBox) -> bool:
-    return bool(
-        left.x < right.x + right.w
-        and left.x + left.w > right.x
-        and left.y < right.y + right.h
-        and left.y + left.h > right.y
-    )
 
 
 def _is_precise_visual_icon_region(region: VisionRegion, *, role: str) -> bool:
@@ -584,6 +565,15 @@ def _geometry_score(region_bbox: BBox, text_bbox: BBox) -> float:
 def _contains_center(container: BBox, child: BBox) -> bool:
     center = _bbox_center(child)
     return container.x <= center["x"] <= container.x + container.w and container.y <= center["y"] <= container.y + container.h
+
+
+def _expand_bbox(bbox: BBox, *, pad_x: int, pad_y: int) -> BBox:
+    return BBox(
+        x=int(bbox.x) - int(pad_x),
+        y=int(bbox.y) - int(pad_y),
+        w=max(1, int(bbox.w) + (int(pad_x) * 2)),
+        h=max(1, int(bbox.h) + (int(pad_y) * 2)),
+    )
 
 
 def _iou(left: BBox, right: BBox) -> float:

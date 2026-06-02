@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 from app.api import action as action_api
@@ -255,6 +256,115 @@ def test_execute_recognition_plan_rejects_approved_plan_window_mismatch(monkeypa
     assert real.error is not None
     assert real.error.code == "approved_plan_reuse_failed"
     assert real.error.details == "approved_plan_window_handle_mismatch"
+
+
+def test_execute_recognition_plan_records_and_reuses_instruction_learning(monkeypatch, tmp_path) -> None:
+    bound = SimpleNamespace(
+        handle=1,
+        title="MouseTester",
+        process_id=1234,
+        process_name="msedge.exe",
+        rect=SimpleNamespace(left=0, top=0, right=800, bottom=600),
+        is_active=True,
+    )
+    monkeypatch.setattr(action_api, "LEARNED_INSTRUCTIONS_DIR", tmp_path / "learned-instructions")
+    action_api.LEARNED_INSTRUCTIONS_DIR.mkdir(parents=True, exist_ok=True)
+    capture_path = tmp_path / "capture.png"
+    before_path = tmp_path / "before.png"
+    after_path = tmp_path / "after.png"
+    diff_path = tmp_path / "diff.png"
+    if action_api.Image is not None:
+        for path in [capture_path, before_path, after_path, diff_path]:
+            action_api.Image.new("RGB", (800, 600), color="white").save(path)
+    else:
+        for path in [capture_path, before_path, after_path, diff_path]:
+            path.write_bytes(b"placeholder")
+    monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: bound)
+    monkeypatch.setattr(
+        action_api.screenshot_service,
+        "capture_window",
+        lambda **kwargs: {
+            "image_path": str(capture_path),
+            "roi": None,
+            "roi_adjusted": False,
+            "window_size": {"width": 800, "height": 600},
+        },
+    )
+    recognition_calls = {"count": 0}
+
+    def fake_recognition_plan(request):
+        recognition_calls["count"] += 1
+        return APIResponse(
+            success=True,
+            message="ok",
+            data=VisionResultData(result=_allowed_plan({"x": 320, "y": 240})).model_dump(),
+            error=None,
+        )
+
+    monkeypatch.setattr(action_api, "_run_recognition_plan_for_execution", fake_recognition_plan)
+    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", lambda trace_path: None)
+    monkeypatch.setattr(action_api.verifier, "capture_pre_action_state", lambda action_name=None: {"image_path": str(before_path)})
+    monkeypatch.setattr(
+        action_api.verifier,
+        "verify_action",
+        lambda *args, **kwargs: {
+            "verified": True,
+            "before": {"image_path": str(before_path)},
+            "after": {"image_path": str(after_path)},
+            "diff": {"diff_image_path": str(diff_path)},
+        },
+    )
+    monkeypatch.setattr(
+        action_api,
+        "_verify_mouse_tester_post_click_semantics",
+        lambda **kwargs: {"applicable": True, "verified": True, "profile": "mousetester_target_text_change_v1"},
+    )
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/execute-recognition-plan.json")
+    clicked: list[dict[str, int]] = []
+    monkeypatch.setattr(
+        action_api.input_controller,
+        "click_point",
+        lambda x, y, **kwargs: clicked.append({"x": x, "y": y}) or {"clicked": True, "window_point": {"x": x, "y": y}},
+    )
+
+    learned = action_api.execute_recognition_plan(
+        ExecuteRecognitionPlanRequest(goal="点击此处测试", app_name="mousetesterweb", learning_mode="instruction")
+    )
+    learned_instruction_id = learned.data["result"]["learned_instruction_id"]
+
+    replay = action_api.execute_recognition_plan(
+        ExecuteRecognitionPlanRequest(
+            goal="点击此处测试",
+            app_name="mousetesterweb",
+            learning_mode="instruction",
+            learned_instruction_id=learned_instruction_id,
+        )
+    )
+
+    assert learned.success is True
+    assert replay.success is True
+    assert recognition_calls["count"] == 1
+    assert clicked == [{"x": 320, "y": 240}, {"x": 320, "y": 240}]
+    learned_bundle_dir = tmp_path / "learned-instructions" / learned_instruction_id
+    learned_record_path = learned_bundle_dir / "learned_instruction.json"
+    assert learned_record_path.exists()
+    assert (learned_bundle_dir / "source_window.png").exists()
+    assert (learned_bundle_dir / "pre_action.png").exists()
+    assert (learned_bundle_dir / "post_action.png").exists()
+    assert (learned_bundle_dir / "post_action_diff.png").exists()
+    if action_api.Image is not None:
+        assert (learned_bundle_dir / "target_crop.png").exists()
+    record = action_api.json.loads(learned_record_path.read_text(encoding="utf-8"))
+    assert record["learning_artifacts"]["bundle_dir"] == str(learned_bundle_dir.resolve())
+    assert Path(record["learning_artifacts"]["source_image_path"]).exists()
+    result = replay.data["result"]
+    assert result["learned_instruction_id"] == learned_instruction_id
+    assert result["learned_instruction_artifacts"]["bundle_dir"] == str(learned_bundle_dir.resolve())
+    assert result["execution_path"]["instruction_learning_reused"] is True
+    assert result["execution_path"]["vision_model_used"] is False
+    assert result["learned_instruction_reuse_validation"]["valid"] is True
+    assert "recognition_plan" not in [step["name"] for step in result["timings"]["steps"]]
+    assert "save_learned_instruction" not in [step["name"] for step in result["timings"]["steps"]]
 
 
 def test_execute_recognition_plan_uses_mouse_tester_semantic_verification(monkeypatch) -> None:

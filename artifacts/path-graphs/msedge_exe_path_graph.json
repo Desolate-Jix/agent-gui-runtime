@@ -1,0 +1,18 @@
+{
+  "format_version": "nav_path_graph_v1",
+  "app_name": "msedge.exe",
+  "saved_at": "2026-06-02T05:34:32.092Z",
+  "summary": "1 pages, 0 transitions",
+  "pages": [
+    {
+      "id": "page-1",
+      "label": "GitHub repository main page",
+      "screen_summary": "GitHub repository main page",
+      "state_guess": "GitHub repository main page",
+      "screenshot_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\desolate-jix-agent-gui-runtime-microsoft-edge__observe-screen__mousetesterweb__full-window__20260602-173336-760785.png",
+      "timestamp": "17:33:59",
+      "controls": []
+    }
+  ],
+  "transitions": []
+}

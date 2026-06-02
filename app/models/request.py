@@ -109,6 +109,8 @@ class ExecuteRecognitionPlanRequest(BaseModel):
 
     goal: str = Field(min_length=1)
     approved_plan_id: Optional[str] = None
+    learned_instruction_id: Optional[str] = None
+    learning_mode: Optional[str] = None
     task: str = Field(default="click_target", min_length=1)
     app_name: Optional[str] = None
     state_hint: Optional[str] = None

@@ -1,0 +1,15 @@
+{
+  "format_version": "nav_path_graph_v1",
+  "app_name": "msedge.exe",
+  "saved_at": "2026-06-02T05:37:55.169Z",
+  "summary": "1 pages, 0 transitions",
+  "pages": [
+    {
+      "id": "page-1",
+      "label": "GitHub repository main page",
+      "timestamp": "17:33:59",
+      "controls": []
+    }
+  ],
+  "transitions": []
+}

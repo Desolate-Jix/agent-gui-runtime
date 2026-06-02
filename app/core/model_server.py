@@ -158,6 +158,42 @@ def start_model_server(profile: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def stop_model_server(profile: dict[str, Any]) -> dict[str, Any]:
+    script = _resolve_path(str(profile.get("stop_script") or "scripts/model_servers/stop_local_vision_server.ps1"))
+    if not script.exists():
+        raise FileNotFoundError(f"Model stop script not found: {script}")
+    command = [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(script),
+    ]
+    port = profile.get("port")
+    if port not in (None, ""):
+        command.extend(["-Port", str(port)])
+    pid_file = str(profile.get("pid_file") or "").strip()
+    if pid_file:
+        command.extend(["-PidFile", str(_resolve_path(pid_file))])
+    completed = subprocess.run(
+        command,
+        cwd=str(ROOT_DIR),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    return {
+        "profile": _public_profile(profile),
+        "command": command,
+        "returncode": completed.returncode,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+        "stopped": completed.returncode == 0,
+        "after": check_model_server(profile),
+    }
+
+
 def wait_for_model_server(profile: dict[str, Any], *, wait_seconds: float) -> dict[str, Any]:
     deadline = time.monotonic() + float(wait_seconds)
     last = check_model_server(profile)

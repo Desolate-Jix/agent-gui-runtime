@@ -555,11 +555,13 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
                 response.data["timings"] = timer.to_dict()
             return response
         result = response.data["result"]
-        recommended_target = result.get("recommended_target") or {}
+        recommended_target = _locatable_target_from_plan_result(result)
         recommended_element = recommended_target.get("element") if isinstance(recommended_target, dict) else {}
         recommended_element = recommended_element if isinstance(recommended_element, dict) else {}
         selected_click_point = ((result.get("pre_click_decision") or {}).get("selected_click_point"))
-        located_point = recommended_element.get("click_point")
+        located_bbox = _locatable_bbox(recommended_target)
+        located_point = selected_click_point if isinstance(selected_click_point, dict) else _locatable_point(recommended_target, located_bbox)
+        located_source = str(recommended_target.get("location_source") or "recommended_target.element.click_point")
         locate_result = {
             "contract_version": "target_location_v1",
             "goal": request.goal,
@@ -569,14 +571,14 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
             "pre_click_decision": result.get("pre_click_decision"),
             "selected_click_point": selected_click_point,
             "recommended_target": recommended_target,
-            "located_bbox": recommended_element.get("bbox"),
+            "located_bbox": located_bbox,
             "located_point": located_point,
             "location_status": "pre_click_verified" if selected_click_point else ("requires_pre_click_confirmation" if located_point else "not_located"),
             "execution_path": {
                 **dict(result.get("execution_path") or {}),
                 "action_executed": False,
                 "coordinate_source": "pre_click_decision_v1.selected_click_point",
-                "located_coordinate_source": "recommended_target.element.click_point",
+                "located_coordinate_source": located_source,
                 "agent_must_call_for_click": "POST /action/execute_recognition_plan",
             },
         }
@@ -603,6 +605,47 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
             data={"trace_path": trace_path, "timings": timings},
             error=ErrorModel(code="locate_target_failed", details=str(exc)),
         )
+
+
+def _locatable_target_from_plan_result(result: dict[str, Any]) -> dict[str, Any]:
+    recommended = result.get("recommended_target") if isinstance(result.get("recommended_target"), dict) else {}
+    if isinstance(recommended.get("element"), dict):
+        recommended.setdefault("location_source", "recommended_target.element.click_point")
+        return recommended
+
+    candidate_result = result.get("candidate_result") if isinstance(result.get("candidate_result"), dict) else {}
+    for source_key, source_name in (("candidates", "candidate_result.candidates[0]"), ("rejected", "candidate_result.rejected[0]")):
+        candidates = candidate_result.get(source_key) if isinstance(candidate_result.get(source_key), list) else []
+        for candidate in candidates:
+            if not isinstance(candidate, dict) or not isinstance(candidate.get("element"), dict):
+                continue
+            candidate = dict(candidate)
+            candidate["location_source"] = source_name
+            return candidate
+    return {}
+
+
+def _locatable_bbox(target: dict[str, Any]) -> dict[str, Any] | None:
+    refined = target.get("refined_bbox")
+    if isinstance(refined, dict):
+        return refined
+    element = target.get("element") if isinstance(target.get("element"), dict) else {}
+    bbox = element.get("bbox") if isinstance(element, dict) else None
+    return bbox if isinstance(bbox, dict) else None
+
+
+def _locatable_point(target: dict[str, Any], bbox: dict[str, Any] | None) -> dict[str, int] | None:
+    element = target.get("element") if isinstance(target.get("element"), dict) else {}
+    point = element.get("click_point") if isinstance(element, dict) else None
+    if isinstance(point, dict):
+        return {"x": int(point.get("x", 0)), "y": int(point.get("y", 0))}
+    if not isinstance(bbox, dict):
+        return None
+    width = int(bbox.get("w", bbox.get("width", 0)) or 0)
+    height = int(bbox.get("h", bbox.get("height", 0)) or 0)
+    if width <= 0 or height <= 0:
+        return None
+    return {"x": int(bbox.get("x", 0)) + width // 2, "y": int(bbox.get("y", 0)) + height // 2}
 
 
 @router.post("/recognition_plan", response_model=APIResponse)

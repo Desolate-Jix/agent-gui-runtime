@@ -286,19 +286,13 @@ def test_build_page_structure_keeps_clickable_text_card_for_review_using_ocr_bbo
     assert target["interaction_policy"]["allowed"] is False
     assert target["interaction_policy"]["zone_type"] == "precise_text_target"
     assert result["links"][0]["relation"] == "precise_text_grounding"
-    assert target["evidence"]["above_exclusion_boundary"] == {
-        "text_id": "text_1",
-        "text": "Blackpepper",
-        "bbox": {"x": 60, "y": 590, "w": 112, "h": 20},
-        "relation": "above_target_text",
-        "vertical_gap_px": 42,
-        "semantic_bbox_crosses_boundary": True,
-        "candidate_bbox_crosses_boundary": False,
-        "enforcement": "candidate_bbox_uses_target_ocr_text_only",
-    }
-    assert target["evidence"]["semantic_bbox_violations"] == ["crosses_above_exclusion_boundary"]
-    assert "above_exclusion_boundary_applied" in result["links"][0]["reasons"]
-    assert "semantic_bbox_crossed_above_exclusion_boundary" in result["links"][0]["reasons"]
+    assert target["evidence"]["unreferenced_text_contamination"]["count"] == 1
+    assert target["evidence"]["unreferenced_text_contamination"]["examples"][0]["text"] == "Blackpepper"
+    assert "unreferenced_text_contamination" in result["links"][0]["reasons"]
+    assert "above_exclusion_boundary" not in target["evidence"]
+    assert "semantic_bbox_violations" not in target["evidence"]
+    assert "above_exclusion_boundary_applied" not in result["links"][0]["reasons"]
+    assert "semantic_bbox_crossed_above_exclusion_boundary" not in result["links"][0]["reasons"]
 
 
 def test_build_page_structure_does_not_promote_unproven_card() -> None:
@@ -321,7 +315,7 @@ def test_build_page_structure_does_not_promote_unproven_card() -> None:
     assert structure.elements == []
 
 
-def test_build_page_structure_applies_above_boundary_to_supported_text_click_target() -> None:
+def test_build_page_structure_does_not_apply_above_boundary_to_supported_text_click_target() -> None:
     target = _region("region_serato", "Serato Job Listing", "nav", 35, 543, 556, 206)
     target.ocr_text = "Junior Software Engineer C++ Serato Limited"
     target.text_lines = ["Junior Software Engineer C++", "Serato Limited"]
@@ -351,6 +345,7 @@ def test_build_page_structure_applies_above_boundary_to_supported_text_click_tar
     assert element["interaction_policy"]["allowed"] is False
     assert element["interaction_policy"]["zone_type"] == "precise_text_target"
     assert element["click_strategy"] == "ocr_text_center_review"
-    assert element["evidence"]["above_exclusion_boundary"]["text"] == "9d ago"
-    assert element["evidence"]["above_exclusion_boundary"]["semantic_bbox_crosses_boundary"] is True
-    assert element["evidence"]["above_exclusion_boundary"]["candidate_bbox_crosses_boundary"] is False
+    assert element["evidence"]["unreferenced_text_contamination"]["examples"][0]["text"] == "9d ago"
+    assert "unreferenced_text_contamination" in result["links"][0]["reasons"]
+    assert "above_exclusion_boundary" not in element["evidence"]
+    assert "semantic_bbox_violations" not in element["evidence"]

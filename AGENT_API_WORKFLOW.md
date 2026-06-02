@@ -498,8 +498,9 @@ Agent decision:
 - Prefer `provider_mode: local_grounding` here. It is intended for the larger local model that performs precise OCR-assisted target localization.
 - Use `pre_click_decision.allowed` as the quality gate.
 - Read `located_bbox` and `located_point` as the large model's no-click target proposal. For a visual-only icon it may be present while `selected_click_point` is null and `location_status` is `requires_pre_click_confirmation`.
-- For a text-bearing clickable card, a target-matched review candidate may be retained only with explicit destination and OCR text evidence. In that case `located_bbox` / `located_point` are derived from matching OCR text inside the card, and the card remains confirmation-required.
-- For list-like text targets, inspect `recommended_target.element.evidence.above_exclusion_boundary`. If `semantic_bbox_crosses_boundary == true`, the visual container intruded into the preceding item; the runtime keeps only the OCR-grounded review candidate and blocks autonomous execution.
+- For a text-bearing clickable target, inspect the OCR-derived `located_bbox` / `located_point`. If the visual semantic bbox contains unreferenced OCR text outside the selected target text cluster, the fusion layer records `unreferenced_text_contamination` and keeps the target as a confirmation-required `precise_text_target`.
+- For list-like text targets, the runtime no longer applies an `above_exclusion_boundary` from the nearest upper OCR row. Neighboring text above the target is not a special hard boundary, but any unreferenced OCR text inside the larger semantic bbox can still mark the candidate as review-only.
+- `locate_target` may surface the best review candidate from `candidate_result.rejected[0]` so the desktop panel can auto-fill the candidate-box review fields. This still does not create an executable click point.
 - Treat only `selected_click_point` as executable. An icon proposal must not silently fall back to nearby OCR text merely because that text is easier to ground.
 - Still do not click directly. To click, call `POST /action/execute_recognition_plan`, which re-captures and rechecks before dispatching input.
 - If a visual model emits out-of-bounds values consistent with `0..1000` normalized coordinates, the provider restores them before pixel clamping and records `coordinate_space_recovered=normalized_1000`; that restored bbox is still a no-click proposal.
@@ -741,6 +742,142 @@ Agent decision:
 - Prefer `approved_plan_id` reuse for the real click. Calling `dry_run: false` without an approved plan is still supported, but it re-runs recognition and is slower.
 - Treat the action as successful only when `success == true` and post-click verification did not reject the result.
 - Save or report both the recognition trace and action trace.
+
+### Optional Instruction Learning
+
+For stable low-risk pages such as MouseTester, an agent can record a verified instruction path:
+
+```json
+{
+  "goal": "点击此处测试",
+  "app_name": "mousetesterweb",
+  "learning_mode": "instruction",
+  "dry_run": false,
+  "enable_post_click_verification": true
+}
+```
+
+After a successful real click, the response may include:
+
+```json
+{
+  "learned_instruction_id": "9b53...",
+  "learned_instruction_path": "artifacts/local-learning/instructions/9b53.../learned_instruction.json",
+  "learned_instruction_bundle_dir": "artifacts/local-learning/instructions/9b53...",
+  "learned_instruction_artifacts": {
+    "bundle_dir": "artifacts/local-learning/instructions/9b53...",
+    "source_image_path": "artifacts/local-learning/instructions/9b53.../source_window.png",
+    "pre_action_image_path": "artifacts/local-learning/instructions/9b53.../pre_action.png",
+    "post_action_image_path": "artifacts/local-learning/instructions/9b53.../post_action.png",
+    "diff_image_path": "artifacts/local-learning/instructions/9b53.../post_action_diff.png",
+    "target_crop_path": "artifacts/local-learning/instructions/9b53.../target_crop.png"
+  },
+  "learning_mode": "instruction"
+}
+```
+
+A later repeat can reuse that instruction:
+
+```json
+{
+  "goal": "点击此处测试",
+  "app_name": "mousetesterweb",
+  "learning_mode": "instruction",
+  "learned_instruction_id": "9b53...",
+  "dry_run": false,
+  "enable_post_click_verification": true
+}
+```
+
+Instruction-learning reuse is intentionally conservative in v1. It validates the same goal, app name, bound-window handle, window size, and click-point bounds before dispatching. It skips the vision model but still performs real click dispatch and post-click verification. If validation fails, the upper-layer agent should fall back to the normal recognition path.
+The learning bundle is permanent local evidence, not part of the rolling screenshot cache. The desktop response path graph shows the bundle as a learning-asset artifact node so a test operator can inspect which saved screenshots/crops back the reused point.
+Successful reuse does not write a new learned instruction record; refresh learning by running the normal recognition path again.
+
+Instruction-learning flow:
+
+```text
+First successful run
+
+User instruction
+  |
+  v
+POST /action/execute_recognition_plan
+goal = "点击此处测试"
+learning_mode = "instruction"
+  |
+  v
+Live capture of the bound window
+  |
+  v
+recognition_plan_v1
+OCR / UIA / Vision / Candidate rank / Narrow search
+  |
+  v
+pre_click_decision_v1
+  |
+  +-- rejected --> no click, no learning record
+  |
+  v
+selected_click_point
+  |
+  v
+real click
+  |
+  v
+post-click verification
+  |
+  +-- failed --> return failure, no learning record
+  |
+  v
+write learned_instruction_v1
+artifacts/local-learning/instructions/{id}/
+  learned_instruction.json
+  source_window.png
+  pre_action.png
+  post_action.png
+  post_action_diff.png
+  target_crop.png
+  |
+  v
+return learned_instruction_id
+```
+
+```text
+Repeat run
+
+User repeats the same instruction
+  |
+  v
+POST /action/execute_recognition_plan
+goal = "点击此处测试"
+learning_mode = "instruction"
+learned_instruction_id = "..."
+  |
+  v
+load learned_instruction_v1
+  |
+  v
+validate reuse
+goal / app_name / window handle / window size / point bounds
+  |
+  +-- failed --> return learned_instruction_reuse_failed;
+  |              upper-layer agent falls back to normal recognition
+  |
+  v
+reuse selected_click_point
+  |
+  v
+real click
+  |
+  v
+post-click verification
+  |
+  +-- failed --> return failure;
+  |              upper-layer agent falls back to normal recognition
+  |
+  v
+return success
+```
 
 ## Saved Screenshot Review Flow
 

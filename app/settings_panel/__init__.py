@@ -1,2 +1,0 @@
-"""Desktop settings panel package."""
-

@@ -1,0 +1,172 @@
+{
+  "format_version": "nav_path_graph_v1",
+  "app_name": "MouseTesterWeb",
+  "saved_at": "2026-06-02T15:30:00.000Z",
+  "summary": "3 pages, 2 transitions",
+  "pages": [
+    {
+      "id": "page-1",
+      "label": "MouseTester main page",
+      "screen_summary": "A minimal mouse-testing utility. The main area shows mouse coordinates and click counts. A large button in the center labeled '点击此处测试' triggers the test dialog. The title bar has minimize/maximize/close controls.",
+      "state_guess": "MouseTester main page",
+      "screenshot_path": "",
+      "timestamp": "15:30:01",
+      "controls": [
+        {
+          "label": "点击此处测试",
+          "type": "button",
+          "description": "Main test trigger button — opens the mouse test dialog",
+          "bbox": { "x": 320, "y": 240, "width": 160, "height": 48 },
+          "click_point": { "x": 400, "y": 264 },
+          "status": "clicked",
+          "click_goal": "点击此处测试",
+          "click_screenshot": "",
+          "navigated_to_page_id": "page-2",
+          "possible_navigation": ""
+        },
+        {
+          "label": "Mouse position display",
+          "type": "label",
+          "description": "Shows current mouse X, Y coordinates and total click count",
+          "bbox": { "x": 100, "y": 60, "width": 600, "height": 80 },
+          "click_point": null,
+          "status": "unclicked",
+          "click_goal": null,
+          "click_screenshot": null,
+          "navigated_to_page_id": null,
+          "possible_navigation": ""
+        },
+        {
+          "label": "Reset counter",
+          "type": "button",
+          "description": "Resets the accumulated click counter to zero",
+          "bbox": { "x": 500, "y": 310, "width": 100, "height": 30 },
+          "click_point": { "x": 550, "y": 325 },
+          "status": "unclicked",
+          "click_goal": null,
+          "click_screenshot": null,
+          "navigated_to_page_id": null,
+          "possible_navigation": "Resets the counter display — stays on main page"
+        },
+        {
+          "label": "Close",
+          "type": "titlebar-button",
+          "description": "Close the application window",
+          "bbox": { "x": 770, "y": 4, "width": 28, "height": 24 },
+          "click_point": { "x": 784, "y": 16 },
+          "status": "unclicked",
+          "click_goal": null,
+          "click_screenshot": null,
+          "navigated_to_page_id": null,
+          "possible_navigation": "Application exits"
+        }
+      ]
+    },
+    {
+      "id": "page-2",
+      "label": "Mouse test dialog",
+      "screen_summary": "A modal test dialog overlaying the main window. Contains a circular mouse-testing target area with concentric rings. Start and Cancel buttons at the bottom. A status bar at the bottom shows current test phase ('Ready', 'Testing...', or results).",
+      "state_guess": "Mouse test dialog",
+      "screenshot_path": "",
+      "timestamp": "15:30:12",
+      "controls": [
+        {
+          "label": "Start test",
+          "type": "button",
+          "description": "Begins the mouse accuracy test — tracks clicks inside the target area",
+          "bbox": { "x": 300, "y": 380, "width": 120, "height": 36 },
+          "click_point": { "x": 360, "y": 398 },
+          "status": "clicked",
+          "click_goal": "Start test",
+          "click_screenshot": "",
+          "navigated_to_page_id": "page-3",
+          "possible_navigation": ""
+        },
+        {
+          "label": "Cancel",
+          "type": "button",
+          "description": "Closes the dialog and returns to the main page without running the test",
+          "bbox": { "x": 440, "y": 380, "width": 100, "height": 36 },
+          "click_point": { "x": 490, "y": 398 },
+          "status": "unclicked",
+          "click_goal": null,
+          "click_screenshot": null,
+          "navigated_to_page_id": null,
+          "possible_navigation": "Returns to MouseTester main page (page-1)"
+        },
+        {
+          "label": "Test area",
+          "type": "canvas",
+          "description": "Circular mouse testing target zone with concentric scoring rings",
+          "bbox": { "x": 200, "y": 60, "width": 400, "height": 300 },
+          "click_point": null,
+          "status": "unclicked",
+          "click_goal": null,
+          "click_screenshot": null,
+          "navigated_to_page_id": null,
+          "possible_navigation": ""
+        }
+      ]
+    },
+    {
+      "id": "page-3",
+      "label": "Test results",
+      "screen_summary": "Test results screen displayed after completing a mouse accuracy test. Shows accuracy metrics: hit count, miss count, average distance from center, and a score distribution chart. 'Retry' and 'Back to main' buttons at the bottom.",
+      "state_guess": "Test results",
+      "screenshot_path": "",
+      "timestamp": "15:30:25",
+      "controls": [
+        {
+          "label": "Retry",
+          "type": "button",
+          "description": "Run the mouse accuracy test again",
+          "bbox": { "x": 280, "y": 400, "width": 100, "height": 34 },
+          "click_point": { "x": 330, "y": 417 },
+          "status": "unclicked",
+          "click_goal": null,
+          "click_screenshot": null,
+          "navigated_to_page_id": null,
+          "possible_navigation": "Restarts the test dialog (returns to page-2)"
+        },
+        {
+          "label": "Back to main",
+          "type": "button",
+          "description": "Return to the main page of the application",
+          "bbox": { "x": 400, "y": 400, "width": 120, "height": 34 },
+          "click_point": { "x": 460, "y": 417 },
+          "status": "unclicked",
+          "click_goal": null,
+          "click_screenshot": null,
+          "navigated_to_page_id": null,
+          "possible_navigation": "Returns to MouseTester main page (page-1)"
+        },
+        {
+          "label": "Score chart",
+          "type": "image",
+          "description": "Visual chart showing click accuracy distribution across the target area",
+          "bbox": { "x": 120, "y": 100, "width": 560, "height": 260 },
+          "click_point": null,
+          "status": "unclicked",
+          "click_goal": null,
+          "click_screenshot": null,
+          "navigated_to_page_id": null,
+          "possible_navigation": ""
+        }
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "from_page": "page-1",
+      "to_page": "page-2",
+      "goal": "点击此处测试",
+      "action": "click"
+    },
+    {
+      "from_page": "page-2",
+      "to_page": "page-3",
+      "goal": "Start test",
+      "action": "click"
+    }
+  ]
+}

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import uuid
 import time
 from contextlib import contextmanager
 from datetime import datetime
@@ -17,8 +18,20 @@ SCREENSHOTS_DIR = ARTIFACTS_DIR / "screenshots"
 VERIFICATION_DIR = ARTIFACTS_DIR / "verification"
 REVIEW_OVERLAYS_DIR = ARTIFACTS_DIR / "review-overlays"
 RECOGNITION_CROPS_DIR = ARTIFACTS_DIR / "recognition-crops"
+LOCAL_LEARNING_DIR = ARTIFACTS_DIR / "local-learning"
+LEARNED_INSTRUCTION_ARTIFACTS_DIR = LOCAL_LEARNING_DIR / "instructions"
 
-for path in (LOGS_DIR, TRACES_DIR, ARTIFACTS_DIR, SCREENSHOTS_DIR, VERIFICATION_DIR, REVIEW_OVERLAYS_DIR, RECOGNITION_CROPS_DIR):
+for path in (
+    LOGS_DIR,
+    TRACES_DIR,
+    ARTIFACTS_DIR,
+    SCREENSHOTS_DIR,
+    VERIFICATION_DIR,
+    REVIEW_OVERLAYS_DIR,
+    RECOGNITION_CROPS_DIR,
+    LOCAL_LEARNING_DIR,
+    LEARNED_INSTRUCTION_ARTIFACTS_DIR,
+):
     path.mkdir(parents=True, exist_ok=True)
 
 
@@ -96,6 +109,21 @@ def build_review_overlay_path(*, name_hint: Optional[str] = None, suffix: str = 
 def build_recognition_crop_path(*, name_hint: Optional[str] = None, candidate_id: Optional[str] = None) -> Path:
     parts = [slugify(name_hint, fallback="recognition"), slugify(candidate_id, fallback="candidate"), timestamp_label()]
     return RECOGNITION_CROPS_DIR / ("__".join(parts) + ".png")
+
+
+def new_learned_instruction_id() -> str:
+    return uuid.uuid4().hex
+
+
+def learned_instruction_bundle_dir(learned_instruction_id: str) -> Path:
+    safe_id = re.sub(r"[^a-zA-Z0-9_.-]+", "", learned_instruction_id)
+    if not safe_id:
+        raise ValueError("learned_instruction_id is empty or invalid")
+    return LEARNED_INSTRUCTION_ARTIFACTS_DIR / safe_id
+
+
+def learned_instruction_record_path(learned_instruction_id: str) -> Path:
+    return learned_instruction_bundle_dir(learned_instruction_id) / "learned_instruction.json"
 
 
 def write_trace(*, category: str, operation: str, payload: dict[str, Any], name_hint: Optional[str] = None) -> str:

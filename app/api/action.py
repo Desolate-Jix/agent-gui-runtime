@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import uuid
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
@@ -14,7 +15,7 @@ from app.actions.known_action_runner import run_known_action
 from app.core.action_registry import action_registry
 from app.core.input_controller import input_controller
 from app.core.ocr_service import ocr_service
-from app.core.runtime_artifacts import RuntimeTimer, write_trace
+from app.core.runtime_artifacts import RuntimeTimer, new_learned_instruction_id, write_trace
 from app.core.screenshot import screenshot_service
 from app.core.verifier import verifier
 from app.core.window_manager import window_manager
@@ -40,6 +41,11 @@ from modules.region.geometry import (
 )
 from modules.validation.counter import evaluate_counter_result as evaluate_counter_result_module
 
+try:
+    from PIL import Image
+except Exception:  # pragma: no cover - depends on optional runtime imaging support
+    Image = None  # type: ignore[assignment]
+
 router = APIRouter(prefix="/action", tags=["action"])
 
 CACHE_DIR = Path("logs/region-click-cache")
@@ -49,6 +55,9 @@ CASES_DIR.mkdir(parents=True, exist_ok=True)
 APPROVED_PLANS_DIR = Path("logs/approved-plans")
 APPROVED_PLANS_DIR.mkdir(parents=True, exist_ok=True)
 APPROVED_PLAN_TTL_SECONDS = 300
+LEARNED_INSTRUCTIONS_DIR = Path("artifacts/local-learning/instructions")
+LEARNED_INSTRUCTIONS_DIR.mkdir(parents=True, exist_ok=True)
+LEGACY_LEARNED_INSTRUCTIONS_DIR = Path("logs/learned-instructions")
 
 RegionClickPanelLocator = Callable[[Any], dict[str, Any]]
 RegionClickZoneResolver = Callable[[dict[str, Any]], dict[str, Any]]
@@ -419,6 +428,24 @@ def _approved_plan_path(approved_plan_id: str) -> Path:
     return APPROVED_PLANS_DIR / f"{safe_id}.json"
 
 
+def _learned_instruction_path(learned_instruction_id: str) -> Path:
+    safe_id = re.sub(r"[^a-zA-Z0-9_.-]+", "", learned_instruction_id)
+    if not safe_id:
+        raise ValueError("learned_instruction_id is empty or invalid")
+    return LEARNED_INSTRUCTIONS_DIR / safe_id / "learned_instruction.json"
+
+
+def _legacy_learned_instruction_path(learned_instruction_id: str) -> Path:
+    safe_id = re.sub(r"[^a-zA-Z0-9_.-]+", "", learned_instruction_id)
+    if not safe_id:
+        raise ValueError("learned_instruction_id is empty or invalid")
+    return LEGACY_LEARNED_INSTRUCTIONS_DIR / f"{safe_id}.json"
+
+
+def _instruction_learning_enabled(request: ExecuteRecognitionPlanRequest) -> bool:
+    return str(request.learning_mode or "").strip().casefold() in {"instruction", "instruction_learning"}
+
+
 def _save_approved_plan(
     *,
     request: ExecuteRecognitionPlanRequest,
@@ -519,6 +546,221 @@ def _validate_approved_plan_reuse(
     }
 
 
+def _copy_learning_file(source: Any, destination: Path, *, missing_sources: list[str]) -> Optional[str]:
+    if not source:
+        return None
+    source_path = Path(str(source))
+    if not source_path.exists() or not source_path.is_file():
+        missing_sources.append(str(source_path))
+        return None
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source_path, destination)
+    return str(destination.resolve())
+
+
+def _learning_target_bbox(plan: dict[str, Any], selected_point: dict[str, Any]) -> dict[str, int]:
+    target_bbox = _target_bbox_from_recommended(plan.get("recommended_target") or {})
+    if target_bbox is not None:
+        return target_bbox
+    x = int(selected_point.get("x", 0))
+    y = int(selected_point.get("y", 0))
+    return {"x": max(0, x - 48), "y": max(0, y - 48), "width": 96, "height": 96}
+
+
+def _crop_learning_target(
+    *,
+    source_image_path: Any,
+    destination: Path,
+    target_bbox: dict[str, int],
+    missing_sources: list[str],
+) -> Optional[str]:
+    if Image is None:
+        return None
+    if not source_image_path:
+        return None
+    source_path = Path(str(source_image_path))
+    if not source_path.exists() or not source_path.is_file():
+        missing_sources.append(str(source_path))
+        return None
+    try:
+        with Image.open(source_path) as image:
+            width, height = image.size
+            x1 = max(0, int(target_bbox["x"]))
+            y1 = max(0, int(target_bbox["y"]))
+            x2 = min(width, x1 + max(1, int(target_bbox["width"])))
+            y2 = min(height, y1 + max(1, int(target_bbox["height"])))
+            if x2 <= x1 or y2 <= y1:
+                return None
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            image.crop((x1, y1, x2, y2)).save(destination)
+            return str(destination.resolve())
+    except Exception:
+        return None
+
+
+def _persist_learned_instruction_assets(
+    *,
+    learned_instruction_id: str,
+    bundle_dir: Path,
+    image_path: str,
+    plan: dict[str, Any],
+    selected_point: dict[str, Any],
+    post_click_verification: dict[str, Any],
+) -> dict[str, Any]:
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    missing_sources: list[str] = []
+    before_path = ((post_click_verification.get("before") or {}).get("image_path"))
+    after_path = ((post_click_verification.get("after") or {}).get("image_path"))
+    diff_path = ((post_click_verification.get("diff") or {}).get("diff_image_path"))
+    target_bbox = _learning_target_bbox(plan, selected_point)
+    source_for_crop = before_path or image_path
+
+    assets = {
+        "contract_version": "learned_instruction_artifacts_v1",
+        "learned_instruction_id": learned_instruction_id,
+        "bundle_dir": str(bundle_dir.resolve()),
+        "source_image_path": _copy_learning_file(image_path, bundle_dir / "source_window.png", missing_sources=missing_sources),
+        "pre_action_image_path": _copy_learning_file(before_path, bundle_dir / "pre_action.png", missing_sources=missing_sources),
+        "post_action_image_path": _copy_learning_file(after_path, bundle_dir / "post_action.png", missing_sources=missing_sources),
+        "diff_image_path": _copy_learning_file(diff_path, bundle_dir / "post_action_diff.png", missing_sources=missing_sources),
+        "target_crop_path": _crop_learning_target(
+            source_image_path=source_for_crop,
+            destination=bundle_dir / "target_crop.png",
+            target_bbox=target_bbox,
+            missing_sources=missing_sources,
+        ),
+        "target_bbox": target_bbox,
+        "selected_click_point": selected_point,
+        "missing_sources": sorted(set(missing_sources)),
+    }
+    return assets
+
+
+def _save_learned_instruction(
+    *,
+    request: ExecuteRecognitionPlanRequest,
+    bound: Any,
+    image_path: str,
+    live_capture: Optional[dict[str, Any]],
+    plan: dict[str, Any],
+    pre_click: dict[str, Any],
+    selected_point: dict[str, Any],
+    click_result: dict[str, Any],
+    post_click_verification: dict[str, Any],
+    semantic_post_click_verification: dict[str, Any],
+    plan_trace_path: Optional[str],
+    action_trace_path: Optional[str],
+) -> dict[str, Any]:
+    learned_instruction_id = new_learned_instruction_id()
+    created_at = datetime.now(timezone.utc)
+    path = _learned_instruction_path(learned_instruction_id)
+    bundle_dir = path.parent
+    learning_artifacts = _persist_learned_instruction_assets(
+        learned_instruction_id=learned_instruction_id,
+        bundle_dir=bundle_dir,
+        image_path=image_path,
+        plan=plan,
+        selected_point=selected_point,
+        post_click_verification=post_click_verification,
+    )
+    record = {
+        "contract_version": "learned_instruction_v1",
+        "learned_instruction_id": learned_instruction_id,
+        "created_at": created_at.isoformat(),
+        "instruction": {
+            "original": request.goal,
+            "normalized": request.goal,
+        },
+        "task": request.task,
+        "app_name": request.app_name,
+        "state_hint": request.state_hint,
+        "provider_mode": request.provider_mode,
+        "top_k": request.top_k,
+        "request_metadata": request.metadata,
+        "bound_window": _bound_window_snapshot(bound),
+        "image_path": image_path,
+        "live_capture": live_capture,
+        "learning_artifacts": learning_artifacts,
+        "recognition_plan": plan,
+        "recognition_plan_trace_path": plan_trace_path,
+        "action_trace_path": action_trace_path,
+        "pre_click_decision": pre_click,
+        "selected_click_point": selected_point,
+        "click_result": click_result,
+        "post_click_verification": post_click_verification,
+        "semantic_post_click_verification": semantic_post_click_verification,
+        "reuse_policy": {
+            "mode": "same_window_exact",
+            "match_goal": True,
+            "match_app_name": True,
+            "match_window_handle": True,
+            "match_window_size": True,
+            "fallback_to_model": True,
+        },
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {
+        "learned_instruction_id": learned_instruction_id,
+        "learned_instruction_path": str(path.resolve()),
+        "learned_instruction_bundle_dir": str(path.parent.resolve()),
+        "learned_instruction_artifacts": learning_artifacts,
+        "learning_mode": "instruction",
+    }
+
+
+def _load_learned_instruction(learned_instruction_id: str) -> dict[str, Any]:
+    path = _learned_instruction_path(learned_instruction_id)
+    if not path.exists():
+        path = _legacy_learned_instruction_path(learned_instruction_id)
+    if not path.exists():
+        raise ValueError(f"learned_instruction_id not found: {learned_instruction_id}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or payload.get("contract_version") != "learned_instruction_v1":
+        raise ValueError("learned instruction has an invalid contract")
+    return payload
+
+
+def _validate_learned_instruction_reuse(
+    *,
+    request: ExecuteRecognitionPlanRequest,
+    bound: Any,
+    record: dict[str, Any],
+    selected_point: dict[str, Any],
+) -> dict[str, Any]:
+    instruction = record.get("instruction") if isinstance(record.get("instruction"), dict) else {}
+    if request.goal != instruction.get("original"):
+        raise ValueError("learned_instruction_goal_mismatch")
+    if request.app_name and record.get("app_name") and request.app_name != record.get("app_name"):
+        raise ValueError("learned_instruction_app_mismatch")
+
+    current_window = _bound_window_snapshot(bound)
+    learned_window = record.get("bound_window") if isinstance(record.get("bound_window"), dict) else {}
+    if int(current_window.get("handle") or 0) != int(learned_window.get("handle") or 0):
+        raise ValueError("learned_instruction_window_handle_mismatch")
+
+    current_rect = current_window.get("rect") or {}
+    learned_rect = learned_window.get("rect") or {}
+    current_size = {"width": int(current_rect.get("width") or 0), "height": int(current_rect.get("height") or 0)}
+    learned_size = {"width": int(learned_rect.get("width") or 0), "height": int(learned_rect.get("height") or 0)}
+    if current_size != learned_size:
+        raise ValueError("learned_instruction_window_size_mismatch")
+
+    if not _point_in_rect(selected_point, {"x": 0, "y": 0, "width": current_size["width"] - 1, "height": current_size["height"] - 1}):
+        raise ValueError("learned_instruction_point_outside_window")
+
+    return {
+        "contract_version": "learned_instruction_reuse_validation_v1",
+        "learned_instruction_id": record.get("learned_instruction_id"),
+        "valid": True,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "reuse_policy": record.get("reuse_policy"),
+        "current_window": current_window,
+        "learned_window": learned_window,
+        "selected_click_point": selected_point,
+    }
+
+
 @router.post("/execute_recognition_plan", response_model=APIResponse)
 def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIResponse:
     timer = RuntimeTimer()
@@ -538,6 +780,86 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             error=ErrorModel(code="approved_plan_dry_run_not_allowed", details="First create the approved plan with dry_run=true, then reuse it with dry_run=false"),
         )
 
+    if request.approved_plan_id and request.learned_instruction_id:
+        timings = timer.to_dict()
+        return APIResponse(
+            success=False,
+            message="Only one reuse source can be selected",
+            data={"approved_plan_id": request.approved_plan_id, "learned_instruction_id": request.learned_instruction_id, "timings": timings},
+            error=ErrorModel(code="reuse_source_conflict", details="Use either approved_plan_id or learned_instruction_id, not both"),
+        )
+
+    learned_instruction_reuse_validation: dict[str, Any] | None = None
+    learned_record: dict[str, Any] | None = None
+    if request.learned_instruction_id:
+        if bound is None:
+            timings = timer.to_dict()
+            return APIResponse(
+                success=False,
+                message="No bound window is currently available",
+                data={"timings": timings},
+                error=ErrorModel(
+                    code="no_bound_window",
+                    details="Bind the target window before reusing a learned instruction",
+                ),
+            )
+        try:
+            with timer.step("load_learned_instruction"):
+                learned_record = _load_learned_instruction(request.learned_instruction_id)
+            plan = learned_record["recognition_plan"]
+            pre_click = learned_record.get("pre_click_decision") or {}
+            selected_point = learned_record.get("selected_click_point")
+            if not isinstance(selected_point, dict):
+                raise ValueError("learned_instruction_missing_selected_click_point")
+            with timer.step("validate_learned_instruction_reuse"):
+                learned_instruction_reuse_validation = _validate_learned_instruction_reuse(
+                    request=request,
+                    bound=bound,
+                    record=learned_record,
+                    selected_point=selected_point,
+                )
+            image_path = str(learned_record.get("image_path") or "")
+            live_capture = learned_record.get("live_capture") if isinstance(learned_record.get("live_capture"), dict) else None
+            plan_trace_path = learned_record.get("recognition_plan_trace_path") or plan.get("trace_path")
+            overlay = None
+        except Exception as exc:
+            timings = timer.to_dict()
+            trace_path = write_trace(
+                category="actions",
+                operation="execute_recognition_plan",
+                payload={
+                    "success": False,
+                    "request": request.model_dump(),
+                    "learned_instruction_id": request.learned_instruction_id,
+                    "failure_reason": "learned_instruction_reuse_failed",
+                    "error": str(exc),
+                    "timings": timings,
+                },
+                name_hint=request.app_name or "recognition_plan",
+            )
+            return APIResponse(
+                success=False,
+                message="Learned instruction could not be reused",
+                data={"trace_path": trace_path, "learned_instruction_id": request.learned_instruction_id, "timings": timings},
+                error=ErrorModel(code="learned_instruction_reuse_failed", details=str(exc)),
+            )
+        execution_path = {
+            "vision_model_used": False,
+            "page_structure_used": False,
+            "candidate_rank_used": False,
+            "narrow_search_used": False,
+            "pre_click_decision_used": True,
+            "post_click_verification_used": bool(request.enable_post_click_verification and not request.dry_run),
+            "coordinate_source": "learned_instruction_v1.selected_click_point",
+            "selection_source": "learned_instruction_v1",
+            "approved_plan_reused": False,
+            "recognition_plan_reused": True,
+            "instruction_learning_reused": True,
+            "action_executed": False,
+            "dry_run": bool(request.dry_run),
+            "retry_policy_used": True,
+            "max_execution_attempts": int(request.max_execution_attempts),
+        }
     approval_reuse_validation: dict[str, Any] | None = None
     if request.approved_plan_id:
         if bound is None:
@@ -607,7 +929,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             "retry_policy_used": True,
             "max_execution_attempts": int(request.max_execution_attempts),
         }
-    else:
+    elif not request.learned_instruction_id:
         if request.capture_live:
             if bound is None:
                 timings = timer.to_dict()
@@ -745,6 +1067,10 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         "selected_click_point": selected_point,
         "approved_plan_id": request.approved_plan_id,
         "approved_plan_reuse_validation": approval_reuse_validation,
+        "learned_instruction_id": request.learned_instruction_id,
+        "learning_mode": request.learning_mode,
+        "learned_instruction_reuse_validation": learned_instruction_reuse_validation,
+        "learned_instruction_artifacts": (learned_record.get("learning_artifacts") if isinstance(learned_record, dict) else None),
         "execution_path": execution_path,
     }
 
@@ -923,6 +1249,25 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 },
             ),
         )
+
+    if _instruction_learning_enabled(request) and bound is not None and not request.learned_instruction_id:
+        with timer.step("save_learned_instruction"):
+            learning_record = _save_learned_instruction(
+                request=request,
+                bound=bound,
+                image_path=image_path,
+                live_capture=live_capture,
+                plan=plan,
+                pre_click=pre_click,
+                selected_point=selected_point,
+                click_result=click_result,
+                post_click_verification=post_click_verification,
+                semantic_post_click_verification=semantic_post_click_verification,
+                plan_trace_path=plan_trace_path,
+                action_trace_path=base_result.get("trace_path"),
+            )
+        base_result.update(learning_record)
+        attach_timings(base_result)
 
     data = ActionResultData(action="execute_recognition_plan", result=base_result)
     return APIResponse(success=True, message="Recognition-plan click executed and verified", data=data.model_dump(), error=None)

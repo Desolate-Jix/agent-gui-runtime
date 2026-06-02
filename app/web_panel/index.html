@@ -1,0 +1,480 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>agent-gui-runtime panel</title>
+    <link rel="stylesheet" href="/panel/assets/panel.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">AG</div>
+          <div>
+            <h1>agent-gui-runtime</h1>
+            <p id="runtimeState">checking runtime</p>
+          </div>
+        </div>
+        <div class="language-row">
+          <span data-i18n="language">Language</span>
+          <div class="language-toggle" role="group" aria-label="Language">
+            <button type="button" class="language-option" data-language="zh-CN">中文</button>
+            <button type="button" class="language-option" data-language="en-US">EN</button>
+          </div>
+        </div>
+        <nav class="stage-nav" aria-label="Workflow stages">
+          <button class="stage active" data-stage="open_bind" data-i18n="nav_open_bind">Open / Bind</button>
+          <button class="stage" data-stage="capture" data-i18n="nav_capture">Capture</button>
+          <button class="stage" data-stage="observe" data-i18n="nav_observe">Observe</button>
+          <button class="stage" data-stage="locate" data-i18n="nav_locate">Locate</button>
+          <button class="stage" data-stage="execute" data-i18n="nav_execute">Click Gate</button>
+          <button class="stage" data-stage="input" data-i18n="nav_input">Input</button>
+          <button class="stage" data-stage="trace" data-i18n="nav_trace">Trace</button>
+        </nav>
+        <div class="side-actions">
+          <button id="healthBtn" data-i18n="health">Health</button>
+          <button class="stage" data-stage="model_test" data-i18n="nav_models">Models</button>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <!-- Flow diagram: ALL stages visible from start, completed ones change color -->
+        <section class="flow-diagram-strip" aria-label="Request flow diagram">
+          <div class="flow-strip-head">
+            <h3 data-i18n="action_path_graph">Flow Diagram</h3>
+            <span id="graphMeta">trace stages</span>
+          </div>
+          <svg id="flowDiagram" viewBox="0 0 960 72" role="img" aria-label="Request flow diagram" preserveAspectRatio="xMidYMid meet"></svg>
+        </section>
+
+        <section class="topbar">
+          <div>
+            <h2 id="stageTitle">Open / Bind</h2>
+            <p id="stageSubtitle">Open software, refresh the window dropdown, and bind the target window</p>
+          </div>
+          <div class="status-pill" id="requestStatus">idle</div>
+        </section>
+
+        <section class="content-grid">
+          <div class="control-surface">
+            <section class="panel stage-page" data-page="model_test">
+              <h3 data-i18n="model_test_title">Model Test</h3>
+              <div class="form-grid">
+                <label>
+                  <span data-i18n="profile">Profile</span>
+                  <select id="modelTestProfile"></select>
+                </label>
+                <label>
+                  <span data-i18n="model_stage">Stage</span>
+                  <select id="modelTestStage">
+                    <option value="observe">observe</option>
+                    <option value="locate">locate</option>
+                  </select>
+                </label>
+                <label class="checkline">
+                  <input id="modelTestUseImage" type="checkbox" checked />
+                  <span data-i18n="model_test_use_image">Attach current image</span>
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="model_test_image_path">Image path</span>
+                  <input id="modelTestImagePath" placeholder="optional; defaults to current screenshot" />
+                </label>
+              </div>
+              <label class="wide-label">
+                <span data-i18n="model_test_prompt">Prompt</span>
+                <textarea id="modelTestPrompt" rows="4">Describe this interface. What can the user do here? List the main interactive elements.</textarea>
+              </label>
+              <div class="button-row">
+                <button id="modelTestSendBtn" data-i18n="model_test_send">Send</button>
+              </div>
+              <div class="model-test-response" id="modelTestResponse">
+                <p class="trace-idle">Send a prompt to see the model response</p>
+              </div>
+            </section>
+
+            <section class="panel stage-page active" data-page="open_bind">
+              <h3 data-i18n="open_bind">Open / Bind</h3>
+              <div class="form-grid">
+                <label>
+                  <span data-i18n="app_id">App ID</span>
+                  <input id="appId" value="edge" />
+                </label>
+                <label>
+                  <span data-i18n="url">URL</span>
+                  <input id="appUrl" value="https://www.mousetester.cn" />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="window_candidates">Open windows</span>
+                  <select id="windowSelect"></select>
+                </label>
+                <label>
+                  <span data-i18n="process_name">Process name</span>
+                  <input id="bindProcess" value="msedge.exe" />
+                </label>
+                <label>
+                  <span data-i18n="title_contains">Title contains</span>
+                  <input id="bindTitle" value="MouseTester" />
+                </label>
+              </div>
+              <div class="button-row">
+                <button id="listAppsBtn" data-i18n="list_apps">List apps</button>
+                <button id="openAppBtn" data-i18n="open_app">Open app</button>
+                <button id="listWindowsBtn" data-i18n="list_windows">List windows</button>
+                <button id="bindWindowBtn" data-i18n="bind_window">Bind window</button>
+              </div>
+            </section>
+
+            <section class="panel stage-page" data-page="capture">
+              <h3 data-i18n="screenshot_saved_image">Screenshot and Saved Image</h3>
+              <div class="form-grid">
+                <label>
+                  <span data-i18n="image_path">Image path</span>
+                  <input id="imagePath" value="" placeholder="capture or upload an image" />
+                </label>
+                <label>
+                  <span>ROI X</span>
+                  <input id="roiX" type="number" min="0" value="" />
+                </label>
+                <label>
+                  <span>ROI Y</span>
+                  <input id="roiY" type="number" min="0" value="" />
+                </label>
+                <label>
+                  <span>ROI W</span>
+                  <input id="roiW" type="number" min="1" value="" />
+                </label>
+                <label>
+                  <span>ROI H</span>
+                  <input id="roiH" type="number" min="1" value="" />
+                </label>
+                <label class="checkline">
+                  <input id="captureSave" type="checkbox" checked />
+                  <span data-i18n="save_screenshot">Save screenshot</span>
+                </label>
+              </div>
+              <div class="button-row">
+                <button id="captureBtn" data-i18n="capture_bound_window">Capture bound window</button>
+                <button id="useImagePathBtn" data-i18n="use_image_path">Use image path</button>
+              </div>
+              <div id="dropZone" class="drop-zone">
+                <input id="imageFile" type="file" accept="image/*" />
+                <span data-i18n="drop_image">Drop or choose a screenshot image</span>
+              </div>
+            </section>
+
+            <section class="panel stage-page" data-page="observe">
+              <h3 data-i18n="observe_screen">Observe Screen</h3>
+              <div class="form-grid">
+                <label>
+                  <span data-i18n="app_name">App name</span>
+                  <input id="observeApp" value="MouseTesterWeb" />
+                </label>
+                <label>
+                  <span data-i18n="state_hint">State hint</span>
+                  <input id="observeState" value="MouseTester main page" />
+                </label>
+                <label>
+                  <span data-i18n="model_profile">Model profile</span>
+                  <select id="observeModelProfile"></select>
+                </label>
+                <label>
+                  <span data-i18n="provider_mode">Provider mode</span>
+                  <input id="observeProvider" value="local" />
+                </label>
+                <label class="checkline">
+                  <input id="observeLive" type="checkbox" checked />
+                  <span data-i18n="capture_live">Capture live</span>
+                </label>
+              </div>
+              <label class="wide-label">
+                <span data-i18n="observe_prompt">Observe prompt rules</span>
+                <textarea id="observePrompt" rows="7">Screen-understanding stage only:
+- Explain the interface purpose briefly in screen_summary.
+- Make state_guess the best concise hint to pass into the next precise localization state_hint field, for example top navigation bar, job results list, chat title bar, left sidebar, settings dialog, or main content list.
+- Return a compact index of independently clickable controls: navigation, buttons, icon-only buttons, tabs, inputs, toggles, menus, and title-bar controls.
+- Include small or uncertain icon controls with lower confidence rather than long explanations.
+- Keep every label and likely action short; this is a fast discovery pass before precise localization.
+- OCR coordinates are reference-only input: do not repeat OCR boxes, anchor relations, or detailed grounding evidence in the response.
+- This stage describes available actions for agent planning; it must not choose or execute a click.</textarea>
+              </label>
+              <div class="button-row">
+                <button id="observeBtn" data-i18n="observe_screen">Observe screen</button>
+                <button id="analyzeBtn" data-i18n="analyze_api">API direct analyze</button>
+                <button id="applyObserveModelBtn" data-i18n="apply_model_profile">Apply profile</button>
+                <button id="startObserveModelBtn" data-i18n="start_model">Start model</button>
+                <button id="stopObserveModelBtn" data-i18n="stop_model">Stop model</button>
+                <button id="testObserveModelBtn" data-i18n="test_model">Check model service</button>
+              </div>
+            </section>
+
+            <section class="panel stage-page" data-page="locate">
+              <h3 data-i18n="locate_target">Locate Target</h3>
+              <div class="form-grid">
+                <label>
+                  <span data-i18n="goal">Goal</span>
+                  <input id="locateGoal" value="点击此处测试" />
+                </label>
+                <label>
+                  <span data-i18n="app_name">App name</span>
+                  <input id="locateApp" value="MouseTesterWeb" />
+                </label>
+                <label>
+                  <span data-i18n="state_hint">State hint</span>
+                  <input id="locateState" value="MouseTester main page" />
+                </label>
+                <label>
+                  <span data-i18n="model_profile">Model profile</span>
+                  <select id="locateModelProfile"></select>
+                </label>
+                <label>
+                  <span data-i18n="top_k">Top K</span>
+                  <input id="locateTopK" type="number" min="1" max="20" value="5" />
+                </label>
+                <label class="checkline">
+                  <input id="locateLive" type="checkbox" checked />
+                  <span data-i18n="capture_live">Capture live</span>
+                </label>
+              </div>
+              <label class="wide-label">
+                <span data-i18n="locate_prompt">Locate prompt rules</span>
+                <textarea id="locatePrompt" rows="9">Precision-localization stage only:
+- Locate only the target named in goal; do not enumerate unrelated controls.
+- First decide whether the clickable target is visual-only or includes visible text.
+- Case A, visual-only icon: set text_inclusion_policy="exclude_text"; use nearby OCR boxes only as boundary rulers and negative constraints. The final diagonal must tightly cover the icon pixels, never the nearby label.
+- Case B, text-bearing control: set text_inclusion_policy="include_referenced_text"; the final diagonal must include the referenced OCR text boxes and the visible clickable control surface.
+- Select the nearest useful top, bottom, left, and right OCR anchors when available. Use them to form text_anchor_frame and anchor_relations before choosing coordinates.
+- Justify all four final bbox edges in grounding_constraints.edge_constraints. Also provide center_constraints, size_constraints, negative_constraints, and final_bbox_reason.
+- For small toolbar or navigation icons, prefer a tight box around the visible shape and reject boxes that drift into adjacent labels or neighboring controls.
+- If multiple visual candidates remain plausible, keep confidence lower and state the ambiguity; do not invent a precise target.</textarea>
+              </label>
+              <div class="button-row">
+                <button id="locateBtn" data-i18n="locate_target">Locate target</button>
+                <button id="overlayBtn" data-i18n="render_overlay">Render overlay</button>
+                <button id="applyLocateModelBtn" data-i18n="apply_model_profile">Apply profile</button>
+                <button id="startLocateModelBtn" data-i18n="start_model">Start model</button>
+                <button id="stopLocateModelBtn" data-i18n="stop_model">Stop model</button>
+                <button id="testLocateModelBtn" data-i18n="test_model">Check model service</button>
+              </div>
+              <div class="subpanel">
+                <h4 data-i18n="manual_box">Candidate box review</h4>
+                <div class="form-grid">
+                  <label>
+                    <span>BBox X</span>
+                    <input id="bboxX" type="number" min="0" value="" />
+                  </label>
+                  <label>
+                    <span>BBox Y</span>
+                    <input id="bboxY" type="number" min="0" value="" />
+                  </label>
+                  <label>
+                    <span>BBox W</span>
+                    <input id="bboxW" type="number" min="1" value="" />
+                  </label>
+                  <label>
+                    <span>BBox H</span>
+                    <input id="bboxH" type="number" min="1" value="" />
+                  </label>
+                  <label>
+                    <span data-i18n="label">Label</span>
+                    <input id="reviewLabel" value="target" />
+                  </label>
+                </div>
+                <div class="button-row">
+                  <button id="manualBoxBtn" data-i18n="manual_box_button">Generate candidate box</button>
+                  <button id="previewBoxBtn" data-i18n="preview_box">Preview box</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel stage-page" data-page="input">
+              <h3 data-i18n="type_text">Type Text</h3>
+              <div class="form-grid">
+                <label>
+                  <span data-i18n="text">Text</span>
+                  <input id="typeTextValue" value="ai 最新进展" />
+                </label>
+                <label>
+                  <span>X</span>
+                  <input id="typeX" type="number" min="0" value="" />
+                </label>
+                <label>
+                  <span>Y</span>
+                  <input id="typeY" type="number" min="0" value="" />
+                </label>
+                <label class="checkline">
+                  <input id="typeClickFirst" type="checkbox" />
+                  <span data-i18n="click_before_typing">Click before typing</span>
+                </label>
+                <label class="checkline">
+                  <input id="typeClear" type="checkbox" />
+                  <span data-i18n="clear_existing">Clear existing</span>
+                </label>
+                <label class="checkline">
+                  <input id="typeSubmit" type="checkbox" />
+                  <span data-i18n="submit_enter">Submit Enter</span>
+                </label>
+                <label class="checkline">
+                  <input id="typeDryRun" type="checkbox" checked />
+                  <span data-i18n="dry_run">Dry run</span>
+                </label>
+              </div>
+              <div class="button-row">
+                <button id="typeTextBtn" data-i18n="type_text">Type text</button>
+              </div>
+            </section>
+
+            <section class="panel stage-page" data-page="trace" style="max-width:none;">
+              <h3 data-i18n="nav_trace">Trace Inspector</h3>
+              <div class="form-grid">
+                <label class="wide-control">
+                  <span data-i18n="trace_file">Trace file</span>
+                  <div style="display:flex;gap:6px;">
+                    <select id="traceFileSelect" style="flex:1;min-width:0;">
+                      <option value="">-- auto latest --</option>
+                    </select>
+                    <button id="refreshTracesBtn" title="Refresh trace list">Refresh</button>
+                    <button id="openTraceFolderBtn" title="Open trace folder">Open</button>
+                  </div>
+                </label>
+              </div>
+              <div class="trace-detail" id="traceDetail">
+                <p class="trace-idle">Select a trace file or run an API request to auto-load the latest trace</p>
+              </div>
+            </section>
+
+            <section class="panel stage-page" data-page="execute">
+              <h3 data-i18n="execute_recognition_plan">Execute Recognition Plan</h3>
+              <div class="form-grid">
+                <label>
+                  <span data-i18n="goal">Goal</span>
+                  <input id="executeGoal" value="点击此处测试" />
+                </label>
+                <label>
+                  <span data-i18n="app_name">App name</span>
+                  <input id="executeApp" value="MouseTesterWeb" />
+                </label>
+                <label>
+                  <span data-i18n="approved_plan_id">Approved plan ID</span>
+                  <input id="approvedPlanId" value="" />
+                </label>
+                <label>
+                  <span data-i18n="learned_instruction_id">Learned instruction ID</span>
+                  <input id="learnedInstructionId" value="" />
+                </label>
+                <label>
+                  <span>Point X</span>
+                  <input id="pointX" type="number" min="0" value="" />
+                </label>
+                <label>
+                  <span>Point Y</span>
+                  <input id="pointY" type="number" min="0" value="" />
+                </label>
+                <label class="checkline">
+                  <input id="dryRun" type="checkbox" checked />
+                  <span data-i18n="dry_run">Dry run</span>
+                </label>
+                <label class="checkline">
+                  <input id="learningMode" type="checkbox" />
+                  <span data-i18n="instruction_learning">Instruction learning</span>
+                </label>
+              </div>
+              <div class="button-row">
+                <button id="dryRunBtn" data-i18n="dry_run_plan">Dry-run plan</button>
+                <button id="executeBtn" class="danger" data-i18n="execute_gated_click">Execute gated click</button>
+                <button id="confirmedDryRunBtn" data-i18n="confirmed_point_dry_run">Confirmed point dry-run</button>
+                <button id="confirmedClickBtn" class="danger" data-i18n="execute_confirmed_point">Execute confirmed point</button>
+              </div>
+            </section>
+            <!-- Navigation path graph: multi-click page transition web -->
+            <section class="panel nav-path-panel" id="navPathPanel">
+              <div class="panel-heading">
+                <h3 data-i18n="path_graph_title">Navigation Path</h3>
+              </div>
+              <div class="path-toolbar">
+                <div class="path-toolbar-left">
+                  <select id="pathHistorySelect" class="path-history-select" title="Select saved path">
+                    <option value="">-- live session --</option>
+                  </select>
+                  <span class="path-app-label" id="pathAppLabel"></span>
+                </div>
+                <div class="path-toolbar-center">
+                  <button id="pathZoomOutBtn" title="Zoom out">-</button>
+                  <span class="path-zoom-label" id="pathZoomLabel">100%</span>
+                  <button id="pathZoomInBtn" title="Zoom in">+</button>
+                  <button id="pathZoomResetBtn" title="Reset zoom">Reset</button>
+                </div>
+                <div class="path-toolbar-right">
+                  <button class="path-save-btn" id="savePathBtn" data-i18n="save_path">Save Path</button>
+                  <button class="path-folder-btn" id="openPathFolderBtn" title="Open path save folder">Open</button>
+                </div>
+              </div>
+              <div class="path-canvas-wrap" id="pathCanvasWrap">
+                <canvas id="navPathCanvas" aria-label="Navigation path graph"></canvas>
+                <div class="path-empty-overlay" id="pathEmptyOverlay" data-i18n="path_empty_hint">Observe a screen to start building the navigation path</div>
+              </div>
+            </section>
+          </div>
+
+          <aside class="response-surface">
+            <section class="panel preview-panel">
+              <div class="panel-heading">
+                <h3 data-i18n="screenshot_preview">Screenshot Preview</h3>
+                <span id="previewMeta">no image</span>
+              </div>
+              <div class="image-preview" id="imagePreview">
+                <img id="previewImage" alt="" />
+                <div id="bboxOverlay" class="bbox-overlay"></div>
+              </div>
+            </section>
+            <section class="panel path-detail-panel" id="pathDetailPanel">
+              <div class="panel-heading">
+                <h3 data-i18n="nav_path_detail">Page Detail</h3>
+                <span id="pathDetailMeta"></span>
+              </div>
+              <div id="pathDetailContent">
+                <p class="path-detail-empty" data-i18n="path_detail_empty">Click a page node in the navigation path to view its observe summary</p>
+              </div>
+            </section>
+            <section class="panel response-panel">
+              <div class="panel-heading">
+                <h3 data-i18n="api_response">API Response</h3>
+                <button id="copyResponseBtn" data-i18n="copy">Copy</button>
+              </div>
+              <pre id="responseText">{}</pre>
+            </section>
+            <section class="panel trace-full-view" id="traceFullView" style="display:none;">
+              <div class="panel-heading">
+                <h3>Trace Flow</h3>
+                <span id="traceFullMeta"></span>
+              </div>
+              <div id="traceFullContent">
+                <p class="trace-idle">Select a trace file to inspect</p>
+              </div>
+            </section>
+          </aside>
+        </section>
+      </main>
+    </div>
+    <!-- Save-As dialog -->
+    <div class="save-as-overlay" id="saveAsOverlay" style="display:none">
+      <div class="save-as-dialog">
+        <h3 data-i18n="save_path_as">Save Path As</h3>
+        <label>
+          <span data-i18n="save_file_name">File name</span>
+          <div class="save-as-input-row">
+            <input id="saveAsFileName" type="text" placeholder="my_app_path_graph" />
+            <span class="save-as-ext">.json</span>
+          </div>
+        </label>
+        <p class="save-as-folder" id="saveAsFolder">artifacts/path-graphs/</p>
+        <div class="save-as-actions">
+          <button id="saveAsCancelBtn" data-i18n="cancel">Cancel</button>
+          <button id="saveAsConfirmBtn" class="primary" data-i18n="save">Save</button>
+        </div>
+      </div>
+    </div>
+    <script src="/panel/assets/panel.js"></script>
+  </body>
+</html>
+

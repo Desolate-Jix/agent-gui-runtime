@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.core.model_server import check_model_server, ensure_model_server, load_model_profiles, profile_for_stage
+from app.core.model_server import check_model_server, ensure_model_server, load_model_profiles, profile_for_stage, stop_model_server
 from app.core.runtime_artifacts import RuntimeTimer, write_trace
 from app.models.request import ModelServerRequest, RuntimePrepareRequest
 from app.models.response import APIResponse, ErrorModel
@@ -61,6 +61,47 @@ def start_model(request: ModelServerRequest) -> APIResponse:
             message="Model server start failed",
             data={"trace_path": trace_path, "timings": timings},
             error=ErrorModel(code="model_server_start_failed", details=str(exc)),
+        )
+
+
+@router.post("/models/stop", response_model=APIResponse)
+def stop_model(request: ModelServerRequest) -> APIResponse:
+    """Stop the local vision model profile for a stage when possible."""
+    timer = RuntimeTimer()
+    try:
+        with timer.step("resolve_model_profile", stage=request.stage, profile_id=request.profile_id):
+            profile = profile_for_stage(request.stage, request.profile_id)
+        with timer.step("stop_model_server", stage=request.stage, profile_id=profile.get("profile_id")):
+            result = stop_model_server(profile)
+        result["stage"] = request.stage
+        result["timings"] = timer.to_dict()
+        result["trace_path"] = write_trace(
+            category="runtime",
+            operation="stop_model",
+            payload={"success": result.get("returncode") == 0, "request": request.model_dump(), "result": result},
+            name_hint=request.stage,
+        )
+        if result.get("returncode") != 0:
+            return APIResponse(
+                success=False,
+                message="Model server stop failed",
+                data=result,
+                error=ErrorModel(code="model_server_stop_failed", details=result.get("stderr")),
+            )
+        return APIResponse(success=True, message="Model server stop completed", data=result, error=None)
+    except Exception as exc:
+        timings = timer.to_dict()
+        trace_path = write_trace(
+            category="runtime",
+            operation="stop_model",
+            payload={"success": False, "request": request.model_dump(), "error": str(exc), "timings": timings},
+            name_hint=request.stage,
+        )
+        return APIResponse(
+            success=False,
+            message="Model server stop failed",
+            data={"trace_path": trace_path, "timings": timings},
+            error=ErrorModel(code="model_server_stop_failed", details=str(exc)),
         )
 
 
