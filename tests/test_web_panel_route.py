@@ -22,6 +22,19 @@ def test_web_panel_serves_browser_control_surface() -> None:
     assert 'class="language-toggle"' in response.text
     assert 'data-language="zh-CN"' in response.text
     assert 'id="windowSelect"' in response.text
+    assert 'id="appId" value=""' in response.text
+    assert 'id="appUrl" value=""' in response.text
+    assert 'id="observeApp" value=""' in response.text
+    assert 'id="observeState" value=""' in response.text
+    assert 'id="locateApp" value=""' in response.text
+    assert 'id="locateState" value=""' in response.text
+    assert 'id="executeApp" value=""' in response.text
+    assert 'id="pointX" type="number"' in response.text
+    assert 'id="pointY" type="number"' in response.text
+    assert 'id="dryRunBtn" data-i18n="plan_click_preview"' in response.text
+    assert 'id="executeBtn" class="danger" data-i18n="plan_execute_click"' in response.text
+    assert 'id="confirmedDryRunBtn" data-i18n="point_click_preview"' in response.text
+    assert 'id="confirmedClickBtn" class="danger" data-i18n="point_execute_click"' in response.text
     assert 'id="observeModelProfile"' in response.text
     assert 'id="locateModelProfile"' in response.text
     assert 'id="modelTestSendBtn"' in response.text
@@ -61,6 +74,21 @@ def test_web_panel_serves_static_assets() -> None:
     assert "applyLanguage" in response.text
     assert "setWindowCandidates" in response.text
     assert "testModelService" in response.text
+    assert "ensureStageModelReady" in response.text
+    assert "panel_model_action_v1" in response.text
+    assert "waitControl?.checked" in response.text
+    assert "syncAppAndStateFields" in response.text
+    assert "appNameFromWindow" in response.text
+    assert "appIdFromProcessName" in response.text
+    assert "Plan Click Preview" in response.text
+    assert "Point execute click" in response.text
+    assert "BROWSER_APP_IDS" in response.text
+    assert "appNameFromUrl" in response.text
+    assert "MouseTesterWeb" in response.text
+    assert "stripBrowserTitleSuffix" in response.text
+    assert "canonicalAppNameFromTitle" in response.text
+    assert "stateHintFromWindow" in response.text
+    assert "syncWindowAppAndState" in response.text
     assert "markWorkflow" in response.text
     assert "roiPayload" in response.text
     assert "callAnalyzeApi" in response.text
@@ -113,6 +141,33 @@ def test_web_panel_file_rejects_outside_paths() -> None:
     response = client.get("/panel/file", params={"path": "C:/Windows/win.ini"})
 
     assert response.status_code == 404
+
+
+def test_web_panel_trace_list_filters_pytest_temp_traces(tmp_path, monkeypatch) -> None:
+    client = TestClient(app)
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    trace_dir = tmp_path / "logs" / "traces" / "vision"
+    trace_dir.mkdir(parents=True)
+    normal_trace = trace_dir / "normal.json"
+    test_trace = trace_dir / "pytest-temp.json"
+    normal_trace.write_text(
+        json.dumps({"success": True, "result": {"image_path": r"D:\agent-gui-runtime\artifacts\screenshots\capture.png"}}),
+        encoding="utf-8",
+    )
+    test_trace.write_text(
+        json.dumps({"success": True, "result": {"image_path": r"C:\Users\me\AppData\Local\Temp\pytest-of-me\case\capture.png"}}),
+        encoding="utf-8",
+    )
+
+    response = client.get("/panel/list_traces")
+
+    assert response.status_code == 200
+    names = [item["name"] for item in response.json()["data"]["traces"]]
+    assert names == ["normal.json"]
+
+    with_tests = client.get("/panel/list_traces", params={"include_tests": "true"})
+    names_with_tests = {item["name"] for item in with_tests.json()["data"]["traces"]}
+    assert names_with_tests == {"normal.json", "pytest-temp.json"}
 
 
 def test_web_panel_renders_manual_candidate_box() -> None:
@@ -203,9 +258,21 @@ def test_web_panel_inspects_trace_result_by_stage(tmp_path) -> None:
                     },
                     "candidate_result": {
                         "summary": {"returned_count": 1, "has_recommendation": True},
-                        "candidates": [{"label": "Start"}],
+                        "candidates": [{"label": "Start", "element": {"bbox": {"x": 10, "y": 20, "w": 30, "h": 40}}}],
                     },
-                    "pre_click_decision": {"allowed": False, "reasons": ["blocked"]},
+                    "pre_click_decision": {
+                        "allowed": False,
+                        "reasons": ["no_candidate_passed_pre_click_checks"],
+                        "summary": {"candidate_count": 1, "allowed_candidate_count": 0},
+                        "candidate_decisions": [
+                            {
+                                "candidate_id": "candidate_start",
+                                "allowed": False,
+                                "click_point": {"x": 25, "y": 40},
+                                "reasons": ["interaction_policy_blocked", "precision_text_target_requires_confirmation"],
+                            }
+                        ],
+                    },
                     "execution_path": {"vision_provider_used": "dummy", "action_executed": False},
                     "timings": {"total_ms": 12, "steps": [{"name": "ocr", "elapsed_ms": 4}]},
                 },
@@ -224,6 +291,8 @@ def test_web_panel_inspects_trace_result_by_stage(tmp_path) -> None:
     assert data["ocr_count"] == 1
     assert data["candidates"] == 1
     assert data["gate_allowed"] is False
+    assert "no_candidate_passed_pre_click_checks" in data["gate_reason"]
+    assert "interaction_policy_blocked" in data["gate_reason"]
     assert [stage["id"] for stage in data["flow_stages"]] == [
         "goal",
         "capture",
@@ -235,6 +304,66 @@ def test_web_panel_inspects_trace_result_by_stage(tmp_path) -> None:
         "timings",
     ]
     assert data["flow_stages"][2]["raw"]["matches"][0]["text"] == "Start"
+    assert data["sections"]["candidates"]["image_path"] == "artifacts/capture.png"
+    assert data["sections"]["gate"]["image_path"] == "artifacts/capture.png"
+
+
+def test_web_panel_inspects_locate_trace_nested_plan_ocr_and_visuals(tmp_path) -> None:
+    client = TestClient(app)
+    trace_path = tmp_path / "locate-trace.json"
+    image_path = str(tmp_path / "capture.png")
+    trace_path.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "request": {"goal": "click news", "app_name": "steam", "provider_mode": "local_grounding"},
+                "result": {
+                    "contract_version": "target_location_v1",
+                    "image_path": image_path,
+                    "located_point": {"x": 334, "y": 94},
+                    "located_bbox": {"x": 300, "y": 80, "w": 60, "h": 30},
+                    "recognition_plan": {
+                        "image_path": image_path,
+                        "parse_result": {
+                            "ocr_result": {"matches": [{"text": "News"}], "metadata": {"match_count": 1}},
+                            "vision_regions": {"regions": [{"label": "news card"}]},
+                        },
+                        "candidate_result": {
+                            "summary": {"returned_count": 1, "has_recommendation": True},
+                            "candidates": [
+                                {
+                                    "candidate_id": "candidate_news",
+                                    "element": {"bbox": {"x": 300, "y": 80, "w": 60, "h": 30}},
+                                }
+                            ],
+                        },
+                        "pre_click_decision": {
+                            "allowed": False,
+                            "reasons": ["no_candidate_passed_pre_click_checks"],
+                            "candidate_decisions": [
+                                {"candidate_id": "candidate_news", "allowed": False, "reasons": ["interaction_policy_blocked"]}
+                            ],
+                        },
+                    },
+                    "execution_path": {"vision_provider_used": "dummy", "action_executed": False},
+                    "timings": {"total_ms": 10, "steps": []},
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.get("/panel/inspect_trace", params={"path": str(trace_path)})
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    stage_ids = [stage["id"] for stage in data["flow_stages"]]
+    assert "ocr" in stage_ids
+    assert data["sections"]["ocr"]["image_path"] == image_path
+    assert data["sections"]["ocr"]["matches"][0]["text"] == "News"
+    assert data["sections"]["gate"]["candidate_result"]["candidates"][0]["candidate_id"] == "candidate_news"
+    assert data["sections"]["target"]["image_path"] == image_path
 
 
 def test_web_panel_inspects_legacy_overlay_trace(tmp_path) -> None:
@@ -335,3 +464,37 @@ def test_web_panel_inspects_screen_reading_trace(tmp_path) -> None:
     stage_ids = [stage["id"] for stage in data["flow_stages"]]
     assert "screen" in stage_ids
     assert "click" not in stage_ids
+
+
+def test_web_panel_inspects_failed_screen_reading_trace(tmp_path) -> None:
+    client = TestClient(app)
+    trace_path = tmp_path / "failed-screen-reading.json"
+    image_path = tmp_path / "capture.png"
+    image_path.write_bytes(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="))
+    trace_path.write_text(
+        json.dumps(
+            {
+                "success": False,
+                "request": {
+                    "image_path": str(image_path),
+                    "task": "observe_screen",
+                    "goal": "understand the current interface",
+                    "provider_mode": "local_understanding",
+                },
+                "error": "failed to reach local vision endpoint http://127.0.0.1:1240/v1/chat/completions",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.get("/panel/inspect_trace", params={"path": str(trace_path)})
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["contract"] == "observe_screen"
+    assert data["provider"] == "local_understanding"
+    stage_ids = [stage["id"] for stage in data["flow_stages"]]
+    assert stage_ids == ["goal", "capture", "error"]
+    assert data["flow_stages"][1]["raw"]["image_path"] == str(image_path)
+    assert "failed to reach local vision endpoint" in data["flow_stages"][2]["summary"]

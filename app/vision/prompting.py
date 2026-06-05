@@ -192,6 +192,7 @@ Required JSON:
 Rules:
 - Return exactly one best target region, or an empty regions list if the target cannot be reliably located.
 - First decide whether the target is a visual-only icon or a clickable control whose visible surface includes text.
+- If the goal names text next to a small icon, first identify the text target and its adjacent icon as a paired reference, then localize only the requested clickable target. For a visual-only adjacent icon, the final icon bbox must not overlap the text bbox; use the text bbox only as an anchor, boundary, and negative constraint.
 - For a visual-only icon, set text_inclusion_policy="exclude_text"; use nearby OCR boxes as boundary rulers only, and tightly cover the icon pixels without nearby label text.
 - For a text-bearing control, set text_inclusion_policy="include_referenced_text"; its diagonal must include the referenced visible text and clickable surface.
 - Cite only supplied OCR anchor ids in anchor_relations and text_anchor_frame. Never invent an anchor id.

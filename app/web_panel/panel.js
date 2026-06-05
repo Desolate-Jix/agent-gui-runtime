@@ -8,6 +8,7 @@ let modelProfiles = [];
 let windowCandidates = [];
 let pendingRequests = new Set();
 let currentLanguage = localStorage.getItem("agentPanelLanguage") || "zh-CN";
+const BROWSER_APP_IDS = new Set(["browser", "edge", "msedge", "chrome", "firefox"]);
 
 /* 鈹€鈹€ Navigation path graph state 鈹€鈹€ */
 // Each page node:
@@ -89,6 +90,12 @@ const translations = {
     submit_enter: "回车提交",
     dry_run: "Dry run",
     execute_recognition_plan: "执行识别计划",
+    click_preview: "点击预览",
+    execute_click: "执行点击",
+    plan_click_preview: "识别点击预览",
+    plan_execute_click: "识别执行点击",
+    point_click_preview: "坐标点击预览",
+    point_execute_click: "坐标执行点击",
     approved_plan_id: "批准计划 ID",
     learned_instruction_id: "学习指令 ID",
     instruction_learning: "指令学习",
@@ -128,7 +135,7 @@ const translations = {
     stage_locate_title: "精准定位",
     stage_locate_subtitle: "使用 OCR 与视觉模型定位目标坐标并复核候选框",
     stage_execute_title: "执行",
-    stage_execute_subtitle: "执行 dry-run、闸门点击或人工确认坐标",
+    stage_execute_subtitle: "支持识别计划点击和坐标点击：先预览，再执行真实点击",
     stage_input_title: "输入",
     stage_input_subtitle: "测试文本输入，不显示导航路径和页面详情",
     stage_trace_title: "Trace 解析",
@@ -207,6 +214,12 @@ const translations = {
     submit_enter: "Submit Enter",
     dry_run: "Dry run",
     execute_recognition_plan: "Execute Recognition Plan",
+    click_preview: "Click Preview",
+    execute_click: "Execute Click",
+    plan_click_preview: "Plan Click Preview",
+    plan_execute_click: "Plan Execute Click",
+    point_click_preview: "Point Click Preview",
+    point_execute_click: "Point Execute Click",
     approved_plan_id: "Approved plan ID",
     learned_instruction_id: "Learned instruction ID",
     instruction_learning: "Instruction learning",
@@ -246,7 +259,7 @@ const translations = {
     stage_locate_title: "Locate",
     stage_locate_subtitle: "Use OCR and vision grounding to locate a target coordinate",
     stage_execute_title: "Execute",
-    stage_execute_subtitle: "Run dry-run, gated click, or confirmed coordinate execution",
+    stage_execute_subtitle: "Preview or execute either a recognition-plan click or a coordinate click",
     stage_input_title: "Input",
     stage_input_subtitle: "Test text input without navigation path or page detail panels",
     stage_trace_title: "Trace Inspector",
@@ -551,6 +564,14 @@ function windowCandidateLabel(candidate) {
   return `${prefix} | ${title}${suffix}`.trim();
 }
 
+function appIdFromProcessName(processName) {
+  const process = String(processName || "").trim().replace(/\.exe$/i, "").toLowerCase();
+  if (!process) return "";
+  if (process === "msedge") return "edge";
+  if (process === "googlechrome") return "chrome";
+  return process;
+}
+
 function setWindowCandidates(candidates) {
   windowCandidates = Array.isArray(candidates) ? candidates : [];
   const select = $("windowSelect");
@@ -578,6 +599,112 @@ function applySelectedWindow() {
   if (!candidate) return;
   if (candidate.process_name) $("bindProcess").value = String(candidate.process_name);
   if (candidate.title) $("bindTitle").value = String(candidate.title);
+  const inferredAppId = appIdFromProcessName(candidate.process_name);
+  if (inferredAppId) $("appId").value = inferredAppId;
+  syncWindowAppAndState(candidate);
+}
+
+function appNameFromUrl(urlValue) {
+  const rawUrl = String(urlValue || "").trim();
+  if (!rawUrl) return "";
+  try {
+    const parsed = new URL(rawUrl);
+    const host = parsed.hostname.replace(/^www\./i, "");
+    if (!host) return "";
+    if (/mousetester\.cn$/i.test(host)) return "MouseTesterWeb";
+    const base = host.split(".")[0] || host;
+    return base
+      .split(/[-_]+/)
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join("");
+  } catch {
+    return "";
+  }
+}
+
+function stripBrowserTitleSuffix(titleValue) {
+  return String(titleValue || "")
+    .trim()
+    .replace(/\s*[-|–—]\s*(Microsoft Edge|Google Chrome|Mozilla Firefox)$/i, "")
+    .trim();
+}
+
+function canonicalAppNameFromTitle(titleValue) {
+  const cleanTitle = stripBrowserTitleSuffix(titleValue);
+  if (!cleanTitle) return "";
+  const firstSegment = cleanTitle.split(/\s*[-|–—]\s*/)[0]?.trim() || cleanTitle;
+  if (/mousetester/i.test(firstSegment)) return "MouseTesterWeb";
+  return firstSegment;
+}
+
+function appNameFromWindow(candidate = null) {
+  const appId = String($("appId")?.value || "").trim();
+  if (appId && !BROWSER_APP_IDS.has(appId.toLowerCase())) return appId;
+  const urlAppName = appNameFromUrl($("appUrl")?.value);
+  if (urlAppName) return urlAppName;
+  const title = stripBrowserTitleSuffix(candidate?.title || $("bindTitle")?.value || "");
+  const titleAppName = canonicalAppNameFromTitle(title);
+  if (titleAppName && !/^(microsoft edge|google chrome|mozilla firefox)$/i.test(titleAppName)) {
+    return titleAppName;
+  }
+  const processName = String(candidate?.process_name || $("bindProcess")?.value || "").trim();
+  return processName.replace(/\.exe$/i, "");
+}
+
+function stateHintFromWindow(candidate = null, appName = "") {
+  const cleanTitle = stripBrowserTitleSuffix(candidate?.title || $("bindTitle")?.value || "");
+  const normalizedAppName = String(appName || "").trim();
+  if (!cleanTitle || !normalizedAppName) return "";
+
+  const parts = cleanTitle.split(/\s*[-|–—]\s*/).map((part) => part.trim()).filter(Boolean);
+  if (parts.length > 1) {
+    const firstPartApp = canonicalAppNameFromTitle(parts[0]);
+    if (firstPartApp.toLowerCase() === normalizedAppName.toLowerCase()) {
+      return parts.slice(1).join(" - ");
+    }
+  }
+
+  const lowerTitle = cleanTitle.toLowerCase();
+  const lowerApp = normalizedAppName.toLowerCase();
+  if (lowerTitle.startsWith(lowerApp)) {
+    return cleanTitle.slice(normalizedAppName.length).replace(/^\s*[-|–—:：]?\s*/, "").trim();
+  }
+
+  if (normalizedAppName === "MouseTesterWeb" && /mousetester/i.test(cleanTitle)) {
+    return cleanTitle;
+  }
+  if (cleanTitle.toLowerCase() !== normalizedAppName.toLowerCase()) {
+    return cleanTitle;
+  }
+  return "";
+}
+
+function syncWindowAppAndState(candidate = null) {
+  const appName = appNameFromWindow(candidate);
+  syncAppAndStateFields({
+    appName,
+    stateHint: stateHintFromWindow(candidate, appName),
+  });
+}
+
+function syncAppAndStateFields({ appName = "", stateHint = "" } = {}) {
+  const normalizedAppName = String(appName || "").trim();
+  const normalizedStateHint = String(stateHint || "").trim();
+  if (normalizedAppName) {
+    ["observeApp", "locateApp", "executeApp"].forEach((id) => {
+      const el = $(id);
+      if (el) el.value = normalizedAppName;
+    });
+    navPathAppName = normalizedAppName;
+    updatePathAppLabel();
+  }
+  if (normalizedStateHint) {
+    ["observeState", "locateState"].forEach((id) => {
+      const el = $(id);
+      if (el) el.value = normalizedStateHint;
+    });
+  }
 }
 
 async function refreshWindows(showResponse = true) {
@@ -599,12 +726,90 @@ async function refreshModels() {
 }
 
 async function callModelAction(action, stage, profileId) {
+  const waitControl = $("prepareWait");
+  const waitUntilReady = action === "start" ? Boolean(waitControl?.checked) : false;
+  const waitSeconds = waitUntilReady ? 30 : 0;
+  renderResponse({
+    success: true,
+    message: `${action === "start" ? "Starting" : "Stopping"} ${stage} model...`,
+    data: {
+      contract_version: "panel_model_action_v1",
+      action,
+      stage,
+      profile_id: profileId || null,
+      wait_until_ready: waitUntilReady,
+    },
+  }, `${action} ${stage} model`);
   return api("POST", `/runtime/models/${action}`, {
     stage,
     profile_id: profileId || null,
-    wait_until_ready: action === "start" ? $("prepareWait").checked : false,
-    wait_seconds: action === "start" && $("prepareWait").checked ? 30 : 0,
-  });
+    wait_until_ready: waitUntilReady,
+    wait_seconds: waitSeconds,
+  }, { summary: `POST /runtime/models/${action} ${stage}`, timeoutSeconds: waitSeconds + 30 });
+}
+
+function selectedModelStatus(models, stage, profileId) {
+  return (models || []).find((item) => item.profile?.profile_id === profileId)
+    || (models || []).find((item) => (item.profile?.role || []).includes(stage));
+}
+
+async function ensureStageModelReady(stage, profileId) {
+  const profile = profileById(profileId);
+  const providerMode = String(profile?.provider_mode || "").toLowerCase();
+  if (!providerMode.startsWith("local")) return true;
+
+  setStatus(`checking ${stage} model`);
+  const statusResponse = await api("GET", "/runtime/models", null, { summary: "GET /runtime/models", skipRender: true });
+  const models = nestedGet(statusResponse, ["data", "models"]) || [];
+  const selected = selectedModelStatus(models, stage, profileId);
+  if (selected?.status?.status === "running") return true;
+
+  if (profile?.launchable === false) {
+    renderResponse({
+      success: false,
+      message: `${stage} model is not running`,
+      data: {
+        contract_version: "panel_model_preflight_v1",
+        stage,
+        profile_id: profileId,
+        status: selected?.status || null,
+        next_step: "Start the selected model service before running this stage.",
+      },
+    }, `${stage} model not ready`);
+    return false;
+  }
+
+  setStatus(`starting ${stage} model`);
+  const waitSeconds = Math.min(Math.max(45, requestTimeoutSeconds()), 180);
+  const startResponse = await api("POST", "/runtime/models/start", {
+    stage,
+    profile_id: profileId || null,
+    wait_until_ready: true,
+    wait_seconds: waitSeconds,
+  }, { summary: `POST /runtime/models/start ${stage}`, skipRender: true, timeoutSeconds: waitSeconds + 10 });
+
+  const afterStatus = nestedGet(startResponse, ["data", "after", "status"])
+    || nestedGet(startResponse, ["data", "before", "status"])
+    || nestedGet(startResponse, ["data", "status", "status"]);
+  if (startResponse.success !== false && afterStatus === "running") {
+    setStatus("ok", "ok");
+    return true;
+  }
+
+  renderResponse({
+    success: false,
+    message: `${stage} model is not ready`,
+    data: {
+      contract_version: "panel_model_preflight_v1",
+      stage,
+      profile_id: profileId,
+      model_status: startResponse.data || null,
+      next_step: "The model was started or checked, but /v1/models is still not running. Wait for loading to finish, then retry.",
+    },
+    error: startResponse.error || null,
+  }, `${stage} model not ready`);
+  setStatus("failed", "error");
+  return false;
 }
 
 async function applyModelProfile(stage, profileId) {
@@ -860,7 +1065,7 @@ function renderResponse(response, summary) {
   if (overlayPath) setCurrentImage(overlayPath);
   const suggestedState = nestedGet(result, ["suggested_state_hint"]);
   if (suggestedState) {
-    $("locateState").value = suggestedState;
+    syncAppAndStateFields({ stateHint: suggestedState });
   }
   populateReviewCandidate(result);
   const locatedPoint = result.located_point || nestedGet(result, ["pre_click_decision", "selected_click_point"]);
@@ -1548,36 +1753,52 @@ function drawTraceVisualOverlay(wrapper, visual) {
   const sx = displayWidth / img.naturalWidth;
   const sy = displayHeight / img.naturalHeight;
 
-  for (const box of visual.boxes || []) {
+  for (const box of (visual.boxes || []).slice(0, 120)) {
     const x = box.x * sx;
     const y = box.y * sy;
     const w = box.width * sx;
     const h = box.height * sy;
-    ctx.fillStyle = "rgba(59, 130, 246, 0.12)";
-    ctx.strokeStyle = "rgba(37, 99, 235, 0.95)";
-    ctx.lineWidth = 2;
+    ctx.fillStyle = "rgba(21, 94, 239, 0.12)";
+    ctx.strokeStyle = "rgba(21, 94, 239, 0.98)";
+    ctx.lineWidth = 3;
     ctx.fillRect(x, y, w, h);
     ctx.strokeRect(x, y, w, h);
+    const label = String(box.label || "bbox").split(".").slice(-2).join(".");
+    if (label) {
+      ctx.font = "12px Microsoft YaHei, Arial, sans-serif";
+      const textWidth = Math.min(ctx.measureText(label).width + 10, 220);
+      const labelY = Math.max(0, y - 19);
+      ctx.fillStyle = "rgba(21, 94, 239, 0.96)";
+      ctx.fillRect(x, labelY, textWidth, 18);
+      ctx.fillStyle = "#fff";
+      ctx.fillText(label.slice(0, 28), x + 5, labelY + 13);
+    }
   }
 
-  for (const point of visual.points || []) {
+  for (const point of (visual.points || []).slice(0, 80)) {
     const x = point.x * sx;
     const y = point.y * sy;
     ctx.beginPath();
-    ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.arc(x, y, 7, 0, Math.PI * 2);
     ctx.fillStyle = "rgba(244, 63, 94, 0.95)";
     ctx.strokeStyle = "#fff";
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 3;
     ctx.fill();
     ctx.stroke();
     ctx.beginPath();
-    ctx.moveTo(x - 10, y);
-    ctx.lineTo(x + 10, y);
-    ctx.moveTo(x, y - 10);
-    ctx.lineTo(x, y + 10);
+    ctx.moveTo(x - 14, y);
+    ctx.lineTo(x + 14, y);
+    ctx.moveTo(x, y - 14);
+    ctx.lineTo(x, y + 14);
     ctx.strokeStyle = "rgba(244, 63, 94, 0.9)";
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 2;
     ctx.stroke();
+    const label = String(point.label || "point").split(".").slice(-2).join(".");
+    ctx.font = "12px Microsoft YaHei, Arial, sans-serif";
+    ctx.fillStyle = "rgba(244, 63, 94, 0.96)";
+    ctx.fillRect(x + 10, Math.max(0, y - 22), Math.min(ctx.measureText(label).width + 10, 220), 18);
+    ctx.fillStyle = "#fff";
+    ctx.fillText(label.slice(0, 28), x + 15, Math.max(13, y - 9));
   }
 }
 
@@ -2364,6 +2585,10 @@ function ingestNavPathFromResponse(response) {
     const summary = screenSummary || result.message || "";
     const guess = stateGuess || "";
     const imagePath = result.image_path || nestedGet(result, ["capture", "image_path"]) || "";
+    syncAppAndStateFields({
+      appName: result.app_name || nestedGet(result, ["request", "app_name"]) || navPathAppName,
+      stateHint: guess,
+    });
     addNavPathNode(summary, guess, imagePath);
 
     // Capture discovered controls from all known observe/screen-reading structures.
@@ -2550,6 +2775,8 @@ function bindEvents() {
   on("healthBtn", "click", () => api("GET", "/health"));
   on("observeModelProfile", "change", () => syncStageProvider("observe"));
   on("locateModelProfile", "change", () => syncStageProvider("locate"));
+  on("appId", "input", () => syncWindowAppAndState());
+  on("appUrl", "input", () => syncWindowAppAndState());
 
   on("listAppsBtn", "click", async () => {
     const response = await api("GET", "/apps", null, { summary: "GET /apps", workflowStep: "open" });
@@ -2561,13 +2788,15 @@ function bindEvents() {
       url: $("appUrl").value || null,
       bind_after_open: true,
       wait_seconds: 1.5,
-    }, { summary: "POST /apps/open", workflowStep: "open" }).then((response) => setWindowCandidates(nestedGet(response, ["data", "running_windows"]) || []));
+    }, { summary: "POST /apps/open", workflowStep: "open" }).then((response) => {
+      setWindowCandidates(nestedGet(response, ["data", "running_windows"]) || []);
+      syncWindowAppAndState();
+    });
   });
   on("listWindowsBtn", "click", () => refreshWindows(true));
   on("windowSelect", "change", applySelectedWindow);
   on("bindWindowBtn", "click", () => {
-    navPathAppName = $("bindProcess").value || $("bindTitle").value || navPathAppName;
-    updatePathAppLabel();
+    syncWindowAppAndState();
     if (navPathAppName) {
       const restored = restorePathGraph(navPathAppName);
       if (!restored) updatePathAppLabel();
@@ -2604,8 +2833,9 @@ function bindEvents() {
     });
   }
 
-  on("observeBtn", "click", () => {
+  on("observeBtn", "click", async () => {
     const profile = syncStageProvider("observe");
+    if (!(await ensureStageModelReady("observe", profile?.profile_id || $("observeModelProfile").value))) return;
     const payload = savedImagePayload({
       task: "observe_screen",
       app_name: $("observeApp").value || null,
@@ -2621,7 +2851,11 @@ function bindEvents() {
   on("stopObserveModelBtn", "click", () => callModelAction("stop", "observe", $("observeModelProfile").value));
   on("testObserveModelBtn", "click", () => testModelService("observe", $("observeModelProfile").value));
 
-  on("locateBtn", "click", () => api("POST", "/vision/locate_target", savedImagePayload(payloadFromShared("locate"), "locateLive"), { summary: "POST /vision/locate_target", workflowStep: "locate", timeoutSeconds: requestTimeoutSeconds() }));
+  on("locateBtn", "click", async () => {
+    const profile = syncStageProvider("locate");
+    if (!(await ensureStageModelReady("locate", profile?.profile_id || $("locateModelProfile").value))) return;
+    api("POST", "/vision/locate_target", savedImagePayload(payloadFromShared("locate"), "locateLive"), { summary: "POST /vision/locate_target", workflowStep: "locate", timeoutSeconds: requestTimeoutSeconds() });
+  });
   on("applyLocateModelBtn", "click", () => applyModelProfile("locate", $("locateModelProfile").value));
   on("startLocateModelBtn", "click", () => callModelAction("start", "locate", $("locateModelProfile").value));
   on("stopLocateModelBtn", "click", () => callModelAction("stop", "locate", $("locateModelProfile").value));
@@ -2661,7 +2895,7 @@ function bindEvents() {
     payload.approved_plan_id = $("approvedPlanId").value || null;
     payload.learned_instruction_id = $("learnedInstructionId").value || null;
     payload.learning_mode = $("learningMode").checked ? "instruction" : null;
-    api("POST", "/action/execute_recognition_plan", payload, { summary: "POST /action/execute_recognition_plan dry_run", workflowStep: "gate", timeoutSeconds: requestTimeoutSeconds() });
+    api("POST", "/action/execute_recognition_plan", payload, { summary: "Click preview", workflowStep: "gate", timeoutSeconds: requestTimeoutSeconds() });
   });
   on("executeBtn", "click", () => {
     const payload = payloadFromShared("execute");
@@ -2669,7 +2903,7 @@ function bindEvents() {
     payload.approved_plan_id = $("approvedPlanId").value || null;
     payload.learned_instruction_id = $("learnedInstructionId").value || null;
     payload.learning_mode = $("learningMode").checked ? "instruction" : null;
-    api("POST", "/action/execute_recognition_plan", payload, { summary: "POST /action/execute_recognition_plan real", workflowStep: "execute", timeoutSeconds: requestTimeoutSeconds() });
+    api("POST", "/action/execute_recognition_plan", payload, { summary: "Execute click", workflowStep: "execute", timeoutSeconds: requestTimeoutSeconds() });
   });
   on("previewBoxBtn", "click", previewBox);
   on("manualBoxBtn", "click", generateManualBox);
@@ -2747,12 +2981,13 @@ function callConfirmedPoint(dryRun) {
     label: $("reviewLabel").value || null,
     source_trace_path: lastTracePath || null,
     dry_run: dryRun,
-  }, { summary: dryRun ? "POST /action/execute_confirmed_point dry_run" : "POST /action/execute_confirmed_point real", workflowStep: "gate" });
+  }, { summary: dryRun ? "Point click preview" : "Point execute click", workflowStep: dryRun ? "gate" : "execute" });
 }
 
 async function boot() {
   bindEvents();
   applyLanguage(currentLanguage);
+  syncWindowAppAndState();
   renderFlowGraph({ message: "idle" });
   renderNavPath();
   populatePathHistory();

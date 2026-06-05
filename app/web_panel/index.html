@@ -98,11 +98,11 @@
               <div class="form-grid">
                 <label>
                   <span data-i18n="app_id">App ID</span>
-                  <input id="appId" value="edge" />
+                  <input id="appId" value="" />
                 </label>
                 <label>
                   <span data-i18n="url">URL</span>
-                  <input id="appUrl" value="https://www.mousetester.cn" />
+                  <input id="appUrl" value="" />
                 </label>
                 <label class="wide-control">
                   <span data-i18n="window_candidates">Open windows</span>
@@ -168,11 +168,11 @@
               <div class="form-grid">
                 <label>
                   <span data-i18n="app_name">App name</span>
-                  <input id="observeApp" value="MouseTesterWeb" />
+                  <input id="observeApp" value="" />
                 </label>
                 <label>
                   <span data-i18n="state_hint">State hint</span>
-                  <input id="observeState" value="MouseTester main page" />
+                  <input id="observeState" value="" />
                 </label>
                 <label>
                   <span data-i18n="model_profile">Model profile</span>
@@ -217,11 +217,11 @@
                 </label>
                 <label>
                   <span data-i18n="app_name">App name</span>
-                  <input id="locateApp" value="MouseTesterWeb" />
+                  <input id="locateApp" value="" />
                 </label>
                 <label>
                   <span data-i18n="state_hint">State hint</span>
-                  <input id="locateState" value="MouseTester main page" />
+                  <input id="locateState" value="" />
                 </label>
                 <label>
                   <span data-i18n="model_profile">Model profile</span>
@@ -241,6 +241,7 @@
                 <textarea id="locatePrompt" rows="9">Precision-localization stage only:
 - Locate only the target named in goal; do not enumerate unrelated controls.
 - First decide whether the clickable target is visual-only or includes visible text.
+- If the goal names text next to a small icon, first identify the text target and its adjacent icon as a paired reference, then localize only the requested clickable target. For a visual-only adjacent icon, the final icon bbox must not overlap the text bbox; use the text bbox only as an anchor, boundary, and negative constraint.
 - Case A, visual-only icon: set text_inclusion_policy="exclude_text"; use nearby OCR boxes only as boundary rulers and negative constraints. The final diagonal must tightly cover the icon pixels, never the nearby label.
 - Case B, text-bearing control: set text_inclusion_policy="include_referenced_text"; the final diagonal must include the referenced OCR text boxes and the visible clickable control surface.
 - Select the nearest useful top, bottom, left, and right OCR anchors when available. Use them to form text_anchor_frame and anchor_relations before choosing coordinates.
@@ -352,15 +353,7 @@
                 </label>
                 <label>
                   <span data-i18n="app_name">App name</span>
-                  <input id="executeApp" value="MouseTesterWeb" />
-                </label>
-                <label>
-                  <span data-i18n="approved_plan_id">Approved plan ID</span>
-                  <input id="approvedPlanId" value="" />
-                </label>
-                <label>
-                  <span data-i18n="learned_instruction_id">Learned instruction ID</span>
-                  <input id="learnedInstructionId" value="" />
+                  <input id="executeApp" value="" />
                 </label>
                 <label>
                   <span>Point X</span>
@@ -370,20 +363,15 @@
                   <span>Point Y</span>
                   <input id="pointY" type="number" min="0" value="" />
                 </label>
-                <label class="checkline">
-                  <input id="dryRun" type="checkbox" checked />
-                  <span data-i18n="dry_run">Dry run</span>
-                </label>
-                <label class="checkline">
-                  <input id="learningMode" type="checkbox" />
-                  <span data-i18n="instruction_learning">Instruction learning</span>
-                </label>
               </div>
+              <input id="approvedPlanId" type="hidden" value="" />
+              <input id="learnedInstructionId" type="hidden" value="" />
+              <input id="learningMode" type="checkbox" hidden />
               <div class="button-row">
-                <button id="dryRunBtn" data-i18n="dry_run_plan">Dry-run plan</button>
-                <button id="executeBtn" class="danger" data-i18n="execute_gated_click">Execute gated click</button>
-                <button id="confirmedDryRunBtn" data-i18n="confirmed_point_dry_run">Confirmed point dry-run</button>
-                <button id="confirmedClickBtn" class="danger" data-i18n="execute_confirmed_point">Execute confirmed point</button>
+                <button id="dryRunBtn" data-i18n="plan_click_preview">Plan Click Preview</button>
+                <button id="executeBtn" class="danger" data-i18n="plan_execute_click">Plan Execute Click</button>
+                <button id="confirmedDryRunBtn" data-i18n="point_click_preview">Point Click Preview</button>
+                <button id="confirmedClickBtn" class="danger" data-i18n="point_execute_click">Point Execute Click</button>
               </div>
             </section>
             <!-- Navigation path graph: multi-click page transition web -->

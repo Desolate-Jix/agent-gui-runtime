@@ -2,7 +2,7 @@
 
 ## Scope
 
-These instructions apply to the repository root `D:\ai agent framework`.
+These instructions apply to the repository root `D:\agent-gui-runtime`.
 
 ## Required Workflow
 
@@ -53,6 +53,70 @@ If full execution is blocked, record:
 - what was verified
 - what remains blocked
 - what document state was updated despite the blocker
+
+## Error Handling
+
+Errors must be clear and actionable. Do not hide failures.
+
+Prefer:
+
+- explicit validation with meaningful exception messages
+- structured error responses (`APIResponse` + `ErrorModel`)
+- safe fallback only when justified
+
+Avoid:
+
+- broad `except Exception` without handling
+- returning `None` for unknown failure
+- logging only without surfacing failure
+- pretending success when an operation failed
+
+## GUI Agent Safety
+
+Safety is more important than speed.
+
+Before executing actions:
+
+- verify target window
+- verify target element
+- verify coordinates
+- verify confidence
+- reject ambiguous actions
+
+Every click action must produce evidence:
+
+- input goal → screenshot or OCR evidence → selected candidate → confidence score → click point → pre-click decision (`pre_click_decision_v1`) → post-click verification
+
+Do not click when:
+
+- target is ambiguous
+- candidate score gap is too small
+- OCR / local evidence disagrees with vision model
+- click point is outside target bbox
+- action could be destructive
+- validation is unavailable for a risky action
+
+Prefer controlled refusal over unsafe execution. All real clicks must go through the gated action API (`POST /action/execute_recognition_plan`).
+
+## Response Format
+
+After finishing a task, summarize:
+
+### Changed
+
+- concise list of what changed
+
+### Tested
+
+- commands actually run and their results
+
+### Notes
+
+- assumptions made
+- limitations
+- recommended next step
+
+Do not claim something works if it was not verified.
 
 ## Notes
 
