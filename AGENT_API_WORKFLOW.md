@@ -178,9 +178,11 @@ Request:
   "app_id": "edge",
   "url": "https://www.google.com/search?q=ai%E7%9A%84%E6%9C%80%E6%96%B0%E8%BF%9B%E5%B1%95",
   "bind_after_open": true,
-  "wait_seconds": 1.5
+  "wait_seconds": 3.5
 }
 ```
+
+For browser apps opened with a URL, the runtime enforces at least `3.5` seconds of post-launch wait even if an older caller sends a smaller value.
 
 Expected response:
 
@@ -393,6 +395,48 @@ Expected response:
           "icon_candidates": []
         }
       },
+      "screen_map": {
+        "contract_version": "screen_map_v1",
+        "state_id": "state_...",
+        "state_hint": "top navigation bar",
+        "sections": [
+          {
+            "contract_version": "screen_map_section_v1",
+            "section_id": "page_header",
+            "label": "Top navigation",
+            "role": "navigation",
+            "bbox": {"x": 0, "y": 80, "w": 1280, "h": 120}
+          },
+          {
+            "contract_version": "screen_map_section_v1",
+            "section_id": "main_content",
+            "label": "Main content",
+            "role": "content",
+            "bbox": {"x": 0, "y": 260, "w": 1280, "h": 520}
+          }
+        ],
+        "summary": {
+          "screen_summary": "Browser page with top navigation",
+          "candidate_count": 4,
+          "section_count": 2,
+          "safe_candidate_count": 2,
+          "blocked_candidate_count": 0
+        },
+        "candidates": [
+          {
+            "contract_version": "screen_map_candidate_v1",
+            "candidate_id": "element_home",
+            "label": "Home",
+            "role": "button",
+            "goal_hint": "button: Home",
+            "expected_effect": "click may change the current interface",
+            "risk_class": "safe_click_allowed",
+            "section_id": "page_header",
+            "bbox": {"x": 10, "y": 20, "w": 80, "h": 32},
+            "click_point": {"x": 50, "y": 36}
+          }
+        ]
+      },
       "execution_path": {
         "vision_model_used": true,
         "page_structure_used": true,
@@ -415,8 +459,13 @@ Expected response:
 Agent decision:
 
 - Use this response to understand what the interface contains and what controls can probably do.
+- Use `screen_map_v1` as the semantic page/action map for the existing path graph. It may include bbox and click-point hints, but those are observation evidence, not executable coordinates.
+- Read `screen_map.sections[]` first to understand coarse layout such as top navigation, promotion strip, main content, lower content, and floating overlays; each candidate may carry `section_id`.
+- `ocr_text_actions` candidates are OCR-backed discovery hints for page-body cards/buttons that the broad vision pass did not promote into `ui.elements`; treat them as Locate targets, not executable coordinates.
+- The observe trace preserves `screen_map_v1`; `/panel/inspect_trace` renders it as a `Path Map` stage so trace review can inspect the same path candidates, bbox hints, and click-point evidence.
 - Prefer `provider_mode: local_understanding` here. It is intended for the smaller local model that summarizes the whole screen for agent planning.
 - Use `suggested_state_hint` as the next precise-localization `state_hint` default. It comes from the observation model's concise `state_guess`.
+- When a concrete candidate is chosen, pass its label/goal hint plus the current `screen_map.state_id` context into the precise localization step.
 - Do not click from this response.
 - Pick a concrete goal such as `点击 SEEK 导航栏的首页图标`, then call `POST /vision/locate_target`.
 

@@ -95,10 +95,14 @@ def test_web_panel_serves_static_assets() -> None:
     assert "generateManualBox" in response.text
     assert "applyModelProfile" in response.text
     assert "collectControlsFromResult" in response.text
+    assert "screen_map?.candidates" in response.text
+    assert "screen_map_candidate_v1" in response.text
     assert "PATH_CANVAS_FONT" in response.text
     assert "traceDisplayValue" in response.text
     assert "collectTraceStageVisuals" in response.text
     assert "activateTraceStageVisuals" in response.text
+    assert "tracePathMapHtml" in response.text
+    assert "section_id" in response.text
 
     css_response = client.get("/panel/assets/panel.css")
 
@@ -108,6 +112,7 @@ def test_web_panel_serves_static_assets() -> None:
     assert "grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr)" in css_response.text
     assert "tf-stage-visuals" in css_response.text
     assert "tf-stage-image-missing" in css_response.text
+    assert "tf-path-map" in css_response.text
 
 
 def test_web_panel_uploads_and_serves_image() -> None:
@@ -464,6 +469,103 @@ def test_web_panel_inspects_screen_reading_trace(tmp_path) -> None:
     stage_ids = [stage["id"] for stage in data["flow_stages"]]
     assert "screen" in stage_ids
     assert "click" not in stage_ids
+
+
+def test_web_panel_inspects_observe_trace_path_map(tmp_path) -> None:
+    client = TestClient(app)
+    trace_path = tmp_path / "observe-mousetester.json"
+    image_path = str(tmp_path / "mousetester.png")
+    trace_path.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "request": {"task": "observe_screen", "app_name": "MouseTesterWeb", "provider_mode": "local_understanding"},
+                "result": {
+                    "contract_version": "screen_observation_v1",
+                    "image_path": image_path,
+                    "app_name": "MouseTesterWeb",
+                    "screen_summary": "MouseTester main page with click test cards.",
+                    "state_guess": "MouseTester main page",
+                    "screen_reading": {
+                        "screen_summary": "MouseTester main page with click test cards.",
+                        "state_guess": "MouseTester main page",
+                    },
+                    "screen_map": {
+                        "contract_version": "screen_map_v1",
+                        "state_id": "state_mouse_123",
+                        "app_name": "MouseTesterWeb",
+                        "image_path": image_path,
+                        "state_hint": "MouseTester main page",
+                        "summary": {
+                            "candidate_count": 2,
+                            "safe_candidate_count": 2,
+                            "section_count": 2,
+                            "screen_summary": "MouseTester main page with click test cards.",
+                        },
+                        "sections": [
+                            {
+                                "contract_version": "screen_map_section_v1",
+                                "section_id": "page_header",
+                                "label": "Top navigation",
+                                "role": "navigation",
+                                "bbox": {"x": 0, "y": 80, "w": 1600, "h": 120},
+                            },
+                            {
+                                "contract_version": "screen_map_section_v1",
+                                "section_id": "main_content",
+                                "label": "Main content",
+                                "role": "content",
+                                "bbox": {"x": 0, "y": 260, "w": 1600, "h": 500},
+                            },
+                        ],
+                        "candidates": [
+                            {
+                                "contract_version": "screen_map_candidate_v1",
+                                "candidate_id": "element_click_here",
+                                "label": "点击此处测试",
+                                "role": "button",
+                                "goal_hint": "open or activate 点击此处测试",
+                                "expected_effect": "click counter starts",
+                                "risk_class": "safe_click_allowed",
+                                "section_id": "main_content",
+                                "bbox": {"x": 676, "y": 323, "width": 74, "height": 42},
+                                "click_point": {"x": 713, "y": 344},
+                                "confidence": 0.98,
+                            },
+                            {
+                                "contract_version": "screen_map_candidate_v1",
+                                "candidate_id": "element_cps",
+                                "label": "CPS 测试",
+                                "role": "card",
+                                "goal_hint": "open or activate CPS 测试",
+                                "expected_effect": "CPS card is selected",
+                                "risk_class": "safe_dry_run_only",
+                                "bbox": {"x": 500, "y": 460, "width": 130, "height": 200},
+                                "click_point": {"x": 565, "y": 560},
+                                "confidence": 0.94,
+                            },
+                        ],
+                    },
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.get("/panel/inspect_trace", params={"path": str(trace_path)})
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    stage_ids = [stage["id"] for stage in data["flow_stages"]]
+    assert "path_map" in stage_ids
+    path_stage = next(stage for stage in data["flow_stages"] if stage["id"] == "path_map")
+    assert path_stage["value"] == "2 candidates, state_mouse_123"
+    assert "Path map candidates: 2" in path_stage["summary"]
+    assert path_stage["raw"]["sections"][1]["section_id"] == "main_content"
+    assert path_stage["raw"]["candidates"][0]["section_id"] == "main_content"
+    assert path_stage["raw"]["candidates"][0]["label"] == "点击此处测试"
+    assert path_stage["raw"]["candidates"][0]["bbox"]["x"] == 676
 
 
 def test_web_panel_inspects_failed_screen_reading_trace(tmp_path) -> None:

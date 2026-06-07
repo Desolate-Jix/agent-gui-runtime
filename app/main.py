@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -19,7 +20,7 @@ LOG_DIR = Path("logs")
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 logger.remove()
-logger.add(lambda message: print(message, end=""), level="INFO")
+logger.add(lambda message: _print_log_message(str(message)), level="INFO")
 logger.add(LOG_DIR / "app.log", level="INFO", rotation="10 MB", retention=5)
 
 app = FastAPI(title="agent-gui-runtime", version="0.1.0")
@@ -31,6 +32,12 @@ app.include_router(action_router)
 app.include_router(vision_router)
 app.include_router(panel_router)
 app.mount("/panel/assets", StaticFiles(directory=PANEL_DIR), name="panel-assets")
+
+
+def _print_log_message(message: str) -> None:
+    encoding = sys.stdout.encoding or "utf-8"
+    sys.stdout.write(message.encode(encoding, errors="replace").decode(encoding, errors="replace"))
+    sys.stdout.flush()
 
 
 @app.get("/health", response_model=APIResponse)

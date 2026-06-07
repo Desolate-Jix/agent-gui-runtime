@@ -219,17 +219,88 @@ class LocalVisionProvider:
             cleaned = cleaned.strip("`").strip()
             if cleaned.lower().startswith("json"):
                 cleaned = cleaned[4:].strip()
-        try:
-            parsed = json.loads(cleaned)
-        except json.JSONDecodeError:
-            start = cleaned.find("{")
-            end = cleaned.rfind("}")
-            if start < 0 or end <= start:
+        parse_error: json.JSONDecodeError | None = None
+        for candidate in self._json_object_candidates(cleaned):
+            try:
+                parsed = json.loads(candidate)
+                break
+            except json.JSONDecodeError as exc:
+                parse_error = exc
+                repaired = self._escape_inner_string_quotes(candidate)
+                if repaired == candidate:
+                    continue
+                try:
+                    parsed = json.loads(repaired)
+                    self._append_parse_note(parsed, "json_repair=escaped_inner_string_quotes")
+                    break
+                except json.JSONDecodeError as repaired_exc:
+                    parse_error = repaired_exc
+        else:
+            if parse_error is None:
                 raise RuntimeError("local vision endpoint did not return a JSON object")
-            parsed = json.loads(cleaned[start : end + 1])
+            raise parse_error
         if not isinstance(parsed, dict):
             raise RuntimeError("local vision endpoint JSON root must be an object")
         return parsed
+
+    def _json_object_candidates(self, text: str) -> list[str]:
+        candidates = [text]
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            extracted = text[start : end + 1]
+            if extracted != text:
+                candidates.append(extracted)
+        return candidates
+
+    def _escape_inner_string_quotes(self, text: str) -> str:
+        output: list[str] = []
+        in_string = False
+        escape = False
+        for index, char in enumerate(text):
+            if not in_string:
+                output.append(char)
+                if char == '"':
+                    in_string = True
+                    escape = False
+                continue
+
+            if escape:
+                output.append(char)
+                escape = False
+                continue
+            if char == "\\":
+                output.append(char)
+                escape = True
+                continue
+            if char != '"':
+                output.append(char)
+                continue
+
+            next_char = self._next_non_space(text, index + 1)
+            if next_char is None or next_char in {":", ",", "}", "]"}:
+                output.append(char)
+                in_string = False
+                continue
+            output.append('\\"')
+        return "".join(output)
+
+    def _next_non_space(self, text: str, start: int) -> str | None:
+        for char in text[start:]:
+            if not char.isspace():
+                return char
+        return None
+
+    def _append_parse_note(self, parsed: Any, note: str) -> None:
+        if not isinstance(parsed, dict):
+            return
+        notes = parsed.get("notes")
+        if isinstance(notes, list):
+            notes.append(note)
+        elif notes:
+            parsed["notes"] = [str(notes), note]
+        else:
+            parsed["notes"] = [note]
 
     def _build_attempt_plan(self, image_size: ImageSize, *, task: str | None = None) -> list[_InferenceAttempt]:
         max_dim = max(image_size.width, image_size.height)

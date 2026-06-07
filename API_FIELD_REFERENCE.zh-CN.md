@@ -198,7 +198,7 @@
 | `process_name` | string/null | null | 覆盖目录里的进程名，用于启动后绑定。 |
 | `title` | string/null | null | 覆盖目录里的标题提示，用于启动后绑定。 |
 | `bind_after_open` | boolean | true | 启动后是否尝试自动绑定窗口。 |
-| `wait_seconds` | number | 1.5 | 启动后等待窗口出现的秒数，范围 `0..10`。 |
+| `wait_seconds` | number | 1.5 | 启动后等待窗口出现的秒数，范围 `0..10`；浏览器打开 URL 时后端至少等待 `3.5` 秒。 |
 
 返回 `data` 字段：
 
@@ -443,6 +443,7 @@
 | --- | --- | --- |
 | `contract_version` | string | 固定为 `screen_observation_v1`。 |
 | `screen_reading` | object | 读取层结果，结构同 `/vision/screen_reading`。 |
+| `screen_map` | object | `screen_map_v1` 页面/动作地图，含 `state_id`、状态摘要、页面分区 `sections`、候选控件、风险等级、预期效果和观察阶段 bbox/point 提示。测试面板导航路径图会消费它。 |
 | `live_capture` | object/null | 实时截图信息。 |
 | `suggested_state_hint` | string | 从模型 `state_guess` 压缩出的下一步定位提示。面板会自动填入精准定位 State hint。 |
 | `agent_next_steps` | array | 建议下一步：选择具体目标、调用 `/vision/locate_target`、不要直接点击。 |
@@ -452,6 +453,10 @@
 使用注意：
 
 - `suggested_state_hint` 不是最终目标，只是下一步 `locate_target.state_hint` 的默认建议。
+- `screen_map` 用于把整屏理解整理成路径图入口；其中 bbox/click_point 只是观察证据，不能作为真实点击坐标。
+- `screen_map.sections[]` 区分页面区域，例如 browser chrome、顶部导航、推广条、正文、下方内容和浮层；`screen_map.candidates[].section_id` 指向所属区域。
+- 当视觉模型只返回顶部导航控件时，runtime 会从高置信 OCR 正文文本补充 `ocr_text_actions` 候选，例如卡片标题、开始按钮和鼠标按键文本，供后续 Locate 精准验证。
+- observe trace 会保存 `screen_map`；`/panel/inspect_trace` 会把它解析为 `Path Map` 阶段，便于阅读 trace 时直接查看路径候选和 overlay 证据。
 - 这个接口只能用于理解和候选发现，不能用于点击。
 
 ## POST /vision/locate_target

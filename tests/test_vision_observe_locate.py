@@ -19,7 +19,50 @@ def test_observe_screen_wraps_live_capture_and_screen_reading(monkeypatch) -> No
         return APIResponse(
             success=True,
             message="ok",
-            data={"result": {"state_guess": "job results list", "screen_reading": {"ui": {"elements": []}}}},
+            data={
+                "result": {
+                    "image_size": {"width": 900, "height": 700},
+                    "state_guess": "job results list",
+                    "screen_summary": "A job results page with filters and result cards.",
+                    "texts": [
+                        {
+                            "id": "text_apply",
+                            "text": "Apply now",
+                            "bbox": {"x": 360, "y": 360, "w": 74, "h": 24},
+                            "confidence": 0.96,
+                        }
+                    ],
+                    "screen_reading": {
+                        "ui": {
+                            "elements": [
+                                {
+                                    "id": "element_filter",
+                                    "label": "Filter",
+                                    "type": "button",
+                                    "bbox": {"x": 20, "y": 30, "w": 80, "h": 32},
+                                    "click_point": {"x": 60, "y": 46},
+                                    "confidence": 0.88,
+                                    "evidence": {
+                                        "interaction_policy": {
+                                            "allowed": True,
+                                            "reasons": ["nav_control"],
+                                        }
+                                    },
+                                    "verification_hints": {"expected_changes": ["filter panel opens"]},
+                                },
+                                {
+                                    "id": "element_delete",
+                                    "label": "Delete",
+                                    "type": "button",
+                                    "bbox": {"x": 120, "y": 30, "w": 80, "h": 32},
+                                    "click_point": {"x": 160, "y": 46},
+                                    "confidence": 0.8,
+                                },
+                            ],
+                        }
+                    },
+                }
+            },
             error=None,
         )
 
@@ -32,7 +75,19 @@ def test_observe_screen_wraps_live_capture_and_screen_reading(monkeypatch) -> No
     assert result["contract_version"] == "screen_observation_v1"
     assert result["live_capture"]["image_path"] == "screen.png"
     assert result["suggested_state_hint"] == "job results list"
-    assert "suggested_state_hint" in result["agent_next_steps"][1]
+    assert result["screen_map"]["contract_version"] == "screen_map_v1"
+    assert result["screen_map"]["state_id"].startswith("state_")
+    assert result["screen_map"]["summary"]["section_count"] >= 4
+    assert result["screen_map"]["summary"]["candidate_count"] == 3
+    assert result["screen_map"]["sections"][0]["contract_version"] == "screen_map_section_v1"
+    assert result["screen_map"]["candidates"][0]["label"] == "Filter"
+    assert result["screen_map"]["candidates"][0]["section_id"]
+    assert result["screen_map"]["candidates"][0]["risk_class"] == "safe_click_allowed"
+    assert result["screen_map"]["candidates"][0]["expected_effect"] == "filter panel opens"
+    assert result["screen_map"]["candidates"][1]["risk_class"] == "requires_user_confirmation"
+    assert result["screen_map"]["candidates"][2]["label"] == "Apply now"
+    assert result["screen_map"]["candidates"][2]["source"] == "ocr_text_actions"
+    assert "screen_map.state_id" in result["agent_next_steps"][1]
     assert "POST /vision/locate_target" in result["agent_next_steps"][2]
 
 

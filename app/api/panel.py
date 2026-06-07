@@ -251,6 +251,21 @@ def inspect_trace(path: str) -> APIResponse:
             parsed["state_guess"] = screen.get("state_guess") or ""
             parsed["sections"]["screen"] = screen
 
+        # Observe-screen semantic map / navigation path seed.
+        screen_map = trace.get("screen_map") or {}
+        if isinstance(screen_map, dict) and screen_map.get("contract_version") == "screen_map_v1":
+            candidates = screen_map.get("candidates") if isinstance(screen_map.get("candidates"), list) else []
+            summary = screen_map.get("summary") if isinstance(screen_map.get("summary"), dict) else {}
+            parsed["path_map_count"] = len(candidates)
+            parsed["path_map_state_id"] = screen_map.get("state_id") or ""
+            parsed["path_map_summary"] = (
+                summary.get("screen_summary")
+                or screen_map.get("state_hint")
+                or parsed.get("screen_summary")
+                or ""
+            )
+            parsed["sections"]["path_map"] = screen_map
+
         # Execution
         exec_path = trace.get("execution_path") or {}
         parsed["action_executed"] = exec_path.get("action_executed", False)
@@ -701,6 +716,7 @@ def _trace_flow_stages(parsed: dict[str, Any]) -> list[dict[str, Any]]:
         add("ocr", "OCR", f"{parsed.get('ocr_count') or 0} anchors"),
         add("vision", "Vision", str(parsed.get("model_provider") or parsed.get("provider") or "")),
         add("screen", "Screen", str(parsed.get("state_guess") or "")),
+        add("path_map", "Path Map", _path_map_label(sections.get("path_map"))),
         add("candidates", "Candidates", f"{parsed.get('candidates') or 0} returned"),
         add(
             "gate",
@@ -767,6 +783,22 @@ def _overlay_label(raw: Any) -> str:
     return ", ".join(parts)
 
 
+def _path_map_label(raw: Any) -> str:
+    if not isinstance(raw, dict):
+        return ""
+    summary = raw.get("summary") if isinstance(raw.get("summary"), dict) else {}
+    count = summary.get("candidate_count")
+    if count is None and isinstance(raw.get("candidates"), list):
+        count = len(raw["candidates"])
+    state_id = raw.get("state_id")
+    parts = []
+    if count is not None:
+        parts.append(f"{count} candidates")
+    if state_id:
+        parts.append(str(state_id))
+    return ", ".join(parts)
+
+
 def _compact_value(value: Any) -> str:
     if isinstance(value, dict):
         for key in ["contract_version", "provider", "region_count", "element_count", "text_count", "status"]:
@@ -787,6 +819,14 @@ def _stage_summary(stage_id: str, parsed: dict[str, Any]) -> str:
         return str(parsed.get("screen_summary") or parsed.get("model_provider") or "")
     if stage_id == "screen":
         return str(parsed.get("screen_summary") or parsed.get("state_guess") or "")
+    if stage_id == "path_map":
+        count = parsed.get("path_map_count") or 0
+        state_id = parsed.get("path_map_state_id") or ""
+        summary = parsed.get("path_map_summary") or ""
+        prefix = f"Path map candidates: {count}"
+        if state_id:
+            prefix += f"; state: {state_id}"
+        return f"{prefix}\n{summary}".strip()
     if stage_id == "candidates":
         return f"Candidates returned: {parsed.get('candidates') or 0}; recommendation: {bool(parsed.get('has_recommendation'))}"
     if stage_id == "gate":

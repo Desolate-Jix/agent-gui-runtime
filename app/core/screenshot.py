@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any, Optional
 
 from loguru import logger
@@ -29,6 +30,7 @@ class ScreenshotService:
         self._capture_dir = SCREENSHOTS_DIR
         self._capture_dir.mkdir(parents=True, exist_ok=True)
         self._capture_keep_limit = 40
+        self._focus_settle_seconds = 0.6
 
     def capture_window(
         self,
@@ -42,6 +44,7 @@ class ScreenshotService:
         self._ensure_capture_backend()
 
         bound = window_manager.focus_bound_window()
+        self._wait_after_focus()
 
         capture_rect = self._resolve_capture_rect(
             left=bound.rect.left,
@@ -170,6 +173,10 @@ class ScreenshotService:
                 "Screenshot backend is unavailable. "
                 f"Import error: {MSS_BACKEND_IMPORT_ERROR}"
             )
+
+    def _wait_after_focus(self) -> None:
+        if self._focus_settle_seconds > 0:
+            time.sleep(self._focus_settle_seconds)
 
 
 screenshot_service = ScreenshotService()

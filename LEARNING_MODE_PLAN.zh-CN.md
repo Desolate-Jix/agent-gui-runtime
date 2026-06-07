@@ -1,188 +1,303 @@
-# 学习模式计划
+# 学习模式设计
 
-更新日期：2026-06-02
+更新日期：2026-06-07
 
-本文记录当前对 `agent-gui-runtime` 学习模式的计划。学习模式是可选能力，不应该削弱现有点击前闸门，也不应该让历史记忆直接绕过真实窗口校验。
+本文记录 `agent-gui-runtime` 的学习模式设计。学习模式必须服务于安全执行和可复盘决策，不能绕过现有点击前闸门，也不能让历史坐标直接替代实时窗口校验。
 
-## 1. 总目标
+## 1. 设计目标
 
-学习模式分三步推进：
+学习能力分为两种一等模式：
 
-1. 重复界面稳定测试。
-2. 匹配策略优化。
-3. 泛化结构探索。
+1. `exploration_learning`：自我探索模式。目标是主动认识一个应用或页面的状态空间。
+2. `path_recording_learning`：点击后路径记录模式。目标是把每次真实点击后的状态转移、证据、验证结果记录下来。
 
-先做前两项。只有当稳定测试和匹配策略都有可量化证据后，再考虑更强的跨界面泛化。
+现有 `instruction_learning` 不再作为第三条平行主线理解。它更适合作为 `path_recording_learning` 的一个“提升结果”：当某条真实路径被证明稳定、可验证、可复用时，可以从路径记录中生成 `learned_instruction_v1`。
 
-## 2. 两个学习模式
+## 2. 模式一：自我探索
 
-### 2.1 指令学习模式
+`exploration_learning` 用于没有明确单步用户目标时，让 runtime 或上层 agent 安全地认识当前界面。
 
-指令学习模式只学习用户明确下达的一条指令。
+### 2.1 适用场景
 
-适用场景：
+- 新应用首次接入，需要知道有哪些页面、按钮、菜单、输入框和导航路径。
+- 已绑定窗口，但用户还没有给出具体点击目标。
+- 需要构建一个“应用状态图”，用于后续任务规划。
+- 需要找出哪些控件会打开弹窗、切换标签、进入下一页或改变主要内容。
 
-- 用户说“点击鼠标测试页面里的鼠标图标”。
-- 用户说“点击第一个搜索结果”。
-- 用户说“打开 Serato 的职业页面”。
-
-学习目标：
-
-- 记录这条指令在当前界面中最终点击了什么。
-- 记录为什么这个点是可信的。
-- 记录点击前后的截图和验证证据。
-- 下次相同窗口、相同内容、相同指令时，优先尝试复用，不必重新调用大模型。
-
-硬性规则：
-
-- 只记录执行成功并通过后验验证的动作。
-- 失败、被闸门拒绝、人工取消、验证不通过的动作不能写成可复用学习记录。
-- 复用时仍要校验当前窗口、窗口大小、app、目标指令、截图相似度和点击点边界。
-- 复用仍要执行真实点击和后验验证。
-- 复用失败时回退到普通识别流程，不允许静默点历史坐标。
-
-### 2.2 探索学习模式
-
-探索学习模式不是学习某一条用户指令，而是探索当前界面有哪些可操作路径。
-
-适用场景：
-
-- 测试一个新页面有哪些按钮、导航、卡片、输入框。
-- 构建一个界面状态图。
-- 找出哪些操作会跳转、展开、弹窗或改变内容。
-
-学习目标：
-
-- 自动尝试当前界面的可点击候选。
-- 生成状态节点和操作边。
-- 把界面从 A 状态点击到 B 状态的过程保存成路径图。
-
-硬性规则：
-
-- 初期只允许 dry-run。
-- 真实点击探索必须有深度限制、黑名单、回退策略和状态去重。
-- 不探索危险操作，例如删除、支付、提交隐私信息、关闭重要窗口。
-- 探索结果是界面 action map，不是某个用户指令的直接复用记录。
-
-## 3. 第一阶段：重复界面稳定测试
-
-目的：证明同一个界面、同一个任务反复运行时，runtime 不是偶然点对。
-
-首选测试对象：
+### 2.2 核心循环
 
 ```text
-MouseTester.cn
-目标：点击鼠标测试区域或鼠标图标
+bind window
+-> observe_screen
+-> extract safe action candidates
+-> classify risk
+-> locate candidate
+-> dry-run gate
+-> optionally execute low-risk action
+-> observe_screen again
+-> compare before/after state
+-> write state node and transition edge
+-> stop, backtrack, or continue within limits
 ```
 
-每次运行记录：
+### 2.3 输出
 
-- 当前窗口信息：进程、标题、handle、窗口大小、DPI/缩放信息。
-- 指令原文和模型用英文归一化目标。
-- 截图：source、pre-action、post-action、diff、target crop。
-- OCR evidence：目标附近文字、坐标、置信度。
-- vision evidence：模型 bbox、anchor relations、grounding constraints。
-- candidate rank：top-k、分数、拒绝原因。
-- pre-click decision：是否放行，原因。
-- clicked point：窗口相对坐标。
-- verification：截图变化、OCR 变化、焦点/状态变化。
-- timings：每个阶段耗时。
-- path graph：本次运行的节点和边。
+自我探索输出的是界面地图，不是可直接复用的点击指令。
 
-稳定性指标：
+建议合同：
 
-- top-1 候选是否稳定。
-- OCR 命中是否稳定。
-- bbox 漂移量。
-- click point 漂移量。
-- pre-click gate 是否稳定放行或稳定拒绝。
-- 后验验证是否稳定通过。
-- 失败属于哪一层：OCR、视觉模型、融合、排序、闸门、点击、验证。
+- `exploration_session_v1`
+- `interface_state_v1`
+- `exploration_action_candidate_v1`
+- `state_transition_edge_v1`
+- `exploration_policy_decision_v1`
 
-第一阶段验收：
-
-- 同一任务连续多次运行，有稳定 trace。
-- 可以解释每次成功或失败发生在哪一层。
-- 成功运行能写入永久学习记录。
-- 学习复用能跳过大模型，但仍完成真实点击和验证。
-
-## 4. 第二阶段：匹配策略优化
-
-目的：不是只记死坐标，而是提高“当前界面是否就是上次学过的界面”的判断能力。
-
-### 4.1 图像匹配
-
-建议分层：
-
-1. 全局粗筛：
-   - pHash / dHash / aHash
-   - 判断当前窗口整体是否和学习记录相似。
-2. 局部确认：
-   - target crop template matching
-   - ORB / AKAZE 特征匹配
-   - 判断目标区域是否仍在相似位置。
-3. 坐标安全校验：
-   - 历史点击点必须仍在窗口内。
-   - 历史点击点附近应存在相似图像或相似 OCR。
-
-### 4.2 OCR 文本签名
-
-对搜索结果页、列表页、动态内容页，纯图像相似度不够。需要 OCR 辅助：
-
-- 保存目标附近 OCR 文本。
-- 保存同排/同列邻居文字。
-- 保存页面区域标题或导航文字。
-- 保存候选目标的相对关系，而不是只保存绝对坐标。
-
-示例：
+建议目录：
 
 ```text
-目标：第一个 Google 自然搜索结果
-稳定结构：
-- 位于 Google 搜索标签栏下方
-- 位于搜索结果列表第一项
-- 目标附近有标题、摘要、来源 URL
-不稳定内容：
-- 搜索结果标题每天可能变化
-- AI Overview 可能出现或消失
+artifacts/local-learning/exploration/{session_id}/
+  exploration_session.json
+  state_nodes/
+    {state_id}.json
+    {state_id}.png
+  transitions/
+    {transition_id}.json
+  traces/
+  overlays/
 ```
 
-这种场景不能只靠截图完全一致。复用前应检查“结构一致”，必要时回退普通视觉识别。
+### 2.4 状态节点
 
-### 4.3 结构匹配
+`interface_state_v1` 应记录：
 
-学习记录应该逐步从“图像相似”升级到“结构相似”：
+```json
+{
+  "contract_version": "interface_state_v1",
+  "state_id": "uuid",
+  "app": {
+    "app_name": "edge",
+    "process_name": "msedge.exe",
+    "window_title": "Example - Microsoft Edge"
+  },
+  "state_signature": {
+    "title_signature": "example",
+    "ocr_signature": [],
+    "uia_signature": [],
+    "visual_hash": "...",
+    "layout_hash": "..."
+  },
+  "screen": {
+    "image_path": "artifacts/local-learning/exploration/.../state.png",
+    "width": 1280,
+    "height": 720
+  },
+  "summary": {
+    "screen_summary": "settings page",
+    "state_hint": "left settings sidebar and main settings content"
+  },
+  "controls": []
+}
+```
 
-- app/process 一致。
-- window size bucket 一致。
-- 页面状态 hint 一致。
-- OCR 布局签名一致。
-- UIA/浏览器 accessibility 节点相似。
-- 目标相对区域一致。
+### 2.5 探索动作候选
 
-## 5. 第三阶段：泛化结构探索
+每个候选都要先被分类，再决定是否允许探索。
 
-暂缓，不作为当前优先实现。
+风险等级建议：
 
-未来方向：
+- `safe_dry_run_only`：只允许定位和生成证据，不真实点击。
+- `safe_click_allowed`：低风险动作，可在深度限制内真实点击。
+- `requires_user_confirmation`：可能改变数据、提交信息、关闭窗口或打开外部副作用。
+- `blocked`：删除、支付、发送隐私信息、安装、授权、关闭关键窗口等。
 
-- 把“点击第一个搜索结果”泛化到不同搜索词。
-- 把“打开职业页面”泛化到不同招聘站点的公司卡片。
-- 把“关闭窗口”泛化到不同桌面应用的 title bar close button。
+候选字段建议：
 
-前提：
+```json
+{
+  "contract_version": "exploration_action_candidate_v1",
+  "candidate_id": "uuid",
+  "label": "Settings",
+  "role": "button",
+  "goal": "open settings",
+  "risk_class": "safe_click_allowed",
+  "risk_reasons": [],
+  "evidence": {
+    "ocr": [],
+    "uia": [],
+    "vision": [],
+    "bbox": {"x": 10, "y": 20, "w": 80, "h": 32},
+    "click_point": {"x": 50, "y": 36}
+  }
+}
+```
 
-- 已经有稳定的重复界面测试。
-- 已经能量化匹配策略的准确率和误点率。
-- 已经有负样本，避免过度泛化。
+### 2.6 安全规则
 
-## 6. 学习记录格式建议
+- 默认先做 dry-run，不真实点击。
+- 真实探索点击必须仍走 `POST /action/execute_recognition_plan`。
+- 不能使用 `POST /action/execute_confirmed_point` 作为自主探索捷径。
+- 每次真实点击前必须有截图、候选、bbox、点、gate 结果和 pre-click decision。
+- 每次真实点击后必须重新 observe，并记录状态是否改变。
+- 探索必须有深度限制、动作数量限制、时间限制、回退策略和黑名单。
+- 遇到疑似提交、删除、支付、发送、授权、关闭窗口、文件操作、隐私输入，一律拒绝或请求用户确认。
 
-每条指令学习记录保存为永久目录：
+## 3. 模式二：点击后路径记录
+
+`path_recording_learning` 是被动学习。它不主动选择动作，而是在每次真实点击后，把“为什么点击、点了哪里、点前点后发生了什么、是否验证成功”记录成路径图。
+
+### 3.1 适用场景
+
+- 用户或 agent 正在执行一个真实任务。
+- 每次点击都已经通过 gated action API。
+- 需要保留完整轨迹，方便复盘、回放、稳定性评估和后续学习。
+- 需要把成功路径提升为可复用指令或测试样本。
+
+### 3.2 核心循环
+
+```text
+before action:
+  current state snapshot
+  goal
+  recognition plan
+  pre-click decision
+
+execute action:
+  selected click point
+  action trace
+
+after action:
+  post screenshot
+  verification
+  new observe result
+  state diff
+
+write:
+  path event
+  transition edge
+  evidence bundle
+```
+
+### 3.3 输出
+
+点击后路径记录输出的是真实执行轨迹。
+
+建议合同：
+
+- `runtime_path_graph_v1`
+- `path_click_event_v1`
+- `verified_transition_v1`
+- `learning_promotion_candidate_v1`
+
+建议目录：
+
+```text
+artifacts/local-learning/path-runs/{run_id}/
+  path_graph.json
+  events/
+    {event_id}.json
+  screenshots/
+    before_{event_id}.png
+    after_{event_id}.png
+    diff_{event_id}.png
+  crops/
+  traces/
+```
+
+### 3.4 点击事件
+
+`path_click_event_v1` 建议字段：
+
+```json
+{
+  "contract_version": "path_click_event_v1",
+  "event_id": "uuid",
+  "run_id": "uuid",
+  "timestamp": "2026-06-07T00:00:00Z",
+  "from_state_id": "state_a",
+  "goal": {
+    "original": "点击设置",
+    "model": "Click Settings"
+  },
+  "target": {
+    "label": "Settings",
+    "bbox": {"x": 10, "y": 20, "w": 80, "h": 32},
+    "click_point": {"x": 50, "y": 36},
+    "coordinate_source": "pre_click_decision_v1.selected_click_point"
+  },
+  "decision": {
+    "allowed": true,
+    "reasons": [],
+    "candidate_id": "candidate_settings",
+    "confidence": 0.91
+  },
+  "execution": {
+    "action_executed": true,
+    "dry_run": false,
+    "approved_plan_id": "..."
+  },
+  "verification": {
+    "passed": true,
+    "methods": ["screenshot_diff", "semantic_post_click_verification"]
+  },
+  "to_state_id": "state_b",
+  "artifacts": {
+    "recognition_trace_path": "logs/traces/vision/...",
+    "action_trace_path": "logs/traces/actions/...",
+    "before_image_path": "...",
+    "after_image_path": "...",
+    "diff_image_path": "..."
+  }
+}
+```
+
+### 3.5 与路径图的关系
+
+路径图必须由结构化事件确定性生成。
+
+AI 可以：
+
+- 翻译节点标签。
+- 总结页面状态。
+- 总结失败原因。
+
+AI 不能：
+
+- 发明节点。
+- 发明边。
+- 发明点击点。
+- 发明验证结果。
+- 把未验证点击升级为成功路径。
+
+## 4. 从路径记录提升为指令学习
+
+当某条点击后路径记录满足稳定条件时，可以生成 `learned_instruction_v1`。
+
+### 4.1 提升条件
+
+至少满足：
+
+- 真实点击执行成功。
+- 点击后验证通过。
+- 目标与用户意图一致。
+- 当前窗口身份可校验。
+- 点击点在目标 bbox 内。
+- 点前/点后截图、trace、crop、diff 都存在。
+- 不属于危险动作或外部副作用动作。
+
+更高质量的提升条件：
+
+- 同一 goal 重复成功多次。
+- selected point 漂移小。
+- OCR/UIA/视觉证据稳定。
+- post-click verification 稳定。
+- 不依赖单次偶然坐标。
+
+### 4.2 指令学习资产
 
 ```text
 artifacts/local-learning/instructions/{learned_instruction_id}/
   learned_instruction.json
+  source_path_event.json
   path_graph.json
   source_window.png
   pre_action.png
@@ -192,141 +307,130 @@ artifacts/local-learning/instructions/{learned_instruction_id}/
   context_crop.png
 ```
 
-`learned_instruction.json` 建议字段：
+`learned_instruction_v1` 应保存：
 
-```json
-{
-  "contract_version": "learned_instruction_v1",
-  "learned_instruction_id": "uuid",
-  "created_at": "2026-06-02T00:00:00",
-  "goal": {
-    "original": "点击鼠标图标",
-    "normalized": "Click the mouse icon"
-  },
-  "app": {
-    "app_name": "browser",
-    "process_name": "msedge.exe"
-  },
-  "window_signature": {
-    "title": "MouseTester.cn - Microsoft Edge",
-    "size": {"width": 1280, "height": 720},
-    "size_bucket": "1280x720"
-  },
-  "target": {
-    "bbox": {"x": 100, "y": 200, "w": 80, "h": 60},
-    "click_point": {"x": 140, "y": 230},
-    "click_strategy": "learned_confirmed_point"
-  },
-  "matching": {
-    "source_image_hash": "...",
-    "target_crop_hash": "...",
-    "ocr_signature": [],
-    "structure_signature": {}
-  },
-  "evidence": {
-    "recognition_trace_path": "logs/traces/vision/...",
-    "action_trace_path": "logs/traces/actions/...",
-    "path_graph_path": "artifacts/local-learning/instructions/{id}/path_graph.json"
-  },
-  "verification": {
-    "passed": true,
-    "method": ["screenshot_diff", "ocr_change"]
-  }
-}
-```
+- 原始 goal 和模型侧 goal。
+- app/window/state signature。
+- target bbox、click point、coordinate source。
+- OCR/UIA/vision evidence。
+- 来源 path event。
+- 来源 trace。
+- 验证结果。
+- 复用约束。
 
-## 7. 复用流程
+复用仍然必须：
 
-复用不是直接点击。推荐流程：
+- 验证 goal。
+- 验证 app/window。
+- 验证窗口尺寸或尺寸 bucket。
+- 验证点击点边界。
+- 最好重新截图并做图像/OCR/结构签名匹配。
+- 执行后继续做 post-click verification。
+
+## 5. 两种模式如何协同
 
 ```text
-收到指令
--> 查 learned_instruction index
--> 筛选 goal/app/window 候选
--> 当前截图
--> 图像粗筛
--> OCR/结构匹配
--> 点击点边界检查
--> 生成 reuse path graph
--> 调用真实点击
--> 后验验证
--> 成功：记录 reuse trace
--> 失败：回退普通识别流程
+exploration_learning
+  主动发现状态和候选动作
+  输出 interface map
+  低风险动作可形成 transition edge
+
+path_recording_learning
+  被动记录真实任务点击
+  输出 verified runtime path graph
+  成功稳定路径可提升为 learned_instruction_v1
+
+instruction reuse
+  从 verified path 中派生
+  只能在实时校验通过后复用
 ```
 
-复用结果状态：
+建议统一使用同一套状态节点和边：
 
-- `reused_verified`：复用点击并验证成功。
-- `reuse_rejected`：匹配不足，未点击，回退普通流程。
-- `reuse_clicked_but_unverified`：点击后验证失败，必须标记为失败并禁止提升置信度。
-- `fallback_to_recognition`：复用失败后进入正常视觉识别。
+- `state_id`
+- `state_signature`
+- `transition_id`
+- `from_state_id`
+- `to_state_id`
+- `source`: `exploration` / `execution` / `instruction_reuse`
+- `confidence`
+- `verification`
 
-## 8. 路径图关系
+这样探索地图、真实路径、指令复用不会成为三套互不兼容的数据。
 
-学习模式必须和路径图结合。
+## 6. API 草案
 
-指令学习写入路径图节点：
+第一阶段可以先只做文档和数据落盘，不急着加完整 API。
+
+后续 API 可分为：
 
 ```text
-goal
-screen capture
-ocr / vision / uia evidence
-candidate rank
-pre-click gate
-target point
-real click
-verification
-learning record
-learning assets
+POST /learning/exploration/start
+POST /learning/exploration/step
+POST /learning/exploration/stop
+GET  /learning/exploration/{session_id}
+
+POST /learning/path_runs/start
+POST /learning/path_runs/{run_id}/events
+GET  /learning/path_runs/{run_id}
+GET  /learning/path_runs
+
+POST /learning/promote_instruction
+GET  /learning/instructions
+GET  /learning/instructions/{id}
 ```
 
-复用时路径图节点：
+最小可实现切片：
 
-```text
-goal
-learned instruction lookup
-current screen capture
-image match
-ocr / structure match
-reuse gate
-target point
-real click
-verification
-reuse trace
-```
+1. 在每次 `execute_recognition_plan` 真实点击后写 `path_click_event_v1`。
+2. 写 `path_graph.json`。
+3. 面板 Trace 或导航路径图能打开该路径记录。
+4. 再做 `promote_instruction`，从已验证 path event 生成 `learned_instruction_v1`。
 
-路径图必须由结构化数据确定性生成。AI 可以翻译 label 或写复盘摘要，但不能发明节点、边、点击点或验证结果。
+## 7. 验收标准
 
-## 9. 当前实现状态
+自我探索模式第一阶段：
 
-已经有的基础：
+- 只 dry-run。
+- 能从 `observe_screen` 生成候选动作列表。
+- 能对候选动作打风险标签。
+- 能生成 `interface_state_v1`。
+- 不真实点击任何危险动作。
 
-- `learning_mode="instruction"` 的最小切片。
-- 成功真实点击后可保存 `learned_instruction_v1`。
-- 永久学习目录位于 `artifacts/local-learning/instructions/{id}/`。
-- 测试面板 path graph 能从 API response 渲染学习资产节点。
-- `execute_recognition_plan` 支持 learned instruction 复用的保守校验。
+点击后路径记录第一阶段：
 
-仍需补：
+- 每次真实点击都有一条 `path_click_event_v1`。
+- 事件包含 before/after、trace、gate、point、verification。
+- 未验证点击不会标成成功。
+- 路径图能从事件确定性生成。
 
-- 学习记录索引 API。
-- 学习记录列表/详情面板。
-- `path_graph.json` 持久化。
-- 图像 hash 和 target crop 匹配。
-- OCR 签名匹配。
-- 复用失败自动回退普通识别。
-- 探索模式 dry-run 原型。
+指令提升第一阶段：
 
-## 10. 下一步建议
+- 只允许从 verified path event 提升。
+- 提升记录能定位回来源 path event。
+- 复用失败时回到普通识别流程，不静默点击历史坐标。
 
-第一批任务：
+## 8. 当前建议的下一步
 
-1. 为 `artifacts/local-learning/instructions/` 建索引读取器。
-2. 增加 `GET /learning/instructions` 和 `GET /learning/instructions/{id}`。
-3. 在测试面板显示学习记录列表和截图证据。
-4. 为每次成功学习写 `path_graph.json`。
-5. 对 MouseTester 做两次运行：
-   - 第一次普通识别并学习。
-   - 第二次 learned instruction 复用。
-6. 输出稳定性报告：是否跳过视觉模型、是否点击同一点、验证是否通过、耗时下降多少。
+当前第一步 MVP 先把整屏理解变成路径图入口：`POST /vision/observe_screen` 返回 `screen_map_v1`，前端现有导航路径图卡片直接消费 `screen_map.candidates`，从 Observe 阶段就能看到当前状态、候选动作、风险等级和预期效果。
 
+之后再实现 `path_recording_learning` 的最小落盘，因为它不会改变 agent 的决策能力，只增强审计和学习素材。
+
+建议顺序：
+
+1. 在 `observe_screen` 中生成 `screen_map_v1`。
+2. 让现有路径图卡片从 `screen_map.candidates` 渲染候选动作。
+3. 定义 `path_click_event_v1` schema。
+4. 在 `execute_recognition_plan` 成功真实点击后写事件。
+5. 把现有面板导航路径图保存格式对齐到 `runtime_path_graph_v1`。
+6. 做 MouseTester 一次真实成功点击，确认事件完整。
+7. 再考虑 `exploration_learning` 的 dry-run 原型。
+## 2026-06-07 更新：Observe Path Map Trace
+
+第一步 MVP 现在不只是在 Observe 页面生成 `screen_map_v1`，也会把同一份地图保存在 observe trace 里。`/panel/inspect_trace` 会把它解析成 `Path Map` 阶段，Trace Inspector 详情里可以直接看到路径候选、候选框 bbox、click_point 观察证据和原始 JSON。
+
+这仍然不是可执行点击路径。`screen_map` 只负责“当前界面有哪些可能的路”；真正点击前仍然需要 `locate_target` 精准定位和 `execute_recognition_plan` 的 Gate。
+
+## 2026-06-07 更新：Sectioned Screen Map
+
+`screen_map_v1` 现在会先划分页面区域，再把候选动作挂到区域上。典型区域包括 `page_header`、`promo_strip`、`main_content`、`lower_content` 和 `floating_overlay`。如果整屏视觉模型只返回顶部导航控件，runtime 会从高置信 OCR 正文文本补充 `ocr_text_actions`，让正文卡片和按钮先进入地图，后续再由 `locate_target` 精准确认。

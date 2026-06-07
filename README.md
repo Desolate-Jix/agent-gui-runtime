@@ -256,9 +256,10 @@ POST /action/execute_recognition_plan  dry_run=false，携带 approved_plan_id
 
 - 先用整屏理解得到简短候选列表，再对选中的目标精准定位
 - `observe_screen.suggested_state_hint` 是下一次 `locate_target.state_hint` 的默认建议；测试面板会自动填入，agent 仍可按目标覆盖
+- `observe_screen.screen_map` 是整屏理解阶段生成的页面/动作地图，测试面板导航路径图会直接消费其中的页面分区、候选控件、风险等级和预期效果；observe trace 也保留这份地图，Trace Inspector 会显示为 `Path Map` 阶段
 - 上层 Agent 应保留用户原文用于 trace，但发给视觉模型的 `goal` / `state_hint` / 排除约束建议规范化为英文；例如用户说“点击第一个自然搜索结果”，模型侧可写成 `Click the first organic Google search result title` 和 `main organic search results list below Google navigation tabs`
 - OCR anchors 默认参与视觉定位；精准定位保留完整 OCR 结果用于校验，但向模型发送受预算控制的几何投影，只有目标文字高匹配时才附带文字
-- `observe_screen` 只用于界面摘要和候选发现，不用于点击或最终坐标证明
+- `observe_screen` 只用于界面摘要、地图生成和候选发现；`screen_map` 里的 bbox/click_point 只是观察证据，不用于点击或最终坐标证明
 - `locate_target` 只返回 no-click 定位结果
 - `located_bbox` / `located_point` 是精准视觉模型建议的目标位置；只有 `selected_click_point` 表示已通过点击前闸门的可执行坐标
 - 自主 agent 的真正点击只能走 `execute_recognition_plan`
@@ -304,7 +305,7 @@ For list-style text targets, fusion also records an `unreferenced_text_contamina
 - `GET /state`
 - `POST /state/capture_window`
 
-`POST /state/capture_window` uses screen-coordinate capture, so it lightly restores the bound window and attempts to bring it to the foreground before grabbing pixels.
+`POST /state/capture_window` uses screen-coordinate capture, so it lightly restores the bound window, brings it to the foreground, and waits briefly for the window to settle before grabbing pixels.
 
 视觉：
 
@@ -442,6 +443,7 @@ node --check app\web_panel\panel.js
 - `PROJECT_SUMMARY.md`：项目摘要
 - `CURRENT_STATE.md`：当前状态
 - `NEXT_STEPS.md`：下一步计划
+- `LEARNING_MODE_PLAN.zh-CN.md`：学习模式设计，区分自我探索和点击后路径记录
 - `ACCURACY_EVALUATION_STANDARD.md`：准确率评估标准
 - `RUNTIME_STATE_GRAPH.md` / `RUNTIME_STATE_GRAPH.zh-CN.md`：状态图设计
 

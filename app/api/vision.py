@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -470,10 +471,11 @@ def observe_screen(request: VisionObserveScreenRequestModel) -> APIResponse:
         result["contract_version"] = "screen_observation_v1"
         result["live_capture"] = live_capture
         result["suggested_state_hint"] = _suggested_state_hint_from_observation(result)
+        result["screen_map"] = _build_screen_map_from_observation(result, request=request, image_path=image_path)
         result["agent_next_steps"] = [
-            "Read screen_reading.ui.elements and ui.icon_candidates to decide what the user likely wants.",
-            "Use suggested_state_hint as the default state_hint for POST /vision/locate_target unless the user overrides it.",
-            "When a concrete target is chosen, call POST /vision/locate_target with that goal.",
+            "Read screen_map.candidates to decide what the user likely wants; it is a semantic map, not executable coordinates.",
+            "Use screen_map.state_id and suggested_state_hint as the default context for POST /vision/locate_target unless the user overrides it.",
+            "When a concrete target is chosen, call POST /vision/locate_target with that candidate label/goal.",
             "Execute only through POST /action/execute_recognition_plan after pre_click_decision allows it.",
         ]
         result["timings"] = timer.to_dict()
@@ -519,6 +521,570 @@ def _compact_state_hint(value: Any) -> str:
     if not text or text.casefold() in {"unknown", "none", "null"}:
         return ""
     return text[:80]
+
+
+def _build_screen_map_from_observation(result: dict[str, Any], *, request: VisionObserveScreenRequestModel, image_path: str) -> dict[str, Any]:
+    screen_reading = result.get("screen_reading") if isinstance(result.get("screen_reading"), dict) else {}
+    screen_summary = (
+        result.get("screen_summary")
+        or screen_reading.get("screen_summary")
+        or result.get("message")
+        or ""
+    )
+    state_hint = result.get("suggested_state_hint") or _suggested_state_hint_from_observation(result)
+    sections = _screen_map_sections(result)
+    candidates = _screen_map_candidates(result, sections=sections)
+    app_name = request.app_name or result.get("app_name") or screen_reading.get("app_name") or ""
+    signature = _screen_state_signature(
+        app_name=app_name,
+        state_hint=state_hint,
+        screen_summary=screen_summary,
+        image_path=image_path,
+        candidates=candidates,
+    )
+    return {
+        "contract_version": "screen_map_v1",
+        "state_id": signature["state_id"],
+        "app_name": app_name,
+        "image_path": image_path,
+        "state_hint": state_hint,
+        "summary": {
+            "screen_summary": screen_summary,
+            "candidate_count": len(candidates),
+            "safe_candidate_count": len([item for item in candidates if item.get("risk_class") == "safe_click_allowed"]),
+            "blocked_candidate_count": len([item for item in candidates if item.get("risk_class") == "blocked"]),
+            "section_count": len(sections),
+        },
+        "state_signature": signature,
+        "sections": sections,
+        "candidates": candidates,
+        "agent_usage": {
+            "observe_role": "Build the semantic page/action map.",
+            "locate_role": "Locate one selected screen_map candidate precisely before any click.",
+            "execute_role": "Verify the selected point and post-click transition through the gated action API.",
+        },
+    }
+
+
+def _screen_map_sections(result: dict[str, Any]) -> list[dict[str, Any]]:
+    image_size = result.get("image_size") if isinstance(result.get("image_size"), dict) else {}
+    live_capture = result.get("live_capture") if isinstance(result.get("live_capture"), dict) else {}
+    width = int(_number(image_size.get("width") or live_capture.get("image_width")) or 0)
+    height = int(_number(image_size.get("height") or live_capture.get("image_height")) or 0)
+    if width <= 0:
+        width = _max_text_edge(result, axis="x") or 1000
+    if height <= 0:
+        height = _max_text_edge(result, axis="y") or 1000
+
+    browser_chrome_bottom = min(height, max(80, round(height * 0.085)))
+    page_header_bottom = min(height, max(browser_chrome_bottom + 70, round(height * 0.17)))
+    promo_bottom = min(height, max(page_header_bottom + 90, round(height * 0.30)))
+    main_bottom = min(height, max(promo_bottom + 260, round(height * 0.86)))
+
+    sections = [
+        _screen_map_section(
+            "browser_chrome",
+            "Browser chrome",
+            "browser",
+            "Browser tabs, address bar, and extension controls.",
+            {"x": 0, "y": 0, "w": width, "h": browser_chrome_bottom},
+            result,
+        ),
+        _screen_map_section(
+            "page_header",
+            "Top navigation",
+            "navigation",
+            "Website header, logo, language controls, and top navigation tabs.",
+            {"x": 0, "y": browser_chrome_bottom, "w": width, "h": max(1, page_header_bottom - browser_chrome_bottom)},
+            result,
+        ),
+        _screen_map_section(
+            "promo_strip",
+            "Promotion strip",
+            "content",
+            "Horizontal promotional or feature cards above the main tool area.",
+            {"x": 0, "y": page_header_bottom, "w": width, "h": max(1, promo_bottom - page_header_bottom)},
+            result,
+        ),
+        _screen_map_section(
+            "main_content",
+            "Main content",
+            "content",
+            "Primary page body with tool cards, panels, forms, and test areas.",
+            {"x": 0, "y": promo_bottom, "w": width, "h": max(1, main_bottom - promo_bottom)},
+            result,
+        ),
+    ]
+    if main_bottom < height:
+        sections.append(
+            _screen_map_section(
+                "lower_content",
+                "Lower content",
+                "content",
+                "Content below the first viewport's main card area.",
+                {"x": 0, "y": main_bottom, "w": width, "h": max(1, height - main_bottom)},
+                result,
+            )
+        )
+    floating = _floating_overlay_section(result, width=width, height=height)
+    if floating:
+        sections.append(floating)
+    return sections
+
+
+def _screen_map_section(section_id: str, label: str, role: str, description: str, bbox: dict[str, int], result: dict[str, Any]) -> dict[str, Any]:
+    texts = _texts_in_bbox(_screen_map_texts(result), bbox)
+    return {
+        "contract_version": "screen_map_section_v1",
+        "section_id": section_id,
+        "label": label,
+        "role": role,
+        "description": description,
+        "bbox": bbox,
+        "text_count": len(texts),
+        "text_sample": [_first_compact_text(item.get("text")) for item in texts[:10] if _first_compact_text(item.get("text"))],
+    }
+
+
+def _floating_overlay_section(result: dict[str, Any], *, width: int, height: int) -> dict[str, Any] | None:
+    texts = _screen_map_texts(result)
+    bottom_right = []
+    for text in texts:
+        bbox = _normalize_map_bbox(text.get("bbox"))
+        if not bbox:
+            continue
+        cx = bbox["x"] + bbox["w"] / 2
+        cy = bbox["y"] + bbox["h"] / 2
+        if cx > width * 0.72 and cy > height * 0.65:
+            label = str(text.get("text") or "")
+            if label and any(token in label.casefold() for token in ["video", "help", "帮助", "房间", "密码", "join", "加入"]):
+                bottom_right.append(text)
+    if not bottom_right:
+        return None
+    bbox = _bbox_union([_normalize_map_bbox(item.get("bbox")) for item in bottom_right])
+    if not bbox:
+        return None
+    padded = _pad_bbox(bbox, pad=28, max_width=width, max_height=height)
+    return _screen_map_section(
+        "floating_overlay",
+        "Floating overlay",
+        "overlay",
+        "Floating widget or overlay above the page content.",
+        padded,
+        result,
+    )
+
+
+def _screen_map_text_candidates(result: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for index, text_item in enumerate(_screen_map_texts(result)):
+        if not isinstance(text_item, dict):
+            continue
+        label = _normalize_ocr_candidate_label(_first_compact_text(text_item.get("text")))
+        bbox = _normalize_map_bbox(text_item.get("bbox"))
+        confidence = _bounded_float(text_item.get("confidence"))
+        if not label or not bbox:
+            continue
+        role = _ocr_text_candidate_role(label, bbox)
+        if not role:
+            continue
+        min_confidence = 0.6 if len(label) <= 4 else 0.72
+        if confidence is not None and confidence < min_confidence:
+            continue
+        candidates.append(
+            {
+                "id": f"ocr_{text_item.get('id') or index}",
+                "text_id": text_item.get("id"),
+                "label": label,
+                "type": role,
+                "bbox": bbox,
+                "click_point": _normalize_map_point(None, bbox),
+                "confidence": confidence,
+                "interaction_policy": {
+                    "allowed": True if role in {"text_action", "nav_text_action"} else None,
+                    "reasons": ["ocr_text_candidate"],
+                },
+                "verification_hints": {"expected_changes": [_expected_effect_for_ocr_text(label, role)]},
+                "evidence_level": "ocr_text_only",
+            }
+        )
+    return candidates
+
+
+def _screen_map_texts(result: dict[str, Any]) -> list[dict[str, Any]]:
+    texts: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    screen_reading = result.get("screen_reading") if isinstance(result.get("screen_reading"), dict) else {}
+    for source in (result.get("texts"), screen_reading.get("texts")):
+        for item in _as_list(source):
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("id") or item.get("text") or "") + "|" + str(item.get("bbox") or "")
+            if key in seen:
+                continue
+            seen.add(key)
+            texts.append(item)
+    return texts
+
+
+def _normalize_ocr_candidate_label(label: str) -> str:
+    return str(label or "").strip().strip("·•・-—→ ").strip()
+
+
+def _ocr_text_candidate_role(label: str, bbox: dict[str, int]) -> str | None:
+    text = label.strip()
+    lowered = text.casefold()
+    if bbox["y"] < 90:
+        return None
+    if bbox["y"] < 180 and ("." in text or "mousetester" in lowered):
+        return None
+    if len(text) > 24:
+        return None
+    if any(mark in text for mark in ["、", "，", ","]) and not text.startswith(("点击", "立即")):
+        return None
+    if "峰值" in text or "成功次数" in text or "上次间隔" in text:
+        return None
+    action_terms = [
+        "click",
+        "start",
+        "open",
+        "apply",
+        "test",
+        "reset",
+        "join",
+        "点击",
+        "开始",
+        "测试",
+        "重置",
+        "左键",
+        "中键",
+        "右键",
+        "前进",
+        "后退",
+        "加入",
+    ]
+    card_terms = [
+        "dpi",
+        "cps",
+        "hz",
+        "回报率",
+        "双击",
+        "按键",
+        "滚轮",
+        "平滑度",
+        "灵敏度",
+        "键盘",
+        "白噪音",
+    ]
+    if any(term in lowered or term in text for term in action_terms):
+        return "nav_text_action" if bbox["y"] < 180 else "text_action"
+    if bbox["y"] >= 250 and any(term in lowered or term in text for term in card_terms):
+        return "content_card"
+    return None
+
+
+def _expected_effect_for_ocr_text(label: str, role: str) -> str:
+    if role == "content_card":
+        return f"open or focus the {label} section"
+    return f"activate {label}"
+
+
+def _screen_map_candidates(result: dict[str, Any], *, sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    sources: list[tuple[str, list[Any]]] = []
+    screen_reading = result.get("screen_reading") if isinstance(result.get("screen_reading"), dict) else {}
+    ui = screen_reading.get("ui") if isinstance(screen_reading.get("ui"), dict) else {}
+    sources.append(("screen_reading.ui.elements", _as_list(ui.get("elements"))))
+    sources.append(("screen_reading.ui.icon_candidates", _as_list(ui.get("icon_candidates"))))
+    sources.append(("screen_reading.ui_elements", _as_list(screen_reading.get("ui_elements"))))
+    sources.append(("top_level.ui.elements", _as_list(result.get("ui", {}).get("elements") if isinstance(result.get("ui"), dict) else None)))
+    sources.append(("top_level.ui.icon_candidates", _as_list(result.get("ui", {}).get("icon_candidates") if isinstance(result.get("ui"), dict) else None)))
+    sources.append(("top_level.ui_elements", _as_list(result.get("ui_elements"))))
+    sources.append(("top_level.elements", _as_list(result.get("elements"))))
+    sources.append(("top_level.controls", _as_list(result.get("controls"))))
+    sources.append(("ocr_text_actions", _screen_map_text_candidates(result)))
+
+    seen: set[str] = set()
+    candidates: list[dict[str, Any]] = []
+    for source_name, items in sources:
+        for index, item in enumerate(items):
+            if not isinstance(item, dict):
+                continue
+            candidate = _screen_map_candidate(item, source=source_name, index=index, sections=sections)
+            if candidate is None:
+                continue
+            dedupe_key = f"{candidate['label']}|{candidate.get('bbox')}"
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            candidates.append(candidate)
+    return candidates[:80]
+
+
+def _screen_map_candidate(item: dict[str, Any], *, source: str, index: int, sections: list[dict[str, Any]]) -> dict[str, Any] | None:
+    label = _first_compact_text(
+        item.get("label"),
+        item.get("text"),
+        item.get("name"),
+        item.get("title"),
+        item.get("description"),
+        item.get("role_guess"),
+        item.get("role"),
+        item.get("type"),
+    )
+    label = _normalize_ocr_candidate_label(label)
+    if not label:
+        return None
+    bbox = _normalize_map_bbox(item.get("bbox") or item.get("bounding_box") or item.get("bounds") or item.get("rect") or item.get("region"))
+    click_point = _normalize_map_point(item.get("click_point") or item.get("clickPoint"), bbox)
+    role = _first_compact_text(item.get("type"), item.get("role_guess"), item.get("role"), item.get("control_type")) or "control"
+    policy = _interaction_policy_from_item(item)
+    risk_class, risk_reasons = _risk_class_for_candidate(label=label, role=role, policy=policy)
+    expected_effect = _expected_effect_from_item(item, role=role)
+    candidate_id = str(item.get("id") or item.get("element_id") or item.get("candidate_id") or f"screen_map_{index}")
+    return {
+        "contract_version": "screen_map_candidate_v1",
+        "candidate_id": candidate_id[:100],
+        "label": label,
+        "role": role,
+        "goal_hint": _goal_hint_for_candidate(label=label, role=role),
+        "expected_effect": expected_effect,
+        "risk_class": risk_class,
+        "risk_reasons": risk_reasons,
+        "section_id": _section_id_for_bbox(bbox, sections),
+        "bbox": bbox,
+        "click_point": click_point,
+        "confidence": _bounded_float(item.get("confidence")),
+        "source": source,
+        "source_id": item.get("id") or item.get("element_id") or item.get("candidate_id"),
+        "evidence": {
+            "interaction_policy": policy,
+            "coordinate_confidence": item.get("coordinate_confidence"),
+            "evidence_level": item.get("evidence_level"),
+            "memory_key": item.get("memory_key"),
+            "source_text_id": item.get("text_id"),
+        },
+    }
+
+
+def _interaction_policy_from_item(item: dict[str, Any]) -> dict[str, Any]:
+    evidence = item.get("evidence") if isinstance(item.get("evidence"), dict) else {}
+    policy = evidence.get("interaction_policy") if isinstance(evidence.get("interaction_policy"), dict) else {}
+    if not policy and isinstance(item.get("interaction_policy"), dict):
+        policy = item["interaction_policy"]
+    return dict(policy)
+
+
+def _risk_class_for_candidate(*, label: str, role: str, policy: dict[str, Any]) -> tuple[str, list[str]]:
+    reasons = [str(item) for item in _as_list(policy.get("reasons")) if str(item or "").strip()]
+    risk_text = " ".join([label, role, " ".join(reasons), str(policy.get("zone_type") or "")]).casefold()
+    dangerous_terms = [
+        "delete",
+        "remove",
+        "payment",
+        "pay",
+        "purchase",
+        "send",
+        "submit",
+        "authorize",
+        "permission",
+        "close window",
+        "删除",
+        "移除",
+        "支付",
+        "购买",
+        "发送",
+        "提交",
+        "授权",
+        "关闭窗口",
+    ]
+    if any(term in risk_text for term in dangerous_terms):
+        return "requires_user_confirmation", sorted(set([*reasons, "potential_side_effect_action"]))
+    if policy.get("allowed") is False:
+        return "blocked", sorted(set(reasons or ["interaction_policy_blocked"]))
+    if policy.get("allowed") is True:
+        return "safe_click_allowed", sorted(set(reasons))
+    if any(token in str(role).casefold() for token in ["input", "textbox", "search"]):
+        return "safe_click_allowed", sorted(set(reasons))
+    return "safe_dry_run_only", sorted(set(reasons or ["requires_precise_location_before_click"]))
+
+
+def _expected_effect_from_item(item: dict[str, Any], *, role: str) -> str:
+    verification = item.get("verification_hints") if isinstance(item.get("verification_hints"), dict) else {}
+    evidence = item.get("evidence") if isinstance(item.get("evidence"), dict) else {}
+    evidence_verification = evidence.get("verification_hints") if isinstance(evidence.get("verification_hints"), dict) else {}
+    for value in (
+        item.get("expected_effect"),
+        item.get("possible_navigation"),
+        item.get("possible_destinations"),
+        item.get("action"),
+        item.get("interaction_type"),
+        verification.get("expected_changes"),
+        evidence_verification.get("expected_changes"),
+    ):
+        text = _first_compact_text(value)
+        if text:
+            return text
+    role_text = str(role or "").casefold()
+    if any(token in role_text for token in ["input", "textbox", "search"]):
+        return "focus or edit input"
+    return "click may change the current interface"
+
+
+def _goal_hint_for_candidate(*, label: str, role: str) -> str:
+    role_text = str(role or "control").replace("_", " ")
+    return f"{role_text}: {label}"[:120]
+
+
+def _section_id_for_bbox(bbox: dict[str, int] | None, sections: list[dict[str, Any]]) -> str | None:
+    if not bbox:
+        return None
+    cx = bbox["x"] + bbox["w"] / 2
+    cy = bbox["y"] + bbox["h"] / 2
+    best_section = None
+    best_score = -1
+    for section in sections:
+        section_bbox = _normalize_map_bbox(section.get("bbox"))
+        if not section_bbox:
+            continue
+        inside = (
+            section_bbox["x"] <= cx <= section_bbox["x"] + section_bbox["w"]
+            and section_bbox["y"] <= cy <= section_bbox["y"] + section_bbox["h"]
+        )
+        overlap = _bbox_overlap_area(bbox, section_bbox)
+        score = overlap + (1_000_000 if inside else 0)
+        if score > best_score:
+            best_score = score
+            best_section = section
+    return str(best_section.get("section_id")) if best_section else None
+
+
+def _max_text_edge(result: dict[str, Any], *, axis: str) -> int | None:
+    edge = 0
+    for text in _screen_map_texts(result):
+        bbox = _normalize_map_bbox(text.get("bbox"))
+        if not bbox:
+            continue
+        if axis == "x":
+            edge = max(edge, bbox["x"] + bbox["w"])
+        else:
+            edge = max(edge, bbox["y"] + bbox["h"])
+    return edge or None
+
+
+def _texts_in_bbox(texts: list[dict[str, Any]], bbox: dict[str, int]) -> list[dict[str, Any]]:
+    selected = []
+    for text in texts:
+        text_bbox = _normalize_map_bbox(text.get("bbox"))
+        if not text_bbox:
+            continue
+        cx = text_bbox["x"] + text_bbox["w"] / 2
+        cy = text_bbox["y"] + text_bbox["h"] / 2
+        if bbox["x"] <= cx <= bbox["x"] + bbox["w"] and bbox["y"] <= cy <= bbox["y"] + bbox["h"]:
+            selected.append(text)
+    selected.sort(key=lambda item: ((_normalize_map_bbox(item.get("bbox")) or {}).get("y", 0), (_normalize_map_bbox(item.get("bbox")) or {}).get("x", 0)))
+    return selected
+
+
+def _bbox_union(boxes: list[dict[str, int] | None]) -> dict[str, int] | None:
+    valid = [box for box in boxes if box]
+    if not valid:
+        return None
+    x1 = min(box["x"] for box in valid)
+    y1 = min(box["y"] for box in valid)
+    x2 = max(box["x"] + box["w"] for box in valid)
+    y2 = max(box["y"] + box["h"] for box in valid)
+    return {"x": x1, "y": y1, "w": max(1, x2 - x1), "h": max(1, y2 - y1)}
+
+
+def _pad_bbox(bbox: dict[str, int], *, pad: int, max_width: int, max_height: int) -> dict[str, int]:
+    x = max(0, bbox["x"] - pad)
+    y = max(0, bbox["y"] - pad)
+    x2 = min(max_width, bbox["x"] + bbox["w"] + pad)
+    y2 = min(max_height, bbox["y"] + bbox["h"] + pad)
+    return {"x": x, "y": y, "w": max(1, x2 - x), "h": max(1, y2 - y)}
+
+
+def _bbox_overlap_area(a: dict[str, int], b: dict[str, int]) -> int:
+    x1 = max(a["x"], b["x"])
+    y1 = max(a["y"], b["y"])
+    x2 = min(a["x"] + a["w"], b["x"] + b["w"])
+    y2 = min(a["y"] + a["h"], b["y"] + b["h"])
+    return max(0, x2 - x1) * max(0, y2 - y1)
+
+
+def _screen_state_signature(*, app_name: str, state_hint: str, screen_summary: str, image_path: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    labels = [str(item.get("label") or "")[:60] for item in candidates[:20]]
+    source = "|".join([app_name or "", state_hint or "", screen_summary or "", image_path or "", *labels])
+    digest = hashlib.sha256(source.encode("utf-8", errors="ignore")).hexdigest()[:16]
+    return {
+        "state_id": f"state_{digest}",
+        "app_name": app_name,
+        "state_hint": state_hint,
+        "screen_summary_hash": hashlib.sha256(str(screen_summary or "").encode("utf-8", errors="ignore")).hexdigest()[:16],
+        "image_path": image_path,
+        "candidate_label_sample": labels[:12],
+        "candidate_count": len(candidates),
+    }
+
+
+def _normalize_map_bbox(value: Any) -> dict[str, int] | None:
+    if not isinstance(value, dict):
+        return None
+    x = _number(value.get("x", value.get("left", value.get("x1"))))
+    y = _number(value.get("y", value.get("top", value.get("y1"))))
+    right = _number(value.get("right", value.get("x2")))
+    bottom = _number(value.get("bottom", value.get("y2")))
+    width = _number(value.get("w", value.get("width")))
+    height = _number(value.get("h", value.get("height")))
+    if width is None and right is not None and x is not None:
+        width = right - x
+    if height is None and bottom is not None and y is not None:
+        height = bottom - y
+    if x is None or y is None or width is None or height is None or width <= 0 or height <= 0:
+        return None
+    return {"x": int(round(x)), "y": int(round(y)), "w": int(round(width)), "h": int(round(height))}
+
+
+def _normalize_map_point(value: Any, bbox: dict[str, int] | None) -> dict[str, int] | None:
+    if isinstance(value, dict):
+        x = _number(value.get("x"))
+        y = _number(value.get("y"))
+        if x is not None and y is not None:
+            return {"x": int(round(x)), "y": int(round(y))}
+    if bbox:
+        return {"x": int(round(bbox["x"] + bbox["w"] / 2)), "y": int(round(bbox["y"] + bbox["h"] / 2))}
+    return None
+
+
+def _number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number else None
+
+
+def _bounded_float(value: Any) -> float | None:
+    number = _number(value)
+    if number is None:
+        return None
+    return round(max(0.0, min(1.0, number)), 4)
+
+
+def _first_compact_text(*values: Any) -> str:
+    for value in values:
+        if isinstance(value, list):
+            text = "; ".join(str(item).strip() for item in value if str(item or "").strip())
+        else:
+            text = str(value or "").strip()
+        text = " ".join(text.split())
+        if text:
+            return text[:160]
+    return ""
+
+
+def _as_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
 
 
 @router.post("/locate_target", response_model=APIResponse)

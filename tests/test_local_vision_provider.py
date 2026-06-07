@@ -373,6 +373,40 @@ def test_local_provider_retries_with_compact_prompt_after_truncated_json(tmp_pat
     assert "provider_retry_count=1" in result.notes
 
 
+def test_local_provider_repairs_inner_quotes_in_json_strings(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "quote-screen.png"
+    Image.new("RGB", (200, 120), color=(255, 255, 255)).save(image_path)
+
+    def fake_urlopen(request, timeout):
+        return _FakeHTTPResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"screen_summary":"news card with "quoted" title",'
+                                '"state_guess":"news_home",'
+                                '"regions":[],'
+                                '"targets":[],'
+                                '"observers":[]}'
+                            )
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("app.vision.local_provider.urlopen", fake_urlopen)
+
+    result = LocalVisionProvider(endpoint="http://127.0.0.1:1234/v1/chat/completions", timeout_seconds=12).analyze(
+        VisionAnalyzeRequest(image_path=str(image_path), task="observe_screen")
+    )
+
+    assert result.screen_summary == 'news card with "quoted" title'
+    assert "json_repair=escaped_inner_string_quotes" in result.notes
+    assert result.raw_response["attempts"][0]["status"] == "success"
+
+
 def test_local_provider_can_use_grid_overlay_reference(tmp_path, monkeypatch) -> None:
     image_path = tmp_path / "grid-screen.png"
     Image.new("RGB", (600, 400), color=(255, 255, 255)).save(image_path)

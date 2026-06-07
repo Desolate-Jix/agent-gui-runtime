@@ -1325,6 +1325,7 @@ function collectArray(value) {
 
 function collectControlsFromResult(result) {
   const sources = [
+    collectArray(result.screen_map?.candidates),
     collectArray(result.controls),
     collectArray(result.elements),
     collectArray(result.regions),
@@ -1381,6 +1382,7 @@ function addControlToCurrentPage(label, bbox, point, type, description, extra = 
     if (extra.possibleNav) existing.possibleNav = extra.possibleNav;
     if (extra.action) existing.action = extra.action;
     if (extra.confidence !== undefined) existing.confidence = extra.confidence;
+    if (extra.sectionId) existing.sectionId = extra.sectionId;
     return;
   }
 
@@ -1397,6 +1399,7 @@ function addControlToCurrentPage(label, bbox, point, type, description, extra = 
     possibleNav: compactText(extra.possibleNav, 160),
     action: compactText(extra.action, 80),
     source: compactText(extra.source, 60),
+    sectionId: compactText(extra.sectionId, 80),
     confidence: extra.confidence ?? null,
   });
   navPathDirty = true;
@@ -1451,6 +1454,10 @@ function buildPathGraphPayload() {
         click_screenshot: c.clickScreenshot || null,
         navigated_to_page_id: c.navigatedToPageId || null,
         possible_navigation: c.possibleNav || "",
+        section_id: c.sectionId || "",
+        action: c.action || "",
+        source: c.source || "",
+        confidence: c.confidence,
       })),
     })),
     transitions: navPathEdges.map((e) => ({
@@ -2459,7 +2466,7 @@ function showNavNodeDetail(nodeId) {
         const statusClass = ctrl.status === "clicked" ? "ctrl-clicked" : "ctrl-unclicked";
         const coords = ctrl.clickPoint ? `(${Math.round(ctrl.clickPoint.x)}, ${Math.round(ctrl.clickPoint.y)})` : (ctrl.bbox ? `${Math.round(ctrl.bbox.x)},${Math.round(ctrl.bbox.y)} ${Math.round(ctrl.bbox.width)}x${Math.round(ctrl.bbox.height)}` : "");
         const navInfo = ctrl.navigatedToPageId ? ` -> ${(navPathNodes.find((n) => n.id === ctrl.navigatedToPageId) || {}).label || "?"}` : "";
-        const typeInfo = [ctrl.type, ctrl.source, ctrl.confidence !== null && ctrl.confidence !== undefined ? `conf ${Number(ctrl.confidence).toFixed(2)}` : ""].filter(Boolean).join(" | ");
+        const typeInfo = [ctrl.type, ctrl.sectionId, ctrl.source, ctrl.confidence !== null && ctrl.confidence !== undefined ? `conf ${Number(ctrl.confidence).toFixed(2)}` : ""].filter(Boolean).join(" | ");
         return `
           <div class="control-item ${statusClass}">
             <span class="ctrl-status">${statusIcon}</span>
@@ -2503,6 +2510,31 @@ function showNavNodeDetail(nodeId) {
   if (meta) meta.textContent = `${controls.length} controls | ${navPathNodes.length} pages`;
 }
 
+function tracePathMapHtml(raw) {
+  if (!raw || raw.contract_version !== "screen_map_v1" || !Array.isArray(raw.candidates)) return "";
+  const candidates = raw.candidates.slice(0, 24);
+  if (!candidates.length) return "";
+  return `
+    <div class="tf-path-map">
+      <h5>路径候选</h5>
+      ${candidates.map((candidate) => {
+        const point = normalizePoint(candidate.click_point, candidate.bbox);
+        const box = normalizeBBox(candidate.bbox);
+        const pointText = point ? `(${Math.round(point.x)}, ${Math.round(point.y)})` : "";
+        const boxText = box ? `${Math.round(box.x)},${Math.round(box.y)} ${Math.round(box.width)}×${Math.round(box.height)}` : "";
+        const meta = [candidate.section_id, candidate.role, candidate.risk_class, pointText, boxText].filter(Boolean).join(" · ");
+        return `
+          <div class="tf-path-candidate">
+            <strong>${escapeHtml(candidate.label || candidate.candidate_id || "candidate")}</strong>
+            <span>${escapeHtml(meta)}</span>
+            ${candidate.expected_effect ? `<p>${escapeHtml(candidate.expected_effect)}</p>` : ""}
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
 function toggleTraceStageDetail(event) {
   const node = event.currentTarget || event.target.closest(".tf-node");
   if (!node) return;
@@ -2529,6 +2561,7 @@ function toggleTraceStageDetail(event) {
         <button type="button" class="tf-stage-close" aria-label="Close">×</button>
       </div>
       <p class="tf-stage-detail-summary">${escapeHtml(summary)}</p>
+      ${tracePathMapHtml(data.raw)}
       ${traceStageVisualsHtml(visuals)}
       ${rawJson ? `<pre class="tf-stage-detail-body">${escapeHtml(rawJson.slice(0, 12000))}</pre>` : ""}
     </div>
@@ -2571,11 +2604,13 @@ function ingestNavPathFromResponse(response) {
   // Detect observe_screen response with screen_summary or screen_reading.
   const screenSummary =
     result.screen_summary ||
+    nestedGet(result, ["screen_map", "summary", "screen_summary"]) ||
     nestedGet(result, ["screen_reading", "screen_summary"]) ||
     nestedGet(result, ["parse_result", "screen_reading", "screen_summary"]) ||
     nestedGet(result, ["parse_result", "vision_regions", "screen_summary"]);
   const stateGuess =
     result.state_guess ||
+    nestedGet(result, ["screen_map", "state_hint"]) ||
     nestedGet(result, ["screen_reading", "state_guess"]) ||
     nestedGet(result, ["parse_result", "screen_reading", "state_guess"]) ||
     result.suggested_state_hint;
@@ -2598,11 +2633,12 @@ function ingestNavPathFromResponse(response) {
       const ctrlBbox = ctrl.bbox || ctrl.bounding_box || ctrl.bounds || ctrl.rect || ctrl.region || null;
       const ctrlPoint = ctrl.click_point || ctrl.clickPoint || ctrl.locator_hints?.coordinate?.click_point || null;
       const ctrlType = ctrl.type || ctrl.role || ctrl.kind || ctrl.control_type || "control";
-      const ctrlDesc = firstText(ctrl.description, ctrl.action, ctrl.purpose, ctrl.meaning, ctrl.summary, ctrl.reason);
+      const ctrlDesc = firstText(ctrl.description, ctrl.expected_effect, ctrl.action, ctrl.purpose, ctrl.meaning, ctrl.summary, ctrl.reason);
       addControlToCurrentPage(ctrlLabel, ctrlBbox, ctrlPoint, ctrlType, ctrlDesc, {
-        possibleNav: controlPossibleNav(ctrl),
-        action: firstText(ctrl.action, ctrl.interaction, ctrl.interaction_type, ctrl.click_action),
-        source: ctrl.source || "observe",
+        possibleNav: controlPossibleNav(ctrl) || ctrl.expected_effect,
+        action: firstText(ctrl.action, ctrl.interaction, ctrl.interaction_type, ctrl.click_action, ctrl.goal_hint),
+        source: ctrl.source || (ctrl.contract_version === "screen_map_candidate_v1" ? "screen_map" : "observe"),
+        sectionId: ctrl.section_id,
         confidence: ctrl.confidence,
       });
     }
@@ -2787,7 +2823,7 @@ function bindEvents() {
       app_id: $("appId").value || null,
       url: $("appUrl").value || null,
       bind_after_open: true,
-      wait_seconds: 1.5,
+    wait_seconds: 3.5,
     }, { summary: "POST /apps/open", workflowStep: "open" }).then((response) => {
       setWindowCandidates(nestedGet(response, ["data", "running_windows"]) || []);
       syncWindowAppAndState();

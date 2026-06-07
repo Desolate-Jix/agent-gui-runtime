@@ -710,6 +710,45 @@ textarea {
   display: none;
 }
 
+.tf-path-map {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #dbe5f5;
+  border-radius: 8px;
+  background: #f6f9ff;
+}
+
+.tf-path-map h5 {
+  margin: 0;
+  font-size: 11px;
+  color: #155eef;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.tf-path-candidate {
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid #e4e7ec;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.tf-path-candidate strong {
+  font-size: 12px;
+  color: #182230;
+}
+
+.tf-path-candidate span,
+.tf-path-candidate p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #667085;
+}
+
 /* Model test response */
 
 .model-test-response {

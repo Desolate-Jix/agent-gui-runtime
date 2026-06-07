@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import unicodedata
 from dataclasses import dataclass
 from typing import Optional
 
@@ -128,7 +129,7 @@ class WindowManager:
     def _find_window(self, process_name: Optional[str], title: Optional[str]) -> HwndWrapper:
         """Locate a visible top-level window matching the provided filters."""
         self._ensure_windows_backend()
-        title_query = title.strip().lower() if title else None
+        title_query = self._normalize_match_text(title) if title else None
         process_query = process_name.strip().lower() if process_name else None
 
         candidates: list[tuple[HwndWrapper, str, Optional[int], Optional[str]]] = []
@@ -164,7 +165,7 @@ class WindowManager:
             process_match = True
 
             if title_query:
-                title_match = title_query in window_title.lower()
+                title_match = title_query in self._normalize_match_text(window_title)
             if process_query:
                 process_match = current_process_name is not None and current_process_name.lower() == process_query
 
@@ -184,6 +185,9 @@ class WindowManager:
         """Return whether a window is a usable top-level candidate."""
         if not WINDOWS_BACKEND_AVAILABLE:
             return False
+
+    def _normalize_match_text(self, value: str) -> str:
+        return "".join(char for char in value.strip().lower() if unicodedata.category(char) != "Cf")
 
         try:
             handle = wrapper.handle

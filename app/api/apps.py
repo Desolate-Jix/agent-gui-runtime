@@ -115,8 +115,9 @@ def open_app(request: OpenAppRequest) -> APIResponse:
             )
         with timer.step("launch_process", executable=command[0] if command else None):
             process = subprocess.Popen(command)
-        with timer.step("wait_after_open", wait_seconds=request.wait_seconds):
-            time.sleep(float(request.wait_seconds))
+        wait_seconds = _effective_open_wait_seconds(app, request)
+        with timer.step("wait_after_open", wait_seconds=wait_seconds, requested_wait_seconds=request.wait_seconds):
+            time.sleep(wait_seconds)
         with timer.step("list_visible_windows"):
             windows = window_manager.list_visible_windows()
         bound_payload = None
@@ -126,7 +127,7 @@ def open_app(request: OpenAppRequest) -> APIResponse:
         if request.bind_after_open:
             try:
                 with timer.step("bind_window", process_name=process_name, title=title):
-                    bound = window_manager.bind_window(process_name=process_name, title=title)
+                    bound = _bind_opened_window(process_name=process_name, title=title, title_required=bool(request.title))
                 bound_payload = _bound_window_payload(bound)
             except Exception as exc:
                 bind_error = str(exc)
@@ -202,6 +203,33 @@ def _resolve_launch_command(app: dict[str, Any], request: OpenAppRequest) -> lis
     if request.url:
         command.append(request.url)
     return command
+
+
+def _effective_open_wait_seconds(app: dict[str, Any], request: OpenAppRequest) -> float:
+    wait_seconds = float(request.wait_seconds)
+    if request.url and _is_browser_app(app):
+        return max(wait_seconds, 3.5)
+    return wait_seconds
+
+
+def _is_browser_app(app: dict[str, Any]) -> bool:
+    app_id = str(app.get("app_id") or "").lower()
+    capabilities = {str(item).lower() for item in (app.get("capabilities") or [])}
+    process_name = str(app.get("process_name") or "").lower()
+    return (
+        app_id in {"edge", "chrome", "browser", "firefox"}
+        or "browser_ui" in capabilities
+        or process_name in {"msedge.exe", "chrome.exe", "firefox.exe"}
+    )
+
+
+def _bind_opened_window(process_name: str | None, title: str | None, *, title_required: bool) -> Any:
+    try:
+        return window_manager.bind_window(process_name=process_name, title=title)
+    except Exception:
+        if title_required or not process_name or not title:
+            raise
+        return window_manager.bind_window(process_name=process_name, title=None)
 
 
 def _resolve_executable(executable: str, candidates: list[Any]) -> str:
