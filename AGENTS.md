@@ -20,6 +20,25 @@ That means:
 
 Do not stop at draft code when a runtime or smoke check is possible.
 
+## Code Search / Context Gathering Rule
+
+To reduce token usage and repeated file reads, prefer codegraph before raw text search when understanding code structure.
+
+Use codegraph first for:
+
+- architecture, flow, and "how does X reach Y" questions
+- locating symbols, definitions, callers, or callees
+- planning edits that depend on how several functions or files connect
+- understanding an area before changing code
+
+Use `rg` or direct file reads after codegraph only when:
+
+- confirming exact lines or nearby implementation details
+- checking plain text that codegraph does not index well
+- verifying generated files, docs, configs, or non-code assets
+
+If codegraph is unavailable or stale for the files being changed, fall back to `rg` and record that assumption when it matters.
+
 ## Documentation Sync Rule
 
 When code changes affect behavior, API shape, architecture, progress, or known limitations, update documentation in the same work session.

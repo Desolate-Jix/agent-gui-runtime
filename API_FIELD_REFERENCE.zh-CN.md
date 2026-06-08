@@ -495,6 +495,7 @@
 | `located_bbox` | object/null | 精准定位建议的目标框，仅供复核。文本目标优先使用 OCR 收紧后的候选框，而不是漂移的大语义框。 |
 | `located_point` | object/null | 精准定位建议的中心点，仅供复核。 |
 | `location_status` | string | 定位状态，例如 `not_located`、`requires_pre_click_confirmation`。 |
+| `path_map_review` | object | `path_map_review_v1` 路径图核对结果。基于本次 Locate 的 AI/候选理解和上一条 Observe `screen_map` 生成 `additions`、`removals`、`kept`，供测试面板修正当前路径图。 |
 | `execution_path` | object | provider、OCR、candidate rank、pre-click 等路径信息。 |
 | `trace_path` | string | locate trace。 |
 
@@ -503,6 +504,7 @@
 - `located_bbox` / `located_point` 不代表可自动点击；只有 `selected_click_point` 非空才是闸门批准的执行点。
 - 对 `include_referenced_text` 的文本目标，如果视觉语义框里包含未引用 OCR 文本，融合层会写入 `unreferenced_text_contamination` 并将候选保持为 `precise_text_target` review 状态。
 - `locate_target` 会把最佳 review 候选也带回给测试面板填候选框，方便人工生成 overlay 和确认坐标。
+- 如果请求携带可复用的 `observe_trace_path`，Locate 会返回 `path_map_review`。测试面板会加入缺失的精准定位候选，并删除同标签或高度重叠且被 Locate 替换的旧路径候选；不会删除已经点击过或已连接到下一页面的控件。
 
 使用注意：
 
@@ -518,6 +520,7 @@
 | 字段 | 类型 | 默认值 | 作用 |
 | --- | --- | --- | --- |
 | `top_k` | integer | 5 | 候选数量上限。 |
+| `observe_trace_path` | string/null | null | 可选。传入前一次 `/vision/observe_screen` trace 后，若截图匹配，会复用 OCR anchors，并基于 `screen_map_v1` 生成 `path_graph_recall_v1`。 |
 
 返回 `data.result` 字段：
 
@@ -528,6 +531,8 @@
 | `vision_regions` | object | 视觉模型原始/标准化区域。 |
 | `ocr_result` | object | OCR 结果。 |
 | `ocr_anchors` | object/null | OCR anchors 证据。 |
+| `observe_trace_reuse` | object | Observe trace 复用状态。 |
+| `path_graph_recall` | object | `path_graph_recall_v1`。执行模式的状态匹配与 PathGraph top-k 召回结果，包含候选、分数和 `local_ocr_roi` 提示。 |
 | `page_structure` | object | 页面结构层。 |
 | `screen_reading` | object | 读取层。 |
 | `candidate_result` | object | 候选排序结果。 |
@@ -633,6 +638,7 @@
 | `metadata` | object | `{}` | OCR/prompt/调试扩展。 |
 | `top_k` | integer | 5 | 候选数量上限。 |
 | `image_path` | string/null | null | `capture_live=false` 时使用的图片。 |
+| `observe_trace_path` | string/null | null | 可选。传入最新 Observe trace 后，会透传给内部 recognition plan，用于 OCR anchors 复用和 PathGraph recall。 |
 | `capture_live` | boolean | true | 是否从绑定窗口实时截图。 |
 | `allow_saved_image_execution` | boolean | false | 是否允许对保存图片执行真实点击。默认禁止。 |
 | `enable_post_click_verification` | boolean | true | 点击后是否验证。 |
@@ -766,6 +772,21 @@ Instruction learning 复用：
 返回 `data` 字段：动作结果、OCR 匹配、点击点、验证结果和 trace。具体字段比 recognition plan 路径更旧，不建议作为新 Agent 主路径。
 
 使用注意：新流程优先使用 `/vision/recognition_plan` 和 `/action/execute_recognition_plan`，因为它们有候选排序和点击前闸门。
+
+## Agent Mode / Write Policy
+
+以下字段可用于视觉与执行主链路请求：
+
+| 字段 | 类型 | 作用 |
+| --- | --- | --- |
+| `agent_mode` | string | 架构模式。`learn` 表示学习/建图，`execute` 表示执行当前命令。 |
+| `learn_depth` | string/null | 学习深度。`fast` 产出 PathGraph draft；`deep` 用于后续全元素精修、语义审查和 ElementMemory 初始化。执行模式为 null。 |
+| `write_policy` | object | 写入策略，形如 `{path_graph, element_memory, trace}`。当前面板会用 `path_graph=false` 阻止响应自动写入导航路径图，执行接口会用 `element_memory=false` 阻止 instruction learning 写回；`trace=false` 会抑制 Observe/Locate/RecognitionPlan/ExecuteRecognitionPlan 的主 trace 写入。 |
+
+默认策略：
+- Learn Fast: `{path_graph: true, element_memory: false, trace: true}`
+- Learn Deep: `{path_graph: true, element_memory: true, trace: true}`
+- Execute: `{path_graph: false, element_memory: true, trace: true}`
 
 ## POST /action/click_mouse_tester_left_region
 

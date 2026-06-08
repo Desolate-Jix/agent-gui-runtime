@@ -56,6 +56,22 @@
           <div class="status-pill" id="requestStatus">idle</div>
         </section>
 
+        <section class="mode-strip" aria-label="Agent mode">
+          <div class="mode-group" role="group" aria-label="Agent mode">
+            <button id="agentModeLearnBtn" type="button" class="mode-option active" data-mode="learn" data-i18n="learn_mode">Learn Mode</button>
+            <button id="agentModeExecuteBtn" type="button" class="mode-option" data-mode="execute" data-i18n="execute_mode">Execute Mode</button>
+          </div>
+          <div class="mode-group learn-depth-group" role="group" aria-label="Learn depth">
+            <button id="learnFastBtn" type="button" class="mode-option active" data-depth="fast" data-i18n="learn_fast">Learn Fast</button>
+            <button id="learnDeepBtn" type="button" class="mode-option" data-depth="deep" data-i18n="learn_deep">Learn Deep</button>
+          </div>
+          <div class="write-policy-row">
+            <label><input id="writePathGraph" type="checkbox" checked /> <span data-i18n="write_path_graph">PathGraph</span></label>
+            <label><input id="writeElementMemory" type="checkbox" /> <span data-i18n="write_element_memory">ElementMemory</span></label>
+            <label><input id="writeTrace" type="checkbox" checked /> <span data-i18n="write_trace">Trace</span></label>
+          </div>
+        </section>
+
         <section class="content-grid">
           <div class="control-surface">
             <section class="panel stage-page" data-page="model_test">

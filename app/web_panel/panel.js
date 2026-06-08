@@ -9,12 +9,14 @@ let modelProfiles = [];
 let windowCandidates = [];
 let pendingRequests = new Set();
 let currentLanguage = localStorage.getItem("agentPanelLanguage") || "zh-CN";
+let currentAgentMode = localStorage.getItem("agentPanelMode") || "learn";
+let currentLearnDepth = localStorage.getItem("agentLearnDepth") || "fast";
 const BROWSER_APP_IDS = new Set(["browser", "edge", "msedge", "chrome", "firefox"]);
 
 /* 鈹€鈹€ Navigation path graph state 鈹€鈹€ */
 // Each page node:
 //   { id, label, summary, stateGuess, imagePath, timestamp,
-//     controls: [{ label, bbox, clickPoint, type, description, status, clickGoal, clickScreenshot, navigatedToPageId, possibleNav }] }
+//     controls: [{ label, bbox, clickPoint, type, description, status, clickGoal, clickScreenshot, navigatedToPageId, possibleNav, candidateId }] }
 let navPathNodes = [];
 let navPathEdges = [];       // { from, to, goal, action }
 let currentNavNodeId = null;
@@ -46,6 +48,13 @@ const translations = {
     nav_input: "输入",
     nav_trace: "Trace",
     nav_models: "模型测试",
+    learn_mode: "学习模式",
+    execute_mode: "执行模式",
+    learn_fast: "快速学习",
+    learn_deep: "深度学习",
+    write_path_graph: "PathGraph",
+    write_element_memory: "ElementMemory",
+    write_trace: "Trace",
     health: "健康检查",
     model_test_title: "模型测试",
     model_test_subtitle: "直接向视觉模型发送提示词和图片，查看原始返回",
@@ -170,6 +179,13 @@ const translations = {
     nav_input: "Input",
     nav_trace: "Trace",
     nav_models: "Models",
+    learn_mode: "Learn Mode",
+    execute_mode: "Execute Mode",
+    learn_fast: "Learn Fast",
+    learn_deep: "Learn Deep",
+    write_path_graph: "PathGraph",
+    write_element_memory: "ElementMemory",
+    write_trace: "Trace",
     health: "Health",
     model_test_title: "Model Test",
     model_test_subtitle: "Send a prompt and optional image directly to a vision model.",
@@ -309,6 +325,60 @@ function applyLanguage(language) {
   showStage(activeStage);
   if (!currentImagePath) $("previewMeta").textContent = t("no_image");
   if (!$("responseText").textContent || $("responseText").textContent === "{}") $("graphMeta").textContent = t("no_response");
+}
+
+function defaultWritePolicyFor(mode, depth) {
+  if (mode === "learn") {
+    return { path_graph: true, element_memory: depth === "deep", trace: true };
+  }
+  return { path_graph: false, element_memory: true, trace: true };
+}
+
+function setWritePolicyControls(policy) {
+  if ($("writePathGraph")) $("writePathGraph").checked = policy.path_graph !== false;
+  if ($("writeElementMemory")) $("writeElementMemory").checked = policy.element_memory === true;
+  if ($("writeTrace")) $("writeTrace").checked = policy.trace !== false;
+}
+
+function writePolicyPayload() {
+  return {
+    path_graph: $("writePathGraph")?.checked !== false,
+    element_memory: $("writeElementMemory")?.checked === true,
+    trace: $("writeTrace")?.checked !== false,
+  };
+}
+
+function setAgentMode(mode, depth = currentLearnDepth, options = {}) {
+  currentAgentMode = mode === "execute" ? "execute" : "learn";
+  currentLearnDepth = depth === "deep" ? "deep" : "fast";
+  localStorage.setItem("agentPanelMode", currentAgentMode);
+  localStorage.setItem("agentLearnDepth", currentLearnDepth);
+  document.querySelectorAll(".mode-option[data-mode]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.mode === currentAgentMode);
+  });
+  document.querySelectorAll(".mode-option[data-depth]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.depth === currentLearnDepth);
+    button.disabled = currentAgentMode !== "learn";
+  });
+  if (!options.preservePolicy) {
+    setWritePolicyControls(defaultWritePolicyFor(currentAgentMode, currentLearnDepth));
+  }
+}
+
+function modePayload(stage) {
+  const mode = stage === "observe" ? currentAgentMode : (currentAgentMode === "learn" && currentLearnDepth === "deep" ? "learn" : "execute");
+  const depth = mode === "learn" ? currentLearnDepth : null;
+  return {
+    agent_mode: mode,
+    learn_depth: depth,
+    write_policy: writePolicyPayload(),
+  };
+}
+
+function responseAllowsPathGraphWrite(result) {
+  const policy = result?.write_policy || nestedGet(result, ["request", "write_policy"]);
+  if (!policy || typeof policy !== "object") return true;
+  return policy.path_graph !== false;
 }
 
 function setStatus(text, state = "neutral") {
@@ -1062,7 +1132,9 @@ function renderResponse(response, summary) {
   if (lastTracePath) inspectLatestTrace(lastTracePath);
   $("responseText").textContent = JSON.stringify(lastResponse, null, 2);
   renderFlowGraph(lastResponse);
-  ingestNavPathFromResponse(lastResponse);
+  if (responseAllowsPathGraphWrite(result)) {
+    ingestNavPathFromResponse(lastResponse);
+  }
   const imagePath = result.image_path || nestedGet(lastResponse, ["data", "image_path"]) || nestedGet(result, ["capture", "image_path"]) || nestedGet(result, ["live_capture", "image_path"]);
   if (imagePath) setCurrentImage(imagePath);
   const overlayPath = result.overlay_path || result.manual_overlay_path || nestedGet(lastResponse, ["data", "manual_overlay_path"]) || nestedGet(result, ["recognition_plan_overlay", "overlay_path"]);
@@ -1387,6 +1459,8 @@ function addControlToCurrentPage(label, bbox, point, type, description, extra = 
     if (extra.action) existing.action = extra.action;
     if (extra.confidence !== undefined) existing.confidence = extra.confidence;
     if (extra.sectionId) existing.sectionId = extra.sectionId;
+    if (extra.candidateId) existing.candidateId = extra.candidateId;
+    if (extra.pathMapReview) existing.pathMapReview = extra.pathMapReview;
     return;
   }
 
@@ -1405,9 +1479,92 @@ function addControlToCurrentPage(label, bbox, point, type, description, extra = 
     source: compactText(extra.source, 60),
     sectionId: compactText(extra.sectionId, 80),
     confidence: extra.confidence ?? null,
+    candidateId: compactText(extra.candidateId, 100),
+    pathMapReview: extra.pathMapReview || null,
   });
   navPathDirty = true;
   liveSessionSnapshot = null;
+}
+
+function applyPathMapReview(review) {
+  if (!review || review.contract_version !== "path_map_review_v1" || review.status !== "ready") return;
+  if (!currentNavNodeId) return;
+  const page = navPathNodes.find((n) => n.id === currentNavNodeId);
+  if (!page || !Array.isArray(page.controls)) return;
+
+  let changed = false;
+  for (const removal of collectArray(review.removals)) {
+    const before = page.controls.length;
+    page.controls = page.controls.filter((control) => !pathReviewRemovalMatchesControl(removal, control));
+    if (page.controls.length !== before) changed = true;
+  }
+
+  for (const addition of collectArray(review.additions)) {
+    const label = addition.label || addition.candidate_id || "";
+    if (!label) continue;
+    addControlToCurrentPage(label, addition.bbox, addition.click_point, addition.role || addition.type || "button", addition.expected_effect || "", {
+      action: "click",
+      candidateId: addition.candidate_id,
+      confidence: addition.confidence,
+      pathMapReview: { action: "add", source: review.review_source, stateId: review.state_id },
+      possibleNav: controlPossibleNav(addition) || addition.expected_effect,
+      sectionId: addition.section_id,
+      source: addition.source || "locate_path_review",
+    });
+    changed = true;
+  }
+
+  page.pathMapReview = {
+    sourceTracePath: review.source_trace_path || "",
+    stateId: review.state_id || "",
+    summary: review.summary || {},
+    scope: review.scope || "",
+    updatedAt: new Date().toISOString(),
+  };
+  if (changed) {
+    navPathDirty = true;
+    liveSessionSnapshot = null;
+    renderNavPath();
+  }
+}
+
+function pathReviewRemovalMatchesControl(removal, control) {
+  if (!removal || !control) return false;
+  if (control.status === "clicked" || control.navigatedToPageId) return false;
+  const source = String(control.source || "");
+  const removableSource = !source || ["observe", "screen_map", "locate_path_review", "locate_candidate"].includes(source);
+  if (!removableSource) return false;
+
+  const removalId = compactText(removal.candidate_id || removal.id, 100);
+  if (removalId && control.candidateId && removalId === control.candidateId) return true;
+
+  const labelMatch = pathReviewLabelKey(removal.label) && pathReviewLabelKey(removal.label) === pathReviewLabelKey(control.label);
+  if (!labelMatch) return false;
+  const removalBox = normalizeBBox(removal.bbox);
+  const controlBox = normalizeBBox(control.bbox);
+  if (!removalBox || !controlBox) return true;
+  return pathReviewBboxSimilarity(removalBox, controlBox) >= 0.45;
+}
+
+function pathReviewBboxSimilarity(a, b) {
+  const x1 = Math.max(a.x, b.x);
+  const y1 = Math.max(a.y, b.y);
+  const x2 = Math.min(a.x + a.width, b.x + b.width);
+  const y2 = Math.min(a.y + a.height, b.y + b.height);
+  const overlap = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+  const union = a.width * a.height + b.width * b.height - overlap;
+  const iou = union > 0 ? overlap / union : 0;
+  const acx = a.x + a.width / 2;
+  const acy = a.y + a.height / 2;
+  const bcx = b.x + b.width / 2;
+  const bcy = b.y + b.height / 2;
+  const distance = Math.hypot(acx - bcx, acy - bcy);
+  const maxSize = Math.max(a.width, a.height, b.width, b.height, 1);
+  return Math.max(iou, Math.max(0, 1 - distance / maxSize) * 0.8);
+}
+
+function pathReviewLabelKey(value) {
+  return String(value || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 }
 
 function markControlClicked(goal, success, screenshot) {
@@ -1461,8 +1618,10 @@ function buildPathGraphPayload() {
         section_id: c.sectionId || "",
         action: c.action || "",
         source: c.source || "",
+        candidate_id: c.candidateId || "",
         confidence: c.confidence,
       })),
+      path_map_review: n.pathMapReview || null,
     })),
     transitions: navPathEdges.map((e) => ({
       from_page: e.from,
@@ -1538,6 +1697,22 @@ function normalizePathData(data) {
   }
   if (data.app_name && !data.appName) {
     data.appName = data.app_name;
+  }
+  if (Array.isArray(data.nodes)) {
+    data.nodes = data.nodes.map((node) => ({
+      ...node,
+      controls: Array.isArray(node.controls)
+        ? node.controls.map((control) => ({
+            ...control,
+            candidateId: control.candidateId || control.candidate_id || "",
+            clickPoint: control.clickPoint || control.click_point || null,
+            navigatedToPageId: control.navigatedToPageId || control.navigated_to_page_id || null,
+            possibleNav: control.possibleNav || control.possible_navigation || "",
+            sectionId: control.sectionId || control.section_id || "",
+          }))
+        : [],
+      pathMapReview: node.pathMapReview || node.path_map_review || null,
+    }));
   }
   return data;
 }
@@ -2733,6 +2908,7 @@ function ingestNavPathFromResponse(response) {
       addControlToCurrentPage(ctrlLabel, ctrlBbox, ctrlPoint, ctrlType, ctrlDesc, {
         possibleNav: controlPossibleNav(ctrl) || ctrl.expected_effect,
         action: firstText(ctrl.action, ctrl.interaction, ctrl.interaction_type, ctrl.click_action, ctrl.goal_hint),
+        candidateId: ctrl.candidate_id || ctrl.id || ctrl.element_id,
         source: ctrl.source || (ctrl.contract_version === "screen_map_candidate_v1" ? "screen_map" : "observe"),
         sectionId: ctrl.section_id,
         confidence: ctrl.confidence,
@@ -2741,13 +2917,18 @@ function ingestNavPathFromResponse(response) {
   }
 
   // Detect locate_target response and capture candidates as controls.
+  applyPathMapReview(result.path_map_review);
   const locateResult = result.located_bbox || result.located_point || result.recommended_target;
   const planGoal = nestedGet(result, ["recognition_plan", "goal"]) || result.goal || "";
   if (locateResult && planGoal && currentNavNodeId) {
     const bbox = result.located_bbox || nestedGet(result, ["recommended_target", "refined_bbox"]);
     const point = result.located_point || nestedGet(result, ["recommended_target", "element", "click_point"]);
     const desc = nestedGet(result, ["recommended_target", "reason"]) || nestedGet(result, ["recommended_target", "label"]) || "";
-    addControlToCurrentPage(planGoal, bbox, point, "button", desc, { source: "locate", action: "click" });
+    addControlToCurrentPage(planGoal, bbox, point, "button", desc, {
+      candidateId: nestedGet(result, ["recommended_target", "candidate_id"]),
+      source: "locate",
+      action: "click",
+    });
 
     // Also capture candidate list
     const candidates = nestedGet(result, ["recognition_plan", "candidate_result", "candidates"]) || [];
@@ -2760,6 +2941,7 @@ function ingestNavPathFromResponse(response) {
         addControlToCurrentPage(candLabel, candBbox, candPoint, cand.type || "button", cand.reason || cand.purpose || "", {
           possibleNav: controlPossibleNav(cand),
           action: cand.action || "click",
+          candidateId: cand.candidate_id || cand.id,
           source: "locate_candidate",
           confidence: cand.confidence,
         });
@@ -2798,6 +2980,7 @@ function payloadFromShared(stage) {
   const goal = stage === "execute" ? $("executeGoal").value : $("locateGoal").value;
   const profile = syncStageProvider("locate");
   return {
+    ...modePayload(stage),
     goal,
     task: "click_target",
     app_name: stage === "execute" ? $("executeApp").value : $("locateApp").value,
@@ -2905,6 +3088,10 @@ function bindEvents() {
   document.querySelectorAll(".language-option").forEach((button) => {
     button.addEventListener("click", () => applyLanguage(button.dataset.language));
   });
+  on("agentModeLearnBtn", "click", () => setAgentMode("learn", currentLearnDepth));
+  on("agentModeExecuteBtn", "click", () => setAgentMode("execute"));
+  on("learnFastBtn", "click", () => setAgentMode("learn", "fast"));
+  on("learnDeepBtn", "click", () => setAgentMode("learn", "deep"));
   on("healthBtn", "click", () => api("GET", "/health"));
   on("observeModelProfile", "change", () => syncStageProvider("observe"));
   on("locateModelProfile", "change", () => syncStageProvider("locate"));
@@ -2970,6 +3157,7 @@ function bindEvents() {
     const profile = syncStageProvider("observe");
     if (!(await ensureStageModelReady("observe", profile?.profile_id || $("observeModelProfile").value))) return;
     const payload = savedImagePayload({
+      ...modePayload("observe"),
       task: "observe_screen",
       app_name: $("observeApp").value || null,
       state_hint: $("observeState").value || null,
@@ -3119,6 +3307,7 @@ function callConfirmedPoint(dryRun) {
 
 async function boot() {
   bindEvents();
+  setAgentMode(currentAgentMode, currentLearnDepth);
   applyLanguage(currentLanguage);
   syncWindowAppAndState();
   renderFlowGraph({ message: "idle" });

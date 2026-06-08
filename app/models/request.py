@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -12,6 +12,26 @@ class ROIModel(BaseModel):
     y: int = Field(ge=0)
     width: int = Field(gt=0)
     height: int = Field(gt=0)
+
+
+class WritePolicyModel(BaseModel):
+    """Controls which persistent learning surfaces a request may update."""
+
+    path_graph: bool = True
+    element_memory: bool = False
+    trace: bool = True
+
+
+def _learn_fast_write_policy() -> WritePolicyModel:
+    return WritePolicyModel(path_graph=True, element_memory=False, trace=True)
+
+
+def _learn_deep_write_policy() -> WritePolicyModel:
+    return WritePolicyModel(path_graph=True, element_memory=True, trace=True)
+
+
+def _execute_write_policy() -> WritePolicyModel:
+    return WritePolicyModel(path_graph=False, element_memory=True, trace=True)
 
 
 class BindWindowRequest(BaseModel):
@@ -115,9 +135,13 @@ class ExecuteRecognitionPlanRequest(BaseModel):
     app_name: Optional[str] = None
     state_hint: Optional[str] = None
     provider_mode: Optional[str] = None
+    agent_mode: Literal["learn", "execute"] = "execute"
+    learn_depth: Optional[Literal["fast", "deep"]] = None
+    write_policy: WritePolicyModel = Field(default_factory=_execute_write_policy)
     metadata: dict[str, Any] = Field(default_factory=dict)
     top_k: int = Field(default=5, ge=1, le=20)
     image_path: Optional[str] = None
+    observe_trace_path: Optional[str] = None
     capture_live: bool = True
     allow_saved_image_execution: bool = False
     enable_post_click_verification: bool = True
@@ -152,6 +176,9 @@ class VisionAnalyzeRequestModel(BaseModel):
     goal: Optional[str] = None
     state_hint: Optional[str] = None
     provider_mode: Optional[str] = None
+    agent_mode: Literal["learn", "execute"] = "execute"
+    learn_depth: Optional[Literal["fast", "deep"]] = None
+    write_policy: WritePolicyModel = Field(default_factory=_execute_write_policy)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -159,6 +186,7 @@ class VisionRecognitionPlanRequestModel(VisionAnalyzeRequestModel):
     """Request model for no-click staged recognition planning."""
 
     top_k: int = Field(default=5, ge=1, le=20)
+    observe_trace_path: Optional[str] = None
 
 
 class VisionObserveScreenRequestModel(BaseModel):
@@ -168,6 +196,9 @@ class VisionObserveScreenRequestModel(BaseModel):
     app_name: Optional[str] = None
     state_hint: Optional[str] = None
     provider_mode: Optional[str] = None
+    agent_mode: Literal["learn", "execute"] = "learn"
+    learn_depth: Literal["fast", "deep"] = "fast"
+    write_policy: WritePolicyModel = Field(default_factory=_learn_fast_write_policy)
     metadata: dict[str, Any] = Field(default_factory=dict)
     capture_live: bool = True
     image_path: Optional[str] = None
@@ -181,6 +212,9 @@ class VisionLocateTargetRequestModel(BaseModel):
     app_name: Optional[str] = None
     state_hint: Optional[str] = None
     provider_mode: Optional[str] = None
+    agent_mode: Literal["learn", "execute"] = "execute"
+    learn_depth: Optional[Literal["fast", "deep"]] = None
+    write_policy: WritePolicyModel = Field(default_factory=_execute_write_policy)
     metadata: dict[str, Any] = Field(default_factory=dict)
     top_k: int = Field(default=5, ge=1, le=20)
     capture_live: bool = True

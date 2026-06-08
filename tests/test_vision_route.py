@@ -446,6 +446,153 @@ def test_vision_recognition_plan_retries_without_ocr_anchors_when_provider_rejec
     assert result["parse_result"]["ocr_anchors"] is None
 
 
+def test_vision_recognition_plan_recalls_path_graph_from_observe_trace(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (420, 220), color=(255, 255, 255)).save(image_path)
+    trace_path = tmp_path / "observe.json"
+    trace_path.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "result": {
+                    "image_path": str(image_path),
+                    "parse_result": {
+                        "ocr_anchors": {
+                            "contract_version": "ocr_anchors_v1",
+                            "image_path": str(image_path),
+                            "coordinate_space": "original_image",
+                            "anchor_count": 2,
+                            "anchors": [
+                                {
+                                    "anchor_id": "ocr_anchor_1",
+                                    "text": "Start detection",
+                                    "bbox": {"x": 70, "y": 66, "w": 96, "h": 16},
+                                    "center": {"x": 118, "y": 74},
+                                    "confidence": 0.99,
+                                },
+                                {
+                                    "anchor_id": "ocr_anchor_2",
+                                    "text": "Help",
+                                    "bbox": {"x": 270, "y": 66, "w": 40, "h": 16},
+                                    "center": {"x": 290, "y": 74},
+                                    "confidence": 0.95,
+                                },
+                            ],
+                        }
+                    },
+                    "screen_map": {
+                        "contract_version": "screen_map_v1",
+                        "state_id": "state_demo",
+                        "candidates": [
+                            {
+                                "contract_version": "screen_map_candidate_v1",
+                                "candidate_id": "start_btn",
+                                "label": "Start detection",
+                                "role": "button",
+                                "section_id": "main_content",
+                                "bbox": {"x": 40, "y": 40, "w": 180, "h": 80},
+                                "click_point": {"x": 130, "y": 80},
+                                "risk_class": "safe_click_allowed",
+                                "expected_effect": "test starts",
+                                "source": "screen_map",
+                            },
+                            {
+                                "contract_version": "screen_map_candidate_v1",
+                                "candidate_id": "help_link",
+                                "label": "Help",
+                                "role": "link",
+                                "section_id": "page_header",
+                                "bbox": {"x": 260, "y": 40, "w": 80, "h": 80},
+                                "click_point": {"x": 300, "y": 80},
+                                "risk_class": "safe_click_allowed",
+                                "expected_effect": "help opens",
+                                "source": "screen_map",
+                            },
+                        ],
+                    },
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    provider_metadata: list[dict] = []
+    ocr_scan_paths: list[str] = []
+
+    class DummyProvider:
+        def analyze(self, req):
+            from app.vision.schemas import BBox, Diagonal, ImageSize, NormalizedDiagonal, VisionAnalyzeResponse, VisionRegion
+
+            provider_metadata.append(req.metadata)
+            return VisionAnalyzeResponse(
+                provider="dummy",
+                screen_summary="dummy page",
+                state_guess="dummy_state",
+                image_size=ImageSize(width=420, height=220),
+                regions=[
+                    VisionRegion(
+                        region_id="region_start",
+                        label="Start detection",
+                        role="button",
+                        bbox=BBox(x=40, y=40, w=180, h=80),
+                        diagonal=Diagonal(x1=40, y1=40, x2=220, y2=120),
+                        normalized_diagonal=NormalizedDiagonal(nx1=0.1, ny1=0.1, nx2=0.5, ny2=0.5),
+                        description="Start detection button",
+                        ocr_text="Start detection",
+                        text_lines=["Start detection"],
+                        possible_destinations=["test_running"],
+                        confidence=0.9,
+                    )
+                ],
+            )
+
+    class DummyOCR:
+        def scan_image(self, image_path):
+            from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
+
+            ocr_scan_paths.append(image_path)
+            return OCRResult(
+                image_path=image_path,
+                metadata={"engine": "local_crop_ocr"},
+                matches=[
+                    OCRTextMatch(text="Start detection", score=0.99, bbox=OCRBoundingBox(x=30, y=26, width=96, height=16)),
+                ],
+            )
+
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.load_config", lambda: {"vision": {"mode": "local"}})
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: DummyProvider())
+    monkeypatch.setattr("app.api.vision.ocr_service", DummyOCR())
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "observe_trace_path": str(trace_path),
+            "task": "click_target",
+            "goal": "click start detection",
+            "app_name": "demo",
+            "top_k": 2,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    assert provider_metadata[0]["path_graph_recall"]["contract_version"] == "path_graph_recall_v1"
+    assert provider_metadata[0]["path_graph_recall"]["candidates"][0]["candidate_id"] == "start_btn"
+    assert provider_metadata[0]["ocr_anchors"]["anchor_count"] == 2
+    assert result["observe_trace_reuse"]["status"] == "ready"
+    assert result["path_graph_recall"]["status"] == "ready"
+    assert result["path_graph_recall"]["candidates"][0]["candidate_id"] == "start_btn"
+    assert result["path_graph_recall"]["candidates"][0]["local_ocr_roi"] == {"x": 16, "y": 16, "w": 228, "h": 128}
+    assert result["execution_path"]["path_graph_recall_used"] is True
+    assert result["execution_path"]["path_graph_recall_count"] == 2
+    assert result["execution_path"]["ocr_anchor_reused_from_observe"] is True
+    assert str(image_path) not in ocr_scan_paths
+
+
 def test_vision_layer_trace_returns_each_layer_result_and_validation(tmp_path, monkeypatch) -> None:
     image_path = tmp_path / "capture.png"
     Image.new("RGB", (420, 220), color=(255, 255, 255)).save(image_path)

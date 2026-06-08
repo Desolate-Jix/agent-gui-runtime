@@ -93,6 +93,10 @@ def test_observe_screen_wraps_live_capture_and_screen_reading(monkeypatch) -> No
     assert response.success is True
     result = response.data["result"]
     assert result["contract_version"] == "screen_observation_v1"
+    assert result["agent_mode"] == "learn"
+    assert result["learn_depth"] == "fast"
+    assert result["mode_contract_version"] == "learn_screen_fast_v1"
+    assert result["write_policy"] == {"path_graph": True, "element_memory": False, "trace": True}
     assert result["live_capture"]["image_path"] == "screen.png"
     assert result["suggested_state_hint"] == "job results list"
     assert result["screen_map"]["contract_version"] == "screen_map_v1"
@@ -164,6 +168,9 @@ def test_locate_target_wraps_recognition_plan_without_clicking(monkeypatch) -> N
     assert response.success is True
     result = response.data["result"]
     assert result["contract_version"] == "target_location_v1"
+    assert result["agent_mode"] == "execute"
+    assert result["mode_contract_version"] == "execute_plan_v1"
+    assert result["write_policy"] == {"path_graph": False, "element_memory": True, "trace": True}
     assert result["selected_click_point"] == {"x": 10, "y": 20}
     assert result["located_bbox"] == {"x": 4, "y": 14, "w": 12, "h": 12}
     assert result["located_point"] == {"x": 10, "y": 20}
@@ -228,6 +235,108 @@ def test_locate_target_surfaces_review_candidate_from_rejected_list(monkeypatch)
     assert result["execution_path"]["located_coordinate_source"] == "candidate_result.rejected[0]"
 
 
+def test_locate_target_reviews_observe_path_map(monkeypatch, tmp_path) -> None:
+    image_path = tmp_path / "screen.png"
+    image_path.write_bytes(b"fake")
+    observe_trace = tmp_path / "observe.json"
+    observe_trace.write_text(
+        __import__("json").dumps(
+            {
+                "success": True,
+                "result": {
+                    "image_path": str(image_path),
+                    "image_size": {"width": 220, "height": 120},
+                    "texts": [
+                        {
+                            "id": "text_start",
+                            "text": "Start",
+                            "bbox": {"x": 12, "y": 22, "w": 42, "h": 20},
+                            "confidence": 0.98,
+                        }
+                    ],
+                    "screen_map": {
+                        "contract_version": "screen_map_v1",
+                        "state_id": "state_demo",
+                        "sections": [
+                            {
+                                "section_id": "main_content",
+                                "bbox": {"x": 0, "y": 0, "w": 220, "h": 120},
+                            }
+                        ],
+                        "candidates": [
+                            {
+                                "contract_version": "screen_map_candidate_v1",
+                                "candidate_id": "old_start",
+                                "label": "Start",
+                                "bbox": {"x": 150, "y": 70, "w": 40, "h": 20},
+                                "source": "screen_map",
+                            },
+                            {
+                                "contract_version": "screen_map_candidate_v1",
+                                "candidate_id": "other",
+                                "label": "Other",
+                                "bbox": {"x": 80, "y": 70, "w": 40, "h": 20},
+                                "source": "screen_map",
+                            },
+                        ],
+                    },
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        vision_api,
+        "_image_path_for_live_or_saved",
+        lambda **_kwargs: (str(image_path), None),
+    )
+    monkeypatch.setattr(vision_api, "write_trace", lambda **_kwargs: "locate-trace.json")
+
+    def fake_recognition_plan(_request):
+        return APIResponse(
+            success=True,
+            message="ok",
+            data={
+                "result": {
+                    "pre_click_decision": {"allowed": True, "selected_click_point": {"x": 32, "y": 32}},
+                    "recommended_target": {
+                        "candidate_id": "ai_start",
+                        "label": "Start",
+                        "element": {
+                            "bbox": {"x": 12, "y": 22, "w": 42, "h": 20},
+                            "click_point": {"x": 32, "y": 32},
+                        },
+                    },
+                    "candidate_result": {"candidates": [], "rejected": []},
+                    "execution_path": {"ocr_anchor_grounding_used": True},
+                }
+            },
+            error=None,
+        )
+
+    monkeypatch.setattr(vision_api, "recognition_plan", fake_recognition_plan)
+
+    response = vision_api.locate_target(
+        VisionLocateTargetRequestModel(
+            goal="Start",
+            app_name="demo",
+            observe_trace_path=str(observe_trace),
+        )
+    )
+
+    assert response.success is True
+    review = response.data["result"]["path_map_review"]
+    assert review["contract_version"] == "path_map_review_v1"
+    assert review["status"] == "ready"
+    assert review["summary"]["addition_count"] == 1
+    assert review["summary"]["removal_count"] == 1
+    assert review["additions"][0]["label"] == "Start"
+    assert review["additions"][0]["source"] == "locate_path_review"
+    assert review["additions"][0]["section_id"] == "main_content"
+    assert review["removals"][0]["candidate_id"] == "old_start"
+
+
 def test_recognition_plan_reuses_observe_ocr_anchors_without_rescanning(monkeypatch, tmp_path) -> None:
     image_path = tmp_path / "screen.png"
     image_path.write_bytes(b"fake")
@@ -268,7 +377,9 @@ def test_recognition_plan_reuses_observe_ocr_anchors_without_rescanning(monkeypa
         image_size=ImageSize(width=100, height=80),
     )
 
-    assert ocr_result is None
+    assert ocr_result is not None
+    assert ocr_result.metadata["engine"] == "observe_trace_reuse"
+    assert ocr_result.matches[0].text == "Start"
     assert anchor_payload is not None
     assert anchor_payload["anchor_count"] == 1
     assert status["reused"] is True

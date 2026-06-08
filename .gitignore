@@ -8,6 +8,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .uv-cache/
+.codegraph/
 .paddlex/
 .paddle-home/
 .coverage

@@ -21,6 +21,13 @@ def test_web_panel_serves_browser_control_surface() -> None:
     assert "/panel/assets/panel.js" in response.text
     assert 'class="language-toggle"' in response.text
     assert 'data-language="zh-CN"' in response.text
+    assert 'id="agentModeLearnBtn"' in response.text
+    assert 'id="agentModeExecuteBtn"' in response.text
+    assert 'id="learnFastBtn"' in response.text
+    assert 'id="learnDeepBtn"' in response.text
+    assert 'id="writePathGraph"' in response.text
+    assert 'id="writeElementMemory"' in response.text
+    assert 'id="writeTrace"' in response.text
     assert 'id="windowSelect"' in response.text
     assert 'id="appId" value=""' in response.text
     assert 'id="appUrl" value=""' in response.text
@@ -95,6 +102,11 @@ def test_web_panel_serves_static_assets() -> None:
     assert "generateManualBox" in response.text
     assert "applyModelProfile" in response.text
     assert "collectControlsFromResult" in response.text
+    assert "modePayload" in response.text
+    assert "writePolicyPayload" in response.text
+    assert "agent_mode" in response.text
+    assert "learn_depth" in response.text
+    assert "write_policy" in response.text
     assert "screen_map?.candidates" in response.text
     assert "screen_map_candidate_v1" in response.text
     assert "PATH_CANVAS_FONT" in response.text
@@ -103,6 +115,9 @@ def test_web_panel_serves_static_assets() -> None:
     assert "activateTraceStageVisuals" in response.text
     assert "tracePathMapHtml" in response.text
     assert "traceDynamicPathGraphHtml" in response.text
+    assert "applyPathMapReview" in response.text
+    assert "path_map_review" in response.text
+    assert "candidate_id" in response.text
     assert "section_id" in response.text
 
     css_response = client.get("/panel/assets/panel.css")
@@ -115,6 +130,7 @@ def test_web_panel_serves_static_assets() -> None:
     assert "tf-stage-image-missing" in css_response.text
     assert "tf-path-map" in css_response.text
     assert "tf-path-graph" in css_response.text
+    assert "mode-strip" in css_response.text
 
 
 def test_web_panel_uploads_and_serves_image() -> None:
@@ -329,8 +345,22 @@ def test_web_panel_inspects_locate_trace_nested_plan_ocr_and_visuals(tmp_path) -
                     "image_path": image_path,
                     "located_point": {"x": 334, "y": 94},
                     "located_bbox": {"x": 300, "y": 80, "w": 60, "h": 30},
+                    "path_map_review": {
+                        "contract_version": "path_map_review_v1",
+                        "status": "ready",
+                        "summary": {"addition_count": 1, "removal_count": 1},
+                        "additions": [{"candidate_id": "locate_review_news", "label": "News"}],
+                        "removals": [{"candidate_id": "old_news", "label": "News"}],
+                    },
                     "recognition_plan": {
                         "image_path": image_path,
+                        "path_graph_recall": {
+                            "contract_version": "path_graph_recall_v1",
+                            "status": "ready",
+                            "state_match": {"status": "matched", "state_id": "state_news"},
+                            "summary": {"candidate_count": 3, "recalled_count": 1},
+                            "candidates": [{"candidate_id": "news_card", "label": "News"}],
+                        },
                         "parse_result": {
                             "ocr_result": {"matches": [{"text": "News"}], "metadata": {"match_count": 1}},
                             "vision_regions": {"regions": [{"label": "news card"}]},
@@ -367,10 +397,18 @@ def test_web_panel_inspects_locate_trace_nested_plan_ocr_and_visuals(tmp_path) -
     data = response.json()["data"]
     stage_ids = [stage["id"] for stage in data["flow_stages"]]
     assert "ocr" in stage_ids
+    assert "path_recall" in stage_ids
+    assert "path_review" in stage_ids
     assert data["sections"]["ocr"]["image_path"] == image_path
     assert data["sections"]["ocr"]["matches"][0]["text"] == "News"
     assert data["sections"]["gate"]["candidate_result"]["candidates"][0]["candidate_id"] == "candidate_news"
     assert data["sections"]["target"]["image_path"] == image_path
+    path_review = next(stage for stage in data["flow_stages"] if stage["id"] == "path_review")
+    assert path_review["value"] == "+1 / -1"
+    assert path_review["raw"]["additions"][0]["candidate_id"] == "locate_review_news"
+    path_recall = next(stage for stage in data["flow_stages"] if stage["id"] == "path_recall")
+    assert path_recall["value"] == "1 recalled, state_news"
+    assert path_recall["raw"]["candidates"][0]["candidate_id"] == "news_card"
 
 
 def test_web_panel_inspects_legacy_overlay_trace(tmp_path) -> None:

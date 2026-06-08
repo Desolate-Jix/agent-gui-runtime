@@ -52,7 +52,7 @@ from app.vision.ocr_anchors import (
 from app.vision.ocr_region_refiner import parse_ocr_region_refine_options, refine_vision_regions_with_ocr
 from app.vision.review_overlay import render_review_overlay
 from app.vision.schemas import ImageSize, VisionAnalyzeRequest
-from modules.ocr.contracts import OCRResult
+from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
 
 router = APIRouter(prefix="/vision", tags=["vision"])
 
@@ -109,6 +109,7 @@ def _recognition_vision_request_with_ocr_anchors(
             raw_max_anchors = raw_options.get("max_anchors") if isinstance(raw_options, dict) else None
             if _reusable_ocr_anchor_payload(reused, image_path=image_path):
                 anchor_payload = dict(reused or {})
+                ocr_result = _ocr_result_from_anchor_payload(anchor_payload, image_path=str(image_path))
                 anchor_status["reused"] = True
                 anchor_status["source_trace_path"] = metadata.get("reused_ocr_source_trace_path")
             else:
@@ -176,6 +177,33 @@ def _reusable_ocr_anchor_payload(payload: dict[str, Any] | None, *, image_path: 
         except Exception:
             return source_image == str(image_path)
     return True
+
+
+def _ocr_result_from_anchor_payload(payload: dict[str, Any], *, image_path: str) -> OCRResult:
+    matches: list[OCRTextMatch] = []
+    for anchor in _as_list(payload.get("anchors")):
+        if not isinstance(anchor, dict):
+            continue
+        text = str(anchor.get("text") or "").strip()
+        bbox = _normalize_map_bbox(anchor.get("bbox"))
+        if not text or not bbox:
+            continue
+        matches.append(
+            OCRTextMatch(
+                text=text,
+                score=float(anchor.get("confidence") or anchor.get("score") or 1.0),
+                bbox=OCRBoundingBox(x=bbox["x"], y=bbox["y"], width=bbox["w"], height=bbox["h"]),
+            )
+        )
+    return OCRResult(
+        image_path=image_path,
+        metadata={
+            "engine": "observe_trace_reuse",
+            "source_trace_path": payload.get("source_trace_path"),
+            "source_anchor_count": len(matches),
+        },
+        matches=matches,
+    )
 
 
 def _ocr_anchors_enabled(metadata: dict[str, object]) -> bool:
@@ -267,6 +295,151 @@ def _load_observe_trace_reuse(trace_path_value: str | None, *, image_path: str, 
         "anchor_count": int(ocr_anchors.get("anchor_count") or 0),
         "anchor_source": ocr_anchors.get("source_engine"),
     }
+
+
+def _build_path_graph_recall(
+    *,
+    observe_reuse: dict[str, Any],
+    goal: str,
+    top_k: int,
+    image_size: ImageSize,
+) -> dict[str, Any]:
+    if observe_reuse.get("status") != "ready":
+        return {
+            "contract_version": "path_graph_recall_v1",
+            "status": "unavailable",
+            "reason": observe_reuse.get("reason") or "observe_trace_reuse_not_ready",
+            "state_match": {"status": "unavailable"},
+            "candidates": [],
+            "summary": {"candidate_count": 0, "recalled_count": 0},
+        }
+    screen_map = observe_reuse.get("screen_map") if isinstance(observe_reuse.get("screen_map"), dict) else {}
+    if screen_map.get("contract_version") != "screen_map_v1":
+        return {
+            "contract_version": "path_graph_recall_v1",
+            "status": "unavailable",
+            "reason": "screen_map_unavailable",
+            "state_match": {"status": "unavailable", "source_trace_path": observe_reuse.get("trace_path")},
+            "candidates": [],
+            "summary": {"candidate_count": 0, "recalled_count": 0},
+        }
+    raw_candidates = [item for item in _as_list(screen_map.get("candidates")) if isinstance(item, dict)]
+    recalled = [
+        recall
+        for recall in (
+            _path_graph_recall_candidate(candidate, goal=goal, rank=index + 1, image_size=image_size)
+            for index, candidate in enumerate(raw_candidates)
+        )
+        if recall is not None
+    ]
+    recalled.sort(key=lambda item: (-float(item.get("score") or 0.0), int(item.get("source_rank") or 9999)))
+    selected = recalled[: max(1, int(top_k))]
+    return {
+        "contract_version": "path_graph_recall_v1",
+        "status": "ready" if selected else "empty",
+        "goal": goal,
+        "state_match": {
+            "status": "matched",
+            "state_id": screen_map.get("state_id"),
+            "source_trace_path": observe_reuse.get("trace_path"),
+            "candidate_count": len(raw_candidates),
+            "anchor_count": observe_reuse.get("anchor_count"),
+        },
+        "candidates": selected,
+        "summary": {
+            "candidate_count": len(raw_candidates),
+            "recalled_count": len(selected),
+            "top_score": selected[0].get("score") if selected else 0.0,
+        },
+    }
+
+
+def _path_graph_recall_candidate(
+    candidate: dict[str, Any],
+    *,
+    goal: str,
+    rank: int,
+    image_size: ImageSize,
+) -> dict[str, Any] | None:
+    label = _first_compact_text(candidate.get("label"), candidate.get("text"), candidate.get("goal_hint"))
+    role = _first_compact_text(candidate.get("role"), candidate.get("type"))
+    expected_effect = _first_compact_text(candidate.get("expected_effect"))
+    section_id = _first_compact_text(candidate.get("section_id"))
+    search_text = " ".join(part for part in [label, role, expected_effect, section_id] if part)
+    if not search_text:
+        return None
+    goal_key = _path_label_key(goal)
+    label_key = _path_label_key(label)
+    search_key = _path_label_key(search_text)
+    label_score = _path_label_similarity(goal_key, label_key)
+    search_score = _path_label_similarity(goal_key, search_key)
+    substring_score = 0.0
+    if goal_key and label_key and (goal_key in label_key or label_key in goal_key):
+        substring_score = 0.92
+    if goal_key and search_key and (goal_key in search_key or search_key in goal_key):
+        substring_score = max(substring_score, 0.78)
+    role_bonus = 0.04 if any(token in str(role).casefold() for token in ["button", "link", "input", "tab", "menu"]) else 0.0
+    score = min(1.0, max(label_score, search_score * 0.9, substring_score) + role_bonus)
+    if score < 0.2:
+        return None
+    reasons = []
+    if label_score >= 0.55 or substring_score >= 0.9:
+        reasons.append("label_matches_goal")
+    if search_score >= 0.5 or substring_score >= 0.78:
+        reasons.append("semantic_context_matches_goal")
+    if role_bonus:
+        reasons.append("interactive_role_bonus")
+    bbox = _normalize_map_bbox(candidate.get("bbox"))
+    click_point = _normalize_map_point(candidate.get("click_point") or candidate.get("clickPoint"), bbox)
+    local_ocr_roi = _pad_bbox(bbox, pad=24, max_width=image_size.width, max_height=image_size.height) if bbox else None
+    return {
+        "contract_version": "path_graph_recall_candidate_v1",
+        "candidate_id": candidate.get("candidate_id") or candidate.get("id"),
+        "source_rank": rank,
+        "label": label,
+        "role": role,
+        "section_id": section_id,
+        "bbox": bbox,
+        "click_point": click_point,
+        "local_ocr_roi": local_ocr_roi,
+        "risk_class": candidate.get("risk_class"),
+        "expected_effect": expected_effect,
+        "source": candidate.get("source"),
+        "score": round(score, 4),
+        "score_reasons": reasons or ["weak_text_similarity"],
+    }
+
+
+def _mode_contract_version(agent_mode: str | None, learn_depth: str | None, *, fallback: str) -> str:
+    if agent_mode == "learn":
+        return "learn_screen_deep_v1" if learn_depth == "deep" else "learn_screen_fast_v1"
+    if agent_mode == "execute":
+        return "execute_plan_v1"
+    return fallback
+
+
+def _mode_payload(request: Any, *, fallback_contract: str) -> dict[str, Any]:
+    write_policy = getattr(request, "write_policy", None)
+    return {
+        "agent_mode": getattr(request, "agent_mode", None) or "execute",
+        "learn_depth": getattr(request, "learn_depth", None),
+        "mode_contract_version": _mode_contract_version(
+            getattr(request, "agent_mode", None),
+            getattr(request, "learn_depth", None),
+            fallback=fallback_contract,
+        ),
+        "write_policy": write_policy.model_dump() if hasattr(write_policy, "model_dump") else dict(write_policy or {}),
+    }
+
+
+def _trace_enabled(request: Any) -> bool:
+    write_policy = getattr(request, "write_policy", None)
+    payload = write_policy.model_dump() if hasattr(write_policy, "model_dump") else dict(write_policy or {})
+    return payload.get("trace", True) is not False
+
+
+def _write_trace_if_enabled(request: Any, **kwargs: Any) -> str | None:
+    return write_trace(**kwargs) if _trace_enabled(request) else None
 
 
 def _ocr_anchor_payload_from_observe_texts(result: dict[str, Any], *, image_path: str, goal: str | None = None) -> dict[str, Any] | None:
@@ -404,7 +577,8 @@ def analyze_vision(request: VisionAnalyzeRequestModel) -> APIResponse:
         )
         if ocr_result is not None:
             result_payload["ocr_result"] = ocr_result.to_dict()
-        result_payload["trace_path"] = write_trace(
+        result_payload["trace_path"] = _write_trace_if_enabled(
+            request,
             category="vision",
             operation="vision_analyze",
             payload={"success": True, "request": request.model_dump(), "result": result_payload},
@@ -413,7 +587,8 @@ def analyze_vision(request: VisionAnalyzeRequestModel) -> APIResponse:
         data = VisionResultData(result=result_payload)
         return APIResponse(success=True, message="Vision analysis completed", data=data.model_dump(), error=None)
     except Exception as exc:
-        trace_path = write_trace(
+        trace_path = _write_trace_if_enabled(
+            request,
             category="vision",
             operation="vision_analyze",
             payload={"success": False, "request": request.model_dump(), "error": str(exc)},
@@ -468,7 +643,8 @@ def page_structure(request: VisionAnalyzeRequestModel) -> APIResponse:
             page_structure_generated=True,
             ocr_region_refine_used=refine_options.enabled,
         )
-        result_payload["trace_path"] = write_trace(
+        result_payload["trace_path"] = _write_trace_if_enabled(
+            request,
             category="vision",
             operation="page_structure",
             payload={"success": True, "request": request.model_dump(), "result": result_payload},
@@ -477,7 +653,8 @@ def page_structure(request: VisionAnalyzeRequestModel) -> APIResponse:
         data = VisionResultData(result=result_payload)
         return APIResponse(success=True, message="Page structure completed", data=data.model_dump(), error=None)
     except Exception as exc:
-        trace_path = write_trace(
+        trace_path = _write_trace_if_enabled(
+            request,
             category="vision",
             operation="page_structure",
             payload={"success": False, "request": request.model_dump(), "error": str(exc)},
@@ -546,7 +723,8 @@ def screen_reading(request: VisionAnalyzeRequestModel) -> APIResponse:
             "uia_provider_connected": True,
             "uia_scan_status": uia_snapshot.get("status"),
         }
-        result_payload["trace_path"] = write_trace(
+        result_payload["trace_path"] = _write_trace_if_enabled(
+            request,
             category="vision",
             operation="screen_reading",
             payload={"success": True, "request": request.model_dump(), "result": result_payload},
@@ -555,7 +733,8 @@ def screen_reading(request: VisionAnalyzeRequestModel) -> APIResponse:
         data = VisionResultData(result=result_payload)
         return APIResponse(success=True, message="Screen reading completed", data=data.model_dump(), error=None)
     except Exception as exc:
-        trace_path = write_trace(
+        trace_path = _write_trace_if_enabled(
+            request,
             category="vision",
             operation="screen_reading",
             payload={"success": False, "request": request.model_dump(), "error": str(exc)},
@@ -588,6 +767,9 @@ def observe_screen(request: VisionObserveScreenRequestModel) -> APIResponse:
             goal="understand the current interface, visible controls, and likely actions",
             state_hint=request.state_hint,
             provider_mode=request.provider_mode or "local_understanding",
+            agent_mode=request.agent_mode,
+            learn_depth=request.learn_depth,
+            write_policy=request.write_policy,
             metadata={
                 **dict(request.metadata or {}),
                 "ocr_anchors": {"enabled": True, "max_anchors": "all", **dict((request.metadata or {}).get("ocr_anchors") or {})}
@@ -603,6 +785,7 @@ def observe_screen(request: VisionObserveScreenRequestModel) -> APIResponse:
             return response
         result = response.data["result"]
         result["contract_version"] = "screen_observation_v1"
+        result.update(_mode_payload(request, fallback_contract="screen_observation_v1"))
         result["live_capture"] = live_capture
         result["suggested_state_hint"] = _suggested_state_hint_from_observation(result)
         result["screen_map"] = _build_screen_map_from_observation(result, request=request, image_path=image_path)
@@ -613,7 +796,8 @@ def observe_screen(request: VisionObserveScreenRequestModel) -> APIResponse:
             "Execute only through POST /action/execute_recognition_plan after pre_click_decision allows it.",
         ]
         result["timings"] = timer.to_dict()
-        result["trace_path"] = write_trace(
+        result["trace_path"] = _write_trace_if_enabled(
+            request,
             category="vision",
             operation="observe_screen",
             payload={"success": True, "request": request.model_dump(), "result": result},
@@ -623,7 +807,8 @@ def observe_screen(request: VisionObserveScreenRequestModel) -> APIResponse:
         return APIResponse(success=True, message="Screen observation completed", data=data.model_dump(), error=None)
     except Exception as exc:
         timings = timer.to_dict()
-        trace_path = write_trace(
+        trace_path = _write_trace_if_enabled(
+            request,
             category="vision",
             operation="observe_screen",
             payload={"success": False, "request": request.model_dump(), "error": str(exc), "timings": timings},
@@ -1423,6 +1608,9 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
             goal=request.goal,
             state_hint=request.state_hint,
             provider_mode=request.provider_mode or "local_grounding",
+            agent_mode=request.agent_mode,
+            learn_depth=request.learn_depth,
+            write_policy=request.write_policy,
             metadata={
                 **metadata,
                 "ocr_anchors": {"enabled": True, "max_anchors": "all", **dict(metadata.get("ocr_anchors") or {})}
@@ -1430,6 +1618,7 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
                 else metadata.get("ocr_anchors", {"enabled": True, "max_anchors": "all"}),
             },
             top_k=request.top_k,
+            observe_trace_path=request.observe_trace_path,
         )
         with timer.step("recognition_plan"):
             response = recognition_plan(plan_request)
@@ -1445,8 +1634,16 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
         located_bbox = _locatable_bbox(recommended_target)
         located_point = selected_click_point if isinstance(selected_click_point, dict) else _locatable_point(recommended_target, located_bbox)
         located_source = str(recommended_target.get("location_source") or "recommended_target.element.click_point")
+        path_map_review = _build_path_map_review_from_locate(
+            observe_reuse=observe_reuse,
+            recognition_result=result,
+            goal=request.goal,
+            located_bbox=located_bbox,
+            located_point=located_point,
+        )
         locate_result = {
             "contract_version": "target_location_v1",
+            **_mode_payload(request, fallback_contract="locate_target_v1"),
             "goal": request.goal,
             "image_path": image_path,
             "live_capture": live_capture,
@@ -1457,6 +1654,7 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
             "located_bbox": located_bbox,
             "located_point": located_point,
             "location_status": "pre_click_verified" if selected_click_point else ("requires_pre_click_confirmation" if located_point else "not_located"),
+            "path_map_review": path_map_review,
             "observe_trace_reuse": {
                 key: value
                 for key, value in observe_reuse.items()
@@ -1474,7 +1672,8 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
             },
         }
         locate_result["timings"] = timer.to_dict()
-        locate_result["trace_path"] = write_trace(
+        locate_result["trace_path"] = _write_trace_if_enabled(
+            request,
             category="vision",
             operation="locate_target",
             payload={"success": True, "request": request.model_dump(), "result": locate_result},
@@ -1484,7 +1683,8 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
         return APIResponse(success=True, message="Target located", data=data.model_dump(), error=None)
     except Exception as exc:
         timings = timer.to_dict()
-        trace_path = write_trace(
+        trace_path = _write_trace_if_enabled(
+            request,
             category="vision",
             operation="locate_target",
             payload={"success": False, "request": request.model_dump(), "error": str(exc), "timings": timings},
@@ -1539,6 +1739,245 @@ def _locatable_point(target: dict[str, Any], bbox: dict[str, Any] | None) -> dic
     return {"x": int(bbox.get("x", 0)) + width // 2, "y": int(bbox.get("y", 0)) + height // 2}
 
 
+def _build_path_map_review_from_locate(
+    *,
+    observe_reuse: dict[str, Any],
+    recognition_result: dict[str, Any],
+    goal: str,
+    located_bbox: dict[str, Any] | None,
+    located_point: dict[str, Any] | None,
+) -> dict[str, Any]:
+    screen_map = observe_reuse.get("screen_map") if isinstance(observe_reuse.get("screen_map"), dict) else {}
+    if observe_reuse.get("status") != "ready" or screen_map.get("contract_version") != "screen_map_v1":
+        return {
+            "contract_version": "path_map_review_v1",
+            "status": "skipped",
+            "reason": "observe_screen_map_unavailable",
+            "additions": [],
+            "removals": [],
+            "kept": [],
+        }
+
+    sections = _as_list(screen_map.get("sections"))
+    observed = [item for item in _as_list(screen_map.get("candidates")) if isinstance(item, dict)]
+    ai_candidates = _locate_review_candidates(
+        recognition_result,
+        goal=goal,
+        located_bbox=located_bbox,
+        located_point=located_point,
+    )
+    additions: list[dict[str, Any]] = []
+    removals: list[dict[str, Any]] = []
+    kept: list[dict[str, Any]] = []
+
+    matched_observed_ids: set[str] = set()
+    for candidate in ai_candidates:
+        match = _best_path_map_match(candidate, observed)
+        if match:
+            matched_observed_ids.add(str(match.get("candidate_id") or match.get("id") or ""))
+            kept.append(
+                {
+                    "candidate_id": match.get("candidate_id") or match.get("id"),
+                    "label": match.get("label"),
+                    "reason": "matched_locate_ai_candidate",
+                    "matched_label": candidate.get("label"),
+                }
+            )
+            continue
+        additions.append(_path_map_addition_from_locate_candidate(candidate, sections=sections, goal=goal))
+
+    ai_label_keys = {_path_label_key(item.get("label")) for item in ai_candidates if _path_label_key(item.get("label"))}
+    goal_key = _path_label_key(goal)
+    for candidate in observed:
+        candidate_id = str(candidate.get("candidate_id") or candidate.get("id") or "")
+        if candidate_id and candidate_id in matched_observed_ids:
+            continue
+        label_key = _path_label_key(candidate.get("label"))
+        same_target_label = bool(label_key and (label_key == goal_key or label_key in ai_label_keys))
+        overlaps_ai_target = any(_path_bbox_conflicts(candidate, ai_candidate) for ai_candidate in ai_candidates)
+        if not same_target_label and not overlaps_ai_target:
+            continue
+        removals.append(
+            {
+                "candidate_id": candidate.get("candidate_id") or candidate.get("id"),
+                "label": candidate.get("label"),
+                "bbox": candidate.get("bbox"),
+                "source": candidate.get("source"),
+                "reason": "same_label_or_overlap_replaced_by_locate_ai",
+                "matched_goal": goal,
+            }
+        )
+
+    return {
+        "contract_version": "path_map_review_v1",
+        "status": "ready",
+        "review_source": "locate_target.recognition_plan",
+        "source_trace_path": observe_reuse.get("trace_path"),
+        "state_id": screen_map.get("state_id"),
+        "goal": goal,
+        "scope": "same_label_or_high_overlap_only",
+        "summary": {
+            "observed_candidate_count": len(observed),
+            "ai_candidate_count": len(ai_candidates),
+            "addition_count": len(additions),
+            "removal_count": len(removals),
+            "kept_count": len(kept),
+        },
+        "additions": additions,
+        "removals": removals,
+        "kept": kept,
+    }
+
+
+def _locate_review_candidates(
+    recognition_result: dict[str, Any],
+    *,
+    goal: str,
+    located_bbox: dict[str, Any] | None,
+    located_point: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    recommended = recognition_result.get("recommended_target") if isinstance(recognition_result.get("recommended_target"), dict) else {}
+    if recommended:
+        candidates.append(_locate_review_candidate(recommended, source="recommended_target", fallback_label=goal, fallback_bbox=located_bbox, fallback_point=located_point))
+
+    candidate_result = recognition_result.get("candidate_result") if isinstance(recognition_result.get("candidate_result"), dict) else {}
+    for key in ("candidates", "rejected"):
+        for item in _as_list(candidate_result.get(key)):
+            if isinstance(item, dict):
+                candidates.append(_locate_review_candidate(item, source=f"candidate_result.{key}", fallback_label=goal))
+
+    unique: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        label = _first_compact_text(candidate.get("label"))
+        bbox = _normalize_map_bbox(candidate.get("bbox"))
+        if not label or not bbox:
+            continue
+        key = f"{_path_label_key(label)}|{bbox['x']},{bbox['y']},{bbox['w']},{bbox['h']}"
+        if key in seen:
+            continue
+        seen.add(key)
+        candidate["bbox"] = bbox
+        candidate["click_point"] = _normalize_map_point(candidate.get("click_point"), bbox)
+        unique.append(candidate)
+    return unique
+
+
+def _locate_review_candidate(
+    item: dict[str, Any],
+    *,
+    source: str,
+    fallback_label: str,
+    fallback_bbox: dict[str, Any] | None = None,
+    fallback_point: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    element = item.get("element") if isinstance(item.get("element"), dict) else {}
+    bbox = item.get("refined_bbox") or element.get("bbox") or item.get("bbox") or fallback_bbox
+    point = element.get("click_point") or item.get("click_point") or fallback_point
+    label = _first_compact_text(item.get("label"), element.get("label"), item.get("text"), item.get("name"), fallback_label)
+    role = _first_compact_text(item.get("type"), item.get("role"), element.get("role"), "button")
+    return {
+        "candidate_id": item.get("candidate_id") or item.get("id"),
+        "label": label,
+        "role": role,
+        "bbox": bbox,
+        "click_point": point,
+        "confidence": _bounded_float(item.get("confidence") or item.get("score")),
+        "reason": _first_compact_text(item.get("reason"), item.get("purpose"), item.get("description")),
+        "source": source,
+    }
+
+
+def _best_path_map_match(candidate: dict[str, Any], observed: list[dict[str, Any]]) -> dict[str, Any] | None:
+    label_key = _path_label_key(candidate.get("label"))
+    bbox = _normalize_map_bbox(candidate.get("bbox"))
+    best: tuple[float, dict[str, Any]] | None = None
+    for item in observed:
+        item_bbox = _normalize_map_bbox(item.get("bbox"))
+        label_score = _path_label_similarity(label_key, _path_label_key(item.get("label")))
+        bbox_score = _path_bbox_similarity(bbox, item_bbox)
+        label_and_position_match = label_score >= 0.85 and (bbox_score >= 0.35 or not bbox or not item_bbox)
+        strong_spatial_match = bbox_score >= 0.65
+        if not label_and_position_match and not strong_spatial_match:
+            continue
+        score = max(label_score, bbox_score) + min(label_score, bbox_score) * 0.25
+        if best is None or score > best[0]:
+            best = (score, item)
+    return best[1] if best else None
+
+
+def _path_map_addition_from_locate_candidate(candidate: dict[str, Any], *, sections: list[Any], goal: str) -> dict[str, Any]:
+    bbox = _normalize_map_bbox(candidate.get("bbox"))
+    point = _normalize_map_point(candidate.get("click_point"), bbox)
+    label = _first_compact_text(candidate.get("label"), goal)
+    role = _first_compact_text(candidate.get("role"), "button")
+    source_id = candidate.get("candidate_id") or f"{label}|{bbox}"
+    digest = hashlib.sha256(str(source_id).encode("utf-8", errors="ignore")).hexdigest()[:12]
+    return {
+        "contract_version": "screen_map_candidate_v1",
+        "candidate_id": f"locate_review_{digest}",
+        "label": label,
+        "role": role,
+        "bbox": bbox,
+        "click_point": point,
+        "confidence": candidate.get("confidence"),
+        "section_id": _section_id_for_bbox(bbox, [section for section in sections if isinstance(section, dict)]),
+        "source": "locate_path_review",
+        "source_id": candidate.get("candidate_id"),
+        "risk_class": "requires_user_confirmation",
+        "expected_effect": f"precisely located during Locate for goal: {goal}"[:160],
+        "evidence": {
+            "path_map_review": True,
+            "review_action": "add",
+            "review_source": candidate.get("source"),
+            "reason": candidate.get("reason"),
+        },
+    }
+
+
+def _path_bbox_conflicts(observed: dict[str, Any], ai_candidate: dict[str, Any]) -> bool:
+    observed_bbox = _normalize_map_bbox(observed.get("bbox"))
+    ai_bbox = _normalize_map_bbox(ai_candidate.get("bbox"))
+    if not observed_bbox or not ai_bbox:
+        return False
+    label_score = _path_label_similarity(_path_label_key(observed.get("label")), _path_label_key(ai_candidate.get("label")))
+    overlap = _bbox_overlap_area(observed_bbox, ai_bbox)
+    smaller = min(observed_bbox["w"] * observed_bbox["h"], ai_bbox["w"] * ai_bbox["h"])
+    overlap_ratio = overlap / smaller if smaller > 0 else 0.0
+    return overlap_ratio >= 0.72 and label_score < 0.45
+
+
+def _path_bbox_similarity(a: dict[str, int] | None, b: dict[str, int] | None) -> float:
+    if not a or not b:
+        return 0.0
+    overlap = _bbox_overlap_area(a, b)
+    union = a["w"] * a["h"] + b["w"] * b["h"] - overlap
+    iou = overlap / union if union > 0 else 0.0
+    acx = a["x"] + a["w"] / 2
+    acy = a["y"] + a["h"] / 2
+    bcx = b["x"] + b["w"] / 2
+    bcy = b["y"] + b["h"] / 2
+    distance = ((acx - bcx) ** 2 + (acy - bcy) ** 2) ** 0.5
+    max_size = max(a["w"], a["h"], b["w"], b["h"], 1)
+    center_score = max(0.0, 1.0 - distance / max_size)
+    return max(iou, center_score * 0.8)
+
+
+def _path_label_key(value: Any) -> str:
+    return "".join(char for char in str(value or "").casefold() if char.isalnum())
+
+
+def _path_label_similarity(a: str, b: str) -> float:
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 1.0
+    if a in b or b in a:
+        return min(len(a), len(b)) / max(len(a), len(b))
+    return SequenceMatcher(None, a, b).ratio()
+
+
 @router.post("/recognition_plan", response_model=APIResponse)
 def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
     timer = RuntimeTimer()
@@ -1559,9 +1998,31 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
         with timer.step("read_image_size"):
             with Image.open(image_path) as image:
                 input_image_size = ImageSize(width=image.width, height=image.height)
+        goal = request.goal or request.task
+        with timer.step("load_observe_trace_reuse", has_observe_trace=bool(request.observe_trace_path)):
+            observe_reuse = _load_observe_trace_reuse(request.observe_trace_path, image_path=str(image_path), goal=goal)
+        with timer.step("path_graph_recall", observe_reuse_status=observe_reuse.get("status")):
+            path_graph_recall = _build_path_graph_recall(
+                observe_reuse=observe_reuse,
+                goal=goal,
+                top_k=request.top_k,
+                image_size=input_image_size,
+            )
+        effective_metadata = dict(request.metadata or {})
+        if observe_reuse.get("status") == "ready":
+            effective_metadata["reused_ocr_anchors"] = observe_reuse["ocr_anchors"]
+            effective_metadata["reused_ocr_source_trace_path"] = observe_reuse["trace_path"]
+            effective_metadata["screen_map_context"] = {
+                "state_id": observe_reuse.get("state_id"),
+                "candidate_count": observe_reuse.get("candidate_count"),
+                "source_trace_path": observe_reuse.get("trace_path"),
+            }
+        if path_graph_recall.get("status") in {"ready", "empty"}:
+            effective_metadata["path_graph_recall"] = path_graph_recall
+        effective_request = request.model_copy(update={"metadata": effective_metadata})
         with timer.step("prepare_ocr_anchors"):
             vision_request, ocr_result, ocr_anchor_payload, ocr_anchor_status = _recognition_vision_request_with_ocr_anchors(
-                request,
+                effective_request,
                 image_path=image_path,
                 image_size=input_image_size,
             )
@@ -1574,9 +2035,9 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
             ocr_anchor_status.update({"used": False, "fallback_used": True, "provider_error": str(exc)})
             ocr_anchor_payload = None
             with timer.step("vision_provider_analyze_without_ocr_anchors", provider_mode=request.provider_mode):
-                response = provider.analyze(_vision_request_without_ocr_anchors(request, image_path=image_path))
+                response = provider.analyze(_vision_request_without_ocr_anchors(effective_request, image_path=image_path))
         with timer.step("ocr_region_refine"):
-            response, refine_ocr_result, refine_options = _maybe_refine_with_ocr(response, request=request, image_path=image_path)
+            response, refine_ocr_result, refine_options = _maybe_refine_with_ocr(response, request=effective_request, image_path=image_path)
         if refine_ocr_result is not None:
             ocr_result = refine_ocr_result
         with timer.step("normalize_vision_regions", provider=response.provider):
@@ -1601,7 +2062,6 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
                 app_name=request.app_name,
                 uia_snapshot=uia_snapshot,
             )
-        goal = request.goal or request.task
         with timer.step("rank_candidates", top_k=request.top_k):
             candidate_result = rank_candidates(
                 CandidateRankRequest(
@@ -1631,9 +2091,16 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
         recommended = candidate_result.candidates[0].to_dict() if candidate_result.candidates else None
         result_payload = {
             "contract_version": "recognition_plan_v1",
+            **_mode_payload(request, fallback_contract="recognition_plan_v1"),
             "image_path": str(image_path),
             "goal": goal,
             "top_k": request.top_k,
+            "observe_trace_reuse": {
+                key: value
+                for key, value in observe_reuse.items()
+                if key not in {"ocr_anchors", "screen_map"}
+            },
+            "path_graph_recall": path_graph_recall,
             "parse_result": {
                 "vision_regions": normalized.to_dict(),
                 "ocr_result": ocr_result.to_dict(),
@@ -1671,6 +2138,10 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
                 "ocr_anchor_grounding_used": bool(ocr_anchor_status.get("used")),
                 "ocr_anchor_grounding_fallback_used": bool(ocr_anchor_status.get("fallback_used")),
                 "ocr_anchor_count": int(ocr_anchor_status.get("anchor_count") or 0),
+                "ocr_anchor_reused_from_observe": observe_reuse.get("status") == "ready" and bool(ocr_anchor_status.get("reused")),
+                "path_graph_recall_used": path_graph_recall.get("status") == "ready",
+                "path_graph_recall_count": len(path_graph_recall.get("candidates") or []),
+                "state_match_status": (path_graph_recall.get("state_match") or {}).get("status"),
                 "screen_reading_used": True,
                 "screen_reading_rank_evidence_used": True,
                 "uia_scan_status": uia_snapshot.get("status"),
@@ -1680,7 +2151,8 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
             },
         }
         result_payload["timings"] = timer.to_dict()
-        result_payload["trace_path"] = write_trace(
+        result_payload["trace_path"] = _write_trace_if_enabled(
+            request,
             category="vision",
             operation="recognition_plan",
             payload={"success": True, "request": request.model_dump(), "result": result_payload},
@@ -1690,7 +2162,8 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
         return APIResponse(success=True, message="Recognition plan completed", data=data.model_dump(), error=None)
     except Exception as exc:
         timings = timer.to_dict()
-        trace_path = write_trace(
+        trace_path = _write_trace_if_enabled(
+            request,
             category="vision",
             operation="recognition_plan",
             payload={"success": False, "request": request.model_dump(), "error": str(exc), "timings": timings},

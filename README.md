@@ -256,10 +256,13 @@ POST /action/execute_recognition_plan  dry_run=false，携带 approved_plan_id
 
 - 先用整屏理解得到简短候选列表，再对选中的目标精准定位
 - `observe_screen.suggested_state_hint` 是下一次 `locate_target.state_hint` 的默认建议；测试面板会自动填入，agent 仍可按目标覆盖
+- 面板现在有 `Learn Mode / Execute Mode` 切换。Learn Mode 分 `Learn Fast` 与 `Learn Deep`，请求会携带 `agent_mode`、`learn_depth` 和 `write_policy`；Execute Mode 默认 `write_policy.path_graph=false`，避免执行当前命令时顺手污染 PathGraph；`write_policy.trace=false` 会抑制 Observe/Locate/RecognitionPlan/ExecuteRecognitionPlan 的主 trace 写入。
 - `observe_screen.screen_map` 是整屏理解阶段生成的页面/动作地图，测试面板导航路径图会直接消费其中的页面分区、候选控件、风险等级和预期效果；observe trace 也保留这份地图，Trace Inspector 会显示为 `Path Map` 阶段，并先渲染整屏理解生成的动态路径图，再显示分区/候选清单与截图 overlay。路径图规则会把顶部导航区的有效 OCR 文字作为导航按钮候选，并把正文/推广区的相关 OCR 文本聚合成整张卡片候选，而不是只保留标题文字框
+- `recognition_plan` / `execute_recognition_plan` 现在会接收 `observe_trace_path`。当 trace 与当前截图匹配且含 `screen_map_v1` 时，会先生成 `path_graph_recall_v1`，把与当前 goal 相关的路径候选、状态匹配、local OCR ROI 提示写进响应和 trace；Trace Inspector 显示为 `Path Recall` 阶段。
 - 上层 Agent 应保留用户原文用于 trace，但发给视觉模型的 `goal` / `state_hint` / 排除约束建议规范化为英文；例如用户说“点击第一个自然搜索结果”，模型侧可写成 `Click the first organic Google search result title` 和 `main organic search results list below Google navigation tabs`
 - OCR anchors 默认参与视觉定位；精准定位保留完整 OCR 结果用于校验，但向模型发送受预算控制的几何投影，只有目标文字高匹配时才附带文字
 - `observe_screen` 只用于界面摘要、地图生成和候选发现；`screen_map` 里的 bbox/click_point 只是观察证据，不用于点击或最终坐标证明
+- `locate_target` 如果复用了上一条 Observe trace，会返回 `path_map_review_v1`：根据本次精准定位的 AI/候选证据补入缺失路径候选，并删除同标签或高度重叠且被 Locate 替换的旧候选。测试面板只会删除未点击、未连到下一页面的控件。
 - `locate_target` 只返回 no-click 定位结果
 - `located_bbox` / `located_point` 是精准视觉模型建议的目标位置；只有 `selected_click_point` 表示已通过点击前闸门的可执行坐标
 - 自主 agent 的真正点击只能走 `execute_recognition_plan`

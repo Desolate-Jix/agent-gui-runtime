@@ -368,6 +368,13 @@ Request:
   "state_hint": "browser page",
   "provider_mode": "local_understanding",
   "capture_live": true,
+  "agent_mode": "learn",
+  "learn_depth": "fast",
+  "write_policy": {
+    "path_graph": true,
+    "element_memory": false,
+    "trace": true
+  },
   "metadata": {
     "ocr_anchors": {
       "enabled": true,
@@ -457,12 +464,15 @@ Expected response:
 Agent decision:
 
 - Use this response to understand what the interface contains and what controls can probably do.
+- Use `agent_mode="learn"` with `learn_depth="fast"` for quick map drafting. Reserve `learn_depth="deep"` for the later full refine / semantic review / ElementMemory initialization pass.
+- Respect `write_policy`: PathGraph writes are allowed in Learn by default, while Execute defaults to reading PathGraph without mutating it. Use `trace=false` only for preview/smoke paths where you intentionally do not want a trace artifact.
 - Use `screen_map_v1` as the semantic page/action map for the existing path graph. It may include bbox and click-point hints, but those are observation evidence, not executable coordinates.
 - Read `screen_map.sections[]` first to understand coarse layout such as top navigation, promotion strip, main content, lower content, and floating overlays; each candidate may carry `section_id`.
 - `ocr_text_actions` candidates are OCR-backed discovery hints for page-body cards/buttons that the broad vision pass did not promote into `ui.elements`; treat them as Locate targets, not executable coordinates.
 - `ocr_card_groups` candidates are card-level discovery hints. Their bbox intentionally covers a whole card/module so the map can reason about entries before Locate chooses an exact click target.
 - `nav_text_action` candidates are intentionally generated from valid OCR text in the top navigation section so missed navigation labels still appear in the map.
 - The observe trace preserves `screen_map_v1`; `/panel/inspect_trace` renders it as a `Path Map` stage so trace review can inspect the same path candidates, bbox hints, and click-point evidence.
+- Execute/RecognitionPlan requests should carry the latest matching `observe_trace_path` when available. The runtime will reuse OCR anchors and emit `path_graph_recall_v1` before full candidate ranking, giving the model a top-k map recall plus local OCR ROI hints.
 - Prefer `provider_mode: local_understanding` here. It is intended for the smaller local model that summarizes the whole screen for agent planning.
 - Use `suggested_state_hint` as the next precise-localization `state_hint` default. It comes from the observation model's concise `state_guess`.
 - When a concrete candidate is chosen, pass its label/goal hint plus the current `screen_map.state_id` context into the precise localization step.
@@ -487,6 +497,13 @@ Request:
   "provider_mode": "local_grounding",
   "capture_live": true,
   "observe_trace_path": "logs/traces/vision/20260608-...__observe-screen__seek.json",
+  "agent_mode": "execute",
+  "learn_depth": null,
+  "write_policy": {
+    "path_graph": false,
+    "element_memory": true,
+    "trace": true
+  },
   "top_k": 5,
   "metadata": {
     "ocr_anchors": {
@@ -497,7 +514,9 @@ Request:
 }
 ```
 
-When Locate follows an Observe on the same screenshot/window state, pass the Observe `trace_path` as `observe_trace_path`. The runtime reuses matching `ocr_anchors` from that trace instead of running OCR again, and records the reuse status in `target_location_v1.observe_trace_reuse`.
+When Locate, RecognitionPlan, or Execute follows an Observe on the same screenshot/window state, pass the Observe `trace_path` as `observe_trace_path`. The runtime reuses matching `ocr_anchors` from that trace instead of running the recognition-plan full-image OCR step again, and records the reuse status in `observe_trace_reuse`.
+When the Observe trace also contains `screen_map_v1`, Locate returns `path_map_review_v1`. The review compares the current Locate AI/candidate evidence with the previous path map, proposes `additions` for missing precise candidates, and proposes scoped `removals` only for same-label or high-overlap path candidates that Locate has replaced.
+RecognitionPlan/Execute also return `path_graph_recall_v1` when `screen_map_v1` is available. This is the Execute-mode state-match and PathGraph recall stage: it ranks map candidates against the current goal and provides `local_ocr_roi` hints for the later local grounding step.
 
 Expected response:
 
@@ -532,6 +551,19 @@ Expected response:
         "y": 119
       },
       "location_status": "pre_click_verified",
+      "path_map_review": {
+        "contract_version": "path_map_review_v1",
+        "status": "ready",
+        "scope": "same_label_or_high_overlap_only",
+        "summary": {
+          "addition_count": 1,
+          "removal_count": 1,
+          "kept_count": 0
+        },
+        "additions": [],
+        "removals": [],
+        "kept": []
+      },
       "execution_path": {
         "action_executed": false,
         "coordinate_source": "pre_click_decision_v1.selected_click_point",
@@ -547,12 +579,14 @@ Expected response:
 Agent decision:
 
 - Treat this as precise no-click localization.
+- In Execute Mode, keep `write_policy.path_graph=false` unless this request is intentionally reviewing or correcting the map. Successful execution should write ElementMemory, not rewrite structural PathGraph by default.
 - Prefer `provider_mode: local_grounding` here. It is intended for the larger local model that performs precise OCR-assisted target localization.
 - Use `pre_click_decision.allowed` as the quality gate.
 - Read `located_bbox` and `located_point` as the large model's no-click target proposal. For a visual-only icon it may be present while `selected_click_point` is null and `location_status` is `requires_pre_click_confirmation`.
 - For a text-bearing clickable target, inspect the OCR-derived `located_bbox` / `located_point`. If the visual semantic bbox contains unreferenced OCR text outside the selected target text cluster, the fusion layer records `unreferenced_text_contamination` and keeps the target as a confirmation-required `precise_text_target`.
 - For list-like text targets, the runtime no longer applies an `above_exclusion_boundary` from the nearest upper OCR row. Neighboring text above the target is not a special hard boundary, but any unreferenced OCR text inside the larger semantic bbox can still mark the candidate as review-only.
 - `locate_target` may surface the best review candidate from `candidate_result.rejected[0]` so the desktop panel can auto-fill the candidate-box review fields. This still does not create an executable click point.
+- Read `path_map_review` when present. The browser panel applies it to the current path graph by adding missing Locate-backed candidates and deleting only unclicked same-label/high-overlap stale controls. It is a map correction record, not click permission.
 - Treat only `selected_click_point` as executable. An icon proposal must not silently fall back to nearby OCR text merely because that text is easier to ground.
 - Still do not click directly. To click, call `POST /action/execute_recognition_plan`, which re-captures and rechecks before dispatching input.
 - If a visual model emits out-of-bounds values consistent with `0..1000` normalized coordinates, the provider restores them before pixel clamping and records `coordinate_space_recovered=normalized_1000`; that restored bbox is still a no-click proposal.
@@ -594,9 +628,9 @@ Request:
 Internal runtime steps:
 
 1. Capture the currently bound live window.
-2. Call `POST /vision/recognition_plan` internally with the captured `image_path`.
-3. Run OCR over the same screenshot.
-4. Build and retain `ocr_anchors_v1` from all OCR text boxes by default.
+2. Call `POST /vision/recognition_plan` internally with the captured `image_path` and latest `observe_trace_path` when present.
+3. If the Observe trace matches, reuse `ocr_anchors_v1` and build `path_graph_recall_v1`; otherwise run full-image OCR and build anchors.
+4. Retain `ocr_anchors_v1` from the reused or freshly scanned OCR evidence.
 5. For `click_target`, attach a bounded `relation_matrix_compact` prompt projection: every selected row keeps OCR text and bbox coordinates, plus compact inclusion/exclusion policy rows.
 6. Normalize model regions into `vision_regions_v1`.
 7. Fuse vision and OCR into `page_structure_v1`.

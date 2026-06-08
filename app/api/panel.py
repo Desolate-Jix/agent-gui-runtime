@@ -238,6 +238,21 @@ def inspect_trace(path: str) -> APIResponse:
                 "recommended_target": trace.get("recommended_target") or plan.get("recommended_target"),
                 "location_status": trace.get("location_status"),
             }
+            path_map_review = trace.get("path_map_review")
+            if isinstance(path_map_review, dict):
+                summary = path_map_review.get("summary") if isinstance(path_map_review.get("summary"), dict) else {}
+                parsed["path_map_review_additions"] = int(summary.get("addition_count") or len(path_map_review.get("additions") or []))
+                parsed["path_map_review_removals"] = int(summary.get("removal_count") or len(path_map_review.get("removals") or []))
+                parsed["path_map_review_status"] = path_map_review.get("status") or ""
+                parsed["sections"]["path_review"] = path_map_review
+            path_graph_recall = trace.get("path_graph_recall") or plan.get("path_graph_recall")
+            if isinstance(path_graph_recall, dict):
+                summary = path_graph_recall.get("summary") if isinstance(path_graph_recall.get("summary"), dict) else {}
+                parsed["path_graph_recall_count"] = int(summary.get("recalled_count") or len(path_graph_recall.get("candidates") or []))
+                parsed["path_graph_recall_status"] = path_graph_recall.get("status") or ""
+                state_match = path_graph_recall.get("state_match") if isinstance(path_graph_recall.get("state_match"), dict) else {}
+                parsed["path_graph_recall_state"] = state_match.get("state_id") or ""
+                parsed["sections"]["path_recall"] = path_graph_recall
 
             parsed["sections"]["click"] = plan.get("execution") or trace.get("click_result") or trace.get("execution_path") or {}
             parsed["sections"]["verify"] = trace.get("post_click_verification") or trace.get("semantic_post_click_verification") or {}
@@ -717,6 +732,8 @@ def _trace_flow_stages(parsed: dict[str, Any]) -> list[dict[str, Any]]:
         add("vision", "Vision", str(parsed.get("model_provider") or parsed.get("provider") or "")),
         add("screen", "Screen", str(parsed.get("state_guess") or "")),
         add("path_map", "Path Map", _path_map_label(sections.get("path_map"))),
+        add("path_recall", "Path Recall", _path_recall_label(sections.get("path_recall"))),
+        add("path_review", "Path Review", _path_review_label(sections.get("path_review"))),
         add("candidates", "Candidates", f"{parsed.get('candidates') or 0} returned"),
         add(
             "gate",
@@ -799,6 +816,35 @@ def _path_map_label(raw: Any) -> str:
     return ", ".join(parts)
 
 
+def _path_recall_label(raw: Any) -> str:
+    if not isinstance(raw, dict):
+        return ""
+    summary = raw.get("summary") if isinstance(raw.get("summary"), dict) else {}
+    count = summary.get("recalled_count")
+    if count is None and isinstance(raw.get("candidates"), list):
+        count = len(raw["candidates"])
+    state_match = raw.get("state_match") if isinstance(raw.get("state_match"), dict) else {}
+    parts = []
+    if count is not None:
+        parts.append(f"{count} recalled")
+    if state_match.get("state_id"):
+        parts.append(str(state_match["state_id"]))
+    return ", ".join(parts)
+
+
+def _path_review_label(raw: Any) -> str:
+    if not isinstance(raw, dict):
+        return ""
+    summary = raw.get("summary") if isinstance(raw.get("summary"), dict) else {}
+    additions = summary.get("addition_count")
+    removals = summary.get("removal_count")
+    if additions is None:
+        additions = len(raw.get("additions") or []) if isinstance(raw.get("additions"), list) else 0
+    if removals is None:
+        removals = len(raw.get("removals") or []) if isinstance(raw.get("removals"), list) else 0
+    return f"+{additions} / -{removals}"
+
+
 def _compact_value(value: Any) -> str:
     if isinstance(value, dict):
         for key in ["contract_version", "provider", "region_count", "element_count", "text_count", "status"]:
@@ -827,6 +873,17 @@ def _stage_summary(stage_id: str, parsed: dict[str, Any]) -> str:
         if state_id:
             prefix += f"; state: {state_id}"
         return f"{prefix}\n{summary}".strip()
+    if stage_id == "path_recall":
+        count = parsed.get("path_graph_recall_count") or 0
+        status = parsed.get("path_graph_recall_status") or ""
+        state_id = parsed.get("path_graph_recall_state") or ""
+        suffix = f"; state: {state_id}" if state_id else ""
+        return f"Path recall {status}: {count} candidate(s){suffix}".strip()
+    if stage_id == "path_review":
+        additions = parsed.get("path_map_review_additions") or 0
+        removals = parsed.get("path_map_review_removals") or 0
+        status = parsed.get("path_map_review_status") or ""
+        return f"Path review {status}: +{additions}, -{removals}".strip()
     if stage_id == "candidates":
         return f"Candidates returned: {parsed.get('candidates') or 0}; recommendation: {bool(parsed.get('has_recommendation'))}"
     if stage_id == "gate":

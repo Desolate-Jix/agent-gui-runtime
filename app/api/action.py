@@ -443,7 +443,19 @@ def _legacy_learned_instruction_path(learned_instruction_id: str) -> Path:
 
 
 def _instruction_learning_enabled(request: ExecuteRecognitionPlanRequest) -> bool:
-    return str(request.learning_mode or "").strip().casefold() in {"instruction", "instruction_learning"}
+    write_policy = request.write_policy.model_dump() if hasattr(request.write_policy, "model_dump") else {}
+    return bool(write_policy.get("element_memory", True)) and str(request.learning_mode or "").strip().casefold() in {"instruction", "instruction_learning"}
+
+
+def _execute_trace_enabled(request: ExecuteRecognitionPlanRequest) -> bool:
+    write_policy = request.write_policy.model_dump() if hasattr(request.write_policy, "model_dump") else {}
+    return write_policy.get("trace", True) is not False
+
+
+def _write_execute_trace_if_enabled(request: ExecuteRecognitionPlanRequest, **kwargs: Any) -> str | None:
+    if not _execute_trace_enabled(request):
+        return None
+    return write_trace(**kwargs)
 
 
 def _save_approved_plan(
@@ -824,7 +836,8 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             overlay = None
         except Exception as exc:
             timings = timer.to_dict()
-            trace_path = write_trace(
+            trace_path = _write_execute_trace_if_enabled(
+                request,
                 category="actions",
                 operation="execute_recognition_plan",
                 payload={
@@ -894,7 +907,8 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             overlay = approved_record.get("recognition_plan_overlay") if isinstance(approved_record.get("recognition_plan_overlay"), dict) else None
         except Exception as exc:
             timings = timer.to_dict()
-            trace_path = write_trace(
+            trace_path = _write_execute_trace_if_enabled(
+                request,
                 category="actions",
                 operation="execute_recognition_plan",
                 payload={
@@ -951,7 +965,8 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                     )
             except Exception as exc:
                 timings = timer.to_dict()
-                trace_path = write_trace(
+                trace_path = _write_execute_trace_if_enabled(
+                    request,
                     category="actions",
                     operation="execute_recognition_plan",
                     payload={"success": False, "request": request.model_dump(), "error": str(exc), "timings": timings},
@@ -969,7 +984,8 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 image_path = request.image_path
             if not request.allow_saved_image_execution and not request.dry_run:
                 timings = timer.to_dict()
-                trace_path = write_trace(
+                trace_path = _write_execute_trace_if_enabled(
+                    request,
                     category="actions",
                     operation="execute_recognition_plan",
                     payload={
@@ -1005,14 +1021,19 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             goal=request.goal,
             state_hint=request.state_hint,
             provider_mode=request.provider_mode,
+            agent_mode=request.agent_mode,
+            learn_depth=request.learn_depth,
+            write_policy=request.write_policy,
             metadata=request.metadata,
             top_k=request.top_k,
+            observe_trace_path=request.observe_trace_path,
         )
         with timer.step("recognition_plan"):
             plan_response = _run_recognition_plan_for_execution(plan_request)
         if not plan_response.success or not plan_response.data:
             timings = timer.to_dict()
-            trace_path = write_trace(
+            trace_path = _write_execute_trace_if_enabled(
+                request,
                 category="actions",
                 operation="execute_recognition_plan",
                 payload={
@@ -1057,6 +1078,10 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
 
     base_result: dict[str, Any] = {
         "contract_version": "execute_recognition_plan_v1",
+        "agent_mode": request.agent_mode,
+        "learn_depth": request.learn_depth,
+        "mode_contract_version": "execute_plan_v1" if request.agent_mode == "execute" else ("learn_screen_deep_v1" if request.learn_depth == "deep" else "learn_screen_fast_v1"),
+        "write_policy": request.write_policy.model_dump(),
         "goal": request.goal,
         "image_path": image_path,
         "live_capture": live_capture,
@@ -1076,7 +1101,8 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
 
     if not pre_click.get("allowed") or selected_point is None:
         attach_timings(base_result)
-        base_result["trace_path"] = write_trace(
+        base_result["trace_path"] = _write_execute_trace_if_enabled(
+            request,
             category="actions",
             operation="execute_recognition_plan",
             payload={
@@ -1111,7 +1137,8 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             base_result.update(approval)
             base_result["approved_plan_id"] = approval["approved_plan_id"]
         attach_timings(base_result)
-        base_result["trace_path"] = write_trace(
+        base_result["trace_path"] = _write_execute_trace_if_enabled(
+            request,
             category="actions",
             operation="execute_recognition_plan",
             payload={"success": True, "request": request.model_dump(), "result": base_result},
@@ -1192,7 +1219,8 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         base_result["execution_path"]["action_executed"] = bool(attempts)
         base_result["attempts"] = attempts
         attach_timings(base_result)
-        base_result["trace_path"] = write_trace(
+        base_result["trace_path"] = _write_execute_trace_if_enabled(
+            request,
             category="actions",
             operation="execute_recognition_plan",
             payload={
@@ -1228,7 +1256,8 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
     base_result["execution_path"]["retry_count"] = max(0, len(attempts) - 1)
     base_result["execution_path"]["semantic_post_click_verification_used"] = bool(semantic_post_click_verification.get("applicable"))
     attach_timings(base_result)
-    base_result["trace_path"] = write_trace(
+    base_result["trace_path"] = _write_execute_trace_if_enabled(
+        request,
         category="actions",
         operation="execute_recognition_plan",
         payload={"success": verified, "request": request.model_dump(), "result": base_result},
