@@ -105,7 +105,7 @@ def test_open_app_resolves_executable_candidate_and_appends_url(monkeypatch, tmp
     assert response.data["timings"]["steps"][0]["name"] == "load_app_catalog"
 
 
-def test_open_app_waits_longer_for_browser_url(monkeypatch, tmp_path) -> None:
+def test_open_app_uses_requested_browser_url_wait(monkeypatch, tmp_path) -> None:
     exe = tmp_path / "browser.exe"
     exe.write_text("demo", encoding="utf-8")
     monkeypatch.setattr(
@@ -134,10 +134,10 @@ def test_open_app_waits_longer_for_browser_url(monkeypatch, tmp_path) -> None:
     response = apps_api.open_app(OpenAppRequest(app_id="edge", url="https://www.google.com", wait_seconds=1.5))
 
     assert response.success is True
-    assert sleeps == [3.5]
+    assert sleeps == [1.5]
     wait_step = response.data["timings"]["steps"][4]
     assert wait_step["name"] == "wait_after_open"
-    assert wait_step["wait_seconds"] == 3.5
+    assert wait_step["wait_seconds"] == 1.5
     assert wait_step["requested_wait_seconds"] == 1.5
 
 

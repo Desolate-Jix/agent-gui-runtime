@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
+from difflib import SequenceMatcher
 from typing import Any
 
 from fastapi import APIRouter
@@ -102,18 +104,24 @@ def _recognition_vision_request_with_ocr_anchors(
 
     if anchor_status["enabled"]:
         try:
-            ocr_result = ocr_service.scan_image(str(image_path))
             raw_options = metadata.get("ocr_anchors") if isinstance(metadata.get("ocr_anchors"), dict) else {}
+            reused = metadata.get("reused_ocr_anchors") if isinstance(metadata.get("reused_ocr_anchors"), dict) else None
             raw_max_anchors = raw_options.get("max_anchors") if isinstance(raw_options, dict) else None
-            max_anchors = None if raw_max_anchors in (None, "all", "ALL", 0, "0") else int(raw_max_anchors)
-            min_score = float(raw_options.get("min_score", 0.0)) if isinstance(raw_options, dict) else 0.0
-            anchor_payload = build_ocr_anchor_payload(
-                ocr_result,
-                image_size=image_size,
-                goal=request.goal or request.task,
-                max_anchors=max_anchors,
-                min_score=min_score,
-            )
+            if _reusable_ocr_anchor_payload(reused, image_path=image_path):
+                anchor_payload = dict(reused or {})
+                anchor_status["reused"] = True
+                anchor_status["source_trace_path"] = metadata.get("reused_ocr_source_trace_path")
+            else:
+                ocr_result = ocr_service.scan_image(str(image_path))
+                max_anchors = None if raw_max_anchors in (None, "all", "ALL", 0, "0") else int(raw_max_anchors)
+                min_score = float(raw_options.get("min_score", 0.0)) if isinstance(raw_options, dict) else 0.0
+                anchor_payload = build_ocr_anchor_payload(
+                    ocr_result,
+                    image_size=image_size,
+                    goal=request.goal or request.task,
+                    max_anchors=max_anchors,
+                    min_score=min_score,
+                )
             anchor_payload["prompt_max_anchors"] = (
                 int(raw_options.get("prompt_max_anchors", DEFAULT_PROMPT_ANCHOR_LIMIT))
                 if isinstance(raw_options, dict)
@@ -130,6 +138,7 @@ def _recognition_vision_request_with_ocr_anchors(
                 else DEFAULT_PROMPT_FOCUS_NEIGHBOR_LIMIT
             )
             metadata["ocr_anchors"] = anchor_payload
+            metadata.pop("reused_ocr_anchors", None)
             anchor_status.update(
                 {
                     "used": bool(anchor_payload.get("anchor_count")),
@@ -151,6 +160,22 @@ def _recognition_vision_request_with_ocr_anchors(
         metadata=metadata,
     )
     return vision_request, ocr_result, anchor_payload, anchor_status
+
+
+def _reusable_ocr_anchor_payload(payload: dict[str, Any] | None, *, image_path: Path) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("contract_version") != "ocr_anchors_v1":
+        return False
+    if not isinstance(payload.get("anchors"), list):
+        return False
+    source_image = str(payload.get("image_path") or "")
+    if source_image:
+        try:
+            return Path(source_image).resolve() == image_path.resolve()
+        except Exception:
+            return source_image == str(image_path)
+    return True
 
 
 def _ocr_anchors_enabled(metadata: dict[str, object]) -> bool:
@@ -189,6 +214,115 @@ def _image_path_for_live_or_saved(
     if image_path:
         return image_path, None
     raise ValueError("Provide image_path or set capture_live=true")
+
+
+def _load_observe_trace_reuse(trace_path_value: str | None, *, image_path: str, goal: str | None = None) -> dict[str, Any]:
+    if not trace_path_value:
+        return {}
+    trace_path = Path(trace_path_value)
+    if not trace_path.exists():
+        return {
+            "status": "unavailable",
+            "reason": "observe_trace_not_found",
+            "trace_path": str(trace_path),
+        }
+    try:
+        trace = json.loads(trace_path.read_text(encoding="utf-8-sig"))
+    except Exception as exc:
+        return {
+            "status": "unavailable",
+            "reason": f"observe_trace_read_failed: {exc}",
+            "trace_path": str(trace_path),
+        }
+    result = trace.get("result") if isinstance(trace.get("result"), dict) else {}
+    if not result:
+        nested = trace.get("data") if isinstance(trace.get("data"), dict) else {}
+        result = nested.get("result") if isinstance(nested.get("result"), dict) else {}
+    parse_result = result.get("parse_result") if isinstance(result.get("parse_result"), dict) else {}
+    ocr_anchors = parse_result.get("ocr_anchors") if isinstance(parse_result.get("ocr_anchors"), dict) else None
+    if not ocr_anchors:
+        ocr_anchors = _ocr_anchor_payload_from_observe_texts(result, image_path=image_path, goal=goal)
+    if not ocr_anchors:
+        return {
+            "status": "unavailable",
+            "reason": "observe_trace_has_no_ocr_texts",
+            "trace_path": str(trace_path),
+        }
+    if not _reusable_ocr_anchor_payload(ocr_anchors, image_path=Path(image_path)):
+        return {
+            "status": "unavailable",
+            "reason": "observe_trace_image_mismatch",
+            "trace_path": str(trace_path),
+            "trace_image_path": ocr_anchors.get("image_path"),
+            "image_path": image_path,
+        }
+    screen_map = result.get("screen_map") if isinstance(result.get("screen_map"), dict) else {}
+    return {
+        "status": "ready",
+        "trace_path": str(trace_path),
+        "ocr_anchors": ocr_anchors,
+        "screen_map": screen_map,
+        "state_id": screen_map.get("state_id") if isinstance(screen_map, dict) else None,
+        "candidate_count": len(screen_map.get("candidates") or []) if isinstance(screen_map, dict) else 0,
+        "anchor_count": int(ocr_anchors.get("anchor_count") or 0),
+        "anchor_source": ocr_anchors.get("source_engine"),
+    }
+
+
+def _ocr_anchor_payload_from_observe_texts(result: dict[str, Any], *, image_path: str, goal: str | None = None) -> dict[str, Any] | None:
+    texts = _screen_map_texts(result)
+    if not texts:
+        return None
+    image_size_payload = result.get("image_size") if isinstance(result.get("image_size"), dict) else {}
+    width = int(_number(image_size_payload.get("width")) or _max_text_edge(result, axis="x") or 0)
+    height = int(_number(image_size_payload.get("height")) or _max_text_edge(result, axis="y") or 0)
+    anchors: list[dict[str, Any]] = []
+    normalized_goal = _normalize_anchor_text(goal or "")
+    for index, item in enumerate(texts, start=1):
+        text = _first_compact_text(item.get("text"))
+        bbox = _normalize_map_bbox(item.get("bbox"))
+        if not text or not bbox:
+            continue
+        confidence = _bounded_float(item.get("confidence"))
+        goal_similarity = _anchor_text_similarity(normalized_goal, _normalize_anchor_text(text)) if normalized_goal else 0.0
+        anchors.append(
+            {
+                "anchor_id": f"observe_text_anchor_{index}",
+                "text": text,
+                "bbox": bbox,
+                "center": _normalize_map_point(None, bbox),
+                "confidence": confidence if confidence is not None else 1.0,
+                "goal_similarity": round(goal_similarity, 4),
+                "source_text_id": item.get("id"),
+            }
+        )
+    if not anchors:
+        return None
+    anchors.sort(key=lambda item: (item["goal_similarity"], item["confidence"], len(item["text"])), reverse=True)
+    return {
+        "contract_version": "ocr_anchors_v1",
+        "coordinate_space": "original_image",
+        "image_path": image_path,
+        "image_size": {"width": width, "height": height},
+        "source_engine": "observe_trace_texts",
+        "total_detected_count": len(anchors),
+        "anchor_count": len(anchors),
+        "anchors": anchors,
+    }
+
+
+def _normalize_anchor_text(value: str) -> str:
+    return "".join(str(value or "").casefold().split())
+
+
+def _anchor_text_similarity(a: str, b: str) -> float:
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 1.0
+    if a in b or b in a:
+        return min(len(a), len(b)) / max(len(a), len(b))
+    return SequenceMatcher(None, a, b).ratio()
 
 
 @router.post("/ocr_region", response_model=APIResponse)
@@ -675,7 +809,7 @@ def _floating_overlay_section(result: dict[str, Any], *, width: int, height: int
     )
 
 
-def _screen_map_text_candidates(result: dict[str, Any]) -> list[dict[str, Any]]:
+def _screen_map_text_candidates(result: dict[str, Any], *, sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for index, text_item in enumerate(_screen_map_texts(result)):
         if not isinstance(text_item, dict):
@@ -685,10 +819,11 @@ def _screen_map_text_candidates(result: dict[str, Any]) -> list[dict[str, Any]]:
         confidence = _bounded_float(text_item.get("confidence"))
         if not label or not bbox:
             continue
-        role = _ocr_text_candidate_role(label, bbox)
+        section_id = _section_id_for_bbox(bbox, sections)
+        role = _ocr_text_candidate_role(label, bbox, section_id=section_id)
         if not role:
             continue
-        min_confidence = 0.6 if len(label) <= 4 else 0.72
+        min_confidence = 0.5 if section_id == "page_header" else (0.6 if len(label) <= 4 else 0.72)
         if confidence is not None and confidence < min_confidence:
             continue
         candidates.append(
@@ -706,6 +841,7 @@ def _screen_map_text_candidates(result: dict[str, Any]) -> list[dict[str, Any]]:
                 },
                 "verification_hints": {"expected_changes": [_expected_effect_for_ocr_text(label, role)]},
                 "evidence_level": "ocr_text_only",
+                "screen_map_rule": "header_text_is_button" if section_id == "page_header" else "ocr_action_text",
             }
         )
     return candidates
@@ -731,11 +867,15 @@ def _normalize_ocr_candidate_label(label: str) -> str:
     return str(label or "").strip().strip("·•・-—→ ").strip()
 
 
-def _ocr_text_candidate_role(label: str, bbox: dict[str, int]) -> str | None:
+def _ocr_text_candidate_role(label: str, bbox: dict[str, int], *, section_id: str | None = None) -> str | None:
     text = label.strip()
     lowered = text.casefold()
     if bbox["y"] < 90:
         return None
+    if section_id == "page_header":
+        if _screen_map_text_is_noise(text, allow_short=True):
+            return None
+        return "nav_text_action"
     if bbox["y"] < 180 and ("." in text or "mousetester" in lowered):
         return None
     if len(text) > 24:
@@ -783,6 +923,169 @@ def _ocr_text_candidate_role(label: str, bbox: dict[str, int]) -> str | None:
     return None
 
 
+def _screen_map_text_is_noise(text: str, *, allow_short: bool = False) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return True
+    lowered = value.casefold()
+    if "://" in lowered or lowered.startswith("http"):
+        return True
+    if len(value) == 1 and not allow_short:
+        return True
+    if len(value) == 1 and allow_short and not value.isalnum():
+        return True
+    if all(not char.isalnum() for char in value):
+        return True
+    return False
+
+
+def _screen_map_card_candidates(result: dict[str, Any], *, sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    text_items = _screen_map_texts(result)
+    section_by_id = {str(section.get("section_id")): section for section in sections if isinstance(section, dict)}
+    for section_id in ("main_content", "promo_strip", "lower_content"):
+        section = section_by_id.get(section_id)
+        section_bbox = _normalize_map_bbox((section or {}).get("bbox"))
+        if not section_bbox:
+            continue
+        section_texts = _texts_in_bbox(text_items, section_bbox)
+        seed_boxes = [
+            bbox
+            for item in section_texts
+            if (bbox := _normalize_map_bbox(item.get("bbox")))
+            and _is_card_seed_label(_normalize_ocr_candidate_label(_first_compact_text(item.get("text"))), section_id=section_id)
+        ]
+        used_centers: list[dict[str, int]] = []
+        for index, text_item in enumerate(section_texts):
+            seed_bbox = _normalize_map_bbox(text_item.get("bbox"))
+            label = _normalize_ocr_candidate_label(_first_compact_text(text_item.get("text")))
+            if not seed_bbox or not _is_card_seed_label(label, section_id=section_id):
+                continue
+            seed_center = _normalize_map_point(None, seed_bbox)
+            if seed_center and any(_point_inside_bbox(seed_center, used) for used in used_centers):
+                continue
+            card_bbox = _card_bbox_for_seed(section_texts, seed_bbox=seed_bbox, seed_boxes=seed_boxes, section_bbox=section_bbox)
+            if not card_bbox:
+                continue
+            used_centers.append(card_bbox)
+            card_texts = _texts_in_bbox(section_texts, card_bbox)
+            candidates.append(
+                {
+                    "id": f"card_{section_id}_{index}",
+                    "label": label,
+                    "type": "content_card",
+                    "bbox": card_bbox,
+                    "click_point": _normalize_map_point(None, card_bbox),
+                    "confidence": _bounded_float(text_item.get("confidence")) or 0.75,
+                    "interaction_policy": {
+                        "allowed": None,
+                        "reasons": ["card_group_candidate", f"section:{section_id}"],
+                    },
+                    "verification_hints": {"expected_changes": [f"open or focus the {label} card"]},
+                    "evidence_level": "ocr_grouped_card",
+                    "text_id": text_item.get("id"),
+                    "screen_map_rule": "card_texts_grouped_as_single_candidate",
+                    "text_sample": [_first_compact_text(item.get("text")) for item in card_texts[:8] if _first_compact_text(item.get("text"))],
+                    "text_count": len(card_texts),
+                }
+            )
+    return candidates
+
+
+def _is_card_seed_label(label: str, *, section_id: str) -> bool:
+    text = str(label or "").strip()
+    if _screen_map_text_is_noise(text):
+        return False
+    lowered = text.casefold()
+    if any(text.startswith(prefix) for prefix in ("点击", "检测", "测试鼠标", "请输入", "输入")):
+        return False
+    if section_id == "promo_strip":
+        return len(text) >= 3 and any(term in text or term in lowered for term in ["测试", "工具", "dpi", "cps", "延迟", "灵敏度", "白噪音", "键盘"])
+    return any(
+        term in text or term in lowered
+        for term in [
+            "测试",
+            "按键",
+            "滚轮",
+            "回报率",
+            "双击",
+            "轮询率",
+            "平滑度",
+            "灵敏度",
+            "dpi",
+            "cps",
+            "hz",
+            "键盘",
+            "白噪音",
+            "建房",
+            "加入",
+        ]
+    )
+
+
+def _card_bbox_for_seed(
+    texts: list[dict[str, Any]],
+    *,
+    seed_bbox: dict[str, int],
+    seed_boxes: list[dict[str, int]],
+    section_bbox: dict[str, int],
+) -> dict[str, int] | None:
+    seed_cx = seed_bbox["x"] + seed_bbox["w"] / 2
+    half_width = min(260, max(150, int(section_bbox["w"] * 0.11)))
+    x1 = max(section_bbox["x"], int(seed_cx - half_width))
+    x2 = min(section_bbox["x"] + section_bbox["w"], int(seed_cx + half_width))
+    x1, x2 = _card_column_bounds(seed_bbox=seed_bbox, seed_boxes=seed_boxes, fallback_x1=x1, fallback_x2=x2, section_bbox=section_bbox)
+    y1 = max(section_bbox["y"], seed_bbox["y"] - 24)
+    y2 = min(section_bbox["y"] + section_bbox["h"], seed_bbox["y"] + max(120, int(section_bbox["h"] * 0.34)))
+    cluster: list[dict[str, int]] = [seed_bbox]
+    for text_item in texts:
+        bbox = _normalize_map_bbox(text_item.get("bbox"))
+        if not bbox:
+            continue
+        cx = bbox["x"] + bbox["w"] / 2
+        cy = bbox["y"] + bbox["h"] / 2
+        if x1 <= cx <= x2 and y1 <= cy <= y2:
+            cluster.append(bbox)
+    bbox = _bbox_union(cluster)
+    if not bbox:
+        return None
+    return _pad_bbox(bbox, pad=18, max_width=section_bbox["x"] + section_bbox["w"], max_height=section_bbox["y"] + section_bbox["h"])
+
+
+def _card_column_bounds(
+    *,
+    seed_bbox: dict[str, int],
+    seed_boxes: list[dict[str, int]],
+    fallback_x1: int,
+    fallback_x2: int,
+    section_bbox: dict[str, int],
+) -> tuple[int, int]:
+    seed_cx = seed_bbox["x"] + seed_bbox["w"] / 2
+    seed_cy = seed_bbox["y"] + seed_bbox["h"] / 2
+    row_peers = [
+        box
+        for box in seed_boxes
+        if abs((box["y"] + box["h"] / 2) - seed_cy) <= 80
+    ]
+    centers = sorted({round(box["x"] + box["w"] / 2) for box in row_peers})
+    if len(centers) < 2:
+        return fallback_x1, fallback_x2
+    center = round(seed_cx)
+    left_centers = [item for item in centers if item < center]
+    right_centers = [item for item in centers if item > center]
+    left_bound = section_bbox["x"]
+    right_bound = section_bbox["x"] + section_bbox["w"]
+    if left_centers:
+        left_bound = max(left_bound, int(round((left_centers[-1] + center) / 2)))
+    if right_centers:
+        right_bound = min(right_bound, int(round((right_centers[0] + center) / 2)))
+    return max(fallback_x1, left_bound), min(fallback_x2, right_bound)
+
+
+def _point_inside_bbox(point: dict[str, int], bbox: dict[str, int]) -> bool:
+    return bbox["x"] <= point["x"] <= bbox["x"] + bbox["w"] and bbox["y"] <= point["y"] <= bbox["y"] + bbox["h"]
+
+
 def _expected_effect_for_ocr_text(label: str, role: str) -> str:
     if role == "content_card":
         return f"open or focus the {label} section"
@@ -801,7 +1104,8 @@ def _screen_map_candidates(result: dict[str, Any], *, sections: list[dict[str, A
     sources.append(("top_level.ui_elements", _as_list(result.get("ui_elements"))))
     sources.append(("top_level.elements", _as_list(result.get("elements"))))
     sources.append(("top_level.controls", _as_list(result.get("controls"))))
-    sources.append(("ocr_text_actions", _screen_map_text_candidates(result)))
+    sources.append(("ocr_card_groups", _screen_map_card_candidates(result, sections=sections)))
+    sources.append(("ocr_text_actions", _screen_map_text_candidates(result, sections=sections)))
 
     seen: set[str] = set()
     candidates: list[dict[str, Any]] = []
@@ -856,12 +1160,14 @@ def _screen_map_candidate(item: dict[str, Any], *, source: str, index: int, sect
         "confidence": _bounded_float(item.get("confidence")),
         "source": source,
         "source_id": item.get("id") or item.get("element_id") or item.get("candidate_id"),
+        "screen_map_rule": item.get("screen_map_rule"),
         "evidence": {
             "interaction_policy": policy,
             "coordinate_confidence": item.get("coordinate_confidence"),
             "evidence_level": item.get("evidence_level"),
             "memory_key": item.get("memory_key"),
             "source_text_id": item.get("text_id"),
+            "screen_map_rule": item.get("screen_map_rule"),
         },
     }
 
@@ -1099,6 +1405,17 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
                 purpose="locate_target",
                 app_name=request.app_name,
             )
+        with timer.step("load_observe_trace_reuse", has_observe_trace=bool(request.observe_trace_path)):
+            observe_reuse = _load_observe_trace_reuse(request.observe_trace_path, image_path=image_path, goal=request.goal)
+        metadata = dict(request.metadata or {})
+        if observe_reuse.get("status") == "ready":
+            metadata["reused_ocr_anchors"] = observe_reuse["ocr_anchors"]
+            metadata["reused_ocr_source_trace_path"] = observe_reuse["trace_path"]
+            metadata["screen_map_context"] = {
+                "state_id": observe_reuse.get("state_id"),
+                "candidate_count": observe_reuse.get("candidate_count"),
+                "source_trace_path": observe_reuse.get("trace_path"),
+            }
         plan_request = VisionRecognitionPlanRequestModel(
             image_path=image_path,
             task=request.task,
@@ -1107,10 +1424,10 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
             state_hint=request.state_hint,
             provider_mode=request.provider_mode or "local_grounding",
             metadata={
-                **dict(request.metadata or {}),
-                "ocr_anchors": {"enabled": True, "max_anchors": "all", **dict((request.metadata or {}).get("ocr_anchors") or {})}
-                if isinstance((request.metadata or {}).get("ocr_anchors"), dict)
-                else (request.metadata or {}).get("ocr_anchors", {"enabled": True, "max_anchors": "all"}),
+                **metadata,
+                "ocr_anchors": {"enabled": True, "max_anchors": "all", **dict(metadata.get("ocr_anchors") or {})}
+                if isinstance(metadata.get("ocr_anchors"), dict)
+                else metadata.get("ocr_anchors", {"enabled": True, "max_anchors": "all"}),
             },
             top_k=request.top_k,
         )
@@ -1140,11 +1457,19 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
             "located_bbox": located_bbox,
             "located_point": located_point,
             "location_status": "pre_click_verified" if selected_click_point else ("requires_pre_click_confirmation" if located_point else "not_located"),
+            "observe_trace_reuse": {
+                key: value
+                for key, value in observe_reuse.items()
+                if key not in {"ocr_anchors", "screen_map"}
+            },
             "execution_path": {
                 **dict(result.get("execution_path") or {}),
                 "action_executed": False,
                 "coordinate_source": "pre_click_decision_v1.selected_click_point",
                 "located_coordinate_source": located_source,
+                "ocr_anchor_reused_from_observe": observe_reuse.get("status") == "ready",
+                "ocr_anchor_reuse_source": observe_reuse.get("anchor_source"),
+                "ocr_anchor_reuse_trace_path": observe_reuse.get("trace_path") if observe_reuse.get("status") == "ready" else None,
                 "agent_must_call_for_click": "POST /action/execute_recognition_plan",
             },
         }

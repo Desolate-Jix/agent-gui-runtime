@@ -727,6 +727,160 @@ textarea {
   letter-spacing: 0.3px;
 }
 
+.tf-path-graph {
+  display: grid;
+  gap: 10px;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid #bfd7ff;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.tf-path-state-node {
+  display: grid;
+  gap: 3px;
+  max-width: 780px;
+  padding: 9px 11px;
+  border: 1px solid #84caff;
+  border-radius: 8px;
+  background: #eff8ff;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+}
+
+.tf-path-state-node span {
+  font-size: 10px;
+  font-weight: 700;
+  color: #175cd3;
+}
+
+.tf-path-state-node strong {
+  font-size: 13px;
+  color: #101828;
+}
+
+.tf-path-state-node em,
+.tf-path-state-node p {
+  margin: 0;
+  font-style: normal;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #475467;
+}
+
+.tf-path-lanes {
+  display: grid;
+  gap: 10px;
+  min-width: 520px;
+}
+
+.tf-path-lane {
+  display: grid;
+  grid-template-columns: minmax(150px, 220px) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  position: relative;
+}
+
+.tf-path-lane::before {
+  content: "";
+  position: absolute;
+  left: 220px;
+  right: 0;
+  top: 18px;
+  border-top: 1px solid #d0d5dd;
+}
+
+.tf-path-section-node,
+.tf-path-graph-node {
+  position: relative;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.tf-path-section-node {
+  z-index: 1;
+  border: 1px solid #9b8afb;
+  background: #f4f3ff;
+}
+
+.tf-path-section-node strong,
+.tf-path-graph-node strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: #182230;
+}
+
+.tf-path-section-node span,
+.tf-path-graph-node span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  line-height: 1.4;
+  color: #667085;
+}
+
+.tf-path-candidate-nodes {
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 7px;
+}
+
+.tf-path-graph-node {
+  border: 1px solid #d0d5dd;
+  box-shadow: 0 1px 1px rgba(16, 24, 40, 0.04);
+}
+
+.tf-path-graph-node:hover {
+  border-color: #84caff;
+  background: #f8fbff;
+}
+
+.tf-path-graph-empty {
+  min-height: 34px;
+  padding: 8px 10px;
+  border: 1px dashed #d0d5dd;
+  border-radius: 7px;
+  background: #f8fafc;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #667085;
+}
+
+.tf-path-sections {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 6px;
+}
+
+.tf-path-section {
+  display: grid;
+  gap: 2px;
+  padding: 7px 9px;
+  border: 1px solid #d0d5dd;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.tf-path-section strong {
+  font-size: 11px;
+  color: #182230;
+}
+
+.tf-path-section span {
+  font-size: 10px;
+  line-height: 1.4;
+  color: #667085;
+}
+
 .tf-path-candidate {
   display: grid;
   gap: 3px;

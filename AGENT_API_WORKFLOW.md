@@ -178,11 +178,9 @@ Request:
   "app_id": "edge",
   "url": "https://www.google.com/search?q=ai%E7%9A%84%E6%9C%80%E6%96%B0%E8%BF%9B%E5%B1%95",
   "bind_after_open": true,
-  "wait_seconds": 3.5
+  "wait_seconds": 1.5
 }
 ```
-
-For browser apps opened with a URL, the runtime enforces at least `3.5` seconds of post-launch wait even if an older caller sends a smaller value.
 
 Expected response:
 
@@ -462,6 +460,8 @@ Agent decision:
 - Use `screen_map_v1` as the semantic page/action map for the existing path graph. It may include bbox and click-point hints, but those are observation evidence, not executable coordinates.
 - Read `screen_map.sections[]` first to understand coarse layout such as top navigation, promotion strip, main content, lower content, and floating overlays; each candidate may carry `section_id`.
 - `ocr_text_actions` candidates are OCR-backed discovery hints for page-body cards/buttons that the broad vision pass did not promote into `ui.elements`; treat them as Locate targets, not executable coordinates.
+- `ocr_card_groups` candidates are card-level discovery hints. Their bbox intentionally covers a whole card/module so the map can reason about entries before Locate chooses an exact click target.
+- `nav_text_action` candidates are intentionally generated from valid OCR text in the top navigation section so missed navigation labels still appear in the map.
 - The observe trace preserves `screen_map_v1`; `/panel/inspect_trace` renders it as a `Path Map` stage so trace review can inspect the same path candidates, bbox hints, and click-point evidence.
 - Prefer `provider_mode: local_understanding` here. It is intended for the smaller local model that summarizes the whole screen for agent planning.
 - Use `suggested_state_hint` as the next precise-localization `state_hint` default. It comes from the observation model's concise `state_guess`.
@@ -486,6 +486,7 @@ Request:
   "state_hint": "browser navbar",
   "provider_mode": "local_grounding",
   "capture_live": true,
+  "observe_trace_path": "logs/traces/vision/20260608-...__observe-screen__seek.json",
   "top_k": 5,
   "metadata": {
     "ocr_anchors": {
@@ -495,6 +496,8 @@ Request:
   }
 }
 ```
+
+When Locate follows an Observe on the same screenshot/window state, pass the Observe `trace_path` as `observe_trace_path`. The runtime reuses matching `ocr_anchors` from that trace instead of running OCR again, and records the reuse status in `target_location_v1.observe_trace_reuse`.
 
 Expected response:
 

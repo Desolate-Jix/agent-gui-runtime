@@ -2,6 +2,7 @@
 
 let lastResponse = {};
 let lastTracePath = "";
+let lastObserveTracePath = "";
 let currentImagePath = "";
 let currentImageUrl = "";
 let modelProfiles = [];
@@ -1055,6 +1056,9 @@ function renderResponse(response, summary) {
   lastResponse = response || {};
   const result = resultOf(lastResponse);
   lastTracePath = result.trace_path || result.recognition_plan_trace_path || nestedGet(result, ["recognition_plan", "trace_path"]) || lastTracePath;
+  if (result.contract_version === "screen_observation_v1" || result.screen_map?.contract_version === "screen_map_v1") {
+    lastObserveTracePath = result.trace_path || lastObserveTracePath;
+  }
   if (lastTracePath) inspectLatestTrace(lastTracePath);
   $("responseText").textContent = JSON.stringify(lastResponse, null, 2);
   renderFlowGraph(lastResponse);
@@ -2512,17 +2516,36 @@ function showNavNodeDetail(nodeId) {
 
 function tracePathMapHtml(raw) {
   if (!raw || raw.contract_version !== "screen_map_v1" || !Array.isArray(raw.candidates)) return "";
-  const candidates = raw.candidates.slice(0, 24);
+  const sections = Array.isArray(raw.sections) ? raw.sections : [];
+  const candidates = raw.candidates;
   if (!candidates.length) return "";
   return `
     <div class="tf-path-map">
+      ${traceDynamicPathGraphHtml(raw, candidates, sections)}
+      ${sections.length ? `
+        <h5>路径分区</h5>
+        <div class="tf-path-sections">
+          ${sections.map((section) => {
+            const box = normalizeBBox(section.bbox);
+            const boxText = box ? `${Math.round(box.x)},${Math.round(box.y)} ${Math.round(box.width)}×${Math.round(box.height)}` : "";
+            const meta = [section.section_id, section.role, boxText, `${section.text_count || 0} texts`].filter(Boolean).join(" · ");
+            return `
+              <div class="tf-path-section">
+                <strong>${escapeHtml(section.label || section.section_id || "section")}</strong>
+                <span>${escapeHtml(meta)}</span>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      ` : ""}
       <h5>路径候选</h5>
       ${candidates.map((candidate) => {
         const point = normalizePoint(candidate.click_point, candidate.bbox);
         const box = normalizeBBox(candidate.bbox);
         const pointText = point ? `(${Math.round(point.x)}, ${Math.round(point.y)})` : "";
         const boxText = box ? `${Math.round(box.x)},${Math.round(box.y)} ${Math.round(box.width)}×${Math.round(box.height)}` : "";
-        const meta = [candidate.section_id, candidate.role, candidate.risk_class, pointText, boxText].filter(Boolean).join(" · ");
+        const rule = candidate.screen_map_rule || candidate.evidence?.screen_map_rule || "";
+        const meta = [candidate.section_id, candidate.role, candidate.source, rule, candidate.risk_class, pointText, boxText].filter(Boolean).join(" · ");
         return `
           <div class="tf-path-candidate">
             <strong>${escapeHtml(candidate.label || candidate.candidate_id || "candidate")}</strong>
@@ -2531,6 +2554,79 @@ function tracePathMapHtml(raw) {
           </div>
         `;
       }).join("")}
+    </div>
+  `;
+}
+
+function traceDynamicPathGraphHtml(raw, candidates, sections) {
+  const sectionById = new Map();
+  sections.forEach((section) => {
+    if (section?.section_id) sectionById.set(section.section_id, section);
+  });
+
+  const grouped = new Map();
+  candidates.forEach((candidate) => {
+    const sectionId = candidate.section_id || "unassigned";
+    if (!grouped.has(sectionId)) grouped.set(sectionId, []);
+    grouped.get(sectionId).push(candidate);
+  });
+
+  const orderedSectionIds = [];
+  sections.forEach((section) => {
+    if (section?.section_id) orderedSectionIds.push(section.section_id);
+  });
+  grouped.forEach((_, sectionId) => {
+    if (!orderedSectionIds.includes(sectionId)) orderedSectionIds.push(sectionId);
+  });
+
+  const stateLabel = raw.state_hint || raw.state_id || "observed screen";
+  const summary = raw.screen_summary || raw.summary || "";
+  const stateMeta = [
+    raw.state_id,
+    raw.app_name,
+    `${candidates.length} candidates`,
+    sections.length ? `${sections.length} sections` : "",
+  ].filter(Boolean).join(" · ");
+
+  return `
+    <div class="tf-path-graph" aria-label="Dynamic path graph from screen map">
+      <div class="tf-path-state-node">
+        <span>整屏理解路径图</span>
+        <strong>${escapeHtml(stateLabel)}</strong>
+        ${stateMeta ? `<em>${escapeHtml(stateMeta)}</em>` : ""}
+        ${summary ? `<p>${escapeHtml(summary)}</p>` : ""}
+      </div>
+      <div class="tf-path-lanes">
+        ${orderedSectionIds.map((sectionId) => {
+          const section = sectionById.get(sectionId) || { section_id: sectionId, label: sectionId };
+          const sectionCandidates = grouped.get(sectionId) || [];
+          const box = normalizeBBox(section.bbox);
+          const boxText = box ? `${Math.round(box.x)},${Math.round(box.y)} ${Math.round(box.width)}×${Math.round(box.height)}` : "";
+          const sectionMeta = [section.role, boxText, `${sectionCandidates.length} candidates`].filter(Boolean).join(" · ");
+          return `
+            <div class="tf-path-lane">
+              <div class="tf-path-section-node">
+                <strong>${escapeHtml(section.label || section.section_id || "section")}</strong>
+                ${sectionMeta ? `<span>${escapeHtml(sectionMeta)}</span>` : ""}
+              </div>
+              <div class="tf-path-candidate-nodes">
+                ${sectionCandidates.length ? sectionCandidates.map((candidate) => {
+                  const point = normalizePoint(candidate.click_point, candidate.bbox);
+                  const rule = candidate.screen_map_rule || candidate.evidence?.screen_map_rule || "";
+                  const pointText = point ? `(${Math.round(point.x)}, ${Math.round(point.y)})` : "";
+                  const nodeMeta = [candidate.role, candidate.source, rule, candidate.risk_class, pointText].filter(Boolean).join(" · ");
+                  return `
+                    <div class="tf-path-graph-node" data-candidate-id="${escapeHtml(candidate.candidate_id || "")}">
+                      <strong>${escapeHtml(candidate.label || candidate.candidate_id || "candidate")}</strong>
+                      ${nodeMeta ? `<span>${escapeHtml(nodeMeta)}</span>` : ""}
+                    </div>
+                  `;
+                }).join("") : `<div class="tf-path-graph-empty">No mapped candidate in this section yet</div>`}
+              </div>
+            </div>
+          `;
+        }).join("")}
+      </div>
     </div>
   `;
 }
@@ -2710,6 +2806,7 @@ function payloadFromShared(stage) {
     metadata: metadataWithPrompt("locate"),
     top_k: Number($("locateTopK").value || 5),
     capture_live: true,
+    observe_trace_path: lastObserveTracePath || null,
   };
 }
 
@@ -2823,7 +2920,7 @@ function bindEvents() {
       app_id: $("appId").value || null,
       url: $("appUrl").value || null,
       bind_after_open: true,
-    wait_seconds: 3.5,
+    wait_seconds: 1.5,
     }, { summary: "POST /apps/open", workflowStep: "open" }).then((response) => {
       setWindowCandidates(nestedGet(response, ["data", "running_windows"]) || []);
       syncWindowAppAndState();

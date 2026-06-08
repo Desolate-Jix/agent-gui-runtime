@@ -115,7 +115,7 @@ def open_app(request: OpenAppRequest) -> APIResponse:
             )
         with timer.step("launch_process", executable=command[0] if command else None):
             process = subprocess.Popen(command)
-        wait_seconds = _effective_open_wait_seconds(app, request)
+        wait_seconds = float(request.wait_seconds)
         with timer.step("wait_after_open", wait_seconds=wait_seconds, requested_wait_seconds=request.wait_seconds):
             time.sleep(wait_seconds)
         with timer.step("list_visible_windows"):
@@ -203,13 +203,6 @@ def _resolve_launch_command(app: dict[str, Any], request: OpenAppRequest) -> lis
     if request.url:
         command.append(request.url)
     return command
-
-
-def _effective_open_wait_seconds(app: dict[str, Any], request: OpenAppRequest) -> float:
-    wait_seconds = float(request.wait_seconds)
-    if request.url and _is_browser_app(app):
-        return max(wait_seconds, 3.5)
-    return wait_seconds
 
 
 def _is_browser_app(app: dict[str, Any]) -> bool:

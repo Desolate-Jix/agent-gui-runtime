@@ -185,6 +185,7 @@ class VisionLocateTargetRequestModel(BaseModel):
     top_k: int = Field(default=5, ge=1, le=20)
     capture_live: bool = True
     image_path: Optional[str] = None
+    observe_trace_path: Optional[str] = None
 
 
 class VisionReviewOverlayRequestModel(BaseModel):

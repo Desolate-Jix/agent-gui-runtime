@@ -102,6 +102,7 @@ def test_web_panel_serves_static_assets() -> None:
     assert "collectTraceStageVisuals" in response.text
     assert "activateTraceStageVisuals" in response.text
     assert "tracePathMapHtml" in response.text
+    assert "traceDynamicPathGraphHtml" in response.text
     assert "section_id" in response.text
 
     css_response = client.get("/panel/assets/panel.css")
@@ -113,6 +114,7 @@ def test_web_panel_serves_static_assets() -> None:
     assert "tf-stage-visuals" in css_response.text
     assert "tf-stage-image-missing" in css_response.text
     assert "tf-path-map" in css_response.text
+    assert "tf-path-graph" in css_response.text
 
 
 def test_web_panel_uploads_and_serves_image() -> None:

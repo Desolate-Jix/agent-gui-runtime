@@ -198,7 +198,7 @@
 | `process_name` | string/null | null | 覆盖目录里的进程名，用于启动后绑定。 |
 | `title` | string/null | null | 覆盖目录里的标题提示，用于启动后绑定。 |
 | `bind_after_open` | boolean | true | 启动后是否尝试自动绑定窗口。 |
-| `wait_seconds` | number | 1.5 | 启动后等待窗口出现的秒数，范围 `0..10`；浏览器打开 URL 时后端至少等待 `3.5` 秒。 |
+| `wait_seconds` | number | 1.5 | 启动后等待窗口出现的秒数，范围 `0..10`。 |
 
 返回 `data` 字段：
 
@@ -456,6 +456,8 @@
 - `screen_map` 用于把整屏理解整理成路径图入口；其中 bbox/click_point 只是观察证据，不能作为真实点击坐标。
 - `screen_map.sections[]` 区分页面区域，例如 browser chrome、顶部导航、推广条、正文、下方内容和浮层；`screen_map.candidates[].section_id` 指向所属区域。
 - 当视觉模型只返回顶部导航控件时，runtime 会从高置信 OCR 正文文本补充 `ocr_text_actions` 候选，例如卡片标题、开始按钮和鼠标按键文本，供后续 Locate 精准验证。
+- 顶部导航区的有效 OCR 文字会被提升为 `nav_text_action`，用于补齐模型漏掉的导航按钮。
+- 正文、推广区和下方内容中的相关标题/说明文字会被聚合为 `source="ocr_card_groups"` 的 `content_card`，bbox 覆盖整张卡片而不是只覆盖标题文字。
 - observe trace 会保存 `screen_map`；`/panel/inspect_trace` 会把它解析为 `Path Map` 阶段，便于阅读 trace 时直接查看路径候选和 overlay 证据。
 - 这个接口只能用于理解和候选发现，不能用于点击。
 
@@ -476,6 +478,7 @@
 | `top_k` | integer | 5 | 候选数量上限。 |
 | `capture_live` | boolean | true | 是否实时截图。 |
 | `image_path` | string/null | null | `capture_live=false` 时使用的截图路径。 |
+| `observe_trace_path` | string/null | null | 可选。传入前一次 `/vision/observe_screen` trace 后，若截图匹配，精准定位会复用其中的 `ocr_anchors`，避免同图重复 OCR。 |
 
 返回 `data.result` 字段：
 
