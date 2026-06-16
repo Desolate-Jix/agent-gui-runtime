@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-06-16T07:49:01.460Z",
+  "includeContent": false,
+  "summary": {
+    "ok": false,
+    "status": "partial",
+    "warnings": [
+      "[redacted:133 chars]",
+      "[redacted:49 chars]",
+      "[redacted:93 chars]",
+      "[redacted:76 chars]",
+      "[redacted:133 chars]",
+      "[redacted:49 chars]",
+      "[redacted:93 chars]",
+      "[redacted:76 chars]"
+    ],
+    "context": {
+      "timestamp": "2026-06-16T07:49:01.459Z",
+      "url": "[redacted:58 chars]",
+      "title": "[redacted:8 chars]",
+      "turnCount": 7,
+      "assistantTurnCount": 4,
+      "conversationId": "[redacted:36 chars]"
+    }
+  },
+  "steps": [
+    {
+      "id": "bootstrap",
+      "command": "session.bootstrap",
+      "status": "ok",
+      "ok": true,
+      "startedAt": "2026-06-16T07:46:59.760Z",
+      "endedAt": "2026-06-16T07:46:59.825Z",
+      "warnings": [],
+      "dataPreview": {
+        "browserName": "[redacted:6 chars]",
+        "tabId": "[redacted:9 chars]",
+        "url": "[redacted:58 chars]",
+        "loggedIn": false
+      }
+    },
+    {
+      "id": "open",
+      "command": "threads.open",
+      "status": "ok",
+      "ok": true,
+      "startedAt": "2026-06-16T07:46:59.825Z",
+      "endedAt": "2026-06-16T07:47:00.160Z",
+      "warnings": [],
+      "dataPreview": {
+        "url": "[redacted:58 chars]",
+        "conversationId": "[redacted:36 chars]",
+        "title": "[redacted:8 chars]"
+      }
+    },
+    {
+      "id": "ask",
+      "command": "messages.ask",
+      "status": "partial",
+      "ok": false,
+      "startedAt": "2026-06-16T07:47:00.160Z",
+      "endedAt": "2026-06-16T07:49:01.459Z",
+      "warnings": [
+        "Markdown was reconstructed from visible DOM semantics; use response.copy for clipboard Markdown when exact copy fidelity is required.",
+        "Timed out after receiving partial assistant text.",
+        "Assistant response was read after partial, but completion was not confirmed by the wait step.",
+        "Assistant response was read after partial, but completion was not confirmed."
+      ],
+      "dataPreview": {
+        "prompt": "[redacted:122 chars]",
+        "complete": false,
+        "responseText": "[redacted:74 chars]",
+        "conversationId": "[redacted:36 chars]",
+        "title": "[redacted:8 chars]"
+      }
+    }
+  ],
+  "data": {
+    "bootstrap": {
+      "browserName": "[redacted:6 chars]",
+      "tabId": "[redacted:9 chars]",
+      "url": "[redacted:58 chars]",
+      "loggedIn": false
+    },
+    "open": {
+      "url": "[redacted:58 chars]",
+      "conversationId": "[redacted:36 chars]",
+      "title": "[redacted:8 chars]"
+    },
+    "ask": {
+      "prompt": "[redacted:894 chars]",
+      "complete": false,
+      "responseText": "[redacted:74 chars]",
+      "conversationId": "[redacted:36 chars]",
+      "title": "[redacted:8 chars]"
+    }
+  }
+}

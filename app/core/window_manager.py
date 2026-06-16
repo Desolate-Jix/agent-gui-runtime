@@ -79,10 +79,21 @@ class WindowManager:
             return self._bound_window
 
         try:
+            if not self._is_bound_handle_valid(self._bound_window.handle):
+                logger.warning("Bound window handle is no longer valid: {}", self._bound_window.handle)
+                self._bound_window = None
+                return None
+
             wrapper = HwndWrapper(self._bound_window.handle)  # type: ignore[operator]
+            if not self._is_candidate_window(wrapper):
+                logger.warning("Bound window is no longer a visible top-level titled window: {}", self._bound_window.handle)
+                self._bound_window = None
+                return None
+
             self._bound_window = self._build_bound_window(wrapper)
         except Exception as exc:  # pragma: no cover - defensive refresh path
-            logger.warning("Failed to refresh bound window state: {}", exc)
+            logger.warning("Failed to refresh bound window state; clearing stale binding: {}", exc)
+            self._bound_window = None
 
         return self._bound_window
 
@@ -100,6 +111,57 @@ class WindowManager:
         refreshed = self.get_bound_window()
         if refreshed is None:
             raise ValueError("Bound window disappeared after focus attempt")
+        return refreshed
+
+    def resize_bound_window(
+        self,
+        *,
+        width: int,
+        height: int,
+        left: Optional[int] = None,
+        top: Optional[int] = None,
+        focus: bool = True,
+    ) -> BoundWindow:
+        """Resize the currently bound window and refresh its bound-window snapshot."""
+        self._ensure_windows_backend()
+        if width <= 0 or height <= 0:
+            raise ValueError("width and height must be positive")
+
+        bound = self.get_bound_window()
+        if bound is None:
+            raise ValueError("No bound window available to resize")
+
+        x = int(bound.rect.left if left is None else left)
+        y = int(bound.rect.top if top is None else top)
+        logger.info(
+            "Resizing bound window: handle={}, title={}, x={}, y={}, width={}, height={}",
+            bound.handle,
+            bound.title,
+            x,
+            y,
+            width,
+            height,
+        )
+        try:
+            win32gui.ShowWindow(bound.handle, win32con.SW_RESTORE)  # type: ignore[union-attr]
+            win32gui.SetWindowPos(  # type: ignore[union-attr]
+                bound.handle,
+                win32con.HWND_NOTOPMOST,  # type: ignore[union-attr]
+                x,
+                y,
+                int(width),
+                int(height),
+                win32con.SWP_SHOWWINDOW,  # type: ignore[union-attr]
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Failed to resize bound window: {exc}") from exc
+
+        time.sleep(0.2)
+        if focus:
+            return self.focus_bound_window()
+        refreshed = self.get_bound_window()
+        if refreshed is None:
+            raise ValueError("Bound window disappeared after resize")
         return refreshed
 
     def list_visible_windows(self) -> list[dict[str, Optional[int | str]]]:
@@ -186,9 +248,6 @@ class WindowManager:
         if not WINDOWS_BACKEND_AVAILABLE:
             return False
 
-    def _normalize_match_text(self, value: str) -> str:
-        return "".join(char for char in value.strip().lower() if unicodedata.category(char) != "Cf")
-
         try:
             handle = wrapper.handle
             if not win32gui.IsWindowVisible(handle):  # type: ignore[union-attr]
@@ -200,6 +259,25 @@ class WindowManager:
             return True
         except Exception:
             return False
+
+    def _is_bound_handle_valid(self, handle: int) -> bool:
+        """Return whether the bound handle still points to a visible top-level window."""
+        if not WINDOWS_BACKEND_AVAILABLE:
+            return False
+
+        try:
+            if hasattr(win32gui, "IsWindow") and not win32gui.IsWindow(handle):  # type: ignore[union-attr]
+                return False
+            if not win32gui.IsWindowVisible(handle):  # type: ignore[union-attr]
+                return False
+            if win32gui.GetParent(handle) != 0:  # type: ignore[union-attr]
+                return False
+            return True
+        except Exception:
+            return False
+
+    def _normalize_match_text(self, value: str) -> str:
+        return "".join(char for char in value.strip().lower() if unicodedata.category(char) != "Cf")
 
     def _build_bound_window(self, wrapper: HwndWrapper) -> BoundWindow:
         """Build a serializable bound-window snapshot from a wrapper."""

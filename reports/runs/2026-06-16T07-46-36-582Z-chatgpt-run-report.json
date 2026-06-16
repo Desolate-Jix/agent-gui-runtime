@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-06-16T07:46:36.582Z",
+  "includeContent": false,
+  "summary": {
+    "ok": true,
+    "status": "ok",
+    "warnings": [
+      "[redacted:133 chars]"
+    ],
+    "context": {
+      "timestamp": "2026-06-16T07:46:36.581Z",
+      "url": "[redacted:58 chars]",
+      "title": "[redacted:8 chars]",
+      "turnCount": 5,
+      "assistantTurnCount": 3,
+      "conversationId": "[redacted:36 chars]"
+    }
+  },
+  "steps": [
+    {
+      "id": "bootstrap",
+      "command": "session.bootstrap",
+      "status": "ok",
+      "ok": true,
+      "startedAt": "2026-06-16T07:46:14.291Z",
+      "endedAt": "2026-06-16T07:46:14.610Z",
+      "warnings": [],
+      "dataPreview": {
+        "browserName": "[redacted:6 chars]",
+        "tabId": "[redacted:9 chars]",
+        "url": "[redacted:58 chars]",
+        "loggedIn": false
+      }
+    },
+    {
+      "id": "open",
+      "command": "threads.open",
+      "status": "ok",
+      "ok": true,
+      "startedAt": "2026-06-16T07:46:14.610Z",
+      "endedAt": "2026-06-16T07:46:14.928Z",
+      "warnings": [],
+      "dataPreview": {
+        "url": "[redacted:58 chars]",
+        "conversationId": "[redacted:36 chars]",
+        "title": "[redacted:8 chars]"
+      }
+    },
+    {
+      "id": "ask",
+      "command": "messages.ask",
+      "status": "ok",
+      "ok": true,
+      "startedAt": "2026-06-16T07:46:14.928Z",
+      "endedAt": "2026-06-16T07:46:36.581Z",
+      "warnings": [
+        "Markdown was reconstructed from visible DOM semantics; use response.copy for clipboard Markdown when exact copy fidelity is required."
+      ],
+      "dataPreview": {
+        "prompt": "[redacted:65 chars]",
+        "complete": true,
+        "responseText": "[redacted:2 chars]",
+        "conversationId": "[redacted:36 chars]",
+        "title": "[redacted:8 chars]"
+      }
+    }
+  ],
+  "data": {
+    "prompt": "[redacted:65 chars]",
+    "complete": true,
+    "responseText": "[redacted:2 chars]",
+    "conversationId": "[redacted:36 chars]",
+    "title": "[redacted:8 chars]"
+  }
+}

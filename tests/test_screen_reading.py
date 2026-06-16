@@ -119,3 +119,6 @@ def test_screen_reading_exposes_ui_layer_with_reserved_icon_and_learning_slots()
     assert back["provider_matches"]["uia"]["control_id"] == "uia_1_back"
     assert any(item["code"] == "visual_only_ui_requires_grounding" for item in result["uncertainties"])
     assert result["source_layers"]["windows_uia"]["status"] == "ok"
+    assert result["source_layers"]["windows_uia"]["controls"][0]["name"] == "Back"
+    assert result["screen_inventory"]["contract_version"] == "screen_inventory_v1"
+    assert result["screen_inventory"]["summary"]["available_action_count"] >= 1

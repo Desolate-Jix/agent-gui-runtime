@@ -1,0 +1,81 @@
+{
+  "contract_version": "screen_inventory_benchmark_cases_v1",
+  "cases": [
+    {
+      "case_id": "seek_job_results_inventory_fixture",
+      "screen_reading_path": "tests/fixtures/screen_inventory_seek_screen_reading.json",
+      "goal": "click Apply on the first job result",
+      "gt": [
+        {
+          "id": "gt_search_jobs",
+          "kind": "action_input",
+          "label": "Search jobs",
+          "clickable": true,
+          "bbox": [320, 150, 640, 188]
+        },
+        {
+          "id": "gt_pay_filter",
+          "kind": "action_button",
+          "label": "Pay",
+          "clickable": true,
+          "bbox": [28, 232, 124, 280]
+        },
+        {
+          "id": "gt_date_filter",
+          "kind": "action_button",
+          "label": "Date",
+          "clickable": true,
+          "bbox": [508, 232, 620, 280]
+        },
+        {
+          "id": "gt_job_card_1",
+          "kind": "card_container",
+          "label": "Senior Product Designer",
+          "clickable": true,
+          "bbox": [340, 360, 880, 530]
+        },
+        {
+          "id": "gt_save",
+          "kind": "action_button",
+          "label": "Save",
+          "clickable": true,
+          "bbox": [660, 468, 742, 502],
+          "parent_card_id": "gt_job_card_1"
+        },
+        {
+          "id": "gt_apply",
+          "kind": "action_button",
+          "label": "Apply",
+          "clickable": true,
+          "bbox": [760, 468, 844, 502],
+          "parent_card_id": "gt_job_card_1"
+        },
+        {
+          "id": "gt_location",
+          "kind": "metadata_text",
+          "label": "Auckland",
+          "clickable": false,
+          "bbox": [380, 420, 470, 440],
+          "parent_card_id": "gt_job_card_1"
+        },
+        {
+          "id": "gt_salary",
+          "kind": "metadata_text",
+          "label": "$120k - $140k",
+          "clickable": false,
+          "bbox": [380, 450, 520, 470],
+          "parent_card_id": "gt_job_card_1"
+        },
+        {
+          "id": "gt_posted",
+          "kind": "metadata_text",
+          "label": "Posted 3 days ago",
+          "clickable": false,
+          "bbox": [380, 478, 540, 498],
+          "parent_card_id": "gt_job_card_1"
+        }
+      ],
+      "allowed_extra_actions": []
+    }
+  ]
+}

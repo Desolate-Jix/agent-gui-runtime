@@ -1,0 +1,1103 @@
+{
+  "contract_version": "understanding_model_benchmark_v1",
+  "cases_path": "configs/understanding_model_benchmark_cases.json",
+  "profiles": [
+    "qwen3_vl_8b_q4_k_m",
+    "qwen3_vl_4b_q4_k_m",
+    "minicpm_v_4_6_transformers"
+  ],
+  "summary": [
+    {
+      "profile_id": "qwen3_vl_8b_q4_k_m",
+      "success_count": 2,
+      "case_count": 2,
+      "avg_case_ms": 4594.104,
+      "avg_recall": 0.7,
+      "load_ms": 9807.968
+    },
+    {
+      "profile_id": "qwen3_vl_4b_q4_k_m",
+      "success_count": 2,
+      "case_count": 2,
+      "avg_case_ms": 3090.104,
+      "avg_recall": 0.7,
+      "load_ms": 5777.889
+    },
+    {
+      "profile_id": "minicpm_v_4_6_transformers",
+      "success_count": 2,
+      "case_count": 2,
+      "avg_case_ms": 9074.644,
+      "avg_recall": 0.8,
+      "load_ms": 8051.948
+    }
+  ],
+  "results": [
+    {
+      "profile_id": "qwen3_vl_8b_q4_k_m",
+      "label": "Qwen3-VL 8B Q4_K_M",
+      "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+      "endpoint": "http://127.0.0.1:1240/v1/chat/completions",
+      "ensure_model_server": {
+        "stage": "observe",
+        "profile": {
+          "profile_id": "qwen3_vl_8b_q4_k_m",
+          "label": "Qwen3-VL 8B Q4_K_M",
+          "role": [
+            "understanding"
+          ],
+          "provider_mode": "local_understanding",
+          "input_format": "openai_compatible_vision",
+          "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+          "model_path": "models/qwen3-vl-8b-instruct-q4_k_m-gguf/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+          "mmproj_path": "models/qwen3-vl-8b-instruct-q4_k_m-gguf/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf",
+          "server_path": "tools/llama.cpp-b8892-cuda13/llama-server.exe",
+          "endpoint": "http://127.0.0.1:1240/v1/chat/completions",
+          "start_script": "scripts/model_servers/start_llama_vision_server.ps1",
+          "stop_script": "scripts/model_servers/stop_local_vision_server.ps1",
+          "pid_file": "logs/qwen3-vl-8b-q4_k_m-server.pid",
+          "port": 1240,
+          "context_size": 8192,
+          "gpu_layers": 99,
+          "image_min_tokens": 1024,
+          "supports_ocr_anchors": true,
+          "launchable": true,
+          "best_for": "Faster whole-screen UI understanding before precise grounding.",
+          "limitations": "Use as a planning and screen-understanding model; use VISTA for final precise point localization."
+        },
+        "before": {
+          "status": "unreachable",
+          "base_url": "http://127.0.0.1:1240/v1",
+          "error": "<urlopen error timed out>"
+        },
+        "started": true,
+        "start": {
+          "pid": 31508,
+          "command": [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            "D:\\agent-gui-runtime\\scripts\\model_servers\\start_llama_vision_server.ps1",
+            "-ModelPath",
+            "D:\\agent-gui-runtime\\models\\qwen3-vl-8b-instruct-q4_k_m-gguf\\Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            "-MmprojPath",
+            "D:\\agent-gui-runtime\\models\\qwen3-vl-8b-instruct-q4_k_m-gguf\\mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf",
+            "-ServerPath",
+            "D:\\agent-gui-runtime\\tools\\llama.cpp-b8892-cuda13\\llama-server.exe",
+            "-ModelName",
+            "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            "-Port",
+            "1240",
+            "-ContextSize",
+            "8192",
+            "-GpuLayers",
+            "99",
+            "-ImageMinTokens",
+            "1024"
+          ],
+          "log_path": "D:\\agent-gui-runtime\\logs\\local-vision-server-qwen3_vl_8b_q4_k_m-20260616-192450.log",
+          "pid_path": "D:\\agent-gui-runtime\\logs\\qwen3-vl-8b-q4_k_m-server.pid"
+        },
+        "after": {
+          "status": "running",
+          "base_url": "http://127.0.0.1:1240/v1",
+          "response": {
+            "models": [
+              {
+                "name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                "model": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                "modified_at": "",
+                "size": "",
+                "digest": "",
+                "type": "model",
+                "description": "",
+                "tags": [
+                  ""
+                ],
+                "capabilities": [
+                  "completion",
+                  "multimodal"
+                ],
+                "parameters": "",
+                "details": {
+                  "parent_model": "",
+                  "format": "gguf",
+                  "family": "",
+                  "families": [
+                    ""
+                  ],
+                  "parameter_size": "",
+                  "quantization_level": ""
+                }
+              }
+            ],
+            "object": "list",
+            "data": [
+              {
+                "id": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                "aliases": [],
+                "tags": [],
+                "object": "model",
+                "created": 1781594698,
+                "owned_by": "llamacpp",
+                "meta": {
+                  "vocab_type": 2,
+                  "n_vocab": 151936,
+                  "n_ctx_train": 262144,
+                  "n_embd": 4096,
+                  "n_params": 8190735360,
+                  "size": 5021827072
+                }
+              }
+            ]
+          },
+          "health": null,
+          "model_id": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+        }
+      },
+      "server_status": {
+        "status": "running",
+        "base_url": "http://127.0.0.1:1240/v1",
+        "response": {
+          "models": [
+            {
+              "name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+              "model": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+              "modified_at": "",
+              "size": "",
+              "digest": "",
+              "type": "model",
+              "description": "",
+              "tags": [
+                ""
+              ],
+              "capabilities": [
+                "completion",
+                "multimodal"
+              ],
+              "parameters": "",
+              "details": {
+                "parent_model": "",
+                "format": "gguf",
+                "family": "",
+                "families": [
+                  ""
+                ],
+                "parameter_size": "",
+                "quantization_level": ""
+              }
+            }
+          ],
+          "object": "list",
+          "data": [
+            {
+              "id": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+              "aliases": [],
+              "tags": [],
+              "object": "model",
+              "created": 1781594698,
+              "owned_by": "llamacpp",
+              "meta": {
+                "vocab_type": 2,
+                "n_vocab": 151936,
+                "n_ctx_train": 262144,
+                "n_embd": 4096,
+                "n_params": 8190735360,
+                "size": 5021827072
+              }
+            }
+          ]
+        },
+        "health": null,
+        "model_id": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+      },
+      "load_ms": 9807.968,
+      "cases": [
+        {
+          "case_id": "seek_resume_screening_fixture",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\seek-resume-screening-fixture-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-183033-787978.png",
+          "elapsed_ms": 4474.485,
+          "success": true,
+          "error": null,
+          "json_ok": true,
+          "parse_error": null,
+          "score": {
+            "expected_count": 5,
+            "matched_count": 5,
+            "matched_terms": [
+              {
+                "matched": "Resume Screening",
+                "variants": [
+                  "Resume Screening"
+                ]
+              },
+              {
+                "matched": "Avery Chen",
+                "variants": [
+                  "Avery Chen"
+                ]
+              },
+              {
+                "matched": "Mika Patel",
+                "variants": [
+                  "Mika Patel"
+                ]
+              },
+              {
+                "matched": "Shortlist",
+                "variants": [
+                  "Shortlist"
+                ]
+              },
+              {
+                "matched": "Open Next Candidate",
+                "variants": [
+                  "Open Next Candidate",
+                  "Next Candidate"
+                ]
+              }
+            ],
+            "missing_terms": [],
+            "recall": 1.0
+          },
+          "raw_text_preview": "{ \"screen_summary\": \"Resume screening interface for selecting candidates\", \"actions\": [ { \"label\": \"Shortlisted\", \"role\": \"button\", \"reason\": \"green button indicating an actionable decision for the candidate\" }, { \"label\": \"Put on Hold\", \"role\": \"button\", \"reason\": \"button for changing candidate status\" }, { \"label\": \"Reject\", \"role\": \"button\", \"reason\": \"button for rejecting the candidate\" }, { \"label\": \"Open Next Candidate\", \"role\": \"button\", \"reason\": \"button to proceed to the next candidate in the queue\" } ], \"visible_text\": [ \"SEEK Talent Search\", \"Resume screening\", \"Step 2: open the next candidate\", \"Avery Chen\", \"Shortlisted\", \"Mika Patel\", \"Queued\", \"Open Next Candidate\" ] }",
+          "parsed": {
+            "screen_summary": "Resume screening interface for selecting candidates",
+            "actions": [
+              {
+                "label": "Shortlisted",
+                "role": "button",
+                "reason": "green button indicating an actionable decision for the candidate"
+              },
+              {
+                "label": "Put on Hold",
+                "role": "button",
+                "reason": "button for changing candidate status"
+              },
+              {
+                "label": "Reject",
+                "role": "button",
+                "reason": "button for rejecting the candidate"
+              },
+              {
+                "label": "Open Next Candidate",
+                "role": "button",
+                "reason": "button to proceed to the next candidate in the queue"
+              }
+            ],
+            "visible_text": [
+              "SEEK Talent Search",
+              "Resume screening",
+              "Step 2: open the next candidate",
+              "Avery Chen",
+              "Shortlisted",
+              "Mika Patel",
+              "Queued",
+              "Open Next Candidate"
+            ]
+          }
+        },
+        {
+          "case_id": "seek_jobs",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-191231-008073.png",
+          "elapsed_ms": 4713.723,
+          "success": true,
+          "error": null,
+          "json_ok": true,
+          "parse_error": null,
+          "score": {
+            "expected_count": 5,
+            "matched_count": 2,
+            "matched_terms": [
+              {
+                "matched": "SEEK",
+                "variants": [
+                  "SEEK"
+                ]
+              },
+              {
+                "matched": "Software Engineer",
+                "variants": [
+                  "Software Engineer",
+                  "Software Engineers"
+                ]
+              }
+            ],
+            "missing_terms": [
+              [
+                "Pay"
+              ],
+              [
+                "Date"
+              ],
+              [
+                "listed",
+                "Posted",
+                "days"
+              ]
+            ],
+            "recall": 0.4
+          },
+          "raw_text_preview": "{ \"screen_summary\": \"Job search results page for software engineer positions in Auckland on SEEK\", \"actions\": [ { \"label\": \"SEEK\", \"role\": \"button\", \"reason\": \"pink button with clear call-to-action to initiate search\" }, { \"label\": \"Save this search\", \"role\": \"button\", \"reason\": \"blue button with heart icon, clearly labeled for saving search criteria\" }, { \"label\": \"Applications Software Engineer\", \"role\": \"card\", \"reason\": \"job listing card with visible job title and company, clickable to view details\" } ], \"visible_text\": [ \"Software Engineer Jobs in All Auckland\", \"seek\", \"Job search\", \"software engineer\", \"All Auckland\", \"SEEK\", \"325 jobs\", \"New to you 99+\", \"Strong applicant jobs\", \"Applications Software Engineer\", \"Temperzone\", \"Manukau, Auckland\", \"Onsite cafeteria + parking + security.\", \"Opportunities for continuous professional development\", \"Comprehensive Health Insurance Cover\", \"Build and support modern applications that connect systems, streamline processes, and power by\"",
+          "parsed": {
+            "screen_summary": "Job search results page for software engineer positions in Auckland on SEEK",
+            "actions": [
+              {
+                "label": "SEEK",
+                "role": "button",
+                "reason": "pink button with clear call-to-action to initiate search"
+              },
+              {
+                "label": "Save this search",
+                "role": "button",
+                "reason": "blue button with heart icon, clearly labeled for saving search criteria"
+              },
+              {
+                "label": "Applications Software Engineer",
+                "role": "card",
+                "reason": "job listing card with visible job title and company, clickable to view details"
+              }
+            ],
+            "visible_text": [
+              "Software Engineer Jobs in All Auckland",
+              "seek",
+              "Job search",
+              "software engineer",
+              "All Auckland",
+              "SEEK",
+              "325 jobs",
+              "New to you 99+",
+              "Strong applicant jobs",
+              "Applications Software Engineer",
+              "Temperzone",
+              "Manukau, Auckland",
+              "Onsite cafeteria + parking + security.",
+              "Opportunities for continuous professional development",
+              "Comprehensive Health Insurance Cover",
+              "Build and support modern applications that connect systems, streamline processes, and power by",
+              "Save this search",
+              "Featured"
+            ]
+          }
+        }
+      ],
+      "stop_model_server": {
+        "profile": {
+          "profile_id": "qwen3_vl_8b_q4_k_m",
+          "label": "Qwen3-VL 8B Q4_K_M",
+          "role": [
+            "understanding"
+          ],
+          "provider_mode": "local_understanding",
+          "input_format": "openai_compatible_vision",
+          "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+          "model_path": "models/qwen3-vl-8b-instruct-q4_k_m-gguf/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+          "mmproj_path": "models/qwen3-vl-8b-instruct-q4_k_m-gguf/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf",
+          "server_path": "tools/llama.cpp-b8892-cuda13/llama-server.exe",
+          "endpoint": "http://127.0.0.1:1240/v1/chat/completions",
+          "start_script": "scripts/model_servers/start_llama_vision_server.ps1",
+          "stop_script": "scripts/model_servers/stop_local_vision_server.ps1",
+          "pid_file": "logs/qwen3-vl-8b-q4_k_m-server.pid",
+          "port": 1240,
+          "context_size": 8192,
+          "gpu_layers": 99,
+          "image_min_tokens": 1024,
+          "supports_ocr_anchors": true,
+          "launchable": true,
+          "best_for": "Faster whole-screen UI understanding before precise grounding.",
+          "limitations": "Use as a planning and screen-understanding model; use VISTA for final precise point localization."
+        },
+        "command": [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "D:\\agent-gui-runtime\\scripts\\model_servers\\stop_local_vision_server.ps1",
+          "-Port",
+          "1240",
+          "-PidFile",
+          "D:\\agent-gui-runtime\\logs\\qwen3-vl-8b-q4_k_m-server.pid"
+        ],
+        "returncode": 0,
+        "stdout": "Stopped local vision server process 31508.\nStopped process 32740 listening on port 1240.\n",
+        "stderr": "",
+        "stopped": true,
+        "after": {
+          "status": "unreachable",
+          "base_url": "http://127.0.0.1:1240/v1",
+          "error": "[WinError 10054] 远程主机强迫关闭了一个现有的连接。"
+        }
+      }
+    },
+    {
+      "profile_id": "qwen3_vl_4b_q4_k_m",
+      "label": "Qwen3-VL 4B Q4_K_M",
+      "model_name": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+      "endpoint": "http://127.0.0.1:1241/v1/chat/completions",
+      "ensure_model_server": {
+        "stage": "observe",
+        "profile": {
+          "profile_id": "qwen3_vl_4b_q4_k_m",
+          "label": "Qwen3-VL 4B Q4_K_M",
+          "role": [
+            "understanding",
+            "fast_understanding"
+          ],
+          "provider_mode": "local_understanding",
+          "input_format": "openai_compatible_vision",
+          "model_name": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+          "model_path": "models/qwen3-vl-4b-instruct-q4_k_m-gguf/Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+          "mmproj_path": "models/qwen3-vl-4b-instruct-q4_k_m-gguf/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf",
+          "server_path": "tools/llama.cpp-b8892-cuda13/llama-server.exe",
+          "endpoint": "http://127.0.0.1:1241/v1/chat/completions",
+          "start_script": "scripts/model_servers/start_llama_vision_server.ps1",
+          "stop_script": "scripts/model_servers/stop_local_vision_server.ps1",
+          "pid_file": "logs/qwen3-vl-4b-q4_k_m-server.pid",
+          "port": 1241,
+          "context_size": 4096,
+          "gpu_layers": 99,
+          "image_min_tokens": 768,
+          "supports_ocr_anchors": true,
+          "launchable": true,
+          "best_for": "Fast screenshot understanding and available-action summaries with lower latency than the 8B profile.",
+          "limitations": "Benchmark before making it the default; not a point-grounding replacement for VISTA."
+        },
+        "before": {
+          "status": "unreachable",
+          "base_url": "http://127.0.0.1:1241/v1",
+          "error": "<urlopen error timed out>"
+        },
+        "started": true,
+        "start": {
+          "pid": 31064,
+          "command": [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            "D:\\agent-gui-runtime\\scripts\\model_servers\\start_llama_vision_server.ps1",
+            "-ModelPath",
+            "D:\\agent-gui-runtime\\models\\qwen3-vl-4b-instruct-q4_k_m-gguf\\Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+            "-MmprojPath",
+            "D:\\agent-gui-runtime\\models\\qwen3-vl-4b-instruct-q4_k_m-gguf\\mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf",
+            "-ServerPath",
+            "D:\\agent-gui-runtime\\tools\\llama.cpp-b8892-cuda13\\llama-server.exe",
+            "-ModelName",
+            "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+            "-Port",
+            "1241",
+            "-ContextSize",
+            "4096",
+            "-GpuLayers",
+            "99",
+            "-ImageMinTokens",
+            "768"
+          ],
+          "log_path": "D:\\agent-gui-runtime\\logs\\local-vision-server-qwen3_vl_4b_q4_k_m-20260616-192509.log",
+          "pid_path": "D:\\agent-gui-runtime\\logs\\qwen3-vl-4b-q4_k_m-server.pid"
+        },
+        "after": {
+          "status": "running",
+          "base_url": "http://127.0.0.1:1241/v1",
+          "response": {
+            "models": [
+              {
+                "name": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+                "model": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+                "modified_at": "",
+                "size": "",
+                "digest": "",
+                "type": "model",
+                "description": "",
+                "tags": [
+                  ""
+                ],
+                "capabilities": [
+                  "completion",
+                  "multimodal"
+                ],
+                "parameters": "",
+                "details": {
+                  "parent_model": "",
+                  "format": "gguf",
+                  "family": "",
+                  "families": [
+                    ""
+                  ],
+                  "parameter_size": "",
+                  "quantization_level": ""
+                }
+              }
+            ],
+            "object": "list",
+            "data": [
+              {
+                "id": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+                "aliases": [],
+                "tags": [],
+                "object": "model",
+                "created": 1781594714,
+                "owned_by": "llamacpp",
+                "meta": {
+                  "vocab_type": 2,
+                  "n_vocab": 151936,
+                  "n_ctx_train": 262144,
+                  "n_embd": 2560,
+                  "n_params": 4022468096,
+                  "size": 2491323904
+                }
+              }
+            ]
+          },
+          "health": null,
+          "model_id": "Qwen3VL-4B-Instruct-Q4_K_M.gguf"
+        }
+      },
+      "server_status": {
+        "status": "running",
+        "base_url": "http://127.0.0.1:1241/v1",
+        "response": {
+          "models": [
+            {
+              "name": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+              "model": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+              "modified_at": "",
+              "size": "",
+              "digest": "",
+              "type": "model",
+              "description": "",
+              "tags": [
+                ""
+              ],
+              "capabilities": [
+                "completion",
+                "multimodal"
+              ],
+              "parameters": "",
+              "details": {
+                "parent_model": "",
+                "format": "gguf",
+                "family": "",
+                "families": [
+                  ""
+                ],
+                "parameter_size": "",
+                "quantization_level": ""
+              }
+            }
+          ],
+          "object": "list",
+          "data": [
+            {
+              "id": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+              "aliases": [],
+              "tags": [],
+              "object": "model",
+              "created": 1781594714,
+              "owned_by": "llamacpp",
+              "meta": {
+                "vocab_type": 2,
+                "n_vocab": 151936,
+                "n_ctx_train": 262144,
+                "n_embd": 2560,
+                "n_params": 4022468096,
+                "size": 2491323904
+              }
+            }
+          ]
+        },
+        "health": null,
+        "model_id": "Qwen3VL-4B-Instruct-Q4_K_M.gguf"
+      },
+      "load_ms": 5777.889,
+      "cases": [
+        {
+          "case_id": "seek_resume_screening_fixture",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\seek-resume-screening-fixture-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-183033-787978.png",
+          "elapsed_ms": 3597.089,
+          "success": true,
+          "error": null,
+          "json_ok": true,
+          "parse_error": null,
+          "score": {
+            "expected_count": 5,
+            "matched_count": 5,
+            "matched_terms": [
+              {
+                "matched": "Resume Screening",
+                "variants": [
+                  "Resume Screening"
+                ]
+              },
+              {
+                "matched": "Avery Chen",
+                "variants": [
+                  "Avery Chen"
+                ]
+              },
+              {
+                "matched": "Mika Patel",
+                "variants": [
+                  "Mika Patel"
+                ]
+              },
+              {
+                "matched": "Shortlist",
+                "variants": [
+                  "Shortlist"
+                ]
+              },
+              {
+                "matched": "Open Next Candidate",
+                "variants": [
+                  "Open Next Candidate",
+                  "Next Candidate"
+                ]
+              }
+            ],
+            "missing_terms": [],
+            "recall": 1.0
+          },
+          "raw_text_preview": "{ \"screen_summary\": \"Resume screening interface with candidate cards and action buttons\", \"actions\": [ { \"label\": \"Shortlisted\", \"role\": \"button\", \"reason\": \"Green button indicating candidate has been selected for next step\" }, { \"label\": \"Put on Hold\", \"role\": \"button\", \"reason\": \"Action button to pause candidate evaluation\" }, { \"label\": \"Reject\", \"role\": \"button\", \"reason\": \"Action button to decline candidate\" }, { \"label\": \"Open Next Candidate\", \"role\": \"button\", \"reason\": \"Button to proceed to the next candidate in queue\" } ], \"visible_text\": [ \"SEEK Talent Search\", \"Screening filters\", \"Location: Auckland\", \"Experience: 3+ years\", \"Visa: Work rights\", \"Availability: 2 weeks\", \"Resume screening\", \"frontend react engineer\", \"Avery Chen\", \"Frontend Engineer · React · TypeScript · Accessibility\", \"Shortlisted\", \"React\", \"TypeScript\", \"Design systems\", \"5 years\", \"Mika Patel\", \"Full Stack Engineer · Node.js · AWS · Testing\", \"Queued\", \"Screening notes\", \"Use Shortlist for a candidate ",
+          "parsed": {
+            "screen_summary": "Resume screening interface with candidate cards and action buttons",
+            "actions": [
+              {
+                "label": "Shortlisted",
+                "role": "button",
+                "reason": "Green button indicating candidate has been selected for next step"
+              },
+              {
+                "label": "Put on Hold",
+                "role": "button",
+                "reason": "Action button to pause candidate evaluation"
+              },
+              {
+                "label": "Reject",
+                "role": "button",
+                "reason": "Action button to decline candidate"
+              },
+              {
+                "label": "Open Next Candidate",
+                "role": "button",
+                "reason": "Button to proceed to the next candidate in queue"
+              }
+            ],
+            "visible_text": [
+              "SEEK Talent Search",
+              "Screening filters",
+              "Location: Auckland",
+              "Experience: 3+ years",
+              "Visa: Work rights",
+              "Availability: 2 weeks",
+              "Resume screening",
+              "frontend react engineer",
+              "Avery Chen",
+              "Frontend Engineer · React · TypeScript · Accessibility",
+              "Shortlisted",
+              "React",
+              "TypeScript",
+              "Design systems",
+              "5 years",
+              "Mika Patel",
+              "Full Stack Engineer · Node.js · AWS · Testing",
+              "Queued",
+              "Screening notes",
+              "Use Shortlist for a candidate who matches the role requirements.",
+              "Open Next Candidate after the current review decision is recorded.",
+              "Avery Chen was shortlisted for recruiter review."
+            ]
+          }
+        },
+        {
+          "case_id": "seek_jobs",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-191231-008073.png",
+          "elapsed_ms": 2583.12,
+          "success": true,
+          "error": null,
+          "json_ok": true,
+          "parse_error": null,
+          "score": {
+            "expected_count": 5,
+            "matched_count": 2,
+            "matched_terms": [
+              {
+                "matched": "SEEK",
+                "variants": [
+                  "SEEK"
+                ]
+              },
+              {
+                "matched": "Software Engineer",
+                "variants": [
+                  "Software Engineer",
+                  "Software Engineers"
+                ]
+              }
+            ],
+            "missing_terms": [
+              [
+                "Pay"
+              ],
+              [
+                "Date"
+              ],
+              [
+                "listed",
+                "Posted",
+                "days"
+              ]
+            ],
+            "recall": 0.4
+          },
+          "raw_text_preview": "{ \"screen_summary\": \"Job search results page for software engineer roles in Auckland\", \"actions\": [ { \"label\": \"Save this search\", \"role\": \"button\", \"reason\": \"Visible save button for the job search\" }, { \"label\": \"Applications Software Engineer\", \"role\": \"card\", \"reason\": \"Job listing card with company and location details\" }, { \"label\": \"SEEK\", \"role\": \"button\", \"reason\": \"Search button to initiate job search\" }, { \"label\": \"All Auckland\", \"role\": \"input\", \"reason\": \"Location filter input field\" }, { \"label\": \"software engineer\", \"role\": \"input\", \"reason\": \"Search term input field\" } ], \"visible_text\": [ \"Software Engineer Jobs in All Auckland\", \"SEEK\", \"Applications Software Engineer\", \"Temperzone\", \"Manukau, Auckland\", \"Save this search\", \"325 jobs\", \"New to you\", \"Strong applicant jobs\", \"Select a job\", \"Display details here\" ] }",
+          "parsed": {
+            "screen_summary": "Job search results page for software engineer roles in Auckland",
+            "actions": [
+              {
+                "label": "Save this search",
+                "role": "button",
+                "reason": "Visible save button for the job search"
+              },
+              {
+                "label": "Applications Software Engineer",
+                "role": "card",
+                "reason": "Job listing card with company and location details"
+              },
+              {
+                "label": "SEEK",
+                "role": "button",
+                "reason": "Search button to initiate job search"
+              },
+              {
+                "label": "All Auckland",
+                "role": "input",
+                "reason": "Location filter input field"
+              },
+              {
+                "label": "software engineer",
+                "role": "input",
+                "reason": "Search term input field"
+              }
+            ],
+            "visible_text": [
+              "Software Engineer Jobs in All Auckland",
+              "SEEK",
+              "Applications Software Engineer",
+              "Temperzone",
+              "Manukau, Auckland",
+              "Save this search",
+              "325 jobs",
+              "New to you",
+              "Strong applicant jobs",
+              "Select a job",
+              "Display details here"
+            ]
+          }
+        }
+      ],
+      "stop_model_server": {
+        "profile": {
+          "profile_id": "qwen3_vl_4b_q4_k_m",
+          "label": "Qwen3-VL 4B Q4_K_M",
+          "role": [
+            "understanding",
+            "fast_understanding"
+          ],
+          "provider_mode": "local_understanding",
+          "input_format": "openai_compatible_vision",
+          "model_name": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+          "model_path": "models/qwen3-vl-4b-instruct-q4_k_m-gguf/Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+          "mmproj_path": "models/qwen3-vl-4b-instruct-q4_k_m-gguf/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf",
+          "server_path": "tools/llama.cpp-b8892-cuda13/llama-server.exe",
+          "endpoint": "http://127.0.0.1:1241/v1/chat/completions",
+          "start_script": "scripts/model_servers/start_llama_vision_server.ps1",
+          "stop_script": "scripts/model_servers/stop_local_vision_server.ps1",
+          "pid_file": "logs/qwen3-vl-4b-q4_k_m-server.pid",
+          "port": 1241,
+          "context_size": 4096,
+          "gpu_layers": 99,
+          "image_min_tokens": 768,
+          "supports_ocr_anchors": true,
+          "launchable": true,
+          "best_for": "Fast screenshot understanding and available-action summaries with lower latency than the 8B profile.",
+          "limitations": "Benchmark before making it the default; not a point-grounding replacement for VISTA."
+        },
+        "command": [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "D:\\agent-gui-runtime\\scripts\\model_servers\\stop_local_vision_server.ps1",
+          "-Port",
+          "1241",
+          "-PidFile",
+          "D:\\agent-gui-runtime\\logs\\qwen3-vl-4b-q4_k_m-server.pid"
+        ],
+        "returncode": 0,
+        "stdout": "Stopped local vision server process 31064.\nStopped process 30288 listening on port 1241.\n",
+        "stderr": "",
+        "stopped": true,
+        "after": {
+          "status": "unreachable",
+          "base_url": "http://127.0.0.1:1241/v1",
+          "error": "[WinError 10054] 远程主机强迫关闭了一个现有的连接。"
+        }
+      }
+    },
+    {
+      "profile_id": "minicpm_v_4_6_transformers",
+      "label": "MiniCPM-V 4.6 Transformers",
+      "model_name": "openbmb/MiniCPM-V-4.6",
+      "endpoint": null,
+      "ensure_model_server": {
+        "status": "loaded_direct_transformers",
+        "started": false
+      },
+      "server_status": {
+        "status": "direct_transformers"
+      },
+      "load_ms": 8051.948,
+      "cases": [
+        {
+          "case_id": "seek_resume_screening_fixture",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\seek-resume-screening-fixture-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-183033-787978.png",
+          "elapsed_ms": 7710.685,
+          "success": true,
+          "error": null,
+          "json_ok": true,
+          "parse_error": null,
+          "score": {
+            "expected_count": 5,
+            "matched_count": 5,
+            "matched_terms": [
+              {
+                "matched": "Resume Screening",
+                "variants": [
+                  "Resume Screening"
+                ]
+              },
+              {
+                "matched": "Avery Chen",
+                "variants": [
+                  "Avery Chen"
+                ]
+              },
+              {
+                "matched": "Mika Patel",
+                "variants": [
+                  "Mika Patel"
+                ]
+              },
+              {
+                "matched": "Shortlist",
+                "variants": [
+                  "Shortlist"
+                ]
+              },
+              {
+                "matched": "Open Next Candidate",
+                "variants": [
+                  "Open Next Candidate",
+                  "Next Candidate"
+                ]
+              }
+            ],
+            "missing_terms": [],
+            "recall": 1.0
+          },
+          "raw_text_preview": "{ \"screen_summary\": \"resume screening and talent search\", \"actions\": [ {\"label\": \"SEEK Talent Search\", \"role\": \"tab\", \"reason\": \"for talent search navigation\"}, {\"label\": \"Resume screening\", \"role\": \"card\", \"reason\": \"active screening process\"}, {\"label\": \"Avery Chen\", \"role\": \"shortlisted candidate\", \"reason\": \"shortlisted resume\"}, {\"label\": \"Shortlisted\", \"role\": \"button\", \"reason\": \"action to proceed\"}, {\"label\": \"Reject\", \"role\": \"button\", \"reason\": \"decision option\"}, {\"label\": \"Screening notes\", \"role\": \"section\", \"reason\": \"additional criteria guidance\"}, {\"label\": \"Open Next Candidate\", \"role\": \"button\", \"reason\": \"next candidate action\"} ], \"visible_text\": [ \"Auckland\", \"3+ years\", \"Visa\", \"2 weeks\", \"Frontend Engineer • React • TypeScript • Accessibility\", \"Read Shortlisted\", \"Put on Hold\", \"Reject\", \"Mika Patel\", \"Full Stack Engineer • Nodejs • AWS • Testing\", \"Open Next Candidate\" ] }",
+          "parsed": {
+            "screen_summary": "resume screening and talent search",
+            "actions": [
+              {
+                "label": "SEEK Talent Search",
+                "role": "tab",
+                "reason": "for talent search navigation"
+              },
+              {
+                "label": "Resume screening",
+                "role": "card",
+                "reason": "active screening process"
+              },
+              {
+                "label": "Avery Chen",
+                "role": "shortlisted candidate",
+                "reason": "shortlisted resume"
+              },
+              {
+                "label": "Shortlisted",
+                "role": "button",
+                "reason": "action to proceed"
+              },
+              {
+                "label": "Reject",
+                "role": "button",
+                "reason": "decision option"
+              },
+              {
+                "label": "Screening notes",
+                "role": "section",
+                "reason": "additional criteria guidance"
+              },
+              {
+                "label": "Open Next Candidate",
+                "role": "button",
+                "reason": "next candidate action"
+              }
+            ],
+            "visible_text": [
+              "Auckland",
+              "3+ years",
+              "Visa",
+              "2 weeks",
+              "Frontend Engineer • React • TypeScript • Accessibility",
+              "Read Shortlisted",
+              "Put on Hold",
+              "Reject",
+              "Mika Patel",
+              "Full Stack Engineer • Nodejs • AWS • Testing",
+              "Open Next Candidate"
+            ]
+          }
+        },
+        {
+          "case_id": "seek_jobs",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-191231-008073.png",
+          "elapsed_ms": 10438.602,
+          "success": true,
+          "error": null,
+          "json_ok": true,
+          "parse_error": null,
+          "score": {
+            "expected_count": 5,
+            "matched_count": 3,
+            "matched_terms": [
+              {
+                "matched": "SEEK",
+                "variants": [
+                  "SEEK"
+                ]
+              },
+              {
+                "matched": "Software Engineer",
+                "variants": [
+                  "Software Engineer",
+                  "Software Engineers"
+                ]
+              },
+              {
+                "matched": "Date",
+                "variants": [
+                  "Date"
+                ]
+              }
+            ],
+            "missing_terms": [
+              [
+                "Pay"
+              ],
+              [
+                "listed",
+                "Posted",
+                "days"
+              ]
+            ],
+            "recall": 0.6
+          },
+          "raw_text_preview": "{ \"screen_summary\": \"Job search for software engineers\", \"actions\": [ {\"label\": \"seek\", \"role\": \"button\", \"reason\": \"search for jobs\"}, {\"label\": \"Job search\", \"role\": \"tab\", \"reason\": \"active tab for job search\"}, {\"label\": \"software engineer\", \"role\": \"input\", \"reason\": \"search term for job postings\"}, {\"label\": \"All Auckland\", \"role\": \"location\", \"reason\": \"filter location\"}, {\"label\": \"SEEK\", \"role\": \"button\", \"reason\": \"submit search\"}, {\"label\": \"325 jobs\", \"role\": \"count\", \"reason\": \"number of job listings\"}, {\"label\": \"Strong applicant jobs\", \"role\": \"filter\", \"reason\": \"filter strong candidates\"}, {\"label\": \"Applications Software Engineer\", \"role\": \"section\", \"reason\": \"job application section\"}, {\"label\": \"Save this search\", \"role\": \"button\", \"reason\": \"save current search\"}, {\"label\": \"Select a job\", \"role\": \"link\", \"reason\": \"view job details\"}, {\"label\": \"temperzone\", \"role\": \"briefing\", \"reason\": \"company or location tag\"} ], \"visible_text\": [\"Job search\", \"People search\"",
+          "parsed": {
+            "screen_summary": "Job search for software engineers",
+            "actions": [
+              {
+                "label": "seek",
+                "role": "button",
+                "reason": "search for jobs"
+              },
+              {
+                "label": "Job search",
+                "role": "tab",
+                "reason": "active tab for job search"
+              },
+              {
+                "label": "software engineer",
+                "role": "input",
+                "reason": "search term for job postings"
+              },
+              {
+                "label": "All Auckland",
+                "role": "location",
+                "reason": "filter location"
+              },
+              {
+                "label": "SEEK",
+                "role": "button",
+                "reason": "submit search"
+              },
+              {
+                "label": "325 jobs",
+                "role": "count",
+                "reason": "number of job listings"
+              },
+              {
+                "label": "Strong applicant jobs",
+                "role": "filter",
+                "reason": "filter strong candidates"
+              },
+              {
+                "label": "Applications Software Engineer",
+                "role": "section",
+                "reason": "job application section"
+              },
+              {
+                "label": "Save this search",
+                "role": "button",
+                "reason": "save current search"
+              },
+              {
+                "label": "Select a job",
+                "role": "link",
+                "reason": "view job details"
+              },
+              {
+                "label": "temperzone",
+                "role": "briefing",
+                "reason": "company or location tag"
+              }
+            ],
+            "visible_text": [
+              "Job search",
+              "People search",
+              "Career advice",
+              "Recruiters",
+              "Community",
+              "Employer site",
+              "software engineer",
+              "325 jobs",
+              "New to you",
+              "99+",
+              "Classification",
+              "Listing time",
+              "Select a job",
+              "Display details here",
+              "Applications Software Engineer",
+              "Temperzone",
+              "Manukau, Auckland",
+              "Onsite cafeteria + parking + security",
+              "Opportunities for continuous professional development",
+              "Comprehensive Health Insurance Cover",
+              "Build and support modern applications that connect systems, streamline processes, and power bi",
+              "Featured",
+              "Save this search"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

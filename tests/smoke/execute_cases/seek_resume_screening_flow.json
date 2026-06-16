@@ -1,0 +1,64 @@
+{
+  "cases": [
+    {
+      "id": "seek_resume_shortlist_avery",
+      "app": {
+        "app_name": "edge",
+        "app_id": "edge",
+        "url": "file:///D:/agent-gui-runtime/app/web_panel/seek_resume_fixture.html",
+        "window_title_contains": "SEEK Resume Screening Fixture",
+        "open_before": true,
+        "wait_seconds": 2.0
+      },
+      "goal": "Click Shortlist Avery Chen",
+      "state_hint": "SEEK resume screening fixture showing Avery Chen as the primary candidate",
+      "mode": {
+        "dry_run_default": true,
+        "destructive": false
+      },
+      "expect": {
+        "action_type": "click",
+        "allow": true,
+        "max_attempt_count": 2,
+        "max_latency_ms": 10000,
+        "point_in_rect": {
+          "min_x": 300,
+          "max_x": 560,
+          "min_y": 460,
+          "max_y": 570
+        },
+        "post_click": {
+          "required": true
+        }
+      }
+    },
+    {
+      "id": "seek_resume_open_next_candidate",
+      "app": {
+        "app_name": "edge",
+        "window_title_contains": "SEEK Resume Screening Fixture"
+      },
+      "goal": "Click Open Next Candidate",
+      "state_hint": "SEEK resume screening fixture after Avery Chen was shortlisted",
+      "mode": {
+        "dry_run_default": true,
+        "destructive": false
+      },
+      "expect": {
+        "action_type": "click",
+        "allow": true,
+        "max_attempt_count": 2,
+        "max_latency_ms": 10000,
+        "point_in_rect": {
+          "min_x": 350,
+          "max_x": 560,
+          "min_y": 620,
+          "max_y": 690
+        },
+        "post_click": {
+          "required": true
+        }
+      }
+    }
+  ]
+}

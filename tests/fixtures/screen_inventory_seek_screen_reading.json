@@ -1,0 +1,208 @@
+{
+  "contract_version": "screen_reading_v1",
+  "image_path": "artifacts/screenshots/seek-fixture.png",
+  "app_name": "seek",
+  "screen_summary": "SEEK job results page with filters and job cards.",
+  "texts": [
+    {
+      "id": "text_1",
+      "text": "Pay",
+      "bbox": {
+        "x": 36,
+        "y": 244,
+        "w": 42,
+        "h": 22
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "text_2",
+      "text": "Date",
+      "bbox": {
+        "x": 520,
+        "y": 244,
+        "w": 50,
+        "h": 22
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "text_3",
+      "text": "Senior Product Designer",
+      "bbox": {
+        "x": 380,
+        "y": 385,
+        "w": 250,
+        "h": 24
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "text_4",
+      "text": "Auckland",
+      "bbox": {
+        "x": 380,
+        "y": 420,
+        "w": 90,
+        "h": 20
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "text_5",
+      "text": "$120k - $140k",
+      "bbox": {
+        "x": 380,
+        "y": 450,
+        "w": 140,
+        "h": 20
+      },
+      "confidence": 0.93
+    },
+    {
+      "id": "text_6",
+      "text": "Posted 3 days ago",
+      "bbox": {
+        "x": 380,
+        "y": 478,
+        "w": 160,
+        "h": 20
+      },
+      "confidence": 0.93
+    }
+  ],
+  "ui_elements": [
+    {
+      "id": "filter_pay",
+      "type": "button",
+      "role_guess": "button",
+      "label": "Pay",
+      "bbox": {
+        "x": 28,
+        "y": 232,
+        "w": 96,
+        "h": 48
+      },
+      "click_point": {
+        "x": 76,
+        "y": 256
+      },
+      "confidence": 0.78,
+      "coordinate_confidence": "medium",
+      "interaction_type": "click",
+      "evidence": {
+        "interaction_policy": {
+          "allowed": true
+        }
+      }
+    },
+    {
+      "id": "filter_date",
+      "type": "button",
+      "role_guess": "button",
+      "label": "Date",
+      "bbox": {
+        "x": 508,
+        "y": 232,
+        "w": 112,
+        "h": 48
+      },
+      "click_point": {
+        "x": 564,
+        "y": 256
+      },
+      "confidence": 0.76,
+      "coordinate_confidence": "medium",
+      "interaction_type": "click",
+      "evidence": {
+        "interaction_policy": {
+          "allowed": true
+        }
+      }
+    },
+    {
+      "id": "job_card_1",
+      "type": "card",
+      "role_guess": "card",
+      "label": "Senior Product Designer",
+      "bbox": {
+        "x": 340,
+        "y": 360,
+        "w": 540,
+        "h": 170
+      },
+      "click_point": {
+        "x": 610,
+        "y": 445
+      },
+      "confidence": 0.75,
+      "coordinate_confidence": "medium",
+      "interaction_type": "click",
+      "evidence": {
+        "interaction_policy": {
+          "allowed": true
+        }
+      }
+    }
+  ],
+  "source_layers": {
+    "windows_uia": {
+      "status": "ok",
+      "control_count": 3,
+      "controls": [
+        {
+          "provider": "windows_uia",
+          "control_id": "uia_search",
+          "name": "Search jobs",
+          "control_type": "Edit",
+          "bbox": {
+            "x": 320,
+            "y": 150,
+            "w": 320,
+            "h": 38
+          },
+          "enabled": true,
+          "visible": true,
+          "patterns": [
+            "Value",
+            "Text"
+          ]
+        },
+        {
+          "provider": "windows_uia",
+          "control_id": "uia_save",
+          "name": "Save",
+          "control_type": "Button",
+          "bbox": {
+            "x": 660,
+            "y": 468,
+            "w": 82,
+            "h": 34
+          },
+          "enabled": true,
+          "visible": true,
+          "patterns": [
+            "Invoke"
+          ]
+        },
+        {
+          "provider": "windows_uia",
+          "control_id": "uia_apply",
+          "name": "Apply",
+          "control_type": "Button",
+          "bbox": {
+            "x": 760,
+            "y": 468,
+            "w": 84,
+            "h": 34
+          },
+          "enabled": true,
+          "visible": true,
+          "patterns": [
+            "Invoke"
+          ]
+        }
+      ]
+    }
+  }
+}

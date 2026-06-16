@@ -1,0 +1,32 @@
+{
+  "locate_success": true,
+  "location_status": "learn_all_targets_ready",
+  "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260613-225727-352733__locate-target__google-news.json",
+  "target_count": 41,
+  "validated_count": 41,
+  "invalid_count": 0,
+  "valid_rate": 1.0,
+  "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\state-a12c3b8679bfbed9-learn-targets__learn-target-coordinates__20260613-225727-303093.png",
+  "model_review_status": "failed",
+  "model_error": "local vision endpoint failed after 2 attempt(s): local vision endpoint returned HTTP 400: {\"error\":{\"code\":400,\"message\":\"request (9974 tokens) exceeds the available context size (8192 tokens), try increasing it\",\"type\":\"exceed_context_size_error\",\"n_prompt_tokens\":9974,\"n_ctx\":8192}}",
+  "model_addition_count": 0,
+  "model_update_count": 0,
+  "model_removal_count": 0,
+  "role_counts": {
+    "text_input": 1,
+    "icon_button": 4,
+    "menu_item": 6,
+    "news_card": 6,
+    "recommendation_item": 5,
+    "nav_text_action": 18,
+    "text_action": 1
+  },
+  "section_counts": {
+    "browser_chrome": 1,
+    "page_header": 24,
+    "promo_strip": 2,
+    "main_content": 5,
+    "right_sidebar": 5,
+    "lower_content": 4
+  }
+}

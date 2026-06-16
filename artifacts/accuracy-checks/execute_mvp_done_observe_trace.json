@@ -1,0 +1,53 @@
+﻿{
+    "result":  {
+                   "screen_map":  {
+                                      "state_id":  "execute_mvp_done",
+                                      "contract_version":  "screen_map_v1",
+                                      "candidates":  [
+                                                         {
+                                                             "source":  "screen_map",
+                                                             "bbox":  {
+                                                                          "y":  690,
+                                                                          "w":  70,
+                                                                          "h":  60,
+                                                                          "x":  405
+                                                                      },
+                                                             "section_id":  "main_content",
+                                                             "contract_version":  "screen_map_candidate_v1",
+                                                             "label":  "Done",
+                                                             "expected_effect":  "done state remains visible",
+                                                             "candidate_id":  "done_button",
+                                                             "role":  "button",
+                                                             "click_point":  {
+                                                                                 "y":  720,
+                                                                                 "x":  438
+                                                                             },
+                                                             "risk_class":  "safe_click_allowed"
+                                                         }
+                                                     ]
+                                  },
+                   "parse_result":  {
+                                        "ocr_anchors":  {
+                                                            "contract_version":  "ocr_anchors_v1",
+                                                            "anchor_count":  1,
+                                                            "image_path":  "D:\\agent-gui-runtime\\artifacts\\screenshots\\execute-mvp-test__post-action__execute-recognition-plan__full-window__20260615-233529-976216.png",
+                                                            "coordinate_space":  "original_image",
+                                                            "anchors":  [
+                                                                            {
+                                                                                "bbox":  {
+                                                                                             "y":  690,
+                                                                                             "w":  70,
+                                                                                             "h":  60,
+                                                                                             "x":  405
+                                                                                         },
+                                                                                "confidence":  0.95,
+                                                                                "anchor_id":  "ocr_anchor_done",
+                                                                                "text":  "Done"
+                                                                            }
+                                                                        ]
+                                                        }
+                                    },
+                   "image_path":  "D:\\agent-gui-runtime\\artifacts\\screenshots\\execute-mvp-test__post-action__execute-recognition-plan__full-window__20260615-233529-976216.png"
+               },
+    "success":  true
+}

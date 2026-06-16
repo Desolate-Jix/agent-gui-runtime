@@ -1,0 +1,12 @@
+[
+  {
+    "case_id": "seek_resume_screening_fixture",
+    "image_path": "artifacts/screenshots/seek-resume-screening-fixture-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-183033-787978.png",
+    "expected_terms": [["Resume Screening"], ["Avery Chen"], ["Mika Patel"], ["Shortlist"], ["Open Next Candidate", "Next Candidate"]]
+  },
+  {
+    "case_id": "seek_jobs",
+    "image_path": "artifacts/screenshots/software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-191231-008073.png",
+    "expected_terms": [["SEEK"], ["Software Engineer", "Software Engineers"], ["Pay"], ["Date"], ["listed", "Posted", "days"]]
+  }
+]

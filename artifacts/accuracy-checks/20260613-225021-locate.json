@@ -1,0 +1,1826 @@
+{
+  "success": true,
+  "message": "Learn targets located",
+  "data": {
+    "result": {
+      "contract_version": "target_location_v1",
+      "agent_mode": "learn",
+      "learn_depth": "deep",
+      "mode_contract_version": "learn_screen_deep_v1",
+      "write_policy": {
+        "path_graph": true,
+        "element_memory": false,
+        "trace": true
+      },
+      "goal": "learn all visible controls",
+      "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\google-news-microsoft-edge__locate-target__google-news__full-window__20260613-225048-951229.png",
+      "live_capture": {
+        "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\google-news-microsoft-edge__locate-target__google-news__full-window__20260613-225048-951229.png",
+        "image_width": 1288,
+        "image_height": 1216,
+        "roi": null,
+        "roi_adjusted": false,
+        "capture_purpose": "locate_target",
+        "window_size": {
+          "width": 1288,
+          "height": 1216
+        }
+      },
+      "recognition_plan": null,
+      "pre_click_decision": null,
+      "selected_click_point": null,
+      "recommended_target": null,
+      "located_bbox": null,
+      "located_point": null,
+      "location_status": "learn_all_targets_ready",
+      "learn_all_targets": {
+        "contract_version": "learn_all_target_locations_v1",
+        "status": "ready",
+        "state_id": "state_c9e8d20b75bd5f5d",
+        "source_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260613-225048-297149__observe-screen__google-news.json",
+        "target_count": 39,
+        "targets": [
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_cv_9aee81a1",
+            "label": "在 CV 中搜索",
+            "role": "text_input",
+            "bbox": {
+              "x": 704,
+              "y": 20,
+              "w": 202,
+              "h": 20
+            },
+            "click_point": {
+              "x": 805,
+              "y": 30
+            },
+            "section_id": "browser_chrome",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_o_97f843a8",
+            "label": "打开(O)",
+            "role": "button",
+            "bbox": {
+              "x": 704,
+              "y": 544,
+              "w": 101,
+              "h": 20
+            },
+            "click_point": {
+              "x": 754,
+              "y": 554
+            },
+            "section_id": "right_sidebar",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_55a10597",
+            "label": "取消",
+            "role": "button",
+            "bbox": {
+              "x": 815,
+              "y": 544,
+              "w": 91,
+              "h": 20
+            },
+            "click_point": {
+              "x": 860,
+              "y": 554
+            },
+            "section_id": "right_sidebar",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_n_00fa9e2e",
+            "label": "文件名(N):",
+            "role": "text_input",
+            "bbox": {
+              "x": 83,
+              "y": 634,
+              "w": 64,
+              "h": 17
+            },
+            "click_point": {
+              "x": 115,
+              "y": 642
+            },
+            "section_id": "main_content",
+            "source": "top_level.ui.elements",
+            "confidence": 0.9043,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_9440847a",
+            "label": "从移动设备上传",
+            "role": "button",
+            "bbox": {
+              "x": 826,
+              "y": 663,
+              "w": 91,
+              "h": 20
+            },
+            "click_point": {
+              "x": 872,
+              "y": 673
+            },
+            "section_id": "right_sidebar",
+            "source": "top_level.ui.elements",
+            "confidence": 0.84,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_00e56401",
+            "label": "搜索",
+            "role": "button",
+            "bbox": {
+              "x": 976,
+              "y": 876,
+              "w": 20,
+              "h": 20
+            },
+            "click_point": {
+              "x": 986,
+              "y": 886
+            },
+            "section_id": "right_sidebar",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_5742b36f",
+            "label": "搜索",
+            "role": "button",
+            "bbox": {
+              "x": 976,
+              "y": 906,
+              "w": 20,
+              "h": 20
+            },
+            "click_point": {
+              "x": 986,
+              "y": 916
+            },
+            "section_id": "right_sidebar",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_10",
+            "label": "Reference Letter Wenqing Ji.pdf",
+            "role": "news_card",
+            "bbox": {
+              "x": 65,
+              "y": 614,
+              "w": 294,
+              "h": 223
+            },
+            "click_point": {
+              "x": 212,
+              "y": 726
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9545,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_13",
+            "label": "支持的文件:DOC、DOT、RMR、RSM、RESUME、OXPS、PDF、P7S、AI、RTF、PAGES、GDOC、GSLIDES、XLS、XLSM、PUB、MSG、PPT、WPS、ODS、ODT、PPTX、PPSX、",
+            "role": "news_card",
+            "bbox": {
+              "x": 214,
+              "y": 802,
+              "w": 533,
+              "h": 214
+            },
+            "click_point": {
+              "x": 480,
+              "y": 909
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9989,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_19",
+            "label": "What ethnicity do you identify with?",
+            "role": "news_card",
+            "bbox": {
+              "x": 212,
+              "y": 1014,
+              "w": 263,
+              "h": 32
+            },
+            "click_point": {
+              "x": 344,
+              "y": 1030
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9985,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_right_sidebar_1",
+            "label": "an collects as part of",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 1120,
+              "y": 543,
+              "w": 166,
+              "h": 53
+            },
+            "click_point": {
+              "x": 1203,
+              "y": 570
+            },
+            "section_id": "right_sidebar",
+            "source": "ocr_card_groups",
+            "confidence": 0.9684,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_right_sidebar_2",
+            "label": "韦明被保存、存储和使",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 1119,
+              "y": 581,
+              "w": 169,
+              "h": 53
+            },
+            "click_point": {
+              "x": 1204,
+              "y": 608
+            },
+            "section_id": "right_sidebar",
+            "source": "ocr_card_groups",
+            "confidence": 0.9344,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_right_sidebar_3",
+            "label": "自定义文件(*.doc;*dot;*rmr;",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 917,
+              "y": 612,
+              "w": 210,
+              "h": 90
+            },
+            "click_point": {
+              "x": 1022,
+              "y": 657
+            },
+            "section_id": "right_sidebar",
+            "source": "ocr_card_groups",
+            "confidence": 0.9253,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_right_sidebar_6",
+            "label": "Choose a file or drop it here",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 659,
+              "y": 709,
+              "w": 210,
+              "h": 53
+            },
+            "click_point": {
+              "x": 764,
+              "y": 736
+            },
+            "section_id": "right_sidebar",
+            "source": "ocr_card_groups",
+            "confidence": 0.995,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_right_sidebar_8",
+            "label": "Supported fles: DOC, DOT, RMR, RSM, RESUME, OXPS, PDF, P7S, AI, RTF, PAGES, GDOC, GSLIDES, XLS, XLSM, PUB, MSG, PPT, WPS, ODS, ODT, PPTX, PPSX, XLSX, DOCX, DOTX",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 239,
+              "y": 749,
+              "w": 1018,
+              "h": 55
+            },
+            "click_point": {
+              "x": 748,
+              "y": 776
+            },
+            "section_id": "right_sidebar",
+            "source": "ocr_card_groups",
+            "confidence": 0.9874,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_right_sidebar_10",
+            "label": "支持的文件:DOC、DOT、RMR、RSM、RESUME、OXPS、PDF、P7S、AI、RTF、PAGES、GDOC、GSLIDES、XLS、XLSM、PUB、MSG、PPT、WPS、ODS、ODT、PPTX、PPSX、",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 240,
+              "y": 802,
+              "w": 1014,
+              "h": 55
+            },
+            "click_point": {
+              "x": 747,
+              "y": 830
+            },
+            "section_id": "right_sidebar",
+            "source": "ocr_card_groups",
+            "confidence": 0.9989,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_right_sidebar_12",
+            "label": "\"We're continuously striving to grow diversity at Meridian. We want our culture to be one that is inclusive, respectful and supportive as well as representative",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 213,
+              "y": 898,
+              "w": 1075,
+              "h": 57
+            },
+            "click_point": {
+              "x": 750,
+              "y": 926
+            },
+            "section_id": "right_sidebar",
+            "source": "ocr_card_groups",
+            "confidence": 0.9849,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_promo_strip_1",
+            "label": "Immigration New Zealand - 9573899.",
+            "role": "news_card",
+            "bbox": {
+              "x": 129,
+              "y": 185,
+              "w": 264,
+              "h": 56
+            },
+            "click_point": {
+              "x": 261,
+              "y": 213
+            },
+            "section_id": "promo_strip",
+            "source": "ocr_card_groups",
+            "confidence": 0.9829,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_lower_content_2",
+            "label": "What gender do you identify with? *",
+            "role": "news_card",
+            "bbox": {
+              "x": 213,
+              "y": 1114,
+              "w": 262,
+              "h": 57
+            },
+            "click_point": {
+              "x": 344,
+              "y": 1142
+            },
+            "section_id": "lower_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9915,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_14",
+            "label": "浏览器下载",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 11,
+              "y": 110,
+              "w": 69,
+              "h": 20
+            },
+            "click_point": {
+              "x": 46,
+              "y": 120
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9543,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_15",
+            "label": "新建文件夹",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 146,
+              "y": 118,
+              "w": 71,
+              "h": 20
+            },
+            "click_point": {
+              "x": 182,
+              "y": 128
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9974,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_16",
+            "label": "2026/6/10 17:27",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 388,
+              "y": 117,
+              "w": 102,
+              "h": 22
+            },
+            "click_point": {
+              "x": 439,
+              "y": 128
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9986,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_17",
+            "label": "文件夹",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 532,
+              "y": 118,
+              "w": 46,
+              "h": 21
+            },
+            "click_point": {
+              "x": 555,
+              "y": 128
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9972,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_18",
+            "label": "aland各种，各种，",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1137,
+              "y": 112,
+              "w": 146,
+              "h": 17
+            },
+            "click_point": {
+              "x": 1210,
+              "y": 120
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9967,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_19",
+            "label": "手心输入法",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 11,
+              "y": 134,
+              "w": 69,
+              "h": 20
+            },
+            "click_point": {
+              "x": 46,
+              "y": 144
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9998,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_20",
+            "label": "814990805_2026-03-20.pdf",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 149,
+              "y": 141,
+              "w": 164,
+              "h": 17
+            },
+            "click_point": {
+              "x": 231,
+              "y": 150
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9991,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_21",
+            "label": "2026/3/24 16:44",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 389,
+              "y": 140,
+              "w": 101,
+              "h": 17
+            },
+            "click_point": {
+              "x": 440,
+              "y": 148
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9983,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_22",
+            "label": "PDF 文件",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 533,
+              "y": 140,
+              "w": 57,
+              "h": 18
+            },
+            "click_point": {
+              "x": 562,
+              "y": 149
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9497,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_23",
+            "label": "9 KB",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 691,
+              "y": 140,
+              "w": 36,
+              "h": 19
+            },
+            "click_point": {
+              "x": 709,
+              "y": 150
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9852,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_24",
+            "label": "鼠标驱动",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 12,
+              "y": 159,
+              "w": 55,
+              "h": 18
+            },
+            "click_point": {
+              "x": 40,
+              "y": 168
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9999,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_25",
+            "label": "Application Form.doc",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 129,
+              "y": 159,
+              "w": 151,
+              "h": 22
+            },
+            "click_point": {
+              "x": 204,
+              "y": 170
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9634,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_26",
+            "label": "2026/5/27 17:57",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 390,
+              "y": 162,
+              "w": 98,
+              "h": 17
+            },
+            "click_point": {
+              "x": 439,
+              "y": 170
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9804,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_27",
+            "label": "Microsoft Word ...",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 533,
+              "y": 160,
+              "w": 110,
+              "h": 20
+            },
+            "click_point": {
+              "x": 588,
+              "y": 170
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9642,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_28",
+            "label": "37 KB",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 685,
+              "y": 161,
+              "w": 42,
+              "h": 18
+            },
+            "click_point": {
+              "x": 706,
+              "y": 170
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9916,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_29",
+            "label": "腾讯会议",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 11,
+              "y": 182,
+              "w": 55,
+              "h": 18
+            },
+            "click_point": {
+              "x": 38,
+              "y": 191
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9999,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_30",
+            "label": "Confirmation of Graduation.pdf",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 149,
+              "y": 183,
+              "w": 190,
+              "h": 17
+            },
+            "click_point": {
+              "x": 244,
+              "y": 192
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9923,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_31",
+            "label": "2026/3/23 15:03",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 390,
+              "y": 182,
+              "w": 99,
+              "h": 17
+            },
+            "click_point": {
+              "x": 440,
+              "y": 190
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9971,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_32",
+            "label": "PDF 文件",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 533,
+              "y": 182,
+              "w": 57,
+              "h": 18
+            },
+            "click_point": {
+              "x": 562,
+              "y": 191
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9497,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_33",
+            "label": "384 KB",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 679,
+              "y": 182,
+              "w": 47,
+              "h": 18
+            },
+            "click_point": {
+              "x": 702,
+              "y": 191
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9977,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          }
+        ]
+      },
+      "path_map_review": {
+        "contract_version": "path_map_review_v1",
+        "status": "learn_all_targets",
+        "source": "screen_map_v1",
+        "summary": {
+          "addition_count": 39,
+          "removal_count": 0,
+          "kept_count": 0
+        },
+        "additions": [
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_cv_9aee81a1",
+            "label": "在 CV 中搜索",
+            "role": "text_input",
+            "bbox": {
+              "x": 704,
+              "y": 20,
+              "w": 202,
+              "h": 20
+            },
+            "click_point": {
+              "x": 805,
+              "y": 30
+            },
+            "section_id": "browser_chrome",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_o_97f843a8",
+            "label": "打开(O)",
+            "role": "button",
+            "bbox": {
+              "x": 704,
+              "y": 544,
+              "w": 101,
+              "h": 20
+            },
+            "click_point": {
+              "x": 754,
+              "y": 554
+            },
+            "section_id": "right_sidebar",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_55a10597",
+            "label": "取消",
+            "role": "button",
+            "bbox": {
+              "x": 815,
+              "y": 544,
+              "w": 91,
+              "h": 20
+            },
+            "click_point": {
+              "x": 860,
+              "y": 554
+            },
+            "section_id": "right_sidebar",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_n_00fa9e2e",
+            "label": "文件名(N):",
+            "role": "text_input",
+            "bbox": {
+              "x": 83,
+              "y": 634,
+              "w": 64,
+              "h": 17
+            },
+            "click_point": {
+              "x": 115,
+              "y": 642
+            },
+            "section_id": "main_content",
+            "source": "top_level.ui.elements",
+            "confidence": 0.9043,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_9440847a",
+            "label": "从移动设备上传",
+            "role": "button",
+            "bbox": {
+              "x": 826,
+              "y": 663,
+              "w": 91,
+              "h": 20
+            },
+            "click_point": {
+              "x": 872,
+              "y": 673
+            },
+            "section_id": "right_sidebar",
+            "source": "top_level.ui.elements",
+            "confidence": 0.84,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_00e56401",
+            "label": "搜索",
+            "role": "button",
+            "bbox": {
+              "x": 976,
+              "y": 876,
+              "w": 20,
+              "h": 20
+            },
+            "click_point": {
+              "x": 986,
+              "y": 886
+            },
+            "section_id": "right_sidebar",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_5742b36f",
+            "label": "搜索",
+            "role": "button",
+            "bbox": {
+              "x": 976,
+              "y": 906,
+              "w": 20,
+              "h": 20
+            },
+            "click_point": {
+              "x": 986,
+              "y": 916
+            },
+            "section_id": "right_sidebar",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_10",
+            "label": "Reference Letter Wenqing Ji.pdf",
+            "role": "news_card",
+            "bbox": {
+              "x": 65,
+              "y": 614,
+              "w": 294,
+              "h": 223
+            },
+            "click_point": {
+              "x": 212,
+              "y": 726
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9545,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_13",
+            "label": "支持的文件:DOC、DOT、RMR、RSM、RESUME、OXPS、PDF、P7S、AI、RTF、PAGES、GDOC、GSLIDES、XLS、XLSM、PUB、MSG、PPT、WPS、ODS、ODT、PPTX、PPSX、",
+            "role": "news_card",
+            "bbox": {
+              "x": 214,
+              "y": 802,
+              "w": 533,
+              "h": 214
+            },
+            "click_point": {
+              "x": 480,
+              "y": 909
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9989,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_19",
+            "label": "What ethnicity do you identify with?",
+            "role": "news_card",
+            "bbox": {
+              "x": 212,
+              "y": 1014,
+              "w": 263,
+              "h": 32
+            },
+            "click_point": {
+              "x": 344,
+              "y": 1030
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9985,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_right_sidebar_1",
+            "label": "an collects as part of",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 1120,
+              "y": 543,
+              "w": 166,
+              "h": 53
+            },
+            "click_point": {
+              "x": 1203,
+              "y": 570
+            },
+            "section_id": "right_sidebar",
+            "source": "ocr_card_groups",
+            "confidence": 0.9684,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_right_sidebar_2",
+            "label": "韦明被保存、存储和使",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 1119,
+              "y": 581,
+              "w": 169,
+              "h": 53
+            },
+            "click_point": {
+              "x": 1204,
+              "y": 608
+            },
+            "section_id": "right_sidebar",
+            "source": "ocr_card_groups",
+            "confidence": 0.9344,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_right_sidebar_3",
+            "label": "自定义文件(*.doc;*dot;*rmr;",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 917,
+              "y": 612,
+              "w": 210,
+              "h": 90
+            },
+            "click_point": {
+              "x": 1022,
+              "y": 657
+            },
+            "section_id": "right_sidebar",
+            "source": "ocr_card_groups",
+            "confidence": 0.9253,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_right_sidebar_6",
+            "label": "Choose a file or drop it here",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 659,
+              "y": 709,
+              "w": 210,
+              "h": 53
+            },
+            "click_point": {
+              "x": 764,
+              "y": 736
+            },
+            "section_id": "right_sidebar",
+            "source": "ocr_card_groups",
+            "confidence": 0.995,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_right_sidebar_8",
+            "label": "Supported fles: DOC, DOT, RMR, RSM, RESUME, OXPS, PDF, P7S, AI, RTF, PAGES, GDOC, GSLIDES, XLS, XLSM, PUB, MSG, PPT, WPS, ODS, ODT, PPTX, PPSX, XLSX, DOCX, DOTX",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 239,
+              "y": 749,
+              "w": 1018,
+              "h": 55
+            },
+            "click_point": {
+              "x": 748,
+              "y": 776
+            },
+            "section_id": "right_sidebar",
+            "source": "ocr_card_groups",
+            "confidence": 0.9874,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_right_sidebar_10",
+            "label": "支持的文件:DOC、DOT、RMR、RSM、RESUME、OXPS、PDF、P7S、AI、RTF、PAGES、GDOC、GSLIDES、XLS、XLSM、PUB、MSG、PPT、WPS、ODS、ODT、PPTX、PPSX、",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 240,
+              "y": 802,
+              "w": 1014,
+              "h": 55
+            },
+            "click_point": {
+              "x": 747,
+              "y": 830
+            },
+            "section_id": "right_sidebar",
+            "source": "ocr_card_groups",
+            "confidence": 0.9989,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_right_sidebar_12",
+            "label": "\"We're continuously striving to grow diversity at Meridian. We want our culture to be one that is inclusive, respectful and supportive as well as representative",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 213,
+              "y": 898,
+              "w": 1075,
+              "h": 57
+            },
+            "click_point": {
+              "x": 750,
+              "y": 926
+            },
+            "section_id": "right_sidebar",
+            "source": "ocr_card_groups",
+            "confidence": 0.9849,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_promo_strip_1",
+            "label": "Immigration New Zealand - 9573899.",
+            "role": "news_card",
+            "bbox": {
+              "x": 129,
+              "y": 185,
+              "w": 264,
+              "h": 56
+            },
+            "click_point": {
+              "x": 261,
+              "y": 213
+            },
+            "section_id": "promo_strip",
+            "source": "ocr_card_groups",
+            "confidence": 0.9829,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_lower_content_2",
+            "label": "What gender do you identify with? *",
+            "role": "news_card",
+            "bbox": {
+              "x": 213,
+              "y": 1114,
+              "w": 262,
+              "h": 57
+            },
+            "click_point": {
+              "x": 344,
+              "y": 1142
+            },
+            "section_id": "lower_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9915,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_14",
+            "label": "浏览器下载",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 11,
+              "y": 110,
+              "w": 69,
+              "h": 20
+            },
+            "click_point": {
+              "x": 46,
+              "y": 120
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9543,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_15",
+            "label": "新建文件夹",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 146,
+              "y": 118,
+              "w": 71,
+              "h": 20
+            },
+            "click_point": {
+              "x": 182,
+              "y": 128
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9974,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_16",
+            "label": "2026/6/10 17:27",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 388,
+              "y": 117,
+              "w": 102,
+              "h": 22
+            },
+            "click_point": {
+              "x": 439,
+              "y": 128
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9986,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_17",
+            "label": "文件夹",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 532,
+              "y": 118,
+              "w": 46,
+              "h": 21
+            },
+            "click_point": {
+              "x": 555,
+              "y": 128
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9972,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_18",
+            "label": "aland各种，各种，",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1137,
+              "y": 112,
+              "w": 146,
+              "h": 17
+            },
+            "click_point": {
+              "x": 1210,
+              "y": 120
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9967,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_19",
+            "label": "手心输入法",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 11,
+              "y": 134,
+              "w": 69,
+              "h": 20
+            },
+            "click_point": {
+              "x": 46,
+              "y": 144
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9998,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_20",
+            "label": "814990805_2026-03-20.pdf",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 149,
+              "y": 141,
+              "w": 164,
+              "h": 17
+            },
+            "click_point": {
+              "x": 231,
+              "y": 150
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9991,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_21",
+            "label": "2026/3/24 16:44",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 389,
+              "y": 140,
+              "w": 101,
+              "h": 17
+            },
+            "click_point": {
+              "x": 440,
+              "y": 148
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9983,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_22",
+            "label": "PDF 文件",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 533,
+              "y": 140,
+              "w": 57,
+              "h": 18
+            },
+            "click_point": {
+              "x": 562,
+              "y": 149
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9497,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_23",
+            "label": "9 KB",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 691,
+              "y": 140,
+              "w": 36,
+              "h": 19
+            },
+            "click_point": {
+              "x": 709,
+              "y": 150
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9852,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_24",
+            "label": "鼠标驱动",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 12,
+              "y": 159,
+              "w": 55,
+              "h": 18
+            },
+            "click_point": {
+              "x": 40,
+              "y": 168
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9999,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_25",
+            "label": "Application Form.doc",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 129,
+              "y": 159,
+              "w": 151,
+              "h": 22
+            },
+            "click_point": {
+              "x": 204,
+              "y": 170
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9634,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_26",
+            "label": "2026/5/27 17:57",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 390,
+              "y": 162,
+              "w": 98,
+              "h": 17
+            },
+            "click_point": {
+              "x": 439,
+              "y": 170
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9804,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_27",
+            "label": "Microsoft Word ...",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 533,
+              "y": 160,
+              "w": 110,
+              "h": 20
+            },
+            "click_point": {
+              "x": 588,
+              "y": 170
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9642,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_28",
+            "label": "37 KB",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 685,
+              "y": 161,
+              "w": 42,
+              "h": 18
+            },
+            "click_point": {
+              "x": 706,
+              "y": 170
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9916,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_29",
+            "label": "腾讯会议",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 11,
+              "y": 182,
+              "w": 55,
+              "h": 18
+            },
+            "click_point": {
+              "x": 38,
+              "y": 191
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9999,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_30",
+            "label": "Confirmation of Graduation.pdf",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 149,
+              "y": 183,
+              "w": 190,
+              "h": 17
+            },
+            "click_point": {
+              "x": 244,
+              "y": 192
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9923,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_31",
+            "label": "2026/3/23 15:03",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 390,
+              "y": 182,
+              "w": 99,
+              "h": 17
+            },
+            "click_point": {
+              "x": 440,
+              "y": 190
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9971,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_32",
+            "label": "PDF 文件",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 533,
+              "y": 182,
+              "w": 57,
+              "h": 18
+            },
+            "click_point": {
+              "x": 562,
+              "y": 191
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9497,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_33",
+            "label": "384 KB",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 679,
+              "y": 182,
+              "w": 47,
+              "h": 18
+            },
+            "click_point": {
+              "x": 702,
+              "y": 191
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9977,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_ready"
+          }
+        ],
+        "removals": [],
+        "kept": []
+      },
+      "observe_trace_reuse": {
+        "status": "ready",
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260613-225048-297149__observe-screen__google-news.json",
+        "state_id": "state_c9e8d20b75bd5f5d",
+        "candidate_count": 39,
+        "anchor_count": 97,
+        "anchor_source": "observe_trace_texts"
+      },
+      "execution_path": {
+        "action_executed": false,
+        "learn_all_targets_used": true,
+        "target_count": 39,
+        "coordinate_source": "screen_map_v1.candidates",
+        "ocr_anchor_reused_from_observe": true,
+        "ocr_anchor_reuse_source": "observe_trace_texts",
+        "ocr_anchor_reuse_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260613-225048-297149__observe-screen__google-news.json",
+        "agent_must_call_for_click": "POST /action/execute_recognition_plan"
+      },
+      "timings": {
+        "contract_version": "runtime_timing_v1",
+        "started_at": "2026-06-13T22:50:48.319536",
+        "ended_at": "2026-06-13T22:50:48.979456",
+        "total_ms": 659.65,
+        "steps": [
+          {
+            "name": "resolve_image_source",
+            "started_at": "2026-06-13T22:50:48.319536",
+            "capture_live": true,
+            "ended_at": "2026-06-13T22:50:48.974590",
+            "elapsed_ms": 655.051
+          },
+          {
+            "name": "load_observe_trace_reuse",
+            "started_at": "2026-06-13T22:50:48.974590",
+            "has_observe_trace": true,
+            "ended_at": "2026-06-13T22:50:48.978482",
+            "elapsed_ms": 4.291
+          },
+          {
+            "name": "learn_all_targets_from_screen_map",
+            "started_at": "2026-06-13T22:50:48.978482",
+            "candidate_count": 39,
+            "ended_at": "2026-06-13T22:50:48.978482",
+            "elapsed_ms": 0.2
+          }
+        ]
+      },
+      "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260613-225048-979456__locate-target__google-news.json"
+    }
+  },
+  "error": null
+}

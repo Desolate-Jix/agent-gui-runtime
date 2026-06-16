@@ -1,0 +1,2775 @@
+{
+  "success": true,
+  "message": "Learn targets located",
+  "data": {
+    "result": {
+      "contract_version": "target_location_v1",
+      "agent_mode": "learn",
+      "learn_depth": "deep",
+      "mode_contract_version": "learn_screen_deep_v1",
+      "write_policy": {
+        "path_graph": true,
+        "element_memory": false,
+        "trace": true
+      },
+      "goal": "learn all visible controls",
+      "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\google-news-1-microsoft-edge__locate-target__google-news__full-window__20260613-225357-548452.png",
+      "live_capture": {
+        "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\google-news-1-microsoft-edge__locate-target__google-news__full-window__20260613-225357-548452.png",
+        "image_width": 1665,
+        "image_height": 1216,
+        "roi": null,
+        "roi_adjusted": false,
+        "capture_purpose": "locate_target",
+        "window_size": {
+          "width": 1665,
+          "height": 1216
+        }
+      },
+      "recognition_plan": null,
+      "pre_click_decision": null,
+      "selected_click_point": null,
+      "recommended_target": null,
+      "located_bbox": null,
+      "located_point": null,
+      "location_status": "learn_all_targets_ready",
+      "learn_all_targets": {
+        "contract_version": "learn_all_target_locations_v1",
+        "status": "ready",
+        "state_id": "state_ded270fcc37aced8",
+        "source_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260613-225356-882691__observe-screen__google-news.json",
+        "image_size": {
+          "width": 1665,
+          "height": 1216
+        },
+        "target_count": 35,
+        "validated_count": 35,
+        "invalid_count": 0,
+        "overlay": {
+          "contract_version": "learn_target_coordinate_overlay_v1",
+          "status": "ready",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\google-news-1-microsoft-edge__locate-target__google-news__full-window__20260613-225357-548452.png",
+          "output_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\state-ded270fcc37aced8-learn-targets__learn-target-coordinates__20260613-225358-039011.png",
+          "target_count": 35,
+          "valid_count": 35,
+          "invalid_count": 0
+        },
+        "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\state-ded270fcc37aced8-learn-targets__learn-target-coordinates__20260613-225358-039011.png",
+        "targets": [
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_search_bar_acd5773d",
+            "label": "Search bar",
+            "role": "text_input",
+            "bbox": {
+              "x": 373,
+              "y": 99,
+              "w": 314,
+              "h": 39
+            },
+            "click_point": {
+              "x": 530,
+              "y": 118
+            },
+            "section_id": "page_header",
+            "source": "top_level.ui.elements",
+            "confidence": 0.637,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_following_4bfb3135",
+            "label": "Following",
+            "role": "tab",
+            "bbox": {
+              "x": 373,
+              "y": 163,
+              "w": 70,
+              "h": 23
+            },
+            "click_point": {
+              "x": 408,
+              "y": 174
+            },
+            "section_id": "page_header",
+            "source": "top_level.ui.elements",
+            "confidence": 0.7664,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_news_showcase_59f37111",
+            "label": "News Showcase",
+            "role": "tab",
+            "bbox": {
+              "x": 466,
+              "y": 163,
+              "w": 114,
+              "h": 22
+            },
+            "click_point": {
+              "x": 523,
+              "y": 174
+            },
+            "section_id": "page_header",
+            "source": "top_level.ui.elements",
+            "confidence": 0.7665,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_for_you_f4b1c5a7",
+            "label": "For you",
+            "role": "tab",
+            "bbox": {
+              "x": 291,
+              "y": 164,
+              "w": 60,
+              "h": 23
+            },
+            "click_point": {
+              "x": 321,
+              "y": 176
+            },
+            "section_id": "page_header",
+            "source": "top_level.ui.elements",
+            "confidence": 0.7896,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_home_ae1d44a5",
+            "label": "Home",
+            "role": "tab",
+            "bbox": {
+              "x": 223,
+              "y": 166,
+              "w": 45,
+              "h": 18
+            },
+            "click_point": {
+              "x": 246,
+              "y": 175
+            },
+            "section_id": "page_header",
+            "source": "top_level.ui.elements",
+            "confidence": 0.7957,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_new_zealand_tab_44e9f2ed",
+            "label": "New Zealand tab",
+            "role": "tab",
+            "bbox": {
+              "x": 442,
+              "y": 169,
+              "w": 91,
+              "h": 26
+            },
+            "click_point": {
+              "x": 488,
+              "y": 182
+            },
+            "section_id": "page_header",
+            "source": "top_level.ui.elements",
+            "confidence": 0.6305,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_world_tab_0a041c73",
+            "label": "World tab",
+            "role": "tab",
+            "bbox": {
+              "x": 533,
+              "y": 169,
+              "w": 65,
+              "h": 26
+            },
+            "click_point": {
+              "x": 566,
+              "y": 182
+            },
+            "section_id": "page_header",
+            "source": "top_level.ui.elements",
+            "confidence": 0.6305,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_local_tab_605ed313",
+            "label": "Local tab",
+            "role": "tab",
+            "bbox": {
+              "x": 598,
+              "y": 169,
+              "w": 65,
+              "h": 26
+            },
+            "click_point": {
+              "x": 630,
+              "y": 182
+            },
+            "section_id": "page_header",
+            "source": "top_level.ui.elements",
+            "confidence": 0.6305,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_sports_tab_a043210e",
+            "label": "Sports tab",
+            "role": "tab",
+            "bbox": {
+              "x": 924,
+              "y": 169,
+              "w": 52,
+              "h": 26
+            },
+            "click_point": {
+              "x": 950,
+              "y": 182
+            },
+            "section_id": "page_header",
+            "source": "top_level.ui.elements",
+            "confidence": 0.6305,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_science_tab_c3afe2fa",
+            "label": "Science tab",
+            "role": "tab",
+            "bbox": {
+              "x": 976,
+              "y": 169,
+              "w": 52,
+              "h": 26
+            },
+            "click_point": {
+              "x": 1002,
+              "y": 182
+            },
+            "section_id": "page_header",
+            "source": "top_level.ui.elements",
+            "confidence": 0.6305,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_health_tab_b9ade5a0",
+            "label": "Health tab",
+            "role": "tab",
+            "bbox": {
+              "x": 1028,
+              "y": 169,
+              "w": 52,
+              "h": 26
+            },
+            "click_point": {
+              "x": 1054,
+              "y": 182
+            },
+            "section_id": "page_header",
+            "source": "top_level.ui.elements",
+            "confidence": 0.6305,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_1",
+            "label": "Shelley Loader: The real test of reform is whether people still feel",
+            "role": "news_card",
+            "bbox": {
+              "x": 553,
+              "y": 386,
+              "w": 413,
+              "h": 260
+            },
+            "click_point": {
+              "x": 760,
+              "y": 516
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9779,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_8",
+            "label": "Labour slams council reforms",
+            "role": "news_card",
+            "bbox": {
+              "x": 250,
+              "y": 553,
+              "w": 307,
+              "h": 61
+            },
+            "click_point": {
+              "x": 404,
+              "y": 584
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9946,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_15",
+            "label": "New Zealand Warriors return home for NRL clash with Sharks >",
+            "role": "news_card",
+            "bbox": {
+              "x": 251,
+              "y": 729,
+              "w": 655,
+              "h": 271
+            },
+            "click_point": {
+              "x": 578,
+              "y": 864
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9814,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_26",
+            "label": "at the death in tight loss to",
+            "role": "news_card",
+            "bbox": {
+              "x": 251,
+              "y": 998,
+              "w": 280,
+              "h": 48
+            },
+            "click_point": {
+              "x": 391,
+              "y": 1022
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.99,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_27",
+            "label": "LIVE: Warriors vs Sharks - Round 15, 2026",
+            "role": "news_card",
+            "bbox": {
+              "x": 554,
+              "y": 983,
+              "w": 302,
+              "h": 63
+            },
+            "click_point": {
+              "x": 705,
+              "y": 1014
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9944,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_right_sidebar_1",
+            "label": "'We think it's winnable':",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 1020,
+              "y": 352,
+              "w": 210,
+              "h": 300
+            },
+            "click_point": {
+              "x": 1125,
+              "y": 502
+            },
+            "section_id": "right_sidebar",
+            "source": "ocr_card_groups",
+            "confidence": 0.9681,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_right_sidebar_10",
+            "label": "Scoop - New Zealand News",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 1019,
+              "y": 646,
+              "w": 215,
+              "h": 276
+            },
+            "click_point": {
+              "x": 1126,
+              "y": 784
+            },
+            "section_id": "right_sidebar",
+            "source": "ocr_card_groups",
+            "confidence": 0.9775,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_right_sidebar_19",
+            "label": "Models After U.S. Ban on Foreign",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 1022,
+              "y": 890,
+              "w": 278,
+              "h": 77
+            },
+            "click_point": {
+              "x": 1161,
+              "y": 928
+            },
+            "section_id": "right_sidebar",
+            "source": "ocr_card_groups",
+            "confidence": 0.9901,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_lower_content_1",
+            "label": "Why everyone from your local",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 1022,
+              "y": 1034,
+              "w": 255,
+              "h": 130
+            },
+            "click_point": {
+              "x": 1150,
+              "y": 1099
+            },
+            "section_id": "lower_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9984,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_13",
+            "label": "Google News",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 29,
+              "y": 96,
+              "w": 140,
+              "h": 33
+            },
+            "click_point": {
+              "x": 99,
+              "y": 112
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9995,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_15",
+            "label": "Search for topics, locations & sources",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 522,
+              "y": 102,
+              "w": 278,
+              "h": 20
+            },
+            "click_point": {
+              "x": 661,
+              "y": 112
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9851,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_17",
+            "label": "章",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1274,
+              "y": 98,
+              "w": 28,
+              "h": 27
+            },
+            "click_point": {
+              "x": 1288,
+              "y": 112
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.6481,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_18",
+            "label": "11:",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1543,
+              "y": 99,
+              "w": 27,
+              "h": 27
+            },
+            "click_point": {
+              "x": 1556,
+              "y": 112
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.7676,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_19",
+            "label": "李杰",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1589,
+              "y": 104,
+              "w": 32,
+              "h": 19
+            },
+            "click_point": {
+              "x": 1605,
+              "y": 114
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9978,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_20",
+            "label": "翻译为",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 887,
+              "y": 119,
+              "w": 50,
+              "h": 21
+            },
+            "click_point": {
+              "x": 912,
+              "y": 130
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9551,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_21",
+            "label": "中文 (简体)",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 897,
+              "y": 151,
+              "w": 82,
+              "h": 21
+            },
+            "click_point": {
+              "x": 938,
+              "y": 162
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9936,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_26",
+            "label": "New Zealand",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 639,
+              "y": 164,
+              "w": 91,
+              "h": 20
+            },
+            "click_point": {
+              "x": 684,
+              "y": 174
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9951,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_27",
+            "label": "World",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 754,
+              "y": 163,
+              "w": 47,
+              "h": 21
+            },
+            "click_point": {
+              "x": 778,
+              "y": 174
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9989,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_28",
+            "label": "Local",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 826,
+              "y": 165,
+              "w": 42,
+              "h": 18
+            },
+            "click_point": {
+              "x": 847,
+              "y": 174
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9997,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_29",
+            "label": "Sports",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1219,
+              "y": 164,
+              "w": 51,
+              "h": 21
+            },
+            "click_point": {
+              "x": 1244,
+              "y": 174
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9999,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_30",
+            "label": "Science",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1293,
+              "y": 163,
+              "w": 62,
+              "h": 22
+            },
+            "click_point": {
+              "x": 1324,
+              "y": 174
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9975,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_31",
+            "label": "Health",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1379,
+              "y": 165,
+              "w": 49,
+              "h": 18
+            },
+            "click_point": {
+              "x": 1404,
+              "y": 174
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9999,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_65",
+            "label": "See more headlines and perspectives",
+            "role": "button",
+            "bbox": {
+              "x": 516,
+              "y": 685,
+              "w": 256,
+              "h": 21
+            },
+            "click_point": {
+              "x": 644,
+              "y": 696
+            },
+            "section_id": "main_content",
+            "source": "ocr_text_actions",
+            "confidence": 0.9803,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_99",
+            "label": "See more headlines and perspectives",
+            "role": "button",
+            "bbox": {
+              "x": 509,
+              "y": 1128,
+              "w": 263,
+              "h": 21
+            },
+            "click_point": {
+              "x": 640,
+              "y": 1138
+            },
+            "section_id": "lower_content",
+            "source": "ocr_text_actions",
+            "confidence": 0.9929,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          }
+        ]
+      },
+      "coordinate_overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\state-ded270fcc37aced8-learn-targets__learn-target-coordinates__20260613-225358-039011.png",
+      "coordinate_overlay": {
+        "contract_version": "learn_target_coordinate_overlay_v1",
+        "status": "ready",
+        "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\google-news-1-microsoft-edge__locate-target__google-news__full-window__20260613-225357-548452.png",
+        "output_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\state-ded270fcc37aced8-learn-targets__learn-target-coordinates__20260613-225358-039011.png",
+        "target_count": 35,
+        "valid_count": 35,
+        "invalid_count": 0
+      },
+      "learn_locate_model_review": {
+        "contract_version": "learn_locate_model_review_v1",
+        "status": "failed",
+        "error": "local vision endpoint failed after 3 attempt(s): local vision endpoint returned HTTP 400: {\"error\":{\"code\":400,\"message\":\"request (12571 tokens) exceeds the available context size (8192 tokens), try increasing it\",\"type\":\"exceed_context_size_error\",\"n_prompt_tokens\":12571,\"n_ctx\":8192}}",
+        "provider_mode": "local_understanding",
+        "model_io": {
+          "contract_version": "model_io_trace_v1",
+          "status": "failed",
+          "provider": "local",
+          "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\google-news-1-microsoft-edge__locate-target__google-news__full-window__20260613-225357-548452.png",
+          "attempt_count": 3,
+          "attempts": [
+            {
+              "tag": "default",
+              "compact_prompt": false,
+              "max_regions": 8,
+              "requested_max_edge": 1280,
+              "status": "failed",
+              "error": "local vision endpoint returned HTTP 400: {\"error\":{\"code\":400,\"message\":\"request (12669 tokens) exceeds the available context size (8192 tokens), try increasing it\",\"type\":\"exceed_context_size_error\",\"n_prompt_tokens\":12669,\"n_ctx\":8192}}"
+            },
+            {
+              "tag": "compact_retry",
+              "compact_prompt": true,
+              "max_regions": 6,
+              "requested_max_edge": 1024,
+              "status": "failed",
+              "error": "local vision endpoint returned HTTP 400: {\"error\":{\"code\":400,\"message\":\"request (12573 tokens) exceeds the available context size (8192 tokens), try increasing it\",\"type\":\"exceed_context_size_error\",\"n_prompt_tokens\":12573,\"n_ctx\":8192}}"
+            },
+            {
+              "tag": "compact_retry_small",
+              "compact_prompt": true,
+              "max_regions": 5,
+              "requested_max_edge": 896,
+              "status": "failed",
+              "error": "local vision endpoint returned HTTP 400: {\"error\":{\"code\":400,\"message\":\"request (12571 tokens) exceeds the available context size (8192 tokens), try increasing it\",\"type\":\"exceed_context_size_error\",\"n_prompt_tokens\":12571,\"n_ctx\":8192}}"
+            }
+          ]
+        },
+        "fallback": "screen_map_candidate_coordinate_validation"
+      },
+      "learn_locate_path_delta": {
+        "contract_version": "learn_locate_path_calibration_delta_v1",
+        "status": "failed",
+        "summary": {
+          "addition_count": 0,
+          "removal_count": 0,
+          "update_count": 0
+        },
+        "additions": [],
+        "removals": [],
+        "updates": [],
+        "candidate_decisions": []
+      },
+      "path_map_review": {
+        "contract_version": "path_map_review_v1",
+        "status": "ready",
+        "source": "screen_map_v1",
+        "review_source": "learn_locate_deep_calibration",
+        "summary": {
+          "addition_count": 35,
+          "validated_count": 35,
+          "invalid_count": 0,
+          "coordinate_overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\state-ded270fcc37aced8-learn-targets__learn-target-coordinates__20260613-225358-039011.png",
+          "model_addition_count": 0,
+          "model_removal_count": 0,
+          "model_update_count": 0,
+          "removal_count": 0,
+          "update_count": 0,
+          "kept_count": 0
+        },
+        "additions": [
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_search_bar_acd5773d",
+            "label": "Search bar",
+            "role": "text_input",
+            "bbox": {
+              "x": 373,
+              "y": 99,
+              "w": 314,
+              "h": 39
+            },
+            "click_point": {
+              "x": 530,
+              "y": 118
+            },
+            "section_id": "page_header",
+            "source": "top_level.ui.elements",
+            "confidence": 0.637,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_following_4bfb3135",
+            "label": "Following",
+            "role": "tab",
+            "bbox": {
+              "x": 373,
+              "y": 163,
+              "w": 70,
+              "h": 23
+            },
+            "click_point": {
+              "x": 408,
+              "y": 174
+            },
+            "section_id": "page_header",
+            "source": "top_level.ui.elements",
+            "confidence": 0.7664,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_news_showcase_59f37111",
+            "label": "News Showcase",
+            "role": "tab",
+            "bbox": {
+              "x": 466,
+              "y": 163,
+              "w": 114,
+              "h": 22
+            },
+            "click_point": {
+              "x": 523,
+              "y": 174
+            },
+            "section_id": "page_header",
+            "source": "top_level.ui.elements",
+            "confidence": 0.7665,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_for_you_f4b1c5a7",
+            "label": "For you",
+            "role": "tab",
+            "bbox": {
+              "x": 291,
+              "y": 164,
+              "w": 60,
+              "h": 23
+            },
+            "click_point": {
+              "x": 321,
+              "y": 176
+            },
+            "section_id": "page_header",
+            "source": "top_level.ui.elements",
+            "confidence": 0.7896,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_home_ae1d44a5",
+            "label": "Home",
+            "role": "tab",
+            "bbox": {
+              "x": 223,
+              "y": 166,
+              "w": 45,
+              "h": 18
+            },
+            "click_point": {
+              "x": 246,
+              "y": 175
+            },
+            "section_id": "page_header",
+            "source": "top_level.ui.elements",
+            "confidence": 0.7957,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_new_zealand_tab_44e9f2ed",
+            "label": "New Zealand tab",
+            "role": "tab",
+            "bbox": {
+              "x": 442,
+              "y": 169,
+              "w": 91,
+              "h": 26
+            },
+            "click_point": {
+              "x": 488,
+              "y": 182
+            },
+            "section_id": "page_header",
+            "source": "top_level.ui.elements",
+            "confidence": 0.6305,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_world_tab_0a041c73",
+            "label": "World tab",
+            "role": "tab",
+            "bbox": {
+              "x": 533,
+              "y": 169,
+              "w": 65,
+              "h": 26
+            },
+            "click_point": {
+              "x": 566,
+              "y": 182
+            },
+            "section_id": "page_header",
+            "source": "top_level.ui.elements",
+            "confidence": 0.6305,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_local_tab_605ed313",
+            "label": "Local tab",
+            "role": "tab",
+            "bbox": {
+              "x": 598,
+              "y": 169,
+              "w": 65,
+              "h": 26
+            },
+            "click_point": {
+              "x": 630,
+              "y": 182
+            },
+            "section_id": "page_header",
+            "source": "top_level.ui.elements",
+            "confidence": 0.6305,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_sports_tab_a043210e",
+            "label": "Sports tab",
+            "role": "tab",
+            "bbox": {
+              "x": 924,
+              "y": 169,
+              "w": 52,
+              "h": 26
+            },
+            "click_point": {
+              "x": 950,
+              "y": 182
+            },
+            "section_id": "page_header",
+            "source": "top_level.ui.elements",
+            "confidence": 0.6305,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_science_tab_c3afe2fa",
+            "label": "Science tab",
+            "role": "tab",
+            "bbox": {
+              "x": 976,
+              "y": 169,
+              "w": 52,
+              "h": 26
+            },
+            "click_point": {
+              "x": 1002,
+              "y": 182
+            },
+            "section_id": "page_header",
+            "source": "top_level.ui.elements",
+            "confidence": 0.6305,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_health_tab_b9ade5a0",
+            "label": "Health tab",
+            "role": "tab",
+            "bbox": {
+              "x": 1028,
+              "y": 169,
+              "w": 52,
+              "h": 26
+            },
+            "click_point": {
+              "x": 1054,
+              "y": 182
+            },
+            "section_id": "page_header",
+            "source": "top_level.ui.elements",
+            "confidence": 0.6305,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_1",
+            "label": "Shelley Loader: The real test of reform is whether people still feel",
+            "role": "news_card",
+            "bbox": {
+              "x": 553,
+              "y": 386,
+              "w": 413,
+              "h": 260
+            },
+            "click_point": {
+              "x": 760,
+              "y": 516
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9779,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_8",
+            "label": "Labour slams council reforms",
+            "role": "news_card",
+            "bbox": {
+              "x": 250,
+              "y": 553,
+              "w": 307,
+              "h": 61
+            },
+            "click_point": {
+              "x": 404,
+              "y": 584
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9946,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_15",
+            "label": "New Zealand Warriors return home for NRL clash with Sharks >",
+            "role": "news_card",
+            "bbox": {
+              "x": 251,
+              "y": 729,
+              "w": 655,
+              "h": 271
+            },
+            "click_point": {
+              "x": 578,
+              "y": 864
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9814,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_26",
+            "label": "at the death in tight loss to",
+            "role": "news_card",
+            "bbox": {
+              "x": 251,
+              "y": 998,
+              "w": 280,
+              "h": 48
+            },
+            "click_point": {
+              "x": 391,
+              "y": 1022
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.99,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_27",
+            "label": "LIVE: Warriors vs Sharks - Round 15, 2026",
+            "role": "news_card",
+            "bbox": {
+              "x": 554,
+              "y": 983,
+              "w": 302,
+              "h": 63
+            },
+            "click_point": {
+              "x": 705,
+              "y": 1014
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9944,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_right_sidebar_1",
+            "label": "'We think it's winnable':",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 1020,
+              "y": 352,
+              "w": 210,
+              "h": 300
+            },
+            "click_point": {
+              "x": 1125,
+              "y": 502
+            },
+            "section_id": "right_sidebar",
+            "source": "ocr_card_groups",
+            "confidence": 0.9681,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_right_sidebar_10",
+            "label": "Scoop - New Zealand News",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 1019,
+              "y": 646,
+              "w": 215,
+              "h": 276
+            },
+            "click_point": {
+              "x": 1126,
+              "y": 784
+            },
+            "section_id": "right_sidebar",
+            "source": "ocr_card_groups",
+            "confidence": 0.9775,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_right_sidebar_19",
+            "label": "Models After U.S. Ban on Foreign",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 1022,
+              "y": 890,
+              "w": 278,
+              "h": 77
+            },
+            "click_point": {
+              "x": 1161,
+              "y": 928
+            },
+            "section_id": "right_sidebar",
+            "source": "ocr_card_groups",
+            "confidence": 0.9901,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_lower_content_1",
+            "label": "Why everyone from your local",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 1022,
+              "y": 1034,
+              "w": 255,
+              "h": 130
+            },
+            "click_point": {
+              "x": 1150,
+              "y": 1099
+            },
+            "section_id": "lower_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9984,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_13",
+            "label": "Google News",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 29,
+              "y": 96,
+              "w": 140,
+              "h": 33
+            },
+            "click_point": {
+              "x": 99,
+              "y": 112
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9995,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_15",
+            "label": "Search for topics, locations & sources",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 522,
+              "y": 102,
+              "w": 278,
+              "h": 20
+            },
+            "click_point": {
+              "x": 661,
+              "y": 112
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9851,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_17",
+            "label": "章",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1274,
+              "y": 98,
+              "w": 28,
+              "h": 27
+            },
+            "click_point": {
+              "x": 1288,
+              "y": 112
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.6481,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_18",
+            "label": "11:",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1543,
+              "y": 99,
+              "w": 27,
+              "h": 27
+            },
+            "click_point": {
+              "x": 1556,
+              "y": 112
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.7676,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_19",
+            "label": "李杰",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1589,
+              "y": 104,
+              "w": 32,
+              "h": 19
+            },
+            "click_point": {
+              "x": 1605,
+              "y": 114
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9978,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_20",
+            "label": "翻译为",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 887,
+              "y": 119,
+              "w": 50,
+              "h": 21
+            },
+            "click_point": {
+              "x": 912,
+              "y": 130
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9551,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_21",
+            "label": "中文 (简体)",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 897,
+              "y": 151,
+              "w": 82,
+              "h": 21
+            },
+            "click_point": {
+              "x": 938,
+              "y": 162
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9936,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_26",
+            "label": "New Zealand",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 639,
+              "y": 164,
+              "w": 91,
+              "h": 20
+            },
+            "click_point": {
+              "x": 684,
+              "y": 174
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9951,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_27",
+            "label": "World",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 754,
+              "y": 163,
+              "w": 47,
+              "h": 21
+            },
+            "click_point": {
+              "x": 778,
+              "y": 174
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9989,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_28",
+            "label": "Local",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 826,
+              "y": 165,
+              "w": 42,
+              "h": 18
+            },
+            "click_point": {
+              "x": 847,
+              "y": 174
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9997,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_29",
+            "label": "Sports",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1219,
+              "y": 164,
+              "w": 51,
+              "h": 21
+            },
+            "click_point": {
+              "x": 1244,
+              "y": 174
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9999,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_30",
+            "label": "Science",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1293,
+              "y": 163,
+              "w": 62,
+              "h": 22
+            },
+            "click_point": {
+              "x": 1324,
+              "y": 174
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9975,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_31",
+            "label": "Health",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1379,
+              "y": 165,
+              "w": 49,
+              "h": 18
+            },
+            "click_point": {
+              "x": 1404,
+              "y": 174
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9999,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_65",
+            "label": "See more headlines and perspectives",
+            "role": "button",
+            "bbox": {
+              "x": 516,
+              "y": 685,
+              "w": 256,
+              "h": 21
+            },
+            "click_point": {
+              "x": 644,
+              "y": 696
+            },
+            "section_id": "main_content",
+            "source": "ocr_text_actions",
+            "confidence": 0.9803,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_99",
+            "label": "See more headlines and perspectives",
+            "role": "button",
+            "bbox": {
+              "x": 509,
+              "y": 1128,
+              "w": 263,
+              "h": 21
+            },
+            "click_point": {
+              "x": 640,
+              "y": 1138
+            },
+            "section_id": "lower_content",
+            "source": "ocr_text_actions",
+            "confidence": 0.9929,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          }
+        ],
+        "removals": [],
+        "updates": [],
+        "kept": [],
+        "candidate_decisions": [],
+        "model_review": {
+          "contract_version": "learn_locate_model_review_v1",
+          "status": "failed",
+          "error": "local vision endpoint failed after 3 attempt(s): local vision endpoint returned HTTP 400: {\"error\":{\"code\":400,\"message\":\"request (12571 tokens) exceeds the available context size (8192 tokens), try increasing it\",\"type\":\"exceed_context_size_error\",\"n_prompt_tokens\":12571,\"n_ctx\":8192}}",
+          "provider_mode": "local_understanding",
+          "model_io": {
+            "contract_version": "model_io_trace_v1",
+            "status": "failed",
+            "provider": "local",
+            "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\google-news-1-microsoft-edge__locate-target__google-news__full-window__20260613-225357-548452.png",
+            "attempt_count": 3,
+            "attempts": [
+              {
+                "tag": "default",
+                "compact_prompt": false,
+                "max_regions": 8,
+                "requested_max_edge": 1280,
+                "status": "failed",
+                "error": "local vision endpoint returned HTTP 400: {\"error\":{\"code\":400,\"message\":\"request (12669 tokens) exceeds the available context size (8192 tokens), try increasing it\",\"type\":\"exceed_context_size_error\",\"n_prompt_tokens\":12669,\"n_ctx\":8192}}"
+              },
+              {
+                "tag": "compact_retry",
+                "compact_prompt": true,
+                "max_regions": 6,
+                "requested_max_edge": 1024,
+                "status": "failed",
+                "error": "local vision endpoint returned HTTP 400: {\"error\":{\"code\":400,\"message\":\"request (12573 tokens) exceeds the available context size (8192 tokens), try increasing it\",\"type\":\"exceed_context_size_error\",\"n_prompt_tokens\":12573,\"n_ctx\":8192}}"
+              },
+              {
+                "tag": "compact_retry_small",
+                "compact_prompt": true,
+                "max_regions": 5,
+                "requested_max_edge": 896,
+                "status": "failed",
+                "error": "local vision endpoint returned HTTP 400: {\"error\":{\"code\":400,\"message\":\"request (12571 tokens) exceeds the available context size (8192 tokens), try increasing it\",\"type\":\"exceed_context_size_error\",\"n_prompt_tokens\":12571,\"n_ctx\":8192}}"
+              }
+            ]
+          },
+          "fallback": "screen_map_candidate_coordinate_validation"
+        }
+      },
+      "observe_trace_reuse": {
+        "status": "ready",
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260613-225356-882691__observe-screen__google-news.json",
+        "state_id": "state_ded270fcc37aced8",
+        "candidate_count": 35,
+        "anchor_count": 102,
+        "anchor_source": "observe_trace_texts"
+      },
+      "execution_path": {
+        "action_executed": false,
+        "learn_all_targets_used": true,
+        "target_count": 35,
+        "coordinate_source": "screen_map_v1.candidates",
+        "ocr_anchor_reused_from_observe": true,
+        "ocr_anchor_reuse_source": "observe_trace_texts",
+        "ocr_anchor_reuse_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260613-225356-882691__observe-screen__google-news.json",
+        "agent_must_call_for_click": "POST /action/execute_recognition_plan"
+      },
+      "timings": {
+        "contract_version": "runtime_timing_v1",
+        "started_at": "2026-06-13T22:53:56.918705",
+        "ended_at": "2026-06-13T22:53:58.109091",
+        "total_ms": 1189.904,
+        "steps": [
+          {
+            "name": "resolve_image_source",
+            "started_at": "2026-06-13T22:53:56.918705",
+            "capture_live": true,
+            "ended_at": "2026-06-13T22:53:57.586411",
+            "elapsed_ms": 667.184
+          },
+          {
+            "name": "load_observe_trace_reuse",
+            "started_at": "2026-06-13T22:53:57.586411",
+            "has_observe_trace": true,
+            "ended_at": "2026-06-13T22:53:57.591278",
+            "elapsed_ms": 5.492
+          },
+          {
+            "name": "learn_locate_model_review",
+            "started_at": "2026-06-13T22:53:57.591278",
+            "enabled": true,
+            "ended_at": "2026-06-13T22:53:58.038037",
+            "elapsed_ms": 446.579
+          },
+          {
+            "name": "learn_locate_apply_model_review",
+            "started_at": "2026-06-13T22:53:58.038037",
+            "status": "failed",
+            "ended_at": "2026-06-13T22:53:58.038037",
+            "elapsed_ms": 0.019
+          },
+          {
+            "name": "learn_all_targets_from_screen_map",
+            "started_at": "2026-06-13T22:53:58.038037",
+            "candidate_count": 35,
+            "ended_at": "2026-06-13T22:53:58.109091",
+            "elapsed_ms": 70.536
+          }
+        ]
+      },
+      "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260613-225358-109091__locate-target__google-news.json"
+    }
+  },
+  "error": null
+}

@@ -1,0 +1,94 @@
+{
+  "contract_version": "golden_execute_smoke_manifest_v1",
+  "created_at": "2026-06-16T22:08:33+12:00",
+  "scenario": "seek_resume_screening_execute_repeat3",
+  "description": "SEEK-like local resume-screening fixture, two independent agent-style Execute Mode calls repeated three times with real approved-plan execution.",
+  "case_file": "tests/smoke/execute_cases/seek_resume_screening_flow.json",
+  "fixture": "app/web_panel/seek_resume_fixture.html",
+  "command": "uv run python scripts\\execute_smoke_runner.py --case tests\\smoke\\execute_cases\\seek_resume_screening_flow.json --out logs\\smoke\\seek_resume_screening_flow_execute_repeat3_after_sizefix_results.jsonl --timeout 120 --repeat 3 --execute",
+  "runtime_health": "http://127.0.0.1:8000/health returned 200 before execution",
+  "summary": {
+    "repeat_count": 3,
+    "step_count": 6,
+    "passed": 6,
+    "failed": 0,
+    "dry_run_latency_ms": {
+      "min": 2180.521,
+      "max": 2279.396,
+      "average": 2216.56
+    },
+    "execute_latency_ms": {
+      "min": 1749.975,
+      "max": 1769.148,
+      "average": 1756.784
+    },
+    "post_click_verification": "success for all rows",
+    "max_decision_latency_target_ms": 10000
+  },
+  "root_cause_fixed_before_this_golden": {
+    "failure": "approved_plan_window_size_mismatch during repeat 2 before the fix",
+    "cause": "approved_recognition_plan_v1 stored a Windows minimized placeholder bound-window rectangle (-32000, -32000, 160x28) while live_capture.window_size was the real click-coordinate space.",
+    "fix": "approved_recognition_plan_v1 and learned_instruction_v1 now store coordinate_window_size from live capture/image size before falling back to bound-window rect, and reuse validation compares against that click-coordinate space."
+  },
+  "artifacts": {
+    "results_jsonl": "execute_repeat3_results.jsonl",
+    "overlays_dir": "overlays",
+    "note": "Full action traces are not frozen in this golden because timestamps, latency, titles, and model details are intentionally volatile. Source trace paths remain listed for manual audit."
+  },
+  "rows": [
+    {
+      "repeat_index": 1,
+      "case_id": "seek_resume_shortlist_avery",
+      "selected_click_point": {"x": 419, "y": 467},
+      "dry_run_latency_ms": 2279.396,
+      "execute_latency_ms": 1749.975,
+      "source_action_trace": "logs/traces/actions/20260616-220809-310130__execute-mode-click__edge.json",
+      "overlay": "overlays/r1-seek_resume_shortlist_avery__overlay.png"
+    },
+    {
+      "repeat_index": 1,
+      "case_id": "seek_resume_open_next_candidate",
+      "selected_click_point": {"x": 455, "y": 646},
+      "dry_run_latency_ms": 2208.021,
+      "execute_latency_ms": 1769.148,
+      "source_action_trace": "logs/traces/actions/20260616-220813-304097__execute-mode-click__edge.json",
+      "overlay": "overlays/r1-seek_resume_open_next_candidate__overlay.png"
+    },
+    {
+      "repeat_index": 2,
+      "case_id": "seek_resume_shortlist_avery",
+      "selected_click_point": {"x": 434, "y": 466},
+      "dry_run_latency_ms": 2216.854,
+      "execute_latency_ms": 1760.762,
+      "source_action_trace": "logs/traces/actions/20260616-220819-321079__execute-mode-click__edge.json",
+      "overlay": "overlays/r2-seek_resume_shortlist_avery__overlay.png"
+    },
+    {
+      "repeat_index": 2,
+      "case_id": "seek_resume_open_next_candidate",
+      "selected_click_point": {"x": 451, "y": 649},
+      "dry_run_latency_ms": 2233.195,
+      "execute_latency_ms": 1757.471,
+      "source_action_trace": "logs/traces/actions/20260616-220823-326616__execute-mode-click__edge.json",
+      "overlay": "overlays/r2-seek_resume_open_next_candidate__overlay.png"
+    },
+    {
+      "repeat_index": 3,
+      "case_id": "seek_resume_shortlist_avery",
+      "selected_click_point": {"x": 440, "y": 467},
+      "dry_run_latency_ms": 2180.521,
+      "execute_latency_ms": 1750.489,
+      "source_action_trace": "logs/traces/actions/20260616-220829-292250__execute-mode-click__edge.json",
+      "overlay": "overlays/r3-seek_resume_shortlist_avery__overlay.png"
+    },
+    {
+      "repeat_index": 3,
+      "case_id": "seek_resume_open_next_candidate",
+      "selected_click_point": {"x": 428, "y": 646},
+      "dry_run_latency_ms": 2181.372,
+      "execute_latency_ms": 1752.862,
+      "source_action_trace": "logs/traces/actions/20260616-220833-242422__execute-mode-click__edge.json",
+      "overlay": "overlays/r3-seek_resume_open_next_candidate__overlay.png"
+    }
+  ]
+}

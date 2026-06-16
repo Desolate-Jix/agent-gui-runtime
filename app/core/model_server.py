@@ -12,10 +12,10 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 MODEL_PROFILE_DIR = ROOT_DIR / "configs" / "model_profiles"
 
 STAGE_PROFILE_IDS = {
-    "observe": "qwen3_vl_8b_q4_k_m",
-    "understanding": "qwen3_vl_8b_q4_k_m",
-    "locate": "qwen3_6_iq4_xs",
-    "grounding": "qwen3_6_iq4_xs",
+    "observe": "qwen3_vl_4b_q4_k_m",
+    "understanding": "qwen3_vl_4b_q4_k_m",
+    "locate": "vista_4b_transformers",
+    "grounding": "vista_4b_transformers",
 }
 
 
@@ -57,6 +57,22 @@ def model_base_url(profile: dict[str, Any]) -> str:
 
 def check_model_server(profile: dict[str, Any], *, timeout: float = 1.0) -> dict[str, Any]:
     base_url = model_base_url(profile)
+    health_payload: dict[str, Any] | None = None
+    if _profile_supports_health_status(profile):
+        health_request = urllib.request.Request(f"{base_url}/health", headers={"Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(health_request, timeout=timeout) as response:
+                health_payload = json.loads(response.read().decode("utf-8"))
+            health_status = str(health_payload.get("status") or "").casefold()
+            if health_status == "busy":
+                return {
+                    "status": "busy",
+                    "base_url": base_url,
+                    "health": health_payload,
+                    "model_id": str(health_payload.get("model") or "") or None,
+                }
+        except Exception:
+            health_payload = None
     request = urllib.request.Request(f"{base_url}/models", headers={"Accept": "application/json"})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -65,6 +81,7 @@ def check_model_server(profile: dict[str, Any], *, timeout: float = 1.0) -> dict
             "status": "running",
             "base_url": base_url,
             "response": payload,
+            "health": health_payload,
             "model_id": _model_id(payload),
         }
     except urllib.error.HTTPError as exc:
@@ -85,7 +102,7 @@ def ensure_model_server(
 ) -> dict[str, Any]:
     profile = profile_for_stage(stage, profile_id)
     before = check_model_server(profile)
-    if before["status"] in {"running", "loading"}:
+    if before["status"] in {"running", "loading", "busy"}:
         result = {"stage": stage, "profile": _public_profile(profile), "before": before, "started": False}
         if wait_until_ready and before["status"] == "loading":
             result["after"] = wait_for_model_server(profile, wait_seconds=wait_seconds)
@@ -105,6 +122,9 @@ def ensure_model_server(
 
 
 def start_model_server(profile: dict[str, Any]) -> dict[str, Any]:
+    if profile.get("launchable") is False:
+        profile_id = str(profile.get("profile_id") or "unknown")
+        raise ValueError(f"Model profile is not launchable: {profile_id}")
     script = _resolve_path(str(profile.get("start_script") or "scripts/model_servers/start_llama_vision_server.ps1"))
     if not script.exists():
         raise FileNotFoundError(f"Model start script not found: {script}")
@@ -123,10 +143,16 @@ def start_model_server(profile: dict[str, Any]) -> dict[str, Any]:
         ("model_path", "-ModelPath"),
         ("mmproj_path", "-MmprojPath"),
         ("server_path", "-ServerPath"),
+        ("model_name", "-ModelName"),
+        ("host", "-Host"),
         ("port", "-Port"),
         ("context_size", "-ContextSize"),
         ("gpu_layers", "-GpuLayers"),
         ("image_min_tokens", "-ImageMinTokens"),
+        ("chat_template", "-ChatTemplate"),
+        ("device", "-Device"),
+        ("dtype", "-DType"),
+        ("max_new_tokens", "-MaxNewTokens"),
     ]:
         value = profile.get(key)
         if value not in (None, ""):
@@ -147,6 +173,11 @@ def start_model_server(profile: dict[str, Any]) -> dict[str, Any]:
         stderr=subprocess.STDOUT,
         creationflags=creationflags,
     )
+    time.sleep(float(profile.get("startup_exit_check_seconds") or 0.75))
+    returncode = process.poll()
+    if returncode is not None:
+        log_file.close()
+        raise RuntimeError(f"Model start script exited immediately with code {returncode}; see log: {log_path}")
     pid_path = _profile_pid_path(profile)
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     pid_path.write_text(str(process.pid), encoding="utf-8")
@@ -203,6 +234,10 @@ def wait_for_model_server(profile: dict[str, Any], *, wait_seconds: float) -> di
         time.sleep(1.0)
         last = check_model_server(profile)
     return last
+
+
+def _profile_supports_health_status(profile: dict[str, Any]) -> bool:
+    return str(profile.get("runtime") or "").casefold() == "transformers" or str(profile.get("output_contract") or "").casefold() == "vista_point_v1"
 
 
 def _resolve_path(path: str) -> Path:

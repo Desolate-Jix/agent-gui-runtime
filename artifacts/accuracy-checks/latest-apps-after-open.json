@@ -1,0 +1,138 @@
+{
+  "success": true,
+  "message": "Apps listed",
+  "data": {
+    "contract_version": "app_discovery_v1",
+    "catalog": {
+      "contract_version": "app_catalog_v1",
+      "apps": [
+        {
+          "app_id": "edge",
+          "name": "Microsoft Edge",
+          "description": "Web browser for website and web-app tasks.",
+          "launch_command": [
+            "msedge.exe"
+          ],
+          "executable_candidates": [
+            "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+            "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"
+          ],
+          "process_name": "msedge.exe",
+          "title_hint": "Microsoft Edge",
+          "capabilities": [
+            "open_url",
+            "web_navigation",
+            "web_forms",
+            "browser_ui"
+          ]
+        },
+        {
+          "app_id": "chrome",
+          "name": "Google Chrome",
+          "description": "Chrome browser for website and web-app tasks.",
+          "launch_command": [
+            "chrome.exe"
+          ],
+          "executable_candidates": [
+            "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+            "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+            "%LOCALAPPDATA%\\Google\\Chrome\\Application\\chrome.exe"
+          ],
+          "process_name": "chrome.exe",
+          "title_hint": "Google Chrome",
+          "capabilities": [
+            "open_url",
+            "web_navigation",
+            "web_forms",
+            "browser_ui"
+          ]
+        },
+        {
+          "app_id": "notepad",
+          "name": "Notepad",
+          "description": "Plain text editor for simple local text editing tasks.",
+          "launch_command": [
+            "notepad.exe"
+          ],
+          "process_name": "notepad.exe",
+          "title_hint": "Notepad",
+          "capabilities": [
+            "text_editing",
+            "file_text_review"
+          ]
+        }
+      ]
+    },
+    "running_windows": [
+      {
+        "handle": 66318,
+        "title": "NVIDIA GeForce Overlay DT",
+        "process_id": 12864,
+        "process_name": "NVIDIA Overlay.exe"
+      },
+      {
+        "handle": 1313696,
+        "title": "Google News 和另外 1 个页面 - 个人 - Microsoft​ Edge",
+        "process_id": 34180,
+        "process_name": "msedge.exe"
+      },
+      {
+        "handle": 920340,
+        "title": "Codex",
+        "process_id": 32872,
+        "process_name": "Codex.exe"
+      },
+      {
+        "handle": 394628,
+        "title": "好友列表",
+        "process_id": 11480,
+        "process_name": "steamwebhelper.exe"
+      },
+      {
+        "handle": 131512,
+        "title": "Microsoft Text Input Application",
+        "process_id": 13348,
+        "process_name": "TextInputHost.exe"
+      },
+      {
+        "handle": 131950,
+        "title": "设置",
+        "process_id": 10636,
+        "process_name": "ApplicationFrameHost.exe"
+      },
+      {
+        "handle": 197336,
+        "title": "NVIDIA GeForce Overlay",
+        "process_id": 12864,
+        "process_name": "NVIDIA Overlay.exe"
+      },
+      {
+        "handle": 263590,
+        "title": "Steam",
+        "process_id": 11480,
+        "process_name": "steamwebhelper.exe"
+      },
+      {
+        "handle": 1115118,
+        "title": "MuMu安卓设备",
+        "process_id": 15380,
+        "process_name": "MuMuNxDevice.exe"
+      },
+      {
+        "handle": 132160,
+        "title": "Program Manager",
+        "process_id": 8836,
+        "process_name": "explorer.exe"
+      }
+    ],
+    "bound_window": null,
+    "window_status": "ok",
+    "agent_next_steps": [
+      "Choose an app from catalog.apps or a visible running window.",
+      "Open a catalog app with POST /apps/open when needed.",
+      "Bind an existing window with POST /session/bind_window when already running.",
+      "Call POST /vision/observe_screen to understand the current screen before precise localization."
+    ]
+  },
+  "error": null
+}

@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from loguru import logger
 
 from app.core.window_manager import BoundWindow, window_manager
-from app.models.request import BindWindowRequest
+from app.models.request import BindWindowRequest, ResizeBoundWindowRequest
 from app.models.response import APIResponse, ErrorModel, SessionData, WindowRectModel
 
 router = APIRouter(prefix="/session", tags=["session"])
@@ -72,4 +72,37 @@ def bind_window(request: BindWindowRequest) -> APIResponse:
             message="Failed to bind window",
             data={"candidates": candidates},
             error=ErrorModel(code="bind_window_failed", details=str(exc)),
+        )
+
+
+@router.post("/resize_bound_window", response_model=APIResponse)
+def resize_bound_window(request: ResizeBoundWindowRequest) -> APIResponse:
+    """Resize the currently bound target window for stability and drift testing."""
+    try:
+        before = window_manager.get_bound_window()
+        resized = window_manager.resize_bound_window(
+            width=request.width,
+            height=request.height,
+            left=request.left,
+            top=request.top,
+            focus=request.focus,
+        )
+        return APIResponse(
+            success=True,
+            message="Bound window resized",
+            data={
+                "contract_version": "bound_window_resize_v1",
+                "requested": request.model_dump(),
+                "before": _to_session_data(before).model_dump() if before is not None else None,
+                "after": _to_session_data(resized).model_dump(),
+            },
+            error=None,
+        )
+    except Exception as exc:
+        logger.warning("Failed to resize bound window: {}", exc)
+        return APIResponse(
+            success=False,
+            message="Failed to resize bound window",
+            data={"requested": request.model_dump()},
+            error=ErrorModel(code="window_resize_failed", details=str(exc)),
         )

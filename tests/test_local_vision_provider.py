@@ -79,6 +79,14 @@ def test_local_provider_calls_openai_compatible_vision_endpoint(tmp_path, monkey
     assert result.raw_text is not None
     assert result.raw_response is not None
     assert result.raw_response["attempts"][0]["status"] == "success"
+    assert result.raw_response["contract_version"] == "provider_model_trace_v1"
+    assert result.raw_response["raw_text"] == result.raw_text
+    attempt_io = result.raw_response["attempts"][0]["model_io"]
+    assert attempt_io["contract_version"] == "model_io_attempt_v1"
+    assert attempt_io["input"]["prompt"]
+    assert attempt_io["input"]["image_path"] == str(image_path)
+    assert attempt_io["output"]["raw_text"] == result.raw_text
+    assert attempt_io["output"]["parsed_model_json"]["screen_summary"] == "demo screen"
 
 
 def test_local_provider_caps_fast_screen_understanding_output(tmp_path, monkeypatch) -> None:
@@ -87,7 +95,7 @@ def test_local_provider_caps_fast_screen_understanding_output(tmp_path, monkeypa
 
     def fake_urlopen(request, timeout):
         body = json.loads(request.data.decode("utf-8"))
-        assert body["max_tokens"] == 1024
+        assert body["max_tokens"] == 2048
         prompt = body["messages"][1]["content"][0]["text"]
         assert "fast screen-understanding stage" in prompt
         assert "do not emit ocr_text" in prompt
@@ -369,8 +377,36 @@ def test_local_provider_retries_with_compact_prompt_after_truncated_json(tmp_pat
     assert result.screen_summary == "retry demo"
     assert len(result.raw_response["attempts"]) == 2
     assert result.raw_response["attempts"][0]["status"] == "failed"
+    assert result.raw_response["attempts"][0]["model_io"]["output"]["raw_text"] == "{\"regions\": ["
     assert result.raw_response["attempts"][1]["status"] == "success"
+    assert result.raw_response["attempts"][1]["model_io"]["status"] == "success"
     assert "provider_retry_count=1" in result.notes
+
+
+def test_local_provider_failure_keeps_model_io_diagnostics(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "bad-json.png"
+    Image.new("RGB", (200, 120), color=(255, 255, 255)).save(image_path)
+
+    def fake_urlopen(request, timeout):
+        return _FakeHTTPResponse({"choices": [{"message": {"content": "not json at all"}}]})
+
+    monkeypatch.setattr("app.vision.local_provider.urlopen", fake_urlopen)
+
+    provider = LocalVisionProvider(endpoint="http://127.0.0.1:1234/v1/chat/completions", timeout_seconds=12)
+    try:
+        provider.analyze(VisionAnalyzeRequest(image_path=str(image_path), task="observe_screen"))
+    except RuntimeError as exc:
+        diagnostics = getattr(exc, "diagnostics", {})
+    else:
+        raise AssertionError("expected invalid model JSON to fail")
+
+    assert diagnostics["contract_version"] == "model_io_trace_v1"
+    assert diagnostics["status"] == "failed"
+    assert diagnostics["attempt_count"] == 2
+    first_attempt = diagnostics["attempts"][0]
+    assert first_attempt["status"] == "failed"
+    assert first_attempt["model_io"]["input"]["prompt"]
+    assert first_attempt["model_io"]["output"]["raw_text"] == "not json at all"
 
 
 def test_local_provider_repairs_inner_quotes_in_json_strings(tmp_path, monkeypatch) -> None:
@@ -405,6 +441,116 @@ def test_local_provider_repairs_inner_quotes_in_json_strings(tmp_path, monkeypat
     assert result.screen_summary == 'news card with "quoted" title'
     assert "json_repair=escaped_inner_string_quotes" in result.notes
     assert result.raw_response["attempts"][0]["status"] == "success"
+
+
+def test_local_provider_repairs_missing_commas_between_json_fields(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "missing-comma-screen.png"
+    Image.new("RGB", (200, 120), color=(255, 255, 255)).save(image_path)
+
+    def fake_urlopen(request, timeout):
+        return _FakeHTTPResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{\n'
+                                '  "screen_summary": "google news page"\n'
+                                '  "state_guess": "news_home",\n'
+                                '  "regions": [],\n'
+                                '  "targets": [],\n'
+                                '  "observers": []\n'
+                                '}'
+                            )
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("app.vision.local_provider.urlopen", fake_urlopen)
+
+    result = LocalVisionProvider(endpoint="http://127.0.0.1:1234/v1/chat/completions", timeout_seconds=12).analyze(
+        VisionAnalyzeRequest(image_path=str(image_path), task="observe_screen")
+    )
+
+    assert result.screen_summary == "google news page"
+    assert result.state_guess == "news_home"
+    assert "json_repair=inserted_missing_commas_before_keys" in result.notes
+
+
+def test_local_provider_repairs_trailing_commas_and_raw_string_newlines(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "trailing-comma-screen.png"
+    Image.new("RGB", (200, 120), color=(255, 255, 255)).save(image_path)
+
+    def fake_urlopen(request, timeout):
+        return _FakeHTTPResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{\n'
+                                '  "screen_summary": "line one\nline two",\n'
+                                '  "state_guess": "news_home",\n'
+                                '  "regions": [],\n'
+                                '  "targets": [],\n'
+                                '  "observers": [],\n'
+                                '}'
+                            )
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("app.vision.local_provider.urlopen", fake_urlopen)
+
+    result = LocalVisionProvider(endpoint="http://127.0.0.1:1234/v1/chat/completions", timeout_seconds=12).analyze(
+        VisionAnalyzeRequest(image_path=str(image_path), task="observe_screen")
+    )
+
+    assert result.screen_summary == "line one\nline two"
+    assert "json_repair=removed_trailing_commas" in result.notes
+    assert "json_repair=escaped_raw_string_newlines" in result.notes
+
+
+def test_local_provider_repairs_truncated_regions_payload(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "truncated-screen.png"
+    Image.new("RGB", (200, 120), color=(255, 255, 255)).save(image_path)
+
+    def fake_urlopen(request, timeout):
+        return _FakeHTTPResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{\n'
+                                '  "contract_version": "vision_regions_v1",\n'
+                                '  "image_size": {"width": 200, "height": 120},\n'
+                                '  "screen_summary": "google news page",\n'
+                                '  "state_guess": "news_home",\n'
+                                '  "regions": [\n'
+                                '    {"region_id": "c1", "label": "Search", "role": "input", "diagonal": {"x1": 10, "y1": 10, "x2": 100, "y2": 30}, "description": "search", "confidence": 0.9},\n'
+                                '    {"region_id": "c2", "label": "Menu", "role": "button", "diagonal": {"x1": 120, "y1": 10, "x2": 150, "y2": 30}, "description": "open menu", "confidence": 0.'
+                            )
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("app.vision.local_provider.urlopen", fake_urlopen)
+
+    result = LocalVisionProvider(endpoint="http://127.0.0.1:1234/v1/chat/completions", timeout_seconds=12).analyze(
+        VisionAnalyzeRequest(image_path=str(image_path), task="observe_screen")
+    )
+
+    assert result.screen_summary == "google news page"
+    assert len(result.regions) == 1
+    assert result.regions[0].label == "Search"
+    assert "json_repair=closed_truncated_regions_payload" in result.notes
 
 
 def test_local_provider_can_use_grid_overlay_reference(tmp_path, monkeypatch) -> None:

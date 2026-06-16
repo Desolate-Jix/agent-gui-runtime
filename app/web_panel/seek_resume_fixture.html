@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SEEK Resume Screening Fixture</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: #eef2f7;
+      color: #172033;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #eef2f7;
+    }
+    header {
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 32px;
+      background: #ffffff;
+      border-bottom: 1px solid #d9e1ec;
+    }
+    .brand {
+      font-size: 20px;
+      font-weight: 700;
+      color: #163a6b;
+    }
+    .status {
+      font-size: 14px;
+      color: #50627a;
+    }
+    main {
+      max-width: 1180px;
+      margin: 28px auto;
+      padding: 0 28px 40px;
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr) 300px;
+      gap: 20px;
+    }
+    aside,
+    section {
+      background: #ffffff;
+      border: 1px solid #d9e1ec;
+      border-radius: 8px;
+    }
+    aside {
+      padding: 18px;
+    }
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+    h1 {
+      font-size: 24px;
+      margin-bottom: 8px;
+    }
+    h2 {
+      font-size: 16px;
+      margin-bottom: 14px;
+    }
+    .filter {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid #edf1f6;
+      font-size: 14px;
+    }
+    .candidate-panel {
+      padding: 22px;
+    }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .search {
+      min-width: 280px;
+      height: 38px;
+      border: 1px solid #c8d3e2;
+      border-radius: 6px;
+      padding: 0 12px;
+      font-size: 14px;
+    }
+    .candidate-card {
+      border: 2px solid #1b6fd6;
+      border-radius: 8px;
+      padding: 18px;
+      background: #f8fbff;
+      margin-bottom: 16px;
+    }
+    .candidate-card.secondary {
+      border-color: #d5dee9;
+      background: #ffffff;
+    }
+    .candidate-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .name {
+      font-size: 22px;
+      font-weight: 700;
+    }
+    .role {
+      margin-top: 6px;
+      color: #465a73;
+      font-size: 15px;
+    }
+    .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    .tag {
+      background: #e8f1ff;
+      border: 1px solid #c9dcfb;
+      color: #194b85;
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 13px;
+    }
+    .actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 22px;
+    }
+    button {
+      height: 46px;
+      min-width: 150px;
+      border-radius: 6px;
+      border: 1px solid #b9c8da;
+      background: #ffffff;
+      color: #172033;
+      font-size: 15px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    button.primary {
+      background: #0b66d8;
+      border-color: #0b66d8;
+      color: white;
+    }
+    button.success {
+      background: #137a3a;
+      border-color: #137a3a;
+      color: white;
+    }
+    button:focus {
+      outline: 3px solid #9cc4ff;
+      outline-offset: 2px;
+    }
+    .notes {
+      padding: 18px;
+    }
+    .notes p {
+      line-height: 1.5;
+      color: #465a73;
+      margin-bottom: 12px;
+      font-size: 14px;
+    }
+    .activity {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 6px;
+      background: #f4f7fb;
+      color: #34465e;
+      font-size: 14px;
+      min-height: 42px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">SEEK Talent Search</div>
+    <div class="status" id="headerStatus">Review queue: Software Engineer applicants</div>
+  </header>
+  <main>
+    <aside aria-label="Filters">
+      <h2>Screening filters</h2>
+      <div class="filter"><span>Location</span><strong>Auckland</strong></div>
+      <div class="filter"><span>Experience</span><strong>3+ years</strong></div>
+      <div class="filter"><span>Visa</span><strong>Work rights</strong></div>
+      <div class="filter"><span>Availability</span><strong>2 weeks</strong></div>
+    </aside>
+    <section class="candidate-panel" aria-label="Candidate review">
+      <div class="toolbar">
+        <div>
+          <h1>Resume screening</h1>
+          <p class="status" id="stepStatus">Step 1: review Avery Chen</p>
+        </div>
+        <input class="search" aria-label="Search candidates" value="frontend react engineer">
+      </div>
+      <article class="candidate-card" id="primaryCandidate">
+        <div class="candidate-head">
+          <div>
+            <div class="name">Avery Chen</div>
+            <div class="role">Frontend Engineer · React · TypeScript · Accessibility</div>
+          </div>
+          <strong id="candidateState">New</strong>
+        </div>
+        <div class="tags">
+          <span class="tag">React</span>
+          <span class="tag">TypeScript</span>
+          <span class="tag">Design systems</span>
+          <span class="tag">5 years</span>
+        </div>
+        <div class="actions">
+          <button class="primary" id="shortlistBtn">Shortlist Avery Chen</button>
+          <button id="holdBtn">Put on Hold</button>
+          <button id="rejectBtn">Reject</button>
+        </div>
+      </article>
+      <article class="candidate-card secondary" id="secondaryCandidate">
+        <div class="candidate-head">
+          <div>
+            <div class="name">Mika Patel</div>
+            <div class="role">Full Stack Engineer · Node.js · AWS · Testing</div>
+          </div>
+          <strong>Queued</strong>
+        </div>
+        <div class="actions">
+          <button id="nextBtn">Open Next Candidate</button>
+        </div>
+      </article>
+    </section>
+    <section class="notes" aria-label="Screening details">
+      <h2>Screening notes</h2>
+      <p>Use Shortlist for a candidate who matches the role requirements.</p>
+      <p>Open Next Candidate after the current review decision is recorded.</p>
+      <div class="activity" id="activityLog">No action recorded yet.</div>
+    </section>
+  </main>
+  <script>
+    const shortlistBtn = document.getElementById("shortlistBtn");
+    const nextBtn = document.getElementById("nextBtn");
+    const candidateState = document.getElementById("candidateState");
+    const stepStatus = document.getElementById("stepStatus");
+    const headerStatus = document.getElementById("headerStatus");
+    const activityLog = document.getElementById("activityLog");
+
+    shortlistBtn.addEventListener("click", () => {
+      shortlistBtn.textContent = "Shortlisted";
+      shortlistBtn.className = "success";
+      candidateState.textContent = "Shortlisted";
+      stepStatus.textContent = "Step 2: open the next candidate";
+      activityLog.textContent = "Avery Chen was shortlisted for recruiter review.";
+      headerStatus.textContent = "Review queue: Avery shortlisted";
+    });
+
+    nextBtn.addEventListener("click", () => {
+      document.getElementById("primaryCandidate").classList.add("secondary");
+      document.getElementById("secondaryCandidate").classList.remove("secondary");
+      stepStatus.textContent = "Step 3: review Mika Patel";
+      activityLog.textContent = "Mika Patel candidate profile is now open.";
+      headerStatus.textContent = "Review queue: Mika Patel active";
+    });
+  </script>
+</body>
+</html>

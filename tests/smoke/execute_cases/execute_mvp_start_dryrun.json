@@ -1,0 +1,27 @@
+{
+  "id": "execute_mvp_start_dryrun",
+  "app": {
+    "app_name": "edge",
+    "window_title_contains": "Execute MVP Test"
+  },
+  "goal": "Click Start",
+  "mode": {
+    "dry_run_default": true,
+    "destructive": false
+  },
+  "expect": {
+    "action_type": "click",
+    "allow": true,
+    "max_attempt_count": 2,
+    "max_latency_ms": 5000,
+    "point_in_rect": {
+      "min_x": 340,
+      "max_x": 545,
+      "min_y": 705,
+      "max_y": 850
+    },
+    "post_click": {
+      "required": false
+    }
+  }
+}

@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from app.api import action as action_api
-from app.models.request import ClickTextRequest, ROIModel, TypeTextRequest
+from app.models.request import ClickTextRequest, ROIModel, ScrollRequest, TypeTextRequest
 from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
 
 
@@ -159,6 +159,73 @@ def test_type_text_dry_run_does_not_dispatch(monkeypatch) -> None:
     assert response.success is True
     assert response.data["result"]["dry_run"] is True
     assert response.data["result"]["execution_path"]["action_executed"] is False
+
+
+def test_scroll_dry_run_validates_without_dispatch(monkeypatch) -> None:
+    monkeypatch.setattr(
+        action_api.window_manager,
+        "get_bound_window",
+        lambda: SimpleNamespace(
+            handle=1,
+            title="Demo",
+            rect=SimpleNamespace(left=0, top=0, right=800, bottom=600),
+        ),
+    )
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/scroll-dry-run.json")
+    monkeypatch.setattr(
+        action_api.input_controller,
+        "scroll_window",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("dry run should not scroll")),
+    )
+
+    response = action_api.scroll(ScrollRequest(direction="down", wheel_clicks=3, dry_run=True))
+
+    assert response.success is True
+    result = response.data["result"]
+    assert result["contract_version"] == "scroll_action_v1"
+    assert result["point"] == {"x": 400, "y": 300}
+    assert result["execution_path"]["action_executed"] is False
+    assert result["trace_path"].endswith("scroll-dry-run.json")
+
+
+def test_scroll_dispatches_and_verifies(monkeypatch) -> None:
+    monkeypatch.setattr(
+        action_api.window_manager,
+        "get_bound_window",
+        lambda: SimpleNamespace(
+            handle=1,
+            title="Demo",
+            rect=SimpleNamespace(left=0, top=0, right=800, bottom=600),
+        ),
+    )
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/scroll.json")
+    monkeypatch.setattr(action_api.verifier, "capture_pre_action_state", lambda action_name=None: {"image_path": "before.png"})
+    monkeypatch.setattr(
+        action_api.verifier,
+        "verify_action",
+        lambda *args, **kwargs: {
+            "verified": True,
+            "before": {"image_path": "before.png"},
+            "after": {"image_path": "after.png"},
+            "diff": {"diff_image_path": "diff.png", "changed": True},
+        },
+    )
+    scrolled: dict[str, object] = {}
+
+    def fake_scroll_window(**kwargs):
+        scrolled.update(kwargs)
+        return {"scrolled": True, "direction": kwargs["direction"], "wheel_clicks": kwargs["wheel_clicks"]}
+
+    monkeypatch.setattr(action_api.input_controller, "scroll_window", fake_scroll_window)
+
+    response = action_api.scroll(ScrollRequest(direction="up", wheel_clicks=2, x=40, y=50))
+
+    assert response.success is True
+    assert scrolled == {"direction": "up", "wheel_clicks": 2, "x": 40, "y": 50, "settle_ms": 100}
+    result = response.data["result"]
+    assert result["execution_path"]["action_executed"] is True
+    assert result["post_scroll_verification"]["verified"] is True
+    assert result["trace_path"].endswith("scroll.json")
 
 
 def test_click_text_retries_next_candidate_when_validation_fails(monkeypatch) -> None:

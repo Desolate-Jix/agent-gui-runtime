@@ -1,0 +1,1176 @@
+{
+  "contract_version": "understanding_model_benchmark_v1",
+  "cases_path": "configs/understanding_model_benchmark_cases.json",
+  "profiles": [
+    "qwen3_vl_8b_q4_k_m",
+    "qwen3_vl_4b_q4_k_m",
+    "minicpm_v_4_6_transformers"
+  ],
+  "summary": [
+    {
+      "profile_id": "qwen3_vl_8b_q4_k_m",
+      "success_count": 3,
+      "case_count": 3,
+      "avg_case_ms": 3831.659,
+      "avg_recall": 0.8333,
+      "load_ms": 3775.07
+    },
+    {
+      "profile_id": "qwen3_vl_4b_q4_k_m",
+      "success_count": 3,
+      "case_count": 3,
+      "avg_case_ms": 2273.069,
+      "avg_recall": 0.9167,
+      "load_ms": 3763.544
+    },
+    {
+      "profile_id": "minicpm_v_4_6_transformers",
+      "success_count": 3,
+      "case_count": 3,
+      "avg_case_ms": 4949.515,
+      "avg_recall": 0.8333,
+      "load_ms": 4841.857
+    }
+  ],
+  "results": [
+    {
+      "profile_id": "qwen3_vl_8b_q4_k_m",
+      "label": "Qwen3-VL 8B Q4_K_M",
+      "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+      "endpoint": "http://127.0.0.1:1240/v1/chat/completions",
+      "ensure_model_server": {
+        "stage": "observe",
+        "profile": {
+          "profile_id": "qwen3_vl_8b_q4_k_m",
+          "label": "Qwen3-VL 8B Q4_K_M",
+          "role": [
+            "understanding"
+          ],
+          "provider_mode": "local_understanding",
+          "input_format": "openai_compatible_vision",
+          "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+          "model_path": "models/qwen3-vl-8b-instruct-q4_k_m-gguf/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+          "mmproj_path": "models/qwen3-vl-8b-instruct-q4_k_m-gguf/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf",
+          "server_path": "tools/llama.cpp-b8892-cuda13/llama-server.exe",
+          "endpoint": "http://127.0.0.1:1240/v1/chat/completions",
+          "start_script": "scripts/model_servers/start_llama_vision_server.ps1",
+          "stop_script": "scripts/model_servers/stop_local_vision_server.ps1",
+          "pid_file": "logs/qwen3-vl-8b-q4_k_m-server.pid",
+          "port": 1240,
+          "context_size": 8192,
+          "gpu_layers": 99,
+          "image_min_tokens": 1024,
+          "supports_ocr_anchors": true,
+          "launchable": true,
+          "best_for": "Faster whole-screen UI understanding before precise grounding.",
+          "limitations": "Use as a planning and screen-understanding model; keep Qwen3.6 for final precise localization."
+        },
+        "before": {
+          "status": "unreachable",
+          "base_url": "http://127.0.0.1:1240/v1",
+          "error": "<urlopen error timed out>"
+        },
+        "started": true,
+        "start": {
+          "pid": 12504,
+          "command": [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            "D:\\agent-gui-runtime\\scripts\\model_servers\\start_llama_vision_server.ps1",
+            "-ModelPath",
+            "D:\\agent-gui-runtime\\models\\qwen3-vl-8b-instruct-q4_k_m-gguf\\Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            "-MmprojPath",
+            "D:\\agent-gui-runtime\\models\\qwen3-vl-8b-instruct-q4_k_m-gguf\\mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf",
+            "-ServerPath",
+            "D:\\agent-gui-runtime\\tools\\llama.cpp-b8892-cuda13\\llama-server.exe",
+            "-ModelName",
+            "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            "-Port",
+            "1240",
+            "-ContextSize",
+            "8192",
+            "-GpuLayers",
+            "99",
+            "-ImageMinTokens",
+            "1024"
+          ],
+          "log_path": "D:\\agent-gui-runtime\\logs\\local-vision-server-qwen3_vl_8b_q4_k_m-20260616-181340.log",
+          "pid_path": "D:\\agent-gui-runtime\\logs\\qwen3-vl-8b-q4_k_m-server.pid"
+        },
+        "after": {
+          "status": "running",
+          "base_url": "http://127.0.0.1:1240/v1",
+          "response": {
+            "models": [
+              {
+                "name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                "model": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                "modified_at": "",
+                "size": "",
+                "digest": "",
+                "type": "model",
+                "description": "",
+                "tags": [
+                  ""
+                ],
+                "capabilities": [
+                  "completion",
+                  "multimodal"
+                ],
+                "parameters": "",
+                "details": {
+                  "parent_model": "",
+                  "format": "gguf",
+                  "family": "",
+                  "families": [
+                    ""
+                  ],
+                  "parameter_size": "",
+                  "quantization_level": ""
+                }
+              }
+            ],
+            "object": "list",
+            "data": [
+              {
+                "id": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                "aliases": [],
+                "tags": [],
+                "object": "model",
+                "created": 1781590423,
+                "owned_by": "llamacpp",
+                "meta": {
+                  "vocab_type": 2,
+                  "n_vocab": 151936,
+                  "n_ctx_train": 262144,
+                  "n_embd": 4096,
+                  "n_params": 8190735360,
+                  "size": 5021827072
+                }
+              }
+            ]
+          },
+          "health": null,
+          "model_id": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+        }
+      },
+      "server_status": {
+        "status": "running",
+        "base_url": "http://127.0.0.1:1240/v1",
+        "response": {
+          "models": [
+            {
+              "name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+              "model": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+              "modified_at": "",
+              "size": "",
+              "digest": "",
+              "type": "model",
+              "description": "",
+              "tags": [
+                ""
+              ],
+              "capabilities": [
+                "completion",
+                "multimodal"
+              ],
+              "parameters": "",
+              "details": {
+                "parent_model": "",
+                "format": "gguf",
+                "family": "",
+                "families": [
+                  ""
+                ],
+                "parameter_size": "",
+                "quantization_level": ""
+              }
+            }
+          ],
+          "object": "list",
+          "data": [
+            {
+              "id": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+              "aliases": [],
+              "tags": [],
+              "object": "model",
+              "created": 1781590423,
+              "owned_by": "llamacpp",
+              "meta": {
+                "vocab_type": 2,
+                "n_vocab": 151936,
+                "n_ctx_train": 262144,
+                "n_embd": 4096,
+                "n_params": 8190735360,
+                "size": 5021827072
+              }
+            }
+          ]
+        },
+        "health": null,
+        "model_id": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+      },
+      "load_ms": 3775.07,
+      "cases": [
+        {
+          "case_id": "execute_mvp_start",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\execute-mvp-test-1-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-155119-232986.png",
+          "elapsed_ms": 2703.335,
+          "success": true,
+          "error": null,
+          "json_ok": true,
+          "parse_error": null,
+          "score": {
+            "expected_count": 2,
+            "matched_count": 2,
+            "matched_terms": [
+              {
+                "matched": "Execute MVP",
+                "variants": [
+                  "Execute MVP"
+                ]
+              },
+              {
+                "matched": "Start",
+                "variants": [
+                  "Start"
+                ]
+              }
+            ],
+            "missing_terms": [],
+            "recall": 1.0
+          },
+          "raw_text_preview": "{ \"screen_summary\": \"A test page to start an MVP test\", \"actions\": [ { \"label\": \"Start\", \"role\": \"button\", \"reason\": \"It is a blue button with the text 'Start', indicating it is clickable to initiate the test.\" } ], \"visible_text\": [ \"Execute MVP Test\", \"This page is a controlled target for Execute Mode single-step smoke tests.\", \"Start\", \"Ready\" ] }",
+          "parsed": {
+            "screen_summary": "A test page to start an MVP test",
+            "actions": [
+              {
+                "label": "Start",
+                "role": "button",
+                "reason": "It is a blue button with the text 'Start', indicating it is clickable to initiate the test."
+              }
+            ],
+            "visible_text": [
+              "Execute MVP Test",
+              "This page is a controlled target for Execute Mode single-step smoke tests.",
+              "Start",
+              "Ready"
+            ]
+          }
+        },
+        {
+          "case_id": "notepad_menu",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\-03faf5c9__recognition-plan-execution__notepad__full-window__20260616-155938-549464.png",
+          "elapsed_ms": 3952.141,
+          "success": true,
+          "error": null,
+          "json_ok": true,
+          "parse_error": null,
+          "score": {
+            "expected_count": 3,
+            "matched_count": 3,
+            "matched_terms": [
+              {
+                "matched": "File",
+                "variants": [
+                  "File",
+                  "文件"
+                ]
+              },
+              {
+                "matched": "Edit",
+                "variants": [
+                  "Edit",
+                  "编辑"
+                ]
+              },
+              {
+                "matched": "View",
+                "variants": [
+                  "View",
+                  "查看"
+                ]
+              }
+            ],
+            "missing_terms": [],
+            "recall": 1.0
+          },
+          "raw_text_preview": "{ \"screen_summary\": \"Notepad application with blank document\", \"actions\": [ { \"label\": \"文件(F)\", \"role\": \"menu\", \"reason\": \"Standard menu item for file operations\" }, { \"label\": \"编辑(E)\", \"role\": \"menu\", \"reason\": \"Standard menu item for editing operations\" }, { \"label\": \"格式(O)\", \"role\": \"menu\", \"reason\": \"Standard menu item for formatting options\" }, { \"label\": \"查看(V)\", \"role\": \"menu\", \"reason\": \"Standard menu item for view settings\" }, { \"label\": \"帮助(H)\", \"role\": \"menu\", \"reason\": \"Standard menu item for help information\" } ], \"visible_text\": [ \"无标题 - 记事本\", \"文件(F)\", \"编辑(E)\", \"格式(O)\", \"查看(V)\", \"帮助(H)\", \"第 1 行, 第 1 列\", \"100%\", \"Windows (CRLF)\", \"UTF-8\" ] }",
+          "parsed": {
+            "screen_summary": "Notepad application with blank document",
+            "actions": [
+              {
+                "label": "文件(F)",
+                "role": "menu",
+                "reason": "Standard menu item for file operations"
+              },
+              {
+                "label": "编辑(E)",
+                "role": "menu",
+                "reason": "Standard menu item for editing operations"
+              },
+              {
+                "label": "格式(O)",
+                "role": "menu",
+                "reason": "Standard menu item for formatting options"
+              },
+              {
+                "label": "查看(V)",
+                "role": "menu",
+                "reason": "Standard menu item for view settings"
+              },
+              {
+                "label": "帮助(H)",
+                "role": "menu",
+                "reason": "Standard menu item for help information"
+              }
+            ],
+            "visible_text": [
+              "无标题 - 记事本",
+              "文件(F)",
+              "编辑(E)",
+              "格式(O)",
+              "查看(V)",
+              "帮助(H)",
+              "第 1 行, 第 1 列",
+              "100%",
+              "Windows (CRLF)",
+              "UTF-8"
+            ]
+          }
+        },
+        {
+          "case_id": "seek_jobs",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-160955-988635.png",
+          "elapsed_ms": 4839.5,
+          "success": true,
+          "error": null,
+          "json_ok": true,
+          "parse_error": null,
+          "score": {
+            "expected_count": 4,
+            "matched_count": 2,
+            "matched_terms": [
+              {
+                "matched": "SEEK",
+                "variants": [
+                  "SEEK"
+                ]
+              },
+              {
+                "matched": "Software Engineer",
+                "variants": [
+                  "Software Engineer",
+                  "Software Engineers"
+                ]
+              }
+            ],
+            "missing_terms": [
+              [
+                "Pay"
+              ],
+              [
+                "Date"
+              ]
+            ],
+            "recall": 0.5
+          },
+          "raw_text_preview": "{ \"screen_summary\": \"Job search results page for software engineers in Auckland on SEEK\", \"actions\": [ { \"label\": \"SEEK\", \"role\": \"button\", \"reason\": \"pink button with clear call-to-action to initiate search\" }, { \"label\": \"Save this search\", \"role\": \"button\", \"reason\": \"blue button with heart icon, clearly designed for saving a search\" }, { \"label\": \"Software Engineers (All levels!)\", \"role\": \"card\", \"reason\": \"job listing card with visible company and location, clickable to view details\" }, { \"label\": \"Applications Software Engineer\", \"role\": \"card\", \"reason\": \"job listing card with visible company and location, clickable to view details\" } ], \"visible_text\": [ \"Software Engineer Jobs in All Auckland\", \"Job search\", \"software engineer\", \"All Auckland\", \"SEEK\", \"323 jobs\", \"New to you 99+\", \"Strong applicant jobs\", \"Software Engineers (All levels!)\", \"Halter\", \"Auckland CBD, Auckland\", \"Applications Software Engineer\", \"Temperzone\", \"Manukau, Auckland\", \"Save this search\" ] }",
+          "parsed": {
+            "screen_summary": "Job search results page for software engineers in Auckland on SEEK",
+            "actions": [
+              {
+                "label": "SEEK",
+                "role": "button",
+                "reason": "pink button with clear call-to-action to initiate search"
+              },
+              {
+                "label": "Save this search",
+                "role": "button",
+                "reason": "blue button with heart icon, clearly designed for saving a search"
+              },
+              {
+                "label": "Software Engineers (All levels!)",
+                "role": "card",
+                "reason": "job listing card with visible company and location, clickable to view details"
+              },
+              {
+                "label": "Applications Software Engineer",
+                "role": "card",
+                "reason": "job listing card with visible company and location, clickable to view details"
+              }
+            ],
+            "visible_text": [
+              "Software Engineer Jobs in All Auckland",
+              "Job search",
+              "software engineer",
+              "All Auckland",
+              "SEEK",
+              "323 jobs",
+              "New to you 99+",
+              "Strong applicant jobs",
+              "Software Engineers (All levels!)",
+              "Halter",
+              "Auckland CBD, Auckland",
+              "Applications Software Engineer",
+              "Temperzone",
+              "Manukau, Auckland",
+              "Save this search"
+            ]
+          }
+        }
+      ],
+      "stop_model_server": {
+        "profile": {
+          "profile_id": "qwen3_vl_8b_q4_k_m",
+          "label": "Qwen3-VL 8B Q4_K_M",
+          "role": [
+            "understanding"
+          ],
+          "provider_mode": "local_understanding",
+          "input_format": "openai_compatible_vision",
+          "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+          "model_path": "models/qwen3-vl-8b-instruct-q4_k_m-gguf/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+          "mmproj_path": "models/qwen3-vl-8b-instruct-q4_k_m-gguf/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf",
+          "server_path": "tools/llama.cpp-b8892-cuda13/llama-server.exe",
+          "endpoint": "http://127.0.0.1:1240/v1/chat/completions",
+          "start_script": "scripts/model_servers/start_llama_vision_server.ps1",
+          "stop_script": "scripts/model_servers/stop_local_vision_server.ps1",
+          "pid_file": "logs/qwen3-vl-8b-q4_k_m-server.pid",
+          "port": 1240,
+          "context_size": 8192,
+          "gpu_layers": 99,
+          "image_min_tokens": 1024,
+          "supports_ocr_anchors": true,
+          "launchable": true,
+          "best_for": "Faster whole-screen UI understanding before precise grounding.",
+          "limitations": "Use as a planning and screen-understanding model; keep Qwen3.6 for final precise localization."
+        },
+        "command": [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "D:\\agent-gui-runtime\\scripts\\model_servers\\stop_local_vision_server.ps1",
+          "-Port",
+          "1240",
+          "-PidFile",
+          "D:\\agent-gui-runtime\\logs\\qwen3-vl-8b-q4_k_m-server.pid"
+        ],
+        "returncode": 0,
+        "stdout": "Stopped local vision server process 12504.\nStopped process 5196 listening on port 1240.\n",
+        "stderr": "",
+        "stopped": true,
+        "after": {
+          "status": "unreachable",
+          "base_url": "http://127.0.0.1:1240/v1",
+          "error": "[WinError 10054] 远程主机强迫关闭了一个现有的连接。"
+        }
+      }
+    },
+    {
+      "profile_id": "qwen3_vl_4b_q4_k_m",
+      "label": "Qwen3-VL 4B Q4_K_M",
+      "model_name": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+      "endpoint": "http://127.0.0.1:1241/v1/chat/completions",
+      "ensure_model_server": {
+        "stage": "observe",
+        "profile": {
+          "profile_id": "qwen3_vl_4b_q4_k_m",
+          "label": "Qwen3-VL 4B Q4_K_M",
+          "role": [
+            "understanding",
+            "fast_understanding"
+          ],
+          "provider_mode": "local_understanding",
+          "input_format": "openai_compatible_vision",
+          "model_name": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+          "model_path": "models/qwen3-vl-4b-instruct-q4_k_m-gguf/Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+          "mmproj_path": "models/qwen3-vl-4b-instruct-q4_k_m-gguf/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf",
+          "server_path": "tools/llama.cpp-b8892-cuda13/llama-server.exe",
+          "endpoint": "http://127.0.0.1:1241/v1/chat/completions",
+          "start_script": "scripts/model_servers/start_llama_vision_server.ps1",
+          "stop_script": "scripts/model_servers/stop_local_vision_server.ps1",
+          "pid_file": "logs/qwen3-vl-4b-q4_k_m-server.pid",
+          "port": 1241,
+          "context_size": 4096,
+          "gpu_layers": 99,
+          "image_min_tokens": 768,
+          "supports_ocr_anchors": true,
+          "launchable": true,
+          "best_for": "Fast screenshot understanding and available-action summaries with lower latency than the 8B profile.",
+          "limitations": "Benchmark before making it the default; not a point-grounding replacement for VISTA."
+        },
+        "before": {
+          "status": "unreachable",
+          "base_url": "http://127.0.0.1:1241/v1",
+          "error": "<urlopen error timed out>"
+        },
+        "started": true,
+        "start": {
+          "pid": 10908,
+          "command": [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            "D:\\agent-gui-runtime\\scripts\\model_servers\\start_llama_vision_server.ps1",
+            "-ModelPath",
+            "D:\\agent-gui-runtime\\models\\qwen3-vl-4b-instruct-q4_k_m-gguf\\Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+            "-MmprojPath",
+            "D:\\agent-gui-runtime\\models\\qwen3-vl-4b-instruct-q4_k_m-gguf\\mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf",
+            "-ServerPath",
+            "D:\\agent-gui-runtime\\tools\\llama.cpp-b8892-cuda13\\llama-server.exe",
+            "-ModelName",
+            "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+            "-Port",
+            "1241",
+            "-ContextSize",
+            "4096",
+            "-GpuLayers",
+            "99",
+            "-ImageMinTokens",
+            "768"
+          ],
+          "log_path": "D:\\agent-gui-runtime\\logs\\local-vision-server-qwen3_vl_4b_q4_k_m-20260616-181356.log",
+          "pid_path": "D:\\agent-gui-runtime\\logs\\qwen3-vl-4b-q4_k_m-server.pid"
+        },
+        "after": {
+          "status": "running",
+          "base_url": "http://127.0.0.1:1241/v1",
+          "response": {
+            "models": [
+              {
+                "name": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+                "model": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+                "modified_at": "",
+                "size": "",
+                "digest": "",
+                "type": "model",
+                "description": "",
+                "tags": [
+                  ""
+                ],
+                "capabilities": [
+                  "completion",
+                  "multimodal"
+                ],
+                "parameters": "",
+                "details": {
+                  "parent_model": "",
+                  "format": "gguf",
+                  "family": "",
+                  "families": [
+                    ""
+                  ],
+                  "parameter_size": "",
+                  "quantization_level": ""
+                }
+              }
+            ],
+            "object": "list",
+            "data": [
+              {
+                "id": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+                "aliases": [],
+                "tags": [],
+                "object": "model",
+                "created": 1781590439,
+                "owned_by": "llamacpp",
+                "meta": {
+                  "vocab_type": 2,
+                  "n_vocab": 151936,
+                  "n_ctx_train": 262144,
+                  "n_embd": 2560,
+                  "n_params": 4022468096,
+                  "size": 2491323904
+                }
+              }
+            ]
+          },
+          "health": null,
+          "model_id": "Qwen3VL-4B-Instruct-Q4_K_M.gguf"
+        }
+      },
+      "server_status": {
+        "status": "running",
+        "base_url": "http://127.0.0.1:1241/v1",
+        "response": {
+          "models": [
+            {
+              "name": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+              "model": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+              "modified_at": "",
+              "size": "",
+              "digest": "",
+              "type": "model",
+              "description": "",
+              "tags": [
+                ""
+              ],
+              "capabilities": [
+                "completion",
+                "multimodal"
+              ],
+              "parameters": "",
+              "details": {
+                "parent_model": "",
+                "format": "gguf",
+                "family": "",
+                "families": [
+                  ""
+                ],
+                "parameter_size": "",
+                "quantization_level": ""
+              }
+            }
+          ],
+          "object": "list",
+          "data": [
+            {
+              "id": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+              "aliases": [],
+              "tags": [],
+              "object": "model",
+              "created": 1781590439,
+              "owned_by": "llamacpp",
+              "meta": {
+                "vocab_type": 2,
+                "n_vocab": 151936,
+                "n_ctx_train": 262144,
+                "n_embd": 2560,
+                "n_params": 4022468096,
+                "size": 2491323904
+              }
+            }
+          ]
+        },
+        "health": null,
+        "model_id": "Qwen3VL-4B-Instruct-Q4_K_M.gguf"
+      },
+      "load_ms": 3763.544,
+      "cases": [
+        {
+          "case_id": "execute_mvp_start",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\execute-mvp-test-1-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-155119-232986.png",
+          "elapsed_ms": 1406.884,
+          "success": true,
+          "error": null,
+          "json_ok": true,
+          "parse_error": null,
+          "score": {
+            "expected_count": 2,
+            "matched_count": 2,
+            "matched_terms": [
+              {
+                "matched": "Execute MVP",
+                "variants": [
+                  "Execute MVP"
+                ]
+              },
+              {
+                "matched": "Start",
+                "variants": [
+                  "Start"
+                ]
+              }
+            ],
+            "missing_terms": [],
+            "recall": 1.0
+          },
+          "raw_text_preview": "{ \"screen_summary\": \"A test page prompting user to start an MVP test\", \"actions\": [ { \"label\": \"Start\", \"role\": \"button\", \"reason\": \"Blue button with clear call-to-action text\" } ], \"visible_text\": [ \"Execute MVP Test\", \"This page is a controlled target for Execute Mode single-step smoke tests.\", \"Start\", \"Ready\" ] }",
+          "parsed": {
+            "screen_summary": "A test page prompting user to start an MVP test",
+            "actions": [
+              {
+                "label": "Start",
+                "role": "button",
+                "reason": "Blue button with clear call-to-action text"
+              }
+            ],
+            "visible_text": [
+              "Execute MVP Test",
+              "This page is a controlled target for Execute Mode single-step smoke tests.",
+              "Start",
+              "Ready"
+            ]
+          }
+        },
+        {
+          "case_id": "notepad_menu",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\-03faf5c9__recognition-plan-execution__notepad__full-window__20260616-155938-549464.png",
+          "elapsed_ms": 1148.619,
+          "success": true,
+          "error": null,
+          "json_ok": true,
+          "parse_error": null,
+          "score": {
+            "expected_count": 3,
+            "matched_count": 3,
+            "matched_terms": [
+              {
+                "matched": "文件",
+                "variants": [
+                  "File",
+                  "文件"
+                ]
+              },
+              {
+                "matched": "编辑",
+                "variants": [
+                  "Edit",
+                  "编辑"
+                ]
+              },
+              {
+                "matched": "查看",
+                "variants": [
+                  "View",
+                  "查看"
+                ]
+              }
+            ],
+            "missing_terms": [],
+            "recall": 1.0
+          },
+          "raw_text_preview": "{ \"screen_summary\": \"New blank Notepad window ready for text input\", \"actions\": [], \"visible_text\": [ \"无标题 - 记事本\", \"文件(F)\", \"编辑(E)\", \"格式(O)\", \"查看(V)\", \"帮助(H)\", \"第1行,第1列\", \"100%\", \"Windows (CRLF)\", \"UTF-8\" ] }",
+          "parsed": {
+            "screen_summary": "New blank Notepad window ready for text input",
+            "actions": [],
+            "visible_text": [
+              "无标题 - 记事本",
+              "文件(F)",
+              "编辑(E)",
+              "格式(O)",
+              "查看(V)",
+              "帮助(H)",
+              "第1行,第1列",
+              "100%",
+              "Windows (CRLF)",
+              "UTF-8"
+            ]
+          }
+        },
+        {
+          "case_id": "seek_jobs",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-160955-988635.png",
+          "elapsed_ms": 4263.705,
+          "success": true,
+          "error": null,
+          "json_ok": true,
+          "parse_error": null,
+          "score": {
+            "expected_count": 4,
+            "matched_count": 3,
+            "matched_terms": [
+              {
+                "matched": "SEEK",
+                "variants": [
+                  "SEEK"
+                ]
+              },
+              {
+                "matched": "Software Engineer",
+                "variants": [
+                  "Software Engineer",
+                  "Software Engineers"
+                ]
+              },
+              {
+                "matched": "Pay",
+                "variants": [
+                  "Pay"
+                ]
+              }
+            ],
+            "missing_terms": [
+              [
+                "Date"
+              ]
+            ],
+            "recall": 0.75
+          },
+          "raw_text_preview": "{ \"screen_summary\": \"Job search results page for software engineers in Auckland with a translation overlay and job listings\", \"actions\": [ { \"label\": \"Software Engineers (All levels!)\", \"role\": \"card\", \"reason\": \"Job listing with company and location details\" }, { \"label\": \"Applications Software Engineer\", \"role\": \"card\", \"reason\": \"Job listing with company and location details\" }, { \"label\": \"Save this search\", \"role\": \"button\", \"reason\": \"Visible save button for the current job search\" }, { \"label\": \"Pay\", \"role\": \"button\", \"reason\": \"Filter button for salary range\" }, { \"label\": \"Type\", \"role\": \"button\", \"reason\": \"Filter button for job type\" }, { \"label\": \"Remote\", \"role\": \"button\", \"reason\": \"Filter button for remote work options\" }, { \"label\": \"Classification\", \"role\": \"button\", \"reason\": \"Filter button for job classification\" }, { \"label\": \"Listing time\", \"role\": \"button\", \"reason\": \"Filter button for job listing age\" }, { \"label\": \"SEEK\", \"role\": \"button\", \"reason\": \"Search but",
+          "parsed": {
+            "screen_summary": "Job search results page for software engineers in Auckland with a translation overlay and job listings",
+            "actions": [
+              {
+                "label": "Software Engineers (All levels!)",
+                "role": "card",
+                "reason": "Job listing with company and location details"
+              },
+              {
+                "label": "Applications Software Engineer",
+                "role": "card",
+                "reason": "Job listing with company and location details"
+              },
+              {
+                "label": "Save this search",
+                "role": "button",
+                "reason": "Visible save button for the current job search"
+              },
+              {
+                "label": "Pay",
+                "role": "button",
+                "reason": "Filter button for salary range"
+              },
+              {
+                "label": "Type",
+                "role": "button",
+                "reason": "Filter button for job type"
+              },
+              {
+                "label": "Remote",
+                "role": "button",
+                "reason": "Filter button for remote work options"
+              },
+              {
+                "label": "Classification",
+                "role": "button",
+                "reason": "Filter button for job classification"
+              },
+              {
+                "label": "Listing time",
+                "role": "button",
+                "reason": "Filter button for job listing age"
+              },
+              {
+                "label": "SEEK",
+                "role": "button",
+                "reason": "Search button to submit query"
+              },
+              {
+                "label": "翻译",
+                "role": "button",
+                "reason": "Translation button in overlay"
+              }
+            ],
+            "visible_text": [
+              "Software Engineer Jobs in All Auckland",
+              "323 jobs",
+              "New to you",
+              "Strong applicant jobs",
+              "Software Engineers (All levels!)",
+              "Halter",
+              "Auckland CBD, Auckland",
+              "Applications Software Engineer",
+              "Temperzone",
+              "Manukau, Auckland",
+              "Save this search",
+              "Pay",
+              "Type",
+              "Remote",
+              "Classification",
+              "Listing time",
+              "SEEK",
+              "翻译",
+              "中文（简体）"
+            ]
+          }
+        }
+      ],
+      "stop_model_server": {
+        "profile": {
+          "profile_id": "qwen3_vl_4b_q4_k_m",
+          "label": "Qwen3-VL 4B Q4_K_M",
+          "role": [
+            "understanding",
+            "fast_understanding"
+          ],
+          "provider_mode": "local_understanding",
+          "input_format": "openai_compatible_vision",
+          "model_name": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+          "model_path": "models/qwen3-vl-4b-instruct-q4_k_m-gguf/Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+          "mmproj_path": "models/qwen3-vl-4b-instruct-q4_k_m-gguf/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf",
+          "server_path": "tools/llama.cpp-b8892-cuda13/llama-server.exe",
+          "endpoint": "http://127.0.0.1:1241/v1/chat/completions",
+          "start_script": "scripts/model_servers/start_llama_vision_server.ps1",
+          "stop_script": "scripts/model_servers/stop_local_vision_server.ps1",
+          "pid_file": "logs/qwen3-vl-4b-q4_k_m-server.pid",
+          "port": 1241,
+          "context_size": 4096,
+          "gpu_layers": 99,
+          "image_min_tokens": 768,
+          "supports_ocr_anchors": true,
+          "launchable": true,
+          "best_for": "Fast screenshot understanding and available-action summaries with lower latency than the 8B profile.",
+          "limitations": "Benchmark before making it the default; not a point-grounding replacement for VISTA."
+        },
+        "command": [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "D:\\agent-gui-runtime\\scripts\\model_servers\\stop_local_vision_server.ps1",
+          "-Port",
+          "1241",
+          "-PidFile",
+          "D:\\agent-gui-runtime\\logs\\qwen3-vl-4b-q4_k_m-server.pid"
+        ],
+        "returncode": 0,
+        "stdout": "Stopped local vision server process 10908.\nStopped process 28508 listening on port 1241.\n",
+        "stderr": "",
+        "stopped": true,
+        "after": {
+          "status": "unreachable",
+          "base_url": "http://127.0.0.1:1241/v1",
+          "error": "<urlopen error [WinError 10054] 远程主机强迫关闭了一个现有的连接。>"
+        }
+      }
+    },
+    {
+      "profile_id": "minicpm_v_4_6_transformers",
+      "label": "MiniCPM-V 4.6 Transformers",
+      "model_name": "openbmb/MiniCPM-V-4.6",
+      "endpoint": null,
+      "ensure_model_server": {
+        "status": "loaded_direct_transformers",
+        "started": false
+      },
+      "server_status": {
+        "status": "direct_transformers"
+      },
+      "load_ms": 4841.857,
+      "cases": [
+        {
+          "case_id": "execute_mvp_start",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\execute-mvp-test-1-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-155119-232986.png",
+          "elapsed_ms": 3072.644,
+          "success": true,
+          "error": null,
+          "json_ok": true,
+          "parse_error": null,
+          "score": {
+            "expected_count": 2,
+            "matched_count": 2,
+            "matched_terms": [
+              {
+                "matched": "Execute MVP",
+                "variants": [
+                  "Execute MVP"
+                ]
+              },
+              {
+                "matched": "Start",
+                "variants": [
+                  "Start"
+                ]
+              }
+            ],
+            "missing_terms": [],
+            "recall": 1.0
+          },
+          "raw_text_preview": "{ \"screen_summary\": \"Execute MVP Test\", \"actions\": [ {\"label\": \"Start\", \"role\": \"button\", \"reason\": \"actionable to begin execution\"}, {\"label\": \"Ready\", \"role\": \"label\", \"reason\": \"indicates state\"} ], \"visible_text\": [\"Execute MVP Test\", \"This page is a controlled target for Execute Mode single-step smoke tests\", \"Ready\"] }",
+          "parsed": {
+            "screen_summary": "Execute MVP Test",
+            "actions": [
+              {
+                "label": "Start",
+                "role": "button",
+                "reason": "actionable to begin execution"
+              },
+              {
+                "label": "Ready",
+                "role": "label",
+                "reason": "indicates state"
+              }
+            ],
+            "visible_text": [
+              "Execute MVP Test",
+              "This page is a controlled target for Execute Mode single-step smoke tests",
+              "Ready"
+            ]
+          }
+        },
+        {
+          "case_id": "notepad_menu",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\-03faf5c9__recognition-plan-execution__notepad__full-window__20260616-155938-549464.png",
+          "elapsed_ms": 6458.961,
+          "success": true,
+          "error": null,
+          "json_ok": true,
+          "parse_error": null,
+          "score": {
+            "expected_count": 3,
+            "matched_count": 3,
+            "matched_terms": [
+              {
+                "matched": "文件",
+                "variants": [
+                  "File",
+                  "文件"
+                ]
+              },
+              {
+                "matched": "Edit",
+                "variants": [
+                  "Edit",
+                  "编辑"
+                ]
+              },
+              {
+                "matched": "查看",
+                "variants": [
+                  "View",
+                  "查看"
+                ]
+              }
+            ],
+            "missing_terms": [],
+            "recall": 1.0
+          },
+          "raw_text_preview": "{ \"screen_summary\": \"Notebook or text editing interface\", \"actions\": [ {\"label\": \"文件 (F)\", \"role\": \"menu item\"}, {\"label\": \"编辑 (E)\", \"role\": \"menu item\"}, {\"label\": \"格式 (O)\", \"role\": \"menu item\"}, {\"label\": \"查看 (V)\", \"role\": \"menu item\"}, {\"label\": \"帮助 (H)\", \"role\": \"menu item\"}, {\"label\": \"无标题 - 记事本\", \"role\": \"title\"}, {\"label\": \"第 1 行, 第 1 列\", \"role\": \"status indicator\"}, {\"label\": \"100%\", \"role\": \"window state\"}, {\"label\": \"Windows (CRLF)\", \"role\": \"window type\"}, {\"label\": \"UTF-8\", \"role\": \"encoding\"} ], \"visible_text\": [\"无标题\", \"文件\", \"编辑\", \"格式\", \"查看\", \"帮助\", \"第 1 行, 第 1 列\", \"100%\", \"Windows (CRLF)\", \"UTF-8\"] }",
+          "parsed": {
+            "screen_summary": "Notebook or text editing interface",
+            "actions": [
+              {
+                "label": "文件 (F)",
+                "role": "menu item"
+              },
+              {
+                "label": "编辑 (E)",
+                "role": "menu item"
+              },
+              {
+                "label": "格式 (O)",
+                "role": "menu item"
+              },
+              {
+                "label": "查看 (V)",
+                "role": "menu item"
+              },
+              {
+                "label": "帮助 (H)",
+                "role": "menu item"
+              },
+              {
+                "label": "无标题 - 记事本",
+                "role": "title"
+              },
+              {
+                "label": "第 1 行, 第 1 列",
+                "role": "status indicator"
+              },
+              {
+                "label": "100%",
+                "role": "window state"
+              },
+              {
+                "label": "Windows (CRLF)",
+                "role": "window type"
+              },
+              {
+                "label": "UTF-8",
+                "role": "encoding"
+              }
+            ],
+            "visible_text": [
+              "无标题",
+              "文件",
+              "编辑",
+              "格式",
+              "查看",
+              "帮助",
+              "第 1 行, 第 1 列",
+              "100%",
+              "Windows (CRLF)",
+              "UTF-8"
+            ]
+          }
+        },
+        {
+          "case_id": "seek_jobs",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-160955-988635.png",
+          "elapsed_ms": 5316.941,
+          "success": true,
+          "error": null,
+          "json_ok": true,
+          "parse_error": null,
+          "score": {
+            "expected_count": 4,
+            "matched_count": 2,
+            "matched_terms": [
+              {
+                "matched": "SEEK",
+                "variants": [
+                  "SEEK"
+                ]
+              },
+              {
+                "matched": "Software Engineer",
+                "variants": [
+                  "Software Engineer",
+                  "Software Engineers"
+                ]
+              }
+            ],
+            "missing_terms": [
+              [
+                "Pay"
+              ],
+              [
+                "Date"
+              ]
+            ],
+            "recall": 0.5
+          },
+          "raw_text_preview": "{ \"screen_summary\": \"Software engineer job search\", \"actions\": [ {\"label\": \"Job search\", \"role\": \"button\"}, {\"label\": \"翻译英语页面\", \"role\": \"link\"}, {\"label\": \"中文 (简体)\", \"role\": \"input\"}, {\"label\": \"翻译\", \"role\": \"button\"}, {\"label\": \"更多\", \"role\": \"button\"}, {\"label\": \"All Auckland\", \"role\": \"input\"}, {\"label\": \"SEEK\", \"role\": \"button\"} ], \"visible_text\": [\"323 jobs\", \"New to you\", \"99+\", \"Strong applicant jobs\", \"Software Engineers (All levels)\", \"Halter\", \"Auckland CBD, Auckland\", \"Applications Software Engineer\", \"Temperzone\", \"Onsite cafeteria + parking + security\", \"Opportunities for continuous professional development\", \"Comprehensive Health Insurance Cover\", \"Save this search\"] }",
+          "parsed": {
+            "screen_summary": "Software engineer job search",
+            "actions": [
+              {
+                "label": "Job search",
+                "role": "button"
+              },
+              {
+                "label": "翻译英语页面",
+                "role": "link"
+              },
+              {
+                "label": "中文 (简体)",
+                "role": "input"
+              },
+              {
+                "label": "翻译",
+                "role": "button"
+              },
+              {
+                "label": "更多",
+                "role": "button"
+              },
+              {
+                "label": "All Auckland",
+                "role": "input"
+              },
+              {
+                "label": "SEEK",
+                "role": "button"
+              }
+            ],
+            "visible_text": [
+              "323 jobs",
+              "New to you",
+              "99+",
+              "Strong applicant jobs",
+              "Software Engineers (All levels)",
+              "Halter",
+              "Auckland CBD, Auckland",
+              "Applications Software Engineer",
+              "Temperzone",
+              "Onsite cafeteria + parking + security",
+              "Opportunities for continuous professional development",
+              "Comprehensive Health Insurance Cover",
+              "Save this search"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

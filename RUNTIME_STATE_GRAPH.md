@@ -22,6 +22,132 @@ The runtime loop is:
 
 `see current screen -> identify state -> find target -> click -> verify -> save result -> reuse later`
 
+## Current Two-Mode Architecture
+
+The current implementation splits the runtime into two operating modes.
+
+### Learn Mode
+
+Goal:
+
+- make the current interface as complete a map as possible
+- accept slower full-screen work
+- write structural map evidence, not direct click permission
+
+Implemented depth levels:
+
+- `Learn Fast`: Observe-stage quick map draft from `POST /vision/observe_screen`
+- `Learn Deep`: Learn-mode Locate-stage path calibration from the latest Observe `screen_map_v1`
+
+Learn Fast flow:
+
+```text
+screenshot
+-> broad observe / screen reading
+-> OCR-backed section and candidate rules
+-> screen_map_v1
+-> Path Map trace
+```
+
+Learn Deep flow:
+
+```text
+screen_map_v1 draft
+-> locate_target with metadata.learn_all_targets=true
+-> learn_locate_model_review_v1 add/update/remove calibration
+-> learn_all_targets from screen_map candidates
+-> coordinate_validation for every child control
+-> learn target coordinate overlay image
+-> path_map_review_v1 additions
+-> PathGraph child-control coordinate writeback
+-> locate trace
+```
+
+Main fields:
+
+- request: `agent_mode="learn"`
+- request: `learn_depth="fast"` for Observe fast map build; `learn_depth="deep"` for Learn Locate deep path calibration
+- request: `write_policy.path_graph=true`
+- request: `metadata.learn_all_targets=true` for Learn Locate deep calibration
+- output: `screen_map_v1`
+- output: `learn_locate_model_review_v1`
+- output: `learn_locate_path_calibration_delta_v1`
+- output: `learn_all_targets`
+- output: `coordinate_validation` on every `learn_all_targets.targets[]`
+- output: `coordinate_overlay_path` / `learn_all_targets.overlay_path`
+- output: `path_map_review_v1`
+- trace: `model_io_trace_v1` records every model attempt's prompt, image paths, raw output, parsed JSON, normalized JSON, and parse errors
+
+Current behavior:
+
+- The panel's main Learn Deep path is Locate-stage calibration: it does not require a single user target and does not run the execute-mode single-goal recognition plan.
+- Learn Locate Deep asks the model to add missing child nodes, update wrong coordinates, rename mislabeled nodes, and remove duplicate/noisy nodes before coordinate validation and overlay rendering.
+- If the configured Locate/Grounding model is VISTA `vista_point_v1`, Learn Locate Deep skips full-map model review and uses deterministic `screen_map_v1` coordinate validation. VISTA is reserved for single-target point grounding inside recalled PathGraph bboxes.
+- Learn Locate Deep may optionally run VISTA per-target coordinate validation. It records `vista_coordinate_validation` on each target and updates the click point only when the VISTA point lands inside the target bbox. The default is bounded to a few targets with per-target timeout and stop-on-failure; full validation requires explicit metadata.
+- Learn Locate Deep also enforces the non-containment overlap rule: sibling child path nodes must not visibly overlap; overlap is allowed only when one bbox contains the other as a parent-child relationship. The model is asked to resolve these conflicts, and the backend prunes remaining lower-priority conflicts with `non_containment_overlap_removed` trace evidence.
+- The older observe-stage deep review (`path_graph_deep_review_v1`, `learn_deep_model_review_v1`, `path_graph_delta_v1`, `element_memory_init_plan_v1`) remains available as a semantic review capability, but it is not the primary panel flow.
+- Learn Fast screen-map rules now keep page-area semantics in the map: `main_content` card groups become `news_card`, `right_sidebar` groups become `recommendation_item`, More-style text actions are promoted to `button` before card grouping, and source/time metadata is filtered as child evidence instead of becoming a top-level card.
+
+### Execute Mode
+
+Goal:
+
+- complete the current user command
+- stay fast, stable, and low-call
+- read the PathGraph instead of rewriting it by default
+
+Execute flow:
+
+```text
+user goal + current screenshot
+-> execute defaults: local_grounding + bounded Direct VISTA when provider_mode is omitted
+-> observe_trace_path state/OCR reuse
+-> path_graph_recall_v1 top-k recall
+-> local OCR grounding on recalled/visual candidates
+   or VISTA vista_point_v1 candidate ROI refine inside recalled PathGraph bboxes
+-> pre_click_decision_v1
+-> gated click through POST /action/execute_recognition_plan
+-> post-click verification
+-> agent_step_result_v1
+-> agent_execution_guidance_v1
+-> execute_transition_memory_v1 or execute_fallback_plan_v1
+```
+
+Main fields:
+
+- request: `agent_mode="execute"`
+- request: `learn_depth=null`
+- request: `write_policy.path_graph=false`
+- request: `write_policy.element_memory=true`
+- request: `observe_trace_path`
+- output: `path_graph_recall_v1`
+- output: `candidate_result`
+- output: `parse_result.vista_point_grounding` when `local_grounding.output_contract="vista_point_v1"`
+- output: `pre_click_decision_v1`
+- output: `agent_step_result_v1`
+- output: `agent_execution_guidance_v1`
+- output: `execute_transition_memory_v1` as `element_memory_writeback`
+- output: `execute_fallback_plan_v1` as `fallback_plan`
+- trace: `model_io_trace_v1` stays attached to RecognitionPlan evidence, including failed anchored-provider attempts under `model_io_failovers` when fallback succeeds
+
+Safety boundary:
+
+- Execute Mode never treats a PathGraph coordinate as permission to click.
+- Execute Mode is a single-step atomic action. It does not own multi-step route orchestration; the upper agent reads `agent_step_result_v1` and calls Execute again for the next step when appropriate.
+- Live Execute tests must verify the bound-window screenshot before sending a goal. The visible target text/control must exist in that screenshot; do not rely only on the browser URL or a stale window title.
+- The bound window is revalidated every time it is read. If the saved handle no longer points to a visible top-level titled window, or refreshing the handle fails, the runtime clears the binding and returns an unbound/capture failure instead of reusing stale geometry.
+- `POST /action/execute_recognition_plan` validates known app aliases before live capture. For example, `app_name="edge"` must be bound to an Edge-compatible process; if the current bound window is QQ or another app, the route returns `bound_window_mismatch` before screenshot capture or model inference.
+- `browser_chrome` PathGraph candidates are excluded from Execute recall before ranking, so browser toolbar OCR cannot outrank page controls.
+- When `local_grounding.output_contract="vista_point_v1"`, VISTA-4B replaces the previous 35B grounding model for Execute/Locate. With PathGraph recall, the adapter crops a candidate ROI first: if top1 clearly leads it uses top1, otherwise it unions top candidates, records ROI bounds and transform, sends the ROI to VISTA, maps the returned normalized point back to original coordinates, and only emits grounded `narrow_search_v1` evidence when that original point is inside a recalled candidate bbox. Without a matched candidate, the plan remains blocked.
+- Execute Mode can also run Direct VISTA when no PathGraph candidate is available. Direct VISTA keeps the original screenshot as evidence, sends a resized full-image input to VISTA for coarse grounding by default (`max_edge=640`), crops a 512x512 original-coordinate ROI around the coarse point for refine grounding, maps the refined processed point back to original screenshot coordinates, creates a temporary `vista_direct_*` candidate around that original point, and still requires `pre_click_decision_v1`; timeouts and model failures become blocked plans with failed `model_io`, not raw clicks.
+- `POST /action/execute_recognition_plan` is the agent-facing orchestration entry. In Execute Mode, omitted `provider_mode` defaults to `local_grounding`; bounded Direct VISTA metadata is injected unless explicitly overridden (`timeout_seconds=45.0`, `max_edge=640`, `refine=true`, `refine_roi_size=512` by default).
+- `agent_execution_guidance_v1` tells the upper agent the next safe step: dry-runs that pass return an approved-plan follow-up request, verified real clicks return `next_action="done"`, and blocked/unverified paths return `recover_with_fallback_plan`.
+- `agent_step_result_v1` is the compact per-step result for agents and traces. It carries status, selected click point, approved plan id, screenshot/overlay/trace paths, post-click before/after/diff evidence, failure reason, fallback plan, and the next suggested agent action.
+- Recalled candidates must still pass local OCR grounding and `pre_click_decision_v1`.
+- Ranker-verified precise text buttons may pass the gate only when local OCR confirms the same target text inside the candidate bbox and the candidate is not ad-like; ordinary precise-text cards remain confirmation-required.
+- Only verified real clicks write transition memory.
+- Dry-runs, rejected gates, failed recognition, click exceptions, and failed post-click verification do not write execution memory.
+
 ## Layered View
 
 Think of the system as five layers.

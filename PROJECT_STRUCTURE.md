@@ -13,6 +13,156 @@ Use it when you need to answer:
 
 `README.md` should stay concise. This file can be more explicit.
 
+## Learn / Execute Mode Structure
+
+中文版本在本节后半部分。This section is the repository map for the current two-mode runtime architecture.
+
+### Current Progress
+
+Learn Mode is the map-building side. Execute Mode is the command-running side.
+
+- `Learn Fast` is implemented as the Observe-stage quick map draft path. The panel's Observe button is "Fast Map Build"; it sends `agent_mode=learn, learn_depth=fast`, runs through `POST /vision/observe_screen`, produces `screen_map_v1`, and renders the result in Trace Inspector as `Path Map`.
+- `Learn Deep` is implemented as the Learn-mode Locate-stage path calibration path. The panel's Locate button becomes "Deep Path Calibration" in Learn Mode; it sends `agent_mode=learn, learn_depth=deep` plus `metadata.learn_all_targets=true`, reuses the latest Observe trace, and returns `learn_all_targets` / `path_map_review_v1` for all child PathGraph controls. The older observe-stage deep semantic review hook remains available as a model-backed review capability.
+- `Execute Mode` has a closed MVP. It reads a matching Observe trace through `observe_trace_path`, builds `path_graph_recall_v1`, merges safe recalled PathGraph candidates into `candidate_result`, verifies them through local OCR grounding and `pre_click_decision_v1`, executes only through `POST /action/execute_recognition_plan`, verifies after click, then writes `execute_transition_memory_v1` or returns `execute_fallback_plan_v1`. When the visible screenshot may be incomplete, the fallback plan can ask the upper agent to call `POST /action/scroll` and then rerun the same gated Execute goal.
+- `screen_inventory_v1` is the fast Execute inventory layer. It is derived from `screen_reading_v1` plus compact Windows UIA controls and splits structured evidence into `available_actions`, `page_elements`, and `cards`, so the upper agent can inspect what can be operated without asking the whole-screen VLM again. Trace Inspector exposes it as an `Inventory` stage with action/text/card counts and coordinate coverage.
+- `screen_map_v1` candidate rules now distinguish page areas before aggregation: `main_content` produces `news_card`, `right_sidebar` produces `recommendation_item`, and More-style text such as `More`, `See more`, `View more`, `Read more`, or Chinese `查看更多` is treated as a `button` before card grouping. Source/time metadata is kept as child evidence and filtered out as a card seed.
+
+### Mode Flows
+
+```text
+Learn Fast:
+  screenshot
+  -> broad observe / screen reading
+  -> OCR-backed section and candidate rules
+  -> screen_map_v1
+  -> Path Map trace
+
+Learn Deep:
+  screen_map_v1 draft
+  -> locate_target in Learn Mode
+  -> learn_all_targets from screen_map candidates
+  -> path_map_review_v1 additions
+  -> PathGraph child-control coordinate writeback
+  -> locate trace
+
+Execute:
+  user goal + current screenshot
+  -> screen_inventory_v1 from latest screen_reading / observe trace
+  -> observe_trace_path state/OCR reuse
+  -> path_graph_recall_v1 top-k recall
+  -> local OCR grounding on candidates
+  -> pre_click_decision_v1
+  -> gated click
+  -> post-click verification
+  -> execute_transition_memory_v1 or execute_fallback_plan_v1
+  -> optional POST /action/scroll requested by fallback_plan
+  -> rerun the same Execute goal after scroll evidence
+```
+
+### Main Fields And Contracts
+
+Common request fields:
+
+- `agent_mode`: `learn` or `execute`
+- `learn_depth`: `fast`, `deep`, or `null` for Execute
+- `write_policy.path_graph`: whether the response may update the structural PathGraph
+- `write_policy.element_memory`: whether verified execution experience may write ElementMemory / transition memory
+- `write_policy.trace`: whether Observe, Locate, RecognitionPlan, and ExecuteRecognitionPlan write main trace files
+- `observe_trace_path`: latest matching Observe trace for OCR anchor reuse and PathGraph recall
+- `model_io_trace_v1`: per-model-call trace payload that records provider, model name, attempt count, full text prompt, image path, raw model text, raw endpoint response, parsed JSON, runtime-normalized JSON, and parse errors when present
+
+Learn outputs:
+
+- `screen_map_v1`: state id, state hint, page sections, candidate actions, risk class, expected effect, bbox and point hints
+- `learn_all_targets`: Learn Locate all-control coordinate review generated from the latest Observe `screen_map_v1`
+- `path_graph_deep_review_v1`: deep-review decision list and summary
+- `learn_deep_model_review_v1`: optional model semantic review embedded under `path_graph_deep_review.model_review`
+- `path_graph_delta_v1`: additions, removals, and updates proposed against the draft map
+- `element_memory_init_plan_v1`: planned memory entries, not verified execution experience
+
+Execute outputs:
+
+- `screen_inventory_v1`: fast inventory for agent planning, with `available_actions`, `page_elements`, `cards`, duplicate rate, coordinate coverage, and source counts
+- `path_graph_recall_v1`: state match, recalled map candidates, scores, and local OCR ROI hints
+- `candidate_result`: merged visual, page-structure, and safe recalled candidates
+- `pre_click_decision_v1`: the mandatory click gate
+- `execute_transition_memory_v1`: verified real-click writeback result
+- `execute_fallback_plan_v1`: safe next-step plan for failed execution, including optional scroll-to-reveal, never permission to auto-click
+- `scroll_action_v1`: dry-run or real up/down mouse-wheel scroll evidence for the currently bound window
+
+### File Ownership
+
+- `app/models/request.py`: mode fields and write-policy request contracts
+- `app/api/vision.py`: Learn Fast, Learn Deep, OCR anchor reuse, PathGraph recall, and recognition-plan candidate fusion
+- `app/api/vision.py`: Screen Map candidate rules for sections, controls, OCR text actions, OCR card aggregation, and noise filtering
+- `app/screen_inventory/`: builds `screen_inventory_v1` from `screen_reading_v1`, compact UIA controls, OCR text, and UI elements
+- `scripts/benchmark_screen_inventory.py`: measures typed-ground-truth inventory recall for actions, page elements, metadata, and cards, plus action precision, clickable false-positive rate, duplicate rate, coordinate coverage, candidate count, and build latency
+- `app/vision/local_provider.py`: OpenAI-compatible local model calls and `model_io_trace_v1` / `model_io_attempt_v1` recording for every successful or failed attempt
+- `app/api/action.py`: Execute Mode gated click, bound-window scroll actions, post-click verification, transition memory writeback, and fallback planning
+- `app/core/input_controller.py`: low-level SendInput click, text helper support, and mouse-wheel dispatch
+- `app/api/panel.py`: Trace Inspector stages for `Model IO`, `Inventory`, `Path Map`, `Path Deep`, `Path Recall`, `Memory`, and `Fallback`
+- `app/web_panel/`: Learn/Execute mode controls and panel request wiring
+- `app/core/transition_memory.py`: writes verified execution transition records under `logs/app-transitions/`
+- `logs/traces/vision/`: Observe, Locate, and RecognitionPlan traces
+- `logs/traces/actions/`: ExecuteRecognitionPlan traces
+- `logs/app-transitions/`: `execute_transition_memory_v1` transition records
+
+### 中文：当前两种模式结构
+
+Learn Mode 负责“把界面变成地图”。Execute Mode 负责“从地图里找路并执行当前命令”。
+
+- `Learn Fast` 已实现为整屏理解阶段的快速建图路径：面板整屏理解按钮显示“快速建图”，发送 `agent_mode=learn, learn_depth=fast`，调用 `POST /vision/observe_screen`，产出 `screen_map_v1`，Trace Inspector 显示为 `Path Map`。
+- `Learn Deep` 已实现为 Learn Mode 下精准定位阶段的深度校准路径：面板精准定位按钮显示“深度校准路径图”，发送 `agent_mode=learn, learn_depth=deep` 和 `metadata.learn_all_targets=true`，复用最新 Observe trace，返回所有子路径控件的 `learn_all_targets` / `path_map_review_v1`。旧的 observe-stage deep 语义审查钩子仍作为模型审查能力保留。
+- `Execute Mode` 已有闭环 MVP：通过 `observe_trace_path` 读取匹配的 Observe trace，生成 `path_graph_recall_v1`，把安全的 PathGraph 召回候选合并到 `candidate_result`，再经过局部 OCR grounding 和 `pre_click_decision_v1`，只通过 `POST /action/execute_recognition_plan` 真实点击，点击后验证，最后写入 `execute_transition_memory_v1` 或返回 `execute_fallback_plan_v1`。当当前截图信息不完整时，fallback plan 可以要求上层 agent 先调用 `POST /action/scroll`，再用同一个目标重新进入 gated Execute。
+- `screen_inventory_v1` 是 Execute Mode 的快速可操作清单层：从 `screen_reading_v1` 和 compact Windows UIA 控件生成，拆成 `available_actions`、`page_elements`、`cards`，让上层 agent 不需要再次调用全屏 VLM 就能知道当前页面有哪些可操作入口和可见元数据。Trace Inspector 会把它显示成独立 `Inventory` 阶段，并展示 action/text/card 数量和坐标覆盖率。
+- `screen_map_v1` 候选规则会先区分页面区域再聚合：`main_content` 生成 `news_card`，`right_sidebar` 生成 `recommendation_item`；`More` / `See more` / `View more` / `Read more` / `查看更多` 这类入口在卡片聚合前优先标成 `button`；来源和时间文本保留为子证据，但不会作为卡片种子。
+
+流程：
+
+```text
+Learn Fast:
+  截图
+  -> 整屏观察 / screen reading
+  -> OCR 规则补充分区和候选
+  -> screen_map_v1
+  -> Path Map trace
+
+Learn Deep:
+  screen_map_v1 草图
+  -> Learn Mode 下调用 locate_target
+  -> 从 screen_map candidates 生成 learn_all_targets
+  -> path_map_review_v1 additions
+  -> 写回 PathGraph 子控件坐标
+  -> locate trace
+
+Execute:
+  用户目标 + 当前截图
+  -> 从最新 screen_reading / observe trace 生成 screen_inventory_v1
+  -> observe_trace_path 状态/OCR 复用
+  -> path_graph_recall_v1 top-k 召回
+  -> 候选局部 OCR grounding
+  -> pre_click_decision_v1
+  -> gated click
+  -> 点击后验证
+  -> execute_transition_memory_v1 或 execute_fallback_plan_v1
+```
+
+主要字段：
+
+- `agent_mode`：`learn` 或 `execute`
+- `learn_depth`：`fast`、`deep`，Execute 时为 `null`
+- `write_policy.path_graph`：是否允许更新结构性 PathGraph
+- `write_policy.element_memory`：是否允许把验证成功的执行经验写入 ElementMemory / transition memory
+- `write_policy.trace`：是否写 Observe、Locate、RecognitionPlan、ExecuteRecognitionPlan 主 trace
+- `observe_trace_path`：最新匹配的 Observe trace，用于 OCR anchor 复用和 PathGraph recall
+- `model_io_trace_v1`：每次模型调用的 trace 证据，记录 provider、模型名、attempt 数、完整文本 prompt、图片路径、模型原始文本、endpoint 原始响应、解析后的 JSON、运行时归一化 JSON，以及解析失败原因
+- `screen_map_v1`：状态、页面分区、候选动作、风险、预期效果、bbox/point 观察证据
+- `screen_inventory_v1`：执行模式快速清单，包含可操作控件、页面文本/元数据、卡片分组、重复率、坐标覆盖和来源统计
+- `path_graph_recall_v1`：执行模式里的状态匹配和地图候选召回
+- `pre_click_decision_v1`：真实点击前必须通过的闸门
+- `execute_transition_memory_v1`：验证成功的真实点击写回
+- `execute_fallback_plan_v1`：失败后的安全下一步计划，不代表允许自动点击
+
 ## Root Layout
 
 ### Runtime code
@@ -52,6 +202,9 @@ Use it when you need to answer:
 
 - `tests/`
   - pytest coverage for extracted logic and route-level behavior
+- `tests/smoke/execute_cases/`
+  - JSON smoke cases consumed by `scripts/execute_smoke_runner.py`
+  - includes controlled Execute MVP page cases, Notepad File-menu dry-run, `seek_resume_screening_flow.json` for the local SEEK-like resume-screening two-step live flow, `seek_real_jobs_dryrun.json` for non-destructive real SEEK job-list dry-runs, `seek_real_jobs_reopen_dryrun.json` for reopening the real SEEK URL before each goal, and `seek_real_jobs_resized_dryrun.json` for resizing the bound Edge window before each goal
 
 ### Scripts
 
@@ -68,9 +221,18 @@ Use it when you need to answer:
   - binds a target window, collects a Windows UIA snapshot, writes a `uia_smoke_trace_v1` trace, and scores it
   - default target is MouseTester.cn in Microsoft Edge
   - writes JSON reports under `logs/evaluations/`
+- `scripts/execute_smoke_runner.py`
+  - loads Execute Mode JSON smoke cases from `tests/smoke/execute_cases`
+  - can open a browser URL or app before a case through `/apps/open`, bind or resize a target window, run dry-run recognition, and optionally reuse `approved_plan_id` for a real click with `--execute`
+  - supports `--repeat N` to run the same case set repeatedly and records `repeat_index` / `repeat_count` in each JSONL row
+  - writes `execute_smoke_result_v1` JSONL rows under `logs/smoke/`
+  - records `selected_click_point`, `coordinate_overlay_path`, `dry_run_latency_ms`, `execute_latency_ms`, trace paths, post-click verification, and pass/fail reasons
+  - evaluates `expect.point_in_rect` and treats `expect.max_latency_ms` as the dry-run decision latency threshold when real execution is enabled
 - `scripts/model_servers/`
   - unified PowerShell launch/stop scripts for local multimodal servers
   - `start_llama_vision_server.ps1` starts a llama.cpp-compatible vision model from profile-supplied paths and runtime parameters
+  - `start_transformers_vision_server.ps1` starts a Transformers/safetensors vision model profile such as VISTA-4B
+  - `vista_openai_server.py` exposes VISTA-style point grounding through `/v1/models` and `/v1/chat/completions`
   - `stop_local_vision_server.ps1` stops a model server by profile PID file and/or port
 
 ### Browser test panel
@@ -82,6 +244,11 @@ Use it when you need to answer:
   - static browser panel assets served under `/panel/assets/`
   - uses existing runtime APIs for health, model start/stop/status, app discovery/open, window binding, screenshot capture, whole-screen observation, precise localization, recognition-plan execution, operator-confirmed point execution, controlled text input, and overlay rendering
   - provides screenshot/upload/overlay preview and candidate bbox overlay for human review
+- `app/web_panel/execute_test_page.html`
+  - local controlled Execute Mode page used for safe Start/Continue/Done click-loop smoke tests
+- `app/web_panel/seek_resume_fixture.html`
+  - local SEEK-like resume-screening page used to validate agent-style multi-step Execute calls without touching a real external account
+  - exposes shortlist and next-candidate actions with visible post-click state changes for verification
 
 ### Desktop settings panel
 
@@ -152,7 +319,8 @@ Use it when you need to answer:
 - `app/api/session.py`
   - `GET /session/windows`
   - `POST /session/bind_window`
-  - responsibility: list visible windows and bind the runtime to one target window
+  - `POST /session/resize_bound_window`
+  - responsibility: list visible windows, bind the runtime to one target window, and resize the current bound window for stability/coordinate-drift tests
 
 - `app/api/state.py`
   - `GET /state`
@@ -231,7 +399,7 @@ Use it when you need to answer:
 - `app/core/model_server.py`
   - loads model profiles from `configs/model_profiles/`
   - checks OpenAI-compatible `/v1/models`
-  - starts profile-defined local llama.cpp-compatible model servers
+  - starts profile-defined local llama.cpp-compatible or Transformers-backed model servers
 
 - `app/core/verifier.py`
   - before/after capture
@@ -716,8 +884,11 @@ Current shape:
 Current reality:
 
 - local and API provider entries exist
-- local defaults target `Qwen-Qwen3.6-35B-A3B-IQ4_XS.gguf` through `http://127.0.0.1:1234/v1/chat/completions`
-- local default provider timeout is `180` seconds for the current qwen3.6 IQ4_XS GGUF baseline
+- local understanding defaults target `Qwen3-VL 4B Q4_K_M` through `http://127.0.0.1:1241/v1/chat/completions`
+- local grounding defaults target `VISTA-4B Transformers` through `http://127.0.0.1:1244/v1/chat/completions`
+- `Qwen3-VL 8B Q4_K_M` is installed as an optional understanding baseline on port `1240`
+- `MiniCPM-V-4.6 Transformers` is benchmark-only until a compatible OpenAI-compatible server path is added
+- local default provider timeout is conservative, but current execution performance work should prefer preprocessing, PathGraph/ROI recall, and model-specific max-edge controls over simply raising timeouts
 - full-page stability is now improved in provider code through inference scaling plus compact retry fallback
 - local deployment assets are stored under ignored `models/` and `tools/` directories
 - API provider remains a stub unless replaced with a real endpoint
@@ -727,13 +898,15 @@ Current reality:
 Current purpose:
 
 - one JSON file per model profile
-- centralizes model label, role, endpoint, input format, local model path, mmproj path, start/stop script paths, port, context size, GPU layers, image token budget, and known strengths/limitations
-- launchable local GGUF profiles include `model_path` and `mmproj_path`; endpoint-only profiles can be tested but not started by the local script
+- centralizes model label, role, endpoint, input format, runtime, local model path, optional mmproj path, start/stop script paths, port, context size, GPU layers, image token budget, output contract, and known strengths/limitations
+- launchable local GGUF profiles include `model_path` and `mmproj_path`; launchable Transformers profiles include a safetensors model directory and `start_transformers_vision_server.ps1`; endpoint-only profiles can be tested but not started by the local script
 
 Current entries:
 
-- `qwen3_6_iq4_xs.json`
-- `small_screen_understanding_endpoint.json`
+- `qwen3_vl_8b_q4_k_m.json`
+- `qwen3_vl_4b_q4_k_m.json`
+- `minicpm_v_4_6_transformers.json`
+- `vista_4b_transformers.json`
 
 ### Other config folders
 

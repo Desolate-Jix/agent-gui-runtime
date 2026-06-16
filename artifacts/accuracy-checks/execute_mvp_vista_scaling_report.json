@@ -1,0 +1,210 @@
+{
+  "contract_version": "vista_scaling_benchmark_v1",
+  "case_count": 1,
+  "result_count": 4,
+  "results": [
+    {
+      "case_id": "execute_mvp_done_button",
+      "category": "normal_button",
+      "goal": "Click Done",
+      "max_edge": 448,
+      "success": true,
+      "latency_ms": 1400.464,
+      "processed_size": {
+        "width": 411,
+        "height": 448
+      },
+      "processed_point": {
+        "x": 123,
+        "y": 235
+      },
+      "mapped_point_original": {
+        "x": 379,
+        "y": 724
+      },
+      "expected_bbox": {
+        "x": 405,
+        "y": 690,
+        "w": 70,
+        "h": 60
+      },
+      "expected_click_point": {
+        "x": 438,
+        "y": 720
+      },
+      "gate_allowed": true,
+      "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260616-013056-429884__execute-mode-recognition-plan__edge.json",
+      "status": "fail",
+      "inside_expected_bbox": false,
+      "distance_to_expected_click": 59.135,
+      "edge_margin_px": null,
+      "nearest_neighbor_mistake": false,
+      "nearest_neighbor_distance": null,
+      "reasons": [
+        "point_outside_expected_bbox",
+        "distance_above_allowed"
+      ]
+    },
+    {
+      "case_id": "execute_mvp_done_button",
+      "category": "normal_button",
+      "goal": "Click Done",
+      "max_edge": 512,
+      "success": true,
+      "latency_ms": 2067.929,
+      "processed_size": {
+        "width": 469,
+        "height": 512
+      },
+      "processed_point": {
+        "x": 152,
+        "y": 266
+      },
+      "mapped_point_original": {
+        "x": 410,
+        "y": 717
+      },
+      "expected_bbox": {
+        "x": 405,
+        "y": 690,
+        "w": 70,
+        "h": 60
+      },
+      "expected_click_point": {
+        "x": 438,
+        "y": 720
+      },
+      "gate_allowed": true,
+      "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260616-013058-497285__execute-mode-recognition-plan__edge.json",
+      "status": "risky",
+      "inside_expected_bbox": true,
+      "distance_to_expected_click": 28.16,
+      "edge_margin_px": 5,
+      "nearest_neighbor_mistake": false,
+      "nearest_neighbor_distance": null,
+      "reasons": [
+        "distance_above_allowed",
+        "edge_margin_below_6px"
+      ]
+    },
+    {
+      "case_id": "execute_mvp_done_button",
+      "category": "normal_button",
+      "goal": "Click Done",
+      "max_edge": 640,
+      "success": true,
+      "latency_ms": 3049.655,
+      "processed_size": {
+        "width": 587,
+        "height": 640
+      },
+      "processed_point": {
+        "x": 200,
+        "y": 333
+      },
+      "mapped_point_original": {
+        "x": 431,
+        "y": 718
+      },
+      "expected_bbox": {
+        "x": 405,
+        "y": 690,
+        "w": 70,
+        "h": 60
+      },
+      "expected_click_point": {
+        "x": 438,
+        "y": 720
+      },
+      "gate_allowed": true,
+      "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260616-013101-547491__execute-mode-recognition-plan__edge.json",
+      "status": "pass",
+      "inside_expected_bbox": true,
+      "distance_to_expected_click": 7.28,
+      "edge_margin_px": 26,
+      "nearest_neighbor_mistake": false,
+      "nearest_neighbor_distance": null,
+      "reasons": []
+    },
+    {
+      "case_id": "execute_mvp_done_button",
+      "category": "normal_button",
+      "goal": "Click Done",
+      "max_edge": 768,
+      "success": true,
+      "latency_ms": 5575.13,
+      "processed_size": {
+        "width": 704,
+        "height": 768
+      },
+      "processed_point": {
+        "x": 244,
+        "y": 399
+      },
+      "mapped_point_original": {
+        "x": 438,
+        "y": 717
+      },
+      "expected_bbox": {
+        "x": 405,
+        "y": 690,
+        "w": 70,
+        "h": 60
+      },
+      "expected_click_point": {
+        "x": 438,
+        "y": 720
+      },
+      "gate_allowed": true,
+      "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260616-013107-122326__execute-mode-recognition-plan__edge.json",
+      "status": "pass",
+      "inside_expected_bbox": true,
+      "distance_to_expected_click": 3.0,
+      "edge_margin_px": 27,
+      "nearest_neighbor_mistake": false,
+      "nearest_neighbor_distance": null,
+      "reasons": []
+    }
+  ],
+  "summary": {
+    "contract_version": "vista_scaling_benchmark_summary_v1",
+    "max_edges": {
+      "448": {
+        "case_count": 1,
+        "pass_count": 0,
+        "risky_count": 0,
+        "fail_count": 1,
+        "pass_rate": 0.0,
+        "median_latency_ms": 1400.464,
+        "max_latency_ms": 1400.464
+      },
+      "512": {
+        "case_count": 1,
+        "pass_count": 0,
+        "risky_count": 1,
+        "fail_count": 0,
+        "pass_rate": 0.0,
+        "median_latency_ms": 2067.929,
+        "max_latency_ms": 2067.929
+      },
+      "640": {
+        "case_count": 1,
+        "pass_count": 1,
+        "risky_count": 0,
+        "fail_count": 0,
+        "pass_rate": 1.0,
+        "median_latency_ms": 3049.655,
+        "max_latency_ms": 3049.655
+      },
+      "768": {
+        "case_count": 1,
+        "pass_count": 1,
+        "risky_count": 0,
+        "fail_count": 0,
+        "pass_rate": 1.0,
+        "median_latency_ms": 5575.13,
+        "max_latency_ms": 5575.13
+      }
+    }
+  }
+}

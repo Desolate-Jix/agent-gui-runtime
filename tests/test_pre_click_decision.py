@@ -203,6 +203,66 @@ def test_pre_click_decision_removes_passed_reason_when_margin_later_rejects() ->
     assert "pre_click_checks_passed" not in result.candidate_decisions[0].reasons
 
 
+def test_pre_click_decision_can_allow_reviewed_low_margin_grounded_candidate() -> None:
+    top = _candidate(candidate_id="candidate_top", score=0.8)
+    second = _candidate(candidate_id="candidate_second", score=0.79)
+    rank_result = CandidateRankResult(
+        goal="click start detection",
+        candidates=[top, second],
+        recommended_candidate_id=top.candidate_id,
+        margin_to_second=0.01,
+    )
+    grounding = LocalGroundingResult(
+        goal="click start detection",
+        results=[
+            _grounding(candidate_id="candidate_top").results[0],
+            _grounding(candidate_id="candidate_second").results[0],
+        ],
+    )
+
+    result = decide_pre_click(
+        goal="click start detection",
+        candidates=rank_result,
+        grounding=grounding,
+        allow_low_margin_when_grounded=True,
+    )
+
+    assert result.allowed is True
+    assert result.selected_candidate_id == "candidate_top"
+    assert "top_candidate_margin_reviewed_override" in result.reasons
+    assert "top_candidate_margin_reviewed_override" in result.candidate_decisions[0].reasons
+    assert result.summary["low_margin_reviewed_override_used"] is True
+
+
+def test_pre_click_decision_reviewed_low_margin_does_not_allow_hard_blocker() -> None:
+    top = _candidate(candidate_id="candidate_top", score=0.8)
+    second = _candidate(candidate_id="candidate_second", score=0.79)
+    rank_result = CandidateRankResult(
+        goal="click start detection",
+        candidates=[top, second],
+        recommended_candidate_id=top.candidate_id,
+        margin_to_second=0.01,
+    )
+    grounding = LocalGroundingResult(
+        goal="click start detection",
+        results=[
+            _grounding(candidate_id="candidate_top", matched_text="Cancel").results[0],
+            _grounding(candidate_id="candidate_second").results[0],
+        ],
+    )
+
+    result = decide_pre_click(
+        goal="click start detection",
+        candidates=rank_result,
+        grounding=grounding,
+        allow_low_margin_when_grounded=True,
+    )
+
+    assert result.allowed is False
+    assert "local_ocr_text_mismatch" in result.candidate_decisions[0].reasons
+    assert "top_candidate_margin_too_small" in result.candidate_decisions[0].reasons
+
+
 def test_pre_click_decision_does_not_fall_back_from_precise_icon_to_nearby_text() -> None:
     icon = _candidate(
         candidate_id="candidate_icon",
@@ -253,3 +313,30 @@ def test_pre_click_decision_requires_confirmation_for_precise_text_card() -> Non
     assert result.allowed is False
     assert result.selected_click_point is None
     assert "precision_text_target_requires_confirmation" in result.candidate_decisions[0].reasons
+
+
+def test_pre_click_decision_allows_ranker_verified_precise_text_button() -> None:
+    button = _candidate(
+        candidate_id="candidate_more",
+        score=0.82,
+        text_similarity=0.9,
+        allowed=False,
+        eligible=True,
+        zone_type="precise_text_target",
+    )
+    button.reasons = ["precision_text_target_matches_goal", "strong_goal_text_match", "supported_interaction"]
+    button.label = "See more headlines and perspectives"
+    button.text = button.label
+    button.element.label = button.label
+    button.element.text = button.label
+    button.element.description = button.label
+
+    result = decide_pre_click(
+        goal="See more headlines and perspectives",
+        candidates=_rank_result(button),
+        grounding=_grounding(candidate_id="candidate_more", matched_text="See more headlines and perspectives"),
+    )
+
+    assert result.allowed is True
+    assert result.selected_candidate_id == "candidate_more"
+    assert "precision_text_target_verified_by_local_ocr" in result.candidate_decisions[0].reasons

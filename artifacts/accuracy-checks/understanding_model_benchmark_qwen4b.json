@@ -1,0 +1,425 @@
+{
+  "contract_version": "understanding_model_benchmark_v1",
+  "cases_path": "configs/understanding_model_benchmark_cases.json",
+  "profiles": [
+    "qwen3_vl_4b_q4_k_m"
+  ],
+  "summary": [
+    {
+      "profile_id": "qwen3_vl_4b_q4_k_m",
+      "success_count": 3,
+      "case_count": 3,
+      "avg_case_ms": 2318.717,
+      "avg_recall": 0.5833,
+      "load_ms": 3778.251
+    }
+  ],
+  "results": [
+    {
+      "profile_id": "qwen3_vl_4b_q4_k_m",
+      "label": "Qwen3-VL 4B Q4_K_M",
+      "model_name": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+      "endpoint": "http://127.0.0.1:1241/v1/chat/completions",
+      "ensure_model_server": {
+        "stage": "observe",
+        "profile": {
+          "profile_id": "qwen3_vl_4b_q4_k_m",
+          "label": "Qwen3-VL 4B Q4_K_M",
+          "role": [
+            "understanding",
+            "fast_understanding"
+          ],
+          "provider_mode": "local_understanding",
+          "input_format": "openai_compatible_vision",
+          "model_name": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+          "model_path": "models/qwen3-vl-4b-instruct-q4_k_m-gguf/Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+          "mmproj_path": "models/qwen3-vl-4b-instruct-q4_k_m-gguf/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf",
+          "server_path": "tools/llama.cpp-b8892-cuda13/llama-server.exe",
+          "endpoint": "http://127.0.0.1:1241/v1/chat/completions",
+          "start_script": "scripts/model_servers/start_llama_vision_server.ps1",
+          "stop_script": "scripts/model_servers/stop_local_vision_server.ps1",
+          "pid_file": "logs/qwen3-vl-4b-q4_k_m-server.pid",
+          "port": 1241,
+          "context_size": 4096,
+          "gpu_layers": 99,
+          "image_min_tokens": 768,
+          "supports_ocr_anchors": true,
+          "launchable": true,
+          "best_for": "Fast screenshot understanding and available-action summaries with lower latency than the 8B profile.",
+          "limitations": "Benchmark before making it the default; not a point-grounding replacement for VISTA."
+        },
+        "before": {
+          "status": "unreachable",
+          "base_url": "http://127.0.0.1:1241/v1",
+          "error": "<urlopen error timed out>"
+        },
+        "started": true,
+        "start": {
+          "pid": 27444,
+          "command": [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            "D:\\agent-gui-runtime\\scripts\\model_servers\\start_llama_vision_server.ps1",
+            "-ModelPath",
+            "D:\\agent-gui-runtime\\models\\qwen3-vl-4b-instruct-q4_k_m-gguf\\Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+            "-MmprojPath",
+            "D:\\agent-gui-runtime\\models\\qwen3-vl-4b-instruct-q4_k_m-gguf\\mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf",
+            "-ServerPath",
+            "D:\\agent-gui-runtime\\tools\\llama.cpp-b8892-cuda13\\llama-server.exe",
+            "-ModelName",
+            "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+            "-Port",
+            "1241",
+            "-ContextSize",
+            "4096",
+            "-GpuLayers",
+            "99",
+            "-ImageMinTokens",
+            "768"
+          ],
+          "log_path": "D:\\agent-gui-runtime\\logs\\local-vision-server-qwen3_vl_4b_q4_k_m-20260616-180136.log",
+          "pid_path": "D:\\agent-gui-runtime\\logs\\qwen3-vl-4b-q4_k_m-server.pid"
+        },
+        "after": {
+          "status": "running",
+          "base_url": "http://127.0.0.1:1241/v1",
+          "response": {
+            "models": [
+              {
+                "name": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+                "model": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+                "modified_at": "",
+                "size": "",
+                "digest": "",
+                "type": "model",
+                "description": "",
+                "tags": [
+                  ""
+                ],
+                "capabilities": [
+                  "completion",
+                  "multimodal"
+                ],
+                "parameters": "",
+                "details": {
+                  "parent_model": "",
+                  "format": "gguf",
+                  "family": "",
+                  "families": [
+                    ""
+                  ],
+                  "parameter_size": "",
+                  "quantization_level": ""
+                }
+              }
+            ],
+            "object": "list",
+            "data": [
+              {
+                "id": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+                "aliases": [],
+                "tags": [],
+                "object": "model",
+                "created": 1781589699,
+                "owned_by": "llamacpp",
+                "meta": {
+                  "vocab_type": 2,
+                  "n_vocab": 151936,
+                  "n_ctx_train": 262144,
+                  "n_embd": 2560,
+                  "n_params": 4022468096,
+                  "size": 2491323904
+                }
+              }
+            ]
+          },
+          "health": null,
+          "model_id": "Qwen3VL-4B-Instruct-Q4_K_M.gguf"
+        }
+      },
+      "server_status": {
+        "status": "running",
+        "base_url": "http://127.0.0.1:1241/v1",
+        "response": {
+          "models": [
+            {
+              "name": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+              "model": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+              "modified_at": "",
+              "size": "",
+              "digest": "",
+              "type": "model",
+              "description": "",
+              "tags": [
+                ""
+              ],
+              "capabilities": [
+                "completion",
+                "multimodal"
+              ],
+              "parameters": "",
+              "details": {
+                "parent_model": "",
+                "format": "gguf",
+                "family": "",
+                "families": [
+                  ""
+                ],
+                "parameter_size": "",
+                "quantization_level": ""
+              }
+            }
+          ],
+          "object": "list",
+          "data": [
+            {
+              "id": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+              "aliases": [],
+              "tags": [],
+              "object": "model",
+              "created": 1781589699,
+              "owned_by": "llamacpp",
+              "meta": {
+                "vocab_type": 2,
+                "n_vocab": 151936,
+                "n_ctx_train": 262144,
+                "n_embd": 2560,
+                "n_params": 4022468096,
+                "size": 2491323904
+              }
+            }
+          ]
+        },
+        "health": null,
+        "model_id": "Qwen3VL-4B-Instruct-Q4_K_M.gguf"
+      },
+      "load_ms": 3778.251,
+      "cases": [
+        {
+          "case_id": "execute_mvp_start",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\execute-mvp-test-1-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-155119-232986.png",
+          "elapsed_ms": 1441.859,
+          "success": true,
+          "error": null,
+          "json_ok": true,
+          "parse_error": null,
+          "score": {
+            "expected_count": 2,
+            "matched_count": 2,
+            "matched_terms": [
+              "Execute MVP",
+              "Start"
+            ],
+            "missing_terms": [],
+            "recall": 1.0
+          },
+          "raw_text_preview": "{ \"screen_summary\": \"A test page prompting user to start an MVP test\", \"actions\": [ { \"label\": \"Start\", \"role\": \"button\", \"reason\": \"Blue button with clear call-to-action text\" } ], \"visible_text\": [ \"Execute MVP Test\", \"This page is a controlled target for Execute Mode single-step smoke tests.\", \"Start\", \"Ready\" ] }",
+          "parsed": {
+            "screen_summary": "A test page prompting user to start an MVP test",
+            "actions": [
+              {
+                "label": "Start",
+                "role": "button",
+                "reason": "Blue button with clear call-to-action text"
+              }
+            ],
+            "visible_text": [
+              "Execute MVP Test",
+              "This page is a controlled target for Execute Mode single-step smoke tests.",
+              "Start",
+              "Ready"
+            ]
+          }
+        },
+        {
+          "case_id": "notepad_menu",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\-03faf5c9__recognition-plan-execution__notepad__full-window__20260616-155938-549464.png",
+          "elapsed_ms": 1164.098,
+          "success": true,
+          "error": null,
+          "json_ok": true,
+          "parse_error": null,
+          "score": {
+            "expected_count": 3,
+            "matched_count": 0,
+            "matched_terms": [],
+            "missing_terms": [
+              "File",
+              "Edit",
+              "View"
+            ],
+            "recall": 0.0
+          },
+          "raw_text_preview": "{ \"screen_summary\": \"New blank Notepad window ready for text input\", \"actions\": [], \"visible_text\": [ \"无标题 - 记事本\", \"文件(F)\", \"编辑(E)\", \"格式(O)\", \"查看(V)\", \"帮助(H)\", \"第1行,第1列\", \"100%\", \"Windows (CRLF)\", \"UTF-8\" ] }",
+          "parsed": {
+            "screen_summary": "New blank Notepad window ready for text input",
+            "actions": [],
+            "visible_text": [
+              "无标题 - 记事本",
+              "文件(F)",
+              "编辑(E)",
+              "格式(O)",
+              "查看(V)",
+              "帮助(H)",
+              "第1行,第1列",
+              "100%",
+              "Windows (CRLF)",
+              "UTF-8"
+            ]
+          }
+        },
+        {
+          "case_id": "seek_jobs",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-160955-988635.png",
+          "elapsed_ms": 4350.194,
+          "success": true,
+          "error": null,
+          "json_ok": true,
+          "parse_error": null,
+          "score": {
+            "expected_count": 4,
+            "matched_count": 3,
+            "matched_terms": [
+              "SEEK",
+              "Software Engineer",
+              "Pay"
+            ],
+            "missing_terms": [
+              "Date"
+            ],
+            "recall": 0.75
+          },
+          "raw_text_preview": "{ \"screen_summary\": \"Job search results page for software engineers in Auckland with a translation popup and job listings\", \"actions\": [ { \"label\": \"Software Engineers (All levels!)\", \"role\": \"card\", \"reason\": \"Job listing with company name and location visible\" }, { \"label\": \"Applications Software Engineer\", \"role\": \"card\", \"reason\": \"Job listing with company name and location visible\" }, { \"label\": \"Save this search\", \"role\": \"button\", \"reason\": \"Blue button with heart icon indicating save functionality\" }, { \"label\": \"Pay\", \"role\": \"button\", \"reason\": \"Dropdown filter button for salary range\" }, { \"label\": \"Type\", \"role\": \"button\", \"reason\": \"Dropdown filter button for job type\" }, { \"label\": \"Remote\", \"role\": \"button\", \"reason\": \"Dropdown filter button for remote work options\" }, { \"label\": \"Classification\", \"role\": \"button\", \"reason\": \"Dropdown filter button for job classification\" }, { \"label\": \"Listing time\", \"role\": \"button\", \"reason\": \"Dropdown filter button for job listing ag",
+          "parsed": {
+            "screen_summary": "Job search results page for software engineers in Auckland with a translation popup and job listings",
+            "actions": [
+              {
+                "label": "Software Engineers (All levels!)",
+                "role": "card",
+                "reason": "Job listing with company name and location visible"
+              },
+              {
+                "label": "Applications Software Engineer",
+                "role": "card",
+                "reason": "Job listing with company name and location visible"
+              },
+              {
+                "label": "Save this search",
+                "role": "button",
+                "reason": "Blue button with heart icon indicating save functionality"
+              },
+              {
+                "label": "Pay",
+                "role": "button",
+                "reason": "Dropdown filter button for salary range"
+              },
+              {
+                "label": "Type",
+                "role": "button",
+                "reason": "Dropdown filter button for job type"
+              },
+              {
+                "label": "Remote",
+                "role": "button",
+                "reason": "Dropdown filter button for remote work options"
+              },
+              {
+                "label": "Classification",
+                "role": "button",
+                "reason": "Dropdown filter button for job classification"
+              },
+              {
+                "label": "Listing time",
+                "role": "button",
+                "reason": "Dropdown filter button for job listing age"
+              },
+              {
+                "label": "SEEK",
+                "role": "button",
+                "reason": "Search button to submit query"
+              },
+              {
+                "label": "翻译",
+                "role": "button",
+                "reason": "Translation button in popup"
+              }
+            ],
+            "visible_text": [
+              "Software Engineer Jobs in All Auckland",
+              "323 jobs",
+              "New to you",
+              "Strong applicant jobs",
+              "Software Engineers (All levels!)",
+              "Halter",
+              "Auckland CBD, Auckland",
+              "Applications Software Engineer",
+              "Temperzone",
+              "Manukau, Auckland",
+              "Save this search",
+              "Pay",
+              "Type",
+              "Remote",
+              "Classification",
+              "Listing time",
+              "SEEK",
+              "翻译",
+              "中文（简体）"
+            ]
+          }
+        }
+      ],
+      "stop_model_server": {
+        "profile": {
+          "profile_id": "qwen3_vl_4b_q4_k_m",
+          "label": "Qwen3-VL 4B Q4_K_M",
+          "role": [
+            "understanding",
+            "fast_understanding"
+          ],
+          "provider_mode": "local_understanding",
+          "input_format": "openai_compatible_vision",
+          "model_name": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+          "model_path": "models/qwen3-vl-4b-instruct-q4_k_m-gguf/Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+          "mmproj_path": "models/qwen3-vl-4b-instruct-q4_k_m-gguf/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf",
+          "server_path": "tools/llama.cpp-b8892-cuda13/llama-server.exe",
+          "endpoint": "http://127.0.0.1:1241/v1/chat/completions",
+          "start_script": "scripts/model_servers/start_llama_vision_server.ps1",
+          "stop_script": "scripts/model_servers/stop_local_vision_server.ps1",
+          "pid_file": "logs/qwen3-vl-4b-q4_k_m-server.pid",
+          "port": 1241,
+          "context_size": 4096,
+          "gpu_layers": 99,
+          "image_min_tokens": 768,
+          "supports_ocr_anchors": true,
+          "launchable": true,
+          "best_for": "Fast screenshot understanding and available-action summaries with lower latency than the 8B profile.",
+          "limitations": "Benchmark before making it the default; not a point-grounding replacement for VISTA."
+        },
+        "command": [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "D:\\agent-gui-runtime\\scripts\\model_servers\\stop_local_vision_server.ps1",
+          "-Port",
+          "1241",
+          "-PidFile",
+          "D:\\agent-gui-runtime\\logs\\qwen3-vl-4b-q4_k_m-server.pid"
+        ],
+        "returncode": 0,
+        "stdout": "Stopped local vision server process 27444.\nStopped process 11588 listening on port 1241.\n",
+        "stderr": "",
+        "stopped": true,
+        "after": {
+          "status": "unreachable",
+          "base_url": "http://127.0.0.1:1241/v1",
+          "error": "[WinError 10054] 远程主机强迫关闭了一个现有的连接。"
+        }
+      }
+    }
+  ]
+}

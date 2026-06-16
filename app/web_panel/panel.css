@@ -1221,9 +1221,15 @@ textarea {
   border-radius: 9px;
   background: #0b1120;
   overflow: hidden;
-  height: 300px;
-  max-height: 360px;
+  height: clamp(280px, 30vw, 340px);
+  min-height: 280px;
+  max-height: 680px;
   border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: height 180ms var(--ease);
+}
+
+.path-canvas-wrap.expanded {
+  min-height: 360px;
 }
 
 #navPathCanvas {
@@ -1350,6 +1356,35 @@ textarea {
   color: #667085;
 }
 
+.focused-control-card {
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid #99f6e4;
+  border-radius: 8px;
+  background: #f0fdfa;
+}
+
+.focused-control-card h5 {
+  margin: 0;
+  font-size: 11px;
+  color: #0f766e;
+  text-transform: uppercase;
+}
+
+.focused-control-card strong {
+  color: #134e4a;
+  font-size: 13px;
+}
+
+.focused-control-card span,
+.focused-control-card p {
+  margin: 0;
+  color: #475467;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .path-detail-sections {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1408,6 +1443,29 @@ textarea {
   color: #344054;
 }
 
+.control-section {
+  margin: 8px 0 10px;
+  padding: 8px;
+  border: 1px solid #e4e7ec;
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.control-section h5 {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 0 0 6px;
+  font-size: 11px;
+  color: #0f766e;
+  text-transform: uppercase;
+}
+
+.control-section h5 span {
+  color: #667085;
+  font-weight: 600;
+}
+
 .control-item {
   display: flex;
   gap: 8px;
@@ -1427,6 +1485,11 @@ textarea {
 .control-item.ctrl-unclicked {
   background: #f8fafc;
   border: 1px solid #e4e7ec;
+}
+
+.control-item.ctrl-focused {
+  border-color: #2dd4bf;
+  box-shadow: 0 0 0 2px rgba(45, 212, 191, 0.18);
 }
 
 .ctrl-status {
@@ -1563,6 +1626,34 @@ textarea {
 .write-policy-row input {
   width: auto;
   min-height: 0;
+}
+
+.mode-help {
+  margin: 0 0 12px;
+  padding: 9px 10px;
+  border: 1px solid #b7e4c7;
+  border-radius: 7px;
+  background: #f0fdf4;
+  color: #05603a;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.mode-help-execute {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1849a9;
+}
+
+body.agent-mode-learn [data-mode-scope="execute"],
+body.agent-mode-execute [data-mode-scope="learn"] {
+  display: none;
+}
+
+.execute-evidence-note {
+  margin: -3px 0 12px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .content-grid {

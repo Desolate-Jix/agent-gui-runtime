@@ -10,6 +10,6 @@
     "start": "scripts/model_servers/start_llama_vision_server.ps1",
     "stop": "scripts/model_servers/stop_local_vision_server.ps1"
   },
-  "observe_model_profile": "Qwen3-VL 8B Q4_K_M",
-  "locate_model_profile": "Qwen3.6 35B A3B IQ4_XS"
+  "observe_model_profile": "Qwen3-VL 4B Q4_K_M",
+  "locate_model_profile": "VISTA-4B Transformers"
 }

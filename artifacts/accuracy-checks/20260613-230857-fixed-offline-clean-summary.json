@@ -1,0 +1,33 @@
+{
+  "locate_success": true,
+  "location_status": "learn_all_targets_ready",
+  "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260613-230944-377312__locate-target__google-news.json",
+  "target_count": 36,
+  "validated_count": 36,
+  "invalid_count": 0,
+  "valid_rate": 1.0,
+  "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\state-fb7783fa005b40f4-learn-targets__learn-target-coordinates__20260613-230944-327313.png",
+  "model_review_status": "ready",
+  "model_error": null,
+  "model_addition_count": 0,
+  "model_update_count": 0,
+  "model_removal_count": 0,
+  "role_counts": {
+    "menu_item": 5,
+    "text_input": 1,
+    "icon_button": 4,
+    "news_card": 6,
+    "recommendation_item": 5,
+    "nav_text_action": 14,
+    "text_action": 1
+  },
+  "section_counts": {
+    "browser_chrome": 2,
+    "page_header": 19,
+    "promo_strip": 1,
+    "main_content": 6,
+    "right_sidebar": 4,
+    "lower_content": 4
+  },
+  "noise_present": []
+}

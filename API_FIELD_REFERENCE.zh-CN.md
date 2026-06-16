@@ -123,7 +123,7 @@
 | `start_models` | boolean | true | 是否自动启动不可达的模型服务。为 false 时只做状态检查。 |
 | `stages` | array | `["observe","locate"]` | 要检查的阶段。`observe` 默认对应整屏理解小模型，`locate` 默认对应精准定位大模型。 |
 | `wait_until_ready` | boolean | false | 启动模型后是否等待 `/v1/models` 变为可用。 |
-| `wait_seconds` | number | 0 | 最大等待秒数，范围 `0..120`。 |
+| `wait_seconds` | number | 0 | 最大等待秒数，范围 `0..180`。 |
 
 返回 `data` 字段：
 
@@ -152,7 +152,7 @@
 | `stage` | string | `locate` | 要启动的阶段，例如 `observe` 或 `locate`。 |
 | `profile_id` | string/null | null | 明确指定模型 profile；为空时由 stage 映射。 |
 | `wait_until_ready` | boolean | false | 是否等待模型可用。 |
-| `wait_seconds` | number | 0 | 最大等待秒数。 |
+| `wait_seconds` | number | 0 | 最大等待秒数，范围 `0..180`。 |
 
 返回字段：与 `/runtime/prepare` 的单个 stage 结果相同。
 
@@ -433,7 +433,7 @@
 | `app_name` | string/null | null | 应用上下文。 |
 | `state_hint` | string/null | null | 调用方已有的状态提示。 |
 | `provider_mode` | string/null | null | 推荐传 `local_understanding`。 |
-| `metadata` | object | `{}` | prompt override、OCR anchor 等扩展。 |
+| `metadata` | object | `{}` | prompt override、OCR anchor、Learn Deep 模型审查等扩展。`learn_deep_model_review=false` 可禁用第二阶段模型审查；也可传 `{enabled, provider_mode, max_candidates, max_texts, max_output_tokens}`。 |
 | `capture_live` | boolean | true | 是否从绑定窗口实时截图。 |
 | `image_path` | string/null | null | `capture_live=false` 时使用的截图路径。 |
 
@@ -448,6 +448,7 @@
 | `suggested_state_hint` | string | 从模型 `state_guess` 压缩出的下一步定位提示。面板会自动填入精准定位 State hint。 |
 | `agent_next_steps` | array | 建议下一步：选择具体目标、调用 `/vision/locate_target`、不要直接点击。 |
 | `execution_path` | object | 是否使用视觉模型、page structure、screen reading。 |
+| `degraded_reason` | object/null | 当本地视觉模型返回非法 JSON 或 `screen_reading` 失败时出现。Observe 会用 OCR/UIA 降级生成 `screen_map_v1`，并把原始失败原因写在这里。 |
 | `trace_path` | string | observe trace。 |
 
 使用注意：
@@ -458,6 +459,8 @@
 - 当视觉模型只返回顶部导航控件时，runtime 会从高置信 OCR 正文文本补充 `ocr_text_actions` 候选，例如卡片标题、开始按钮和鼠标按键文本，供后续 Locate 精准验证。
 - 顶部导航区的有效 OCR 文字会被提升为 `nav_text_action`，用于补齐模型漏掉的导航按钮。
 - 正文、推广区和下方内容中的相关标题/说明文字会被聚合为 `source="ocr_card_groups"` 的 `content_card`，bbox 覆盖整张卡片而不是只覆盖标题文字。
+- `learn_depth="deep"` 时，runtime 会先做确定性 PathGraph 审查，再默认调用第二阶段本地模型做语义 review。模型输出的 `learn_deep_model_review_v1` 会写入 `path_graph_deep_review.model_review`，并保守合并 add/remove/update 到 `path_graph_delta_v1`；模型失败会回退到确定性结果。
+- 如果本地视觉模型返回非法 JSON 导致 `screen_reading` 失败，Observe 不再直接失败；它会降级为 OCR/UIA-only 观察，返回 `success=true`、`status="degraded"`、`degraded_reason` 和一份可阅读的 `screen_map_v1`。这些候选仍然只是观察证据，执行前必须 Locate/RecognitionPlan/Gate。
 - observe trace 会保存 `screen_map`；`/panel/inspect_trace` 会把它解析为 `Path Map` 阶段，便于阅读 trace 时直接查看路径候选和 overlay 证据。
 - 这个接口只能用于理解和候选发现，不能用于点击。
 
@@ -532,7 +535,7 @@
 | `ocr_result` | object | OCR 结果。 |
 | `ocr_anchors` | object/null | OCR anchors 证据。 |
 | `observe_trace_reuse` | object | Observe trace 复用状态。 |
-| `path_graph_recall` | object | `path_graph_recall_v1`。执行模式的状态匹配与 PathGraph top-k 召回结果，包含候选、分数和 `local_ocr_roi` 提示。 |
+| `path_graph_recall` | object | `path_graph_recall_v1`。执行模式的状态匹配与 PathGraph top-k 召回结果，包含候选、分数和 `local_ocr_roi` 提示；安全召回候选会合并进 `candidate_result`，继续经过局部 OCR grounding 和 `pre_click_decision_v1`。 |
 | `page_structure` | object | 页面结构层。 |
 | `screen_reading` | object | 读取层。 |
 | `candidate_result` | object | 候选排序结果。 |
@@ -676,6 +679,8 @@
 | `semantic_post_click_verification` | object | 语义验证，例如 MouseTester 特化验证。 |
 | `attempts` | array | 每次点击尝试详情。 |
 | `execution_path` | object | 计划、闸门、点击、验证、重试路径。 |
+| `element_memory_writeback` | object/null | `execute_transition_memory_v1`。验证成功的真实点击会在 `write_policy.element_memory=true` 时写入 transition memory；dry-run、闸门拒绝、未验证成功或未绑定窗口不会写入。 |
+| `fallback_plan` | object/null | `execute_fallback_plan_v1`。失败时给出局部重扫、PathGraph review、全屏 OCR 刷新或重新 grounding 的下一步计划；它不授予自动点击权限。 |
 | `trace_path` | string | action trace。 |
 
 安全语义：
@@ -683,6 +688,9 @@
 - `dry_run=true` 且闸门通过：`success=true`，但 `execution_path.action_executed=false`。
 - 闸门拒绝：`success=false`，`error.code=pre_click_rejected`，不会点击。
 - 真实点击后验证失败：`success=false`，但 `execution_path.action_executed=true`，需要读验证字段。
+- 只有验证成功的真实点击会写 `execute_transition_memory_v1`；执行经验归 ElementMemory，不反向污染 PathGraph 结构判断。
+- 失败响应应读 `fallback_plan`，但下一次尝试仍必须重新经过 `pre_click_decision_v1`。如果 `steps[]` 包含 `request_scroll`，上层 agent 可先调用 `POST /action/scroll` 露出更多内容，再用同一个 goal 重跑 `POST /action/execute_recognition_plan`。
+- Action trace 会保留 `element_memory_writeback` 或 `fallback_plan`，面板 Trace Inspector 分别显示为 `Memory` / `Fallback` 阶段。
 
 Approved plan 复用：
 - `dry_run=true` 且闸门通过时，`data.result.approved_plan_id` 会返回一个短期有效的已批准计划 ID。
@@ -755,6 +763,40 @@ Instruction learning 复用：
 | `execution_path.action_executed` | boolean | 是否真的发送了输入。 |
 | `trace_path` | string | 动作 trace。 |
 
+## POST /action/scroll
+
+设计目的：在当前绑定窗口内执行上下滚动，让 agent 在信息不全时先露出更多内容，再重新走执行模式识别与点击闸门。它不做视觉定位，也不授予点击权限。
+
+请求字段：
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `direction` | string | `down` | 滚动方向，取值 `down` 或 `up`。 |
+| `wheel_clicks` | integer | `4` | 鼠标滚轮档数，范围 `1..20`。 |
+| `x`, `y` | integer/null | null | 可选窗口相对坐标。为空时滚动点为当前绑定窗口中心；只有已确认具体可滚动 pane 时才建议传入。 |
+| `dry_run` | boolean | false | 只校验窗口、坐标和 trace，不发送滚轮输入。 |
+| `enable_verification` | boolean | true | 真实滚动后是否捕获前后状态并做通用变化验证。 |
+
+返回 `data.result` 字段：
+
+| 字段 | 类型 | 作用 |
+| --- | --- | --- |
+| `contract_version` | string | 固定为 `scroll_action_v1`。 |
+| `direction` | string | 实际请求方向。 |
+| `wheel_clicks` | integer | 实际滚轮档数。 |
+| `point` | object | 窗口相对滚动点。 |
+| `bound_window` | object | 当前绑定窗口摘要。 |
+| `scroll_result` | object | `dry_run=false` 时的 SendInput 滚轮执行结果，包含窗口点、屏幕点和滚轮 delta。 |
+| `post_scroll_verification` | object/null | 真实滚动后的前后截图/差异验证结果。 |
+| `execution_path.action_executed` | boolean | 是否真的发送了滚轮输入。 |
+| `trace_path` | string | action trace。 |
+
+安全语义：
+
+- `POST /action/scroll` 是 reveal/navigation 动作，不是点击动作。
+- Execute Mode 的 `fallback_plan.request_scroll` 只是建议“先滚动再重试同一目标”；滚动后仍必须重新调用 `POST /action/execute_recognition_plan` 并通过 `pre_click_decision_v1`。
+- 如果滚动点超出当前绑定窗口，会返回 `error.code=scroll_point_outside_window`，不会发送输入。
+
 ## POST /action/click_text
 
 设计目的：旧式 OCR 找文字并点击接口，主要用于简单调试和历史兼容。
@@ -780,7 +822,7 @@ Instruction learning 复用：
 | 字段 | 类型 | 作用 |
 | --- | --- | --- |
 | `agent_mode` | string | 架构模式。`learn` 表示学习/建图，`execute` 表示执行当前命令。 |
-| `learn_depth` | string/null | 学习深度。`fast` 产出 PathGraph draft；`deep` 用于后续全元素精修、语义审查和 ElementMemory 初始化。执行模式为 null。 |
+| `learn_depth` | string/null | 学习深度。`fast` 产出 PathGraph draft；`deep` 会在 Observe 阶段额外产出 `path_graph_deep_review_v1`、`path_graph_delta_v1` 和 `element_memory_init_plan_v1`。执行模式为 null。 |
 | `write_policy` | object | 写入策略，形如 `{path_graph, element_memory, trace}`。当前面板会用 `path_graph=false` 阻止响应自动写入导航路径图，执行接口会用 `element_memory=false` 阻止 instruction learning 写回；`trace=false` 会抑制 Observe/Locate/RecognitionPlan/ExecuteRecognitionPlan 的主 trace 写入。 |
 
 默认策略：

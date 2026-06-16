@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-06-15T11:59:12.431Z",
+  "includeContent": false,
+  "summary": {
+    "ok": false,
+    "status": "partial",
+    "warnings": [],
+    "error": {
+      "name": "[redacted:5 chars]",
+      "message": "[redacted:62 chars]",
+      "recoverable": false
+    },
+    "context": {
+      "timestamp": "2026-06-15T11:59:12.429Z",
+      "url": "[redacted:97 chars]",
+      "title": "[redacted:29 chars]"
+    }
+  },
+  "steps": [
+    {
+      "id": "bootstrap",
+      "command": "session.bootstrap",
+      "status": "ok",
+      "ok": true,
+      "startedAt": "2026-06-15T11:59:01.324Z",
+      "endedAt": "2026-06-15T11:59:01.379Z",
+      "warnings": [],
+      "dataPreview": {
+        "browserName": "[redacted:6 chars]",
+        "tabId": "[redacted:9 chars]",
+        "url": "[redacted:97 chars]",
+        "loggedIn": false
+      }
+    },
+    {
+      "id": "open",
+      "command": "threads.open",
+      "status": "error",
+      "ok": false,
+      "startedAt": "2026-06-15T11:59:01.379Z",
+      "endedAt": "2026-06-15T11:59:12.430Z",
+      "warnings": []
+    }
+  ],
+  "data": {
+    "bootstrap": {
+      "browserName": "[redacted:6 chars]",
+      "tabId": "[redacted:9 chars]",
+      "url": "[redacted:97 chars]",
+      "loggedIn": false
+    }
+  }
+}

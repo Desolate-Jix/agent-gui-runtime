@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ROIModel(BaseModel):
@@ -39,6 +39,16 @@ class BindWindowRequest(BaseModel):
 
     process_name: Optional[str] = None
     title: Optional[str] = None
+
+
+class ResizeBoundWindowRequest(BaseModel):
+    """Request model for resizing the currently bound window."""
+
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+    left: Optional[int] = None
+    top: Optional[int] = None
+    focus: bool = True
 
 
 class OpenAppRequest(BaseModel):
@@ -106,13 +116,24 @@ class TypeTextRequest(BaseModel):
     dry_run: bool = False
 
 
+class ScrollRequest(BaseModel):
+    """Request model for scrolling the currently bound window."""
+
+    direction: Literal["down", "up"] = "down"
+    wheel_clicks: int = Field(default=4, ge=1, le=20)
+    x: Optional[int] = Field(default=None, ge=0)
+    y: Optional[int] = Field(default=None, ge=0)
+    dry_run: bool = False
+    enable_verification: bool = True
+
+
 class RuntimePrepareRequest(BaseModel):
     """Request model for preparing local runtime dependencies before an agent run."""
 
     start_models: bool = True
     stages: list[str] = Field(default_factory=lambda: ["observe", "locate"])
     wait_until_ready: bool = False
-    wait_seconds: float = Field(default=0.0, ge=0.0, le=120.0)
+    wait_seconds: float = Field(default=0.0, ge=0.0, le=180.0)
 
 
 class ModelServerRequest(BaseModel):
@@ -121,7 +142,7 @@ class ModelServerRequest(BaseModel):
     stage: str = Field(default="locate", min_length=1)
     profile_id: Optional[str] = None
     wait_until_ready: bool = False
-    wait_seconds: float = Field(default=0.0, ge=0.0, le=120.0)
+    wait_seconds: float = Field(default=0.0, ge=0.0, le=180.0)
 
 
 class ExecuteRecognitionPlanRequest(BaseModel):
@@ -202,6 +223,12 @@ class VisionObserveScreenRequestModel(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     capture_live: bool = True
     image_path: Optional[str] = None
+
+    @model_validator(mode="after")
+    def align_default_write_policy_with_depth(self) -> "VisionObserveScreenRequestModel":
+        if self.learn_depth == "deep" and "write_policy" not in self.model_fields_set:
+            self.write_policy = _learn_deep_write_policy()
+        return self
 
 
 class VisionLocateTargetRequestModel(BaseModel):

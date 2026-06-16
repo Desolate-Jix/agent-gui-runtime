@@ -1,0 +1,191 @@
+{
+  "contract_version": "understanding_model_benchmark_v1",
+  "cases_path": "configs/understanding_model_benchmark_cases.json",
+  "profiles": [
+    "minicpm_v_4_6_transformers"
+  ],
+  "summary": [
+    {
+      "profile_id": "minicpm_v_4_6_transformers",
+      "success_count": 3,
+      "case_count": 3,
+      "avg_case_ms": 4466.779,
+      "avg_recall": 0.5278,
+      "load_ms": 4988.594
+    }
+  ],
+  "results": [
+    {
+      "profile_id": "minicpm_v_4_6_transformers",
+      "label": "MiniCPM-V 4.6 Transformers",
+      "model_name": "openbmb/MiniCPM-V-4.6",
+      "endpoint": null,
+      "ensure_model_server": {
+        "status": "loaded_direct_transformers",
+        "started": false
+      },
+      "server_status": {
+        "status": "direct_transformers"
+      },
+      "load_ms": 4988.594,
+      "cases": [
+        {
+          "case_id": "execute_mvp_start",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\execute-mvp-test-1-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-155119-232986.png",
+          "elapsed_ms": 3254.738,
+          "success": true,
+          "error": null,
+          "json_ok": true,
+          "parse_error": null,
+          "score": {
+            "expected_count": 2,
+            "matched_count": 2,
+            "matched_terms": [
+              "Execute MVP",
+              "Start"
+            ],
+            "missing_terms": [],
+            "recall": 1.0
+          },
+          "raw_text_preview": "{ \"screen_summary\": \"Execute MVP Test\", \"actions\": [ {\"label\": \"Start\", \"role\": \"button\", \"reason\": \"actionable to begin smoke tests\"}, {\"label\": \"Ready\", \"role\": \"text\", \"reason\": \"indicates current state\"} ], \"visible_text\": [\"Execute MVP Test\", \"This page is a controlled target for Execute Mode single-step smoke tests\", \"Ready\"] }",
+          "parsed": {
+            "screen_summary": "Execute MVP Test",
+            "actions": [
+              {
+                "label": "Start",
+                "role": "button",
+                "reason": "actionable to begin smoke tests"
+              },
+              {
+                "label": "Ready",
+                "role": "text",
+                "reason": "indicates current state"
+              }
+            ],
+            "visible_text": [
+              "Execute MVP Test",
+              "This page is a controlled target for Execute Mode single-step smoke tests",
+              "Ready"
+            ]
+          }
+        },
+        {
+          "case_id": "notepad_menu",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\-03faf5c9__recognition-plan-execution__notepad__full-window__20260616-155938-549464.png",
+          "elapsed_ms": 5215.948,
+          "success": true,
+          "error": null,
+          "json_ok": true,
+          "parse_error": null,
+          "score": {
+            "expected_count": 3,
+            "matched_count": 1,
+            "matched_terms": [
+              "Edit"
+            ],
+            "missing_terms": [
+              "File",
+              "View"
+            ],
+            "recall": 0.3333
+          },
+          "raw_text_preview": "{ \"screen_summary\": \"text editor or note-taking interface\", \"actions\": [ { \"label\": \"文件 (F)\", \"role\": \"menu item\" }, { \"label\": \"编辑 (E)\", \"role\": \"menu item\" }, { \"label\": \"格式 (O)\", \"role\": \"menu item\" }, { \"label\": \"查看 (V)\", \"role\": \"menu item\" }, { \"label\": \"帮助 (H)\", \"role\": \"menu item\" } ], \"visible_text\": [ \"无标题 · 记事本\", \"第 1 行, 第 1 列\", \"100%\", \"Windows (CRLF)\", \"UTF-8\" ] }",
+          "parsed": {
+            "screen_summary": "text editor or note-taking interface",
+            "actions": [
+              {
+                "label": "文件 (F)",
+                "role": "menu item"
+              },
+              {
+                "label": "编辑 (E)",
+                "role": "menu item"
+              },
+              {
+                "label": "格式 (O)",
+                "role": "menu item"
+              },
+              {
+                "label": "查看 (V)",
+                "role": "menu item"
+              },
+              {
+                "label": "帮助 (H)",
+                "role": "menu item"
+              }
+            ],
+            "visible_text": [
+              "无标题 · 记事本",
+              "第 1 行, 第 1 列",
+              "100%",
+              "Windows (CRLF)",
+              "UTF-8"
+            ]
+          }
+        },
+        {
+          "case_id": "seek_jobs",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-160955-988635.png",
+          "elapsed_ms": 4929.652,
+          "success": true,
+          "error": null,
+          "json_ok": true,
+          "parse_error": null,
+          "score": {
+            "expected_count": 4,
+            "matched_count": 1,
+            "matched_terms": [
+              "Software Engineer"
+            ],
+            "missing_terms": [
+              "SEEK",
+              "Pay",
+              "Date"
+            ],
+            "recall": 0.25
+          },
+          "raw_text_preview": "{ \"screen_summary\": \"Software engineer job search\", \"actions\": [ {\"label\": \"visible label\", \"role\": \"button\", \"reason\": \"search for software engineer jobs\"}, {\"label\": \"visible label\", \"role\": \"tab\", \"reason\": \"view strong applicant jobs\"}, {\"label\": \"visible label\", \"role\": \"button\", \"reason\": \"select job listing\"}, {\"label\": \"Save this search\", \"role\": \"button\", \"reason\": \"save current search query\"} ], \"visible_text\": [\"323 jobs\", \"New to you\", \"99+\", \"Strong applicant jobs\", \"Software Engineers (All levels)\", \"Halter\", \"Applications Software Engineer\", \"Temperzone\", \"Onsite cafeteria + parking + security\", \"Opportunities for continuous professional development\", \"Comprehensive Health Insurance Cover\", \"Save this search\"] }",
+          "parsed": {
+            "screen_summary": "Software engineer job search",
+            "actions": [
+              {
+                "label": "visible label",
+                "role": "button",
+                "reason": "search for software engineer jobs"
+              },
+              {
+                "label": "visible label",
+                "role": "tab",
+                "reason": "view strong applicant jobs"
+              },
+              {
+                "label": "visible label",
+                "role": "button",
+                "reason": "select job listing"
+              },
+              {
+                "label": "Save this search",
+                "role": "button",
+                "reason": "save current search query"
+              }
+            ],
+            "visible_text": [
+              "323 jobs",
+              "New to you",
+              "99+",
+              "Strong applicant jobs",
+              "Software Engineers (All levels)",
+              "Halter",
+              "Applications Software Engineer",
+              "Temperzone",
+              "Onsite cafeteria + parking + security",
+              "Opportunities for continuous professional development",
+              "Comprehensive Health Insurance Cover",
+              "Save this search"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "trace": "logs\\traces\\vision\\20260616-020313-319360__screen-reading__demo.json",
+  "elapsed_ms": 1.102,
+  "summary": {
+    "available_action_count": 2,
+    "page_element_count": 1,
+    "card_count": 0,
+    "action_ids_in_cards": 0,
+    "page_element_ids_in_cards": 0,
+    "duplicate_policy": "normalized_label_role_bbox_iou",
+    "build_elapsed_ms": 1.09
+  },
+  "quality": {
+    "duplicate_rate": 0.0,
+    "coordinate_coverage": 1.0,
+    "sources": {
+      "screen_reading.ui_elements": 2,
+      "screen_reading.texts": 1
+    }
+  },
+  "first_actions": [
+    "Back arrow",
+    "Start"
+  ],
+  "first_cards": []
+}

@@ -26,6 +26,8 @@ def build_region_analysis_prompt(
             max_regions=max_regions,
             grid_overlay_spacing=grid_overlay_spacing,
         )
+    if req.task == "learn_deep_review":
+        return _build_learn_deep_review_prompt(req, image_size)
     if req.task == "click_target":
         return _build_precise_target_prompt(
             req,
@@ -122,6 +124,70 @@ Region rules:
 {grid_rules}
 {ocr_anchor_rules}
 {custom_rules}
+""".strip()
+
+
+def _build_learn_deep_review_prompt(req: VisionAnalyzeRequest, image_size: ImageSize) -> str:
+    app_name = req.app_name or "unknown_app"
+    state_hint = req.state_hint or "unknown"
+    context = req.metadata.get("learn_deep_review_context") if isinstance(req.metadata, dict) else None
+    context_json = json.dumps(context or {}, ensure_ascii=False, separators=(",", ":"))
+    return f"""
+You are the Learn Deep semantic review stage for a GUI PathGraph.
+
+Goal:
+- review the draft map of the whole current interface
+- use the screenshot, OCR/UIA evidence, sections, and draft candidates together
+- decide whether important elements are missing, duplicated, mislabeled, assigned to the wrong role, or connected to the wrong section
+- do not choose a click target and do not authorize execution
+
+Input:
+- app_name: {app_name}
+- state_hint: {state_hint}
+- image_size: {{"width": {image_size.width}, "height": {image_size.height}}}
+- coordinates are screenshot pixels
+- context_json follows after the rules
+
+Return JSON only. Do not return markdown.
+
+Required JSON shape:
+{{
+  "contract_version": "learn_deep_model_review_v1",
+  "image_size": {{"width": {image_size.width}, "height": {image_size.height}}},
+  "screen_summary": "short review summary",
+  "state_guess": "short state hint",
+  "regions": [],
+  "targets": [],
+  "observers": [],
+  "status": "ready",
+  "candidate_decisions": [
+    {{
+      "candidate_id": "existing id or new id",
+      "action": "keep|remove|update|add",
+      "label": "short label",
+      "reasons": ["short reason"],
+      "candidate": {{}}
+    }}
+  ],
+  "additions": [],
+  "removals": [],
+  "updates": [],
+  "notes": []
+}}
+
+Rules:
+- Preserve existing candidate ids when reviewing existing candidates.
+- Use action="remove" only for clear duplicates or non-UI/noisy candidates.
+- Use action="add" only for visible important controls or card-level units missing from the draft.
+- Added candidates must include label, role, bbox, section_id when known, expected_effect, and reasons.
+- For page cards, prefer one card-level candidate instead of many tiny text candidates.
+- For top navigation, visible nav words are actionable candidates.
+- Do not mark risky/destructive actions as safe_click_allowed.
+- If unsure, keep the candidate and add a reason instead of deleting it.
+- All model-created coordinates remain observation evidence only; execution still requires Locate/RecognitionPlan and pre_click_decision_v1.
+
+context_json:
+{context_json}
 """.strip()
 
 
@@ -248,6 +314,7 @@ Return JSON only with this compact shape:
 }}
 
 Rules:
+- before returning, mentally validate that the response is parseable JSON: every object field and array item has a comma separator, all keys are double-quoted, any quote inside a string is escaped as \\", raw newlines inside strings are escaped as \\n, and there are no trailing commas
 - return at most {max_regions} independently clickable candidate controls, not large containing panels
 - prioritize navigation, icon-only buttons, primary buttons, tabs, inputs, toggles, menus, and title-bar controls
 - keep screen_summary and state_guess under 12 words each

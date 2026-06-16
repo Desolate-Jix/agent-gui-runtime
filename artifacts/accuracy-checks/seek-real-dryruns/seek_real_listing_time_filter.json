@@ -1,0 +1,1727 @@
+{
+  "case_id": "seek_real_listing_time_filter",
+  "goal": "Click the Listing time filter",
+  "latency_ms": 2218.709,
+  "response": {
+    "success": true,
+    "message": "Recognition plan accepted; dry run did not click",
+    "data": {
+      "action": "execute_recognition_plan",
+      "result": {
+        "contract_version": "execute_recognition_plan_v1",
+        "agent_mode": "execute",
+        "learn_depth": null,
+        "mode_contract_version": "execute_plan_v1",
+        "write_policy": {
+          "path_graph": false,
+          "element_memory": false,
+          "trace": true
+        },
+        "goal": "Click the Listing time filter",
+        "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302.png",
+        "live_capture": {
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302.png",
+          "image_width": 1265,
+          "image_height": 1380,
+          "roi": null,
+          "roi_adjusted": false,
+          "capture_purpose": "recognition_plan_execution",
+          "window_size": {
+            "width": 1265,
+            "height": 1380
+          }
+        },
+        "recognition_plan": {
+          "contract_version": "recognition_plan_v1",
+          "agent_mode": "execute",
+          "learn_depth": null,
+          "mode_contract_version": "execute_plan_v1",
+          "write_policy": {
+            "path_graph": false,
+            "element_memory": false,
+            "trace": true
+          },
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302.png",
+          "goal": "Click the Listing time filter",
+          "top_k": 5,
+          "observe_trace_reuse": {},
+          "path_graph_recall": {
+            "contract_version": "path_graph_recall_v1",
+            "status": "unavailable",
+            "reason": "observe_trace_reuse_not_ready",
+            "state_match": {
+              "status": "unavailable"
+            },
+            "candidates": [],
+            "summary": {
+              "candidate_count": 0,
+              "recalled_count": 0
+            }
+          },
+          "parse_result": {
+            "vision_regions": {
+              "contract_version": "vision_regions_v1",
+              "provider": "vista_point_grounding",
+              "image_size": {
+                "width": 1265,
+                "height": 1380
+              },
+              "screen_summary": "VISTA point grounding uses PathGraph recall instead of full-screen region parsing.",
+              "regions": [],
+              "targets": [],
+              "observers": [],
+              "notes": [
+                "vista_point_grounding_only"
+              ]
+            },
+            "ocr_result": null,
+            "ocr_anchors": null,
+            "page_structure": null,
+            "screen_reading": null,
+            "vista_point_grounding": {
+              "contract_version": "vista_point_grounding_v1",
+              "status": "ready",
+              "provider": "vista_direct_point_grounding",
+              "vista_stage": "final_refine_roi",
+              "model_name": "inclusionAI/VISTA-4B",
+              "output_contract": "vista_point_v1",
+              "image_path": "artifacts\\vista-direct\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302__vista-direct-roi-334-18-512x512-max640__8cc8dd5eff.png",
+              "goal": "Click the Listing time filter",
+              "prompt": "Click the Listing time filter",
+              "raw_text": "{\"contract_version\": \"vista_point_v1\", \"status\": \"ready\", \"point\": {\"x\": 473.0, \"y\": 501.0, \"coordinate_space\": \"normalized_0_1000\"}, \"raw_text\": \"[473, 501]\"}",
+              "raw_response": {
+                "id": "vista-1781592023809",
+                "object": "chat.completion",
+                "created": 1781592023,
+                "model": "inclusionAI/VISTA-4B",
+                "choices": [
+                  {
+                    "index": 0,
+                    "message": {
+                      "role": "assistant",
+                      "content": "{\"contract_version\": \"vista_point_v1\", \"status\": \"ready\", \"point\": {\"x\": 473.0, \"y\": 501.0, \"coordinate_space\": \"normalized_0_1000\"}, \"raw_text\": \"[473, 501]\"}"
+                    },
+                    "finish_reason": "stop"
+                  }
+                ],
+                "usage": {
+                  "prompt_tokens": 0,
+                  "completion_tokens": 0,
+                  "total_tokens": 0
+                }
+              },
+              "parsed": {
+                "contract_version": "vista_point_v1",
+                "point": {
+                  "x": 473.0,
+                  "y": 501.0,
+                  "coordinate_space": "normalized_0_1000"
+                }
+              },
+              "processed_point": {
+                "x": 242,
+                "y": 257
+              },
+              "point": {
+                "x": 576,
+                "y": 275
+              },
+              "image_size": {
+                "width": 1265,
+                "height": 1380
+              },
+              "inference_image_size": {
+                "width": 512,
+                "height": 512
+              },
+              "coordinate_transform": {
+                "contract_version": "vista_coordinate_transform_v1",
+                "type": "crop",
+                "origin_original": {
+                  "x": 334,
+                  "y": 18
+                },
+                "scale_original_to_processed": {
+                  "x": 1.0,
+                  "y": 1.0
+                },
+                "scale_processed_to_original": {
+                  "x": 1.0,
+                  "y": 1.0
+                }
+              },
+              "image_preprocess": {
+                "contract_version": "vista_direct_image_preprocess_v1",
+                "status": "processed",
+                "strategy": "crop_roi",
+                "max_edge": 640,
+                "original_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302.png",
+                "processed_image_path": "artifacts\\vista-direct\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302__vista-direct-roi-334-18-512x512-max640__8cc8dd5eff.png",
+                "original_size": {
+                  "width": 1265,
+                  "height": 1380
+                },
+                "crop_bounds_original": {
+                  "x": 334,
+                  "y": 18,
+                  "w": 512,
+                  "h": 512
+                },
+                "processed_size": {
+                  "width": 512,
+                  "height": 512
+                },
+                "transform": {
+                  "contract_version": "vista_coordinate_transform_v1",
+                  "type": "crop",
+                  "origin_original": {
+                    "x": 334,
+                    "y": 18
+                  },
+                  "scale_original_to_processed": {
+                    "x": 1.0,
+                    "y": 1.0
+                  },
+                  "scale_processed_to_original": {
+                    "x": 1.0,
+                    "y": 1.0
+                  }
+                }
+              },
+              "model_io_attempt": {
+                "contract_version": "model_io_attempt_v1",
+                "status": "success",
+                "provider": "vista_direct_point_grounding",
+                "vista_stage": "refine_roi",
+                "model_name": "inclusionAI/VISTA-4B",
+                "image_path": "artifacts\\vista-direct\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302__vista-direct-roi-334-18-512x512-max640__8cc8dd5eff.png",
+                "prompt": "Click the Listing time filter",
+                "raw_text": "{\"contract_version\": \"vista_point_v1\", \"status\": \"ready\", \"point\": {\"x\": 473.0, \"y\": 501.0, \"coordinate_space\": \"normalized_0_1000\"}, \"raw_text\": \"[473, 501]\"}",
+                "raw_response": {
+                  "id": "vista-1781592023809",
+                  "object": "chat.completion",
+                  "created": 1781592023,
+                  "model": "inclusionAI/VISTA-4B",
+                  "choices": [
+                    {
+                      "index": 0,
+                      "message": {
+                        "role": "assistant",
+                        "content": "{\"contract_version\": \"vista_point_v1\", \"status\": \"ready\", \"point\": {\"x\": 473.0, \"y\": 501.0, \"coordinate_space\": \"normalized_0_1000\"}, \"raw_text\": \"[473, 501]\"}"
+                      },
+                      "finish_reason": "stop"
+                    }
+                  ],
+                  "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0
+                  }
+                },
+                "parsed_model_json": {
+                  "contract_version": "vista_point_v1",
+                  "point": {
+                    "x": 473.0,
+                    "y": 501.0,
+                    "coordinate_space": "normalized_0_1000"
+                  }
+                },
+                "processed_point": {
+                  "x": 242,
+                  "y": 257
+                },
+                "point": {
+                  "x": 576,
+                  "y": 275
+                },
+                "image_preprocess": {
+                  "contract_version": "vista_direct_image_preprocess_v1",
+                  "status": "processed",
+                  "strategy": "crop_roi",
+                  "max_edge": 640,
+                  "original_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302.png",
+                  "processed_image_path": "artifacts\\vista-direct\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302__vista-direct-roi-334-18-512x512-max640__8cc8dd5eff.png",
+                  "original_size": {
+                    "width": 1265,
+                    "height": 1380
+                  },
+                  "crop_bounds_original": {
+                    "x": 334,
+                    "y": 18,
+                    "w": 512,
+                    "h": 512
+                  },
+                  "processed_size": {
+                    "width": 512,
+                    "height": 512
+                  },
+                  "transform": {
+                    "contract_version": "vista_coordinate_transform_v1",
+                    "type": "crop",
+                    "origin_original": {
+                      "x": 334,
+                      "y": 18
+                    },
+                    "scale_original_to_processed": {
+                      "x": 1.0,
+                      "y": 1.0
+                    },
+                    "scale_processed_to_original": {
+                      "x": 1.0,
+                      "y": 1.0
+                    }
+                  }
+                },
+                "coordinate_transform": {
+                  "contract_version": "vista_coordinate_transform_v1",
+                  "type": "crop",
+                  "origin_original": {
+                    "x": 334,
+                    "y": 18
+                  },
+                  "scale_original_to_processed": {
+                    "x": 1.0,
+                    "y": 1.0
+                  },
+                  "scale_processed_to_original": {
+                    "x": 1.0,
+                    "y": 1.0
+                  }
+                }
+              },
+              "coarse_vista_point_grounding": {
+                "contract_version": "vista_point_grounding_v1",
+                "status": "ready",
+                "provider": "vista_direct_point_grounding",
+                "vista_stage": "coarse_full",
+                "model_name": "inclusionAI/VISTA-4B",
+                "output_contract": "vista_point_v1",
+                "image_path": "artifacts\\vista-direct\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302__vista-direct-max640__22db2b4390.png",
+                "goal": "Click the Listing time filter",
+                "prompt": "Click the Listing time filter",
+                "raw_text": "{\"contract_version\": \"vista_point_v1\", \"status\": \"ready\", \"point\": {\"x\": 466.0, \"y\": 198.0, \"coordinate_space\": \"normalized_0_1000\"}, \"raw_text\": \"[466, 198]\"}",
+                "raw_response": {
+                  "id": "vista-1781592023064",
+                  "object": "chat.completion",
+                  "created": 1781592023,
+                  "model": "inclusionAI/VISTA-4B",
+                  "choices": [
+                    {
+                      "index": 0,
+                      "message": {
+                        "role": "assistant",
+                        "content": "{\"contract_version\": \"vista_point_v1\", \"status\": \"ready\", \"point\": {\"x\": 466.0, \"y\": 198.0, \"coordinate_space\": \"normalized_0_1000\"}, \"raw_text\": \"[466, 198]\"}"
+                      },
+                      "finish_reason": "stop"
+                    }
+                  ],
+                  "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0
+                  }
+                },
+                "parsed": {
+                  "contract_version": "vista_point_v1",
+                  "point": {
+                    "x": 466.0,
+                    "y": 198.0,
+                    "coordinate_space": "normalized_0_1000"
+                  }
+                },
+                "processed_point": {
+                  "x": 274,
+                  "y": 127
+                },
+                "point": {
+                  "x": 590,
+                  "y": 274
+                },
+                "image_size": {
+                  "width": 1265,
+                  "height": 1380
+                },
+                "inference_image_size": {
+                  "width": 587,
+                  "height": 640
+                },
+                "coordinate_transform": {
+                  "contract_version": "vista_coordinate_transform_v1",
+                  "type": "resize",
+                  "origin_original": {
+                    "x": 0,
+                    "y": 0
+                  },
+                  "scale_original_to_processed": {
+                    "x": 0.46403162055335967,
+                    "y": 0.463768115942029
+                  },
+                  "scale_processed_to_original": {
+                    "x": 2.155025553662692,
+                    "y": 2.15625
+                  }
+                },
+                "image_preprocess": {
+                  "contract_version": "vista_direct_image_preprocess_v1",
+                  "status": "processed",
+                  "strategy": "resize_max_edge",
+                  "max_edge": 640,
+                  "original_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302.png",
+                  "processed_image_path": "artifacts\\vista-direct\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302__vista-direct-max640__22db2b4390.png",
+                  "original_size": {
+                    "width": 1265,
+                    "height": 1380
+                  },
+                  "processed_size": {
+                    "width": 587,
+                    "height": 640
+                  },
+                  "transform": {
+                    "contract_version": "vista_coordinate_transform_v1",
+                    "type": "resize",
+                    "origin_original": {
+                      "x": 0,
+                      "y": 0
+                    },
+                    "scale_original_to_processed": {
+                      "x": 0.46403162055335967,
+                      "y": 0.463768115942029
+                    },
+                    "scale_processed_to_original": {
+                      "x": 2.155025553662692,
+                      "y": 2.15625
+                    }
+                  }
+                },
+                "model_io_attempt": {
+                  "contract_version": "model_io_attempt_v1",
+                  "status": "success",
+                  "provider": "vista_direct_point_grounding",
+                  "vista_stage": "coarse_full",
+                  "model_name": "inclusionAI/VISTA-4B",
+                  "image_path": "artifacts\\vista-direct\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302__vista-direct-max640__22db2b4390.png",
+                  "prompt": "Click the Listing time filter",
+                  "raw_text": "{\"contract_version\": \"vista_point_v1\", \"status\": \"ready\", \"point\": {\"x\": 466.0, \"y\": 198.0, \"coordinate_space\": \"normalized_0_1000\"}, \"raw_text\": \"[466, 198]\"}",
+                  "raw_response": {
+                    "id": "vista-1781592023064",
+                    "object": "chat.completion",
+                    "created": 1781592023,
+                    "model": "inclusionAI/VISTA-4B",
+                    "choices": [
+                      {
+                        "index": 0,
+                        "message": {
+                          "role": "assistant",
+                          "content": "{\"contract_version\": \"vista_point_v1\", \"status\": \"ready\", \"point\": {\"x\": 466.0, \"y\": 198.0, \"coordinate_space\": \"normalized_0_1000\"}, \"raw_text\": \"[466, 198]\"}"
+                        },
+                        "finish_reason": "stop"
+                      }
+                    ],
+                    "usage": {
+                      "prompt_tokens": 0,
+                      "completion_tokens": 0,
+                      "total_tokens": 0
+                    }
+                  },
+                  "parsed_model_json": {
+                    "contract_version": "vista_point_v1",
+                    "point": {
+                      "x": 466.0,
+                      "y": 198.0,
+                      "coordinate_space": "normalized_0_1000"
+                    }
+                  },
+                  "processed_point": {
+                    "x": 274,
+                    "y": 127
+                  },
+                  "point": {
+                    "x": 590,
+                    "y": 274
+                  },
+                  "image_preprocess": {
+                    "contract_version": "vista_direct_image_preprocess_v1",
+                    "status": "processed",
+                    "strategy": "resize_max_edge",
+                    "max_edge": 640,
+                    "original_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302.png",
+                    "processed_image_path": "artifacts\\vista-direct\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302__vista-direct-max640__22db2b4390.png",
+                    "original_size": {
+                      "width": 1265,
+                      "height": 1380
+                    },
+                    "processed_size": {
+                      "width": 587,
+                      "height": 640
+                    },
+                    "transform": {
+                      "contract_version": "vista_coordinate_transform_v1",
+                      "type": "resize",
+                      "origin_original": {
+                        "x": 0,
+                        "y": 0
+                      },
+                      "scale_original_to_processed": {
+                        "x": 0.46403162055335967,
+                        "y": 0.463768115942029
+                      },
+                      "scale_processed_to_original": {
+                        "x": 2.155025553662692,
+                        "y": 2.15625
+                      }
+                    }
+                  },
+                  "coordinate_transform": {
+                    "contract_version": "vista_coordinate_transform_v1",
+                    "type": "resize",
+                    "origin_original": {
+                      "x": 0,
+                      "y": 0
+                    },
+                    "scale_original_to_processed": {
+                      "x": 0.46403162055335967,
+                      "y": 0.463768115942029
+                    },
+                    "scale_processed_to_original": {
+                      "x": 2.155025553662692,
+                      "y": 2.15625
+                    }
+                  }
+                }
+              },
+              "refine_vista_point_grounding": {
+                "contract_version": "vista_point_grounding_v1",
+                "status": "ready",
+                "provider": "vista_direct_point_grounding",
+                "vista_stage": "refine_roi",
+                "model_name": "inclusionAI/VISTA-4B",
+                "output_contract": "vista_point_v1",
+                "image_path": "artifacts\\vista-direct\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302__vista-direct-roi-334-18-512x512-max640__8cc8dd5eff.png",
+                "goal": "Click the Listing time filter",
+                "prompt": "Click the Listing time filter",
+                "raw_text": "{\"contract_version\": \"vista_point_v1\", \"status\": \"ready\", \"point\": {\"x\": 473.0, \"y\": 501.0, \"coordinate_space\": \"normalized_0_1000\"}, \"raw_text\": \"[473, 501]\"}",
+                "raw_response": {
+                  "id": "vista-1781592023809",
+                  "object": "chat.completion",
+                  "created": 1781592023,
+                  "model": "inclusionAI/VISTA-4B",
+                  "choices": [
+                    {
+                      "index": 0,
+                      "message": {
+                        "role": "assistant",
+                        "content": "{\"contract_version\": \"vista_point_v1\", \"status\": \"ready\", \"point\": {\"x\": 473.0, \"y\": 501.0, \"coordinate_space\": \"normalized_0_1000\"}, \"raw_text\": \"[473, 501]\"}"
+                      },
+                      "finish_reason": "stop"
+                    }
+                  ],
+                  "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0
+                  }
+                },
+                "parsed": {
+                  "contract_version": "vista_point_v1",
+                  "point": {
+                    "x": 473.0,
+                    "y": 501.0,
+                    "coordinate_space": "normalized_0_1000"
+                  }
+                },
+                "processed_point": {
+                  "x": 242,
+                  "y": 257
+                },
+                "point": {
+                  "x": 576,
+                  "y": 275
+                },
+                "image_size": {
+                  "width": 1265,
+                  "height": 1380
+                },
+                "inference_image_size": {
+                  "width": 512,
+                  "height": 512
+                },
+                "coordinate_transform": {
+                  "contract_version": "vista_coordinate_transform_v1",
+                  "type": "crop",
+                  "origin_original": {
+                    "x": 334,
+                    "y": 18
+                  },
+                  "scale_original_to_processed": {
+                    "x": 1.0,
+                    "y": 1.0
+                  },
+                  "scale_processed_to_original": {
+                    "x": 1.0,
+                    "y": 1.0
+                  }
+                },
+                "image_preprocess": {
+                  "contract_version": "vista_direct_image_preprocess_v1",
+                  "status": "processed",
+                  "strategy": "crop_roi",
+                  "max_edge": 640,
+                  "original_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302.png",
+                  "processed_image_path": "artifacts\\vista-direct\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302__vista-direct-roi-334-18-512x512-max640__8cc8dd5eff.png",
+                  "original_size": {
+                    "width": 1265,
+                    "height": 1380
+                  },
+                  "crop_bounds_original": {
+                    "x": 334,
+                    "y": 18,
+                    "w": 512,
+                    "h": 512
+                  },
+                  "processed_size": {
+                    "width": 512,
+                    "height": 512
+                  },
+                  "transform": {
+                    "contract_version": "vista_coordinate_transform_v1",
+                    "type": "crop",
+                    "origin_original": {
+                      "x": 334,
+                      "y": 18
+                    },
+                    "scale_original_to_processed": {
+                      "x": 1.0,
+                      "y": 1.0
+                    },
+                    "scale_processed_to_original": {
+                      "x": 1.0,
+                      "y": 1.0
+                    }
+                  }
+                },
+                "model_io_attempt": {
+                  "contract_version": "model_io_attempt_v1",
+                  "status": "success",
+                  "provider": "vista_direct_point_grounding",
+                  "vista_stage": "refine_roi",
+                  "model_name": "inclusionAI/VISTA-4B",
+                  "image_path": "artifacts\\vista-direct\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302__vista-direct-roi-334-18-512x512-max640__8cc8dd5eff.png",
+                  "prompt": "Click the Listing time filter",
+                  "raw_text": "{\"contract_version\": \"vista_point_v1\", \"status\": \"ready\", \"point\": {\"x\": 473.0, \"y\": 501.0, \"coordinate_space\": \"normalized_0_1000\"}, \"raw_text\": \"[473, 501]\"}",
+                  "raw_response": {
+                    "id": "vista-1781592023809",
+                    "object": "chat.completion",
+                    "created": 1781592023,
+                    "model": "inclusionAI/VISTA-4B",
+                    "choices": [
+                      {
+                        "index": 0,
+                        "message": {
+                          "role": "assistant",
+                          "content": "{\"contract_version\": \"vista_point_v1\", \"status\": \"ready\", \"point\": {\"x\": 473.0, \"y\": 501.0, \"coordinate_space\": \"normalized_0_1000\"}, \"raw_text\": \"[473, 501]\"}"
+                        },
+                        "finish_reason": "stop"
+                      }
+                    ],
+                    "usage": {
+                      "prompt_tokens": 0,
+                      "completion_tokens": 0,
+                      "total_tokens": 0
+                    }
+                  },
+                  "parsed_model_json": {
+                    "contract_version": "vista_point_v1",
+                    "point": {
+                      "x": 473.0,
+                      "y": 501.0,
+                      "coordinate_space": "normalized_0_1000"
+                    }
+                  },
+                  "processed_point": {
+                    "x": 242,
+                    "y": 257
+                  },
+                  "point": {
+                    "x": 576,
+                    "y": 275
+                  },
+                  "image_preprocess": {
+                    "contract_version": "vista_direct_image_preprocess_v1",
+                    "status": "processed",
+                    "strategy": "crop_roi",
+                    "max_edge": 640,
+                    "original_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302.png",
+                    "processed_image_path": "artifacts\\vista-direct\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302__vista-direct-roi-334-18-512x512-max640__8cc8dd5eff.png",
+                    "original_size": {
+                      "width": 1265,
+                      "height": 1380
+                    },
+                    "crop_bounds_original": {
+                      "x": 334,
+                      "y": 18,
+                      "w": 512,
+                      "h": 512
+                    },
+                    "processed_size": {
+                      "width": 512,
+                      "height": 512
+                    },
+                    "transform": {
+                      "contract_version": "vista_coordinate_transform_v1",
+                      "type": "crop",
+                      "origin_original": {
+                        "x": 334,
+                        "y": 18
+                      },
+                      "scale_original_to_processed": {
+                        "x": 1.0,
+                        "y": 1.0
+                      },
+                      "scale_processed_to_original": {
+                        "x": 1.0,
+                        "y": 1.0
+                      }
+                    }
+                  },
+                  "coordinate_transform": {
+                    "contract_version": "vista_coordinate_transform_v1",
+                    "type": "crop",
+                    "origin_original": {
+                      "x": 334,
+                      "y": 18
+                    },
+                    "scale_original_to_processed": {
+                      "x": 1.0,
+                      "y": 1.0
+                    },
+                    "scale_processed_to_original": {
+                      "x": 1.0,
+                      "y": 1.0
+                    }
+                  }
+                }
+              },
+              "model_io_attempts": [
+                {
+                  "contract_version": "model_io_attempt_v1",
+                  "status": "success",
+                  "provider": "vista_direct_point_grounding",
+                  "vista_stage": "coarse_full",
+                  "model_name": "inclusionAI/VISTA-4B",
+                  "image_path": "artifacts\\vista-direct\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302__vista-direct-max640__22db2b4390.png",
+                  "prompt": "Click the Listing time filter",
+                  "raw_text": "{\"contract_version\": \"vista_point_v1\", \"status\": \"ready\", \"point\": {\"x\": 466.0, \"y\": 198.0, \"coordinate_space\": \"normalized_0_1000\"}, \"raw_text\": \"[466, 198]\"}",
+                  "raw_response": {
+                    "id": "vista-1781592023064",
+                    "object": "chat.completion",
+                    "created": 1781592023,
+                    "model": "inclusionAI/VISTA-4B",
+                    "choices": [
+                      {
+                        "index": 0,
+                        "message": {
+                          "role": "assistant",
+                          "content": "{\"contract_version\": \"vista_point_v1\", \"status\": \"ready\", \"point\": {\"x\": 466.0, \"y\": 198.0, \"coordinate_space\": \"normalized_0_1000\"}, \"raw_text\": \"[466, 198]\"}"
+                        },
+                        "finish_reason": "stop"
+                      }
+                    ],
+                    "usage": {
+                      "prompt_tokens": 0,
+                      "completion_tokens": 0,
+                      "total_tokens": 0
+                    }
+                  },
+                  "parsed_model_json": {
+                    "contract_version": "vista_point_v1",
+                    "point": {
+                      "x": 466.0,
+                      "y": 198.0,
+                      "coordinate_space": "normalized_0_1000"
+                    }
+                  },
+                  "processed_point": {
+                    "x": 274,
+                    "y": 127
+                  },
+                  "point": {
+                    "x": 590,
+                    "y": 274
+                  },
+                  "image_preprocess": {
+                    "contract_version": "vista_direct_image_preprocess_v1",
+                    "status": "processed",
+                    "strategy": "resize_max_edge",
+                    "max_edge": 640,
+                    "original_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302.png",
+                    "processed_image_path": "artifacts\\vista-direct\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302__vista-direct-max640__22db2b4390.png",
+                    "original_size": {
+                      "width": 1265,
+                      "height": 1380
+                    },
+                    "processed_size": {
+                      "width": 587,
+                      "height": 640
+                    },
+                    "transform": {
+                      "contract_version": "vista_coordinate_transform_v1",
+                      "type": "resize",
+                      "origin_original": {
+                        "x": 0,
+                        "y": 0
+                      },
+                      "scale_original_to_processed": {
+                        "x": 0.46403162055335967,
+                        "y": 0.463768115942029
+                      },
+                      "scale_processed_to_original": {
+                        "x": 2.155025553662692,
+                        "y": 2.15625
+                      }
+                    }
+                  },
+                  "coordinate_transform": {
+                    "contract_version": "vista_coordinate_transform_v1",
+                    "type": "resize",
+                    "origin_original": {
+                      "x": 0,
+                      "y": 0
+                    },
+                    "scale_original_to_processed": {
+                      "x": 0.46403162055335967,
+                      "y": 0.463768115942029
+                    },
+                    "scale_processed_to_original": {
+                      "x": 2.155025553662692,
+                      "y": 2.15625
+                    }
+                  }
+                },
+                {
+                  "contract_version": "model_io_attempt_v1",
+                  "status": "success",
+                  "provider": "vista_direct_point_grounding",
+                  "vista_stage": "refine_roi",
+                  "model_name": "inclusionAI/VISTA-4B",
+                  "image_path": "artifacts\\vista-direct\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302__vista-direct-roi-334-18-512x512-max640__8cc8dd5eff.png",
+                  "prompt": "Click the Listing time filter",
+                  "raw_text": "{\"contract_version\": \"vista_point_v1\", \"status\": \"ready\", \"point\": {\"x\": 473.0, \"y\": 501.0, \"coordinate_space\": \"normalized_0_1000\"}, \"raw_text\": \"[473, 501]\"}",
+                  "raw_response": {
+                    "id": "vista-1781592023809",
+                    "object": "chat.completion",
+                    "created": 1781592023,
+                    "model": "inclusionAI/VISTA-4B",
+                    "choices": [
+                      {
+                        "index": 0,
+                        "message": {
+                          "role": "assistant",
+                          "content": "{\"contract_version\": \"vista_point_v1\", \"status\": \"ready\", \"point\": {\"x\": 473.0, \"y\": 501.0, \"coordinate_space\": \"normalized_0_1000\"}, \"raw_text\": \"[473, 501]\"}"
+                        },
+                        "finish_reason": "stop"
+                      }
+                    ],
+                    "usage": {
+                      "prompt_tokens": 0,
+                      "completion_tokens": 0,
+                      "total_tokens": 0
+                    }
+                  },
+                  "parsed_model_json": {
+                    "contract_version": "vista_point_v1",
+                    "point": {
+                      "x": 473.0,
+                      "y": 501.0,
+                      "coordinate_space": "normalized_0_1000"
+                    }
+                  },
+                  "processed_point": {
+                    "x": 242,
+                    "y": 257
+                  },
+                  "point": {
+                    "x": 576,
+                    "y": 275
+                  },
+                  "image_preprocess": {
+                    "contract_version": "vista_direct_image_preprocess_v1",
+                    "status": "processed",
+                    "strategy": "crop_roi",
+                    "max_edge": 640,
+                    "original_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302.png",
+                    "processed_image_path": "artifacts\\vista-direct\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302__vista-direct-roi-334-18-512x512-max640__8cc8dd5eff.png",
+                    "original_size": {
+                      "width": 1265,
+                      "height": 1380
+                    },
+                    "crop_bounds_original": {
+                      "x": 334,
+                      "y": 18,
+                      "w": 512,
+                      "h": 512
+                    },
+                    "processed_size": {
+                      "width": 512,
+                      "height": 512
+                    },
+                    "transform": {
+                      "contract_version": "vista_coordinate_transform_v1",
+                      "type": "crop",
+                      "origin_original": {
+                        "x": 334,
+                        "y": 18
+                      },
+                      "scale_original_to_processed": {
+                        "x": 1.0,
+                        "y": 1.0
+                      },
+                      "scale_processed_to_original": {
+                        "x": 1.0,
+                        "y": 1.0
+                      }
+                    }
+                  },
+                  "coordinate_transform": {
+                    "contract_version": "vista_coordinate_transform_v1",
+                    "type": "crop",
+                    "origin_original": {
+                      "x": 334,
+                      "y": 18
+                    },
+                    "scale_original_to_processed": {
+                      "x": 1.0,
+                      "y": 1.0
+                    },
+                    "scale_processed_to_original": {
+                      "x": 1.0,
+                      "y": 1.0
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "candidate_result": {
+            "contract_version": "candidate_rank_v1",
+            "goal": "Click the Listing time filter",
+            "top_k": 5,
+            "candidates": [
+              {
+                "candidate_id": "vista_direct_6fd88af328",
+                "rank": 1,
+                "element_id": "element_vista_direct_6fd88af328",
+                "label": "Click the Listing time filter",
+                "role": "button",
+                "text": "Click the Listing time filter",
+                "score": 0.78,
+                "eligible": true,
+                "reasons": [
+                  "vista_direct_point_grounding",
+                  "no_path_graph_recall_candidate"
+                ],
+                "score_breakdown": {
+                  "text_similarity": 0.78,
+                  "role_score": 0.75,
+                  "policy_score": 0.72,
+                  "confidence_score": 0.72,
+                  "state_score": 0.35,
+                  "screen_reading_score": 0.0,
+                  "ad_penalty": 0.0,
+                  "blocked_penalty": 0.0,
+                  "total": 0.6748
+                },
+                "element": {
+                  "element_id": "element_vista_direct_6fd88af328",
+                  "label": "Click the Listing time filter",
+                  "role": "button",
+                  "interaction_type": "click",
+                  "description": "Direct VISTA point-grounded target without PathGraph recall.",
+                  "text": "Click the Listing time filter",
+                  "bbox": {
+                    "x": 552,
+                    "y": 251,
+                    "w": 48,
+                    "h": 48
+                  },
+                  "semantic_bbox": null,
+                  "click_point": {
+                    "x": 576,
+                    "y": 275
+                  },
+                  "click_strategy": "vista_direct_point_grounding",
+                  "possible_destinations": [],
+                  "verification_hints": {
+                    "expected_changes": [
+                      "target action should change focus, state, or visible content"
+                    ],
+                    "target_scope": "local"
+                  },
+                  "interaction_policy": {
+                    "allowed": true,
+                    "zone_type": "general_action",
+                    "priority": "vista_direct_grounding",
+                    "ad_risk": 0.0,
+                    "reasons": [
+                      "vista_direct_point_grounding_policy",
+                      "requires_post_click_verification"
+                    ]
+                  },
+                  "fusion_confidence": 0.72,
+                  "coordinate_confidence": "vista_direct_point",
+                  "memory_key": "vista_direct:6fd88af328",
+                  "sources": [
+                    "vista_point_v1_direct"
+                  ],
+                  "source_region_ids": [],
+                  "source_text_ids": [],
+                  "evidence": {
+                    "vista_direct_point": {
+                      "point": {
+                        "x": 576,
+                        "y": 275
+                      },
+                      "bbox": {
+                        "x": 552,
+                        "y": 251,
+                        "w": 48,
+                        "h": 48
+                      }
+                    }
+                  }
+                },
+                "refined_bbox": {
+                  "x": 552,
+                  "y": 251,
+                  "w": 48,
+                  "h": 48
+                },
+                "bbox_refine_reason": "synthetic_bbox_around_vista_direct_point"
+              }
+            ],
+            "rejected": [],
+            "recommended_candidate_id": "vista_direct_6fd88af328",
+            "margin_to_second": 0.78,
+            "summary": {
+              "returned_count": 1,
+              "has_recommendation": true,
+              "path_graph_recall_used": true,
+              "path_graph_recall_candidate_count": 1,
+              "path_graph_recall_selected_count": 1,
+              "vista_point_grounding_used": true,
+              "vista_point_inside_candidate_bbox": true,
+              "vista_direct_point_grounding_used": true,
+              "vista_direct_point_grounding_attempted": true
+            }
+          },
+          "narrow_search_result": {
+            "contract_version": "narrow_search_v1",
+            "goal": "Click the Listing time filter",
+            "results": [
+              {
+                "candidate_id": "vista_direct_6fd88af328",
+                "element_id": "element_vista_direct_6fd88af328",
+                "status": "grounded",
+                "crop_path": null,
+                "crop_bbox": {
+                  "x": 552,
+                  "y": 251,
+                  "w": 48,
+                  "h": 48
+                },
+                "refined_click_point": {
+                  "x": 576,
+                  "y": 275
+                },
+                "coordinate_source": "vista_point_v1",
+                "confidence": 0.82,
+                "matched_text": "Click the Listing time filter",
+                "matched_text_bbox": {
+                  "x": 552,
+                  "y": 251,
+                  "w": 48,
+                  "h": 48
+                },
+                "reasons": [
+                  "vista_direct_point_grounding"
+                ]
+              }
+            ],
+            "recommended_candidate_id": "vista_direct_6fd88af328",
+            "summary": {
+              "provider": "vista_point_grounding",
+              "output_contract": "vista_point_v1",
+              "candidate_count": 1,
+              "grounded_count": 1,
+              "error": null,
+              "vista_direct_point_grounding_used": true
+            }
+          },
+          "pre_click_decision": {
+            "contract_version": "pre_click_decision_v1",
+            "allowed": true,
+            "selected_candidate_id": "vista_direct_6fd88af328",
+            "selected_element_id": "element_vista_direct_6fd88af328",
+            "selected_click_point": {
+              "x": 576,
+              "y": 275
+            },
+            "reasons": [
+              "pre_click_candidate_allowed"
+            ],
+            "candidate_decisions": [
+              {
+                "candidate_id": "vista_direct_6fd88af328",
+                "element_id": "element_vista_direct_6fd88af328",
+                "allowed": true,
+                "score": 0.78,
+                "click_point": {
+                  "x": 576,
+                  "y": 275
+                },
+                "reasons": [
+                  "local_ocr_text_match",
+                  "pre_click_checks_passed"
+                ]
+              }
+            ],
+            "summary": {
+              "candidate_count": 1,
+              "allowed_candidate_count": 1,
+              "top_margin_ok": true,
+              "low_margin_reviewed_override_used": false,
+              "margin_to_second": 0.78
+            }
+          },
+          "verification_plan": {
+            "status": "planned_not_executed",
+            "pre_click_checks": [
+              "path_graph_state_match",
+              "vista_point_inside_candidate_bbox",
+              "vista_direct_point_grounding",
+              "candidate_policy_allowed",
+              "click_point_inside_candidate_bbox"
+            ],
+            "post_click_checks": [
+              "ocr_change",
+              "content_change",
+              "focus_or_state_change"
+            ]
+          },
+          "recommended_target": {
+            "candidate_id": "vista_direct_6fd88af328",
+            "rank": 1,
+            "element_id": "element_vista_direct_6fd88af328",
+            "label": "Click the Listing time filter",
+            "role": "button",
+            "text": "Click the Listing time filter",
+            "score": 0.78,
+            "eligible": true,
+            "reasons": [
+              "vista_direct_point_grounding",
+              "no_path_graph_recall_candidate"
+            ],
+            "score_breakdown": {
+              "text_similarity": 0.78,
+              "role_score": 0.75,
+              "policy_score": 0.72,
+              "confidence_score": 0.72,
+              "state_score": 0.35,
+              "screen_reading_score": 0.0,
+              "ad_penalty": 0.0,
+              "blocked_penalty": 0.0,
+              "total": 0.6748
+            },
+            "element": {
+              "element_id": "element_vista_direct_6fd88af328",
+              "label": "Click the Listing time filter",
+              "role": "button",
+              "interaction_type": "click",
+              "description": "Direct VISTA point-grounded target without PathGraph recall.",
+              "text": "Click the Listing time filter",
+              "bbox": {
+                "x": 552,
+                "y": 251,
+                "w": 48,
+                "h": 48
+              },
+              "semantic_bbox": null,
+              "click_point": {
+                "x": 576,
+                "y": 275
+              },
+              "click_strategy": "vista_direct_point_grounding",
+              "possible_destinations": [],
+              "verification_hints": {
+                "expected_changes": [
+                  "target action should change focus, state, or visible content"
+                ],
+                "target_scope": "local"
+              },
+              "interaction_policy": {
+                "allowed": true,
+                "zone_type": "general_action",
+                "priority": "vista_direct_grounding",
+                "ad_risk": 0.0,
+                "reasons": [
+                  "vista_direct_point_grounding_policy",
+                  "requires_post_click_verification"
+                ]
+              },
+              "fusion_confidence": 0.72,
+              "coordinate_confidence": "vista_direct_point",
+              "memory_key": "vista_direct:6fd88af328",
+              "sources": [
+                "vista_point_v1_direct"
+              ],
+              "source_region_ids": [],
+              "source_text_ids": [],
+              "evidence": {
+                "vista_direct_point": {
+                  "point": {
+                    "x": 576,
+                    "y": 275
+                  },
+                  "bbox": {
+                    "x": 552,
+                    "y": 251,
+                    "w": 48,
+                    "h": 48
+                  }
+                }
+              }
+            },
+            "refined_bbox": {
+              "x": 552,
+              "y": 251,
+              "w": 48,
+              "h": 48
+            },
+            "bbox_refine_reason": "synthetic_bbox_around_vista_direct_point"
+          },
+          "model_io": {
+            "contract_version": "model_io_trace_v1",
+            "status": "success",
+            "provider": "vista_direct_point_grounding",
+            "model_name": "inclusionAI/VISTA-4B",
+            "raw_text": "{\"contract_version\": \"vista_point_v1\", \"status\": \"ready\", \"point\": {\"x\": 473.0, \"y\": 501.0, \"coordinate_space\": \"normalized_0_1000\"}, \"raw_text\": \"[473, 501]\"}",
+            "raw_response": {
+              "id": "vista-1781592023809",
+              "object": "chat.completion",
+              "created": 1781592023,
+              "model": "inclusionAI/VISTA-4B",
+              "choices": [
+                {
+                  "index": 0,
+                  "message": {
+                    "role": "assistant",
+                    "content": "{\"contract_version\": \"vista_point_v1\", \"status\": \"ready\", \"point\": {\"x\": 473.0, \"y\": 501.0, \"coordinate_space\": \"normalized_0_1000\"}, \"raw_text\": \"[473, 501]\"}"
+                  },
+                  "finish_reason": "stop"
+                }
+              ],
+              "usage": {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0
+              }
+            },
+            "parsed_json": {
+              "contract_version": "vista_point_v1",
+              "point": {
+                "x": 473.0,
+                "y": 501.0,
+                "coordinate_space": "normalized_0_1000"
+              }
+            },
+            "attempt_count": 2,
+            "attempts": [
+              {
+                "contract_version": "model_io_attempt_v1",
+                "status": "success",
+                "provider": "vista_direct_point_grounding",
+                "vista_stage": "coarse_full",
+                "model_name": "inclusionAI/VISTA-4B",
+                "image_path": "artifacts\\vista-direct\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302__vista-direct-max640__22db2b4390.png",
+                "prompt": "Click the Listing time filter",
+                "raw_text": "{\"contract_version\": \"vista_point_v1\", \"status\": \"ready\", \"point\": {\"x\": 466.0, \"y\": 198.0, \"coordinate_space\": \"normalized_0_1000\"}, \"raw_text\": \"[466, 198]\"}",
+                "raw_response": {
+                  "id": "vista-1781592023064",
+                  "object": "chat.completion",
+                  "created": 1781592023,
+                  "model": "inclusionAI/VISTA-4B",
+                  "choices": [
+                    {
+                      "index": 0,
+                      "message": {
+                        "role": "assistant",
+                        "content": "{\"contract_version\": \"vista_point_v1\", \"status\": \"ready\", \"point\": {\"x\": 466.0, \"y\": 198.0, \"coordinate_space\": \"normalized_0_1000\"}, \"raw_text\": \"[466, 198]\"}"
+                      },
+                      "finish_reason": "stop"
+                    }
+                  ],
+                  "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0
+                  }
+                },
+                "parsed_model_json": {
+                  "contract_version": "vista_point_v1",
+                  "point": {
+                    "x": 466.0,
+                    "y": 198.0,
+                    "coordinate_space": "normalized_0_1000"
+                  }
+                },
+                "processed_point": {
+                  "x": 274,
+                  "y": 127
+                },
+                "point": {
+                  "x": 590,
+                  "y": 274
+                },
+                "image_preprocess": {
+                  "contract_version": "vista_direct_image_preprocess_v1",
+                  "status": "processed",
+                  "strategy": "resize_max_edge",
+                  "max_edge": 640,
+                  "original_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302.png",
+                  "processed_image_path": "artifacts\\vista-direct\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302__vista-direct-max640__22db2b4390.png",
+                  "original_size": {
+                    "width": 1265,
+                    "height": 1380
+                  },
+                  "processed_size": {
+                    "width": 587,
+                    "height": 640
+                  },
+                  "transform": {
+                    "contract_version": "vista_coordinate_transform_v1",
+                    "type": "resize",
+                    "origin_original": {
+                      "x": 0,
+                      "y": 0
+                    },
+                    "scale_original_to_processed": {
+                      "x": 0.46403162055335967,
+                      "y": 0.463768115942029
+                    },
+                    "scale_processed_to_original": {
+                      "x": 2.155025553662692,
+                      "y": 2.15625
+                    }
+                  }
+                },
+                "coordinate_transform": {
+                  "contract_version": "vista_coordinate_transform_v1",
+                  "type": "resize",
+                  "origin_original": {
+                    "x": 0,
+                    "y": 0
+                  },
+                  "scale_original_to_processed": {
+                    "x": 0.46403162055335967,
+                    "y": 0.463768115942029
+                  },
+                  "scale_processed_to_original": {
+                    "x": 2.155025553662692,
+                    "y": 2.15625
+                  }
+                }
+              },
+              {
+                "contract_version": "model_io_attempt_v1",
+                "status": "success",
+                "provider": "vista_direct_point_grounding",
+                "vista_stage": "refine_roi",
+                "model_name": "inclusionAI/VISTA-4B",
+                "image_path": "artifacts\\vista-direct\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302__vista-direct-roi-334-18-512x512-max640__8cc8dd5eff.png",
+                "prompt": "Click the Listing time filter",
+                "raw_text": "{\"contract_version\": \"vista_point_v1\", \"status\": \"ready\", \"point\": {\"x\": 473.0, \"y\": 501.0, \"coordinate_space\": \"normalized_0_1000\"}, \"raw_text\": \"[473, 501]\"}",
+                "raw_response": {
+                  "id": "vista-1781592023809",
+                  "object": "chat.completion",
+                  "created": 1781592023,
+                  "model": "inclusionAI/VISTA-4B",
+                  "choices": [
+                    {
+                      "index": 0,
+                      "message": {
+                        "role": "assistant",
+                        "content": "{\"contract_version\": \"vista_point_v1\", \"status\": \"ready\", \"point\": {\"x\": 473.0, \"y\": 501.0, \"coordinate_space\": \"normalized_0_1000\"}, \"raw_text\": \"[473, 501]\"}"
+                      },
+                      "finish_reason": "stop"
+                    }
+                  ],
+                  "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0
+                  }
+                },
+                "parsed_model_json": {
+                  "contract_version": "vista_point_v1",
+                  "point": {
+                    "x": 473.0,
+                    "y": 501.0,
+                    "coordinate_space": "normalized_0_1000"
+                  }
+                },
+                "processed_point": {
+                  "x": 242,
+                  "y": 257
+                },
+                "point": {
+                  "x": 576,
+                  "y": 275
+                },
+                "image_preprocess": {
+                  "contract_version": "vista_direct_image_preprocess_v1",
+                  "status": "processed",
+                  "strategy": "crop_roi",
+                  "max_edge": 640,
+                  "original_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302.png",
+                  "processed_image_path": "artifacts\\vista-direct\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302__vista-direct-roi-334-18-512x512-max640__8cc8dd5eff.png",
+                  "original_size": {
+                    "width": 1265,
+                    "height": 1380
+                  },
+                  "crop_bounds_original": {
+                    "x": 334,
+                    "y": 18,
+                    "w": 512,
+                    "h": 512
+                  },
+                  "processed_size": {
+                    "width": 512,
+                    "height": 512
+                  },
+                  "transform": {
+                    "contract_version": "vista_coordinate_transform_v1",
+                    "type": "crop",
+                    "origin_original": {
+                      "x": 334,
+                      "y": 18
+                    },
+                    "scale_original_to_processed": {
+                      "x": 1.0,
+                      "y": 1.0
+                    },
+                    "scale_processed_to_original": {
+                      "x": 1.0,
+                      "y": 1.0
+                    }
+                  }
+                },
+                "coordinate_transform": {
+                  "contract_version": "vista_coordinate_transform_v1",
+                  "type": "crop",
+                  "origin_original": {
+                    "x": 334,
+                    "y": 18
+                  },
+                  "scale_original_to_processed": {
+                    "x": 1.0,
+                    "y": 1.0
+                  },
+                  "scale_processed_to_original": {
+                    "x": 1.0,
+                    "y": 1.0
+                  }
+                }
+              }
+            ]
+          },
+          "execution_path": {
+            "vision_provider_requested": "local_grounding",
+            "vision_provider_used": "vista_point_grounding",
+            "vision_model_used": true,
+            "page_structure_used": false,
+            "ocr_region_refine_used": false,
+            "coordinate_source": "vision_regions_v1",
+            "candidate_rank_used": true,
+            "ocr_anchor_grounding_used": false,
+            "ocr_anchor_grounding_fallback_used": false,
+            "ocr_anchor_count": 0,
+            "ocr_anchor_reused_from_observe": false,
+            "path_graph_recall_used": false,
+            "path_graph_recall_count": 0,
+            "path_graph_recall_candidates_ranked": true,
+            "path_graph_recall_selected_count": 1,
+            "path_graph_candidate_roi_refine_used": false,
+            "state_match_status": "unavailable",
+            "screen_reading_used": false,
+            "screen_reading_rank_evidence_used": false,
+            "uia_scan_status": "skipped_for_vista_point_grounding",
+            "narrow_search_used": true,
+            "vista_point_grounding_used": true,
+            "vista_point_inside_candidate_bbox": true,
+            "vista_direct_point_grounding_used": true,
+            "vista_direct_point_grounding_attempted": true,
+            "pre_click_decision_used": true,
+            "reviewed_test_execution_used": false,
+            "action_executed": false
+          },
+          "timings": {
+            "contract_version": "runtime_timing_v1",
+            "started_at": "2026-06-16T18:40:22.291302",
+            "ended_at": "2026-06-16T18:40:23.810353",
+            "total_ms": 1519.222,
+            "steps": [
+              {
+                "name": "load_vision_provider",
+                "started_at": "2026-06-16T18:40:22.291302",
+                "ended_at": "2026-06-16T18:40:22.291302",
+                "elapsed_ms": 0.151
+              },
+              {
+                "name": "read_image_size",
+                "started_at": "2026-06-16T18:40:22.291302",
+                "ended_at": "2026-06-16T18:40:22.291302",
+                "elapsed_ms": 0.095
+              },
+              {
+                "name": "load_observe_trace_reuse",
+                "started_at": "2026-06-16T18:40:22.291302",
+                "has_observe_trace": false,
+                "ended_at": "2026-06-16T18:40:22.291302",
+                "elapsed_ms": 0.002
+              },
+              {
+                "name": "path_graph_recall",
+                "started_at": "2026-06-16T18:40:22.291302",
+                "ended_at": "2026-06-16T18:40:22.291302",
+                "elapsed_ms": 0.003
+              },
+              {
+                "name": "vista_direct_point_grounding_coarse",
+                "started_at": "2026-06-16T18:40:22.318848",
+                "timeout_seconds": 45.0,
+                "max_edge": 640,
+                "preprocess_status": "processed",
+                "ended_at": "2026-06-16T18:40:23.064354",
+                "elapsed_ms": 745.186
+              },
+              {
+                "name": "vista_direct_point_grounding_refine",
+                "started_at": "2026-06-16T18:40:23.076355",
+                "timeout_seconds": 45.0,
+                "roi_size": 512,
+                "max_edge": 640,
+                "crop_bounds_original": {
+                  "x": 334,
+                  "y": 18,
+                  "w": 512,
+                  "h": 512
+                },
+                "ended_at": "2026-06-16T18:40:23.810353",
+                "elapsed_ms": 734.166
+              },
+              {
+                "name": "pre_click_decision",
+                "started_at": "2026-06-16T18:40:23.810353",
+                "ended_at": "2026-06-16T18:40:23.810353",
+                "elapsed_ms": 0.105
+              }
+            ]
+          },
+          "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260616-184023-810353__execute-mode-recognition-plan__edge.json"
+        },
+        "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260616-184023-810353__execute-mode-recognition-plan__edge.json",
+        "recognition_plan_overlay": {
+          "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260616-184023-845354__render-recognition-plan-overlay__20260616-184023-810353-execute-mode-recognition-plan-edge.json",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302.png",
+          "output_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\20260616-184023-810353-execute-mode-recognition-plan-edge__recognition-plan-overlay__20260616-184023-813353.png",
+          "candidate_count": 1,
+          "decision_count": 1,
+          "narrow_result_count": 1,
+          "selected_candidate_id": "vista_direct_6fd88af328",
+          "include_rejected": true,
+          "include_points": true,
+          "label_candidates": true,
+          "label_reasons": true
+        },
+        "pre_click_decision": {
+          "contract_version": "pre_click_decision_v1",
+          "allowed": true,
+          "selected_candidate_id": "vista_direct_6fd88af328",
+          "selected_element_id": "element_vista_direct_6fd88af328",
+          "selected_click_point": {
+            "x": 576,
+            "y": 275
+          },
+          "reasons": [
+            "pre_click_candidate_allowed"
+          ],
+          "candidate_decisions": [
+            {
+              "candidate_id": "vista_direct_6fd88af328",
+              "element_id": "element_vista_direct_6fd88af328",
+              "allowed": true,
+              "score": 0.78,
+              "click_point": {
+                "x": 576,
+                "y": 275
+              },
+              "reasons": [
+                "local_ocr_text_match",
+                "pre_click_checks_passed"
+              ]
+            }
+          ],
+          "summary": {
+            "candidate_count": 1,
+            "allowed_candidate_count": 1,
+            "top_margin_ok": true,
+            "low_margin_reviewed_override_used": false,
+            "margin_to_second": 0.78
+          }
+        },
+        "selected_click_point": {
+          "x": 576,
+          "y": 275
+        },
+        "approved_plan_id": "e4b486ae32c5403aa48164eade2b0a54",
+        "approved_plan_reuse_validation": null,
+        "learned_instruction_id": null,
+        "learning_mode": null,
+        "learned_instruction_reuse_validation": null,
+        "learned_instruction_artifacts": null,
+        "execution_path": {
+          "vision_model_used": true,
+          "page_structure_used": true,
+          "candidate_rank_used": true,
+          "narrow_search_used": true,
+          "pre_click_decision_used": true,
+          "post_click_verification_used": false,
+          "coordinate_source": "pre_click_decision_v1.selected_click_point",
+          "selection_source": "recognition_plan_v1",
+          "approved_plan_reused": false,
+          "recognition_plan_reused": false,
+          "action_executed": false,
+          "dry_run": true,
+          "retry_policy_used": true,
+          "max_execution_attempts": 2
+        },
+        "effective_execution_options": {
+          "provider_mode": "local_grounding",
+          "metadata": {
+            "vista_direct_grounding": {
+              "enabled": true,
+              "timeout_seconds": 45.0,
+              "max_edge": 640,
+              "refine": true,
+              "refine_roi_size": 512,
+              "refine_max_edge": 640
+            },
+            "execute_mode_policy": {
+              "state_match": "path_graph_when_available",
+              "recall": "top_k_relevant_nodes",
+              "grounding": "local_model_or_direct_point",
+              "requires_pre_click_gate": true,
+              "requires_post_click_verification": true
+            }
+          }
+        },
+        "approved_plan_path": "D:\\agent-gui-runtime\\logs\\approved-plans\\e4b486ae32c5403aa48164eade2b0a54.json",
+        "expires_at": "2026-06-16T06:45:23.846354+00:00",
+        "ttl_seconds": 300,
+        "agent_execution_guidance": {
+          "contract_version": "agent_execute_guidance_v1",
+          "status": "dry_run_ready",
+          "goal": "Click the Listing time filter",
+          "agent_mode": "execute",
+          "safe_to_click_now": true,
+          "failure_reason": null,
+          "next_action": "execute_approved_plan",
+          "next_request": {
+            "endpoint": "POST /action/execute_recognition_plan",
+            "body": {
+              "goal": "Click the Listing time filter",
+              "app_name": "edge",
+              "state_hint": "SEEK software engineer jobs list in Auckland",
+              "approved_plan_id": "e4b486ae32c5403aa48164eade2b0a54",
+              "capture_live": true,
+              "dry_run": false,
+              "enable_post_click_verification": true,
+              "max_execution_attempts": 2
+            }
+          }
+        },
+        "agent_step_result": {
+          "contract_version": "agent_step_result_v1",
+          "agent_mode": "execute",
+          "goal": "Click the Listing time filter",
+          "status": "dry_run_ready",
+          "dry_run": true,
+          "action_executed": false,
+          "failure_reason": null,
+          "approved_plan_id": "e4b486ae32c5403aa48164eade2b0a54",
+          "selected_click_point": {
+            "x": 576,
+            "y": 275
+          },
+          "pre_click_allowed": true,
+          "evidence": {
+            "input_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302.png",
+            "live_capture_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-2-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-184022-264302.png",
+            "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260616-184023-810353__execute-mode-recognition-plan__edge.json",
+            "coordinate_overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\20260616-184023-810353-execute-mode-recognition-plan-edge__recognition-plan-overlay__20260616-184023-813353.png",
+            "action_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260616-184023-849353__execute-mode-plan-preview__edge.json"
+          },
+          "post_click": {
+            "enabled": false,
+            "verified": null,
+            "before_image_path": null,
+            "after_image_path": null,
+            "diff_image_path": null,
+            "verification_basis": null
+          },
+          "semantic_post_click": {
+            "applicable": false,
+            "verified": null,
+            "reason": null
+          },
+          "next_agent_action": "execute_approved_plan",
+          "fallback_plan": null
+        },
+        "timings": {
+          "contract_version": "runtime_timing_v1",
+          "started_at": "2026-06-16T18:40:21.637794",
+          "ended_at": "2026-06-16T18:40:23.848353",
+          "total_ms": 2211.307,
+          "steps": [
+            {
+              "name": "capture_live_window",
+              "started_at": "2026-06-16T18:40:21.637794",
+              "ended_at": "2026-06-16T18:40:22.291302",
+              "elapsed_ms": 652.838
+            },
+            {
+              "name": "recognition_plan",
+              "started_at": "2026-06-16T18:40:22.291302",
+              "ended_at": "2026-06-16T18:40:23.812353",
+              "elapsed_ms": 1521.265
+            },
+            {
+              "name": "render_recognition_plan_overlay",
+              "started_at": "2026-06-16T18:40:23.812353",
+              "has_plan_trace": true,
+              "ended_at": "2026-06-16T18:40:23.846354",
+              "elapsed_ms": 34.338
+            },
+            {
+              "name": "save_approved_plan",
+              "started_at": "2026-06-16T18:40:23.846354",
+              "ended_at": "2026-06-16T18:40:23.848353",
+              "elapsed_ms": 2.073
+            }
+          ]
+        },
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260616-184023-849353__execute-mode-plan-preview__edge.json"
+      }
+    },
+    "error": null
+  }
+}

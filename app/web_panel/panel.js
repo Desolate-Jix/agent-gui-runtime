@@ -6,11 +6,19 @@ let lastObserveTracePath = "";
 let currentImagePath = "";
 let currentImageUrl = "";
 let modelProfiles = [];
+let appCatalog = [];
+
+const DEFAULT_STAGE_PROFILE_IDS = {
+  observe: "qwen3_vl_4b_q4_k_m",
+  understanding: "qwen3_vl_4b_q4_k_m",
+  locate: "vista_4b_transformers",
+  grounding: "vista_4b_transformers",
+};
 let windowCandidates = [];
 let pendingRequests = new Set();
 let currentLanguage = localStorage.getItem("agentPanelLanguage") || "zh-CN";
 let currentAgentMode = localStorage.getItem("agentPanelMode") || "learn";
-let currentLearnDepth = localStorage.getItem("agentLearnDepth") || "fast";
+let currentLearnDepth = "fast";
 const BROWSER_APP_IDS = new Set(["browser", "edge", "msedge", "chrome", "firefox"]);
 
 /* 鈹€鈹€ Navigation path graph state 鈹€鈹€ */
@@ -52,6 +60,9 @@ const translations = {
     execute_mode: "执行模式",
     learn_fast: "快速学习",
     learn_deep: "深度学习",
+    learn_fast_build_path: "快速建图",
+    learn_deep_calibrate_path: "深度校准路径图",
+    locate_current_target: "定位当前目标",
     write_path_graph: "PathGraph",
     write_element_memory: "ElementMemory",
     write_trace: "Trace",
@@ -66,6 +77,7 @@ const translations = {
     profile: "Profile",
     open_bind: "打开 / 绑定",
     app_id: "App ID",
+    app_catalog: "应用列表",
     url: "URL",
     window_candidates: "打开的窗口",
     process_name: "进程名",
@@ -92,6 +104,8 @@ const translations = {
     goal: "目标",
     top_k: "Top K",
     locate_prompt: "精准定位提示词规则",
+    learn_workbench_hint: "学习模式：整屏理解负责快速建图，精准定位负责深度校准全部子路径；不真实点击。",
+    execute_workbench_hint: "执行模式：先生成点击预览和坐标框图，再复用 approved_plan_id 执行真实点击。",
     render_overlay: "渲染覆盖图",
     type_text: "输入文本",
     text: "文本",
@@ -153,6 +167,7 @@ const translations = {
     stage_model_test_title: "模型测试",
     stage_model_test_subtitle: "带图片和提示词直接测试视觉模型返回",
     trace_file: "Trace 文件",
+    trace_mode_filter: "Trace 模式",
     start_model: "启动模型",
     stop_model: "停止模型",
     test_model: "检查模型服务",
@@ -165,9 +180,11 @@ const translations = {
     runtime_unavailable: "runtime 不可用",
     no_image: "无图片",
     no_response: "无响应",
+    no_apps: "未发现应用",
     no_windows: "未发现窗口",
     no_models: "未发现模型 profile",
-    request_already_running: "该请求正在运行"
+    request_already_running: "该请求正在运行",
+    path_graph_calibrated: "路径图已校准"
   },
   "en-US": {
     language: "Language",
@@ -183,6 +200,9 @@ const translations = {
     execute_mode: "Execute Mode",
     learn_fast: "Learn Fast",
     learn_deep: "Learn Deep",
+    learn_fast_build_path: "Fast Map Build",
+    learn_deep_calibrate_path: "Deep Path Calibration",
+    locate_current_target: "Locate Current Target",
     write_path_graph: "PathGraph",
     write_element_memory: "ElementMemory",
     write_trace: "Trace",
@@ -197,6 +217,7 @@ const translations = {
     profile: "Profile",
     open_bind: "Open / Bind",
     app_id: "App ID",
+    app_catalog: "App catalog",
     url: "URL",
     window_candidates: "Open windows",
     process_name: "Process name",
@@ -223,6 +244,8 @@ const translations = {
     goal: "Goal",
     top_k: "Top K",
     locate_prompt: "Locate prompt rules",
+    learn_workbench_hint: "Learn Mode: Observe builds the fast map, Locate calibrates every child path control; no real click.",
+    execute_workbench_hint: "Execute Mode: preview the click plan and coordinate overlay first, then reuse the approved_plan_id for the real click.",
     render_overlay: "Render overlay",
     type_text: "Type text",
     text: "Text",
@@ -284,6 +307,7 @@ const translations = {
     stage_model_test_title: "Model Test",
     stage_model_test_subtitle: "Talk directly to a vision model with prompt and image",
     trace_file: "Trace file",
+    trace_mode_filter: "Trace mode",
     start_model: "Start model",
     stop_model: "Stop model",
     test_model: "Check model service",
@@ -296,9 +320,11 @@ const translations = {
     runtime_unavailable: "runtime unavailable",
     no_image: "no image",
     no_response: "no response",
+    no_apps: "No apps found",
     no_windows: "No windows found",
     no_models: "No model profiles found",
-    request_already_running: "This request is already running"
+    request_already_running: "This request is already running",
+    path_graph_calibrated: "Path graph calibrated"
   }
 };
 function baseUrl() {
@@ -350,29 +376,39 @@ function writePolicyPayload() {
 
 function setAgentMode(mode, depth = currentLearnDepth, options = {}) {
   currentAgentMode = mode === "execute" ? "execute" : "learn";
-  currentLearnDepth = depth === "deep" ? "deep" : "fast";
+  currentLearnDepth = "fast";
   localStorage.setItem("agentPanelMode", currentAgentMode);
-  localStorage.setItem("agentLearnDepth", currentLearnDepth);
+  document.body.classList.toggle("agent-mode-execute", currentAgentMode === "execute");
+  document.body.classList.toggle("agent-mode-learn", currentAgentMode === "learn");
   document.querySelectorAll(".mode-option[data-mode]").forEach((button) => {
     button.classList.toggle("active", button.dataset.mode === currentAgentMode);
-  });
-  document.querySelectorAll(".mode-option[data-depth]").forEach((button) => {
-    button.classList.toggle("active", button.dataset.depth === currentLearnDepth);
-    button.disabled = currentAgentMode !== "learn";
   });
   if (!options.preservePolicy) {
     setWritePolicyControls(defaultWritePolicyFor(currentAgentMode, currentLearnDepth));
   }
+  syncStageLearningControls();
 }
 
 function modePayload(stage) {
-  const mode = stage === "observe" ? currentAgentMode : (currentAgentMode === "learn" && currentLearnDepth === "deep" ? "learn" : "execute");
-  const depth = mode === "learn" ? currentLearnDepth : null;
+  const mode = stage === "observe" ? "learn" : (stage === "locate" && currentAgentMode === "learn" ? "learn" : "execute");
+  const depth = stage === "observe" ? "fast" : (mode === "learn" ? "deep" : null);
   return {
     agent_mode: mode,
     learn_depth: depth,
     write_policy: writePolicyPayload(),
   };
+}
+
+function syncStageLearningControls(stage = document.querySelector(".stage.active")?.dataset.stage || "open_bind") {
+  const observeBtn = $("observeBtn");
+  if (observeBtn) observeBtn.textContent = t("learn_fast_build_path");
+  const locateBtn = $("locateBtn");
+  if (locateBtn) locateBtn.textContent = currentAgentMode === "learn" ? t("learn_deep_calibrate_path") : t("locate_current_target");
+  const locateGoal = $("locateGoal");
+  if (locateGoal) {
+    locateGoal.disabled = stage === "locate" && currentAgentMode === "learn";
+    locateGoal.placeholder = currentAgentMode === "learn" ? "Learn Mode uses all PathGraph controls" : "";
+  }
 }
 
 function responseAllowsPathGraphWrite(result) {
@@ -384,7 +420,7 @@ function responseAllowsPathGraphWrite(result) {
 function setStatus(text, state = "neutral") {
   const el = $("requestStatus");
   el.textContent = t(text) || text;
-  el.style.color = state === "error" ? "#b42318" : state === "ok" ? "#14804a" : "#344054";
+  el.style.color = state === "error" ? "#b42318" : state === "ok" ? "#14804a" : state === "warning" ? "#b54708" : "#344054";
 }
 
 function setRuntimeState(text, ok = true) {
@@ -425,6 +461,7 @@ function showStage(stage) {
   if (responsePanel) responsePanel.style.display = needsResponse.has(stage) ? "" : "none";
   if (contentGrid) contentGrid.classList.toggle("single-column", singleColumn);
   if (responseSurface) responseSurface.style.display = stage === "model_test" ? "none" : "";
+  syncStageLearningControls(stage);
 
   if (traceView) {
     traceView.style.display = stage === "trace" ? "block" : "none";
@@ -469,8 +506,9 @@ async function api(method, path, payload = null, options = {}) {
       data = { success: response.ok, message: text };
     }
     if (!options.skipRender) renderResponse(data, options.summary || `${method} ${path}`);
-    setStatus(response.ok && data.success !== false ? "ok" : "failed", response.ok && data.success !== false ? "ok" : "error");
-    markWorkflow(workflowStep, response.ok && data.success !== false ? "done" : "error");
+    const ok = response.ok && data.success !== false;
+    setStatus(ok ? statusTextForResponse(data) : "failed", ok ? "ok" : "error");
+    markWorkflow(workflowStep, ok ? "done" : "error");
     return data;
   } catch (error) {
     const data = { success: false, message: "Request failed", error: String(error) };
@@ -500,6 +538,18 @@ function resultOf(response) {
   return Object.keys(result).length ? result : response;
 }
 
+function statusTextForResponse(response) {
+  const result = resultOf(response);
+  if (
+    result?.location_status === "learn_all_targets_ready"
+    || result?.learn_all_targets?.status === "ready"
+    || (result?.agent_mode === "learn" && result?.learn_depth === "deep" && result?.mode_contract_version === "learn_screen_deep_v1")
+  ) {
+    return "path_graph_calibrated";
+  }
+  return "ok";
+}
+
 function nestedGet(source, path) {
   let current = source;
   for (const key of path) {
@@ -521,6 +571,8 @@ function profileById(profileId) {
 
 function defaultProfileId(stage) {
   const stageText = String(stage || "").toLowerCase();
+  const preferred = DEFAULT_STAGE_PROFILE_IDS[stageText];
+  if (preferred && profileById(preferred)) return preferred;
   const expected = stageText === "observe" ? "understanding" : stageText === "locate" ? "grounding" : stageText;
   const byRole = modelProfiles.find((profile) => (profile.role || []).map((item) => String(item).toLowerCase()).includes(expected));
   return (byRole || modelProfiles[0] || {}).profile_id || "";
@@ -564,6 +616,19 @@ function populateModelTestProfiles() {
     const label = profileLabel(p);
     return `<option value="${p.profile_id || ""}">${label}</option>`;
   }).join("") || '<option value="">-- none --</option>';
+  syncModelTestProfile();
+}
+
+function syncModelTestProfile() {
+  const sel = $("modelTestProfile");
+  const stageEl = $("modelTestStage");
+  if (!sel || !stageEl) return null;
+  const current = sel.value;
+  const preferred = defaultProfileId(stageEl.value);
+  if (!current || !profileById(current) || profileById(current)?.provider_mode !== profileById(preferred)?.provider_mode) {
+    sel.value = preferred;
+  }
+  return profileById(sel.value);
 }
 
 async function sendModelTest() {
@@ -641,6 +706,57 @@ function appIdFromProcessName(processName) {
   if (process === "msedge") return "edge";
   if (process === "googlechrome") return "chrome";
   return process;
+}
+
+function appCatalogLabel(app) {
+  const appId = String(app.app_id || "");
+  const name = String(app.name || appId || "");
+  const process = String(app.process_name || "");
+  return [appId, name, process].filter(Boolean).join(" | ");
+}
+
+function setAppCatalog(apps) {
+  appCatalog = Array.isArray(apps) ? apps.filter((item) => item && typeof item === "object") : [];
+  const select = $("appCatalogSelect");
+  const list = $("appCatalogOptions");
+  if (!select || !list) return;
+  select.innerHTML = "";
+  list.innerHTML = "";
+  if (!appCatalog.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = t("no_apps");
+    select.appendChild(option);
+    return;
+  }
+  for (const app of appCatalog) {
+    const option = document.createElement("option");
+    option.value = String(app.app_id || "");
+    option.textContent = appCatalogLabel(app);
+    select.appendChild(option);
+
+    const dataOption = document.createElement("option");
+    dataOption.value = String(app.app_id || "");
+    dataOption.label = appCatalogLabel(app);
+    list.appendChild(dataOption);
+  }
+  const current = $("appId")?.value || "";
+  if (current && appCatalog.some((app) => app.app_id === current)) {
+    select.value = current;
+  } else {
+    select.value = String(appCatalog[0].app_id || "");
+  }
+  applySelectedCatalogApp();
+}
+
+function applySelectedCatalogApp() {
+  const selected = $("appCatalogSelect")?.value || "";
+  const app = appCatalog.find((item) => String(item.app_id || "") === selected);
+  if (!app) return;
+  $("appId").value = String(app.app_id || "");
+  if (app.process_name) $("bindProcess").value = String(app.process_name);
+  if (app.title_hint) $("bindTitle").value = String(app.title_hint);
+  syncWindowAppAndState();
 }
 
 function setWindowCandidates(candidates) {
@@ -903,15 +1019,34 @@ async function testModelService(stage, profileId) {
   const response = await refreshModels();
   const models = nestedGet(response, ["data", "models"]) || [];
   const selected = models.find((item) => item.profile?.profile_id === profileId) || models.find((item) => (item.profile?.role || []).includes(stage));
-  if (selected) {
+  if (!selected) {
     renderResponse(
       {
-        success: selected.status?.status === "running",
-        message: `Model service ${selected.status?.status || "unknown"}`,
-        data: { contract_version: "runtime_model_service_test_v1", stage, model: selected },
+        success: false,
+        message: `Model service not found for ${stage}`,
+        data: { contract_version: "runtime_model_service_test_v1", stage, profile_id: profileId || null },
       },
       "model service test",
     );
+    setStatus("model service not found", "error");
+    return response;
+  }
+  const serviceStatus = selected.status?.status || "unknown";
+  const ok = serviceStatus === "running";
+  renderResponse(
+    {
+      success: ok,
+      message: `Model service ${serviceStatus}`,
+      data: { contract_version: "runtime_model_service_test_v1", stage, model: selected },
+    },
+    "model service test",
+  );
+  if (ok) {
+    setStatus("ok", "ok");
+  } else if (serviceStatus === "loading") {
+    setStatus("model service loading", "warning");
+  } else {
+    setStatus(`model service ${serviceStatus}`, "error");
   }
   return response;
 }
@@ -1137,13 +1272,31 @@ function renderResponse(response, summary) {
   }
   const imagePath = result.image_path || nestedGet(lastResponse, ["data", "image_path"]) || nestedGet(result, ["capture", "image_path"]) || nestedGet(result, ["live_capture", "image_path"]);
   if (imagePath) setCurrentImage(imagePath);
-  const overlayPath = result.overlay_path || result.manual_overlay_path || nestedGet(lastResponse, ["data", "manual_overlay_path"]) || nestedGet(result, ["recognition_plan_overlay", "overlay_path"]);
+  const overlayPath = result.coordinate_overlay_path
+    || nestedGet(result, ["learn_all_targets", "overlay_path"])
+    || nestedGet(result, ["learn_all_targets", "overlay", "output_path"])
+    || result.overlay_path
+    || result.output_path
+    || result.manual_overlay_path
+    || nestedGet(lastResponse, ["data", "manual_overlay_path"])
+    || nestedGet(result, ["recognition_plan_overlay", "overlay_path"])
+    || nestedGet(result, ["recognition_plan_overlay", "output_path"])
+    || nestedGet(result, ["recognition_plan_overlay", "data", "result", "output_path"]);
   if (overlayPath) setCurrentImage(overlayPath);
   const suggestedState = nestedGet(result, ["suggested_state_hint"]);
   if (suggestedState) {
     syncAppAndStateFields({ stateHint: suggestedState });
   }
   populateReviewCandidate(result);
+  const approvedPlanId = result.approved_plan_id
+    || nestedGet(result, ["agent_execution_guidance", "next_request", "body", "approved_plan_id"]);
+  if (approvedPlanId && $("approvedPlanId")) {
+    $("approvedPlanId").value = approvedPlanId;
+  }
+  const learnedInstructionId = result.learned_instruction_id;
+  if (learnedInstructionId && $("learnedInstructionId")) {
+    $("learnedInstructionId").value = learnedInstructionId;
+  }
   const locatedPoint = result.located_point || nestedGet(result, ["pre_click_decision", "selected_click_point"]);
   if (locatedPoint && result.goal) {
     $("executeGoal").value = result.goal;
@@ -1319,6 +1472,7 @@ function addNavPathNode(summary, stateGuess, imagePath) {
 
   pendingTransition = null;
   currentNavNodeId = id;
+  expandedPathNodeId = null;
   navPathDirty = true;
   liveSessionSnapshot = null;  // modifications invalidate history view
   renderNavPath();
@@ -1447,11 +1601,14 @@ function addControlToCurrentPage(label, bbox, point, type, description, extra = 
   const normalizedBbox = normalizeBBox(bbox);
   const normalizedPoint = normalizePoint(point, normalizedBbox);
   const normalizedDescription = compactText(description || extra.description, 160);
+  const normalizedCandidateId = compactText(extra.candidateId, 100);
 
   // Avoid duplicate controls on same page
-  const existing = page.controls.find((c) => c.label === normalizedLabel);
+  const existing = page.controls.find((c) => (normalizedCandidateId && c.candidateId === normalizedCandidateId) || c.label === normalizedLabel);
   if (existing) {
-    // Update with latest coordinates
+    // Update with latest semantics and coordinates.
+    existing.label = normalizedLabel;
+    if (type) existing.type = type;
     if (normalizedBbox) existing.bbox = normalizedBbox;
     if (normalizedPoint) existing.clickPoint = normalizedPoint;
     if (normalizedDescription) existing.description = normalizedDescription;
@@ -1459,8 +1616,11 @@ function addControlToCurrentPage(label, bbox, point, type, description, extra = 
     if (extra.action) existing.action = extra.action;
     if (extra.confidence !== undefined) existing.confidence = extra.confidence;
     if (extra.sectionId) existing.sectionId = extra.sectionId;
-    if (extra.candidateId) existing.candidateId = extra.candidateId;
+    if (normalizedCandidateId) existing.candidateId = normalizedCandidateId;
+    if (extra.source) existing.source = compactText(extra.source, 60);
     if (extra.pathMapReview) existing.pathMapReview = extra.pathMapReview;
+    navPathDirty = true;
+    liveSessionSnapshot = null;
     return;
   }
 
@@ -1479,7 +1639,7 @@ function addControlToCurrentPage(label, bbox, point, type, description, extra = 
     source: compactText(extra.source, 60),
     sectionId: compactText(extra.sectionId, 80),
     confidence: extra.confidence ?? null,
-    candidateId: compactText(extra.candidateId, 100),
+    candidateId: normalizedCandidateId,
     pathMapReview: extra.pathMapReview || null,
   });
   navPathDirty = true;
@@ -1487,7 +1647,7 @@ function addControlToCurrentPage(label, bbox, point, type, description, extra = 
 }
 
 function applyPathMapReview(review) {
-  if (!review || review.contract_version !== "path_map_review_v1" || review.status !== "ready") return;
+  if (!review || review.contract_version !== "path_map_review_v1" || !["ready", "learn_all_targets"].includes(review.status)) return;
   if (!currentNavNodeId) return;
   const page = navPathNodes.find((n) => n.id === currentNavNodeId);
   if (!page || !Array.isArray(page.controls)) return;
@@ -1497,6 +1657,10 @@ function applyPathMapReview(review) {
     const before = page.controls.length;
     page.controls = page.controls.filter((control) => !pathReviewRemovalMatchesControl(removal, control));
     if (page.controls.length !== before) changed = true;
+  }
+
+  for (const update of collectArray(review.updates)) {
+    if (applyPathReviewUpdate(page, update, review)) changed = true;
   }
 
   for (const addition of collectArray(review.additions)) {
@@ -1528,11 +1692,34 @@ function applyPathMapReview(review) {
   }
 }
 
+function applyPathReviewUpdate(page, update, review) {
+  const candidateId = compactText(update.candidate_id || update.id, 100);
+  const fields = update.fields && typeof update.fields === "object" ? update.fields : update;
+  const control = page.controls.find((item) => {
+    if (candidateId && item.candidateId === candidateId) return true;
+    return pathReviewLabelKey(update.label) && pathReviewLabelKey(update.label) === pathReviewLabelKey(item.label);
+  });
+  if (!control) return false;
+  const nextLabel = compactText(fields.label || update.label, 80);
+  const nextBbox = normalizeBBox(fields.bbox || update.bbox);
+  const nextPoint = normalizePoint(fields.click_point || fields.clickPoint || update.click_point || update.clickPoint, nextBbox || control.bbox);
+  if (nextLabel) control.label = nextLabel;
+  if (fields.role || fields.type) control.type = compactText(fields.role || fields.type, 60);
+  if (fields.description || fields.expected_effect) control.description = compactText(fields.description || fields.expected_effect, 160);
+  if (fields.section_id || fields.sectionId) control.sectionId = compactText(fields.section_id || fields.sectionId, 80);
+  if (nextBbox) control.bbox = nextBbox;
+  if (nextPoint) control.clickPoint = nextPoint;
+  if (fields.confidence !== undefined) control.confidence = fields.confidence;
+  control.source = compactText(fields.source || update.source || "learn_locate_model_review", 60);
+  control.pathMapReview = { action: "update", source: review.review_source || review.source, stateId: review.state_id };
+  return true;
+}
+
 function pathReviewRemovalMatchesControl(removal, control) {
   if (!removal || !control) return false;
   if (control.status === "clicked" || control.navigatedToPageId) return false;
   const source = String(control.source || "");
-  const removableSource = !source || ["observe", "screen_map", "locate_path_review", "locate_candidate"].includes(source);
+  const removableSource = !source || ["observe", "screen_map", "locate_path_review", "locate_candidate", "learn_all_targets", "learn_locate_model_review"].includes(source);
   if (!removableSource) return false;
 
   const removalId = compactText(removal.candidate_id || removal.id, 100);
@@ -1726,6 +1913,7 @@ function restorePathGraph(appName) {
   navPathCounter = data.counter || navPathNodes.length;
   navPathAppName = data.appName || appName;
   currentNavNodeId = navPathNodes.length ? navPathNodes[navPathNodes.length - 1].id : null;
+  expandedPathNodeId = null;
   pendingTransition = null;
   navPathDirty = false;
   renderNavPath();
@@ -1754,6 +1942,7 @@ function clearNavPath() {
   navPathNodes = [];
   navPathEdges = [];
   currentNavNodeId = null;
+  expandedPathNodeId = null;
   pendingTransition = null;
   navPathCounter = 0;
   navPathAppName = "";
@@ -1776,7 +1965,10 @@ let traceFileList = [];
 let traceStageData = [];
 
 function refreshTraceList() {
-  fetch(`${baseUrl()}/panel/list_traces?limit=60`).then((r) => r.json()).then((resp) => {
+  const mode = $("traceModeFilter")?.value || "";
+  const query = new URLSearchParams({ limit: "60" });
+  if (mode) query.set("mode", mode);
+  fetch(`${baseUrl()}/panel/list_traces?${query.toString()}`).then((r) => r.json()).then((resp) => {
     const data = resp.data || resp;
     traceFileList = (data && data.traces) ? data.traces : [];
     populateTraceSelect();
@@ -1792,7 +1984,9 @@ function populateTraceSelect() {
     const opt = document.createElement("option");
     opt.value = t.path;
     const cat = t.category ? `[${t.category}] ` : "";
-    opt.textContent = `${cat}${t.name}`;
+    const mode = t.agent_mode ? `[${t.agent_mode}] ` : "";
+    const op = t.operation ? `${t.operation} | ` : "";
+    opt.textContent = `${cat}${mode}${op}${t.name}`;
     sel.appendChild(opt);
   }
   // Restore previous selection or set to latest trace path
@@ -2121,6 +2315,8 @@ let pathPanY = 0;
 let pathDragging = false;
 let pathDragStart = { x: 0, y: 0 };
 let pathDragPanStart = { x: 0, y: 0 };
+let expandedPathNodeId = null;
+let pathSectionLayouts = [];
 
 let pathContextNode = null;  // node id under right-click
 
@@ -2141,7 +2337,7 @@ function ensurePathCanvas() {
 
 function onPathCanvasContext(e) {
   e.preventDefault();
-  if (!pathHoveredNode || pathHoveredNode === "__pending__") return;
+  if (!pathHoveredNode || pathHoveredNode === "__pending__" || isPathControlNodeId(pathHoveredNode)) return;
   pathContextNode = pathHoveredNode;
   showPathContextMenu(e.clientX, e.clientY);
 }
@@ -2180,6 +2376,9 @@ function deletePathNode(nodeId) {
   // Update current node
   if (currentNavNodeId === nodeId) {
     currentNavNodeId = navPathNodes.length ? navPathNodes[navPathNodes.length - 1].id : null;
+  }
+  if (expandedPathNodeId === nodeId) {
+    expandedPathNodeId = null;
   }
   // Clear pending transition if source was deleted
   if (pendingTransition && pendingTransition.from === nodeId) {
@@ -2237,7 +2436,7 @@ function onPathCanvasUp(e) {
     const dy = e.clientY - pathDragStart.y;
     // If barely moved, treat as click
     if (Math.abs(dx) < 3 && Math.abs(dy) < 3 && pathHoveredNode && pathHoveredNode !== "__pending__") {
-      showNavNodeDetail(pathHoveredNode);
+      handlePathNodeClick(pathHoveredNode);
     }
   }
   pathDragging = false;
@@ -2270,7 +2469,8 @@ function onPathCanvasMouse(e) {
   for (const pos of pathNodePositions) {
     const dx = wx - pos.x;
     const dy = wy - pos.y;
-    if (Math.sqrt(dx * dx + dy * dy) < PATH_GLOW_R / pathZoom) {
+    const hitRadius = pos.isControl ? 18 : PATH_GLOW_R;
+    if (Math.sqrt(dx * dx + dy * dy) < hitRadius / pathZoom) {
       found = pos.id;
       break;
     }
@@ -2279,11 +2479,46 @@ function onPathCanvasMouse(e) {
   pathCanvas.style.cursor = found && found !== "__pending__" ? "pointer" : pathDragging ? "grabbing" : "grab";
 }
 
+function isPathControlNodeId(nodeId) {
+  return String(nodeId || "").startsWith("control:");
+}
+
+function pathControlNodeId(pageId, index) {
+  return `control:${pageId}:${index}`;
+}
+
+function parsePathControlNodeId(nodeId) {
+  const text = String(nodeId || "");
+  if (!text.startsWith("control:")) return null;
+  const lastColon = text.lastIndexOf(":");
+  if (lastColon <= "control:".length) return null;
+  const pageId = text.slice("control:".length, lastColon);
+  const index = Number(text.slice(lastColon + 1));
+  if (!Number.isInteger(index) || index < 0) return null;
+  return { pageId, index };
+}
+
+function handlePathNodeClick(nodeId) {
+  const controlRef = parsePathControlNodeId(nodeId);
+  if (controlRef) {
+    currentNavNodeId = controlRef.pageId;
+    expandedPathNodeId = controlRef.pageId;
+    showNavNodeDetail(controlRef.pageId, controlRef.index);
+    renderNavPath();
+    $("pathDetailContent")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    return;
+  }
+  if (!navPathNodes.some((n) => n.id === nodeId)) return;
+  expandedPathNodeId = expandedPathNodeId === nodeId ? null : nodeId;
+  currentNavNodeId = nodeId;
+  showNavNodeDetail(nodeId);
+}
+
 function layoutPathNodes() {
   const w = pathCanvas ? pathCanvas.clientWidth : 600;
   const h = pathCanvas ? pathCanvas.clientHeight : 300;
   const cx = w / 2;
-  const cy = h / 2;
+  const cy = expandedPathNodeId ? h * 0.66 : h / 2;
   const margin = 60;
 
   const count = navPathNodes.length + (pendingTransition ? 1 : 0);
@@ -2347,7 +2582,169 @@ function layoutPathNodes() {
       node.y = Math.max(margin / 2, Math.min(h - margin / 2, node.y));
     }
   }
+  const expandedId = expandedPathNodeId;
+  const expandedPage = expandedId ? navPathNodes.find((n) => n.id === expandedId) : null;
+  const parent = expandedPage ? allNodes.find((n) => n.id === expandedPage.id) : null;
+  pathSectionLayouts = [];
+  const controls = Array.isArray(expandedPage?.controls) ? expandedPage.controls : [];
+  if (parent && controls.length) {
+    const visibleControls = controls.slice(0, 32);
+    const groups = groupPathControlsBySection(visibleControls);
+    const childAreaLeft = parent.x < w * 0.42 ? Math.min(w - 220, parent.x + 112) : 48;
+    const laneLeft = Math.max(44, Math.min(w - 220, childAreaLeft));
+    const laneWidth = Math.max(180, w - laneLeft - 44);
+    const rowGap = 68;
+    const laneGap = 20;
+    const headerH = 26;
+    const minLaneH = 92;
+    const lanePlans = groups.map((group) => {
+      const grid = computePathControlGrid(group.controls, laneWidth, { compact: true });
+      const rows = Math.ceil(group.controls.length / grid.cols);
+      return {
+        group,
+        grid,
+        rows,
+        height: Math.max(minLaneH, headerH + rows * rowGap + 16),
+      };
+    });
+    const totalHeight = lanePlans.reduce((sum, plan) => sum + plan.height, 0) + Math.max(0, lanePlans.length - 1) * laneGap;
+    const startY = Math.max(36, Math.min(Math.max(36, h - totalHeight - 28), parent.y - totalHeight / 2));
+    let cursorY = startY;
+    for (const plan of lanePlans) {
+      const panel = {
+        key: plan.group.key,
+        label: plan.group.label,
+        count: plan.group.controls.length,
+        x: laneLeft,
+        y: cursorY,
+        w: laneWidth,
+        h: plan.height,
+      };
+      pathSectionLayouts.push(panel);
+      plan.group.controls.forEach(({ ctrl, originalIndex }, localIndex) => {
+        const col = localIndex % plan.grid.cols;
+        const row = Math.floor(localIndex / plan.grid.cols);
+        allNodes.push({
+          id: pathControlNodeId(expandedPage.id, originalIndex),
+          parentId: expandedPage.id,
+          controlIndex: originalIndex,
+          label: ctrl.label || ctrl.type || "control",
+          type: ctrl.type || "control",
+          sectionId: ctrl.sectionId || ctrl.section_id || "",
+          index: originalIndex,
+          x: panel.x + plan.grid.left + plan.grid.colWidth * (col + 0.5),
+          y: panel.y + headerH + 24 + row * rowGap,
+          labelMaxWidth: Math.max(54, plan.grid.colWidth - 14),
+          isCurrent: false,
+          isPending: false,
+          isControl: true,
+        });
+      });
+      cursorY += plan.height + laneGap;
+    }
+  }
   return allNodes;
+}
+
+function computePathControlGrid(controls, canvasWidth, options = {}) {
+  const visibleCount = Math.max(1, controls.length);
+  const horizontalPad = options.compact ? 24 : 96;
+  const usableWidth = Math.max(180, canvasWidth - horizontalPad);
+  const longestUnits = Math.max(
+    8,
+    ...controls.map((ctrl) => visualTextUnits(ctrl.label || ctrl.type || "control")),
+  );
+  const preferredColWidth = Math.max(84, Math.min(154, 34 + longestUnits * 6.2));
+  const maxCols = Math.max(1, Math.floor(usableWidth / preferredColWidth));
+  const cols = Math.max(1, Math.min(8, visibleCount, maxCols));
+  const colWidth = usableWidth / cols;
+  return {
+    cols,
+    colWidth,
+    left: (canvasWidth - usableWidth) / 2,
+  };
+}
+
+function groupPathControlsBySection(controls) {
+  const order = ["page_header", "main_content", "right_sidebar", "promo_strip", "lower_content", "floating_overlay", "other"];
+  const groups = new Map();
+  controls.forEach((ctrl, originalIndex) => {
+    const key = normalizePathSectionId(ctrl.sectionId || ctrl.section_id || ctrl.section || "");
+    if (!groups.has(key)) groups.set(key, { key, label: pathSectionLabel(key), controls: [] });
+    groups.get(key).controls.push({ ctrl, originalIndex });
+  });
+  return Array.from(groups.values()).sort((a, b) => {
+    const ai = order.indexOf(a.key);
+    const bi = order.indexOf(b.key);
+    return (ai === -1 ? order.length : ai) - (bi === -1 ? order.length : bi);
+  });
+}
+
+function normalizePathSectionId(sectionId) {
+  const value = String(sectionId || "").trim().toLowerCase();
+  if (!value) return "other";
+  if (value.includes("header") || value.includes("nav")) return "page_header";
+  if (value.includes("right") || value.includes("sidebar")) return "right_sidebar";
+  if (value.includes("promo")) return "promo_strip";
+  if (value.includes("lower") || value.includes("bottom")) return "lower_content";
+  if (value.includes("float") || value.includes("overlay")) return "floating_overlay";
+  if (value.includes("main") || value.includes("content") || value.includes("body")) return "main_content";
+  return value;
+}
+
+function pathSectionLabel(sectionId) {
+  const labels = {
+    page_header: "Top navigation",
+    main_content: "Main content",
+    right_sidebar: "Right sidebar",
+    promo_strip: "Promo / feature strip",
+    lower_content: "Lower content",
+    floating_overlay: "Floating overlay",
+    other: "Other controls",
+  };
+  return labels[sectionId] || sectionId.replace(/_/g, " ");
+}
+
+function visualTextUnits(value) {
+  return Array.from(String(value || "")).reduce((total, char) => total + (char.charCodeAt(0) > 255 ? 1.7 : 1), 0);
+}
+
+function expandedPathControls() {
+  if (!expandedPathNodeId) return [];
+  const page = navPathNodes.find((node) => node.id === expandedPathNodeId);
+  return Array.isArray(page?.controls) ? page.controls.slice(0, 32) : [];
+}
+
+function updatePathCanvasHeight() {
+  const wrap = pathCanvas?.parentElement;
+  if (!wrap) return;
+  const controls = expandedPathControls();
+  if (!controls.length) {
+    wrap.classList.remove("expanded");
+    wrap.style.height = "";
+    return;
+  }
+  const width = wrap.getBoundingClientRect().width || pathCanvas.clientWidth || 600;
+  const groupCount = groupPathControlsBySection(controls).length;
+  const grid = computePathControlGrid(controls, Math.max(180, width - 160), { compact: true });
+  const rows = Math.ceil(controls.length / grid.cols);
+  const targetHeight = Math.max(400, Math.min(760, 300 + rows * 58 + groupCount * 74));
+  wrap.classList.add("expanded");
+  wrap.style.height = `${targetHeight}px`;
+}
+
+function truncateCanvasText(ctx, text, maxWidth) {
+  const value = String(text || "");
+  if (!ctx || !maxWidth || ctx.measureText(value).width <= maxWidth) return value;
+  const ellipsis = "...";
+  let low = 0;
+  let high = value.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (ctx.measureText(value.slice(0, mid) + ellipsis).width <= maxWidth) low = mid;
+    else high = mid - 1;
+  }
+  return value.slice(0, Math.max(0, low)) + ellipsis;
 }
 
 function drawPathGraphFrame() {
@@ -2397,16 +2794,22 @@ function drawPathGraphFrame() {
   ctx.scale(pathZoom, pathZoom);
 
   // Edges
+  const mainNodePositions = nodePositions.filter((pos) => !pos.isControl);
+  const childNodePositions = nodePositions.filter((pos) => pos.isControl);
   const edges = [];
-  for (let i = 1; i < nodePositions.length; i++) {
-    const from = nodePositions[i - 1];
-    const to = nodePositions[i];
+  for (let i = 1; i < mainNodePositions.length; i++) {
+    const from = mainNodePositions[i - 1];
+    const to = mainNodePositions[i];
     const edgeData = navPathEdges[i - 1] || (to.isPending && pendingTransition ? { goal: pendingTransition.goal } : null);
     edges.push({ from, to, goal: edgeData?.goal || "", isPending: to.isPending });
   }
+  for (const child of childNodePositions) {
+    const parent = mainNodePositions.find((pos) => pos.id === child.parentId);
+    if (parent) edges.push({ from: parent, to: child, goal: "", isPending: false, isChild: true });
+  }
 
   for (const edge of edges) {
-    const { from, to, isPending } = edge;
+    const { from, to, isPending, isChild } = edge;
     const mx = (from.x + to.x) / 2;
     const my = (from.y + to.y) / 2;
     const dx = to.x - from.x;
@@ -2419,11 +2822,11 @@ function drawPathGraphFrame() {
 
     // Edge
     const grad = ctx.createLinearGradient(from.x, from.y, to.x, to.y);
-    grad.addColorStop(0, isPending ? "rgba(251,191,36,0.5)" : "rgba(99,160,255,0.6)");
-    grad.addColorStop(1, isPending ? "rgba(251,191,36,0.1)" : "rgba(168,130,255,0.3)");
+    grad.addColorStop(0, isChild ? "rgba(45,212,191,0.36)" : isPending ? "rgba(251,191,36,0.5)" : "rgba(99,160,255,0.6)");
+    grad.addColorStop(1, isChild ? "rgba(45,212,191,0.08)" : isPending ? "rgba(251,191,36,0.1)" : "rgba(168,130,255,0.3)");
     ctx.strokeStyle = grad;
-    ctx.lineWidth = isPending ? 1.6 : 2;
-    ctx.setLineDash(isPending ? [7, 5] : []);
+    ctx.lineWidth = isChild ? 1 : isPending ? 1.6 : 2;
+    ctx.setLineDash(isPending ? [7, 5] : isChild ? [2, 6] : []);
     if (isPending) ctx.lineDashOffset = -pathAnimT * 25;
     ctx.beginPath();
     ctx.moveTo(from.x, from.y);
@@ -2432,6 +2835,7 @@ function drawPathGraphFrame() {
     ctx.setLineDash([]);
 
     // Particles
+    if (isChild) continue;
     for (let p = 0; p < (isPending ? 2 : 3); p++) {
       const t = ((pathAnimT * 0.35 + p / (isPending ? 2 : 3)) % 1 + 1) % 1;
       const px = (1 - t) * (1 - t) * from.x + 2 * (1 - t) * t * cpx + t * t * to.x;
@@ -2454,16 +2858,21 @@ function drawPathGraphFrame() {
     }
   }
 
+  drawPathSectionPanels(ctx);
+
   // Nodes
   for (const pos of nodePositions) {
-    const node = pos.isPending ? null : navPathNodes.find((n) => n.id === pos.id);
+    const node = pos.isPending || pos.isControl ? null : navPathNodes.find((n) => n.id === pos.id);
     const isHovered = pathHoveredNode === pos.id;
-    const r = isHovered ? PATH_NODE_R + 3 : PATH_NODE_R;
-    const glowR = isHovered ? PATH_GLOW_R + 6 : PATH_GLOW_R;
+    const baseR = pos.isControl ? 10 : PATH_NODE_R;
+    const baseGlowR = pos.isControl ? 18 : PATH_GLOW_R;
+    const r = isHovered ? baseR + 3 : baseR;
+    const glowR = isHovered ? baseGlowR + 6 : baseGlowR;
 
     // Glow
     const gg = ctx.createRadialGradient(pos.x, pos.y, r * 0.5, pos.x, pos.y, glowR);
-    if (pos.isCurrent) { gg.addColorStop(0, "rgba(59,130,246,0.5)"); gg.addColorStop(0.5, "rgba(59,130,246,0.12)"); gg.addColorStop(1, "rgba(59,130,246,0)"); }
+    if (pos.isControl) { gg.addColorStop(0, "rgba(45,212,191,0.35)"); gg.addColorStop(0.55, "rgba(45,212,191,0.1)"); gg.addColorStop(1, "rgba(45,212,191,0)"); }
+    else if (pos.isCurrent) { gg.addColorStop(0, "rgba(59,130,246,0.5)"); gg.addColorStop(0.5, "rgba(59,130,246,0.12)"); gg.addColorStop(1, "rgba(59,130,246,0)"); }
     else if (pos.isPending) { gg.addColorStop(0, "rgba(251,191,36,0.4)"); gg.addColorStop(0.5, "rgba(251,191,36,0.1)"); gg.addColorStop(1, "rgba(251,191,36,0)"); }
     else { gg.addColorStop(0, "rgba(99,160,255,0.25)"); gg.addColorStop(1, "rgba(99,160,255,0)"); }
     ctx.beginPath(); ctx.arc(pos.x, pos.y, glowR, 0, Math.PI * 2); ctx.fillStyle = gg; ctx.fill();
@@ -2483,23 +2892,27 @@ function drawPathGraphFrame() {
 
     // Body
     const bg = ctx.createRadialGradient(pos.x - r * 0.3, pos.y - r * 0.3, r * 0.1, pos.x, pos.y, r);
-    if (pos.isCurrent) { bg.addColorStop(0, "#60a5fa"); bg.addColorStop(0.6, "#2563eb"); bg.addColorStop(1, "#1d4ed8"); }
+    if (pos.isControl) { bg.addColorStop(0, "#5eead4"); bg.addColorStop(0.65, "#0d9488"); bg.addColorStop(1, "#115e59"); }
+    else if (pos.isCurrent) { bg.addColorStop(0, "#60a5fa"); bg.addColorStop(0.6, "#2563eb"); bg.addColorStop(1, "#1d4ed8"); }
     else if (pos.isPending) { bg.addColorStop(0, "#fcd34d"); bg.addColorStop(0.6, "#f59e0b"); bg.addColorStop(1, "#b45309"); }
     else { bg.addColorStop(0, "#94a3b8"); bg.addColorStop(0.6, "#475569"); bg.addColorStop(1, "#1e293b"); }
     ctx.beginPath(); ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2); ctx.fillStyle = bg; ctx.fill();
-    ctx.strokeStyle = pos.isCurrent ? "rgba(147,197,253,0.7)" : pos.isPending ? "rgba(252,211,77,0.6)" : "rgba(148,163,184,0.35)";
+    ctx.strokeStyle = pos.isControl ? "rgba(153,246,228,0.55)" : pos.isCurrent ? "rgba(147,197,253,0.7)" : pos.isPending ? "rgba(252,211,77,0.6)" : "rgba(148,163,184,0.35)";
     ctx.lineWidth = 1.3; ctx.stroke();
 
     // Number
-    ctx.fillStyle = "#fff"; ctx.font = `bold ${pos.isPending ? 13 : 12}px ${PATH_CANVAS_FONT}`;
+    ctx.fillStyle = "#fff"; ctx.font = `bold ${pos.isControl ? 8 : pos.isPending ? 13 : 12}px ${PATH_CANVAS_FONT}`;
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText(pos.isPending ? "?" : String(pos.index + 1), pos.x, pos.y);
+    ctx.fillText(pos.isControl ? String(pos.index + 1) : pos.isPending ? "?" : String(pos.index + 1), pos.x, pos.y);
 
     // Label
-    const lbl = pos.isPending ? (pendingTransition?.goal?.slice(0, 22) || "") : (node?.label || "").slice(0, 22);
-    ctx.fillStyle = pos.isCurrent ? "rgba(191,219,254,0.95)" : "rgba(203,213,225,0.75)";
-    ctx.font = `${pos.isCurrent ? "bold " : ""}11px ${PATH_CANVAS_FONT}`;
-    ctx.fillText(lbl, pos.x, pos.y + PATH_LABEL_DY);
+    const rawLabel = pos.isControl
+      ? String(pos.label || "").slice(0, 14)
+      : pos.isPending ? (pendingTransition?.goal?.slice(0, 22) || "") : (node?.label || "").slice(0, 22);
+    ctx.fillStyle = pos.isControl ? "rgba(204,251,241,0.82)" : pos.isCurrent ? "rgba(191,219,254,0.95)" : "rgba(203,213,225,0.75)";
+    ctx.font = `${pos.isCurrent ? "bold " : ""}${pos.isControl ? 9 : 11}px ${PATH_CANVAS_FONT}`;
+    const lbl = pos.isControl ? truncateCanvasText(ctx, rawLabel, pos.labelMaxWidth || 72) : rawLabel;
+    ctx.fillText(lbl, pos.x, pos.y + (pos.isControl ? 22 : PATH_LABEL_DY));
 
     if (!pos.isPending && node?.summary) {
       ctx.fillStyle = "rgba(148,163,184,0.5)";
@@ -2509,6 +2922,43 @@ function drawPathGraphFrame() {
   }
 
   ctx.restore();
+}
+
+function drawPathSectionPanels(ctx) {
+  if (!pathSectionLayouts.length) return;
+  ctx.save();
+  ctx.textBaseline = "middle";
+  for (const panel of pathSectionLayouts) {
+    const gradient = ctx.createLinearGradient(panel.x, panel.y, panel.x + panel.w, panel.y);
+    gradient.addColorStop(0, "rgba(15, 118, 110, 0.12)");
+    gradient.addColorStop(1, "rgba(59, 130, 246, 0.06)");
+    ctx.fillStyle = gradient;
+    pathRoundRect(ctx, panel.x, panel.y, panel.w, panel.h, 14);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(45, 212, 191, 0.16)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(204, 251, 241, 0.88)";
+    ctx.font = `bold 11px ${PATH_CANVAS_FONT}`;
+    ctx.textAlign = "left";
+    ctx.fillText(`${panel.label} (${panel.count})`, panel.x + 14, panel.y + 15);
+  }
+  ctx.restore();
+}
+
+function pathRoundRect(ctx, x, y, w, h, radius) {
+  const r = Math.min(radius, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
 }
 
 /* 鈹€鈹€ Path history 鈹€鈹€ */
@@ -2533,6 +2983,7 @@ function populatePathHistory() {
 
 function renderNavPath() {
   if (!ensurePathCanvas()) return;
+  updatePathCanvasHeight();
   resizePathCanvas();
   // Reset zoom/pan
   pathZoom = 1.0;
@@ -2609,7 +3060,7 @@ function generateFakePathData() {
   renderNavPath();
 }
 
-function showNavNodeDetail(nodeId) {
+function showNavNodeDetail(nodeId, focusControlIndex = null) {
   const node = navPathNodes.find((n) => n.id === nodeId);
   if (!node) return;
 
@@ -2620,6 +3071,7 @@ function showNavNodeDetail(nodeId) {
   const edge = navPathEdges.find((e) => e.to === nodeId);
   const fromNode = edge ? navPathNodes.find((n) => n.id === edge.from) : null;
   const controls = Array.isArray(node.controls) ? node.controls : [];
+  const focusedControl = Number.isInteger(focusControlIndex) ? controls[focusControlIndex] : null;
   const clickableControls = controls.filter((ctrl) => {
     const type = String(ctrl.type || "").toLowerCase();
     return ctrl.clickPoint || ["button", "icon_button", "tab", "menu", "menuitem", "input", "textbox", "link", "switch", "checkbox", "titlebar-button"].includes(type);
@@ -2637,34 +3089,13 @@ function showNavNodeDetail(nodeId) {
     return `<li><strong>${escapeHtml(ctrl.label)}</strong><span>${escapeHtml(navText)}</span></li>`;
   }).join("");
 
-  const controlsHtml = controls.length ? `
-    <div class="controls-list">
-      <h4>按钮 / 输入 / 控件 (${controls.length})</h4>
-      ${controls.map((ctrl) => {
-        const statusIcon = ctrl.status === "clicked" ? "clicked" : "open";
-        const statusClass = ctrl.status === "clicked" ? "ctrl-clicked" : "ctrl-unclicked";
-        const coords = ctrl.clickPoint ? `(${Math.round(ctrl.clickPoint.x)}, ${Math.round(ctrl.clickPoint.y)})` : (ctrl.bbox ? `${Math.round(ctrl.bbox.x)},${Math.round(ctrl.bbox.y)} ${Math.round(ctrl.bbox.width)}x${Math.round(ctrl.bbox.height)}` : "");
-        const navInfo = ctrl.navigatedToPageId ? ` -> ${(navPathNodes.find((n) => n.id === ctrl.navigatedToPageId) || {}).label || "?"}` : "";
-        const typeInfo = [ctrl.type, ctrl.sectionId, ctrl.source, ctrl.confidence !== null && ctrl.confidence !== undefined ? `conf ${Number(ctrl.confidence).toFixed(2)}` : ""].filter(Boolean).join(" | ");
-        return `
-          <div class="control-item ${statusClass}">
-            <span class="ctrl-status">${statusIcon}</span>
-            <div class="ctrl-info">
-              <span class="ctrl-label">${escapeHtml(ctrl.label)}</span>
-              ${typeInfo ? `<span class="ctrl-type">${escapeHtml(typeInfo)}</span>` : ""}
-              ${ctrl.description ? `<span class="ctrl-desc">${escapeHtml(ctrl.description)}</span>` : ""}
-              ${coords ? `<span class="ctrl-coords">${coords}${navInfo}</span>` : ""}
-              ${ctrl.possibleNav ? `<span class="ctrl-possible">-> ${escapeHtml(ctrl.possibleNav)}</span>` : ""}
-            </div>
-          </div>`;
-      }).join("")}
-    </div>
-  ` : `<div class="path-detail-empty">当前页面还没有收录控件。先运行整屏理解或精准定位后，这里会显示按钮、输入框、可能入口和坐标。</div>`;
+  const controlsHtml = controls.length ? renderGroupedControlDetails(controls, focusControlIndex) : `<div class="path-detail-empty">当前页面还没有收录控件。先运行整屏理解或精准定位后，这里会显示按钮、输入框、可能入口和坐标。</div>`;
 
   content.innerHTML = `
     <div class="path-detail-card">
       <h4>${escapeHtml(node.label)}</h4>
       ${node.summary ? `<div class="summary-block">${escapeHtml(node.summary)}</div>` : ""}
+      ${focusedControl ? renderFocusedControlDetail(focusedControl, focusControlIndex) : ""}
       <div class="path-detail-sections">
         <div class="path-detail-section">
           <h5>可能操作</h5>
@@ -2687,6 +3118,63 @@ function showNavNodeDetail(nodeId) {
   `;
 
   if (meta) meta.textContent = `${controls.length} controls | ${navPathNodes.length} pages`;
+}
+
+function renderFocusedControlDetail(ctrl, index) {
+  const point = ctrl.clickPoint ? `(${Math.round(ctrl.clickPoint.x)}, ${Math.round(ctrl.clickPoint.y)})` : "";
+  const box = ctrl.bbox ? `${Math.round(ctrl.bbox.x)},${Math.round(ctrl.bbox.y)} ${Math.round(ctrl.bbox.width)}x${Math.round(ctrl.bbox.height)}` : "";
+  const meta = [
+    ctrl.type,
+    ctrl.sectionId,
+    ctrl.source,
+    ctrl.candidateId,
+    ctrl.confidence !== null && ctrl.confidence !== undefined ? `conf ${Number(ctrl.confidence).toFixed(2)}` : "",
+    point ? `point ${point}` : "",
+    box ? `box ${box}` : "",
+  ].filter(Boolean).join(" | ");
+  return `
+    <div class="focused-control-card">
+      <h5>当前子路径 #${index + 1}</h5>
+      <strong>${escapeHtml(ctrl.label || "control")}</strong>
+      ${meta ? `<span>${escapeHtml(meta)}</span>` : ""}
+      ${ctrl.description ? `<p>${escapeHtml(ctrl.description)}</p>` : ""}
+      ${ctrl.possibleNav ? `<p>${escapeHtml(ctrl.possibleNav)}</p>` : ""}
+    </div>
+  `;
+}
+
+function renderGroupedControlDetails(controls, focusControlIndex = null) {
+  const groups = groupPathControlsBySection(controls);
+  return `
+    <div class="controls-list">
+      <h4>按钮 / 输入 / 控件 (${controls.length})</h4>
+      ${groups.map((group) => `
+        <section class="control-section">
+          <h5>${escapeHtml(group.label)} <span>${group.controls.length}</span></h5>
+          ${group.controls.map(({ ctrl, originalIndex }) => renderControlDetailItem(ctrl, originalIndex, focusControlIndex)).join("")}
+        </section>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderControlDetailItem(ctrl, index, focusControlIndex = null) {
+  const statusIcon = ctrl.status === "clicked" ? "clicked" : "open";
+  const statusClass = ctrl.status === "clicked" ? "ctrl-clicked" : "ctrl-unclicked";
+  const coords = ctrl.clickPoint ? `(${Math.round(ctrl.clickPoint.x)}, ${Math.round(ctrl.clickPoint.y)})` : (ctrl.bbox ? `${Math.round(ctrl.bbox.x)},${Math.round(ctrl.bbox.y)} ${Math.round(ctrl.bbox.width)}x${Math.round(ctrl.bbox.height)}` : "");
+  const navInfo = ctrl.navigatedToPageId ? ` -> ${(navPathNodes.find((n) => n.id === ctrl.navigatedToPageId) || {}).label || "?"}` : "";
+  const typeInfo = [ctrl.type, ctrl.sectionId, ctrl.source, ctrl.confidence !== null && ctrl.confidence !== undefined ? `conf ${Number(ctrl.confidence).toFixed(2)}` : ""].filter(Boolean).join(" | ");
+  return `
+    <div class="control-item ${statusClass} ${focusControlIndex === index ? "ctrl-focused" : ""}">
+      <span class="ctrl-status">${statusIcon}</span>
+      <div class="ctrl-info">
+        <span class="ctrl-label">${escapeHtml(ctrl.label)}</span>
+        ${typeInfo ? `<span class="ctrl-type">${escapeHtml(typeInfo)}</span>` : ""}
+        ${ctrl.description ? `<span class="ctrl-desc">${escapeHtml(ctrl.description)}</span>` : ""}
+        ${coords ? `<span class="ctrl-coords">${coords}${navInfo}</span>` : ""}
+        ${ctrl.possibleNav ? `<span class="ctrl-possible">-> ${escapeHtml(ctrl.possibleNav)}</span>` : ""}
+      </div>
+    </div>`;
 }
 
 function tracePathMapHtml(raw) {
@@ -2918,6 +3406,23 @@ function ingestNavPathFromResponse(response) {
 
   // Detect locate_target response and capture candidates as controls.
   applyPathMapReview(result.path_map_review);
+  const learnTargets = nestedGet(result, ["learn_all_targets", "targets"]) || [];
+  if (Array.isArray(learnTargets) && learnTargets.length && currentNavNodeId) {
+    for (const target of learnTargets) {
+      const targetLabel = target.label || target.text || target.name || "";
+      const targetBbox = target.bbox || target.refined_bbox || null;
+      const targetPoint = target.click_point || target.clickPoint || null;
+      addControlToCurrentPage(targetLabel, targetBbox, targetPoint, target.role || target.type || "control", target.description || target.meaning || "", {
+        possibleNav: controlPossibleNav(target),
+        action: target.action || target.interaction || "",
+        candidateId: target.candidate_id || target.id,
+        source: target.source || "learn_all_targets",
+        sectionId: target.section_id,
+        confidence: target.confidence,
+      });
+    }
+    renderNavPath();
+  }
   const locateResult = result.located_bbox || result.located_point || result.recommended_target;
   const planGoal = nestedGet(result, ["recognition_plan", "goal"]) || result.goal || "";
   if (locateResult && planGoal && currentNavNodeId) {
@@ -2979,14 +3484,23 @@ function ingestNavPathFromResponse(response) {
 function payloadFromShared(stage) {
   const goal = stage === "execute" ? $("executeGoal").value : $("locateGoal").value;
   const profile = syncStageProvider("locate");
+  const mode = modePayload(stage);
+  const learnLocate = stage === "locate" && currentAgentMode === "learn";
+  const metadata = metadataWithPrompt("locate");
+  if (learnLocate) {
+    metadata.learn_all_targets = true;
+    metadata.learn_all_targets_reason = "Learn Mode locates every current PathGraph child control instead of a single command target.";
+  }
   return {
-    ...modePayload(stage),
-    goal,
+    ...mode,
+    agent_mode: learnLocate ? "learn" : mode.agent_mode,
+    learn_depth: learnLocate ? "deep" : mode.learn_depth,
+    goal: learnLocate ? "learn all visible controls" : goal,
     task: "click_target",
     app_name: stage === "execute" ? $("executeApp").value : $("locateApp").value,
     state_hint: stage === "execute" ? $("locateState").value : $("locateState").value,
     provider_mode: profile?.provider_mode || null,
-    metadata: metadataWithPrompt("locate"),
+    metadata,
     top_k: Number($("locateTopK").value || 5),
     capture_live: true,
     observe_trace_path: lastObserveTracePath || null,
@@ -3090,16 +3604,16 @@ function bindEvents() {
   });
   on("agentModeLearnBtn", "click", () => setAgentMode("learn", currentLearnDepth));
   on("agentModeExecuteBtn", "click", () => setAgentMode("execute"));
-  on("learnFastBtn", "click", () => setAgentMode("learn", "fast"));
-  on("learnDeepBtn", "click", () => setAgentMode("learn", "deep"));
   on("healthBtn", "click", () => api("GET", "/health"));
   on("observeModelProfile", "change", () => syncStageProvider("observe"));
   on("locateModelProfile", "change", () => syncStageProvider("locate"));
   on("appId", "input", () => syncWindowAppAndState());
   on("appUrl", "input", () => syncWindowAppAndState());
+  on("appCatalogSelect", "change", applySelectedCatalogApp);
 
   on("listAppsBtn", "click", async () => {
     const response = await api("GET", "/apps", null, { summary: "GET /apps", workflowStep: "open" });
+    setAppCatalog(nestedGet(response, ["data", "catalog", "apps"]) || []);
     setWindowCandidates(nestedGet(response, ["data", "running_windows"]) || []);
   });
   on("openAppBtn", "click", () => {
@@ -3110,6 +3624,10 @@ function bindEvents() {
     wait_seconds: 1.5,
     }, { summary: "POST /apps/open", workflowStep: "open" }).then((response) => {
       setWindowCandidates(nestedGet(response, ["data", "running_windows"]) || []);
+      const app = nestedGet(response, ["data", "app"]);
+      if (app && !appCatalog.some((item) => item.app_id === app.app_id)) {
+        setAppCatalog([app, ...appCatalog]);
+      }
       syncWindowAppAndState();
     });
   });
@@ -3171,6 +3689,7 @@ function bindEvents() {
   on("startObserveModelBtn", "click", () => callModelAction("start", "observe", $("observeModelProfile").value));
   on("stopObserveModelBtn", "click", () => callModelAction("stop", "observe", $("observeModelProfile").value));
   on("testObserveModelBtn", "click", () => testModelService("observe", $("observeModelProfile").value));
+  on("modelTestStage", "change", () => syncModelTestProfile());
 
   on("locateBtn", "click", async () => {
     const profile = syncStageProvider("locate");
@@ -3213,7 +3732,7 @@ function bindEvents() {
   on("dryRunBtn", "click", () => {
     const payload = payloadFromShared("execute");
     payload.dry_run = true;
-    payload.approved_plan_id = $("approvedPlanId").value || null;
+    payload.approved_plan_id = null;
     payload.learned_instruction_id = $("learnedInstructionId").value || null;
     payload.learning_mode = $("learningMode").checked ? "instruction" : null;
     api("POST", "/action/execute_recognition_plan", payload, { summary: "Click preview", workflowStep: "gate", timeoutSeconds: requestTimeoutSeconds() });
@@ -3233,6 +3752,7 @@ function bindEvents() {
   on("copyResponseBtn", "click", () => navigator.clipboard?.writeText($("responseText").textContent));
 
   on("traceFileSelect", "change", loadSelectedTrace);
+  on("traceModeFilter", "change", refreshTraceList);
   on("refreshTracesBtn", "click", refreshTraceList);
   on("openTraceFolderBtn", "click", () => api("POST", "/panel/open_trace_folder", {}, { summary: "open trace folder" }));
   on("modelTestSendBtn", "click", sendModelTest);
@@ -3255,6 +3775,7 @@ function bindEvents() {
         navPathCounter = liveSessionSnapshot.counter;
         navPathAppName = liveSessionSnapshot.appName;
         currentNavNodeId = liveSessionSnapshot.currentNode;
+        expandedPathNodeId = null;
         pendingTransition = liveSessionSnapshot.pending;
         navPathDirty = liveSessionSnapshot.dirty;
         liveSessionSnapshot = null;
@@ -3281,6 +3802,7 @@ function bindEvents() {
       navPathCounter = data.counter || navPathNodes.length;
       navPathAppName = data.appName || appName;
       currentNavNodeId = navPathNodes.length ? navPathNodes[navPathNodes.length - 1].id : null;
+      expandedPathNodeId = null;
       pendingTransition = null;
       navPathDirty = false;
       updatePathAppLabel();

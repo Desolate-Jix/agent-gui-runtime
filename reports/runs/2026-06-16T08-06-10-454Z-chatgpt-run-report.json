@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-06-16T08:06:10.455Z",
+  "includeContent": false,
+  "summary": {
+    "ok": false,
+    "status": "partial",
+    "warnings": [],
+    "error": {
+      "name": "[redacted:5 chars]",
+      "message": "[redacted:276 chars]",
+      "recoverable": false
+    },
+    "context": {
+      "timestamp": "2026-06-16T08:06:10.454Z",
+      "url": "[redacted:20 chars]",
+      "title": "[redacted:7 chars]",
+      "turnCount": 0,
+      "assistantTurnCount": 0
+    }
+  },
+  "steps": [
+    {
+      "id": "bootstrap",
+      "command": "session.bootstrap",
+      "status": "ok",
+      "ok": true,
+      "startedAt": "2026-06-16T08:06:04.596Z",
+      "endedAt": "2026-06-16T08:06:05.031Z",
+      "warnings": [],
+      "dataPreview": {
+        "browserName": "[redacted:6 chars]",
+        "tabId": "[redacted:9 chars]",
+        "url": "[redacted:58 chars]",
+        "loggedIn": false
+      }
+    },
+    {
+      "id": "new",
+      "command": "threads.new",
+      "status": "ok",
+      "ok": true,
+      "startedAt": "2026-06-16T08:06:05.031Z",
+      "endedAt": "2026-06-16T08:06:09.583Z",
+      "warnings": [],
+      "dataPreview": {
+        "url": "[redacted:20 chars]",
+        "title": "[redacted:7 chars]"
+      }
+    },
+    {
+      "id": "mode",
+      "command": "modes.set",
+      "status": "ok",
+      "ok": true,
+      "startedAt": "2026-06-16T08:06:09.583Z",
+      "endedAt": "2026-06-16T08:06:09.858Z",
+      "warnings": [],
+      "dataPreview": {
+        "selected": [
+          "[redacted:3 chars]"
+        ],
+        "candidates": [
+          "[redacted:3 chars]"
+        ]
+      }
+    },
+    {
+      "id": "ask",
+      "command": "messages.ask",
+      "status": "error",
+      "ok": false,
+      "startedAt": "2026-06-16T08:06:09.858Z",
+      "endedAt": "2026-06-16T08:06:10.454Z",
+      "warnings": []
+    }
+  ],
+  "data": {
+    "bootstrap": {
+      "browserName": "[redacted:6 chars]",
+      "tabId": "[redacted:9 chars]",
+      "url": "[redacted:58 chars]",
+      "loggedIn": false
+    },
+    "new": {
+      "url": "[redacted:20 chars]",
+      "title": "[redacted:7 chars]"
+    },
+    "mode": {
+      "selected": [
+        "[redacted:3 chars]"
+      ],
+      "candidates": [
+        "[redacted:3 chars]"
+      ]
+    }
+  }
+}

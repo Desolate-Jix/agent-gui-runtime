@@ -22,6 +22,7 @@ def decide_pre_click(
     min_candidate_score: float = 0.45,
     min_margin: float = 0.06,
     min_local_text_similarity: float = 0.45,
+    allow_low_margin_when_grounded: bool = False,
 ) -> PreClickDecisionResult:
     grounding_by_id = {item.candidate_id: item for item in grounding.results}
     decisions: list[PreClickCandidateDecision] = []
@@ -58,7 +59,10 @@ def decide_pre_click(
 
     top_margin_ok = _top_margin_ok(candidates, min_margin=min_margin)
     if not top_margin_ok:
-        for decision in decisions:
+        for index, decision in enumerate(decisions):
+            if allow_low_margin_when_grounded and index == 0 and decision.allowed and "pre_click_checks_passed" in decision.reasons:
+                decision.reasons.append("top_candidate_margin_reviewed_override")
+                continue
             decision.allowed = False
             decision.reasons = [item for item in decision.reasons if item != "pre_click_checks_passed"]
             decision.reasons.append("top_candidate_margin_too_small")
@@ -67,7 +71,7 @@ def decide_pre_click(
     selected = allowed[0] if allowed else None
     reasons = ["pre_click_candidate_allowed"] if selected is not None else ["no_candidate_passed_pre_click_checks"]
     if not top_margin_ok:
-        reasons.append("top_candidate_margin_too_small")
+        reasons.append("top_candidate_margin_reviewed_override" if selected is not None else "top_candidate_margin_too_small")
 
     return PreClickDecisionResult(
         allowed=selected is not None,
@@ -80,6 +84,7 @@ def decide_pre_click(
             "candidate_count": len(candidates.candidates),
             "allowed_candidate_count": len(allowed),
             "top_margin_ok": top_margin_ok,
+            "low_margin_reviewed_override_used": bool(selected is not None and not top_margin_ok and allow_low_margin_when_grounded),
             "margin_to_second": candidates.margin_to_second,
         },
     )
@@ -146,6 +151,32 @@ def _candidate_decision(
             allowed = False
             reasons.append("missing_local_ocr_text")
 
+    if _verified_precision_text_candidate(
+        goal=goal,
+        candidate=candidate,
+        local=local,
+        min_local_text_similarity=min_local_text_similarity,
+    ):
+        reasons = [
+            reason
+            for reason in reasons
+            if reason not in {"interaction_policy_blocked", "precision_text_target_requires_confirmation"}
+        ]
+        hard_blockers = {
+            "candidate_not_eligible",
+            "candidate_score_too_low",
+            "candidate_goal_text_mismatch",
+            "ad_like_candidate",
+            "missing_narrow_search_result",
+            "missing_refined_click_point",
+            "refined_point_outside_candidate_bbox",
+            "local_ocr_text_mismatch",
+            "missing_local_ocr_text",
+        }
+        if not any(reason in hard_blockers or reason.startswith("narrow_search_status:") for reason in reasons):
+            allowed = True
+            reasons.append("precision_text_target_verified_by_local_ocr")
+
     if allowed:
         reasons.append("pre_click_checks_passed")
     return PreClickCandidateDecision(
@@ -187,6 +218,29 @@ def _candidate_decision_bbox(candidate: RecognitionCandidate) -> BBox:
         w=int(bbox.get("w", bbox.get("width", 0))),
         h=int(bbox.get("h", bbox.get("height", 0))),
     )
+
+
+def _verified_precision_text_candidate(
+    *,
+    goal: str,
+    candidate: RecognitionCandidate,
+    local: LocalGroundingCandidateResult | None,
+    min_local_text_similarity: float,
+) -> bool:
+    policy = candidate.element.interaction_policy
+    if policy.zone_type != "precise_text_target" or policy.ad_risk >= 0.6:
+        return False
+    required_reasons = {"precision_text_target_matches_goal", "strong_goal_text_match", "supported_interaction"}
+    if not required_reasons.issubset(set(candidate.reasons)):
+        return False
+    if not candidate.eligible or local is None or local.status != "grounded":
+        return False
+    if local.refined_click_point is None or not local.matched_text:
+        return False
+    if not _point_inside_bbox(dict(local.refined_click_point), _candidate_decision_bbox(candidate), padding=8):
+        return False
+    similarity = _best_similarity(goal, local.matched_text, [candidate.label, candidate.text, candidate.element.description])
+    return similarity >= min_local_text_similarity
 
 
 def _best_similarity(goal: str, matched_text: str, values: list[str]) -> float:

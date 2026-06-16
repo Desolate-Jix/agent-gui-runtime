@@ -61,10 +61,6 @@
             <button id="agentModeLearnBtn" type="button" class="mode-option active" data-mode="learn" data-i18n="learn_mode">Learn Mode</button>
             <button id="agentModeExecuteBtn" type="button" class="mode-option" data-mode="execute" data-i18n="execute_mode">Execute Mode</button>
           </div>
-          <div class="mode-group learn-depth-group" role="group" aria-label="Learn depth">
-            <button id="learnFastBtn" type="button" class="mode-option active" data-depth="fast" data-i18n="learn_fast">Learn Fast</button>
-            <button id="learnDeepBtn" type="button" class="mode-option" data-depth="deep" data-i18n="learn_deep">Learn Deep</button>
-          </div>
           <div class="write-policy-row">
             <label><input id="writePathGraph" type="checkbox" checked /> <span data-i18n="write_path_graph">PathGraph</span></label>
             <label><input id="writeElementMemory" type="checkbox" /> <span data-i18n="write_element_memory">ElementMemory</span></label>
@@ -114,11 +110,16 @@
               <div class="form-grid">
                 <label>
                   <span data-i18n="app_id">App ID</span>
-                  <input id="appId" value="" />
+                  <input id="appId" value="" list="appCatalogOptions" />
+                  <datalist id="appCatalogOptions"></datalist>
                 </label>
                 <label>
                   <span data-i18n="url">URL</span>
                   <input id="appUrl" value="" />
+                </label>
+                <label>
+                  <span data-i18n="app_catalog">App catalog</span>
+                  <select id="appCatalogSelect"></select>
                 </label>
                 <label class="wide-control">
                   <span data-i18n="window_candidates">Open windows</span>
@@ -181,6 +182,7 @@
 
             <section class="panel stage-page" data-page="observe">
               <h3 data-i18n="observe_screen">Observe Screen</h3>
+              <div class="mode-help mode-help-learn" data-mode-scope="learn" data-i18n="learn_workbench_hint">Learn Mode: Observe builds the fast map, Locate calibrates every child path control; no real click.</div>
               <div class="form-grid">
                 <label>
                   <span data-i18n="app_name">App name</span>
@@ -215,7 +217,7 @@
 - This stage describes available actions for agent planning; it must not choose or execute a click.</textarea>
               </label>
               <div class="button-row">
-                <button id="observeBtn" data-i18n="observe_screen">Observe screen</button>
+                <button id="observeBtn" data-i18n="learn_fast_build_path">Fast map build</button>
                 <button id="analyzeBtn" data-i18n="analyze_api">API direct analyze</button>
                 <button id="applyObserveModelBtn" data-i18n="apply_model_profile">Apply profile</button>
                 <button id="startObserveModelBtn" data-i18n="start_model">Start model</button>
@@ -226,6 +228,8 @@
 
             <section class="panel stage-page" data-page="locate">
               <h3 data-i18n="locate_target">Locate Target</h3>
+              <div class="mode-help mode-help-learn" data-mode-scope="learn" data-i18n="learn_workbench_hint">Learn Mode: Observe builds the fast map, Locate calibrates every child path control; no real click.</div>
+              <div class="mode-help mode-help-execute" data-mode-scope="execute" data-i18n="execute_workbench_hint">Execute Mode: preview the click plan and coordinate overlay first, then reuse the approved_plan_id for the real click.</div>
               <div class="form-grid">
                 <label>
                   <span data-i18n="goal">Goal</span>
@@ -266,7 +270,7 @@
 - If multiple visual candidates remain plausible, keep confidence lower and state the ambiguity; do not invent a precise target.</textarea>
               </label>
               <div class="button-row">
-                <button id="locateBtn" data-i18n="locate_target">Locate target</button>
+                <button id="locateBtn" data-i18n="learn_deep_calibrate_path">Deep path calibration</button>
                 <button id="overlayBtn" data-i18n="render_overlay">Render overlay</button>
                 <button id="applyLocateModelBtn" data-i18n="apply_model_profile">Apply profile</button>
                 <button id="startLocateModelBtn" data-i18n="start_model">Start model</button>
@@ -344,6 +348,14 @@
             <section class="panel stage-page" data-page="trace" style="max-width:none;">
               <h3 data-i18n="nav_trace">Trace Inspector</h3>
               <div class="form-grid">
+                <label>
+                  <span data-i18n="trace_mode_filter">Trace mode</span>
+                  <select id="traceModeFilter">
+                    <option value="">All</option>
+                    <option value="learn">Learn</option>
+                    <option value="execute">Execute</option>
+                  </select>
+                </label>
                 <label class="wide-control">
                   <span data-i18n="trace_file">Trace file</span>
                   <div style="display:flex;gap:6px;">
@@ -362,6 +374,10 @@
 
             <section class="panel stage-page" data-page="execute">
               <h3 data-i18n="execute_recognition_plan">Execute Recognition Plan</h3>
+              <div class="mode-help mode-help-execute" data-mode-scope="execute" data-i18n="execute_workbench_hint">Execute Mode: preview the click plan and coordinate overlay first, then reuse the approved_plan_id for the real click.</div>
+              <div class="execute-evidence-note">
+                <strong>Evidence:</strong> dry-run returns action trace, recognition trace, pre-click gate, selected point, and a coordinate preview image.
+              </div>
               <div class="form-grid">
                 <label>
                   <span data-i18n="goal">Goal</span>
@@ -418,9 +434,6 @@
                 <div class="path-empty-overlay" id="pathEmptyOverlay" data-i18n="path_empty_hint">Observe a screen to start building the navigation path</div>
               </div>
             </section>
-          </div>
-
-          <aside class="response-surface">
             <section class="panel preview-panel">
               <div class="panel-heading">
                 <h3 data-i18n="screenshot_preview">Screenshot Preview</h3>
@@ -431,6 +444,9 @@
                 <div id="bboxOverlay" class="bbox-overlay"></div>
               </div>
             </section>
+          </div>
+
+          <aside class="response-surface">
             <section class="panel path-detail-panel" id="pathDetailPanel">
               <div class="panel-heading">
                 <h3 data-i18n="nav_path_detail">Page Detail</h3>

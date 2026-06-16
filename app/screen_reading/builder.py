@@ -98,7 +98,7 @@ def build_screen_reading(
         "learning_hooks": _learning_hooks(elements),
     }
 
-    return {
+    result = {
         "contract_version": "screen_reading_v1",
         "image_path": image_path,
         "app_name": app_name,
@@ -135,6 +135,10 @@ def build_screen_reading(
             "ocr_image_path": ocr.image_path,
         },
     }
+    from app.screen_inventory import build_screen_inventory
+
+    result["screen_inventory"] = build_screen_inventory(result)
+    return result
 
 
 def _text_to_dict(text: PageText) -> dict[str, Any]:
@@ -442,11 +446,28 @@ def _best_uia_match(element: dict[str, Any], controls: list[dict[str, Any]]) -> 
 
 def _uia_source_layer(uia_snapshot: dict[str, Any] | None) -> dict[str, Any]:
     snapshot = uia_snapshot or {}
+    controls = [item for item in snapshot.get("controls") or [] if isinstance(item, dict)]
     return {
         "provider": snapshot.get("provider") or "windows_uia",
         "status": snapshot.get("status") or "not_scanned",
         "control_count": int(snapshot.get("control_count") or 0),
         "reason": snapshot.get("reason"),
+        "controls": [_compact_uia_control(item) for item in controls[:150]],
+    }
+
+
+def _compact_uia_control(control: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "provider": control.get("provider") or "windows_uia",
+        "control_id": control.get("control_id"),
+        "name": control.get("name"),
+        "control_type": control.get("control_type"),
+        "automation_id": control.get("automation_id"),
+        "class_name": control.get("class_name"),
+        "bbox": control.get("bbox"),
+        "enabled": control.get("enabled"),
+        "visible": control.get("visible"),
+        "patterns": list(control.get("patterns") or []),
     }
 
 

@@ -1,0 +1,13 @@
+[
+  {
+    "case_id": "execute_mvp_done_button",
+    "category": "normal_button",
+    "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\execute-mvp-test__post-action__execute-recognition-plan__full-window__20260615-233529-976216.png",
+    "goal": "Click Done",
+    "app_name": "edge",
+    "expected_bbox": {"x": 405, "y": 690, "w": 70, "h": 60},
+    "expected_click_point": {"x": 438, "y": 720},
+    "allowed_distance_px": 28,
+    "neighbor_bboxes": []
+  }
+]

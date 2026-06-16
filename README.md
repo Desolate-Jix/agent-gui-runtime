@@ -98,8 +98,12 @@ scripts/model_servers/
 
 当前已有 profile：
 
-- `configs/model_profiles/qwen3_6_iq4_xs.json`
 - `configs/model_profiles/qwen3_vl_8b_q4_k_m.json`
+- `configs/model_profiles/qwen3_vl_4b_q4_k_m.json`
+- `configs/model_profiles/minicpm_v_4_6_transformers.json`
+- `configs/model_profiles/vista_4b_transformers.json`
+
+当前默认分工：整屏理解 `observe` 使用 `Qwen3-VL 4B Q4_K_M`；精准定位/执行 grounding 使用 `VISTA-4B Transformers`。`Qwen3-VL 8B Q4_K_M` 保留为可手动选择的理解基线；`MiniCPM-V-4.6 Transformers` 目前是 benchmark-only profile，当前后端不直接启动它的服务。旧 `Qwen3.6 35B` profile 与本地权重已经移除。
 
 手动启动 llama.cpp 视觉模型：
 
@@ -120,6 +124,27 @@ scripts/model_servers/
   -ModelPath .\models\some-model.gguf `
   -MmprojPath .\models\some-mmproj.gguf
 ```
+
+VISTA-4B 是 Transformers/safetensors 点定位模型，不走 llama.cpp/GGUF。权重目录为 `models/vista-4b-safetensors`，profile 使用 `runtime="transformers"` 和 `output_contract="vista_point_v1"`，通过 `scripts/model_servers/start_transformers_vision_server.ps1` 启动一个本地 OpenAI-compatible 服务。首次运行前需要安装可选依赖：
+
+```powershell
+uv sync --group vista
+```
+
+手动启动 VISTA-4B：
+
+```powershell
+.\scripts\model_servers\start_transformers_vision_server.ps1 `
+  -ModelPath .\models\vista-4b-safetensors `
+  -ModelName inclusionAI/VISTA-4B `
+  -Port 1244
+```
+
+如果缺少 `torch` / `transformers`，启动脚本会非零退出并在 runtime start trace/log 中给出明确错误；不会把依赖缺失伪装成模型已启动。
+
+当前默认 `local_grounding` 已切到 VISTA-4B，用来替代原先 35B 精准定位模型。VISTA 只输出 `vista_point_v1` 点坐标，不输出 `vision_regions_v1` 区域列表；因此执行链路会先复用 Observe 阶段的 `screen_map_v1` 做 PathGraph recall，再把召回候选作为上下文发给 VISTA。VISTA 返回点必须落在召回候选 bbox 内，才会转成 `narrow_search_v1` 证据并进入 `pre_click_decision_v1`。如果没有可复用 PathGraph 候选，系统会返回 blocked plan，而不是凭 VISTA 点坐标直接点击。
+
+VISTA Transformers 服务现在按单飞生成运行：同一时间只允许一个 `/v1/chat/completions` 推理请求，忙时返回 `503 model_busy`。`/health` 会返回 `status="ok"` 或 `status="busy"`，并带上 `pid` / `active_request`；runtime 的模型状态检查会把 busy 显示为 busy，不再仅凭 `/v1/models` 把卡住或旧进程误报为正常。
 
 ## 测试面板
 
@@ -150,6 +175,7 @@ http://127.0.0.1:8000/panel
 - `POST /apps/open` 打开应用
 - `GET /session/windows` 自动读取当前打开窗口
 - `POST /session/bind_window` 绑定窗口
+- `POST /session/resize_bound_window` 调整当前绑定窗口尺寸，用于稳定性/坐标漂移测试
 - 窗口下拉选择 + 进程名/标题自动填入
 - `POST /state/capture_window` 截图
 - 拖拽图片作为测试截图
@@ -159,6 +185,7 @@ http://127.0.0.1:8000/panel
 - `POST /action/execute_recognition_plan` dry-run 点击闸门
 - `POST /action/execute_confirmed_point` 操作者确认坐标点击
 - `POST /action/type_text` 文本输入
+- `POST /action/scroll` 当前绑定窗口上下滚动
 - 渲染识别 overlay
 - 启动/停止本地视觉模型
 - 修改附加视觉提示词
@@ -250,15 +277,31 @@ POST /vision/observe_screen
 POST /vision/locate_target
 POST /action/execute_recognition_plan  dry_run=true
 POST /action/execute_recognition_plan  dry_run=false，携带 approved_plan_id
+POST /action/scroll                    可选，仅当 fallback_plan 要求滚动补全可见信息
 ```
 
 关键原则：
 
 - 先用整屏理解得到简短候选列表，再对选中的目标精准定位
 - `observe_screen.suggested_state_hint` 是下一次 `locate_target.state_hint` 的默认建议；测试面板会自动填入，agent 仍可按目标覆盖
-- 面板现在有 `Learn Mode / Execute Mode` 切换。Learn Mode 分 `Learn Fast` 与 `Learn Deep`，请求会携带 `agent_mode`、`learn_depth` 和 `write_policy`；Execute Mode 默认 `write_policy.path_graph=false`，避免执行当前命令时顺手污染 PathGraph；`write_policy.trace=false` 会抑制 Observe/Locate/RecognitionPlan/ExecuteRecognitionPlan 的主 trace 写入。
+- 面板现在有全局 `Learn Mode / Execute Mode` 切换，但不再把 `Learn Fast / Learn Deep` 做成全局按钮。整屏理解按钮是“快速建图”，固定发送 `agent_mode=learn, learn_depth=fast`；精准定位在 Learn Mode 下是“深度校准路径图”，固定发送 `agent_mode=learn, learn_depth=deep` 和 `metadata.learn_all_targets=true`；精准定位在 Execute Mode 下才是“定位当前目标”。
+- `Learn Deep` 现在由 Learn Mode 下的 `locate_target` 承担全量校准入口：复用上一条 Observe trace 的 `screen_map_v1`，再输出 `learn_all_targets` 和 `path_map_review_v1`。每个子路径控件都会带 `coordinate_validation`，汇总 `validated_count/invalid_count`，并生成 `coordinate_overlay_path` 坐标框图；面板截图预览会优先显示这张校验图。若配置的是非点定位 review 模型，可先调用模型审查补充遗漏子节点、修改错误坐标、重命名误标节点并删除重复/噪声节点；若 `local_grounding` 是 VISTA `vista_point_v1` 点模型，则跳过全图模型审查，避免用点定位模型做慢而无效的 full-map review。历史的 observe-stage deep review 仍作为模型语义审查能力保留，但面板主流程先按 Observe 快速建图、Locate 深度校准来组织。
+- VISTA 可作为 Learn Deep 的逐节点坐标复核层：`metadata.learn_vista_coordinate_validation` 控制是否逐个 target 发送短指令给 VISTA。默认最多校验 5 个、每个 12 秒超时、失败即停；设置 `max_targets: "all"` 才会尝试全量。每个节点会写入 `vista_coordinate_validation`，点落入 bbox 才更新 click_point，点落框外或超时则标记 `needs_review` / `failed`。
+- Learn Deep 路径校准增加重叠规则：同级子路径节点不允许明显重叠，只有一个 bbox 完整包含另一个 bbox 的父子关系允许重叠。模型审查上下文会要求 `resolve_non_containment_overlaps`，后端合并候选后也会确定性移除低优先级的非包含重叠候选，并把 `non_containment_overlap_removed` 写入 `path_map_review` / trace。
 - `observe_screen.screen_map` 是整屏理解阶段生成的页面/动作地图，测试面板导航路径图会直接消费其中的页面分区、候选控件、风险等级和预期效果；observe trace 也保留这份地图，Trace Inspector 会显示为 `Path Map` 阶段，并先渲染整屏理解生成的动态路径图，再显示分区/候选清单与截图 overlay。路径图规则会把顶部导航区的有效 OCR 文字作为导航按钮候选，并把正文/推广区的相关 OCR 文本聚合成整张卡片候选，而不是只保留标题文字框
-- `recognition_plan` / `execute_recognition_plan` 现在会接收 `observe_trace_path`。当 trace 与当前截图匹配且含 `screen_map_v1` 时，会先生成 `path_graph_recall_v1`，把与当前 goal 相关的路径候选、状态匹配、local OCR ROI 提示写进响应和 trace；Trace Inspector 显示为 `Path Recall` 阶段。
+- `screen_map_v1` 候选生成按区域、控件、聚合、过滤四层规则补齐模型漏项：顶部导航文字强制作为导航候选，正文/右栏 OCR 文本可聚合为 `news_card` / `recommendation_item` 并保留 `children`；右侧推荐会归入 `right_sidebar`；`查看更多` / `More` / `See more` / `View more` / `Read more` 这类入口优先作为 `button`，不会再被当成新闻卡片；时间/来源/低质量短文本会被过滤为卡片证据而不是同级主候选。
+- `screen_map_v1` 的区域划分现在区分浏览器网页和普通软件界面：浏览器/新闻网页继续使用 `browser_chrome/page_header/main_content/right_sidebar/lower_content`；普通客户端使用更中性的 `top_bar/primary_area/bottom_bar`。`right_sidebar` 只有在浏览器型页面且右侧有足够推荐/相关内容证据时才创建，不再仅凭窗口宽度生成。
+- 导航路径图的子控件节点默认收起，点击页面主节点才展开；展开后会按 `page_header`、`main_content`、`right_sidebar`、`lower_content` 等区域分组显示子路径泳道，并按画布宽度和标签宽度自适应列数、行距和画布高度，避免大量导航按钮或新闻卡片子节点堆叠。点击子路径节点会打开同一页面详情，在顶部显示当前子路径的 label、类型、区域、candidate id、置信度、bbox/click point，并在详情列表里高亮对应控件。
+- 截图预览卡片位于导航路径图下方，右侧响应区保留页面详情和 API/trace 证据；Learn Mode 深度校准返回 `learn_all_targets_ready` 时，状态显示“路径图已校准”。
+- `recognition_plan` / `execute_recognition_plan` 现在会接收 `observe_trace_path`。当 trace 与当前截图匹配且含 `screen_map_v1` 时，会先生成 `path_graph_recall_v1`，把与当前 goal 相关的路径候选、状态匹配、local OCR ROI 提示写进响应和 trace；召回候选会并入 `candidate_result`，参与后续局部 OCR grounding 和 `pre_click_decision_v1`；Trace Inspector 显示为 `Path Recall` 阶段。若 `local_grounding.output_contract=vista_point_v1`，PathGraph 主路径会直接裁候选 ROI 给 VISTA：top1 分数明显领先时只裁 top1，否则合并 top3，默认 padding 48px、最小 ROI 256px、最长边 640。模型输入、ROI crop bounds、候选 bbox 的 ROI 坐标 prompt、原始输出、解析 JSON 和换算后的原图点会写入 `model_io` 与 `parse_result.vista_point_grounding`，Gate 仍只验证原图坐标。
+- Execute Mode 现在会输出 `screen_inventory_v1` 作为快速“当前有什么可操作”的清单合同。它从结构化的 `screen_reading_v1` 证据生成，不额外调用全屏理解模型，并拆成 `available_actions`（可点击/输入/选择/切换/卡片候选）、`page_elements`（薪资、日期、posted/company/location 等可见文字和元数据）和 `cards`（职位/新闻/结果卡片及其子节点 id）。`POST /vision/screen_reading` 会内嵌它，普通 `recognition_plan_v1` 会在顶层和 `parse_result.screen_reading.screen_inventory` 暴露它；VISTA direct 分支会优先复用 Observe trace 里的 inventory，没有 Observe 时会用当前绑定窗口的 Windows UIA 快速生成 `execute_fast_inventory_v1`，并过滤浏览器 chrome、窗口容器、地址栏和无名泛容器。Trace Inspector 会显示独立 `Inventory` 阶段，展示 actions/text/cards 数量和坐标覆盖率。可用 `uv run python scripts\benchmark_screen_inventory.py --output artifacts\accuracy-checks\screen_inventory_benchmark_report.json` 复测 typed ground truth 下的 action/page/metadata/card recall、action precision、clickable false-positive rate、候选数、重复率、坐标覆盖和构建耗时。
+- Execute Mode 支持 Direct VISTA fallback：当 `agent_mode=execute` 且没有可用 PathGraph recall 候选时，`recognition_plan` 会用 VISTA 直接对当前 goal 输出一个点，生成 `vista_direct_*` 临时候选，再交给 `pre_click_decision_v1`。成功时 `execution_path.vista_direct_point_grounding_used=true`；超时或失败时返回 blocked plan，并在 `model_io.status=failed` 和 trace 中记录错误，不会绕过 Gate 裸点点击。
+- Agent 调用 `POST /action/execute_recognition_plan` 时如果没有显式传 `provider_mode`，Execute Mode 会默认使用 `local_grounding`，并启用受保护的 `vista_direct_grounding` 配置。Direct VISTA 的默认保护上限是 `timeout_seconds=45.0`、`max_edge=640`、`refine=true`、`refine_roi_size=512`：运行时保存原始截图作为 evidence，先把送入 VISTA 的全图缩放到最长边 640 做 coarse grounding，再围绕 coarse 原图点裁出 512x512 ROI 做 refine grounding，最终点映射回原图坐标后进入 Gate。`parse_result.vista_point_grounding` 会记录最终点，同时保留 `coarse_vista_point_grounding`、`refine_vista_point_grounding`、processed image、crop bounds、transform、模型原始输出和 processed/original 坐标。调用方仍可用 `metadata.vista_direct_grounding.timeout_seconds` / `max_edge` / `refine` / `refine_roi_size` 显式覆盖。接口返回 `agent_step_result_v1` 和 `agent_execution_guidance_v1`：dry-run 通过时给出下一次复用 `approved_plan_id` 的请求体，真实点击验证通过时返回 `next_action="done"`，失败或 Gate 拒绝时返回可恢复的 `fallback_plan`。推荐 agent 先 `dry_run=true` 生成可审查计划，再用 guidance 里的 approved-plan 请求执行真实点击。
+- VISTA 缩放准确率可以用 `python scripts\benchmark_vista_scaling.py --cases artifacts\accuracy-checks\execute_mvp_vista_scaling_cases.json --max-edges 448,512,640,768 --output artifacts\accuracy-checks\execute_mvp_vista_scaling_report.json` 复测。case 需要包含保存截图、goal、expected bbox、expected click point 和允许距离；报告会输出 latency、点是否落入 bbox、到预期点距离、边界 margin、相邻目标误点和 Gate 结果。当前 Execute MVP 样本显示 448 失败、512 risky、640 pass、768 pass 但明显更慢，因此默认不全局升到 768/896，而是用 640 coarse + ROI refine 平衡速度和准确率。
+- Execute Mode 的 PathGraph 召回会先过滤 `browser_chrome` 区域，避免地址栏、浏览器工具栏 OCR 被当成网页目标。`pre_click_decision_v1` 只在 ranker 已给出 `precision_text_target_matches_goal`、强文本匹配、本地 OCR 在候选框内命中且非广告风险时，放行精确文字按钮；普通精确文字卡片仍保持需要确认。
+- `Execute Mode` 现在有闭环 MVP：真实点击必须通过 `pre_click_decision_v1`，验证成功后按 `write_policy.element_memory` 写入 `execute_transition_memory_v1`；失败时返回 `execute_fallback_plan_v1`，列出局部重扫、PathGraph review、滚动补全可见信息、全屏 OCR 刷新或重新 grounding 的下一步，但不会绕过 gate 自动点击。Trace Inspector 显示 `Memory` 和 `Fallback` 阶段。
+- 如果 `fallback_plan.steps[]` 出现 `request_scroll`，表示当前截图可能没有露出足够信息。上层 agent 可调用 `POST /action/scroll` 对当前绑定窗口执行 `up/down` 滚轮动作，查看 `post_scroll_verification` 和 action trace，然后用同一个 goal 重新调用 `POST /action/execute_recognition_plan`。滚动只是 reveal/navigation 动作，不授予点击权限，也不会替代下一次 `pre_click_decision_v1`。
+- Execute Mode 只做单步原子动作，不在后端内部编排多步路线。上层 agent 读取 `agent_step_result_v1.status`、`next_agent_action`、overlay/trace 路径和 post-click before/after/diff 证据后，再决定是否再次调用 Execute 做下一步。
 - 上层 Agent 应保留用户原文用于 trace，但发给视觉模型的 `goal` / `state_hint` / 排除约束建议规范化为英文；例如用户说“点击第一个自然搜索结果”，模型侧可写成 `Click the first organic Google search result title` 和 `main organic search results list below Google navigation tabs`
 - OCR anchors 默认参与视觉定位；精准定位保留完整 OCR 结果用于校验，但向模型发送受预算控制的几何投影，只有目标文字高匹配时才附带文字
 - `observe_screen` 只用于界面摘要、地图生成和候选发现；`screen_map` 里的 bbox/click_point 只是观察证据，不用于点击或最终坐标证明
@@ -269,6 +312,37 @@ POST /action/execute_recognition_plan  dry_run=false，携带 approved_plan_id
 - 测试面板的 `execute_confirmed_point` 仅用于操作者已查看候选框后的显式坐标点击，不是自动执行旁路
 - 执行前必须通过 `pre_click_decision_v1`
 - 成功 dry-run 会返回 `approved_plan_id`；真实点击应复用这个 ID，runtime 校验同一窗口和已批准点位后直接点击，不再第二次运行大视觉模型
+- 外部最小 smoke 可用 `python scripts\smoke_execute_single_step.py --goal "click Learn more" --app-name edge`。默认只执行框架截图和 dry-run，不会真实点击；显式加 `--execute` 才会复用 approved plan 执行一次真实单步点击。
+- Execute Smoke Matrix 的最小 runner 是 `python scripts\execute_smoke_runner.py --case tests\smoke\execute_cases\execute_mvp_start_dryrun.json`。case 使用 JSON，包含 `id/app/goal/mode/expect`；runner 默认只 dry-run，不真实点击，并把 `execute_smoke_result_v1` 写到 `logs/smoke/execute_smoke_results.jsonl`。`expect.point_in_rect` 可声明人工核对过的安全落点区域，runner 会把 `selected_click_point` 和 `coordinate_overlay_path` 打印出来并写入 JSONL，防止 API allowed 但坐标明显错误仍被算作通过。只有显式加 `--execute` 才会复用 approved plan 执行真实单步点击；标记 `mode.destructive=true` 的 case 会拒绝真实执行。批量 dry-run 可用 `--cases tests\smoke\execute_cases`，重复稳定性检查可用 `--repeat N`；当前样本包含受控页面 `execute_mvp_start_dryrun.json` / `execute_mvp_continue_dryrun.json`、第二应用 `notepad_file_menu_dryrun.json`、SEEK 类本地简历筛选流程 `seek_resume_screening_flow.json`，真实 SEEK 求职列表 dry-run 矩阵 `seek_real_jobs_dryrun.json`，每个目标前重新打开 SEEK 页面的 `seek_real_jobs_reopen_dryrun.json`，以及调整窗口尺寸后的 `seek_real_jobs_resized_dryrun.json`。
+- runner 支持 `app.open_before=true`，会先调用 `/apps/open` 打开本地页面或浏览器 URL，再让 Execute Mode 做截图、dry-run、approved-plan 执行和 post-click 验证。`--execute` 结果现在同时记录 `dry_run_latency_ms` 和 `execute_latency_ms`；`expect.max_latency_ms` 检查的是 dry-run 决策耗时，也就是模型识图/坐标判断是否满足 10 秒目标。
+- SEEK 类本地 smoke 可用：
+
+```powershell
+$env:PYTHONIOENCODING='utf-8'
+$env:UV_CACHE_DIR='.uv-cache'
+uv run python scripts\execute_smoke_runner.py `
+  --case tests\smoke\execute_cases\seek_resume_screening_flow.json `
+  --out logs\smoke\seek_resume_screening_flow_results.jsonl `
+  --execute `
+  --timeout 120
+```
+
+最新 clean 验证在本地 `app/web_panel/seek_resume_fixture.html` 上连续执行两步：`Click Shortlist Avery Chen` 和 `Click Open Next Candidate`。两步都先 dry-run 生成 overlay，再复用 `approved_plan_id` 真点。2026-06-16 的空闲窗口 `--repeat 3 --execute` 运行 6/6 通过；dry-run 决策耗时 `2149.517ms..2352.048ms`，真实执行耗时 `1743.997ms..1762.612ms`，post-click verification 全部成功，点位均落在声明的按钮矩形内。该轮确认了 approved-plan 复用偶发 `approved_plan_window_size_mismatch` 的根因修复：保存的 bound-window rect 可能是 Windows 最小化占位 `-32000`，复用校验现在使用 live capture 的 `coordinate_window_size` 作为点击坐标空间真值。
+
+真实 SEEK 页面也有一个低风险 reviewed click smoke：`tests/smoke/execute_cases/seek_real_job_card_execute.json` 打开 `https://www.seek.co.nz/software-engineer-jobs/in-All-Auckland`，先 dry-run 第一个岗位标题，再复用 `approved_plan_id` 真实点击进入右侧岗位详情面板。2026-06-16 复跑通过，dry-run `2725.172ms`，真实执行/验证 `1793.901ms`，落点 `{x:148,y:552}`，overlay `artifacts/review-overlays/20260616-232018-701749-execute-mode-recognition-plan-edge__recognition-plan-overlay__20260616-232018-711749.png`，action trace `logs/traces/actions/20260616-232020-541876__execute-mode-click__edge.json`，post-click verification 为 `verified=true`。
+
+真实 SEEK 页面只做 dry-run，不默认真实点击外站。复跑：
+
+```powershell
+$env:PYTHONIOENCODING='utf-8'
+$env:UV_CACHE_DIR='.uv-cache'
+uv run python scripts\execute_smoke_runner.py `
+  --case tests\smoke\execute_cases\seek_real_jobs_dryrun.json `
+  --out logs\smoke\seek_real_jobs_dryrun_results.jsonl `
+  --timeout 120
+```
+
+当前 case 覆盖 `Click the first job result title`、`Click the Pay filter`、`Click the Listing time filter`。最新普通 dry-run 3/3 通过，决策耗时约 `2.12s..2.25s`，点位均落在人工矩形内。重复稳定性检查也已通过：`--repeat 2` 连续跑 6/6 通过，六次 dry-run 都在 `2.13s..2.21s` 内完成。`seek_real_jobs_reopen_dryrun.json` 会在每个目标前重新打开同一 SEEK URL 并重新绑定窗口，最新 3/3 通过，耗时约 `2.14s..2.19s`，overlay 抽查确认落点在目标控件上。`seek_real_jobs_resized_dryrun.json` 会把绑定窗口调整到 `1100x900` 后再执行判断，最新 3/3 通过，耗时约 `2.08s..2.22s`，overlay 抽查确认目标仍正确。负例：`Click the Date filter` 在当前 SEEK 页面上不是可见标签，模型曾误指向浏览器工具栏日期/扩展区域；现在 Direct VISTA 会在创建候选前拒绝浏览器 chrome 区域点，单测覆盖 `vista_direct_point_in_browser_chrome`。稳定 case 仍建议使用页面可见标签 `Listing time`。
 - `learning_mode="instruction"` 是最简指令学习模式：成功真实点击并验证后，runtime 写入 `learned_instruction_v1`。后续调用带 `learned_instruction_id` 时，在验证 goal、窗口句柄、窗口尺寸和点坐标边界一致后复用点击点，仍会执行点击后验证
 - 指令学习资产不是普通截图缓存。每条学习指令永久保存在 `artifacts/local-learning/instructions/{id}/` 下，含 `learned_instruction.json`、源窗口截图、点击前截图、点击后截图、diff 图和目标裁剪
 - Agent 对外的 runtime、app、vision、识别执行路径现在均包含 `timings`，含 `total_ms` 和 `steps[]`，agent 可据此判断耗时花在模型启动、截图、OCR anchor 准备、视觉推理、排序、点击前闸门、点击派发还是点击后验证
@@ -305,6 +379,7 @@ For list-style text targets, fusion also records an `unreferenced_text_contamina
 - `POST /apps/open`
 - `GET /session/windows`
 - `POST /session/bind_window`
+- `POST /session/resize_bound_window`
 - `GET /state`
 - `POST /state/capture_window`
 
@@ -405,10 +480,11 @@ PROJECT_STRUCTURE.md
 
 最新重点模型实验：
 
-- 模型：`Qwen-Qwen3.6-35B-A3B-IQ4_XS.gguf`
-- mmproj：`mmproj-Qwen3.6-35B-A3B-Q6_K.gguf`
-- 后端：llama.cpp CUDA
-- 结论：OCR anchors 对浏览器 Back 这类小图标帮助明显；大图标形状完整性仍需要 crop/ROI 或其他模型继续对比
+- `Qwen3-VL 4B Q4_K_M`：llama.cpp CUDA，2 个截图理解 case 全部成功，JSON 输出稳定，平均单 case约 `3.09s`，平均召回 `0.7`。在当前 smoke 中与 8B 召回持平但更快，已切为默认整屏理解模型。
+- `Qwen3-VL 8B Q4_K_M`：llama.cpp CUDA，2/2 成功，平均单 case约 `4.59s`，平均召回 `0.7`，保留为可选理解基线。
+- `MiniCPM-V-4.6 Transformers`：Transformers direct，2/2 成功，平均单 case约 `9.07s`，平均召回 `0.8`。当前 llama.cpp 后端无法加载其 `minicpmv4_6` projector，因此保留为 benchmark-only profile，不在面板里直接启动。
+- 报告：`artifacts/accuracy-checks/understanding_model_benchmark_20260616.json`
+- 结论：35B 不再作为本地基线；默认快速理解切到 Qwen3-VL 4B，精准点定位继续走 VISTA。
 
 当前边界：
 
@@ -486,3 +562,11 @@ skills/code-implementation-loop/SKILL.md
 ### Trace UTF-8 兼容性更新 (2026-06-02)
 
 浏览器面板 `/panel` 返回 `text/html; charset=utf-8`；Trace JSON 读取使用 `utf-8-sig` 兼容带 BOM 的文件。`/panel/inspect_trace` 支持当前 recognition/screen-reading trace，也支持旧版 overlay trace 和 `vision_layer_trace_v1` 层 trace，按阶段输出 `flow_stages` 并提供每阶段原始 JSON 供 Trace Flow UI 点击查看。
+
+### UTF-8 中文识别规则 (2026-06-13)
+
+所有识别到的中文必须按 UTF-8 端到端保留：OCR 文本、模型 prompt、模型原始输出、解析后的 JSON、trace、测试断言和面板展示都不能写入乱码、`????` 或替换字符。Windows 下做 smoke 脚本时，不要让中文字面量经过可能使用 ANSI code page 的 shell；需要传中文时使用 UTF-8 文件、`uv run python`、`PYTHONIOENCODING=utf-8` 或 Unicode escape，并用 Python 按 `encoding="utf-8"` / `utf-8-sig` 读取实际文件核对，而不是相信 PowerShell 的乱码显示。
+
+### Model I/O Trace Evidence (2026-06-09)
+
+Vision-model calls now write `model_io_trace_v1` evidence into traces. Each local OpenAI-compatible model attempt records the full text prompt, source/inference image paths, max tokens, raw model text, raw endpoint response, parsed JSON, runtime-normalized JSON, and parse errors when present. Trace Inspector renders this as a `Model IO` stage for easier debugging.

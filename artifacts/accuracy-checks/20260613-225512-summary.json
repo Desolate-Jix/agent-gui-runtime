@@ -1,0 +1,440 @@
+{
+  "locate_success": true,
+  "location_status": "learn_all_targets_ready",
+  "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260613-225539-903723__locate-target__google-news.json",
+  "target_count": 34,
+  "validated_count": 34,
+  "invalid_count": 0,
+  "valid_rate": 1.0,
+  "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\state-e50c40fc3ac853dd-learn-targets__learn-target-coordinates__20260613-225539-844351.png",
+  "model_review_status": "failed",
+  "model_error": "local vision endpoint failed after 3 attempt(s): local vision endpoint returned HTTP 400: {\"error\":{\"code\":400,\"message\":\"request (11412 tokens) exceeds the available context size (8192 tokens), try increasing it\",\"type\":\"exceed_context_size_error\",\"n_prompt_tokens\":11412,\"n_ctx\":8192}}",
+  "model_addition_count": 0,
+  "model_update_count": 0,
+  "model_removal_count": 0,
+  "section_counts": {
+    "browser_chrome": 10,
+    "right_sidebar": 3,
+    "main_content": 5,
+    "promo_strip": 3,
+    "page_header": 13
+  },
+  "role_counts": {
+    "button": 12,
+    "news_card": 7,
+    "recommendation_item": 2,
+    "nav_text_action": 13
+  },
+  "invalid_sample": [],
+  "labels_sample": [
+    {
+      "id": "element_element_060b7c55",
+      "label": "游戏",
+      "role": "button",
+      "section": "browser_chrome",
+      "bbox": {
+        "x": 1,
+        "y": 0,
+        "w": 1,
+        "h": 1
+      }
+    },
+    {
+      "id": "element_element_5742b36f",
+      "label": "在线好友",
+      "role": "button",
+      "section": "browser_chrome",
+      "bbox": {
+        "x": 1,
+        "y": 0,
+        "w": 1,
+        "h": 1
+      }
+    },
+    {
+      "id": "element_codegraph_node_83e0b295",
+      "label": "Codegraph node",
+      "role": "button",
+      "section": "browser_chrome",
+      "bbox": {
+        "x": 0,
+        "y": 1,
+        "w": 1,
+        "h": 1
+      }
+    },
+    {
+      "id": "element_codegraph_search_83388e3d",
+      "label": "CodeGraph search",
+      "role": "button",
+      "section": "browser_chrome",
+      "bbox": {
+        "x": 0,
+        "y": 1,
+        "w": 1,
+        "h": 1
+      }
+    },
+    {
+      "id": "element_element_55a10597",
+      "label": "完全访问",
+      "role": "button",
+      "section": "browser_chrome",
+      "bbox": {
+        "x": 1,
+        "y": 1,
+        "w": 1,
+        "h": 1
+      }
+    },
+    {
+      "id": "element_element_9440847a",
+      "label": "语音",
+      "role": "button",
+      "section": "browser_chrome",
+      "bbox": {
+        "x": 1,
+        "y": 1,
+        "w": 1,
+        "h": 1
+      }
+    },
+    {
+      "id": "element_element_99687d46",
+      "label": "音量",
+      "role": "button",
+      "section": "browser_chrome",
+      "bbox": {
+        "x": 1,
+        "y": 1,
+        "w": 1,
+        "h": 1
+      }
+    },
+    {
+      "id": "element_element_c9f83ff2",
+      "label": "关闭",
+      "role": "button",
+      "section": "browser_chrome",
+      "bbox": {
+        "x": 1,
+        "y": 1,
+        "w": 1,
+        "h": 1
+      }
+    },
+    {
+      "id": "element_x_jix_af7de6e4",
+      "label": "x_Jix",
+      "role": "button",
+      "section": "browser_chrome",
+      "bbox": {
+        "x": 1552,
+        "y": 22,
+        "w": 46,
+        "h": 18
+      }
+    },
+    {
+      "id": "element_element_ba9aaf55",
+      "label": "好友",
+      "role": "button",
+      "section": "browser_chrome",
+      "bbox": {
+        "x": 1503,
+        "y": 77,
+        "w": 33,
+        "h": 19
+      }
+    },
+    {
+      "id": "element_element_00e56401",
+      "label": "群组聊天",
+      "role": "button",
+      "section": "right_sidebar",
+      "bbox": {
+        "x": 1495,
+        "y": 787,
+        "w": 68,
+        "h": 17
+      }
+    },
+    {
+      "id": "element_gifthub_e0aeb41e",
+      "label": "GIFTHub",
+      "role": "button",
+      "section": "right_sidebar",
+      "bbox": {
+        "x": 1548,
+        "y": 832,
+        "w": 61,
+        "h": 17
+      }
+    },
+    {
+      "id": "card_main_content_0",
+      "label": "这轮接口链路成功，坐标校验是35/35，但模型补漏审查失败了：上下文12.571tokens超过8B模型8.192context。所",
+      "role": "news_card",
+      "section": "main_content",
+      "bbox": {
+        "x": 379,
+        "y": 372,
+        "w": 587,
+        "h": 55
+      }
+    },
+    {
+      "id": "card_main_content_3",
+      "label": "里，并给出准确率结论。",
+      "role": "news_card",
+      "section": "main_content",
+      "bbox": {
+        "x": 380,
+        "y": 417,
+        "w": 182,
+        "h": 53
+      }
+    },
+    {
+      "id": "card_main_content_4",
+      "label": "览器UI元素，不能算干净页面准确率。我会先把这个弹窗关掉，再重跑一次；否则漏检/误检判断会被浏览器浮层污",
+      "role": "news_card",
+      "section": "main_content",
+      "bbox": {
+        "x": 379,
+        "y": 676,
+        "w": 587,
+        "h": 267
+      }
+    },
+    {
+      "id": "card_main_content_11",
+      "label": "翻译弹窗已关闭。现在重跑干净页面采样。",
+      "role": "news_card",
+      "section": "main_content",
+      "bbox": {
+        "x": 380,
+        "y": 925,
+        "w": 294,
+        "h": 53
+      }
+    },
+    {
+      "id": "card_main_content_12",
+      "label": "正在运行 Senv:PYTHONIOENCODING='utf-8': @ import json import time import urllib.request from pathlib im..",
+      "role": "news_card",
+      "section": "main_content",
+      "bbox": {
+        "x": 379,
+        "y": 960,
+        "w": 587,
+        "h": 59
+      }
+    },
+    {
+      "id": "card_right_sidebar_12",
+      "label": "人类恶显现（Fakel",
+      "role": "recommendation_item",
+      "section": "right_sidebar",
+      "bbox": {
+        "x": 1477,
+        "y": 612,
+        "w": 188,
+        "h": 255
+      }
+    },
+    {
+      "id": "card_promo_strip_3",
+      "label": "打开请求大概率已发出，失败是在PowerShell用GBK打印窗口标题里的隐形字符。我不通过控制台打印中文/特殊字",
+      "role": "news_card",
+      "section": "promo_strip",
+      "bbox": {
+        "x": 379,
+        "y": 197,
+        "w": 755,
+        "h": 155
+      }
+    },
+    {
+      "id": "card_promo_strip_14",
+      "label": "Slay the Spire 2",
+      "role": "recommendation_item",
+      "section": "promo_strip",
+      "bbox": {
+        "x": 1556,
+        "y": 259,
+        "w": 109,
+        "h": 106
+      }
+    },
+    {
+      "id": "card_promo_strip_15",
+      "label": "查看本目录的项目大致情况.3周",
+      "role": "news_card",
+      "section": "promo_strip",
+      "bbox": {
+        "x": 0,
+        "y": 243,
+        "w": 237,
+        "h": 119
+      }
+    },
+    {
+      "id": "ocr_text_9",
+      "label": "已使用Codegraph",
+      "role": "nav_text_action",
+      "section": "page_header",
+      "bbox": {
+        "x": 398,
+        "y": 100,
+        "w": 140,
+        "h": 20
+      }
+    },
+    {
+      "id": "ocr_text_10",
+      "label": "游戏中",
+      "role": "nav_text_action",
+      "section": "page_header",
+      "bbox": {
+        "x": 1503,
+        "y": 113,
+        "w": 47,
+        "h": 18
+      }
+    },
+    {
+      "id": "ocr_text_11",
+      "label": "it-gui-runtime",
+      "role": "nav_text_action",
+      "section": "page_header",
+      "bbox": {
+        "x": 1,
+        "y": 135,
+        "w": 89,
+        "h": 17
+      }
+    },
+    {
+      "id": "ocr_text_12",
+      "label": "打开时我按你之前要求不加3.5秒长等待，只用短等待后再显式绑定/观察。",
+      "role": "nav_text_action",
+      "section": "page_header",
+      "bbox": {
+        "x": 397,
+        "y": 140,
+        "w": 460,
+        "h": 19
+      }
+    },
+    {
+      "id": "ocr_text_13",
+      "label": "ALAN",
+      "role": "nav_text_action",
+      "section": "page_header",
+      "bbox": {
+        "x": 1576,
+        "y": 141,
+        "w": 44,
+        "h": 17
+      }
+    },
+    {
+      "id": "ocr_text_14",
+      "label": "密室逃脱模拟器",
+      "role": "nav_text_action",
+      "section": "page_header",
+      "bbox": {
+        "x": 1575,
+        "y": 152,
+        "w": 89,
+        "h": 19
+      }
+    },
+    {
+      "id": "ocr_text_15",
+      "label": "面板阶段展示",
+      "role": "nav_text_action",
+      "section": "page_header",
+      "bbox": {
+        "x": 0,
+        "y": 167,
+        "w": 86,
+        "h": 17
+      }
+    },
+    {
+      "id": "ocr_text_16",
+      "label": "O",
+      "role": "nav_text_action",
+      "section": "page_header",
+      "bbox": {
+        "x": 204,
+        "y": 169,
+        "w": 13,
+        "h": 13
+      }
+    },
+    {
+      "id": "ocr_text_17",
+      "label": "Exploring a custon",
+      "role": "nav_text_action",
+      "section": "page_header",
+      "bbox": {
+        "x": 1577,
+        "y": 167,
+        "w": 87,
+        "h": 15
+      }
+    },
+    {
+      "id": "ocr_text_18",
+      "label": "已运行 @ import json, time, urllib.request def post(path, payload, timeout=60): req",
+      "role": "nav_text_action",
+      "section": "page_header",
+      "bbox": {
+        "x": 399,
+        "y": 177,
+        "w": 543,
+        "h": 22
+      }
+    },
+    {
+      "id": "ocr_text_19",
+      "label": "urllib.request.Request('ht",
+      "role": "nav_text_action",
+      "section": "page_header",
+      "bbox": {
+        "x": 950,
+        "y": 184,
+        "w": 154,
+        "h": 10
+      }
+    },
+    {
+      "id": "ocr_text_20",
+      "label": "bewatermy",
+      "role": "nav_text_action",
+      "section": "page_header",
+      "bbox": {
+        "x": 1574,
+        "y": 185,
+        "w": 88,
+        "h": 22
+      }
+    },
+    {
+      "id": "ocr_text_21",
+      "label": "用途",
+      "role": "nav_text_action",
+      "section": "page_header",
+      "bbox": {
+        "x": 0,
+        "y": 194,
+        "w": 33,
+        "h": 26
+      }
+    }
+  ],
+  "saved": "artifacts\\accuracy-checks\\20260613-225512-locate.json"
+}

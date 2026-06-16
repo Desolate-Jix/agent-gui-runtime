@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-06-16T07:44:17.863Z",
+  "includeContent": false,
+  "summary": {
+    "ok": false,
+    "status": "partial",
+    "warnings": [],
+    "error": {
+      "name": "[redacted:13 chars]",
+      "message": "[redacted:60 chars]",
+      "recoverable": true
+    },
+    "context": {
+      "timestamp": "2026-06-16T07:44:17.863Z",
+      "url": "[redacted:58 chars]",
+      "title": "[redacted:8 chars]",
+      "turnCount": 3,
+      "assistantTurnCount": 2,
+      "conversationId": "[redacted:36 chars]"
+    }
+  },
+  "steps": [
+    {
+      "id": "bootstrap",
+      "command": "session.bootstrap",
+      "status": "ok",
+      "ok": true,
+      "startedAt": "2026-06-16T07:43:46.261Z",
+      "endedAt": "2026-06-16T07:43:46.774Z",
+      "warnings": [],
+      "dataPreview": {
+        "browserName": "[redacted:6 chars]",
+        "tabId": "[redacted:9 chars]",
+        "url": "[redacted:58 chars]",
+        "loggedIn": false
+      }
+    },
+    {
+      "id": "open",
+      "command": "threads.open",
+      "status": "ok",
+      "ok": true,
+      "startedAt": "2026-06-16T07:43:46.774Z",
+      "endedAt": "2026-06-16T07:43:47.095Z",
+      "warnings": [],
+      "dataPreview": {
+        "url": "[redacted:58 chars]",
+        "conversationId": "[redacted:36 chars]",
+        "title": "[redacted:8 chars]"
+      }
+    },
+    {
+      "id": "ask",
+      "command": "messages.ask",
+      "status": "timeout",
+      "ok": false,
+      "startedAt": "2026-06-16T07:43:47.095Z",
+      "endedAt": "2026-06-16T07:44:17.863Z",
+      "warnings": []
+    }
+  ],
+  "data": {
+    "bootstrap": {
+      "browserName": "[redacted:6 chars]",
+      "tabId": "[redacted:9 chars]",
+      "url": "[redacted:58 chars]",
+      "loggedIn": false
+    },
+    "open": {
+      "url": "[redacted:58 chars]",
+      "conversationId": "[redacted:36 chars]",
+      "title": "[redacted:8 chars]"
+    }
+  }
+}

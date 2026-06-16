@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-06-16T07:38:31.302Z",
+  "includeContent": false,
+  "summary": {
+    "ok": false,
+    "status": "partial",
+    "warnings": [],
+    "blocker": {
+      "kind": "[redacted:9 chars]",
+      "message": "[redacted:70 chars]",
+      "code": "[redacted:22 chars]",
+      "candidates": [
+        {
+          "label": "[redacted:46 chars]"
+        }
+      ],
+      "remediation": [
+        {
+          "label": "[redacted:19 chars]",
+          "instruction": "[redacted:102 chars]",
+          "userActionRequired": false
+        },
+        {
+          "label": "[redacted:13 chars]",
+          "instruction": "[redacted:123 chars]",
+          "userActionRequired": false
+        }
+      ],
+      "diagnostics": {
+        "existingTab": {
+          "requestedTarget": {
+            "type": "[redacted:3 chars]",
+            "url": "[redacted:58 chars]"
+          },
+          "userOpenTabsAvailable": true,
+          "chatgptTabCount": 1,
+          "mismatchReason": "[redacted:12 chars]",
+          "candidateTabs": [
+            {
+              "id": "[redacted:9 chars]",
+              "url": "[redacted:20 chars]",
+              "title": "[redacted:7 chars]",
+              "lastOpened": "[redacted:24 chars]",
+              "tabGroup": "[redacted:25 chars]"
+            }
+          ]
+        }
+      }
+    },
+    "error": {
+      "name": "[redacted:25 chars]",
+      "message": "[redacted:70 chars]",
+      "recoverable": true
+    },
+    "context": {
+      "timestamp": "2026-06-16T07:38:31.302Z"
+    }
+  },
+  "steps": [
+    {
+      "id": "bootstrap",
+      "command": "session.bootstrap",
+      "status": "blocked",
+      "ok": false,
+      "startedAt": "2026-06-16T07:38:31.298Z",
+      "endedAt": "2026-06-16T07:38:31.302Z",
+      "warnings": []
+    }
+  ],
+  "data": {}
+}

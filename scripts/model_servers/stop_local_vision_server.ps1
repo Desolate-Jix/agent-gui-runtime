@@ -11,7 +11,6 @@ if ($PidFile) {
     $pidPaths += if ([System.IO.Path]::IsPathRooted($PidFile)) { $PidFile } else { Join-Path $root $PidFile }
 }
 $pidPaths += @(
-    (Join-Path $root "logs\qwen3_6-iq4_xs-server.pid"),
     (Join-Path $root "logs\internvl3_5-server.pid"),
     (Join-Path $root "logs\qwen3-vl-server.pid")
 )

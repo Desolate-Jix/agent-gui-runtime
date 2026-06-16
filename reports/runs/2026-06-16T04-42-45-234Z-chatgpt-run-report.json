@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-06-16T04:42:45.235Z",
+  "includeContent": false,
+  "summary": {
+    "ok": false,
+    "status": "partial",
+    "warnings": [],
+    "error": {
+      "name": "[redacted:5 chars]",
+      "message": "[redacted:2695 chars]",
+      "recoverable": false
+    },
+    "context": {
+      "timestamp": "2026-06-16T04:42:45.234Z",
+      "url": "[redacted:58 chars]",
+      "title": "[redacted:24 chars]",
+      "turnCount": 2,
+      "assistantTurnCount": 1,
+      "conversationId": "[redacted:36 chars]"
+    }
+  },
+  "steps": [
+    {
+      "id": "bootstrap",
+      "command": "session.bootstrap",
+      "status": "ok",
+      "ok": true,
+      "startedAt": "2026-06-16T04:42:37.593Z",
+      "endedAt": "2026-06-16T04:42:38.019Z",
+      "warnings": [],
+      "dataPreview": {
+        "browserName": "[redacted:6 chars]",
+        "tabId": "[redacted:9 chars]",
+        "url": "[redacted:58 chars]",
+        "loggedIn": false
+      }
+    },
+    {
+      "id": "open",
+      "command": "threads.open",
+      "status": "ok",
+      "ok": true,
+      "startedAt": "2026-06-16T04:42:38.020Z",
+      "endedAt": "2026-06-16T04:42:38.358Z",
+      "warnings": [],
+      "dataPreview": {
+        "url": "[redacted:58 chars]",
+        "conversationId": "[redacted:36 chars]",
+        "title": "[redacted:24 chars]"
+      }
+    },
+    {
+      "id": "mode",
+      "command": "modes.set",
+      "status": "ok",
+      "ok": true,
+      "startedAt": "2026-06-16T04:42:38.358Z",
+      "endedAt": "2026-06-16T04:42:42.023Z",
+      "warnings": [],
+      "dataPreview": {
+        "selected": [
+          "[redacted:2 chars]"
+        ],
+        "candidates": [
+          "[redacted:2 chars]",
+          "[redacted:2 chars]",
+          "[redacted:2 chars]",
+          "[redacted:2 chars]",
+          "[redacted:2 chars]",
+          "[redacted:7 chars]"
+        ]
+      }
+    },
+    {
+      "id": "ask",
+      "command": "messages.ask",
+      "status": "error",
+      "ok": false,
+      "startedAt": "2026-06-16T04:42:42.023Z",
+      "endedAt": "2026-06-16T04:42:45.234Z",
+      "warnings": []
+    }
+  ],
+  "data": {
+    "bootstrap": {
+      "browserName": "[redacted:6 chars]",
+      "tabId": "[redacted:9 chars]",
+      "url": "[redacted:58 chars]",
+      "loggedIn": false
+    },
+    "open": {
+      "url": "[redacted:58 chars]",
+      "conversationId": "[redacted:36 chars]",
+      "title": "[redacted:24 chars]"
+    },
+    "mode": {
+      "selected": [
+        "[redacted:2 chars]"
+      ],
+      "candidates": [
+        "[redacted:2 chars]",
+        "[redacted:2 chars]",
+        "[redacted:2 chars]",
+        "[redacted:2 chars]",
+        "[redacted:2 chars]",
+        "[redacted:7 chars]"
+      ]
+    }
+  }
+}

@@ -19,5 +19,5 @@
   "supports_ocr_anchors": true,
   "launchable": true,
   "best_for": "Faster whole-screen UI understanding before precise grounding.",
-  "limitations": "Use as a planning and screen-understanding model; keep Qwen3.6 for final precise localization."
+  "limitations": "Use as a planning and screen-understanding model; use VISTA for final precise point localization."
 }

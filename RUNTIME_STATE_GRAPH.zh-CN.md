@@ -22,6 +22,131 @@
 
 `看到当前界面 -> 识别状态 -> 找到目标 -> 点击 -> 验证 -> 写回结果 -> 下次复用`
 
+## 当前两种运行模式
+
+当前实现把运行时拆成两种操作模式。
+
+### Learn Mode
+
+目标：
+
+- 尽量完整地认识当前界面
+- 可以慢一点，可以做整屏工作
+- 写入结构地图证据，但不把地图坐标当成直接点击权限
+
+已实现的深度：
+
+- `Learn Fast`：通过 `POST /vision/observe_screen` 快速生成地图草图
+- `Learn Deep`：Learn Mode 下精准定位阶段从最近 Observe `screen_map_v1` 做路径校准
+
+Learn Fast 流程：
+
+```text
+截图
+-> 整屏观察 / screen reading
+-> OCR 规则补充分区和候选
+-> screen_map_v1
+-> Path Map trace
+```
+
+Learn Deep 流程：
+
+```text
+screen_map_v1 草图
+-> locate_target，携带 metadata.learn_all_targets=true
+-> learn_locate_model_review_v1 做 add/update/remove 校准
+-> 从 screen_map.candidates 生成 learn_all_targets
+-> 校验每个子路径控件的 coordinate_validation
+-> 渲染 learn target 坐标框图
+-> path_map_review_v1 additions
+-> PathGraph 子控件坐标写回
+-> locate trace
+```
+
+主要字段：
+
+- 请求字段：`agent_mode="learn"`
+- 请求字段：Observe 快速建图使用 `learn_depth="fast"`；Learn Locate 深度校准使用 `learn_depth="deep"`
+- 请求字段：`write_policy.path_graph=true`
+- 请求字段：Learn Locate 深度校准使用 `metadata.learn_all_targets=true`
+- 输出字段：`screen_map_v1`
+- 输出字段：`learn_locate_model_review_v1`
+- 输出字段：`learn_locate_path_calibration_delta_v1`
+- 输出字段：`learn_all_targets`
+- 输出字段：每个 `learn_all_targets.targets[]` 都带 `coordinate_validation`
+- 输出字段：`coordinate_overlay_path` / `learn_all_targets.overlay_path`
+- 输出字段：`path_map_review_v1`
+- trace 字段：`model_io_trace_v1` 记录每次模型 attempt 的 prompt、图片路径、原始输出、解析 JSON、归一化 JSON 和解析错误
+
+当前行为：
+
+- 面板主流程里的 Learn Deep 是 Locate 阶段校准：不要求用户输入单个目标，也不会走 Execute Mode 的单目标 recognition plan。
+- Learn Locate Deep 会要求模型先补充遗漏子节点、更新错误坐标、重命名误标节点、删除重复/噪声节点，然后再统一做坐标校验和 overlay 渲染。
+- 如果当前 Locate/Grounding 模型是 VISTA `vista_point_v1`，Learn Locate Deep 会跳过全图模型审查，直接使用 `screen_map_v1` 做确定性坐标校验。VISTA 只保留给召回 PathGraph bbox 内的单目标点定位。
+- Learn Locate Deep 可以选择运行 VISTA 逐节点坐标复核：每个 target 会记录 `vista_coordinate_validation`，只有 VISTA 点落在该 target bbox 内才更新 click point。默认只校验少量节点、每节点超时、失败即停；全量校验需要显式 metadata。
+- Learn Locate Deep 会执行非包含重叠规则：同级子路径节点不允许明显重叠；只有一个 bbox 包含另一个 bbox 的父子关系允许重叠。模型审查会先尝试解决这些冲突，后端还会确定性移除剩余的低优先级冲突候选，并在 trace delta 里记录 `non_containment_overlap_removed`。
+- 旧的 observe-stage deep review（`path_graph_deep_review_v1`、`learn_deep_model_review_v1`、`path_graph_delta_v1`、`element_memory_init_plan_v1`）仍作为语义审查能力保留，但不是当前面板主流程。
+
+### Execute Mode
+
+目标：
+
+- 完成当前用户命令
+- 必须快、稳、少调用
+- 默认读取 PathGraph，不改写结构地图
+
+Execute 流程：
+
+```text
+用户目标 + 当前截图
+-> 执行默认值：未指定 provider_mode 时使用 local_grounding，并启用受限 Direct VISTA
+-> observe_trace_path 状态/OCR 复用
+-> path_graph_recall_v1 top-k 召回
+-> 对召回/视觉候选做局部 OCR grounding
+   或在召回 PathGraph bbox 内做 VISTA vista_point_v1 候选 ROI refine
+-> pre_click_decision_v1
+-> 只能通过 POST /action/execute_recognition_plan gated click
+-> 点击后验证
+-> agent_step_result_v1
+-> agent_execution_guidance_v1
+-> execute_transition_memory_v1 或 execute_fallback_plan_v1
+```
+
+主要字段：
+
+- 请求字段：`agent_mode="execute"`
+- 请求字段：`learn_depth=null`
+- 请求字段：`write_policy.path_graph=false`
+- 请求字段：`write_policy.element_memory=true`
+- 请求字段：`observe_trace_path`
+- 输出字段：`path_graph_recall_v1`
+- 输出字段：`candidate_result`
+- 输出字段：当 `local_grounding.output_contract="vista_point_v1"` 时包含 `parse_result.vista_point_grounding`
+- 输出字段：`pre_click_decision_v1`
+- 输出字段：`agent_step_result_v1`
+- 输出字段：`agent_execution_guidance_v1`
+- 输出字段：`element_memory_writeback`，合同为 `execute_transition_memory_v1`
+- 输出字段：`fallback_plan`，合同为 `execute_fallback_plan_v1`
+- trace 字段：`model_io_trace_v1` 保留每次模型 attempt 的 prompt、图片路径、原始输出、解析 JSON、归一化 JSON 和解析错误；RecognitionPlan fallback 成功时，失败的带 OCR anchors 模型输出保存在 `model_io_failovers`
+
+安全边界：
+
+- Execute Mode 不能把 PathGraph 里的坐标当成直接点击许可。
+- Execute Mode 是单步原子动作，不负责多步路线编排；上层 agent 读取 `agent_step_result_v1` 后，再决定是否再次调用 Execute 做下一步。
+- 真实 Execute 测试前必须先确认绑定窗口截图。目标文字/控件必须实际出现在这张截图里；不能只依赖浏览器 URL 或旧窗口标题。
+- 每次读取绑定窗口时都会重新校验句柄。如果保存的句柄已经不再指向可见的顶层有标题窗口，或者刷新句柄失败，运行时会清空绑定并返回未绑定/截图失败，而不是继续复用过期几何信息。
+- `POST /action/execute_recognition_plan` 会在实时截图前校验已知 app alias。例如 `app_name="edge"` 必须绑定到 Edge 兼容进程；如果当前绑定窗口是 QQ 或其它应用，接口会在截图和模型推理前返回 `bound_window_mismatch`。
+- Execute 召回会在排序前排除 `browser_chrome` PathGraph 候选，避免浏览器地址栏、工具栏 OCR 抢过网页控件。
+- 当 `local_grounding.output_contract="vista_point_v1"` 时，VISTA-4B 会替代原先的 35B Execute/Locate grounding 模型。有 PathGraph recall 时，adapter 会先裁候选 ROI：top1 明显领先时裁 top1，否则合并 top candidates；trace 记录 ROI bounds 和 transform，再把 ROI 发给 VISTA，把归一化点映射回原图坐标。只有原图点落入召回候选 bbox 内时，才会生成 grounded 的 `narrow_search_v1` 证据。没有匹配候选时，计划保持 blocked。
+- Execute Mode 也可以在没有 PathGraph 候选时运行 Direct VISTA。Direct VISTA 会保留原始截图作为 evidence，默认先把发送给 VISTA 的全图缩放为 coarse processed image（`max_edge=640`），再围绕 coarse 原图点裁出 512x512 ROI 做 refine grounding，最后把 refine processed 点映射回原始截图坐标，并围绕原图点创建临时 `vista_direct_*` 候选；之后仍然必须通过 `pre_click_decision_v1`。超时或模型失败会变成带失败 `model_io` 的 blocked plan，不会裸点点击。
+- `POST /action/execute_recognition_plan` 是给上层 agent 使用的执行编排入口。Execute Mode 下如果没有显式传 `provider_mode`，默认使用 `local_grounding`；除非调用方覆盖，否则会注入受限 Direct VISTA metadata（默认 `timeout_seconds=45.0`、`max_edge=640`、`refine=true`、`refine_roi_size=512`）。
+- `agent_execution_guidance_v1` 会告诉上层 agent 下一步：dry-run 通过时返回 approved-plan 复用请求，真实点击验证通过时返回 `next_action="done"`，blocked 或验证失败时返回 `recover_with_fallback_plan`。
+- `agent_step_result_v1` 是给 agent 和 trace 使用的单步结果摘要，包含状态、选中点击点、approved plan id、截图/overlay/trace 路径、点击后 before/after/diff 证据、失败原因、fallback plan 和建议的下一步 agent 动作。
+- 召回候选必须继续经过局部 OCR grounding 和 `pre_click_decision_v1`。
+- ranker 已验证的精确文字按钮，只有在局部 OCR 确认同一目标文字位于候选框内且不是广告风险时才可过闸；普通精确文字卡片仍然需要确认。
+- 只有验证成功的真实点击才写 transition memory。
+- dry-run、闸门拒绝、识别失败、点击异常、点击后验证失败都不写执行记忆。
+
 ## 分层理解
 
 把整个系统看成 5 层会更容易理解。
@@ -1025,3 +1150,10 @@ ID 应该是机器稳定的短标识，而不是自然语言长句。
 - AI 只在失败时作为 fallback
 
 这就是从一次性识图，转向可复用软件记忆的关键架构变化。
+## 当前学习/执行模式准则
+
+- 全局只保留 `Learn Mode / Execute Mode` 切换，不再提供全局 `Learn Fast / Learn Deep` 按钮。
+- 整屏理解阶段就是快速学习：面板按钮显示“快速建图”，请求固定为 `agent_mode="learn"`、`learn_depth="fast"`，输出 `screen_map_v1` / `Path Map`。
+- 精准定位阶段在 Learn Mode 下就是深度学习：面板按钮显示“深度校准路径图”，请求固定为 `agent_mode="learn"`、`learn_depth="deep"`，并带 `metadata.learn_all_targets=true`，复用上一条 Observe trace，把所有子路径控件写入 `learn_all_targets` / `path_map_review_v1` / locate trace。
+- 精准定位阶段在 Execute Mode 下才是单目标定位：面板按钮显示“定位当前目标”，请求为 `agent_mode="execute"`、`learn_depth=null`，只召回当前命令相关候选。
+- `screen_map_v1` 规则会先区分页面区域再聚合：正文区域生成 `news_card`，右侧栏生成 `recommendation_item`；`查看更多` / `More` / `See more` / `View more` / `Read more` 会在卡片聚合前优先标成 `button`；来源和时间文本保留为子证据，不作为顶层卡片。

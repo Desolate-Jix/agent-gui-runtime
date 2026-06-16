@@ -37,6 +37,7 @@ MOUSEEVENTF_RIGHTDOWN = 0x0008
 MOUSEEVENTF_RIGHTUP = 0x0010
 MOUSEEVENTF_MIDDLEDOWN = 0x0020
 MOUSEEVENTF_MIDDLEUP = 0x0040
+MOUSEEVENTF_WHEEL = 0x0800
 KEYEVENTF_KEYUP = 0x0002
 VK_CONTROL = 0x11
 VK_A = 0x41
@@ -239,6 +240,56 @@ class InputController:
             "restore_clipboard": bool(restore_clipboard),
         }
 
+    def scroll_window(
+        self,
+        *,
+        direction: str = "down",
+        wheel_clicks: int = 4,
+        x: int | None = None,
+        y: int | None = None,
+        settle_ms: int = 100,
+    ) -> dict[str, Any]:
+        """Scroll the bound window with a real mouse wheel event."""
+        self._ensure_windows_input()
+        bound = self._require_bound_window()
+        rect_width = max(1, int(bound.rect.right) - int(bound.rect.left))
+        rect_height = max(1, int(bound.rect.bottom) - int(bound.rect.top))
+        window_x = int(x) if x is not None else rect_width // 2
+        window_y = int(y) if y is not None else rect_height // 2
+        point = self._resolve_window_and_screen_point(bound=bound, x=window_x, y=window_y)
+        normalized_direction = str(direction or "down").strip().lower()
+        if normalized_direction not in {"down", "up"}:
+            raise ValueError(f"Unsupported scroll direction: {direction}")
+        click_count = max(1, int(wheel_clicks))
+        wheel_delta = (120 * click_count) if normalized_direction == "up" else (-120 * click_count)
+
+        foreground_before = int(win32gui.GetForegroundWindow())  # type: ignore[union-attr]
+        set_foreground_ok = self._focus_window(bound.handle)
+        cursor_before = win32api.GetCursorPos()  # type: ignore[union-attr]
+        self._send_move(point["screen_x"], point["screen_y"])
+        if settle_ms > 0:
+            time.sleep(settle_ms / 1000.0)
+        self._send_mouse_input(dx=0, dy=0, flags=MOUSEEVENTF_WHEEL, mouse_data=wheel_delta)
+        cursor_after = win32api.GetCursorPos()  # type: ignore[union-attr]
+        foreground_after = int(win32gui.GetForegroundWindow())  # type: ignore[union-attr]
+        return {
+            "scrolled": True,
+            "input_backend": "SendInput",
+            "window_handle": int(bound.handle),
+            "window_title": bound.title,
+            "direction": normalized_direction,
+            "wheel_clicks": click_count,
+            "wheel_delta": wheel_delta,
+            "window_point": {"x": point["window_x"], "y": point["window_y"]},
+            "screen_point": {"x": point["screen_x"], "y": point["screen_y"]},
+            "foreground_before": foreground_before,
+            "foreground_after": foreground_after,
+            "set_foreground_ok": set_foreground_ok,
+            "cursor_before": {"x": int(cursor_before[0]), "y": int(cursor_before[1])},
+            "cursor_after": {"x": int(cursor_after[0]), "y": int(cursor_after[1])},
+            "settle_ms": int(settle_ms),
+        }
+
     def _require_bound_window(self) -> Any:
         bound = window_manager.get_bound_window()
         if bound is None:
@@ -285,14 +336,14 @@ class InputController:
     def _send_mouse_flags(self, flags: int) -> None:
         self._send_mouse_input(dx=0, dy=0, flags=flags)
 
-    def _send_mouse_input(self, *, dx: int, dy: int, flags: int) -> None:
+    def _send_mouse_input(self, *, dx: int, dy: int, flags: int, mouse_data: int = 0) -> None:
         input_struct = INPUT(
             type=INPUT_MOUSE,
             union=INPUT_UNION(
                 mi=MOUSEINPUT(
                     dx=dx,
                     dy=dy,
-                    mouseData=0,
+                    mouseData=mouse_data & 0xFFFFFFFF,
                     dwFlags=flags,
                     time=0,
                     dwExtraInfo=None,

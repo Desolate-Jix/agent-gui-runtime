@@ -17,12 +17,14 @@ from app.core.input_controller import input_controller
 from app.core.ocr_service import ocr_service
 from app.core.runtime_artifacts import RuntimeTimer, new_learned_instruction_id, write_trace
 from app.core.screenshot import screenshot_service
+from app.core.transition_memory import transition_memory
 from app.core.verifier import verifier
 from app.core.window_manager import window_manager
 from app.models.request import (
     ClickTextRequest,
     ExecuteConfirmedPointRequest,
     ExecuteRecognitionPlanRequest,
+    ScrollRequest,
     TypeTextRequest,
     VisionRecognitionPlanOverlayRequestModel,
     VisionRecognitionPlanRequestModel,
@@ -30,6 +32,7 @@ from app.models.request import (
 from app.models.response import APIResponse, ActionResultData, ErrorModel
 from app.schemas.action_target import ActionTarget
 from app.schemas.state import AppState
+from app.schemas.transition import TransitionRecord
 from app.schemas.validator_profile import ValidatorProfile
 from modules.ocr.matching import bbox_center, find_text_matches
 from modules.region.geometry import (
@@ -421,6 +424,102 @@ def _bound_window_snapshot(bound: Any) -> dict[str, Any]:
     }
 
 
+def _size_from_rect(rect: dict[str, Any]) -> dict[str, int]:
+    return {"width": int(rect.get("width") or 0), "height": int(rect.get("height") or 0)}
+
+
+def _positive_size(size: dict[str, Any] | None) -> dict[str, int] | None:
+    if not isinstance(size, dict):
+        return None
+    try:
+        width = int(size.get("width") or 0)
+        height = int(size.get("height") or 0)
+    except (TypeError, ValueError):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return {"width": width, "height": height}
+
+
+def _coordinate_size_from_live_capture(live_capture: dict[str, Any] | None) -> dict[str, int] | None:
+    if not isinstance(live_capture, dict):
+        return None
+    window_size = _positive_size(live_capture.get("window_size") if isinstance(live_capture.get("window_size"), dict) else None)
+    if window_size is not None:
+        return window_size
+    return _positive_size({"width": live_capture.get("image_width"), "height": live_capture.get("image_height")})
+
+
+def _record_coordinate_window_size(record: dict[str, Any]) -> dict[str, int]:
+    explicit = _positive_size(record.get("coordinate_window_size") if isinstance(record.get("coordinate_window_size"), dict) else None)
+    if explicit is not None:
+        return explicit
+    live_capture = record.get("live_capture") if isinstance(record.get("live_capture"), dict) else None
+    capture_size = _coordinate_size_from_live_capture(live_capture)
+    if capture_size is not None:
+        return capture_size
+    window = record.get("bound_window") if isinstance(record.get("bound_window"), dict) else {}
+    rect = window.get("rect") if isinstance(window.get("rect"), dict) else {}
+    return _size_from_rect(rect)
+
+
+def _normalize_window_token(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").casefold())
+
+
+def _bound_window_matches_request(bound: Any, request: ExecuteRecognitionPlanRequest) -> dict[str, Any]:
+    expected = _normalize_window_token(request.app_name)
+    snapshot = _bound_window_snapshot(bound)
+    process = _normalize_window_token(snapshot.get("process_name"))
+    title = _normalize_window_token(snapshot.get("title"))
+    if not expected:
+        return {"valid": True, "reason": "no_app_name_requested", "bound_window": snapshot}
+
+    aliases = {
+        "edge": {"processes": {"msedgeexe"}, "title_tokens": set()},
+        "msedge": {"processes": {"msedgeexe"}, "title_tokens": set()},
+        "browser": {"processes": {"msedgeexe", "chromeexe", "firefoxexe"}, "title_tokens": set()},
+        "chrome": {"processes": {"chromeexe"}, "title_tokens": set()},
+        "notepad": {"processes": {"notepadexe"}, "title_tokens": {"notepad"}},
+        "qq": {"processes": {"qqexe"}, "title_tokens": {"qq"}},
+        "mousetester": {"processes": {"msedgeexe", "chromeexe"}, "title_tokens": {"mousetester"}},
+        "mousetesterweb": {"processes": {"msedgeexe", "chromeexe"}, "title_tokens": {"mousetester"}},
+    }
+    alias = aliases.get(expected)
+    if alias is not None:
+        allowed_processes = alias["processes"]
+        title_tokens = alias["title_tokens"]
+        valid = process in allowed_processes or any(token in title for token in title_tokens)
+        return {
+            "valid": valid,
+            "reason": "matched_app_alias" if valid else "process_name_mismatch",
+            "expected_app_name": request.app_name,
+            "allowed_processes": sorted(allowed_processes),
+            "actual_process_name": snapshot.get("process_name"),
+            "actual_title": snapshot.get("title"),
+            "bound_window": snapshot,
+        }
+
+    valid = bool(expected and (expected in process or expected in title))
+    if not valid:
+        return {
+            "valid": True,
+            "reason": "unmapped_app_name_not_enforced",
+            "expected_app_name": request.app_name,
+            "actual_process_name": snapshot.get("process_name"),
+            "actual_title": snapshot.get("title"),
+            "bound_window": snapshot,
+        }
+    return {
+        "valid": valid,
+        "reason": "matched_process_or_title",
+        "expected_app_name": request.app_name,
+        "actual_process_name": snapshot.get("process_name"),
+        "actual_title": snapshot.get("title"),
+        "bound_window": snapshot,
+    }
+
+
 def _approved_plan_path(approved_plan_id: str) -> Path:
     safe_id = re.sub(r"[^a-zA-Z0-9_.-]+", "", approved_plan_id)
     if not safe_id:
@@ -447,6 +546,11 @@ def _instruction_learning_enabled(request: ExecuteRecognitionPlanRequest) -> boo
     return bool(write_policy.get("element_memory", True)) and str(request.learning_mode or "").strip().casefold() in {"instruction", "instruction_learning"}
 
 
+def _element_memory_enabled(request: ExecuteRecognitionPlanRequest) -> bool:
+    write_policy = request.write_policy.model_dump() if hasattr(request.write_policy, "model_dump") else {}
+    return bool(write_policy.get("element_memory", True))
+
+
 def _execute_trace_enabled(request: ExecuteRecognitionPlanRequest) -> bool:
     write_policy = request.write_policy.model_dump() if hasattr(request.write_policy, "model_dump") else {}
     return write_policy.get("trace", True) is not False
@@ -455,7 +559,361 @@ def _execute_trace_enabled(request: ExecuteRecognitionPlanRequest) -> bool:
 def _write_execute_trace_if_enabled(request: ExecuteRecognitionPlanRequest, **kwargs: Any) -> str | None:
     if not _execute_trace_enabled(request):
         return None
+    if kwargs.get("operation") == "execute_recognition_plan":
+        kwargs["operation"] = "execute_mode_plan_preview" if request.dry_run else "execute_mode_click"
     return write_trace(**kwargs)
+
+
+def _execute_plan_request_defaults(request: ExecuteRecognitionPlanRequest) -> tuple[Optional[str], dict[str, Any]]:
+    """Return execution-mode defaults without mutating the API request."""
+    metadata = dict(request.metadata or {})
+    provider_mode = request.provider_mode
+    if request.agent_mode != "execute":
+        return provider_mode, metadata
+
+    provider_mode = provider_mode or "local_grounding"
+    vista_direct_defaults = {
+        "enabled": True,
+        "timeout_seconds": 45.0,
+        "max_edge": 640,
+        "refine": True,
+        "refine_roi_size": 512,
+        "refine_max_edge": 640,
+    }
+    vista_direct = metadata.get("vista_direct_grounding")
+    if vista_direct is None or vista_direct is True:
+        metadata["vista_direct_grounding"] = dict(vista_direct_defaults)
+    elif isinstance(vista_direct, dict):
+        merged = dict(vista_direct_defaults)
+        merged.update(vista_direct)
+        metadata["vista_direct_grounding"] = merged
+    metadata.setdefault(
+        "execute_mode_policy",
+        {
+            "state_match": "path_graph_when_available",
+            "recall": "top_k_relevant_nodes",
+            "grounding": "local_model_or_direct_point",
+            "requires_pre_click_gate": True,
+            "requires_post_click_verification": bool(request.enable_post_click_verification),
+        },
+    )
+    return provider_mode, metadata
+
+
+def _agent_execution_guidance(
+    *,
+    request: ExecuteRecognitionPlanRequest,
+    status: str,
+    result: Optional[dict[str, Any]] = None,
+    failure_reason: Optional[str] = None,
+) -> dict[str, Any]:
+    result = result or {}
+    approved_plan_id = result.get("approved_plan_id") or request.approved_plan_id
+    fallback_plan = result.get("fallback_plan")
+    guidance: dict[str, Any] = {
+        "contract_version": "agent_execute_guidance_v1",
+        "status": status,
+        "goal": request.goal,
+        "agent_mode": request.agent_mode,
+        "safe_to_click_now": False,
+        "failure_reason": failure_reason,
+    }
+    if status == "dry_run_ready":
+        if approved_plan_id:
+            guidance.update(
+                {
+                    "safe_to_click_now": True,
+                    "next_action": "execute_approved_plan",
+                    "next_request": {
+                        "endpoint": "POST /action/execute_recognition_plan",
+                        "body": {
+                            "goal": request.goal,
+                            "app_name": request.app_name,
+                            "state_hint": request.state_hint,
+                            "approved_plan_id": approved_plan_id,
+                            "capture_live": True,
+                            "dry_run": False,
+                            "enable_post_click_verification": request.enable_post_click_verification,
+                            "max_execution_attempts": request.max_execution_attempts,
+                        },
+                    },
+                }
+            )
+        else:
+            guidance.update(
+                {
+                    "next_action": "bind_window_or_run_real_capture",
+                    "reason": "dry_run_plan_was_allowed_but_no_bound_window_was_available_to_save_an_approved_plan",
+                }
+            )
+    elif status == "executed_verified":
+        guidance.update({"next_action": "done"})
+    elif status in {"blocked", "execution_failed", "verification_failed"}:
+        guidance.update(
+            {
+                "next_action": "recover_with_fallback_plan",
+                "fallback_plan": fallback_plan,
+            }
+        )
+    else:
+        guidance["next_action"] = "inspect_trace"
+    return guidance
+
+
+def _image_path_from(value: Any) -> Optional[str]:
+    if isinstance(value, dict):
+        image_path = value.get("image_path") or value.get("path") or value.get("diff_image_path")
+        return str(image_path) if image_path else None
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+def _latest_attempt(result: dict[str, Any]) -> dict[str, Any]:
+    attempts = result.get("attempts")
+    if isinstance(attempts, list) and attempts:
+        attempt = attempts[-1]
+        return attempt if isinstance(attempt, dict) else {}
+    return {}
+
+
+def _agent_step_result(
+    *,
+    request: ExecuteRecognitionPlanRequest,
+    status: str,
+    result: Optional[dict[str, Any]] = None,
+    failure_reason: Optional[str] = None,
+) -> dict[str, Any]:
+    result = result or {}
+    attempt = _latest_attempt(result)
+    pre_action_state = attempt.get("pre_action_state") if isinstance(attempt.get("pre_action_state"), dict) else None
+    post_click = result.get("post_click_verification")
+    if not isinstance(post_click, dict):
+        post_click = attempt.get("post_click_verification") if isinstance(attempt.get("post_click_verification"), dict) else {}
+    semantic_post_click = result.get("semantic_post_click_verification")
+    if not isinstance(semantic_post_click, dict):
+        semantic_post_click = (
+            attempt.get("semantic_post_click_verification")
+            if isinstance(attempt.get("semantic_post_click_verification"), dict)
+            else {}
+        )
+    overlay = result.get("recognition_plan_overlay") if isinstance(result.get("recognition_plan_overlay"), dict) else {}
+    guidance = result.get("agent_execution_guidance") if isinstance(result.get("agent_execution_guidance"), dict) else {}
+    execution_path = result.get("execution_path") if isinstance(result.get("execution_path"), dict) else {}
+    selected_point = result.get("selected_click_point")
+    if selected_point is None:
+        selected_point = attempt.get("click_point")
+    return {
+        "contract_version": "agent_step_result_v1",
+        "agent_mode": request.agent_mode,
+        "goal": request.goal,
+        "status": status,
+        "dry_run": bool(request.dry_run),
+        "action_executed": bool(execution_path.get("action_executed") or attempt.get("click_result")),
+        "failure_reason": failure_reason,
+        "approved_plan_id": result.get("approved_plan_id") or request.approved_plan_id,
+        "selected_click_point": selected_point,
+        "pre_click_allowed": bool((result.get("pre_click_decision") or {}).get("allowed")),
+        "evidence": {
+            "input_image_path": _image_path_from(result.get("image_path")),
+            "live_capture_image_path": _image_path_from(result.get("live_capture")),
+            "recognition_plan_trace_path": _image_path_from(result.get("recognition_plan_trace_path")),
+            "coordinate_overlay_path": _image_path_from(overlay.get("output_path") or overlay.get("overlay_path")),
+            "action_trace_path": _image_path_from(result.get("trace_path")),
+        },
+        "post_click": {
+            "enabled": bool(request.enable_post_click_verification and not request.dry_run),
+            "verified": post_click.get("verified"),
+            "before_image_path": _image_path_from(pre_action_state) or _image_path_from(post_click.get("before")),
+            "after_image_path": _image_path_from(post_click.get("after")),
+            "diff_image_path": _image_path_from(post_click.get("diff")),
+            "verification_basis": post_click.get("verification_basis"),
+        },
+        "semantic_post_click": {
+            "applicable": bool(semantic_post_click.get("applicable")),
+            "verified": semantic_post_click.get("verified"),
+            "reason": semantic_post_click.get("reason") or semantic_post_click.get("failure_reason"),
+        },
+        "next_agent_action": guidance.get("next_action") or "inspect_trace",
+        "fallback_plan": result.get("fallback_plan"),
+    }
+
+
+def _execute_fallback_plan(
+    *,
+    request: ExecuteRecognitionPlanRequest,
+    failure_reason: str,
+    plan: Optional[dict[str, Any]] = None,
+    pre_click: Optional[dict[str, Any]] = None,
+    attempts: Optional[list[dict[str, Any]]] = None,
+    error: Any = None,
+) -> dict[str, Any]:
+    pre_click = pre_click or {}
+    plan = plan or {}
+    attempts = attempts or []
+    reasons = [str(item) for item in (pre_click.get("reasons") or [])]
+    for decision in pre_click.get("candidate_decisions") or []:
+        reasons.extend(str(item) for item in (decision.get("reasons") or []))
+    reason_set = set(reasons)
+    steps: list[dict[str, Any]] = []
+
+    if reason_set & {"missing_local_ocr_text", "local_ocr_text_mismatch", "narrow_search_status:fallback"}:
+        steps.append(
+            {
+                "name": "local_rescan_top_candidates",
+                "endpoint": "POST /vision/recognition_plan",
+                "scope": "top-k candidate crops",
+                "reason": "local OCR evidence did not validate the selected candidate",
+            }
+        )
+    if (plan.get("path_graph_recall") or {}).get("status") == "ready":
+        steps.append(
+            {
+                "name": "path_graph_review",
+                "endpoint": "POST /vision/locate_target",
+                "scope": "recalled PathGraph candidates",
+                "reason": "PathGraph recall was available and may need correction",
+            }
+        )
+    candidate_summary = (plan.get("candidate_result") or {}).get("summary") if isinstance(plan.get("candidate_result"), dict) else {}
+    returned_count = int(candidate_summary.get("returned_count") or 0) if isinstance(candidate_summary, dict) else 0
+    if failure_reason in {"recognition_plan_failed", "pre_click_rejected"} and (
+        returned_count == 0
+        or "no_candidate_passed_pre_click_checks" in reason_set
+        or "missing_candidate" in reason_set
+    ):
+        steps.append(
+            {
+                "name": "request_scroll",
+                "endpoint": "POST /action/scroll",
+                "scope": "current bound window",
+                "reason": "visible information may be incomplete; scroll to reveal more content before the next gated attempt",
+                "suggested_request": {
+                    "direction": "down",
+                    "wheel_clicks": 4,
+                    "dry_run": False,
+                    "enable_verification": True,
+                },
+                "next_after_success": {
+                    "endpoint": "POST /action/execute_recognition_plan",
+                    "reason": "rerun the same goal after the scroll produces a new screenshot/state",
+                },
+            }
+        )
+    if failure_reason in {"recognition_plan_failed", "pre_click_rejected"}:
+        steps.append(
+            {
+                "name": "full_ocr_refresh",
+                "endpoint": "POST /vision/recognition_plan",
+                "scope": "full screenshot",
+                "reason": "refresh OCR/page structure before another gated attempt",
+            }
+        )
+    if failure_reason in {"post_click_verification_failed", "semantic_post_click_verification_failed", "recognition_plan_click_failed"}:
+        steps.append(
+            {
+                "name": "post_click_state_observe",
+                "endpoint": "POST /vision/observe_screen",
+                "scope": "current bound window",
+                "reason": "verify the actual post-click state before retrying",
+            }
+        )
+    steps.append(
+        {
+            "name": "model_reground",
+            "endpoint": "POST /vision/recognition_plan",
+            "scope": "gated no-click plan",
+            "reason": "fallback attempts must return through pre_click_decision_v1",
+        }
+    )
+
+    return {
+        "contract_version": "execute_fallback_plan_v1",
+        "status": "planned",
+        "failure_reason": failure_reason,
+        "goal": request.goal,
+        "error": error,
+        "pre_click_reasons": sorted(set(reasons)),
+        "attempt_count": len(attempts),
+        "steps": steps,
+        "safety": {
+            "auto_click_allowed": False,
+            "must_pass_pre_click_gate": True,
+            "execute_endpoint": "POST /action/execute_recognition_plan",
+        },
+    }
+
+
+def _save_execute_transition_memory(
+    *,
+    request: ExecuteRecognitionPlanRequest,
+    bound: Any,
+    base_result: dict[str, Any],
+    verified: bool,
+) -> dict[str, Any]:
+    if not _element_memory_enabled(request):
+        return {
+            "contract_version": "execute_transition_memory_v1",
+            "status": "disabled_by_write_policy",
+            "write_policy_element_memory": False,
+        }
+    if not verified or bound is None or request.dry_run:
+        return {
+            "contract_version": "execute_transition_memory_v1",
+            "status": "not_written",
+            "write_policy_element_memory": True,
+            "reason": "requires_verified_real_click_with_bound_window",
+        }
+
+    plan = base_result.get("recognition_plan") if isinstance(base_result.get("recognition_plan"), dict) else {}
+    pre_click = base_result.get("pre_click_decision") if isinstance(base_result.get("pre_click_decision"), dict) else {}
+    selected_candidate_id = pre_click.get("selected_candidate_id") or ((plan.get("pre_click_decision") or {}).get("selected_candidate_id") if isinstance(plan.get("pre_click_decision"), dict) else None)
+    state_match = ((plan.get("path_graph_recall") or {}).get("state_match") or {}) if isinstance(plan.get("path_graph_recall"), dict) else {}
+    from_state_id = str(state_match.get("state_id") or request.state_hint or request.app_name or "unknown_state")
+    transition_id = f"exec-{uuid.uuid4().hex}"
+    confidence_values = [
+        float(item.get("confidence") or 0.0)
+        for item in (base_result.get("attempts") or [])
+        if isinstance(item, dict)
+    ]
+    confidence = max(confidence_values, default=1.0 if verified else 0.0)
+    record = TransitionRecord(
+        transition_id=transition_id,
+        from_state_id=from_state_id,
+        action_id=str(selected_candidate_id or request.goal),
+        to_state_id=None,
+        success_type="verified_click",
+        confidence=confidence,
+        evidence={
+            "contract_version": "execute_transition_evidence_v1",
+            "goal": request.goal,
+            "app_name": request.app_name,
+            "bound_window": _bound_window_snapshot(bound),
+            "image_path": base_result.get("image_path"),
+            "recognition_plan_trace_path": base_result.get("recognition_plan_trace_path"),
+            "action_trace_path": base_result.get("trace_path"),
+            "selected_click_point": base_result.get("selected_click_point"),
+            "selected_candidate_id": selected_candidate_id,
+            "click_result": base_result.get("click_result"),
+            "post_click_verification": base_result.get("post_click_verification"),
+            "semantic_post_click_verification": base_result.get("semantic_post_click_verification"),
+            "attempt_count": len(base_result.get("attempts") or []),
+            "path_graph_recall": plan.get("path_graph_recall") if isinstance(plan, dict) else None,
+        },
+        side_effects=["real_click_dispatched"],
+        case_path=base_result.get("trace_path"),
+        timestamp=datetime.now(timezone.utc).isoformat(),
+    )
+    path = transition_memory.save(record)
+    return {
+        "contract_version": "execute_transition_memory_v1",
+        "status": "written",
+        "write_policy_element_memory": True,
+        "transition_id": transition_id,
+        "transition_path": path,
+        "from_state_id": from_state_id,
+        "action_id": record.action_id,
+    }
 
 
 def _save_approved_plan(
@@ -473,6 +931,8 @@ def _save_approved_plan(
     approved_plan_id = uuid.uuid4().hex
     created_at = datetime.now(timezone.utc)
     expires_at = created_at + timedelta(seconds=APPROVED_PLAN_TTL_SECONDS)
+    bound_window = _bound_window_snapshot(bound)
+    coordinate_window_size = _coordinate_size_from_live_capture(live_capture) or _size_from_rect(bound_window.get("rect") or {})
     record = {
         "contract_version": "approved_recognition_plan_v1",
         "approved_plan_id": approved_plan_id,
@@ -486,7 +946,8 @@ def _save_approved_plan(
         "provider_mode": request.provider_mode,
         "top_k": request.top_k,
         "request_metadata": request.metadata,
-        "bound_window": _bound_window_snapshot(bound),
+        "bound_window": bound_window,
+        "coordinate_window_size": coordinate_window_size,
         "image_path": image_path,
         "live_capture": live_capture,
         "recognition_plan": plan,
@@ -537,9 +998,8 @@ def _validate_approved_plan_reuse(
         raise ValueError("approved_plan_window_handle_mismatch")
 
     current_rect = current_window.get("rect") or {}
-    approved_rect = approved_window.get("rect") or {}
-    current_size = {"width": int(current_rect.get("width") or 0), "height": int(current_rect.get("height") or 0)}
-    approved_size = {"width": int(approved_rect.get("width") or 0), "height": int(approved_rect.get("height") or 0)}
+    current_size = _size_from_rect(current_rect)
+    approved_size = _record_coordinate_window_size(record)
     if current_size != approved_size:
         raise ValueError("approved_plan_window_size_mismatch")
 
@@ -554,6 +1014,8 @@ def _validate_approved_plan_reuse(
         "expires_at": expires_at.isoformat(),
         "current_window": current_window,
         "approved_window": approved_window,
+        "current_coordinate_window_size": current_size,
+        "approved_coordinate_window_size": approved_size,
         "selected_click_point": selected_point,
     }
 
@@ -667,6 +1129,8 @@ def _save_learned_instruction(
     created_at = datetime.now(timezone.utc)
     path = _learned_instruction_path(learned_instruction_id)
     bundle_dir = path.parent
+    bound_window = _bound_window_snapshot(bound)
+    coordinate_window_size = _coordinate_size_from_live_capture(live_capture) or _size_from_rect(bound_window.get("rect") or {})
     learning_artifacts = _persist_learned_instruction_assets(
         learned_instruction_id=learned_instruction_id,
         bundle_dir=bundle_dir,
@@ -689,7 +1153,8 @@ def _save_learned_instruction(
         "provider_mode": request.provider_mode,
         "top_k": request.top_k,
         "request_metadata": request.metadata,
-        "bound_window": _bound_window_snapshot(bound),
+        "bound_window": bound_window,
+        "coordinate_window_size": coordinate_window_size,
         "image_path": image_path,
         "live_capture": live_capture,
         "learning_artifacts": learning_artifacts,
@@ -719,6 +1184,54 @@ def _save_learned_instruction(
         "learned_instruction_artifacts": learning_artifacts,
         "learning_mode": "instruction",
     }
+
+
+def _update_learned_instruction_action_trace(base_result: dict[str, Any]) -> None:
+    learned_path = base_result.get("learned_instruction_path")
+    action_trace_path = base_result.get("trace_path")
+    if not learned_path or not action_trace_path:
+        return
+    path = Path(str(learned_path))
+    if not path.exists():
+        return
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return
+    payload["action_trace_path"] = action_trace_path
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _update_execute_transition_action_trace(base_result: dict[str, Any]) -> None:
+    writeback = base_result.get("element_memory_writeback")
+    action_trace_path = base_result.get("trace_path")
+    if not isinstance(writeback, dict) or not action_trace_path:
+        return
+    writeback["action_trace_path"] = action_trace_path
+    transition_path = writeback.get("transition_path")
+    if not transition_path:
+        return
+    path = Path(str(transition_path))
+    if not path.exists():
+        return
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return
+    evidence = payload.get("evidence")
+    if not isinstance(evidence, dict):
+        evidence = {}
+        payload["evidence"] = evidence
+    evidence["action_trace_path"] = action_trace_path
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _rewrite_execute_trace_result(*, trace_path: Optional[str], success: bool, request: ExecuteRecognitionPlanRequest, result: dict[str, Any]) -> None:
+    if not trace_path:
+        return
+    path = Path(str(trace_path))
+    if not path.exists():
+        return
+    payload = {"success": success, "request": request.model_dump(), "result": result}
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _load_learned_instruction(learned_instruction_id: str) -> dict[str, Any]:
@@ -752,9 +1265,8 @@ def _validate_learned_instruction_reuse(
         raise ValueError("learned_instruction_window_handle_mismatch")
 
     current_rect = current_window.get("rect") or {}
-    learned_rect = learned_window.get("rect") or {}
-    current_size = {"width": int(current_rect.get("width") or 0), "height": int(current_rect.get("height") or 0)}
-    learned_size = {"width": int(learned_rect.get("width") or 0), "height": int(learned_rect.get("height") or 0)}
+    current_size = _size_from_rect(current_rect)
+    learned_size = _record_coordinate_window_size(record)
     if current_size != learned_size:
         raise ValueError("learned_instruction_window_size_mismatch")
 
@@ -769,6 +1281,8 @@ def _validate_learned_instruction_reuse(
         "reuse_policy": record.get("reuse_policy"),
         "current_window": current_window,
         "learned_window": learned_window,
+        "current_coordinate_window_size": current_size,
+        "learned_coordinate_window_size": learned_size,
         "selected_click_point": selected_point,
     }
 
@@ -956,6 +1470,28 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                         details="Bind the MouseTester window before calling /action/execute_recognition_plan with live capture",
                     ),
                 )
+            bound_validation = _bound_window_matches_request(bound, request)
+            if not bound_validation.get("valid"):
+                timings = timer.to_dict()
+                trace_path = _write_execute_trace_if_enabled(
+                    request,
+                    category="actions",
+                    operation="execute_recognition_plan",
+                    payload={
+                        "success": False,
+                        "request": request.model_dump(),
+                        "failure_reason": "bound_window_mismatch",
+                        "bound_window_validation": bound_validation,
+                        "timings": timings,
+                    },
+                    name_hint=request.app_name or "recognition_plan",
+                )
+                return APIResponse(
+                    success=False,
+                    message="Bound window does not match requested app",
+                    data={"trace_path": trace_path, "bound_window_validation": bound_validation, "timings": timings},
+                    error=ErrorModel(code="bound_window_mismatch", details=bound_validation),
+                )
             try:
                 with timer.step("capture_live_window"):
                     live_capture = screenshot_service.capture_window(
@@ -1014,17 +1550,18 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 error=ErrorModel(code="missing_image_source", details="Provide image_path or set capture_live=true"),
             )
 
+        effective_provider_mode, effective_metadata = _execute_plan_request_defaults(request)
         plan_request = VisionRecognitionPlanRequestModel(
             image_path=image_path,
             task=request.task,
             app_name=request.app_name,
             goal=request.goal,
             state_hint=request.state_hint,
-            provider_mode=request.provider_mode,
+            provider_mode=effective_provider_mode,
             agent_mode=request.agent_mode,
             learn_depth=request.learn_depth,
             write_policy=request.write_policy,
-            metadata=request.metadata,
+            metadata=effective_metadata,
             top_k=request.top_k,
             observe_trace_path=request.observe_trace_path,
         )
@@ -1032,6 +1569,34 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             plan_response = _run_recognition_plan_for_execution(plan_request)
         if not plan_response.success or not plan_response.data:
             timings = timer.to_dict()
+            fallback_plan = _execute_fallback_plan(
+                request=request,
+                failure_reason="recognition_plan_failed",
+                error=plan_response.error.model_dump() if plan_response.error else None,
+            )
+            failed_result: dict[str, Any] = {
+                "contract_version": "execute_recognition_plan_v1",
+                "agent_mode": request.agent_mode,
+                "learn_depth": request.learn_depth,
+                "goal": request.goal,
+                "image_path": image_path,
+                "live_capture": live_capture,
+                "recognition_plan_response": plan_response.model_dump(),
+                "fallback_plan": fallback_plan,
+            }
+            failed_result["agent_execution_guidance"] = _agent_execution_guidance(
+                request=request,
+                status="blocked",
+                result=failed_result,
+                failure_reason="recognition_plan_failed",
+            )
+            failed_result["agent_step_result"] = _agent_step_result(
+                request=request,
+                status="blocked",
+                result=failed_result,
+                failure_reason="recognition_plan_failed",
+            )
+            failed_result["timings"] = timings
             trace_path = _write_execute_trace_if_enabled(
                 request,
                 category="actions",
@@ -1039,17 +1604,30 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 payload={
                     "success": False,
                     "request": request.model_dump(),
-                    "live_capture": live_capture,
-                    "recognition_plan_response": plan_response.model_dump(),
+                    "result": failed_result,
                     "failure_reason": "recognition_plan_failed",
-                    "timings": timings,
                 },
                 name_hint=request.app_name or "recognition_plan",
             )
+            failed_result["trace_path"] = trace_path
+            failed_result["agent_step_result"] = _agent_step_result(
+                request=request,
+                status="blocked",
+                result=failed_result,
+                failure_reason="recognition_plan_failed",
+            )
+            _rewrite_execute_trace_result(trace_path=trace_path, success=False, request=request, result=failed_result)
             return APIResponse(
                 success=False,
                 message="Recognition plan failed",
-                data={"trace_path": trace_path, "recognition_plan_response": plan_response.model_dump(), "timings": timings},
+                data={
+                    "trace_path": trace_path,
+                    "recognition_plan_response": plan_response.model_dump(),
+                    "fallback_plan": fallback_plan,
+                    "agent_execution_guidance": failed_result["agent_execution_guidance"],
+                    "agent_step_result": failed_result["agent_step_result"],
+                    "timings": timings,
+                },
                 error=ErrorModel(code="recognition_plan_failed", details=plan_response.error.model_dump() if plan_response.error else None),
             )
 
@@ -1097,9 +1675,31 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         "learned_instruction_reuse_validation": learned_instruction_reuse_validation,
         "learned_instruction_artifacts": (learned_record.get("learning_artifacts") if isinstance(learned_record, dict) else None),
         "execution_path": execution_path,
+        "effective_execution_options": {
+            "provider_mode": plan_request.provider_mode if "plan_request" in locals() else request.provider_mode,
+            "metadata": plan_request.metadata if "plan_request" in locals() else request.metadata,
+        },
     }
 
     if not pre_click.get("allowed") or selected_point is None:
+        base_result["fallback_plan"] = _execute_fallback_plan(
+            request=request,
+            failure_reason="pre_click_rejected",
+            plan=plan,
+            pre_click=pre_click,
+        )
+        base_result["agent_execution_guidance"] = _agent_execution_guidance(
+            request=request,
+            status="blocked",
+            result=base_result,
+            failure_reason="pre_click_rejected",
+        )
+        base_result["agent_step_result"] = _agent_step_result(
+            request=request,
+            status="blocked",
+            result=base_result,
+            failure_reason="pre_click_rejected",
+        )
         attach_timings(base_result)
         base_result["trace_path"] = _write_execute_trace_if_enabled(
             request,
@@ -1113,6 +1713,13 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             },
             name_hint=request.app_name or "recognition_plan",
         )
+        base_result["agent_step_result"] = _agent_step_result(
+            request=request,
+            status="blocked",
+            result=base_result,
+            failure_reason="pre_click_rejected",
+        )
+        _rewrite_execute_trace_result(trace_path=base_result.get("trace_path"), success=False, request=request, result=base_result)
         return APIResponse(
             success=False,
             message="Recognition plan was rejected before click",
@@ -1136,6 +1743,16 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 )
             base_result.update(approval)
             base_result["approved_plan_id"] = approval["approved_plan_id"]
+        base_result["agent_execution_guidance"] = _agent_execution_guidance(
+            request=request,
+            status="dry_run_ready",
+            result=base_result,
+        )
+        base_result["agent_step_result"] = _agent_step_result(
+            request=request,
+            status="dry_run_ready",
+            result=base_result,
+        )
         attach_timings(base_result)
         base_result["trace_path"] = _write_execute_trace_if_enabled(
             request,
@@ -1144,6 +1761,12 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             payload={"success": True, "request": request.model_dump(), "result": base_result},
             name_hint=request.app_name or "recognition_plan",
         )
+        base_result["agent_step_result"] = _agent_step_result(
+            request=request,
+            status="dry_run_ready",
+            result=base_result,
+        )
+        _rewrite_execute_trace_result(trace_path=base_result.get("trace_path"), success=True, request=request, result=base_result)
         data = ActionResultData(action="execute_recognition_plan", result=base_result)
         return APIResponse(success=True, message="Recognition plan accepted; dry run did not click", data=data.model_dump(), error=None)
 
@@ -1203,6 +1826,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 )
             attempt = {
                 "attempt": attempt_index,
+                "pre_action_state": before_state,
                 "click_point": selected_point,
                 "click_result": click_result,
                 "post_click_verification": post_click_verification,
@@ -1218,6 +1842,26 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
     except Exception as exc:
         base_result["execution_path"]["action_executed"] = bool(attempts)
         base_result["attempts"] = attempts
+        base_result["fallback_plan"] = _execute_fallback_plan(
+            request=request,
+            failure_reason="recognition_plan_click_failed",
+            plan=plan,
+            pre_click=pre_click,
+            attempts=attempts,
+            error=str(exc),
+        )
+        base_result["agent_execution_guidance"] = _agent_execution_guidance(
+            request=request,
+            status="execution_failed",
+            result=base_result,
+            failure_reason="recognition_plan_click_failed",
+        )
+        base_result["agent_step_result"] = _agent_step_result(
+            request=request,
+            status="execution_failed",
+            result=base_result,
+            failure_reason="recognition_plan_click_failed",
+        )
         attach_timings(base_result)
         base_result["trace_path"] = _write_execute_trace_if_enabled(
             request,
@@ -1231,6 +1875,13 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             },
             name_hint=request.app_name or "recognition_plan",
         )
+        base_result["agent_step_result"] = _agent_step_result(
+            request=request,
+            status="execution_failed",
+            result=base_result,
+            failure_reason="recognition_plan_click_failed",
+        )
+        _rewrite_execute_trace_result(trace_path=base_result.get("trace_path"), success=False, request=request, result=base_result)
         return APIResponse(
             success=False,
             message="Recognition-plan click failed",
@@ -1256,16 +1907,43 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
     base_result["execution_path"]["retry_count"] = max(0, len(attempts) - 1)
     base_result["execution_path"]["semantic_post_click_verification_used"] = bool(semantic_post_click_verification.get("applicable"))
     attach_timings(base_result)
-    base_result["trace_path"] = _write_execute_trace_if_enabled(
-        request,
-        category="actions",
-        operation="execute_recognition_plan",
-        payload={"success": verified, "request": request.model_dump(), "result": base_result},
-        name_hint=request.app_name or "recognition_plan",
-    )
 
     if not verified:
         error_code = "semantic_post_click_verification_failed" if semantic_post_click_verification.get("applicable") else "post_click_verification_failed"
+        base_result["fallback_plan"] = _execute_fallback_plan(
+            request=request,
+            failure_reason=error_code,
+            plan=plan,
+            pre_click=pre_click,
+            attempts=attempts,
+        )
+        base_result["agent_execution_guidance"] = _agent_execution_guidance(
+            request=request,
+            status="verification_failed",
+            result=base_result,
+            failure_reason=error_code,
+        )
+        base_result["agent_step_result"] = _agent_step_result(
+            request=request,
+            status="verification_failed",
+            result=base_result,
+            failure_reason=error_code,
+        )
+        attach_timings(base_result)
+        base_result["trace_path"] = _write_execute_trace_if_enabled(
+            request,
+            category="actions",
+            operation="execute_recognition_plan",
+            payload={"success": False, "request": request.model_dump(), "result": base_result},
+            name_hint=request.app_name or "recognition_plan",
+        )
+        base_result["agent_step_result"] = _agent_step_result(
+            request=request,
+            status="verification_failed",
+            result=base_result,
+            failure_reason=error_code,
+        )
+        _rewrite_execute_trace_result(trace_path=base_result.get("trace_path"), success=False, request=request, result=base_result)
         return APIResponse(
             success=False,
             message="Recognition-plan click executed but post-click verification failed",
@@ -1293,10 +1971,44 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 post_click_verification=post_click_verification,
                 semantic_post_click_verification=semantic_post_click_verification,
                 plan_trace_path=plan_trace_path,
-                action_trace_path=base_result.get("trace_path"),
+                action_trace_path=None,
             )
         base_result.update(learning_record)
         attach_timings(base_result)
+
+    with timer.step("save_execute_transition_memory", enabled=_element_memory_enabled(request)):
+        base_result["element_memory_writeback"] = _save_execute_transition_memory(
+            request=request,
+            bound=bound,
+            base_result=base_result,
+            verified=verified,
+        )
+    base_result["agent_execution_guidance"] = _agent_execution_guidance(
+        request=request,
+        status="executed_verified",
+        result=base_result,
+    )
+    base_result["agent_step_result"] = _agent_step_result(
+        request=request,
+        status="executed_verified",
+        result=base_result,
+    )
+    attach_timings(base_result)
+    base_result["trace_path"] = _write_execute_trace_if_enabled(
+        request,
+        category="actions",
+        operation="execute_recognition_plan",
+        payload={"success": True, "request": request.model_dump(), "result": base_result},
+        name_hint=request.app_name or "recognition_plan",
+    )
+    _update_execute_transition_action_trace(base_result)
+    _update_learned_instruction_action_trace(base_result)
+    base_result["agent_step_result"] = _agent_step_result(
+        request=request,
+        status="executed_verified",
+        result=base_result,
+    )
+    _rewrite_execute_trace_result(trace_path=base_result.get("trace_path"), success=True, request=request, result=base_result)
 
     data = ActionResultData(action="execute_recognition_plan", result=base_result)
     return APIResponse(success=True, message="Recognition-plan click executed and verified", data=data.model_dump(), error=None)
@@ -1718,6 +2430,110 @@ def type_text(request: TypeTextRequest) -> APIResponse:
             message="Text input failed",
             data=result,
             error=ErrorModel(code="type_text_failed", details=str(exc)),
+        )
+
+
+@router.post("/scroll", response_model=APIResponse)
+def scroll(request: ScrollRequest) -> APIResponse:
+    timer = RuntimeTimer()
+    with timer.step("get_bound_window"):
+        bound = window_manager.get_bound_window()
+    if bound is None:
+        timings = timer.to_dict()
+        return APIResponse(
+            success=False,
+            message="No bound window is currently available",
+            data={"timings": timings},
+            error=ErrorModel(code="no_bound_window", details="Bind a target window before calling /action/scroll"),
+        )
+
+    with timer.step("validate_scroll_request"):
+        rect = _window_rect(bound)
+        point = {
+            "x": int(request.x) if request.x is not None else rect["width"] // 2,
+            "y": int(request.y) if request.y is not None else rect["height"] // 2,
+        }
+        if not _point_in_rect(point, {"x": 0, "y": 0, "width": rect["width"] - 1, "height": rect["height"] - 1}):
+            timings = timer.to_dict()
+            return APIResponse(
+                success=False,
+                message="Scroll point is outside the currently bound window",
+                data={"point": point, "window_size": {"width": rect["width"], "height": rect["height"]}, "timings": timings},
+                error=ErrorModel(code="scroll_point_outside_window", details=point),
+            )
+
+    action_name = f"scroll_{request.direction}"
+    result: dict[str, Any] = {
+        "contract_version": "scroll_action_v1",
+        "direction": request.direction,
+        "wheel_clicks": request.wheel_clicks,
+        "point": point,
+        "dry_run": request.dry_run,
+        "bound_window": {"handle": int(bound.handle), "title": bound.title, "width": rect["width"], "height": rect["height"]},
+        "execution_path": {
+            "vision_model_used": False,
+            "page_structure_used": False,
+            "input_backend": "SendInput",
+            "action_type": "scroll",
+            "action_executed": False,
+            "verification_used": bool(request.enable_verification and not request.dry_run),
+        },
+    }
+    if request.dry_run:
+        result["timings"] = timer.to_dict()
+        result["trace_path"] = write_trace(
+            category="actions",
+            operation="scroll",
+            payload={"success": True, "request": request.model_dump(), "result": result},
+            name_hint=action_name,
+        )
+        data = ActionResultData(action="scroll", result=result)
+        return APIResponse(success=True, message="Scroll dry-run validated", data=data.model_dump(), error=None)
+
+    try:
+        with timer.step("capture_pre_scroll_state", enabled=request.enable_verification):
+            before_state = verifier.capture_pre_action_state(action_name=action_name) if request.enable_verification else None
+        with timer.step("scroll_window"):
+            result["scroll_result"] = input_controller.scroll_window(
+                direction=request.direction,
+                wheel_clicks=request.wheel_clicks,
+                x=point["x"],
+                y=point["y"],
+                settle_ms=100,
+            )
+        result["execution_path"]["action_executed"] = True
+        with timer.step("post_scroll_verification", enabled=request.enable_verification):
+            result["post_scroll_verification"] = (
+                verifier.verify_action(
+                    action_name,
+                    before_state=before_state,
+                    click_result=result["scroll_result"],
+                )
+                if request.enable_verification
+                else {"verified": None, "verification_skipped": True}
+            )
+        result["timings"] = timer.to_dict()
+        result["trace_path"] = write_trace(
+            category="actions",
+            operation="scroll",
+            payload={"success": True, "request": request.model_dump(), "result": result},
+            name_hint=action_name,
+        )
+        data = ActionResultData(action="scroll", result=result)
+        return APIResponse(success=True, message="Scroll dispatched", data=data.model_dump(), error=None)
+    except Exception as exc:
+        result["timings"] = timer.to_dict()
+        result["trace_path"] = write_trace(
+            category="actions",
+            operation="scroll",
+            payload={"success": False, "request": request.model_dump(), "result": result, "error": str(exc)},
+            name_hint=action_name,
+        )
+        return APIResponse(
+            success=False,
+            message="Scroll failed",
+            data=result,
+            error=ErrorModel(code="scroll_failed", details=str(exc)),
         )
 
 

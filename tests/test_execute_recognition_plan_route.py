@@ -1,641 +1,374 @@
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 
 from app.api import action as action_api
-from app.models.request import ExecuteConfirmedPointRequest, ExecuteRecognitionPlanRequest, ROIModel
+from app.models.request import ExecuteRecognitionPlanRequest
 from app.models.response import APIResponse, VisionResultData
-from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
 
 
-def _allowed_plan(point: dict[str, int] | None = None) -> dict:
-    selected_point = point or {"x": 320, "y": 240}
+def _bound_window(
+    *,
+    title: str = "Example Domain - Microsoft Edge",
+    process_name: str | None = "msedge.exe",
+    handle: int = 100,
+    rect: tuple[int, int, int, int] = (0, 0, 1200, 800),
+) -> SimpleNamespace:
+    left, top, right, bottom = rect
+    return SimpleNamespace(
+        handle=handle,
+        title=title,
+        process_id=1234,
+        process_name=process_name,
+        rect=SimpleNamespace(left=left, top=top, right=right, bottom=bottom),
+        is_active=True,
+    )
+
+
+def _allowed_plan(*, goal: str = "Click Learn more link", point: dict[str, int] | None = None) -> dict:
+    selected_point = point or {"x": 315, "y": 246}
     return {
         "contract_version": "recognition_plan_v1",
+        "agent_mode": "execute",
+        "learn_depth": None,
+        "mode_contract_version": "execute_plan_v1",
         "image_path": "capture.png",
-        "goal": "点击此处测试",
-        "candidate_result": {"candidates": []},
-        "parse_result": {"vision_regions": {"image_size": {"width": 800, "height": 600}, "screen_summary": "Demo page"}},
-        "recommended_target": {
-            "label": "Target test",
-            "text": "Target test",
-            "element": {"bbox": {"x": selected_point["x"] - 30, "y": selected_point["y"] - 10, "w": 60, "h": 20}},
-            "refined_bbox": None,
+        "goal": goal,
+        "candidate_result": {
+            "summary": {"returned_count": 1, "has_recommendation": True},
+            "candidates": [
+                {
+                    "candidate_id": "learn_more_link",
+                    "rank": 1,
+                    "score": 0.95,
+                    "label": "Learn more",
+                    "element": {"bbox": {"x": 270, "y": 232, "w": 100, "h": 28}},
+                }
+            ],
         },
-        "narrow_search_result": {"results": []},
+        "parse_result": {"vision_regions": {"image_size": {"width": 1200, "height": 800}, "screen_summary": "Example page"}},
+        "recommended_target": {
+            "candidate_id": "learn_more_link",
+            "label": "Learn more",
+            "text": "Learn more",
+            "element": {"bbox": {"x": 270, "y": 232, "w": 100, "h": 28}},
+        },
+        "narrow_search_result": {
+            "results": [
+                {
+                    "candidate_id": "learn_more_link",
+                    "refined_click_point": selected_point,
+                    "matched_text": "Learn more",
+                    "coordinate_source": "vista_point_v1",
+                }
+            ]
+        },
         "pre_click_decision": {
             "contract_version": "pre_click_decision_v1",
             "allowed": True,
-            "selected_candidate_id": "candidate_1",
+            "selected_candidate_id": "learn_more_link",
             "selected_click_point": selected_point,
             "reasons": ["pre_click_candidate_allowed"],
         },
-        "execution_path": {"vision_model_used": True, "action_executed": False},
-        "trace_path": "logs/traces/vision/recognition-plan.json",
+        "execution_path": {"vision_model_used": True, "action_executed": False, "vista_direct_point_grounding_used": True},
+        "trace_path": "logs/traces/vision/execute-mode-recognition-plan-edge.json",
     }
 
 
-def test_execute_recognition_plan_preserves_unicode_goal_for_internal_recognition(monkeypatch) -> None:
-    goal = "\u70b9\u51fb\u6b64\u5904\u6d4b\u8bd5"
-    captured: dict[str, object] = {}
+def _blocked_plan(*, goal: str = "Click Learn more link") -> dict:
+    plan = _allowed_plan(goal=goal)
+    plan["pre_click_decision"] = {
+        "contract_version": "pre_click_decision_v1",
+        "allowed": False,
+        "selected_candidate_id": None,
+        "selected_click_point": None,
+        "reasons": ["no_candidate_passed_pre_click_checks"],
+        "candidate_decisions": [],
+        "summary": {"candidate_count": 0, "allowed_candidate_count": 0},
+    }
+    plan["candidate_result"] = {"summary": {"returned_count": 0}, "candidates": []}
+    plan["recommended_target"] = None
+    return plan
 
+
+def _capture() -> dict:
+    return {
+        "image_path": "capture.png",
+        "roi": None,
+        "roi_adjusted": False,
+        "window_size": {"width": 1200, "height": 800},
+    }
+
+
+def test_execute_mode_dry_run_builds_agent_ready_preview(monkeypatch, tmp_path) -> None:
+    captured_request: dict[str, object] = {}
+    written_traces: list[dict[str, object]] = []
+    monkeypatch.setattr(action_api, "APPROVED_PLANS_DIR", tmp_path / "approved-plans")
+    action_api.APPROVED_PLANS_DIR.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: _bound_window())
+    monkeypatch.setattr(action_api.screenshot_service, "capture_window", lambda **kwargs: _capture())
+
+    def fake_recognition_plan(request):
+        captured_request["goal"] = request.goal
+        captured_request["provider_mode"] = request.provider_mode
+        captured_request["metadata"] = request.metadata
+        captured_request["observe_trace_path"] = request.observe_trace_path
+        return APIResponse(success=True, message="ok", data=VisionResultData(result=_allowed_plan(goal=request.goal)).model_dump(), error=None)
+
+    monkeypatch.setattr(action_api, "_run_recognition_plan_for_execution", fake_recognition_plan)
     monkeypatch.setattr(
-        action_api.window_manager,
-        "get_bound_window",
-        lambda: SimpleNamespace(
-            handle=1,
-            title="MouseTester",
-            rect=SimpleNamespace(left=0, top=0, right=800, bottom=600),
-            is_active=True,
-        ),
-    )
-    monkeypatch.setattr(
-        action_api.screenshot_service,
-        "capture_window",
-        lambda **kwargs: {
+        action_api,
+        "_render_recognition_plan_overlay_for_execution",
+        lambda trace_path: {
+            "trace_path": trace_path,
             "image_path": "capture.png",
-            "roi": None,
-            "roi_adjusted": False,
-            "window_size": {"width": 800, "height": 600},
+            "output_path": "overlay.png",
+            "candidate_count": 1,
+            "decision_count": 1,
+            "selected_candidate_id": "learn_more_link",
         },
     )
-
-    def fake_recognition_plan(request):
-        captured["goal"] = request.goal
-        captured["agent_mode"] = request.agent_mode
-        captured["write_policy"] = request.write_policy.model_dump()
-        captured["observe_trace_path"] = request.observe_trace_path
-        plan = _allowed_plan()
-        plan["goal"] = request.goal
-        plan["trace_path"] = "logs/traces/vision/unicode-goal-recognition-plan.json"
-        return APIResponse(
-            success=True,
-            message="ok",
-            data=VisionResultData(result=plan).model_dump(),
-            error=None,
-        )
-
-    monkeypatch.setattr(action_api, "_run_recognition_plan_for_execution", fake_recognition_plan)
-    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", lambda trace_path: None)
-    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/unicode-goal-execute.json")
-
-    response = action_api.execute_recognition_plan(
-        ExecuteRecognitionPlanRequest(goal=goal, app_name="mousetesterweb", dry_run=True, observe_trace_path="observe-trace.json")
-    )
-
-    assert captured["goal"] == goal
-    assert captured["agent_mode"] == "execute"
-    assert captured["write_policy"] == {"path_graph": False, "element_memory": True, "trace": True}
-    assert captured["observe_trace_path"] == "observe-trace.json"
-    assert response.success is True
-    result = response.data["result"]
-    assert result["agent_mode"] == "execute"
-    assert result["mode_contract_version"] == "execute_plan_v1"
-    assert result["goal"] == goal
-    assert result["recognition_plan"]["goal"] == goal
-    assert result["recognition_plan_trace_path"].endswith("unicode-goal-recognition-plan.json")
-
-
-def test_execute_recognition_plan_respects_trace_write_policy(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    def fake_recognition_plan(request):
-        captured["write_policy"] = request.write_policy.model_dump()
-        plan = _allowed_plan()
-        plan["trace_path"] = None
-        return APIResponse(
-            success=True,
-            message="ok",
-            data=VisionResultData(result=plan).model_dump(),
-            error=None,
-        )
-
-    def fail_write_trace(**kwargs):
-        raise AssertionError("write_trace must not be called when write_policy.trace is false")
-
-    monkeypatch.setattr(action_api, "_run_recognition_plan_for_execution", fake_recognition_plan)
-    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", lambda trace_path: None)
-    monkeypatch.setattr(action_api, "write_trace", fail_write_trace)
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: written_traces.append(kwargs) or f"logs/traces/actions/{kwargs['operation']}.json")
 
     response = action_api.execute_recognition_plan(
         ExecuteRecognitionPlanRequest(
-            goal="Target test",
-            app_name="demo",
-            image_path="capture.png",
-            capture_live=False,
+            goal="Click Learn more link",
+            app_name="edge",
+            state_hint="Example Domain page",
+            observe_trace_path="observe-trace.json",
             dry_run=True,
-            write_policy={"path_graph": False, "element_memory": True, "trace": False},
         )
     )
 
-    assert captured["write_policy"] == {"path_graph": False, "element_memory": True, "trace": False}
     assert response.success is True
     result = response.data["result"]
-    assert result["write_policy"] == {"path_graph": False, "element_memory": True, "trace": False}
-    assert result["trace_path"] is None
-    assert result["recognition_plan_trace_path"] is None
+    assert captured_request["goal"] == "Click Learn more link"
+    assert captured_request["provider_mode"] == "local_grounding"
+    assert captured_request["metadata"]["vista_direct_grounding"] == {
+        "enabled": True,
+        "timeout_seconds": 45.0,
+        "max_edge": 640,
+        "refine": True,
+        "refine_roi_size": 512,
+        "refine_max_edge": 640,
+    }
+    assert captured_request["observe_trace_path"] == "observe-trace.json"
+    assert result["recognition_plan_overlay"]["output_path"] == "overlay.png"
+    assert result["approved_plan_id"]
+    guidance = result["agent_execution_guidance"]
+    assert guidance["status"] == "dry_run_ready"
+    assert guidance["next_action"] == "execute_approved_plan"
+    assert guidance["next_request"]["body"]["approved_plan_id"] == result["approved_plan_id"]
+    step_result = result["agent_step_result"]
+    assert step_result["contract_version"] == "agent_step_result_v1"
+    assert step_result["status"] == "dry_run_ready"
+    assert step_result["action_executed"] is False
+    assert step_result["next_agent_action"] == "execute_approved_plan"
+    assert step_result["selected_click_point"] == {"x": 315, "y": 246}
+    assert step_result["evidence"]["coordinate_overlay_path"] == "overlay.png"
+    assert step_result["evidence"]["action_trace_path"].endswith("execute_mode_plan_preview.json")
+    assert written_traces[-1]["operation"] == "execute_mode_plan_preview"
 
 
-def test_execute_recognition_plan_clicks_allowed_live_capture(monkeypatch) -> None:
-    monkeypatch.setattr(
-        action_api.window_manager,
-        "get_bound_window",
-        lambda: SimpleNamespace(
-            handle=1,
-            title="MouseTester",
-            rect=SimpleNamespace(left=0, top=0, right=800, bottom=600),
-            is_active=True,
-        ),
-    )
-    monkeypatch.setattr(
-        action_api.screenshot_service,
-        "capture_window",
-        lambda **kwargs: {
-            "image_path": "capture.png",
-            "roi": None,
-            "roi_adjusted": False,
-            "window_size": {"width": 800, "height": 600},
-        },
-    )
-    monkeypatch.setattr(
-        action_api,
-        "_run_recognition_plan_for_execution",
-        lambda request: APIResponse(
-            success=True,
-            message="ok",
-            data=VisionResultData(result=_allowed_plan()).model_dump(),
-            error=None,
-        ),
-    )
-    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", lambda trace_path: {"overlay_path": "overlay.png"})
-    monkeypatch.setattr(action_api.verifier, "capture_pre_action_state", lambda action_name=None: {"image_path": "before.png"})
-    monkeypatch.setattr(action_api.verifier, "verify_action", lambda *args, **kwargs: {"verified": True})
-    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/execute-recognition-plan.json")
-
+def test_execute_mode_reuses_approved_plan_for_next_call(monkeypatch, tmp_path) -> None:
+    recognition_calls = {"count": 0}
     clicked: dict[str, int] = {}
-
-    def fake_click(x: int, y: int, **kwargs):
-        clicked["x"] = x
-        clicked["y"] = y
-        return {"clicked": True, "window_point": {"x": x, "y": y}}
-
-    monkeypatch.setattr(action_api.input_controller, "click_point", fake_click)
-
-    response = action_api.execute_recognition_plan(
-        ExecuteRecognitionPlanRequest(goal="点击此处测试", app_name="demo")
-    )
-
-    assert response.success is True
-    assert clicked == {"x": 320, "y": 240}
-    result = response.data["result"]
-    assert result["execution_path"]["action_executed"] is True
-    assert result["post_click_verification"]["verified"] is True
-    assert result["recognition_plan_overlay"]["overlay_path"] == "overlay.png"
-    assert result["trace_path"].endswith("execute-recognition-plan.json")
-
-
-def test_execute_recognition_plan_reuses_approved_dry_run_plan(monkeypatch, tmp_path) -> None:
-    bound = SimpleNamespace(
-        handle=1,
-        title="MouseTester",
-        process_id=1234,
-        process_name="msedge.exe",
-        rect=SimpleNamespace(left=0, top=0, right=800, bottom=600),
-        is_active=True,
-    )
+    written_operations: list[str] = []
     monkeypatch.setattr(action_api, "APPROVED_PLANS_DIR", tmp_path / "approved-plans")
     action_api.APPROVED_PLANS_DIR.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: bound)
-    monkeypatch.setattr(
-        action_api.screenshot_service,
-        "capture_window",
-        lambda **kwargs: {
-            "image_path": "capture.png",
-            "roi": None,
-            "roi_adjusted": False,
-            "window_size": {"width": 800, "height": 600},
-        },
-    )
-    recognition_calls = {"count": 0}
+    monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: _bound_window())
+    monkeypatch.setattr(action_api.screenshot_service, "capture_window", lambda **kwargs: _capture())
 
     def fake_recognition_plan(request):
         recognition_calls["count"] += 1
-        return APIResponse(
-            success=True,
-            message="ok",
-            data=VisionResultData(result=_allowed_plan({"x": 320, "y": 240})).model_dump(),
-            error=None,
-        )
+        return APIResponse(success=True, message="ok", data=VisionResultData(result=_allowed_plan(goal=request.goal)).model_dump(), error=None)
 
     monkeypatch.setattr(action_api, "_run_recognition_plan_for_execution", fake_recognition_plan)
-    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", lambda trace_path: None)
+    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", lambda trace_path: {"output_path": "overlay.png"})
     monkeypatch.setattr(action_api.verifier, "capture_pre_action_state", lambda action_name=None: {"image_path": "before.png"})
-    monkeypatch.setattr(action_api.verifier, "verify_action", lambda *args, **kwargs: {"verified": True})
-    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/execute-recognition-plan.json")
-    clicked: dict[str, int] = {}
     monkeypatch.setattr(
-        action_api.input_controller,
-        "click_point",
-        lambda x, y, **kwargs: clicked.update({"x": x, "y": y}) or {"clicked": True, "window_point": {"x": x, "y": y}},
+        action_api.verifier,
+        "verify_action",
+        lambda *args, **kwargs: {
+            "verified": True,
+            "before": {"image_path": "before.png"},
+            "after": {"image_path": "after.png"},
+            "diff": {"diff_image_path": "diff.png"},
+            "verification_basis": {"pixel_change_ratio": 0.2},
+        },
     )
+    monkeypatch.setattr(action_api.input_controller, "click_point", lambda x, y, **kwargs: clicked.update({"x": x, "y": y}) or {"clicked": True})
+    monkeypatch.setattr(action_api.transition_memory, "save", lambda record: str(tmp_path / "transition.json"))
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: written_operations.append(kwargs["operation"]) or f"logs/traces/actions/{kwargs['operation']}.json")
 
-    dry = action_api.execute_recognition_plan(ExecuteRecognitionPlanRequest(goal="Target test", app_name="demo", dry_run=True))
+    dry = action_api.execute_recognition_plan(ExecuteRecognitionPlanRequest(goal="Click Learn more link", app_name="edge", dry_run=True))
     approved_plan_id = dry.data["result"]["approved_plan_id"]
-
     real = action_api.execute_recognition_plan(
-        ExecuteRecognitionPlanRequest(goal="Target test", app_name="demo", approved_plan_id=approved_plan_id, dry_run=False)
+        ExecuteRecognitionPlanRequest(goal="Click Learn more link", app_name="edge", approved_plan_id=approved_plan_id, dry_run=False)
     )
 
     assert dry.success is True
     assert real.success is True
     assert recognition_calls["count"] == 1
-    assert clicked == {"x": 320, "y": 240}
-    result = real.data["result"]
-    assert result["execution_path"]["approved_plan_reused"] is True
-    assert result["execution_path"]["vision_model_used"] is False
-    assert result["approved_plan_reuse_validation"]["valid"] is True
-    assert "recognition_plan" not in [step["name"] for step in result["timings"]["steps"]]
+    assert clicked == {"x": 315, "y": 246}
+    assert real.data["result"]["execution_path"]["approved_plan_reused"] is True
+    assert real.data["result"]["agent_execution_guidance"]["next_action"] == "done"
+    step_result = real.data["result"]["agent_step_result"]
+    assert step_result["status"] == "executed_verified"
+    assert step_result["action_executed"] is True
+    assert step_result["next_agent_action"] == "done"
+    assert step_result["post_click"]["verified"] is True
+    assert step_result["post_click"]["before_image_path"] == "before.png"
+    assert step_result["post_click"]["after_image_path"] == "after.png"
+    assert step_result["post_click"]["diff_image_path"] == "diff.png"
+    assert step_result["evidence"]["coordinate_overlay_path"] == "overlay.png"
+    assert step_result["evidence"]["action_trace_path"].endswith("execute_mode_click.json")
+    assert written_operations == ["execute_mode_plan_preview", "execute_mode_click"]
 
 
-def test_execute_recognition_plan_rejects_approved_plan_window_mismatch(monkeypatch, tmp_path) -> None:
-    original_bound = SimpleNamespace(
-        handle=1,
-        title="MouseTester",
-        process_id=1234,
-        process_name="msedge.exe",
-        rect=SimpleNamespace(left=0, top=0, right=800, bottom=600),
-        is_active=True,
-    )
-    current_bound = SimpleNamespace(
-        handle=2,
-        title="Other Window",
-        process_id=5678,
-        process_name="msedge.exe",
-        rect=SimpleNamespace(left=0, top=0, right=800, bottom=600),
-        is_active=True,
-    )
+def test_approved_plan_reuse_uses_capture_size_when_saved_bound_rect_is_placeholder(monkeypatch, tmp_path) -> None:
+    recognition_calls = {"count": 0}
+    clicked: dict[str, int] = {}
+    window_reads = {"count": 0}
     monkeypatch.setattr(action_api, "APPROVED_PLANS_DIR", tmp_path / "approved-plans")
     action_api.APPROVED_PLANS_DIR.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: original_bound)
-    monkeypatch.setattr(action_api.screenshot_service, "capture_window", lambda **kwargs: {"image_path": "capture.png"})
-    monkeypatch.setattr(
-        action_api,
-        "_run_recognition_plan_for_execution",
-        lambda request: APIResponse(
-            success=True,
-            message="ok",
-            data=VisionResultData(result=_allowed_plan()).model_dump(),
-            error=None,
-        ),
-    )
-    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", lambda trace_path: None)
-    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/execute-recognition-plan.json")
 
-    dry = action_api.execute_recognition_plan(ExecuteRecognitionPlanRequest(goal="Target test", app_name="demo", dry_run=True))
-    approved_plan_id = dry.data["result"]["approved_plan_id"]
-    monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: current_bound)
+    def bound_window_sequence():
+        window_reads["count"] += 1
+        if window_reads["count"] == 1:
+            return _bound_window(rect=(-32000, -32000, -31840, -31972))
+        return _bound_window()
 
-    real = action_api.execute_recognition_plan(
-        ExecuteRecognitionPlanRequest(goal="Target test", app_name="demo", approved_plan_id=approved_plan_id, dry_run=False)
-    )
-
-    assert real.success is False
-    assert real.error is not None
-    assert real.error.code == "approved_plan_reuse_failed"
-    assert real.error.details == "approved_plan_window_handle_mismatch"
-
-
-def test_execute_recognition_plan_records_and_reuses_instruction_learning(monkeypatch, tmp_path) -> None:
-    bound = SimpleNamespace(
-        handle=1,
-        title="MouseTester",
-        process_id=1234,
-        process_name="msedge.exe",
-        rect=SimpleNamespace(left=0, top=0, right=800, bottom=600),
-        is_active=True,
-    )
-    monkeypatch.setattr(action_api, "LEARNED_INSTRUCTIONS_DIR", tmp_path / "learned-instructions")
-    action_api.LEARNED_INSTRUCTIONS_DIR.mkdir(parents=True, exist_ok=True)
-    capture_path = tmp_path / "capture.png"
-    before_path = tmp_path / "before.png"
-    after_path = tmp_path / "after.png"
-    diff_path = tmp_path / "diff.png"
-    if action_api.Image is not None:
-        for path in [capture_path, before_path, after_path, diff_path]:
-            action_api.Image.new("RGB", (800, 600), color="white").save(path)
-    else:
-        for path in [capture_path, before_path, after_path, diff_path]:
-            path.write_bytes(b"placeholder")
-    monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: bound)
-    monkeypatch.setattr(
-        action_api.screenshot_service,
-        "capture_window",
-        lambda **kwargs: {
-            "image_path": str(capture_path),
-            "roi": None,
-            "roi_adjusted": False,
-            "window_size": {"width": 800, "height": 600},
-        },
-    )
-    recognition_calls = {"count": 0}
+    monkeypatch.setattr(action_api.window_manager, "get_bound_window", bound_window_sequence)
+    monkeypatch.setattr(action_api.screenshot_service, "capture_window", lambda **kwargs: _capture())
 
     def fake_recognition_plan(request):
         recognition_calls["count"] += 1
-        return APIResponse(
-            success=True,
-            message="ok",
-            data=VisionResultData(result=_allowed_plan({"x": 320, "y": 240})).model_dump(),
-            error=None,
-        )
+        return APIResponse(success=True, message="ok", data=VisionResultData(result=_allowed_plan(goal=request.goal)).model_dump(), error=None)
 
     monkeypatch.setattr(action_api, "_run_recognition_plan_for_execution", fake_recognition_plan)
-    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", lambda trace_path: None)
-    monkeypatch.setattr(action_api.verifier, "capture_pre_action_state", lambda action_name=None: {"image_path": str(before_path)})
+    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", lambda trace_path: {"output_path": "overlay.png"})
+    monkeypatch.setattr(action_api.verifier, "capture_pre_action_state", lambda action_name=None: {"image_path": "before.png"})
     monkeypatch.setattr(
         action_api.verifier,
         "verify_action",
-        lambda *args, **kwargs: {
-            "verified": True,
-            "before": {"image_path": str(before_path)},
-            "after": {"image_path": str(after_path)},
-            "diff": {"diff_image_path": str(diff_path)},
-        },
+        lambda *args, **kwargs: {"verified": True, "before": {"image_path": "before.png"}, "after": {"image_path": "after.png"}},
     )
-    monkeypatch.setattr(
-        action_api,
-        "_verify_mouse_tester_post_click_semantics",
-        lambda **kwargs: {"applicable": True, "verified": True, "profile": "mousetester_target_text_change_v1"},
-    )
-    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/execute-recognition-plan.json")
-    clicked: list[dict[str, int]] = []
-    monkeypatch.setattr(
-        action_api.input_controller,
-        "click_point",
-        lambda x, y, **kwargs: clicked.append({"x": x, "y": y}) or {"clicked": True, "window_point": {"x": x, "y": y}},
+    monkeypatch.setattr(action_api.input_controller, "click_point", lambda x, y, **kwargs: clicked.update({"x": x, "y": y}) or {"clicked": True})
+    monkeypatch.setattr(action_api.transition_memory, "save", lambda record: str(tmp_path / "transition.json"))
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: f"logs/traces/actions/{kwargs['operation']}.json")
+
+    dry = action_api.execute_recognition_plan(ExecuteRecognitionPlanRequest(goal="Click Learn more link", app_name="edge", dry_run=True))
+    approved_plan_id = dry.data["result"]["approved_plan_id"]
+    approved_record = action_api._load_approved_plan(approved_plan_id)
+    real = action_api.execute_recognition_plan(
+        ExecuteRecognitionPlanRequest(goal="Click Learn more link", app_name="edge", approved_plan_id=approved_plan_id, dry_run=False)
     )
 
-    learned = action_api.execute_recognition_plan(
-        ExecuteRecognitionPlanRequest(goal="点击此处测试", app_name="mousetesterweb", learning_mode="instruction")
-    )
-    learned_instruction_id = learned.data["result"]["learned_instruction_id"]
-
-    replay = action_api.execute_recognition_plan(
-        ExecuteRecognitionPlanRequest(
-            goal="点击此处测试",
-            app_name="mousetesterweb",
-            learning_mode="instruction",
-            learned_instruction_id=learned_instruction_id,
-        )
-    )
-
-    assert learned.success is True
-    assert replay.success is True
+    assert dry.success is True
+    assert approved_record["bound_window"]["rect"] == {"left": -32000, "top": -32000, "width": 160, "height": 28}
+    assert approved_record["coordinate_window_size"] == {"width": 1200, "height": 800}
+    assert real.success is True
     assert recognition_calls["count"] == 1
-    assert clicked == [{"x": 320, "y": 240}, {"x": 320, "y": 240}]
-    learned_bundle_dir = tmp_path / "learned-instructions" / learned_instruction_id
-    learned_record_path = learned_bundle_dir / "learned_instruction.json"
-    assert learned_record_path.exists()
-    assert (learned_bundle_dir / "source_window.png").exists()
-    assert (learned_bundle_dir / "pre_action.png").exists()
-    assert (learned_bundle_dir / "post_action.png").exists()
-    assert (learned_bundle_dir / "post_action_diff.png").exists()
-    if action_api.Image is not None:
-        assert (learned_bundle_dir / "target_crop.png").exists()
-    record = action_api.json.loads(learned_record_path.read_text(encoding="utf-8"))
-    assert record["learning_artifacts"]["bundle_dir"] == str(learned_bundle_dir.resolve())
-    assert Path(record["learning_artifacts"]["source_image_path"]).exists()
-    result = replay.data["result"]
-    assert result["learned_instruction_id"] == learned_instruction_id
-    assert result["learned_instruction_artifacts"]["bundle_dir"] == str(learned_bundle_dir.resolve())
-    assert result["execution_path"]["instruction_learning_reused"] is True
-    assert result["execution_path"]["vision_model_used"] is False
-    assert result["learned_instruction_reuse_validation"]["valid"] is True
-    assert "recognition_plan" not in [step["name"] for step in result["timings"]["steps"]]
-    assert "save_learned_instruction" not in [step["name"] for step in result["timings"]["steps"]]
+    assert clicked == {"x": 315, "y": 246}
+    assert real.data["result"]["approved_plan_reuse_validation"]["approved_coordinate_window_size"] == {"width": 1200, "height": 800}
 
 
-def test_execute_recognition_plan_uses_mouse_tester_semantic_verification(monkeypatch) -> None:
-    monkeypatch.setattr(
-        action_api.window_manager,
-        "get_bound_window",
-        lambda: SimpleNamespace(
-            handle=1,
-            title="MouseTester",
-            rect=SimpleNamespace(left=0, top=0, right=800, bottom=600),
-            is_active=True,
-        ),
-    )
-    monkeypatch.setattr(action_api.screenshot_service, "capture_window", lambda **kwargs: {"image_path": "capture.png"})
-    monkeypatch.setattr(
-        action_api,
-        "_run_recognition_plan_for_execution",
-        lambda request: APIResponse(
-            success=True,
-            message="ok",
-            data=VisionResultData(result=_allowed_plan({"x": 320, "y": 240})).model_dump(),
-            error=None,
-        ),
-    )
-    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", lambda trace_path: None)
-    monkeypatch.setattr(action_api.verifier, "capture_pre_action_state", lambda action_name=None: {"image_path": "before.png"})
-    monkeypatch.setattr(
-        action_api.verifier,
-        "verify_action",
-        lambda *args, **kwargs: {
-            "verified": True,
-            "before": {"image_path": "before.png"},
-            "after": {"image_path": "after.png"},
-            "diff": {"regions": [{"x": 300, "y": 230, "w": 40, "h": 20}]},
-        },
-    )
-    monkeypatch.setattr(action_api.input_controller, "click_point", lambda x, y, **kwargs: {"clicked": True, "window_point": {"x": x, "y": y}})
-    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/execute-recognition-plan.json")
+def test_execute_mode_rejects_mismatched_bound_window_before_capture(monkeypatch) -> None:
+    capture_called = {"value": False}
+    written_traces: list[dict[str, object]] = []
+    monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: _bound_window(title="QQ", process_name="QQ.exe"))
 
-    def fake_scan(path: str) -> OCRResult:
-        text = "Target test" if path == "before.png" else "Timeout single click"
-        return OCRResult(
-            image_path=path,
-            matches=[OCRTextMatch(text=text, score=0.99, bbox=OCRBoundingBox(x=300, y=230, width=70, height=18))],
-        )
+    def fail_capture(**kwargs):
+        capture_called["value"] = True
+        raise AssertionError("mismatched execute-mode request must stop before screenshot")
 
-    monkeypatch.setattr(action_api.ocr_service, "scan_image", fake_scan)
+    monkeypatch.setattr(action_api.screenshot_service, "capture_window", fail_capture)
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: written_traces.append(kwargs) or "logs/traces/actions/bound-window-mismatch.json")
 
-    response = action_api.execute_recognition_plan(
-        ExecuteRecognitionPlanRequest(goal="Target test", app_name="mousetesterweb")
-    )
-
-    assert response.success is True
-    result = response.data["result"]
-    assert result["execution_path"]["semantic_post_click_verification_used"] is True
-    assert result["semantic_post_click_verification"]["verified"] is True
-    assert "target_text_replaced" in result["semantic_post_click_verification"]["reasons"]
-
-
-def test_execute_recognition_plan_retries_verification_failure(monkeypatch) -> None:
-    monkeypatch.setattr(
-        action_api.window_manager,
-        "get_bound_window",
-        lambda: SimpleNamespace(
-            handle=1,
-            title="Demo",
-            rect=SimpleNamespace(left=0, top=0, right=800, bottom=600),
-            is_active=True,
-        ),
-    )
-    monkeypatch.setattr(action_api.screenshot_service, "capture_window", lambda **kwargs: {"image_path": "capture.png"})
-    monkeypatch.setattr(
-        action_api,
-        "_run_recognition_plan_for_execution",
-        lambda request: APIResponse(
-            success=True,
-            message="ok",
-            data=VisionResultData(result=_allowed_plan({"x": 320, "y": 240})).model_dump(),
-            error=None,
-        ),
-    )
-    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", lambda trace_path: None)
-    monkeypatch.setattr(action_api.verifier, "capture_pre_action_state", lambda action_name=None: {"image_path": "before.png"})
-    verification_results = iter([{"verified": False}, {"verified": True}])
-    monkeypatch.setattr(action_api.verifier, "verify_action", lambda *args, **kwargs: next(verification_results))
-    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/execute-recognition-plan.json")
-
-    clicked_points: list[tuple[int, int]] = []
-
-    def fake_click(x: int, y: int, **kwargs):
-        clicked_points.append((x, y))
-        return {"clicked": True, "window_point": {"x": x, "y": y}}
-
-    monkeypatch.setattr(action_api.input_controller, "click_point", fake_click)
-
-    response = action_api.execute_recognition_plan(
-        ExecuteRecognitionPlanRequest(goal="Target test", app_name="demo", max_execution_attempts=2)
-    )
-
-    assert response.success is True
-    assert clicked_points == [(320, 240), (320, 240)]
-    result = response.data["result"]
-    assert result["execution_path"]["execution_attempt_count"] == 2
-    assert result["execution_path"]["retry_count"] == 1
-    assert result["attempts"][0]["retry_allowed"] is True
-    assert result["attempts"][0]["retry_reason"] == "verification_failed_retry_safe"
-    assert result["attempts"][1]["verified"] is True
-
-
-def test_execute_recognition_plan_rejects_unrelated_mouse_tester_diff(monkeypatch) -> None:
-    monkeypatch.setattr(
-        action_api.window_manager,
-        "get_bound_window",
-        lambda: SimpleNamespace(
-            handle=1,
-            title="MouseTester",
-            rect=SimpleNamespace(left=0, top=0, right=800, bottom=600),
-            is_active=True,
-        ),
-    )
-    monkeypatch.setattr(action_api.screenshot_service, "capture_window", lambda **kwargs: {"image_path": "capture.png"})
-    monkeypatch.setattr(
-        action_api,
-        "_run_recognition_plan_for_execution",
-        lambda request: APIResponse(
-            success=True,
-            message="ok",
-            data=VisionResultData(result=_allowed_plan({"x": 320, "y": 240})).model_dump(),
-            error=None,
-        ),
-    )
-    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", lambda trace_path: None)
-    monkeypatch.setattr(action_api.verifier, "capture_pre_action_state", lambda action_name=None: {"image_path": "before.png"})
-    monkeypatch.setattr(
-        action_api.verifier,
-        "verify_action",
-        lambda *args, **kwargs: {
-            "verified": True,
-            "before": {"image_path": "before.png"},
-            "after": {"image_path": "after.png"},
-            "diff": {"regions": [{"x": 20, "y": 20, "w": 40, "h": 20}]},
-        },
-    )
-    monkeypatch.setattr(action_api.input_controller, "click_point", lambda x, y, **kwargs: {"clicked": True, "window_point": {"x": x, "y": y}})
-    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/execute-recognition-plan.json")
-    monkeypatch.setattr(
-        action_api.ocr_service,
-        "scan_image",
-        lambda path: OCRResult(
-            image_path=path,
-            matches=[OCRTextMatch(text="Target test", score=0.99, bbox=OCRBoundingBox(x=300, y=230, width=70, height=18))],
-        ),
-    )
-
-    response = action_api.execute_recognition_plan(
-        ExecuteRecognitionPlanRequest(goal="Target test", app_name="mousetesterweb")
-    )
+    response = action_api.execute_recognition_plan(ExecuteRecognitionPlanRequest(goal="Click Learn more link", app_name="edge", dry_run=True))
 
     assert response.success is False
     assert response.error is not None
-    assert response.error.code == "semantic_post_click_verification_failed"
-    assert response.data["execution_path"]["action_executed"] is True
-    assert response.data["semantic_post_click_verification"]["diff_overlaps_target"] is False
+    assert response.error.code == "bound_window_mismatch"
+    assert capture_called["value"] is False
+    assert response.data["bound_window_validation"]["actual_process_name"] == "QQ.exe"
+    assert written_traces[-1]["operation"] == "execute_mode_plan_preview"
 
 
-def test_execute_recognition_plan_does_not_click_when_pre_click_rejects(monkeypatch) -> None:
-    monkeypatch.setattr(
-        action_api.window_manager,
-        "get_bound_window",
-        lambda: SimpleNamespace(
-            handle=1,
-            title="MouseTester",
-            rect=SimpleNamespace(left=0, top=0, right=800, bottom=600),
-            is_active=True,
-        ),
-    )
-    monkeypatch.setattr(action_api.screenshot_service, "capture_window", lambda **kwargs: {"image_path": "capture.png"})
-    rejected = _allowed_plan()
-    rejected["pre_click_decision"] = {
-        "contract_version": "pre_click_decision_v1",
-        "allowed": False,
-        "selected_click_point": None,
-        "reasons": ["no_candidate_passed_pre_click_checks"],
-    }
+def test_execute_mode_blocked_plan_returns_fallback_and_overlay(monkeypatch) -> None:
+    monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: _bound_window())
+    monkeypatch.setattr(action_api.screenshot_service, "capture_window", lambda **kwargs: _capture())
     monkeypatch.setattr(
         action_api,
         "_run_recognition_plan_for_execution",
-        lambda request: APIResponse(
-            success=True,
-            message="ok",
-            data=VisionResultData(result=rejected).model_dump(),
-            error=None,
-        ),
+        lambda request: APIResponse(success=True, message="ok", data=VisionResultData(result=_blocked_plan(goal=request.goal)).model_dump(), error=None),
     )
-    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", lambda trace_path: None)
-    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/pre-click-rejected.json")
+    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", lambda trace_path: {"output_path": "blocked-overlay.png", "candidate_count": 0})
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/execute-mode-plan-preview.json")
 
-    clicked = False
-
-    def fake_click(*args, **kwargs):
-        nonlocal clicked
-        clicked = True
-        return {"clicked": True}
-
-    monkeypatch.setattr(action_api.input_controller, "click_point", fake_click)
-
-    response = action_api.execute_recognition_plan(ExecuteRecognitionPlanRequest(goal="点击此处测试"))
+    response = action_api.execute_recognition_plan(ExecuteRecognitionPlanRequest(goal="Click Learn more link", app_name="edge", dry_run=True))
 
     assert response.success is False
     assert response.error is not None
     assert response.error.code == "pre_click_rejected"
-    assert clicked is False
-    assert response.data["execution_path"]["action_executed"] is False
+    assert response.data["recognition_plan_overlay"]["output_path"] == "blocked-overlay.png"
+    assert response.data["fallback_plan"]["contract_version"] == "execute_fallback_plan_v1"
+    fallback_steps = response.data["fallback_plan"]["steps"]
+    scroll_step = next(step for step in fallback_steps if step["name"] == "request_scroll")
+    assert scroll_step["endpoint"] == "POST /action/scroll"
+    assert scroll_step["suggested_request"] == {
+        "direction": "down",
+        "wheel_clicks": 4,
+        "dry_run": False,
+        "enable_verification": True,
+    }
+    assert scroll_step["next_after_success"]["endpoint"] == "POST /action/execute_recognition_plan"
+    assert response.data["agent_execution_guidance"]["next_action"] == "recover_with_fallback_plan"
+    assert response.data["agent_step_result"]["status"] == "blocked"
+    assert response.data["agent_step_result"]["failure_reason"] == "pre_click_rejected"
+    assert response.data["agent_step_result"]["next_agent_action"] == "recover_with_fallback_plan"
 
 
-def test_execute_recognition_plan_blocks_saved_image_execution_without_override(monkeypatch) -> None:
+def test_execute_mode_trace_write_policy_can_disable_action_trace(monkeypatch) -> None:
+    monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: _bound_window())
+    monkeypatch.setattr(action_api.screenshot_service, "capture_window", lambda **kwargs: _capture())
+    monkeypatch.setattr(
+        action_api,
+        "_run_recognition_plan_for_execution",
+        lambda request: APIResponse(success=True, message="ok", data=VisionResultData(result=_allowed_plan(goal=request.goal)).model_dump(), error=None),
+    )
+    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", lambda trace_path: {"output_path": "overlay.png"})
+
+    def fail_write_trace(**kwargs):
+        raise AssertionError("write_trace must not run when write_policy.trace is false")
+
+    monkeypatch.setattr(action_api, "write_trace", fail_write_trace)
+
+    response = action_api.execute_recognition_plan(
+        ExecuteRecognitionPlanRequest(
+            goal="Click Learn more link",
+            app_name="edge",
+            dry_run=True,
+            write_policy={"path_graph": False, "element_memory": True, "trace": False},
+        )
+    )
+
+    assert response.success is True
+    assert response.data["result"]["trace_path"] is None
+
+
+def test_execute_mode_blocks_real_saved_image_without_override(monkeypatch) -> None:
+    monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: None)
     monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/saved-image-blocked.json")
 
     response = action_api.execute_recognition_plan(
         ExecuteRecognitionPlanRequest(
-            goal="点击此处测试",
-            image_path="old-capture.png",
+            goal="Click Learn more link",
+            app_name="edge",
+            image_path="capture.png",
             capture_live=False,
+            dry_run=False,
         )
     )
 
@@ -643,74 +376,3 @@ def test_execute_recognition_plan_blocks_saved_image_execution_without_override(
     assert response.error is not None
     assert response.error.code == "saved_image_execution_not_allowed"
     assert response.data["trace_path"].endswith("saved-image-blocked.json")
-
-
-def test_execute_confirmed_point_dry_run_validates_bbox_without_clicking(monkeypatch) -> None:
-    monkeypatch.setattr(
-        action_api.window_manager,
-        "get_bound_window",
-        lambda: SimpleNamespace(
-            handle=5,
-            title="QQ",
-            rect=SimpleNamespace(left=100, top=200, right=920, bottom=1503),
-        ),
-    )
-    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/confirmed-dry-run.json")
-    clicked = False
-
-    def fake_click(*args, **kwargs):
-        nonlocal clicked
-        clicked = True
-        return {"clicked": True}
-
-    monkeypatch.setattr(action_api.input_controller, "click_point", fake_click)
-
-    response = action_api.execute_confirmed_point(
-        ExecuteConfirmedPointRequest(
-            x=800,
-            y=26,
-            bbox=ROIModel(x=792, y=13, width=16, height=26),
-            label="close window button",
-            dry_run=True,
-        )
-    )
-
-    assert response.success is True
-    assert clicked is False
-    assert response.data["result"]["confirmed_point"] == {"x": 800, "y": 26}
-    assert response.data["result"]["execution_path"]["action_executed"] is False
-
-
-def test_execute_confirmed_point_dispatches_real_window_relative_click(monkeypatch) -> None:
-    monkeypatch.setattr(
-        action_api.window_manager,
-        "get_bound_window",
-        lambda: SimpleNamespace(
-            handle=5,
-            title="QQ",
-            rect=SimpleNamespace(left=100, top=200, right=920, bottom=1503),
-        ),
-    )
-    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/confirmed-real-click.json")
-    clicked: dict[str, int] = {}
-
-    def fake_click(x: int, y: int, **kwargs):
-        clicked.update({"x": x, "y": y})
-        return {"clicked": True, "window_point": {"x": x, "y": y}}
-
-    monkeypatch.setattr(action_api.input_controller, "click_point", fake_click)
-
-    response = action_api.execute_confirmed_point(
-        ExecuteConfirmedPointRequest(
-            x=800,
-            y=26,
-            bbox=ROIModel(x=792, y=13, width=16, height=26),
-            label="close window button",
-            dry_run=False,
-        )
-    )
-
-    assert response.success is True
-    assert clicked == {"x": 800, "y": 26}
-    assert response.data["result"]["execution_path"]["coordinate_source"] == "human_confirmed_candidate_center"
-    assert response.data["result"]["execution_path"]["action_executed"] is True

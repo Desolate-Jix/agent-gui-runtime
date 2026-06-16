@@ -1,0 +1,26 @@
+{
+  "success": false,
+  "message": "Screen observation failed",
+  "data": {
+    "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260613-225139-813200__observe-screen__google-news.json",
+    "timings": {
+      "contract_version": "runtime_timing_v1",
+      "started_at": "2026-06-13T22:51:39.813200",
+      "ended_at": "2026-06-13T22:51:39.813200",
+      "total_ms": 0.035,
+      "steps": [
+        {
+          "name": "resolve_image_source",
+          "started_at": "2026-06-13T22:51:39.813200",
+          "capture_live": true,
+          "ended_at": "2026-06-13T22:51:39.813200",
+          "elapsed_ms": 0.013
+        }
+      ]
+    }
+  },
+  "error": {
+    "code": "observe_screen_failed",
+    "details": "No bound window available to focus"
+  }
+}

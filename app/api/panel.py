@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, PlainTextResponse, Response
 from PIL import Image, ImageDraw
 from pydantic import BaseModel, Field
 
+from app.core.runtime_artifacts import write_trace
 from app.core.model_server import load_model_profiles
 from app.core.model_server import model_base_url
 from app.models.response import APIResponse, ErrorModel
@@ -83,9 +84,12 @@ def panel_file(path: str) -> Response:
 
 
 @router.get("/panel/list_traces", include_in_schema=False)
-def list_traces(limit: int = 50, include_tests: bool = False) -> APIResponse:
+def list_traces(limit: int = 50, include_tests: bool = False, mode: Optional[str] = None) -> APIResponse:
     """List recent trace files from logs/traces/."""
     try:
+        mode_filter = str(mode or "").strip().lower()
+        if mode_filter not in {"", "learn", "execute"}:
+            return APIResponse(success=False, message="Invalid trace mode", data=None, error=ErrorModel(code="invalid_trace_mode", details=mode))
         traces_dir = ROOT_DIR / "logs" / "traces"
         if not traces_dir.exists():
             return APIResponse(success=True, message="No traces yet", data={"traces": []}, error=None)
@@ -98,11 +102,15 @@ def list_traces(limit: int = 50, include_tests: bool = False) -> APIResponse:
                     continue
                 if not include_tests and _trace_references_pytest_temp(tf):
                     continue
+                meta = _trace_list_metadata(tf)
+                if mode_filter and meta.get("agent_mode") != mode_filter:
+                    continue
                 stat = tf.stat()
                 files.append({
                     "name": tf.name,
                     "path": str(tf.resolve()),
                     "category": category_dir.name,
+                    **meta,
                     "size": stat.st_size,
                     "modified": stat.st_mtime,
                 })
@@ -110,6 +118,27 @@ def list_traces(limit: int = 50, include_tests: bool = False) -> APIResponse:
         return APIResponse(success=True, message=f"{len(files)} traces", data={"traces": files[:limit]}, error=None)
     except Exception as exc:
         return APIResponse(success=False, message="List failed", data=None, error=ErrorModel(code="trace_list_failed", details=str(exc)))
+
+
+def _trace_list_metadata(path: Path) -> dict[str, str]:
+    parts = path.stem.split("__")
+    operation = parts[1] if len(parts) > 1 else ""
+    metadata: dict[str, str] = {"operation": operation, "agent_mode": "", "mode_contract_version": "", "contract_version": ""}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return metadata
+    trace = payload.get("result") if isinstance(payload, dict) and isinstance(payload.get("result"), dict) else payload
+    request = payload.get("request") if isinstance(payload, dict) and isinstance(payload.get("request"), dict) else {}
+    if isinstance(trace, dict):
+        metadata["agent_mode"] = str(trace.get("agent_mode") or request.get("agent_mode") or "")
+        metadata["mode_contract_version"] = str(trace.get("mode_contract_version") or "")
+        metadata["contract_version"] = str(trace.get("contract_version") or "")
+        plan = trace.get("recognition_plan")
+        if not metadata["agent_mode"] and isinstance(plan, dict):
+            metadata["agent_mode"] = str(plan.get("agent_mode") or "")
+            metadata["mode_contract_version"] = str(plan.get("mode_contract_version") or "")
+    return metadata
 
 
 def _trace_references_pytest_temp(path: Path) -> bool:
@@ -179,6 +208,17 @@ def inspect_trace(path: str) -> APIResponse:
         parse_result = trace.get("parse_result") if isinstance(trace.get("parse_result"), dict) else {}
         if not parse_result and isinstance(plan.get("parse_result"), dict):
             parse_result = plan["parse_result"]
+        model_io = _first_dict(
+            trace.get("model_io"),
+            plan.get("model_io"),
+            raw_trace.get("model_io") if isinstance(raw_trace, dict) else None,
+            ((trace.get("degraded_reason") or {}).get("model_io")) if isinstance(trace.get("degraded_reason"), dict) else None,
+            ((trace.get("raw_refs") or {}).get("model_io")) if isinstance(trace.get("raw_refs"), dict) else None,
+        )
+        if model_io:
+            parsed["model_io_status"] = model_io.get("status") or ""
+            parsed["model_io_attempt_count"] = int(model_io.get("attempt_count") or len(model_io.get("attempts") or []))
+            parsed["sections"]["model_io"] = model_io
 
         if trace.get("output_path") or trace.get("candidate_count") is not None or trace.get("decision_count") is not None:
             parsed["sections"]["overlay"] = {
@@ -192,6 +232,12 @@ def inspect_trace(path: str) -> APIResponse:
             }
             if not parsed["contract"]:
                 parsed["contract"] = "recognition_overlay_trace"
+        coordinate_preview = trace.get("recognition_plan_overlay")
+        if isinstance(coordinate_preview, dict):
+            parsed["sections"]["coordinate_preview"] = coordinate_preview
+            parsed["coordinate_preview_output_path"] = coordinate_preview.get("output_path") or coordinate_preview.get("overlay_path")
+            parsed["coordinate_preview_candidate_count"] = coordinate_preview.get("candidate_count")
+            parsed["coordinate_preview_decision_count"] = coordinate_preview.get("decision_count")
 
         # OCR result
         ocr = parse_result.get("ocr_result") or trace.get("ocr_result") or {}
@@ -253,9 +299,39 @@ def inspect_trace(path: str) -> APIResponse:
                 state_match = path_graph_recall.get("state_match") if isinstance(path_graph_recall.get("state_match"), dict) else {}
                 parsed["path_graph_recall_state"] = state_match.get("state_id") or ""
                 parsed["sections"]["path_recall"] = path_graph_recall
+            fallback_plan = trace.get("fallback_plan")
+            if isinstance(fallback_plan, dict):
+                parsed["fallback_status"] = fallback_plan.get("status") or ""
+                parsed["fallback_step_count"] = len(fallback_plan.get("steps") or []) if isinstance(fallback_plan.get("steps"), list) else 0
+                parsed["fallback_reason"] = fallback_plan.get("failure_reason") or ""
+                parsed["sections"]["fallback"] = fallback_plan
+            agent_guidance = trace.get("agent_execution_guidance")
+            if isinstance(agent_guidance, dict):
+                parsed["agent_guidance_status"] = agent_guidance.get("status") or ""
+                parsed["agent_guidance_next_action"] = agent_guidance.get("next_action") or ""
+                parsed["sections"]["agent_guidance"] = agent_guidance
+            memory_writeback = trace.get("element_memory_writeback")
+            if isinstance(memory_writeback, dict):
+                parsed["memory_status"] = memory_writeback.get("status") or ""
+                parsed["memory_transition_id"] = memory_writeback.get("transition_id") or ""
+                parsed["sections"]["memory"] = memory_writeback
 
             parsed["sections"]["click"] = plan.get("execution") or trace.get("click_result") or trace.get("execution_path") or {}
             parsed["sections"]["verify"] = trace.get("post_click_verification") or trace.get("semantic_post_click_verification") or {}
+
+        path_map_review = trace.get("path_map_review")
+        if isinstance(path_map_review, dict) and "path_review" not in parsed["sections"]:
+            summary = path_map_review.get("summary") if isinstance(path_map_review.get("summary"), dict) else {}
+            parsed["path_map_review_additions"] = int(summary.get("addition_count") or len(path_map_review.get("additions") or []))
+            parsed["path_map_review_removals"] = int(summary.get("removal_count") or len(path_map_review.get("removals") or []))
+            parsed["path_map_review_status"] = path_map_review.get("status") or ""
+            learn_all_targets = trace.get("learn_all_targets") if isinstance(trace.get("learn_all_targets"), dict) else {}
+            parsed["sections"]["path_review"] = {
+                **path_map_review,
+                "learn_all_targets": learn_all_targets,
+                "coordinate_overlay_path": trace.get("coordinate_overlay_path") or learn_all_targets.get("overlay_path"),
+                "coordinate_overlay": trace.get("coordinate_overlay") or learn_all_targets.get("overlay"),
+            }
 
         # Screen understanding
         screen = trace.get("screen_reading") or trace.get("parse_result", {}).get("screen_reading") or {}
@@ -265,6 +341,29 @@ def inspect_trace(path: str) -> APIResponse:
             parsed["screen_summary"] = str(screen.get("screen_summary") or "")[:400]
             parsed["state_guess"] = screen.get("state_guess") or ""
             parsed["sections"]["screen"] = screen
+            screen_inventory = _first_dict(
+                trace.get("screen_inventory"),
+                plan.get("screen_inventory"),
+                parse_result.get("screen_inventory"),
+                screen.get("screen_inventory"),
+            )
+            if screen_inventory and screen_inventory.get("contract_version") == "screen_inventory_v1":
+                inventory_summary = screen_inventory.get("summary") if isinstance(screen_inventory.get("summary"), dict) else {}
+                quality = screen_inventory.get("quality") if isinstance(screen_inventory.get("quality"), dict) else {}
+                parsed["screen_inventory_action_count"] = int(
+                    inventory_summary.get("available_action_count")
+                    or len(screen_inventory.get("available_actions") or [])
+                )
+                parsed["screen_inventory_page_element_count"] = int(
+                    inventory_summary.get("page_element_count")
+                    or len(screen_inventory.get("page_elements") or [])
+                )
+                parsed["screen_inventory_card_count"] = int(
+                    inventory_summary.get("card_count")
+                    or len(screen_inventory.get("cards") or [])
+                )
+                parsed["screen_inventory_coordinate_coverage"] = quality.get("coordinate_coverage")
+                parsed["sections"]["screen_inventory"] = screen_inventory
 
         # Observe-screen semantic map / navigation path seed.
         screen_map = trace.get("screen_map") or {}
@@ -280,6 +379,18 @@ def inspect_trace(path: str) -> APIResponse:
                 or ""
             )
             parsed["sections"]["path_map"] = screen_map
+        path_graph_deep_review = trace.get("path_graph_deep_review")
+        if isinstance(path_graph_deep_review, dict):
+            summary = path_graph_deep_review.get("summary") if isinstance(path_graph_deep_review.get("summary"), dict) else {}
+            parsed["path_graph_deep_status"] = path_graph_deep_review.get("status") or ""
+            parsed["path_graph_deep_additions"] = int(summary.get("missing_text_addition_count") or 0)
+            parsed["path_graph_deep_removals"] = int(summary.get("duplicate_count") or 0)
+            parsed["path_graph_deep_output_count"] = int(summary.get("output_candidate_count") or 0)
+            parsed["sections"]["path_deep"] = {
+                **path_graph_deep_review,
+                "path_graph_delta": trace.get("path_graph_delta") if isinstance(trace.get("path_graph_delta"), dict) else None,
+                "element_memory_init_plan": trace.get("element_memory_init_plan") if isinstance(trace.get("element_memory_init_plan"), dict) else None,
+            }
 
         # Execution
         exec_path = trace.get("execution_path") or {}
@@ -423,6 +534,17 @@ def apply_panel_model_profile(request: PanelApplyModelProfileRequest) -> APIResp
             "model_name": str(profile.get("model_name") or Path(str(profile.get("model_path") or "")).name),
             "endpoint": profile.get("endpoint") or None,
         }
+        for key in (
+            "profile_id",
+            "runtime",
+            "output_contract",
+            "provider_mode",
+            "input_format",
+            "supports_ocr_anchors",
+            "model_path",
+        ):
+            if key in profile:
+                target[key] = profile.get(key)
         vision[target_key] = target
         if request.stage == "locate":
             vision["local"] = dict(target)
@@ -508,10 +630,40 @@ def panel_model_test(request: PanelModelTestRequest) -> APIResponse:
                 response_status = response.status
         except urllib.error.HTTPError as exc:
             raw_text = exc.read().decode("utf-8", errors="replace")
+            model_io = {
+                "contract_version": "model_io_trace_v1",
+                "status": "failed",
+                "provider": "panel_model_test",
+                "model_name": model_name,
+                "endpoint": endpoint,
+                "attempt_count": 1,
+                "attempts": [
+                    {
+                        "status": "failed",
+                        "http_status": exc.code,
+                        "model_io": {
+                            "contract_version": "model_io_attempt_v1",
+                            "input": {
+                                "prompt": request.prompt,
+                                "image_path": request.image_path,
+                                "max_tokens": request.max_tokens,
+                                "temperature": request.temperature,
+                            },
+                            "output": {"raw_text": raw_text, "raw_response": raw_text},
+                        },
+                    }
+                ],
+            }
+            trace_path = write_trace(
+                category="vision",
+                operation="panel_model_test",
+                payload={"success": False, "request": request.model_dump(), "model_io": model_io, "error": raw_text},
+                name_hint=request.profile_id,
+            )
             return APIResponse(
                 success=False,
                 message="Model request failed",
-                data={"endpoint": endpoint, "status": exc.code, "raw_response": raw_text},
+                data={"endpoint": endpoint, "status": exc.code, "raw_response": raw_text, "model_io": model_io, "trace_path": trace_path},
                 error=ErrorModel(code="panel_model_test_http_error", details=raw_text[:1000]),
             )
 
@@ -520,6 +672,41 @@ def panel_model_test(request: PanelModelTestRequest) -> APIResponse:
         except json.JSONDecodeError:
             raw_json = None
         content = _extract_chat_content(raw_json) if isinstance(raw_json, dict) else raw_text
+        model_io = {
+            "contract_version": "model_io_trace_v1",
+            "status": "success",
+            "provider": "panel_model_test",
+            "model_name": model_name,
+            "endpoint": endpoint,
+            "raw_text": content,
+            "raw_response": raw_json if raw_json is not None else raw_text,
+            "attempt_count": 1,
+            "attempts": [
+                {
+                    "status": "success",
+                    "http_status": response_status,
+                    "model_io": {
+                        "contract_version": "model_io_attempt_v1",
+                        "input": {
+                            "prompt": request.prompt,
+                            "image_path": request.image_path,
+                            "max_tokens": request.max_tokens,
+                            "temperature": request.temperature,
+                        },
+                        "output": {
+                            "raw_text": content,
+                            "raw_response": raw_json if raw_json is not None else raw_text,
+                        },
+                    },
+                }
+            ],
+        }
+        trace_path = write_trace(
+            category="vision",
+            operation="panel_model_test",
+            payload={"success": True, "request": request.model_dump(), "model_io": model_io},
+            name_hint=request.profile_id,
+        )
         return APIResponse(
             success=True,
             message="Model response received",
@@ -532,6 +719,8 @@ def panel_model_test(request: PanelModelTestRequest) -> APIResponse:
                 "content": content,
                 "raw_response": raw_json if raw_json is not None else raw_text,
                 "image_attached": image_payload is not None,
+                "model_io": model_io,
+                "trace_path": trace_path,
             },
             error=None,
         )
@@ -730,11 +919,15 @@ def _trace_flow_stages(parsed: dict[str, Any]) -> list[dict[str, Any]]:
         add("overlay", "Overlay", _overlay_label(sections.get("overlay"))),
         add("ocr", "OCR", f"{parsed.get('ocr_count') or 0} anchors"),
         add("vision", "Vision", str(parsed.get("model_provider") or parsed.get("provider") or "")),
+        add("model_io", "Model IO", _model_io_label(sections.get("model_io")), "done" if parsed.get("model_io_status") != "failed" else "error"),
         add("screen", "Screen", str(parsed.get("state_guess") or "")),
+        add("screen_inventory", "Inventory", _screen_inventory_label(sections.get("screen_inventory"))),
         add("path_map", "Path Map", _path_map_label(sections.get("path_map"))),
+        add("path_deep", "Path Deep", _path_deep_label(sections.get("path_deep"))),
         add("path_recall", "Path Recall", _path_recall_label(sections.get("path_recall"))),
         add("path_review", "Path Review", _path_review_label(sections.get("path_review"))),
         add("candidates", "Candidates", f"{parsed.get('candidates') or 0} returned"),
+        add("coordinate_preview", "Coordinate Preview", _coordinate_preview_label(sections.get("coordinate_preview"))),
         add(
             "gate",
             "Gate",
@@ -742,13 +935,16 @@ def _trace_flow_stages(parsed: dict[str, Any]) -> list[dict[str, Any]]:
             "done" if parsed.get("gate_allowed") is True else "blocked" if parsed.get("gate_allowed") is False else "done",
         ),
         add("target", "Target", _point_label(parsed.get("selected_point"))) if parsed.get("selected_point") else None,
+        add("agent_guidance", "Agent Guidance", _agent_guidance_label(sections.get("agent_guidance"))),
         add("click", "Action", "executed" if parsed.get("action_executed") else "dry-run"),
+        add("memory", "Memory", _memory_label(sections.get("memory"))),
         add(
             "verify",
             "Verify",
             "PASS" if parsed.get("verified") is True else "FAIL" if parsed.get("verified") is False else "",
             "done" if parsed.get("verified") is not False else "error",
         ),
+        add("fallback", "Fallback", _fallback_label(sections.get("fallback")), "blocked"),
         add("error", "Error", f"{len(parsed.get('errors') or [])} error(s)", "error"),
         add("timings", "Timings", str(parsed.get("total_time") or "")),
     ]
@@ -787,6 +983,13 @@ def _meaningful_trace_section(raw: Any) -> bool:
     return True
 
 
+def _first_dict(*values: Any) -> dict[str, Any] | None:
+    for value in values:
+        if isinstance(value, dict):
+            return value
+    return None
+
+
 def _overlay_label(raw: Any) -> str:
     if not isinstance(raw, dict):
         return ""
@@ -816,6 +1019,47 @@ def _path_map_label(raw: Any) -> str:
     return ", ".join(parts)
 
 
+def _screen_inventory_label(raw: Any) -> str:
+    if not isinstance(raw, dict):
+        return ""
+    summary = raw.get("summary") if isinstance(raw.get("summary"), dict) else {}
+    action_count = summary.get("available_action_count")
+    if action_count is None and isinstance(raw.get("available_actions"), list):
+        action_count = len(raw["available_actions"])
+    page_count = summary.get("page_element_count")
+    if page_count is None and isinstance(raw.get("page_elements"), list):
+        page_count = len(raw["page_elements"])
+    card_count = summary.get("card_count")
+    if card_count is None and isinstance(raw.get("cards"), list):
+        card_count = len(raw["cards"])
+    parts = []
+    if action_count is not None:
+        parts.append(f"{action_count} actions")
+    if page_count is not None:
+        parts.append(f"{page_count} text")
+    if card_count is not None:
+        parts.append(f"{card_count} cards")
+    return ", ".join(parts)
+
+
+def _model_io_label(raw: Any) -> str:
+    if not isinstance(raw, dict):
+        return ""
+    status = str(raw.get("status") or "")
+    attempts = raw.get("attempt_count")
+    if attempts is None and isinstance(raw.get("attempts"), list):
+        attempts = len(raw["attempts"])
+    provider = str(raw.get("provider") or raw.get("model_name") or "")
+    parts = []
+    if status:
+        parts.append(status)
+    if attempts is not None:
+        parts.append(f"{attempts} attempt(s)")
+    if provider:
+        parts.append(provider)
+    return ", ".join(parts)
+
+
 def _path_recall_label(raw: Any) -> str:
     if not isinstance(raw, dict):
         return ""
@@ -832,6 +1076,21 @@ def _path_recall_label(raw: Any) -> str:
     return ", ".join(parts)
 
 
+def _path_deep_label(raw: Any) -> str:
+    if not isinstance(raw, dict):
+        return ""
+    summary = raw.get("summary") if isinstance(raw.get("summary"), dict) else {}
+    additions = summary.get("missing_text_addition_count")
+    removals = summary.get("duplicate_count")
+    if additions is None:
+        delta = raw.get("path_graph_delta") if isinstance(raw.get("path_graph_delta"), dict) else {}
+        additions = len(delta.get("additions") or []) if isinstance(delta.get("additions"), list) else 0
+    if removals is None:
+        delta = raw.get("path_graph_delta") if isinstance(raw.get("path_graph_delta"), dict) else {}
+        removals = len(delta.get("removals") or []) if isinstance(delta.get("removals"), list) else 0
+    return f"+{additions} / -{removals}"
+
+
 def _path_review_label(raw: Any) -> str:
     if not isinstance(raw, dict):
         return ""
@@ -843,6 +1102,48 @@ def _path_review_label(raw: Any) -> str:
     if removals is None:
         removals = len(raw.get("removals") or []) if isinstance(raw.get("removals"), list) else 0
     return f"+{additions} / -{removals}"
+
+
+def _coordinate_preview_label(raw: Any) -> str:
+    if not isinstance(raw, dict):
+        return ""
+    count = raw.get("candidate_count")
+    decisions = raw.get("decision_count")
+    selected = raw.get("selected_candidate_id")
+    parts = []
+    if count is not None:
+        parts.append(f"{count} candidates")
+    if decisions is not None:
+        parts.append(f"{decisions} decisions")
+    if selected:
+        parts.append(str(selected)[:24])
+    return ", ".join(parts)
+
+
+def _agent_guidance_label(raw: Any) -> str:
+    if not isinstance(raw, dict):
+        return ""
+    return ", ".join(str(item) for item in [raw.get("status"), raw.get("next_action")] if item)
+
+
+def _memory_label(raw: Any) -> str:
+    if not isinstance(raw, dict):
+        return ""
+    status = str(raw.get("status") or "")
+    transition_id = str(raw.get("transition_id") or "")
+    return ", ".join(part for part in [status, transition_id[:12]] if part)
+
+
+def _fallback_label(raw: Any) -> str:
+    if not isinstance(raw, dict):
+        return ""
+    steps = raw.get("steps") if isinstance(raw.get("steps"), list) else []
+    reason = str(raw.get("failure_reason") or "")
+    parts = []
+    if reason:
+        parts.append(reason)
+    parts.append(f"{len(steps)} step(s)")
+    return ", ".join(parts)
 
 
 def _compact_value(value: Any) -> str:
@@ -863,8 +1164,19 @@ def _stage_summary(stage_id: str, parsed: dict[str, Any]) -> str:
         return f"OCR anchors: {parsed.get('ocr_count') or 0}"
     if stage_id == "vision":
         return str(parsed.get("screen_summary") or parsed.get("model_provider") or "")
+    if stage_id == "model_io":
+        status = parsed.get("model_io_status") or ""
+        attempts = parsed.get("model_io_attempt_count") or 0
+        return f"Model IO {status}: {attempts} attempt(s) with full input prompt and raw model output in raw JSON.".strip()
     if stage_id == "screen":
         return str(parsed.get("screen_summary") or parsed.get("state_guess") or "")
+    if stage_id == "screen_inventory":
+        actions = parsed.get("screen_inventory_action_count") or 0
+        page_elements = parsed.get("screen_inventory_page_element_count") or 0
+        cards = parsed.get("screen_inventory_card_count") or 0
+        coverage = parsed.get("screen_inventory_coordinate_coverage")
+        coverage_text = f"; coordinate coverage: {coverage:.2f}" if isinstance(coverage, (int, float)) else ""
+        return f"Screen inventory: {actions} action(s), {page_elements} page element(s), {cards} card(s){coverage_text}"
     if stage_id == "path_map":
         count = parsed.get("path_map_count") or 0
         state_id = parsed.get("path_map_state_id") or ""
@@ -879,21 +1191,42 @@ def _stage_summary(stage_id: str, parsed: dict[str, Any]) -> str:
         state_id = parsed.get("path_graph_recall_state") or ""
         suffix = f"; state: {state_id}" if state_id else ""
         return f"Path recall {status}: {count} candidate(s){suffix}".strip()
+    if stage_id == "path_deep":
+        status = parsed.get("path_graph_deep_status") or ""
+        output_count = parsed.get("path_graph_deep_output_count") or 0
+        additions = parsed.get("path_graph_deep_additions") or 0
+        removals = parsed.get("path_graph_deep_removals") or 0
+        return f"Path deep {status}: {output_count} candidate(s), +{additions}, -{removals}".strip()
     if stage_id == "path_review":
         additions = parsed.get("path_map_review_additions") or 0
         removals = parsed.get("path_map_review_removals") or 0
         status = parsed.get("path_map_review_status") or ""
         return f"Path review {status}: +{additions}, -{removals}".strip()
+    if stage_id == "coordinate_preview":
+        path = parsed.get("coordinate_preview_output_path") or ""
+        count = parsed.get("coordinate_preview_candidate_count")
+        decisions = parsed.get("coordinate_preview_decision_count")
+        return f"Pre-rendered coordinate overlay: {count} candidate(s), {decisions} decision(s). {path}".strip()
     if stage_id == "candidates":
         return f"Candidates returned: {parsed.get('candidates') or 0}; recommendation: {bool(parsed.get('has_recommendation'))}"
     if stage_id == "gate":
         return str(parsed.get("gate_reason") or "")
     if stage_id == "target":
         return _point_label(parsed.get("selected_point"))
+    if stage_id == "agent_guidance":
+        return f"{parsed.get('agent_guidance_status') or ''}: {parsed.get('agent_guidance_next_action') or ''}".strip()
     if stage_id == "click":
         return "Action executed" if parsed.get("action_executed") else "Dry run or not executed"
+    if stage_id == "memory":
+        status = parsed.get("memory_status") or ""
+        transition_id = parsed.get("memory_transition_id") or ""
+        return f"ElementMemory writeback {status}: {transition_id}".strip()
     if stage_id == "verify":
         return str(parsed.get("verification_detail") or "")
+    if stage_id == "fallback":
+        reason = parsed.get("fallback_reason") or ""
+        count = parsed.get("fallback_step_count") or 0
+        return f"Fallback planned for {reason}: {count} step(s)".strip()
     if stage_id == "error":
         return "\n".join(parsed.get("errors") or [])
     return ""

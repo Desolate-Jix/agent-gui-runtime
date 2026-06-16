@@ -1,0 +1,2703 @@
+{
+  "success": true,
+  "message": "Learn targets located",
+  "data": {
+    "result": {
+      "contract_version": "target_location_v1",
+      "agent_mode": "learn",
+      "learn_depth": "deep",
+      "mode_contract_version": "learn_screen_deep_v1",
+      "write_policy": {
+        "path_graph": true,
+        "element_memory": false,
+        "trace": true
+      },
+      "goal": "learn all visible controls",
+      "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\google-news-1-microsoft-edge__locate-target__google-news__full-window__20260613-225539-393698.png",
+      "live_capture": {
+        "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\google-news-1-microsoft-edge__locate-target__google-news__full-window__20260613-225539-393698.png",
+        "image_width": 1665,
+        "image_height": 1216,
+        "roi": null,
+        "roi_adjusted": false,
+        "capture_purpose": "locate_target",
+        "window_size": {
+          "width": 1665,
+          "height": 1216
+        }
+      },
+      "recognition_plan": null,
+      "pre_click_decision": null,
+      "selected_click_point": null,
+      "recommended_target": null,
+      "located_bbox": null,
+      "located_point": null,
+      "location_status": "learn_all_targets_ready",
+      "learn_all_targets": {
+        "contract_version": "learn_all_target_locations_v1",
+        "status": "ready",
+        "state_id": "state_e50c40fc3ac853dd",
+        "source_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260613-225538-736648__observe-screen__google-news.json",
+        "image_size": {
+          "width": 1665,
+          "height": 1216
+        },
+        "target_count": 34,
+        "validated_count": 34,
+        "invalid_count": 0,
+        "overlay": {
+          "contract_version": "learn_target_coordinate_overlay_v1",
+          "status": "ready",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\google-news-1-microsoft-edge__locate-target__google-news__full-window__20260613-225539-393698.png",
+          "output_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\state-e50c40fc3ac853dd-learn-targets__learn-target-coordinates__20260613-225539-844351.png",
+          "target_count": 34,
+          "valid_count": 34,
+          "invalid_count": 0
+        },
+        "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\state-e50c40fc3ac853dd-learn-targets__learn-target-coordinates__20260613-225539-844351.png",
+        "targets": [
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_060b7c55",
+            "label": "游戏",
+            "role": "button",
+            "bbox": {
+              "x": 1,
+              "y": 0,
+              "w": 1,
+              "h": 1
+            },
+            "click_point": {
+              "x": 2,
+              "y": 0
+            },
+            "section_id": "browser_chrome",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_5742b36f",
+            "label": "在线好友",
+            "role": "button",
+            "bbox": {
+              "x": 1,
+              "y": 0,
+              "w": 1,
+              "h": 1
+            },
+            "click_point": {
+              "x": 2,
+              "y": 0
+            },
+            "section_id": "browser_chrome",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_codegraph_node_83e0b295",
+            "label": "Codegraph node",
+            "role": "button",
+            "bbox": {
+              "x": 0,
+              "y": 1,
+              "w": 1,
+              "h": 1
+            },
+            "click_point": {
+              "x": 0,
+              "y": 2
+            },
+            "section_id": "browser_chrome",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_codegraph_search_83388e3d",
+            "label": "CodeGraph search",
+            "role": "button",
+            "bbox": {
+              "x": 0,
+              "y": 1,
+              "w": 1,
+              "h": 1
+            },
+            "click_point": {
+              "x": 0,
+              "y": 2
+            },
+            "section_id": "browser_chrome",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_55a10597",
+            "label": "完全访问",
+            "role": "button",
+            "bbox": {
+              "x": 1,
+              "y": 1,
+              "w": 1,
+              "h": 1
+            },
+            "click_point": {
+              "x": 2,
+              "y": 2
+            },
+            "section_id": "browser_chrome",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_9440847a",
+            "label": "语音",
+            "role": "button",
+            "bbox": {
+              "x": 1,
+              "y": 1,
+              "w": 1,
+              "h": 1
+            },
+            "click_point": {
+              "x": 2,
+              "y": 2
+            },
+            "section_id": "browser_chrome",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_99687d46",
+            "label": "音量",
+            "role": "button",
+            "bbox": {
+              "x": 1,
+              "y": 1,
+              "w": 1,
+              "h": 1
+            },
+            "click_point": {
+              "x": 2,
+              "y": 2
+            },
+            "section_id": "browser_chrome",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_c9f83ff2",
+            "label": "关闭",
+            "role": "button",
+            "bbox": {
+              "x": 1,
+              "y": 1,
+              "w": 1,
+              "h": 1
+            },
+            "click_point": {
+              "x": 2,
+              "y": 2
+            },
+            "section_id": "browser_chrome",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_x_jix_af7de6e4",
+            "label": "x_Jix",
+            "role": "button",
+            "bbox": {
+              "x": 1552,
+              "y": 22,
+              "w": 46,
+              "h": 18
+            },
+            "click_point": {
+              "x": 1575,
+              "y": 31
+            },
+            "section_id": "browser_chrome",
+            "source": "top_level.ui.elements",
+            "confidence": 0.8391,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_ba9aaf55",
+            "label": "好友",
+            "role": "button",
+            "bbox": {
+              "x": 1503,
+              "y": 77,
+              "w": 33,
+              "h": 19
+            },
+            "click_point": {
+              "x": 1520,
+              "y": 86
+            },
+            "section_id": "browser_chrome",
+            "source": "top_level.ui.elements",
+            "confidence": 0.8448,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_00e56401",
+            "label": "群组聊天",
+            "role": "button",
+            "bbox": {
+              "x": 1495,
+              "y": 787,
+              "w": 68,
+              "h": 17
+            },
+            "click_point": {
+              "x": 1529,
+              "y": 796
+            },
+            "section_id": "right_sidebar",
+            "source": "top_level.ui.elements",
+            "confidence": 0.8448,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_gifthub_e0aeb41e",
+            "label": "GIFTHub",
+            "role": "button",
+            "bbox": {
+              "x": 1548,
+              "y": 832,
+              "w": 61,
+              "h": 17
+            },
+            "click_point": {
+              "x": 1578,
+              "y": 840
+            },
+            "section_id": "right_sidebar",
+            "source": "top_level.ui.elements",
+            "confidence": 0.8446,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_0",
+            "label": "这轮接口链路成功，坐标校验是35/35，但模型补漏审查失败了：上下文12.571tokens超过8B模型8.192context。所",
+            "role": "news_card",
+            "bbox": {
+              "x": 379,
+              "y": 372,
+              "w": 587,
+              "h": 55
+            },
+            "click_point": {
+              "x": 672,
+              "y": 400
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9933,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_3",
+            "label": "里，并给出准确率结论。",
+            "role": "news_card",
+            "bbox": {
+              "x": 380,
+              "y": 417,
+              "w": 182,
+              "h": 53
+            },
+            "click_point": {
+              "x": 471,
+              "y": 444
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9997,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_4",
+            "label": "览器UI元素，不能算干净页面准确率。我会先把这个弹窗关掉，再重跑一次；否则漏检/误检判断会被浏览器浮层污",
+            "role": "news_card",
+            "bbox": {
+              "x": 379,
+              "y": 676,
+              "w": 587,
+              "h": 267
+            },
+            "click_point": {
+              "x": 672,
+              "y": 810
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.998,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_11",
+            "label": "翻译弹窗已关闭。现在重跑干净页面采样。",
+            "role": "news_card",
+            "bbox": {
+              "x": 380,
+              "y": 925,
+              "w": 294,
+              "h": 53
+            },
+            "click_point": {
+              "x": 527,
+              "y": 952
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9992,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_12",
+            "label": "正在运行 Senv:PYTHONIOENCODING='utf-8': @ import json import time import urllib.request from pathlib im..",
+            "role": "news_card",
+            "bbox": {
+              "x": 379,
+              "y": 960,
+              "w": 587,
+              "h": 59
+            },
+            "click_point": {
+              "x": 672,
+              "y": 990
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.955,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_right_sidebar_12",
+            "label": "人类恶显现（Fakel",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 1477,
+              "y": 612,
+              "w": 188,
+              "h": 255
+            },
+            "click_point": {
+              "x": 1571,
+              "y": 740
+            },
+            "section_id": "right_sidebar",
+            "source": "ocr_card_groups",
+            "confidence": 0.9506,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_promo_strip_3",
+            "label": "打开请求大概率已发出，失败是在PowerShell用GBK打印窗口标题里的隐形字符。我不通过控制台打印中文/特殊字",
+            "role": "news_card",
+            "bbox": {
+              "x": 379,
+              "y": 197,
+              "w": 755,
+              "h": 155
+            },
+            "click_point": {
+              "x": 756,
+              "y": 274
+            },
+            "section_id": "promo_strip",
+            "source": "ocr_card_groups",
+            "confidence": 0.9928,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_promo_strip_14",
+            "label": "Slay the Spire 2",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 1556,
+              "y": 259,
+              "w": 109,
+              "h": 106
+            },
+            "click_point": {
+              "x": 1610,
+              "y": 312
+            },
+            "section_id": "promo_strip",
+            "source": "ocr_card_groups",
+            "confidence": 0.9916,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_promo_strip_15",
+            "label": "查看本目录的项目大致情况.3周",
+            "role": "news_card",
+            "bbox": {
+              "x": 0,
+              "y": 243,
+              "w": 237,
+              "h": 119
+            },
+            "click_point": {
+              "x": 118,
+              "y": 302
+            },
+            "section_id": "promo_strip",
+            "source": "ocr_card_groups",
+            "confidence": 0.9781,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_9",
+            "label": "已使用Codegraph",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 398,
+              "y": 100,
+              "w": 140,
+              "h": 20
+            },
+            "click_point": {
+              "x": 468,
+              "y": 110
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9963,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_10",
+            "label": "游戏中",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1503,
+              "y": 113,
+              "w": 47,
+              "h": 18
+            },
+            "click_point": {
+              "x": 1526,
+              "y": 122
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9998,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_11",
+            "label": "it-gui-runtime",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1,
+              "y": 135,
+              "w": 89,
+              "h": 17
+            },
+            "click_point": {
+              "x": 46,
+              "y": 144
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9915,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_12",
+            "label": "打开时我按你之前要求不加3.5秒长等待，只用短等待后再显式绑定/观察。",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 397,
+              "y": 140,
+              "w": 460,
+              "h": 19
+            },
+            "click_point": {
+              "x": 627,
+              "y": 150
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9948,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_13",
+            "label": "ALAN",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1576,
+              "y": 141,
+              "w": 44,
+              "h": 17
+            },
+            "click_point": {
+              "x": 1598,
+              "y": 150
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.996,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_14",
+            "label": "密室逃脱模拟器",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1575,
+              "y": 152,
+              "w": 89,
+              "h": 19
+            },
+            "click_point": {
+              "x": 1620,
+              "y": 162
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9798,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_15",
+            "label": "面板阶段展示",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 0,
+              "y": 167,
+              "w": 86,
+              "h": 17
+            },
+            "click_point": {
+              "x": 43,
+              "y": 176
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9998,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_16",
+            "label": "O",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 204,
+              "y": 169,
+              "w": 13,
+              "h": 13
+            },
+            "click_point": {
+              "x": 210,
+              "y": 176
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.6221,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_17",
+            "label": "Exploring a custon",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1577,
+              "y": 167,
+              "w": 87,
+              "h": 15
+            },
+            "click_point": {
+              "x": 1620,
+              "y": 174
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9982,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_18",
+            "label": "已运行 @ import json, time, urllib.request def post(path, payload, timeout=60): req",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 399,
+              "y": 177,
+              "w": 543,
+              "h": 22
+            },
+            "click_point": {
+              "x": 670,
+              "y": 188
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9835,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_19",
+            "label": "urllib.request.Request('ht",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 950,
+              "y": 184,
+              "w": 154,
+              "h": 10
+            },
+            "click_point": {
+              "x": 1027,
+              "y": 189
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9218,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_20",
+            "label": "bewatermy",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1574,
+              "y": 185,
+              "w": 88,
+              "h": 22
+            },
+            "click_point": {
+              "x": 1618,
+              "y": 196
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.998,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_21",
+            "label": "用途",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 0,
+              "y": 194,
+              "w": 33,
+              "h": 26
+            },
+            "click_point": {
+              "x": 16,
+              "y": 207
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 1.0,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          }
+        ]
+      },
+      "coordinate_overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\state-e50c40fc3ac853dd-learn-targets__learn-target-coordinates__20260613-225539-844351.png",
+      "coordinate_overlay": {
+        "contract_version": "learn_target_coordinate_overlay_v1",
+        "status": "ready",
+        "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\google-news-1-microsoft-edge__locate-target__google-news__full-window__20260613-225539-393698.png",
+        "output_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\state-e50c40fc3ac853dd-learn-targets__learn-target-coordinates__20260613-225539-844351.png",
+        "target_count": 34,
+        "valid_count": 34,
+        "invalid_count": 0
+      },
+      "learn_locate_model_review": {
+        "contract_version": "learn_locate_model_review_v1",
+        "status": "failed",
+        "error": "local vision endpoint failed after 3 attempt(s): local vision endpoint returned HTTP 400: {\"error\":{\"code\":400,\"message\":\"request (11412 tokens) exceeds the available context size (8192 tokens), try increasing it\",\"type\":\"exceed_context_size_error\",\"n_prompt_tokens\":11412,\"n_ctx\":8192}}",
+        "provider_mode": "local_understanding",
+        "model_io": {
+          "contract_version": "model_io_trace_v1",
+          "status": "failed",
+          "provider": "local",
+          "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\google-news-1-microsoft-edge__locate-target__google-news__full-window__20260613-225539-393698.png",
+          "attempt_count": 3,
+          "attempts": [
+            {
+              "tag": "default",
+              "compact_prompt": false,
+              "max_regions": 8,
+              "requested_max_edge": 1280,
+              "status": "failed",
+              "error": "local vision endpoint returned HTTP 400: {\"error\":{\"code\":400,\"message\":\"request (11510 tokens) exceeds the available context size (8192 tokens), try increasing it\",\"type\":\"exceed_context_size_error\",\"n_prompt_tokens\":11510,\"n_ctx\":8192}}"
+            },
+            {
+              "tag": "compact_retry",
+              "compact_prompt": true,
+              "max_regions": 6,
+              "requested_max_edge": 1024,
+              "status": "failed",
+              "error": "local vision endpoint returned HTTP 400: {\"error\":{\"code\":400,\"message\":\"request (11414 tokens) exceeds the available context size (8192 tokens), try increasing it\",\"type\":\"exceed_context_size_error\",\"n_prompt_tokens\":11414,\"n_ctx\":8192}}"
+            },
+            {
+              "tag": "compact_retry_small",
+              "compact_prompt": true,
+              "max_regions": 5,
+              "requested_max_edge": 896,
+              "status": "failed",
+              "error": "local vision endpoint returned HTTP 400: {\"error\":{\"code\":400,\"message\":\"request (11412 tokens) exceeds the available context size (8192 tokens), try increasing it\",\"type\":\"exceed_context_size_error\",\"n_prompt_tokens\":11412,\"n_ctx\":8192}}"
+            }
+          ]
+        },
+        "fallback": "screen_map_candidate_coordinate_validation"
+      },
+      "learn_locate_path_delta": {
+        "contract_version": "learn_locate_path_calibration_delta_v1",
+        "status": "failed",
+        "summary": {
+          "addition_count": 0,
+          "removal_count": 0,
+          "update_count": 0
+        },
+        "additions": [],
+        "removals": [],
+        "updates": [],
+        "candidate_decisions": []
+      },
+      "path_map_review": {
+        "contract_version": "path_map_review_v1",
+        "status": "ready",
+        "source": "screen_map_v1",
+        "review_source": "learn_locate_deep_calibration",
+        "summary": {
+          "addition_count": 34,
+          "validated_count": 34,
+          "invalid_count": 0,
+          "coordinate_overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\state-e50c40fc3ac853dd-learn-targets__learn-target-coordinates__20260613-225539-844351.png",
+          "model_addition_count": 0,
+          "model_removal_count": 0,
+          "model_update_count": 0,
+          "removal_count": 0,
+          "update_count": 0,
+          "kept_count": 0
+        },
+        "additions": [
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_060b7c55",
+            "label": "游戏",
+            "role": "button",
+            "bbox": {
+              "x": 1,
+              "y": 0,
+              "w": 1,
+              "h": 1
+            },
+            "click_point": {
+              "x": 2,
+              "y": 0
+            },
+            "section_id": "browser_chrome",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_5742b36f",
+            "label": "在线好友",
+            "role": "button",
+            "bbox": {
+              "x": 1,
+              "y": 0,
+              "w": 1,
+              "h": 1
+            },
+            "click_point": {
+              "x": 2,
+              "y": 0
+            },
+            "section_id": "browser_chrome",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_codegraph_node_83e0b295",
+            "label": "Codegraph node",
+            "role": "button",
+            "bbox": {
+              "x": 0,
+              "y": 1,
+              "w": 1,
+              "h": 1
+            },
+            "click_point": {
+              "x": 0,
+              "y": 2
+            },
+            "section_id": "browser_chrome",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_codegraph_search_83388e3d",
+            "label": "CodeGraph search",
+            "role": "button",
+            "bbox": {
+              "x": 0,
+              "y": 1,
+              "w": 1,
+              "h": 1
+            },
+            "click_point": {
+              "x": 0,
+              "y": 2
+            },
+            "section_id": "browser_chrome",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_55a10597",
+            "label": "完全访问",
+            "role": "button",
+            "bbox": {
+              "x": 1,
+              "y": 1,
+              "w": 1,
+              "h": 1
+            },
+            "click_point": {
+              "x": 2,
+              "y": 2
+            },
+            "section_id": "browser_chrome",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_9440847a",
+            "label": "语音",
+            "role": "button",
+            "bbox": {
+              "x": 1,
+              "y": 1,
+              "w": 1,
+              "h": 1
+            },
+            "click_point": {
+              "x": 2,
+              "y": 2
+            },
+            "section_id": "browser_chrome",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_99687d46",
+            "label": "音量",
+            "role": "button",
+            "bbox": {
+              "x": 1,
+              "y": 1,
+              "w": 1,
+              "h": 1
+            },
+            "click_point": {
+              "x": 2,
+              "y": 2
+            },
+            "section_id": "browser_chrome",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_c9f83ff2",
+            "label": "关闭",
+            "role": "button",
+            "bbox": {
+              "x": 1,
+              "y": 1,
+              "w": 1,
+              "h": 1
+            },
+            "click_point": {
+              "x": 2,
+              "y": 2
+            },
+            "section_id": "browser_chrome",
+            "source": "top_level.ui.elements",
+            "confidence": 0.585,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_x_jix_af7de6e4",
+            "label": "x_Jix",
+            "role": "button",
+            "bbox": {
+              "x": 1552,
+              "y": 22,
+              "w": 46,
+              "h": 18
+            },
+            "click_point": {
+              "x": 1575,
+              "y": 31
+            },
+            "section_id": "browser_chrome",
+            "source": "top_level.ui.elements",
+            "confidence": 0.8391,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_ba9aaf55",
+            "label": "好友",
+            "role": "button",
+            "bbox": {
+              "x": 1503,
+              "y": 77,
+              "w": 33,
+              "h": 19
+            },
+            "click_point": {
+              "x": 1520,
+              "y": 86
+            },
+            "section_id": "browser_chrome",
+            "source": "top_level.ui.elements",
+            "confidence": 0.8448,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_element_00e56401",
+            "label": "群组聊天",
+            "role": "button",
+            "bbox": {
+              "x": 1495,
+              "y": 787,
+              "w": 68,
+              "h": 17
+            },
+            "click_point": {
+              "x": 1529,
+              "y": 796
+            },
+            "section_id": "right_sidebar",
+            "source": "top_level.ui.elements",
+            "confidence": 0.8448,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "element_gifthub_e0aeb41e",
+            "label": "GIFTHub",
+            "role": "button",
+            "bbox": {
+              "x": 1548,
+              "y": 832,
+              "w": 61,
+              "h": 17
+            },
+            "click_point": {
+              "x": 1578,
+              "y": 840
+            },
+            "section_id": "right_sidebar",
+            "source": "top_level.ui.elements",
+            "confidence": 0.8446,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_0",
+            "label": "这轮接口链路成功，坐标校验是35/35，但模型补漏审查失败了：上下文12.571tokens超过8B模型8.192context。所",
+            "role": "news_card",
+            "bbox": {
+              "x": 379,
+              "y": 372,
+              "w": 587,
+              "h": 55
+            },
+            "click_point": {
+              "x": 672,
+              "y": 400
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9933,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_3",
+            "label": "里，并给出准确率结论。",
+            "role": "news_card",
+            "bbox": {
+              "x": 380,
+              "y": 417,
+              "w": 182,
+              "h": 53
+            },
+            "click_point": {
+              "x": 471,
+              "y": 444
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9997,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_4",
+            "label": "览器UI元素，不能算干净页面准确率。我会先把这个弹窗关掉，再重跑一次；否则漏检/误检判断会被浏览器浮层污",
+            "role": "news_card",
+            "bbox": {
+              "x": 379,
+              "y": 676,
+              "w": 587,
+              "h": 267
+            },
+            "click_point": {
+              "x": 672,
+              "y": 810
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.998,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_11",
+            "label": "翻译弹窗已关闭。现在重跑干净页面采样。",
+            "role": "news_card",
+            "bbox": {
+              "x": 380,
+              "y": 925,
+              "w": 294,
+              "h": 53
+            },
+            "click_point": {
+              "x": 527,
+              "y": 952
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.9992,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_main_content_12",
+            "label": "正在运行 Senv:PYTHONIOENCODING='utf-8': @ import json import time import urllib.request from pathlib im..",
+            "role": "news_card",
+            "bbox": {
+              "x": 379,
+              "y": 960,
+              "w": 587,
+              "h": 59
+            },
+            "click_point": {
+              "x": 672,
+              "y": 990
+            },
+            "section_id": "main_content",
+            "source": "ocr_card_groups",
+            "confidence": 0.955,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_right_sidebar_12",
+            "label": "人类恶显现（Fakel",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 1477,
+              "y": 612,
+              "w": 188,
+              "h": 255
+            },
+            "click_point": {
+              "x": 1571,
+              "y": 740
+            },
+            "section_id": "right_sidebar",
+            "source": "ocr_card_groups",
+            "confidence": 0.9506,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_promo_strip_3",
+            "label": "打开请求大概率已发出，失败是在PowerShell用GBK打印窗口标题里的隐形字符。我不通过控制台打印中文/特殊字",
+            "role": "news_card",
+            "bbox": {
+              "x": 379,
+              "y": 197,
+              "w": 755,
+              "h": 155
+            },
+            "click_point": {
+              "x": 756,
+              "y": 274
+            },
+            "section_id": "promo_strip",
+            "source": "ocr_card_groups",
+            "confidence": 0.9928,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_promo_strip_14",
+            "label": "Slay the Spire 2",
+            "role": "recommendation_item",
+            "bbox": {
+              "x": 1556,
+              "y": 259,
+              "w": 109,
+              "h": 106
+            },
+            "click_point": {
+              "x": 1610,
+              "y": 312
+            },
+            "section_id": "promo_strip",
+            "source": "ocr_card_groups",
+            "confidence": 0.9916,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "card_promo_strip_15",
+            "label": "查看本目录的项目大致情况.3周",
+            "role": "news_card",
+            "bbox": {
+              "x": 0,
+              "y": 243,
+              "w": 237,
+              "h": 119
+            },
+            "click_point": {
+              "x": 118,
+              "y": 302
+            },
+            "section_id": "promo_strip",
+            "source": "ocr_card_groups",
+            "confidence": 0.9781,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_9",
+            "label": "已使用Codegraph",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 398,
+              "y": 100,
+              "w": 140,
+              "h": 20
+            },
+            "click_point": {
+              "x": 468,
+              "y": 110
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9963,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_10",
+            "label": "游戏中",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1503,
+              "y": 113,
+              "w": 47,
+              "h": 18
+            },
+            "click_point": {
+              "x": 1526,
+              "y": 122
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9998,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_11",
+            "label": "it-gui-runtime",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1,
+              "y": 135,
+              "w": 89,
+              "h": 17
+            },
+            "click_point": {
+              "x": 46,
+              "y": 144
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9915,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_12",
+            "label": "打开时我按你之前要求不加3.5秒长等待，只用短等待后再显式绑定/观察。",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 397,
+              "y": 140,
+              "w": 460,
+              "h": 19
+            },
+            "click_point": {
+              "x": 627,
+              "y": 150
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9948,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_13",
+            "label": "ALAN",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1576,
+              "y": 141,
+              "w": 44,
+              "h": 17
+            },
+            "click_point": {
+              "x": 1598,
+              "y": 150
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.996,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_14",
+            "label": "密室逃脱模拟器",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1575,
+              "y": 152,
+              "w": 89,
+              "h": 19
+            },
+            "click_point": {
+              "x": 1620,
+              "y": 162
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9798,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_15",
+            "label": "面板阶段展示",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 0,
+              "y": 167,
+              "w": 86,
+              "h": 17
+            },
+            "click_point": {
+              "x": 43,
+              "y": 176
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9998,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_16",
+            "label": "O",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 204,
+              "y": 169,
+              "w": 13,
+              "h": 13
+            },
+            "click_point": {
+              "x": 210,
+              "y": 176
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.6221,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_17",
+            "label": "Exploring a custon",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1577,
+              "y": 167,
+              "w": 87,
+              "h": 15
+            },
+            "click_point": {
+              "x": 1620,
+              "y": 174
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9982,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_18",
+            "label": "已运行 @ import json, time, urllib.request def post(path, payload, timeout=60): req",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 399,
+              "y": 177,
+              "w": 543,
+              "h": 22
+            },
+            "click_point": {
+              "x": 670,
+              "y": 188
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9835,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_19",
+            "label": "urllib.request.Request('ht",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 950,
+              "y": 184,
+              "w": 154,
+              "h": 10
+            },
+            "click_point": {
+              "x": 1027,
+              "y": 189
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.9218,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_20",
+            "label": "bewatermy",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 1574,
+              "y": 185,
+              "w": 88,
+              "h": 22
+            },
+            "click_point": {
+              "x": 1618,
+              "y": 196
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 0.998,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          },
+          {
+            "contract_version": "learn_target_location_v1",
+            "candidate_id": "ocr_text_21",
+            "label": "用途",
+            "role": "nav_text_action",
+            "bbox": {
+              "x": 0,
+              "y": 194,
+              "w": 33,
+              "h": 26
+            },
+            "click_point": {
+              "x": 16,
+              "y": 207
+            },
+            "section_id": "page_header",
+            "source": "ocr_text_actions",
+            "confidence": 1.0,
+            "description": "",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 1665,
+                "height": 1216
+              },
+              "reasons": []
+            }
+          }
+        ],
+        "removals": [],
+        "updates": [],
+        "kept": [],
+        "candidate_decisions": [],
+        "model_review": {
+          "contract_version": "learn_locate_model_review_v1",
+          "status": "failed",
+          "error": "local vision endpoint failed after 3 attempt(s): local vision endpoint returned HTTP 400: {\"error\":{\"code\":400,\"message\":\"request (11412 tokens) exceeds the available context size (8192 tokens), try increasing it\",\"type\":\"exceed_context_size_error\",\"n_prompt_tokens\":11412,\"n_ctx\":8192}}",
+          "provider_mode": "local_understanding",
+          "model_io": {
+            "contract_version": "model_io_trace_v1",
+            "status": "failed",
+            "provider": "local",
+            "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\google-news-1-microsoft-edge__locate-target__google-news__full-window__20260613-225539-393698.png",
+            "attempt_count": 3,
+            "attempts": [
+              {
+                "tag": "default",
+                "compact_prompt": false,
+                "max_regions": 8,
+                "requested_max_edge": 1280,
+                "status": "failed",
+                "error": "local vision endpoint returned HTTP 400: {\"error\":{\"code\":400,\"message\":\"request (11510 tokens) exceeds the available context size (8192 tokens), try increasing it\",\"type\":\"exceed_context_size_error\",\"n_prompt_tokens\":11510,\"n_ctx\":8192}}"
+              },
+              {
+                "tag": "compact_retry",
+                "compact_prompt": true,
+                "max_regions": 6,
+                "requested_max_edge": 1024,
+                "status": "failed",
+                "error": "local vision endpoint returned HTTP 400: {\"error\":{\"code\":400,\"message\":\"request (11414 tokens) exceeds the available context size (8192 tokens), try increasing it\",\"type\":\"exceed_context_size_error\",\"n_prompt_tokens\":11414,\"n_ctx\":8192}}"
+              },
+              {
+                "tag": "compact_retry_small",
+                "compact_prompt": true,
+                "max_regions": 5,
+                "requested_max_edge": 896,
+                "status": "failed",
+                "error": "local vision endpoint returned HTTP 400: {\"error\":{\"code\":400,\"message\":\"request (11412 tokens) exceeds the available context size (8192 tokens), try increasing it\",\"type\":\"exceed_context_size_error\",\"n_prompt_tokens\":11412,\"n_ctx\":8192}}"
+              }
+            ]
+          },
+          "fallback": "screen_map_candidate_coordinate_validation"
+        }
+      },
+      "observe_trace_reuse": {
+        "status": "ready",
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260613-225538-736648__observe-screen__google-news.json",
+        "state_id": "state_e50c40fc3ac853dd",
+        "candidate_count": 34,
+        "anchor_count": 79,
+        "anchor_source": "observe_trace_texts"
+      },
+      "execution_path": {
+        "action_executed": false,
+        "learn_all_targets_used": true,
+        "target_count": 34,
+        "coordinate_source": "screen_map_v1.candidates",
+        "ocr_anchor_reused_from_observe": true,
+        "ocr_anchor_reuse_source": "observe_trace_texts",
+        "ocr_anchor_reuse_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260613-225538-736648__observe-screen__google-news.json",
+        "agent_must_call_for_click": "POST /action/execute_recognition_plan"
+      },
+      "timings": {
+        "contract_version": "runtime_timing_v1",
+        "started_at": "2026-06-13T22:55:38.760981",
+        "ended_at": "2026-06-13T22:55:39.903723",
+        "total_ms": 1142.562,
+        "steps": [
+          {
+            "name": "resolve_image_source",
+            "started_at": "2026-06-13T22:55:38.760981",
+            "capture_live": true,
+            "ended_at": "2026-06-13T22:55:39.431657",
+            "elapsed_ms": 669.911
+          },
+          {
+            "name": "load_observe_trace_reuse",
+            "started_at": "2026-06-13T22:55:39.431657",
+            "has_observe_trace": true,
+            "ended_at": "2026-06-13T22:55:39.434577",
+            "elapsed_ms": 3.489
+          },
+          {
+            "name": "learn_locate_model_review",
+            "started_at": "2026-06-13T22:55:39.434577",
+            "enabled": true,
+            "ended_at": "2026-06-13T22:55:39.843377",
+            "elapsed_ms": 408.936
+          },
+          {
+            "name": "learn_locate_apply_model_review",
+            "started_at": "2026-06-13T22:55:39.843377",
+            "status": "failed",
+            "ended_at": "2026-06-13T22:55:39.843377",
+            "elapsed_ms": 0.018
+          },
+          {
+            "name": "learn_all_targets_from_screen_map",
+            "started_at": "2026-06-13T22:55:39.843377",
+            "candidate_count": 34,
+            "ended_at": "2026-06-13T22:55:39.903723",
+            "elapsed_ms": 60.123
+          }
+        ]
+      },
+      "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260613-225539-903723__locate-target__google-news.json"
+    }
+  },
+  "error": null
+}

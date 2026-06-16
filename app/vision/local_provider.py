@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import tempfile
 import time
 from dataclasses import dataclass
@@ -77,6 +78,7 @@ class LocalVisionProvider:
         parsed: dict[str, Any] | None = None
         attempt_records: list[dict[str, Any]] = []
         last_error: Exception | None = None
+        last_raw_text = ""
 
         for attempt in self._build_attempt_plan(original_image_size, task=req.task):
             attempt_record = {
@@ -100,6 +102,15 @@ class LocalVisionProvider:
             except Exception as exc:
                 attempt_record["status"] = "failed"
                 attempt_record["error"] = str(exc)
+                diagnostics = getattr(exc, "diagnostics", None)
+                if isinstance(diagnostics, dict):
+                    attempt_record.update(diagnostics)
+                    diagnostic_io = diagnostics.get("model_io")
+                    if isinstance(diagnostic_io, dict) and isinstance(diagnostic_io.get("raw_text"), str):
+                        last_raw_text = diagnostic_io["raw_text"]
+                if raw_text:
+                    last_raw_text = raw_text
+                    attempt_record["raw_text_preview"] = self._raw_text_preview(raw_text)
                 attempt_records.append(attempt_record)
                 last_error = exc
 
@@ -107,7 +118,19 @@ class LocalVisionProvider:
             summary = f"local vision endpoint failed after {len(attempt_records)} attempt(s)"
             if last_error is not None:
                 summary = f"{summary}: {last_error}"
-            raise RuntimeError(summary) from last_error
+            if last_raw_text:
+                summary = f"{summary}; raw_text_preview={self._raw_text_preview(last_raw_text)}"
+            final_error = RuntimeError(summary)
+            final_error.diagnostics = {
+                "contract_version": "model_io_trace_v1",
+                "status": "failed",
+                "provider": "local",
+                "model_name": self.model_name,
+                "image_path": str(image_path),
+                "attempt_count": len(attempt_records),
+                "attempts": attempt_records,
+            }
+            raise final_error from last_error
 
         if len(attempt_records) > 1:
             notes.append(f"provider_retry_count={len(attempt_records) - 1}")
@@ -128,6 +151,11 @@ class LocalVisionProvider:
         normalized = normalizer.normalize(parsed, "local", image_size=original_image_size.to_dict())
         normalized.raw_text = raw_text
         normalized.raw_response = {
+            "contract_version": "provider_model_trace_v1",
+            "provider": "local",
+            "model_name": self.model_name,
+            "image_path": str(image_path),
+            "raw_text": raw_text,
             "model_json": parsed,
             "endpoint_response": raw_response,
             "attempts": attempt_records,
@@ -144,7 +172,11 @@ class LocalVisionProvider:
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are a GUI screenshot parser. Return valid JSON only.",
+                    "content": (
+                        "You are a GUI screenshot parser. Return one valid JSON object only. "
+                        "Use double-quoted keys and string values, put commas between every field and array item, "
+                        "escape inner quotes and newlines inside strings, and never use trailing commas."
+                    ),
                 },
                 {
                     "role": "user",
@@ -213,6 +245,12 @@ class LocalVisionProvider:
             return "\n".join(parts).strip()
         raise RuntimeError("local vision endpoint returned unsupported message content")
 
+    def _raw_text_preview(self, text: str, *, limit: int = 300) -> str:
+        compact = " ".join(str(text or "").split())
+        if len(compact) <= limit:
+            return compact
+        return compact[:limit] + "..."
+
     def _parse_json_object(self, text: str) -> dict[str, Any]:
         cleaned = text.strip()
         if cleaned.startswith("```"):
@@ -221,20 +259,17 @@ class LocalVisionProvider:
                 cleaned = cleaned[4:].strip()
         parse_error: json.JSONDecodeError | None = None
         for candidate in self._json_object_candidates(cleaned):
-            try:
-                parsed = json.loads(candidate)
-                break
-            except json.JSONDecodeError as exc:
-                parse_error = exc
-                repaired = self._escape_inner_string_quotes(candidate)
-                if repaired == candidate:
-                    continue
+            for repaired, notes in self._json_repair_candidates(candidate):
                 try:
                     parsed = json.loads(repaired)
-                    self._append_parse_note(parsed, "json_repair=escaped_inner_string_quotes")
+                    for note in notes:
+                        self._append_parse_note(parsed, note)
                     break
-                except json.JSONDecodeError as repaired_exc:
-                    parse_error = repaired_exc
+                except json.JSONDecodeError as exc:
+                    parse_error = exc
+            else:
+                continue
+            break
         else:
             if parse_error is None:
                 raise RuntimeError("local vision endpoint did not return a JSON object")
@@ -252,6 +287,141 @@ class LocalVisionProvider:
             if extracted != text:
                 candidates.append(extracted)
         return candidates
+
+    def _json_repair_candidates(self, text: str) -> list[tuple[str, list[str]]]:
+        variants: list[tuple[str, list[str]]] = [(text, [])]
+        repair_steps = [
+            (self._remove_trailing_commas, "json_repair=removed_trailing_commas"),
+            (self._escape_raw_newlines_in_strings, "json_repair=escaped_raw_string_newlines"),
+            (self._escape_inner_string_quotes, "json_repair=escaped_inner_string_quotes"),
+            (self._insert_missing_commas_before_keys, "json_repair=inserted_missing_commas_before_keys"),
+            (self._close_truncated_regions_payload, "json_repair=closed_truncated_regions_payload"),
+        ]
+        for repair_fn, note in repair_steps:
+            snapshot = list(variants)
+            for candidate, notes in snapshot:
+                repaired = repair_fn(candidate)
+                if repaired != candidate:
+                    variants.append((repaired, [*notes, note]))
+        combined = self._insert_missing_commas_before_keys(
+            self._escape_inner_string_quotes(
+                self._escape_raw_newlines_in_strings(
+                    self._remove_trailing_commas(text)
+                )
+            )
+        )
+        if combined != text:
+            variants.append(
+                (
+                    combined,
+                    [
+                        "json_repair=combined_structural_repairs",
+                    ],
+                )
+            )
+        deduped: list[tuple[str, list[str]]] = []
+        seen: set[str] = set()
+        for candidate, notes in variants:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            deduped.append((candidate, notes))
+        return deduped
+
+    def _remove_trailing_commas(self, text: str) -> str:
+        return re.sub(r",(\s*[}\]])", r"\1", text)
+
+    def _insert_missing_commas_before_keys(self, text: str) -> str:
+        # Repair model outputs like: `"screen_summary":"x"\n"state_guess":"y"`.
+        return re.sub(
+            r'([}\]"0-9eE]|true|false|null)(\s*\n\s*)"([A-Za-z_][A-Za-z0-9_]*)"\s*:',
+            r'\1,\2"\3":',
+            text,
+        )
+
+    def _close_truncated_regions_payload(self, text: str) -> str:
+        if '"regions"' not in text or '"targets"' in text and '"observers"' in text and text.rstrip().endswith("}"):
+            return text
+        regions_key = text.find('"regions"')
+        array_start = text.find("[", regions_key)
+        if array_start < 0:
+            return text
+        last_item_end = self._last_complete_array_item_end(text, array_start)
+        if last_item_end is None:
+            return text
+        prefix = text[: last_item_end + 1].rstrip()
+        prefix = prefix.rstrip(",")
+        return f'{prefix}\n  ],\n  "targets": [],\n  "observers": [],\n  "notes": ["json_repair=truncated_regions_payload"]\n}}'
+
+    def _last_complete_array_item_end(self, text: str, array_start: int) -> int | None:
+        stack: list[str] = ["["]
+        in_string = False
+        escape = False
+        last_item_end: int | None = None
+        index = array_start + 1
+        while index < len(text):
+            char = text[index]
+            if in_string:
+                if escape:
+                    escape = False
+                elif char == "\\":
+                    escape = True
+                elif char == '"':
+                    in_string = False
+                index += 1
+                continue
+            if char == '"':
+                in_string = True
+            elif char in "[{":
+                stack.append(char)
+            elif char in "]}":
+                if not stack:
+                    return last_item_end
+                opener = stack[-1]
+                if (opener, char) not in {("[", "]"), ("{", "}")}:
+                    return last_item_end
+                stack.pop()
+                if char == "}" and stack == ["["]:
+                    last_item_end = index
+                if not stack:
+                    return last_item_end
+            index += 1
+        return last_item_end
+
+    def _escape_raw_newlines_in_strings(self, text: str) -> str:
+        output: list[str] = []
+        in_string = False
+        escape = False
+        for char in text:
+            if not in_string:
+                output.append(char)
+                if char == '"':
+                    in_string = True
+                    escape = False
+                continue
+            if escape:
+                output.append(char)
+                escape = False
+                continue
+            if char == "\\":
+                output.append(char)
+                escape = True
+                continue
+            if char == '"':
+                output.append(char)
+                in_string = False
+                continue
+            if char == "\n":
+                output.append("\\n")
+                continue
+            if char == "\r":
+                output.append("\\r")
+                continue
+            if char == "\t":
+                output.append("\\t")
+                continue
+            output.append(char)
+        return "".join(output)
 
     def _escape_inner_string_quotes(self, text: str) -> str:
         output: list[str] = []
@@ -390,17 +560,57 @@ class LocalVisionProvider:
             grid_overlay_spacing=grid_spacing,
         )
         try:
+            max_tokens = self._max_output_tokens(req)
             raw_response = self._call_openai_compatible_endpoint(
                 inference_path,
                 prompt,
-                max_tokens=self._max_output_tokens(req),
+                max_tokens=max_tokens,
             )
             raw_text = self._extract_message_text(raw_response)
-            parsed = self._parse_json_object(raw_text)
-            parsed = self._remap_to_original_image(parsed, inference_size, original_image_size)
+            try:
+                parsed_model_json = self._parse_json_object(raw_text)
+            except Exception as exc:
+                error = RuntimeError(f"{exc}; raw_text_preview={self._raw_text_preview(raw_text)}")
+                error.diagnostics = {
+                    "raw_text_preview": self._raw_text_preview(raw_text),
+                    "model_io": self._model_io_attempt_payload(
+                        req=req,
+                        prompt=prompt,
+                        image_path=image_path,
+                        inference_path=inference_path,
+                        inference_size=inference_size,
+                        original_image_size=original_image_size,
+                        max_tokens=max_tokens,
+                        raw_text=raw_text,
+                        raw_response=raw_response,
+                        parsed_model_json=None,
+                        runtime_normalized_json=None,
+                        parse_status="failed",
+                        parse_error=str(exc),
+                        attempt=attempt,
+                    ),
+                }
+                raise error from exc
+            parsed = self._remap_to_original_image(parsed_model_json, inference_size, original_image_size)
             attempt_meta = {
                 "inference_image_size": inference_size.to_dict(),
                 "original_image_size": original_image_size.to_dict(),
+                "model_io": self._model_io_attempt_payload(
+                    req=req,
+                    prompt=prompt,
+                    image_path=image_path,
+                    inference_path=inference_path,
+                    inference_size=inference_size,
+                    original_image_size=original_image_size,
+                    max_tokens=max_tokens,
+                    raw_text=raw_text,
+                    raw_response=raw_response,
+                    parsed_model_json=parsed_model_json,
+                    runtime_normalized_json=parsed,
+                    parse_status="success",
+                    parse_error=None,
+                    attempt=attempt,
+                ),
             }
             if grid_spacing is not None:
                 attempt_meta["grid_overlay"] = {
@@ -439,6 +649,64 @@ class LocalVisionProvider:
             if temp_dir is not None:
                 temp_dir.cleanup()
 
+    def _model_io_attempt_payload(
+        self,
+        *,
+        req: VisionAnalyzeRequest,
+        prompt: str,
+        image_path: Path,
+        inference_path: Path,
+        inference_size: ImageSize,
+        original_image_size: ImageSize,
+        max_tokens: int,
+        raw_text: str,
+        raw_response: dict[str, Any] | None,
+        parsed_model_json: dict[str, Any] | None,
+        runtime_normalized_json: dict[str, Any] | None,
+        parse_status: str,
+        parse_error: str | None,
+        attempt: _InferenceAttempt,
+    ) -> dict[str, Any]:
+        return {
+            "contract_version": "model_io_attempt_v1",
+            "status": parse_status,
+            "provider": "local",
+            "model_name": self.model_name,
+            "endpoint": self._chat_completions_url(),
+            "task": req.task,
+            "app_name": req.app_name,
+            "goal": req.goal,
+            "state_hint": req.state_hint,
+            "provider_mode": req.provider_mode,
+            "attempt": {
+                "tag": attempt.tag,
+                "compact_prompt": attempt.compact_prompt,
+                "max_regions": attempt.max_regions,
+                "requested_max_edge": attempt.max_edge,
+            },
+            "input": {
+                "image_path": str(image_path),
+                "inference_image_path": str(inference_path),
+                "original_image_size": original_image_size.to_dict(),
+                "inference_image_size": inference_size.to_dict(),
+                "max_tokens": max_tokens,
+                "prompt": prompt,
+            },
+            "output": {
+                "raw_text": raw_text,
+                "raw_response": raw_response,
+                "parsed_model_json": parsed_model_json,
+                "runtime_normalized_json": runtime_normalized_json,
+                "parse_error": parse_error,
+            },
+            "raw_text": raw_text,
+            "raw_text_preview": self._raw_text_preview(raw_text),
+            "raw_response": raw_response,
+            "parsed_model_json": parsed_model_json,
+            "runtime_normalized_json": runtime_normalized_json,
+            "parse_error": parse_error,
+        }
+
     def _max_output_tokens(self, req: VisionAnalyzeRequest) -> int:
         metadata = req.metadata or {}
         configured = metadata.get("max_output_tokens")
@@ -447,7 +715,7 @@ class LocalVisionProvider:
                 return max(256, min(4096, int(configured)))
             except (TypeError, ValueError):
                 pass
-        return 1024 if req.task == "observe_screen" else 2048
+        return 2048 if req.task == "observe_screen" else 2048
 
     def _request_for_inference_prompt(
         self,

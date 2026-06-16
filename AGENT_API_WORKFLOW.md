@@ -323,6 +323,34 @@ Agent decision:
 - Use `dry_run: true` when checking payload shape without typing.
 - For browser searches, prefer `/apps/open` with `url` when the target URL is already known.
 
+### 4.6 Scroll When Visible Information Is Incomplete
+
+Use this only when the target window is bound and the agent needs to reveal more content before retrying the same goal. The main trigger is `fallback_plan.steps[].name == "request_scroll"` from Execute Mode.
+
+```http
+POST /action/scroll
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "direction": "down",
+  "wheel_clicks": 4,
+  "dry_run": false,
+  "enable_verification": true
+}
+```
+
+Agent decision:
+
+- Treat scroll as a reveal/navigation action, not a click permission.
+- Use the suggested request from `fallback_plan` when present; otherwise choose `direction: "down"` for more lower-page content or `direction: "up"` to return to earlier content.
+- The scroll point defaults to the center of the bound window. Provide `x` and `y` only when a specific scrollable pane has been visually reviewed.
+- After a real scroll, inspect `post_scroll_verification` and trace evidence, then rerun the same `POST /action/execute_recognition_plan` goal on the new screenshot.
+- The retry must still pass `pre_click_decision_v1`; never use scroll as a shortcut to dispatch a click.
+
 ### 5. Read Runtime State
 
 ```http
@@ -464,7 +492,7 @@ Expected response:
 Agent decision:
 
 - Use this response to understand what the interface contains and what controls can probably do.
-- Use `agent_mode="learn"` with `learn_depth="fast"` for quick map drafting. Reserve `learn_depth="deep"` for the later full refine / semantic review / ElementMemory initialization pass.
+- Use `agent_mode="learn"` with `learn_depth="fast"` for quick map drafting. Use `learn_depth="deep"` when the same observe call should produce `path_graph_deep_review_v1`, `path_graph_delta_v1`, and an `element_memory_init_plan_v1`; the current deep pass is deterministic review/delta planning, while full second-model semantic refinement remains a later expansion.
 - Respect `write_policy`: PathGraph writes are allowed in Learn by default, while Execute defaults to reading PathGraph without mutating it. Use `trace=false` only for preview/smoke paths where you intentionally do not want a trace artifact.
 - Use `screen_map_v1` as the semantic page/action map for the existing path graph. It may include bbox and click-point hints, but those are observation evidence, not executable coordinates.
 - Read `screen_map.sections[]` first to understand coarse layout such as top navigation, promotion strip, main content, lower content, and floating overlays; each candidate may carry `section_id`.
@@ -472,7 +500,7 @@ Agent decision:
 - `ocr_card_groups` candidates are card-level discovery hints. Their bbox intentionally covers a whole card/module so the map can reason about entries before Locate chooses an exact click target.
 - `nav_text_action` candidates are intentionally generated from valid OCR text in the top navigation section so missed navigation labels still appear in the map.
 - The observe trace preserves `screen_map_v1`; `/panel/inspect_trace` renders it as a `Path Map` stage so trace review can inspect the same path candidates, bbox hints, and click-point evidence.
-- Execute/RecognitionPlan requests should carry the latest matching `observe_trace_path` when available. The runtime will reuse OCR anchors and emit `path_graph_recall_v1` before full candidate ranking, giving the model a top-k map recall plus local OCR ROI hints.
+- Execute/RecognitionPlan requests should carry the latest matching `observe_trace_path` when available. The runtime will reuse OCR anchors and emit `path_graph_recall_v1` before full candidate ranking, then merge eligible recalled map candidates into `candidate_result` so local OCR grounding and `pre_click_decision_v1` can verify them.
 - Prefer `provider_mode: local_understanding` here. It is intended for the smaller local model that summarizes the whole screen for agent planning.
 - Use `suggested_state_hint` as the next precise-localization `state_hint` default. It comes from the observation model's concise `state_guess`.
 - When a concrete candidate is chosen, pass its label/goal hint plus the current `screen_map.state_id` context into the precise localization step.
@@ -516,7 +544,7 @@ Request:
 
 When Locate, RecognitionPlan, or Execute follows an Observe on the same screenshot/window state, pass the Observe `trace_path` as `observe_trace_path`. The runtime reuses matching `ocr_anchors` from that trace instead of running the recognition-plan full-image OCR step again, and records the reuse status in `observe_trace_reuse`.
 When the Observe trace also contains `screen_map_v1`, Locate returns `path_map_review_v1`. The review compares the current Locate AI/candidate evidence with the previous path map, proposes `additions` for missing precise candidates, and proposes scoped `removals` only for same-label or high-overlap path candidates that Locate has replaced.
-RecognitionPlan/Execute also return `path_graph_recall_v1` when `screen_map_v1` is available. This is the Execute-mode state-match and PathGraph recall stage: it ranks map candidates against the current goal and provides `local_ocr_roi` hints for the later local grounding step.
+RecognitionPlan/Execute also return `path_graph_recall_v1` when `screen_map_v1` is available. This is the Execute-mode state-match and PathGraph recall stage: it ranks map candidates against the current goal, provides `local_ocr_roi` hints, and promotes safe recalled controls into the same candidate list used by local grounding and the pre-click gate.
 
 Expected response:
 
@@ -580,6 +608,10 @@ Agent decision:
 
 - Treat this as precise no-click localization.
 - In Execute Mode, keep `write_policy.path_graph=false` unless this request is intentionally reviewing or correcting the map. Successful execution should write ElementMemory, not rewrite structural PathGraph by default.
+- Verified real Execute Mode clicks write `execute_transition_memory_v1` when `write_policy.element_memory=true`. Dry-runs, pre-click blocks, failed recognition, and failed post-click verification do not write execution memory.
+- In VISTA Direct Execute Mode, read `recognition_plan.screen_inventory` / `parse_result.execute_fast_inventory` as the fast "what can be operated" inventory for the upper agent. When no Observe inventory exists, the runtime may build this from the bound window's UIA snapshot and filter browser chrome before VISTA grounding. This inventory is planning evidence only; it does not grant click permission.
+- When execution cannot safely complete, read `fallback_plan`. It is an `execute_fallback_plan_v1` decision record that lists local rescan / PathGraph review / scroll-to-reveal / full OCR refresh / gated model regrounding steps. It never grants permission to click; the next attempt must still pass `pre_click_decision_v1`.
+- If `fallback_plan.steps[]` contains `request_scroll`, call `POST /action/scroll` first, verify the scroll evidence, then rerun the same goal through `POST /action/execute_recognition_plan`.
 - Prefer `provider_mode: local_grounding` here. It is intended for the larger local model that performs precise OCR-assisted target localization.
 - Use `pre_click_decision.allowed` as the quality gate.
 - Read `located_bbox` and `located_point` as the large model's no-click target proposal. For a visual-only icon it may be present while `selected_click_point` is null and `location_status` is `requires_pre_click_confirmation`.
@@ -630,17 +662,18 @@ Internal runtime steps:
 1. Capture the currently bound live window.
 2. Call `POST /vision/recognition_plan` internally with the captured `image_path` and latest `observe_trace_path` when present.
 3. If the Observe trace matches, reuse `ocr_anchors_v1` and build `path_graph_recall_v1`; otherwise run full-image OCR and build anchors.
-4. Retain `ocr_anchors_v1` from the reused or freshly scanned OCR evidence.
-5. For `click_target`, attach a bounded `relation_matrix_compact` prompt projection: every selected row keeps OCR text and bbox coordinates, plus compact inclusion/exclusion policy rows.
-6. Normalize model regions into `vision_regions_v1`.
-7. Fuse vision and OCR into `page_structure_v1`.
-8. Build `screen_reading_v1`.
-9. Rank candidates through `candidate_rank_v1`.
-10. Run local narrow search on candidate crops.
-11. Build `pre_click_decision_v1`.
-12. Render a recognition-plan overlay when a trace is available.
-13. Save an `approved_recognition_plan_v1` record when the pre-click gate allows the selected point.
-14. Return the selected point and `approved_plan_id` without clicking because `dry_run == true`.
+4. Convert safe recalled PathGraph controls into `RecognitionCandidate` objects, dedupe them with visual/page-structure candidates, and send the merged top-k through local OCR grounding.
+5. Retain `ocr_anchors_v1` from the reused or freshly scanned OCR evidence.
+6. For `click_target`, attach a bounded `relation_matrix_compact` prompt projection: every selected row keeps OCR text and bbox coordinates, plus compact inclusion/exclusion policy rows.
+7. Normalize model regions into `vision_regions_v1`.
+8. Fuse vision and OCR into `page_structure_v1`.
+9. Build `screen_reading_v1`.
+10. Rank candidates through `candidate_rank_v1`.
+11. Run local narrow search on candidate crops.
+12. Build `pre_click_decision_v1`.
+13. Render a recognition-plan overlay when a trace is available.
+14. Save an `approved_recognition_plan_v1` record when the pre-click gate allows the selected point.
+15. Return the selected point and `approved_plan_id` without clicking because `dry_run == true`.
 
 Expected response shape:
 
@@ -706,6 +739,25 @@ Expected response shape:
         "dry_run": true,
         "coordinate_source": "pre_click_decision_v1.selected_click_point",
         "action_executed": false
+      },
+      "agent_step_result": {
+        "contract_version": "agent_step_result_v1",
+        "status": "dry_run_ready",
+        "dry_run": true,
+        "action_executed": false,
+        "approved_plan_id": "86a4a4f0e6f24e70b3f58f26f285c943",
+        "selected_click_point": {"x": 221, "y": 119},
+        "evidence": {
+          "input_image_path": "artifacts/screenshots/...",
+          "recognition_plan_trace_path": "logs/traces/vision/...",
+          "coordinate_overlay_path": "artifacts/review-overlays/...",
+          "action_trace_path": "logs/traces/actions/..."
+        },
+        "post_click": {
+          "enabled": false,
+          "verified": null
+        },
+        "next_agent_action": "execute_approved_plan"
       }
     }
   },
@@ -717,10 +769,11 @@ Agent decision:
 
 - Use `data.result.pre_click_decision.allowed` as the click gate.
 - Use `data.result.selected_click_point` as the only executable coordinate.
+- Use `data.result.agent_step_result` as the compact single-step result for the upper agent. Execute Mode does not run the next step internally; the agent reads this result and decides whether to call Execute again.
 - Do not use raw `vision_regions.regions[*].bbox` as a click coordinate.
 - If `ocr_anchor_grounding_used == false`, treat the plan as lower confidence and inspect `ocr_anchor_grounding_fallback_used`.
 - The default 48-row prompt budget is not guaranteed to fit every dense page. A saved Seek/Serato test exhausted the anchored context and safely retried without prompt anchors; retained OCR then grounded the reviewed text-card point.
-- If `pre_click_decision.allowed == false`, do not click. Re-observe, narrow the ROI, improve the goal text, or ask the user.
+- If `pre_click_decision.allowed == false`, do not click. Read `fallback_plan`; when it asks for `request_scroll`, scroll the bound window and rerun the same goal before widening to heavier recovery.
 
 ### Operator-Reviewed Coordinate Test Path
 
@@ -746,7 +799,7 @@ With `dry_run: false`, this route dispatches that exact point through the real i
 
 ### 9. Execute The Click Only After The Plan Is Accepted
 
-If the dry run is accepted and the user/agent wants to execute, reuse the `approved_plan_id` returned by the dry run. The runtime validates that the same bound window is still active, the goal matches, the approval has not expired, and the approved click point is still inside the window. It then dispatches the click and runs post-click verification without running the large vision model again.
+If the dry run is accepted and the user/agent wants to execute, reuse the `approved_plan_id` returned by the dry run. The runtime validates that the same bound window handle is still active, the goal matches, the approval has not expired, and the approved click point is still inside the click-coordinate window. The approved record stores `coordinate_window_size` from the live capture (`live_capture.window_size` / image size) before falling back to the bound-window rectangle, because Windows can report minimized placeholder rectangles such as `-32000, -32000, 160x28` even when the screenshot and click coordinate space are valid. It then dispatches the click and runs post-click verification without running the large vision model again.
 
 ```http
 POST /action/execute_recognition_plan
@@ -815,6 +868,26 @@ Expected response:
       "approved_plan_reuse_validation": {
         "valid": true
       },
+      "post_click_verification": {
+        "verified": true,
+        "before": {"image_path": "artifacts/screenshots/...before.png"},
+        "after": {"image_path": "artifacts/screenshots/...after.png"},
+        "diff": {"diff_image_path": "artifacts/screenshots/...diff.png"}
+      },
+      "agent_step_result": {
+        "contract_version": "agent_step_result_v1",
+        "status": "executed_verified",
+        "action_executed": true,
+        "selected_click_point": {"x": 221, "y": 119},
+        "post_click": {
+          "enabled": true,
+          "verified": true,
+          "before_image_path": "artifacts/screenshots/...before.png",
+          "after_image_path": "artifacts/screenshots/...after.png",
+          "diff_image_path": "artifacts/screenshots/...diff.png"
+        },
+        "next_agent_action": "done"
+      },
       "recognition_plan_trace_path": "logs/traces/vision/...",
       "trace_path": "logs/traces/actions/..."
     }
@@ -828,6 +901,14 @@ Agent decision:
 - Prefer `approved_plan_id` reuse for the real click. Calling `dry_run: false` without an approved plan is still supported, but it re-runs recognition and is slower.
 - Treat the action as successful only when `success == true` and post-click verification did not reject the result.
 - Save or report both the recognition trace and action trace.
+
+External single-step smoke:
+
+```powershell
+python scripts\smoke_execute_single_step.py --goal "click Learn more" --app-name edge
+```
+
+This command first captures the currently bound window through `/state/capture_window`, then runs a dry-run Execute call and prints `agent_step_result_v1` evidence. It does not click unless `--execute` is supplied.
 
 ### Optional Instruction Learning
 
