@@ -1,0 +1,158 @@
+{
+  "contract_version": "visual_asset_v1",
+  "asset_set_id": "seek_visual_assets_v1",
+  "source_app_id": "seek",
+  "source_report_path": "logs\\smoke\\seek_mvp_readonly_after_parser_title_filter_5jobs_20260617.json",
+  "source_trace_path": null,
+  "assets": [
+    {
+      "asset_id": "seek:visual:apply_button",
+      "label": "Apply button",
+      "role": "button",
+      "region_id": "job_detail",
+      "anchors": [
+        "Apply"
+      ],
+      "source": {
+        "capture_required": true,
+        "crop_path": null,
+        "perceptual_hash": null,
+        "embedding_ref": null
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      }
+    },
+    {
+      "asset_id": "seek:visual:quick_apply_button",
+      "label": "Quick Apply button",
+      "role": "button",
+      "region_id": "job_detail",
+      "anchors": [
+        "Quick Apply"
+      ],
+      "source": {
+        "capture_required": true,
+        "crop_path": null,
+        "perceptual_hash": null,
+        "embedding_ref": null
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      }
+    },
+    {
+      "asset_id": "seek:visual:save_icon",
+      "label": "Save icon",
+      "role": "icon_button",
+      "region_id": "job_detail",
+      "anchors": [
+        "Save",
+        "bookmark"
+      ],
+      "source": {
+        "capture_required": true,
+        "crop_path": null,
+        "perceptual_hash": null,
+        "embedding_ref": null
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      }
+    },
+    {
+      "asset_id": "seek:visual:job_card_shape",
+      "label": "Job card shape",
+      "role": "card",
+      "region_id": "results_list",
+      "anchors": [
+        "title",
+        "company",
+        "location"
+      ],
+      "source": {
+        "capture_required": true,
+        "crop_path": null,
+        "perceptual_hash": null,
+        "embedding_ref": null
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      }
+    },
+    {
+      "asset_id": "seek:visual:selected_card_highlight",
+      "label": "Selected card highlight",
+      "role": "selection_state",
+      "region_id": "results_list",
+      "anchors": [
+        "selected border"
+      ],
+      "source": {
+        "capture_required": true,
+        "crop_path": null,
+        "perceptual_hash": null,
+        "embedding_ref": null
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      }
+    },
+    {
+      "asset_id": "seek:visual:results_scrollbar",
+      "label": "Results list scrollbar",
+      "role": "scrollbar",
+      "region_id": "results_list",
+      "anchors": [
+        "left list scrollbar"
+      ],
+      "source": {
+        "capture_required": true,
+        "crop_path": null,
+        "perceptual_hash": null,
+        "embedding_ref": null
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      }
+    },
+    {
+      "asset_id": "seek:visual:detail_scrollbar",
+      "label": "Job detail scrollbar",
+      "role": "scrollbar",
+      "region_id": "job_detail",
+      "anchors": [
+        "right detail scrollbar"
+      ],
+      "source": {
+        "capture_required": true,
+        "crop_path": null,
+        "perceptual_hash": null,
+        "embedding_ref": null
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      }
+    }
+  ],
+  "matching_policy": {
+    "asset_match_is_evidence_only": true,
+    "requires_current_screenshot": true,
+    "requires_text_or_layout_corrobation": true,
+    "requires_pre_click_gate_for_actions": true
+  }
+}

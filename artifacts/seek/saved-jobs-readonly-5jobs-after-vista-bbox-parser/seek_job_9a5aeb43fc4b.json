@@ -1,0 +1,281 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_9a5aeb43fc4b",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.73,
+    "job_id": "seek_job_9a5aeb43fc4b",
+    "title": "Senior Software Engineer",
+    "company": "Absolute IT Limited",
+    "positive_evidence": [
+      "matched_skills: SQL, software engineer",
+      "matched_target_roles: Software Engineer",
+      "location_matches: Auckland CBD,Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_dd93aaf98bf1",
+    "title": "Senior Software Engineer",
+    "company": "Absolute IT Limited",
+    "location": "Auckland CBD, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": "$150,000 - $160,000 per annum",
+    "classification": "Senior Software Engineer",
+    "card_bbox": {
+      "x": 57,
+      "y": 796,
+      "w": 381,
+      "h": 251
+    },
+    "click_point": {
+      "x": 162,
+      "y": 809
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_17",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_44_senior-software-engineer",
+      "page_text_47_absolute-it-limited",
+      "page_text_49_be-an-early-applicant",
+      "page_text_50_auckland-cbd-auckland",
+      "page_text_51_150-000-160-000-per-annum",
+      "page_text_54_shape-high-impact-network-management-and-data",
+      "page_text_55_platforms",
+      "page_text_60_work-across-modern-stacks-including-nodejs",
+      "page_text_61_angular-and-cloud-native-tooling"
+    ],
+    "evidence": {
+      "texts": [
+        "Senior Software Engineer",
+        "Absolute IT Limited",
+        "Be an early applicant",
+        "Auckland CBD, Auckland",
+        "$150,000 - $160,000 per annum",
+        "Shape high-impact network management and data",
+        "platforms",
+        "Work across modern stacks including NodeJS,",
+        "Angular and cloud-native tooling"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": false,
+        "has_salary": true
+      }
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_9a5aeb43fc4b",
+    "title": "Senior Software Engineer",
+    "company": "Absolute IT Limited",
+    "location": "Auckland CBD,Auckland",
+    "work_type": "Full time",
+    "classification": "Senior Software Engineer",
+    "salary_text": "$150,000-$160,000perannum",
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "absolute"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "Senior Software Engineer"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Absolute IT Limited View all jobs"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "Auckland CBD,Auckland"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "Engineering-Software(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "$150,000-$160,000perannum"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Posted 1h ago·Low application volume"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Quick apply"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "3 skills and credentials match your profile"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "Pipelines"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "√MySQL"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "√Database Systems"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "Show all"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "AbouttheOraanisation"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "tionfocusedondeliverina"
+      }
+    ],
+    "requirements": [
+      "3 skills and credentials match your profile"
+    ],
+    "responsibilities": [],
+    "benefits": [],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply",
+      "bbox": {
+        "x": 546,
+        "y": 839,
+        "w": 103,
+        "h": 29
+      },
+      "click_point": {
+        "x": 598,
+        "y": 854
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save button",
+      "bbox": {
+        "x": 570,
+        "y": 700,
+        "w": 60,
+        "h": 30
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 513,
+        "y": 346,
+        "w": 709,
+        "h": 832
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false
+      },
+      "safe_points": [
+        {
+          "x": 867,
+          "y": 762,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 513,
+      "y": 126,
+      "w": 709,
+      "h": 1052
+    },
+    "detail_scroll_history": [],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-132228-850400__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 21,
+      "action_count": 19,
+      "texts": [
+        "absolute",
+        "IT",
+        "Senior Software Engineer",
+        "Absolute IT Limited View all jobs",
+        "Auckland CBD,Auckland",
+        "国",
+        "Engineering-Software(Information&CommunicationTechnology)",
+        "Full time",
+        "回",
+        "$150,000-$160,000perannum",
+        "Posted 1h ago·Low application volume",
+        "Quick apply",
+        "Save",
+        "How you match ①",
+        "3 skills and credentials match your profile",
+        "Pipelines",
+        "√MySQL",
+        "√Database Systems",
+        "Show all",
+        "AbouttheOraanisation",
+        "tionfocusedondeliverina"
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

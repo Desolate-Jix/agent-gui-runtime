@@ -149,6 +149,63 @@ def test_pre_click_decision_rejects_refined_point_outside_candidate_bbox() -> No
     assert "refined_point_outside_candidate_bbox" in result.candidate_decisions[0].reasons
 
 
+def test_pre_click_decision_uses_button_bbox_safe_center_when_grounding_point_near_edge() -> None:
+    candidate = _candidate()
+
+    result = decide_pre_click(
+        goal="click start detection",
+        candidates=_rank_result(candidate),
+        grounding=_grounding(point={"x": 101, "y": 81}),
+    )
+
+    decision = result.candidate_decisions[0]
+    assert result.allowed is True
+    assert result.selected_click_point == {"x": 170, "y": 120}
+    assert decision.click_point == {"x": 170, "y": 120}
+    assert "bbox_safe_center_used" in decision.reasons
+    assert decision.resolved_click_point["contract_version"] == "resolved_click_point_v1"
+    assert decision.resolved_click_point["raw_model_point"] == {"x": 101, "y": 81}
+    assert decision.resolved_click_point["chosen_point"] == {"x": 170, "y": 120}
+    assert decision.resolved_click_point["chosen_point_source"] == "bbox_safe_center"
+    assert decision.resolved_click_point["adjustment_reason"] == "raw_model_point_near_edge"
+
+
+def test_pre_click_decision_does_not_safe_center_grounding_point_outside_bbox() -> None:
+    candidate = _candidate()
+
+    result = decide_pre_click(
+        goal="click start detection",
+        candidates=_rank_result(candidate),
+        grounding=_grounding(point={"x": 98, "y": 81}),
+    )
+
+    decision = result.candidate_decisions[0]
+    assert result.allowed is False
+    assert decision.click_point == {"x": 98, "y": 81}
+    assert "bbox_safe_center_used" not in decision.reasons
+    assert "refined_point_outside_candidate_bbox" in decision.reasons
+    assert decision.resolved_click_point["chosen_point_source"] == "raw_grounding_point"
+    assert decision.resolved_click_point["raw_inside_bbox"] is False
+
+
+def test_pre_click_decision_keeps_non_button_grounding_point_when_near_edge() -> None:
+    candidate = _candidate()
+    candidate.role = "link"
+    candidate.element.role = "link"
+
+    result = decide_pre_click(
+        goal="click start detection",
+        candidates=_rank_result(candidate),
+        grounding=_grounding(point={"x": 101, "y": 81}),
+    )
+
+    decision = result.candidate_decisions[0]
+    assert result.allowed is True
+    assert result.selected_click_point == {"x": 101, "y": 81}
+    assert "bbox_safe_center_used" not in decision.reasons
+    assert decision.resolved_click_point["chosen_point_source"] == "raw_grounding_point"
+
+
 def test_pre_click_decision_uses_refined_bbox_when_available() -> None:
     candidate = _candidate(refined_bbox={"x": 130, "y": 94, "w": 60, "h": 24})
 

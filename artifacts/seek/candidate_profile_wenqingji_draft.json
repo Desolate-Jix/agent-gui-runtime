@@ -1,0 +1,74 @@
+{
+  "contract_version": "candidate_profile_v1",
+  "profile_source": "real_user_candidate_profile_v1",
+  "profile_purpose": "real_resume_profile",
+  "profile_generation": {
+    "contract_version": "candidate_profile_generation_v1",
+    "source": "cv_text_extraction_v1",
+    "source_path": "D:\\资料\\CV\\WENQING JI.docx",
+    "source_text_hash": "fbf9b57347cd4d23e258d2cfcae32761dbd50a2c10c86cdb250e2c30e6bb8704",
+    "method": "deterministic_cv_text_parser",
+    "review_required": true,
+    "source_format": "docx",
+    "source_character_count": 5666
+  },
+  "candidate_name": "Wenqing Ji",
+  "email": "wji044@aucklanduni.ac.nz",
+  "phone": "0212010309",
+  "city": "Auckland",
+  "suburb": "",
+  "github_url": "https://github.com/Desolate-Jix/agent-gui-runtime",
+  "linkedin_url": "",
+  "portfolio_url": "",
+  "skills": [
+    "Python",
+    "JavaScript",
+    "React",
+    "SQL",
+    "Data Analytics",
+    "Machine Learning",
+    "AI",
+    "API",
+    "Frontend",
+    "Backend",
+    "Automation",
+    "Git"
+  ],
+  "target_roles": [
+    "Software Engineer",
+    "Data Analyst",
+    "Frontend Developer"
+  ],
+  "location_constraints": [
+    "Auckland",
+    "New Zealand"
+  ],
+  "experience_summary": [
+    "Experienced in building scalable frontend applications, integrating AI-driven features, and translating complex data problems into actionable insights through academic and industry projects.",
+    "AI & Prompt Engineering: LLM prompt design, structured prompt templates, agent behaviour design, integrating AI outputs into frontend workflows",
+    "PROJECTS EXPERIENCE & COURSEWORK",
+    "Built a vision-based agent runtime that enables large language models to operate Windows desktop applications through screenshot analysis, OCR, and automated mouse and keyboard actions",
+    "Developed RESTful APIs with FastAPI for screenshot capture, text extraction, UI element detection, click execution, and action verification",
+    "Implemented page structure and state verification modules to compare pre- and post-action screenshots and confirm whether intended actions were successfully completed"
+  ],
+  "education_summary": [
+    "IT graduate (First Class Honours, GPA 7.4/9.0) from the University of Auckland with strong foundations in data analytics, software development, and AI integration.",
+    "University of Auckland | Master of Information Technology (First Class Honours) | Mar 2025 – Mar 2026",
+    "Relevant Courses: Data Analytics with SPSS and Python, Big Data Algorithms, IT Consulting with SAP tool. GPA: 7.417 / 9.0, Final Semester GPA: 8.0 (Internship)",
+    "Nanjing Forestry University | BSc in Information Management and Information Systems | Sep 2020"
+  ],
+  "work_rights_summary": "",
+  "availability_summary": "",
+  "salary_preference": "",
+  "preferred_work_modes": [],
+  "avoid_roles": [],
+  "avoid_companies": [],
+  "do_not_apply_to": [],
+  "risk_do_not_invent": true,
+  "profile_review_required": true,
+  "draft_notes": [
+    "Generated from a local CV by deterministic extraction.",
+    "Review and complete work_rights_summary before live Apply Entry or safe-fill.",
+    "Do not add skills or experience that are not supported by the CV."
+  ]
+}

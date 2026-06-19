@@ -1,0 +1,536 @@
+{
+  "contract_version": "runtime_path_graph_v1",
+  "graph_id": "table_directory_runtime_path_graph_v1",
+  "app_id": "table_directory",
+  "domain": "public_readonly_table_directory",
+  "page_type": "table_filter_directory",
+  "created_from": {
+    "learn_mode": "manual_seeded_from_seek_wikipedia_github_python_docs_patterns",
+    "source_pattern": "table/filter/sort -> row detail",
+    "status": "real_external_smoke_verified",
+    "real_smoke_report": "logs/smoke/table_directory_datatables_real_1record_20260619.json",
+    "real_smoke_url": "https://datatables.net/examples/api/row_details.html"
+  },
+  "coordinate_policy": {
+    "coordinate_space": "window_screenshot",
+    "do_not_reuse_absolute_coordinates_without_reobserve": true,
+    "bbox_is_guidance_not_authorization": true,
+    "click_point_requires_current_validation": true,
+    "coordinate_evidence_required_in_trace": true
+  },
+  "state_match_policy": {
+    "minimum_confidence": 0.75,
+    "required_regions_any": [
+      "table:filter_bar",
+      "table:tab_bar",
+      "table:sort_controls",
+      "table:table_or_list",
+      "table:record_detail_header"
+    ],
+    "reject_if": [
+      "login_or_captcha",
+      "edit_mode_detected",
+      "permission_prompt",
+      "checkout_or_payment"
+    ]
+  },
+  "states": [
+    {
+      "state_id": "table:list_page",
+      "label": "Public table directory list page",
+      "page_type": "table_list",
+      "required_regions": [
+        "table:table_or_list"
+      ]
+    },
+    {
+      "state_id": "table:list_filtered",
+      "label": "Filtered table directory list",
+      "page_type": "table_list_filtered",
+      "required_regions": [
+        "table:filter_bar",
+        "table:table_or_list"
+      ]
+    },
+    {
+      "state_id": "table:list_sorted",
+      "label": "Sorted table directory list",
+      "page_type": "table_list_sorted",
+      "required_regions": [
+        "table:sort_controls",
+        "table:table_or_list"
+      ]
+    },
+    {
+      "state_id": "table:record_detail",
+      "label": "Table record detail page",
+      "page_type": "record_detail",
+      "required_regions": [
+        "table:record_detail_header",
+        "table:record_detail_body"
+      ]
+    },
+    {
+      "state_id": "table:record_detail_scrolled",
+      "label": "Table record detail page after read scroll",
+      "page_type": "record_detail",
+      "required_regions": [
+        "table:record_detail_body"
+      ]
+    },
+    {
+      "state_id": "table:blocked_write_or_login",
+      "label": "Blocked write/login surface",
+      "page_type": "blocked_risk_state"
+    }
+  ],
+  "regions": [
+    {
+      "region_id": "table:page_header",
+      "role": "top_navigation",
+      "description": "Page title, public navigation, and non-write header controls"
+    },
+    {
+      "region_id": "table:filter_bar",
+      "role": "filter_bar",
+      "description": "Filter controls or chips that narrow the visible table records"
+    },
+    {
+      "region_id": "table:tab_bar",
+      "role": "tab_bar",
+      "description": "Read-only tabs that switch between table/list subsets"
+    },
+    {
+      "region_id": "table:sort_controls",
+      "role": "sort_controls",
+      "description": "Column headers or sort controls for changing read order"
+    },
+    {
+      "region_id": "table:table_or_list",
+      "role": "records_table",
+      "description": "Main table or list containing repeatable record rows"
+    },
+    {
+      "region_id": "table:row",
+      "role": "entity_row",
+      "description": "One repeatable row or record card in the table/list",
+      "parent_region_id": "table:table_or_list",
+      "repeatable": true
+    },
+    {
+      "region_id": "table:row_expander",
+      "role": "row_expander",
+      "description": "Small expand/detail control inside a row, often shown as a plus sign, triangle, chevron, or details icon",
+      "parent_region_id": "table:row",
+      "repeatable": true
+    },
+    {
+      "region_id": "table:pagination",
+      "role": "pagination",
+      "description": "Read-only next/more pagination or infinite-scroll affordance"
+    },
+    {
+      "region_id": "table:record_detail_header",
+      "role": "detail_header",
+      "description": "Record detail title and metadata header"
+    },
+    {
+      "region_id": "table:record_detail_body",
+      "role": "detail_body",
+      "description": "Scrollable record detail body"
+    },
+    {
+      "region_id": "table:write_actions",
+      "role": "write_actions",
+      "description": "Edit, delete, save, create, upload, submit, purchase, or login controls that must be blocked"
+    }
+  ],
+  "scroll_containers": [
+    {
+      "container_id": "table:page",
+      "region_id": "table:record_detail_body",
+      "pane_role": "page",
+      "scroll_scope": "page",
+      "scroll_axis": "vertical",
+      "safe_scroll_point_policy": "window_center",
+      "artifact_is_authorization": false
+    },
+    {
+      "container_id": "table:records_list",
+      "region_id": "table:table_or_list",
+      "pane_role": "records_list",
+      "scroll_scope": "container",
+      "scroll_axis": "vertical",
+      "safe_scroll_point_policy": "container_center",
+      "artifact_is_authorization": false
+    }
+  ],
+  "dynamic_collections": [
+    {
+      "collection_id": "table:records",
+      "entity_type": "table_record",
+      "region_id": "table:table_or_list",
+      "container_id": "table:records_list",
+      "entity_pattern_ref": "table:entity_pattern:record_row",
+      "primary_text_role": "row_title",
+      "secondary_text_roles": [
+        "row_metadata",
+        "row_status",
+        "row_date"
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "from_state_id": "table:list_page",
+      "to_state_id": "table:list_filtered",
+      "action_template_id": "switch_filter_tab",
+      "verification_refs": [
+        "table:verify:filter_state_changed"
+      ]
+    },
+    {
+      "from_state_id": "table:list_filtered",
+      "to_state_id": "table:list_sorted",
+      "action_template_id": "sort_records",
+      "verification_refs": [
+        "table:verify:sort_indicator_or_order_changed"
+      ]
+    },
+    {
+      "from_state_id": "table:list_page",
+      "to_state_id": "table:record_detail",
+      "action_template_id": "open_record_from_table",
+      "verification_refs": [
+        "table:verify:detail_heading_matches_row"
+      ]
+    },
+    {
+      "from_state_id": "table:list_filtered",
+      "to_state_id": "table:record_detail",
+      "action_template_id": "open_record_from_table",
+      "verification_refs": [
+        "table:verify:detail_heading_matches_row"
+      ]
+    },
+    {
+      "from_state_id": "table:list_sorted",
+      "to_state_id": "table:record_detail",
+      "action_template_id": "open_record_from_table",
+      "verification_refs": [
+        "table:verify:detail_heading_matches_row"
+      ]
+    },
+    {
+      "from_state_id": "table:record_detail",
+      "to_state_id": "table:record_detail_scrolled",
+      "action_template_id": "read_record_detail",
+      "verification_refs": [
+        "table:verify:detail_scroll_effect"
+      ]
+    },
+    {
+      "from_state_id": "table:record_detail",
+      "to_state_id": "table:list_page",
+      "action_template_id": "return_to_table",
+      "verification_refs": [
+        "table:verify:list_visible_again"
+      ]
+    },
+    {
+      "from_state_id": "table:list_page",
+      "to_state_id": "table:list_page",
+      "action_template_id": "load_more_records",
+      "verification_refs": [
+        "table:verify:more_rows_visible"
+      ]
+    }
+  ],
+  "action_templates": [
+    {
+      "action_template_id": "switch_filter_tab",
+      "action_type": "click",
+      "low_level_action_type": "click",
+      "goal_template": "Switch to a visible read-only filter tab or chip that changes the table subset. Do not click edit, save, delete, create, upload, login, purchase, or submit.",
+      "target_entity": "filter_tab",
+      "candidate_constraints": {
+        "required_region_id_any": [
+          "table:filter_bar",
+          "table:tab_bar"
+        ],
+        "prefer_roles": [
+          "tab",
+          "button",
+          "filter_chip"
+        ],
+        "exclude_targets": [
+          "Edit",
+          "Delete",
+          "Save",
+          "Create",
+          "Add",
+          "Upload",
+          "Login",
+          "Sign in",
+          "Submit",
+          "Apply",
+          "Purchase"
+        ]
+      },
+      "verification_policy": {
+        "post_click": "filter_state_changed_without_write_surface"
+      },
+      "learned_skill_ref": "skill:switch_filter_or_tab",
+      "requires_current_validation": true,
+      "artifact_is_authorization": false
+    },
+    {
+      "action_template_id": "sort_records",
+      "action_type": "click",
+      "low_level_action_type": "click",
+      "goal_template": "Click a read-only sort control or sortable column header. Do not click any write action.",
+      "target_entity": "sort_button",
+      "candidate_constraints": {
+        "required_region_id": "table:sort_controls",
+        "prefer_roles": [
+          "column_header",
+          "button"
+        ],
+        "exclude_targets": [
+          "Edit",
+          "Delete",
+          "Save",
+          "Create",
+          "Add",
+          "Upload",
+          "Login",
+          "Sign in",
+          "Submit",
+          "Apply",
+          "Purchase"
+        ]
+      },
+      "verification_policy": {
+        "post_click": "sort_indicator_or_record_order_changed"
+      },
+      "learned_skill_ref": "skill:sort_records_by_column_or_control",
+      "requires_current_validation": true,
+      "artifact_is_authorization": false
+    },
+    {
+      "action_template_id": "open_record_from_table",
+      "action_type": "click",
+      "low_level_action_type": "click",
+      "goal_template": "Open a table record by clicking the row's explicit expand/details control, row title, or primary row link inside the table/list. Prefer a left-side plus, triangle, chevron, or details icon when the table uses an expander column. Do not click toolbar filters, search boxes, navigation links, or write actions.",
+      "target_entity": "table:row_expander",
+      "candidate_constraints": {
+        "required_region_id": "table:table_or_list",
+        "prefer_roles": [
+          "row_expander",
+          "details_control",
+          "expand_button",
+          "toggle",
+          "row_title",
+          "link",
+          "entity_row"
+        ],
+        "prefer_position": "inside_first_visible_record_row",
+        "prefer_visual_cues": [
+          "plus",
+          "triangle",
+          "chevron",
+          "details icon"
+        ],
+        "exclude_targets": [
+          "Edit",
+          "Delete",
+          "Save",
+          "Create",
+          "Add",
+          "Upload",
+          "Login",
+          "Sign in",
+          "Submit",
+          "Apply",
+          "Purchase"
+        ]
+      },
+      "verification_policy": {
+        "post_click": "record_detail_heading_matches_selected_row"
+      },
+      "learned_skill_ref": "skill:open_record_from_table",
+      "requires_current_validation": true,
+      "artifact_is_authorization": false
+    },
+    {
+      "action_template_id": "read_record_detail",
+      "action_type": "scroll",
+      "low_level_action_type": "scroll",
+      "scroll_target": {
+        "target_pane": "page",
+        "target_container_id": "table:page"
+      },
+      "verification_policy": {
+        "post_scroll": "record_detail_body_content_changes_or_reveals_more_sections"
+      },
+      "learned_skill_ref": "skill:read_record_detail",
+      "requires_current_validation": true,
+      "artifact_is_authorization": false
+    },
+    {
+      "action_template_id": "return_to_table",
+      "action_type": "click",
+      "low_level_action_type": "click",
+      "goal_template": "Return from the record detail page to the previous table/list page using a safe back/list navigation control.",
+      "target_entity": "back_to_table",
+      "candidate_constraints": {
+        "prefer_text_any": [
+          "Back",
+          "Back to list",
+          "All records",
+          "List"
+        ],
+        "exclude_targets": [
+          "Edit",
+          "Delete",
+          "Save",
+          "Create",
+          "Add",
+          "Upload",
+          "Login",
+          "Sign in",
+          "Submit",
+          "Apply",
+          "Purchase"
+        ]
+      },
+      "verification_policy": {
+        "post_click": "table_list_visible_again"
+      },
+      "learned_skill_ref": "skill:return_to_record_list",
+      "requires_current_validation": true,
+      "artifact_is_authorization": false
+    },
+    {
+      "action_template_id": "load_more_records",
+      "action_type": "scroll",
+      "low_level_action_type": "scroll",
+      "scroll_target": {
+        "target_pane": "records_list",
+        "target_container_id": "table:records_list"
+      },
+      "verification_policy": {
+        "post_scroll": "more_table_rows_visible_without_opening_write_surface"
+      },
+      "learned_skill_ref": "skill:scroll_table_until_new_records",
+      "requires_current_validation": true,
+      "artifact_is_authorization": false
+    },
+    {
+      "action_template_id": "blocked_write_action",
+      "action_type": "click",
+      "low_level_action_type": "click",
+      "goal_template": "Blocked write action such as edit, delete, save, create, upload, login, purchase, or submit. This must remain unavailable by default.",
+      "target_entity": "table:write_actions",
+      "availability_policy": {
+        "default_available": false,
+        "reason": "write_or_auth_or_purchase_action_forbidden_in_readonly_learning"
+      },
+      "verification_policy": {
+        "pre_click": "always_block"
+      },
+      "learned_skill_ref": "skill:block_write_actions",
+      "requires_current_validation": true,
+      "artifact_is_authorization": false
+    }
+  ],
+  "verification_rules": [
+    {
+      "rule_id": "table:verify:filter_state_changed",
+      "kind": "post_click_semantic_change",
+      "description": "After switching a tab/filter, the active tab/filter indicator or visible record subset changes without opening a write surface."
+    },
+    {
+      "rule_id": "table:verify:sort_indicator_or_order_changed",
+      "kind": "post_click_semantic_change",
+      "description": "After sorting, the sort indicator or row order changes while staying on the table/list."
+    },
+    {
+      "rule_id": "table:verify:detail_heading_matches_row",
+      "kind": "post_click_semantic_change",
+      "description": "After opening a row, the detail heading should match or clearly relate to the clicked row title."
+    },
+    {
+      "rule_id": "table:verify:detail_scroll_effect",
+      "kind": "post_scroll_reveal",
+      "description": "After scrolling a detail page, more detail content should be visible while staying on the same record."
+    },
+    {
+      "rule_id": "table:verify:list_visible_again",
+      "kind": "post_click_semantic_change",
+      "description": "After returning, the table/list region should be visible again."
+    },
+    {
+      "rule_id": "table:verify:more_rows_visible",
+      "kind": "post_scroll_reveal",
+      "description": "After loading more records, additional rows should become visible while staying inside the record list."
+    }
+  ],
+  "safety_policy": {
+    "mode": "read_only_table_directory",
+    "read_only": true,
+    "live_input": false,
+    "artifact_cannot_authorize_click": true,
+    "artifact_is_authorization": false,
+    "forbid_final_submit": true,
+    "allow_apply_entry": false,
+    "allow_safe_fill": false,
+    "write_actions_forbidden": true,
+    "final_submit": "forbidden",
+    "forbidden_click_texts": [
+      "Submit",
+      "Save",
+      "Delete",
+      "Edit",
+      "Create",
+      "Add",
+      "Upload",
+      "Login",
+      "Sign in",
+      "Apply",
+      "Purchase",
+      "Checkout"
+    ],
+    "forbidden_targets": [
+      "Submit",
+      "Save",
+      "Delete",
+      "Edit",
+      "Create",
+      "Add",
+      "Upload",
+      "Login",
+      "Sign in",
+      "Apply",
+      "Purchase",
+      "Checkout"
+    ]
+  },
+  "learned_skill_refs": [
+    "skill:switch_filter_or_tab",
+    "skill:sort_records_by_column_or_control",
+    "skill:open_record_from_table",
+    "skill:read_record_detail",
+    "skill:return_to_record_list",
+    "skill:scroll_table_until_new_records",
+    "skill:block_write_actions"
+  ],
+  "visual_asset_refs": [],
+  "metrics": {
+    "artifact_is_authorization": false,
+    "sample_entity_count": 1,
+    "real_external_smoke_required": true,
+    "real_external_smoke_verified": true,
+    "fixture_seed_only": false
+  }
+}

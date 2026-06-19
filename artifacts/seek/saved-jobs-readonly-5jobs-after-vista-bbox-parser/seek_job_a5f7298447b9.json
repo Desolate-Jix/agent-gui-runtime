@@ -1,0 +1,348 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_a5f7298447b9",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "maybe_apply",
+    "score": 0.64,
+    "job_id": "seek_job_a5f7298447b9",
+    "title": "Head of Delivery| Software Engineer",
+    "company": "Enterprise Technology Recruitment Ltd View all iobs",
+    "positive_evidence": [
+      "matched_skills: software engineer",
+      "matched_target_roles: Software Engineer",
+      "location_matches: Auckland CBD, Auckland (Hybrid)"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_c961531b9e22",
+    "title": "Head of Delivery| Software Engineer",
+    "company": "Enterprise Technology Recruitment Ltd",
+    "location": "Auckland CBD, Auckland (Hybrid)",
+    "posted_at_text": null,
+    "work_type": "Auckland CBD, Auckland (Hybrid)",
+    "salary_text": "$200,000 - $240,000 per year",
+    "classification": "Head of Delivery| Software Engineer",
+    "card_bbox": {
+      "x": 56,
+      "y": 837,
+      "w": 369,
+      "h": 247
+    },
+    "click_point": {
+      "x": 209,
+      "y": 847
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_16",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_53_head-of-delivery-software-engineer",
+      "page_text_56_background",
+      "page_text_57_enterprise-technology-recruitment-ltd",
+      "page_text_58_auckland-cbd-auckland-hybrid",
+      "page_text_59_200-000-240-000-per-year",
+      "page_text_61_lead-a-talented-engineering-team-delivering-a-ma",
+      "page_text_63_digital-transformation-in-auckland-strategic-rol",
+      "page_text_64_reporting-directly-to-the-cto",
+      "page_text_69_23h-ago-viewed"
+    ],
+    "evidence": {
+      "texts": [
+        "Head of Delivery| Software Engineer",
+        "Background",
+        "Enterprise Technology Recruitment Ltd",
+        "Auckland CBD, Auckland (Hybrid)",
+        "$200,000 - $240,000 per year",
+        "Lead a talented engineering team delivering a major",
+        "digital transformation in Auckland. Strategic role",
+        "reporting directly to the CTO.",
+        "23h ago ·Viewed"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": true,
+        "has_salary": true
+      }
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_a5f7298447b9",
+    "title": "Head of Delivery| Software Engineer",
+    "company": "Enterprise Technology Recruitment Ltd View all iobs",
+    "location": "Auckland CBD, Auckland (Hybrid)",
+    "work_type": "Auckland CBD, Auckland (Hybrid)",
+    "classification": "Head of Delivery| Software Engineer",
+    "salary_text": "回$200,000 -$240,000 per year",
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "Head of Delivery| Software Engineer"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "Background"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Enterprise Technology Recruitment Ltd View all iobs"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "Auckland CBD, Auckland (Hybrid)"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "Engineering-Software(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "回$200,000 -$240,000 per year"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Posted 23h ago·Medium applicationvolume"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Quick apply"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "A highlyrespectedNewZealand technology organisation isseeking an"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "experiencedHeadof Deliverytolead theexecutionof adiverseportfolioof"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "business-critical technology initiatives."
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "Thisis arareopportunity to stepinto asenior leadershiprolewhereyou will"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "performing delivery culture across engineering,business,and vendorteams."
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "Reporting to the Chief Technology Officer, you willplay a pivotal role in ensuring"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "technologyinvestmentsareprioritised effectively,governed appropriately,and"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "delivered with consistency,transparency,and confidence."
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "TheOpportunity"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "As Head of Delivery, you willead the end-to-end execution of technology"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "initiativesacrossa complexand evolving environment."
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "You will work closelywith seniortechnology and businessleaders to align"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "priorities,balance competing demands,and ensure the highest-value work is"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "delivered at theright time."
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "This role combines strategic leadership with hands-on deliverymanagement."
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "You'll be expected to actively engage in delivery challenges, remove roadblocks,"
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "managerisks,andfosteracultureof accountability andcontinuous"
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "improvement."
+      }
+    ],
+    "requirements": [
+      "experiencedHeadof Deliverytolead theexecutionof adiverseportfolioof"
+    ],
+    "responsibilities": [
+      "Thisis arareopportunity to stepinto asenior leadershiprolewhereyou will",
+      "Reporting to the Chief Technology Officer, you willplay a pivotal role in ensuring",
+      "As Head of Delivery, you willead the end-to-end execution of technology",
+      "You will work closelywith seniortechnology and businessleaders to align",
+      "This role combines strategic leadership with hands-on deliverymanagement."
+    ],
+    "benefits": [
+      "Auckland CBD, Auckland (Hybrid)"
+    ],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply",
+      "bbox": {
+        "x": 546,
+        "y": 502,
+        "w": 104,
+        "h": 31
+      },
+      "click_point": {
+        "x": 598,
+        "y": 518
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save button",
+      "bbox": {
+        "x": 570,
+        "y": 414,
+        "w": 57,
+        "h": 38
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 513,
+        "y": 346,
+        "w": 709,
+        "h": 832
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false
+      },
+      "safe_points": [
+        {
+          "x": 867,
+          "y": 762,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 513,
+      "y": 126,
+      "w": 709,
+      "h": 1052
+    },
+    "detail_scroll_history": [],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-132331-170867__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 30,
+      "action_count": 11,
+      "texts": [
+        "Head of Delivery| Software Engineer",
+        "Background",
+        "Enterprise Technology Recruitment Ltd View all iobs",
+        "Auckland CBD, Auckland (Hybrid)",
+        "用",
+        "Engineering-Software(Information&CommunicationTechnology)",
+        "Full time",
+        "回$200,000 -$240,000 per year",
+        "Posted 23h ago·Medium applicationvolume",
+        "Quick apply",
+        "Save",
+        "A highlyrespectedNewZealand technology organisation isseeking an",
+        "experiencedHeadof Deliverytolead theexecutionof adiverseportfolioof",
+        "business-critical technology initiatives.",
+        "Thisis arareopportunity to stepinto asenior leadershiprolewhereyou will",
+        "performing delivery culture across engineering,business,and vendorteams.",
+        "Reporting to the Chief Technology Officer, you willplay a pivotal role in ensuring",
+        "technologyinvestmentsareprioritised effectively,governed appropriately,and",
+        "delivered with consistency,transparency,and confidence.",
+        "TheOpportunity",
+        "As Head of Delivery, you willead the end-to-end execution of technology",
+        "initiativesacrossa complexand evolving environment.",
+        "You will work closelywith seniortechnology and businessleaders to align",
+        "priorities,balance competing demands,and ensure the highest-value work is",
+        "delivered at theright time.",
+        "This role combines strategic leadership with hands-on deliverymanagement.",
+        "tA",
+        "You'll be expected to actively engage in delivery challenges, remove roadblocks,",
+        "managerisks,andfosteracultureof accountability andcontinuous",
+        "improvement."
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

@@ -1,0 +1,434 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_a1af08253e26",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "maybe_apply",
+    "score": 0.64,
+    "job_id": "seek_job_a1af08253e26",
+    "title": "Embedded Software Engineer(C/C++)",
+    "company": "tA",
+    "positive_evidence": [
+      "matched_skills: software engineer",
+      "matched_target_roles: Software Engineer",
+      "location_matches: All Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_984643e3485c",
+    "title": "Embedded Software Engineer (C/C++)",
+    "company": "(C/C++)",
+    "location": "Garmin New Zealand Limited",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": "Embedded Software Engineer",
+    "card_bbox": {
+      "x": 36,
+      "y": 529,
+      "w": 426,
+      "h": 408
+    },
+    "click_point": {
+      "x": 249,
+      "y": 733
+    },
+    "source_url": null,
+    "source_card_id": "card_11_embedded-software-engineer-c-c",
+    "primary_action_id": "action_uia_146_embedded-software-engineer-c-c",
+    "child_action_ids": [
+      "action_uia_145_modify-my-search",
+      "action_uia_147_hyperlink",
+      "action_uia_148_this-is-a-featured-job",
+      "action_uia_149_要获取缺失的图片说明-请打开上下文菜单"
+    ],
+    "child_page_element_ids": [
+      "page_text_29_embedded-software-engineer",
+      "page_text_30_c-c",
+      "page_text_31_garmin",
+      "page_text_32_garmin-new-zealand-limited",
+      "page_text_33_grey-lynn-auckland",
+      "page_text_34_elevate-your-career-with-a-global-leader-and-joi",
+      "page_text_35_very-supportive-team",
+      "page_text_36_join-a-collaborative-innovative-workplace-where",
+      "page_text_37_your-ideas-matter",
+      "page_text_38_great-culture-excellent-benefits-and-real-career",
+      "page_text_39_growth-opportunities",
+      "page_text_40_help-us-revolutionise-the-marine-industry-with-y",
+      "page_text_41_c-c-skills-join-our-team-as-a-software-engineer",
+      "page_text_42_and-make-a-splash-with-innovative-solutions",
+      "page_text_43_featured"
+    ],
+    "evidence": {
+      "texts": [
+        "Embedded Software Engineer",
+        "(C/C++)",
+        "GARMIN.",
+        "Garmin New Zealand Limited",
+        "Grey Lynn, Auckland",
+        "Elevate your career with a global leader and join a",
+        "very supportive team",
+        "Join a collaborative, innovative workplace where",
+        "your ideas matter",
+        "Great culture, excellent benefits, and real career",
+        "growth opportunities",
+        "Help us revolutionise the marine industry with your",
+        "C/C++ skills! Join our team as a Software Engineer",
+        "and make a splash with innovative solutions.",
+        "Featured",
+        "Modify my search",
+        "hyperlink",
+        "This is a featured job",
+        "要获取缺失的图片说明，请打开上下文菜单。"
+      ],
+      "source_contract": "screen_inventory_v1"
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_a1af08253e26",
+    "title": "Embedded Software Engineer(C/C++)",
+    "company": "tA",
+    "location": "All Auckland",
+    "work_type": "Full time",
+    "classification": "Embedded Software Engineer(C/C++)",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "All Auckland"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "SEEK"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Listing time"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "GARMIN."
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "GREATPRODUCTS."
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "GREATPEOPLE."
+      },
+      {
+        "index": 6,
+        "role": "section_hint",
+        "text": "GREATBENEFITS."
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "GARMIN"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Responsive hirer"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Embedded Software Engineer(C/C++)"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "GarminNewZealandLimitedViewalljobs"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "Grey Lynn, Auckland"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "Engineering-Software(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "Posted 14d ago·Medium application volume"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "Quick apply"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "EmbeddedSoftwareEngineer(C/C++)"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "Garmin New Zealand Limited View alljobs"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "Grey Lynn,Auckland"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "Engineering-Software (Information & Communication Technology)"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "Introduction:"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "·Do you have experience with C and/or C++ in the embedded environment?"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "·Looking fora new technical challenge?"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "·Want to build industry leading cutting edge consumer electronics?"
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "Joinourfast-paced development team that isrevolutionising theglobal marine"
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "entertainment industry."
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "AtGarmin,wefuelpeople'spassions.Wemakeproductsforeverywherethat"
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "people live, work and play. Our customers are passionate about our products,"
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "and so are we."
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "Purpose of the Role:"
+      },
+      {
+        "index": 31,
+        "role": "body",
+        "text": "We arelookingfora skilled software engineerwhowants tobring new audio"
+      },
+      {
+        "index": 32,
+        "role": "body",
+        "text": "technologyto theMarine environment.Tobepart of ourteam,you must be able"
+      },
+      {
+        "index": 33,
+        "role": "body",
+        "text": "to:"
+      }
+    ],
+    "requirements": [
+      "·Do you have experience with C and/or C++ in the embedded environment?"
+    ],
+    "responsibilities": [
+      "Purpose of the Role:"
+    ],
+    "benefits": [
+      "GREATBENEFITS."
+    ],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply",
+      "bbox": {
+        "x": 546,
+        "y": 1007,
+        "w": 103,
+        "h": 27
+      },
+      "click_point": {
+        "x": 597,
+        "y": 1020
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save button",
+      "bbox": {
+        "x": 568,
+        "y": 843,
+        "w": 55,
+        "h": 32
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 513,
+        "y": 346,
+        "w": 709,
+        "h": 832
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false
+      },
+      "safe_points": [
+        {
+          "x": 867,
+          "y": 762,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 513,
+      "y": 126,
+      "w": 709,
+      "h": 1052
+    },
+    "detail_scroll_history": [
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260617-103154-983344__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": true
+          }
+        },
+        "missing_evidence": [
+          "responsibilities"
+        ]
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-103153-190986__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-103211-436803__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 35,
+      "action_count": 36,
+      "texts": [
+        "All Auckland",
+        "SEEK",
+        "Listing time",
+        "GARMIN.",
+        "GREATPRODUCTS.",
+        "GREATPEOPLE.",
+        "GREATBENEFITS.",
+        "GARMIN",
+        "Responsive hirer",
+        "Embedded Software Engineer(C/C++)",
+        "GarminNewZealandLimitedViewalljobs",
+        "Grey Lynn, Auckland",
+        "Engineering-Software(Information&CommunicationTechnology)",
+        "Full time",
+        "Posted 14d ago·Medium application volume",
+        "Quick apply",
+        "Save",
+        "tA",
+        "EmbeddedSoftwareEngineer(C/C++)",
+        "Garmin New Zealand Limited View alljobs",
+        "Grey Lynn,Auckland",
+        "Engineering-Software (Information & Communication Technology)",
+        "Introduction:",
+        "·Do you have experience with C and/or C++ in the embedded environment?",
+        "·Looking fora new technical challenge?",
+        "·Want to build industry leading cutting edge consumer electronics?",
+        "Joinourfast-paced development team that isrevolutionising theglobal marine",
+        "entertainment industry.",
+        "AtGarmin,wefuelpeople'spassions.Wemakeproductsforeverywherethat",
+        "people live, work and play. Our customers are passionate about our products,",
+        "and so are we.",
+        "Purpose of the Role:",
+        "We arelookingfora skilled software engineerwhowants tobring new audio",
+        "technologyto theMarine environment.Tobepart of ourteam,you must be able",
+        "to:"
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

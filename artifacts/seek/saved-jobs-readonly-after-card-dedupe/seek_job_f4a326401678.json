@@ -1,0 +1,438 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_f4a326401678",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "maybe_apply",
+    "score": 0.64,
+    "job_id": "seek_job_f4a326401678",
+    "title": "Lead Software Engineer-Al&Automation",
+    "company": "First Focus IT P/L",
+    "positive_evidence": [
+      "matched_skills: software engineer",
+      "matched_target_roles: Software Engineer",
+      "location_matches: All Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_182645cc9258",
+    "title": "Lead Software Engineer - Al &",
+    "company": "Automation",
+    "location": "Auckland CBD, Auckland (Hybrid)",
+    "posted_at_text": null,
+    "work_type": "Auckland CBD, Auckland (Hybrid)",
+    "salary_text": "Up to $170k + Kiwisaver + 10 days paid",
+    "classification": "Lead Software Engineer - Al &",
+    "card_bbox": {
+      "x": 58,
+      "y": 922,
+      "w": 344,
+      "h": 227
+    },
+    "click_point": {
+      "x": 181,
+      "y": 933
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_16",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_41_lead-software-engineer-al",
+      "page_text_42_automation",
+      "page_text_43_first-focus-it-p-l",
+      "page_text_44_auckland-cbd-auckland-hybrid",
+      "page_text_45_up-to-170k-kiwisaver-10-days-paid",
+      "page_text_46_training",
+      "page_text_48_hybrid-work-reqular-working-hours-flexible",
+      "page_text_49_leave-optil",
+      "page_text_50_save-this-search",
+      "page_text_51_paid-trainil"
+    ],
+    "evidence": {
+      "texts": [
+        "Lead Software Engineer - Al &",
+        "Automation",
+        "First Focus IT P/L",
+        "Auckland CBD, Auckland (Hybrid)",
+        "Up to $170k + Kiwisaver + 10 days paid",
+        "training",
+        "Hybrid work | Reqular working hours | Flexible",
+        "leave optil",
+        "Save this search",
+        "Paid trainil"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": true,
+        "has_salary": true
+      }
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_f4a326401678",
+    "title": "Lead Software Engineer-Al&Automation",
+    "company": "First Focus IT P/L",
+    "location": "All Auckland",
+    "work_type": "Auckland CBD,Auckland (Hybrid)",
+    "classification": "Lead Software Engineer-Al&Automation",
+    "salary_text": "Up to $170k + Kiwisaver+ 10 days paid training",
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "All Auckland"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "SEEK"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Listing time"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "FIRSTFOCUS"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "Australia's#1RatedManagedServiceProvider"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "cloudtango"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "Sydney|Melbourne|Brisbane|Adelaide|Perth|Canberra|Gold Coast|Manila"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Auckland|wellington|Christchurch|Nelson"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Lead Software Engineer-Al&Automation"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "First Focus IT P/L View alljobs"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "Auckland CBD,Auckland (Hybrid)"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "Developers/Programmers(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "Up to $170k + Kiwisaver+ 10 days paid training"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "Posted 22d ago·High application volume"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "Quick apply"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "LcauouitwvaicLlyllicci"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "First Focus IT P/L"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "Viewall jobs"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "）Auckland CBD,Auckland (Hybrid)"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "Up to $170k+ Kiwisaver+ 10 days paid training"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "3 skills and credentials match your profile"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "√AI Agents"
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "Typescript Programming"
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "√API"
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "Showall"
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "There are Auckland roles,and then there are Auckland roles.This one will not ask"
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "you to sit in traffic on the Southern Motorway just toexplain“what Al is\"to a"
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "committeeof14people,orpretendthatinnovationmeansputtingChatGPTina"
+      },
+      {
+        "index": 31,
+        "role": "body",
+        "text": "PowerPointandcallingitstrategy.You'rewelcome."
+      },
+      {
+        "index": 32,
+        "role": "body",
+        "text": "FirstFocusisoneofAustralasia’sleadingManagedServiceProviders,with"
+      },
+      {
+        "index": 33,
+        "role": "body",
+        "text": "almost 400people across Australia,NewZealand,and thePhilippines.Wehelp"
+      },
+      {
+        "index": 34,
+        "role": "body",
+        "text": "because it is. Mostly."
+      },
+      {
+        "index": 35,
+        "role": "body",
+        "text": "OurAl,Automation&Adoptionteamisasmallinternalinnovationteamwitha"
+      }
+    ],
+    "requirements": [
+      "3 skills and credentials match your profile"
+    ],
+    "responsibilities": [
+      "There are Auckland roles,and then there are Auckland roles.This one will not ask"
+    ],
+    "benefits": [
+      "Auckland CBD,Auckland (Hybrid)",
+      "）Auckland CBD,Auckland (Hybrid)"
+    ],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply",
+      "bbox": {
+        "x": 546,
+        "y": 1015,
+        "w": 104,
+        "h": 28
+      },
+      "click_point": {
+        "x": 598,
+        "y": 1029
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save button",
+      "bbox": {
+        "x": 570,
+        "y": 848,
+        "w": 60,
+        "h": 32
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 513,
+        "y": 346,
+        "w": 709,
+        "h": 832
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false
+      },
+      "safe_points": [
+        {
+          "x": 867,
+          "y": 762,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 513,
+      "y": 126,
+      "w": 709,
+      "h": 1052
+    },
+    "detail_scroll_history": [
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260617-113513-823803__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": true
+          }
+        },
+        "missing_evidence": [
+          "responsibilities"
+        ]
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-113512-061057__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-113529-683097__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 39,
+      "action_count": 37,
+      "texts": [
+        "All Auckland",
+        "SEEK",
+        "Listing time",
+        "FIRSTFOCUS",
+        "Australia's#1RatedManagedServiceProvider",
+        "cloudtango",
+        "Sydney|Melbourne|Brisbane|Adelaide|Perth|Canberra|Gold Coast|Manila",
+        "Auckland|wellington|Christchurch|Nelson",
+        "Lead Software Engineer-Al&Automation",
+        "First Focus IT P/L View alljobs",
+        "Auckland CBD,Auckland (Hybrid)",
+        "Developers/Programmers(Information&CommunicationTechnology)",
+        "Full time",
+        "回",
+        "Up to $170k + Kiwisaver+ 10 days paid training",
+        "Posted 22d ago·High application volume",
+        "Quick apply",
+        "Save",
+        "tA",
+        "How you match ①",
+        "LcauouitwvaicLlyllicci",
+        "First Focus IT P/L",
+        "Viewall jobs",
+        "）Auckland CBD,Auckland (Hybrid)",
+        "Up to $170k+ Kiwisaver+ 10 days paid training",
+        "3 skills and credentials match your profile",
+        "√AI Agents",
+        "Typescript Programming",
+        "√API",
+        "Showall",
+        "There are Auckland roles,and then there are Auckland roles.This one will not ask",
+        "you to sit in traffic on the Southern Motorway just toexplain“what Al is\"to a",
+        "committeeof14people,orpretendthatinnovationmeansputtingChatGPTina",
+        "PowerPointandcallingitstrategy.You'rewelcome.",
+        "FirstFocusisoneofAustralasia’sleadingManagedServiceProviders,with",
+        "A",
+        "almost 400people across Australia,NewZealand,and thePhilippines.Wehelp",
+        "because it is. Mostly.",
+        "OurAl,Automation&Adoptionteamisasmallinternalinnovationteamwitha"
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

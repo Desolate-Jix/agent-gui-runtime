@@ -1,0 +1,619 @@
+{
+  "contract_version": "runtime_path_graph_v1",
+  "graph_id": "seek_search_results_runtime_path_graph_v1",
+  "app_id": "seek",
+  "domain": "job_search",
+  "page_type": "seek_search_results_with_detail",
+  "created_at": "2026-06-17T04:34:43.448217+00:00",
+  "source": {
+    "learn_mode": "manual_seeded_from_successful_seek_mvp_run",
+    "source_contract": "seek_learn_artifact_export_v1",
+    "source_report_path": "logs\\smoke\\seek_mvp_readonly_after_parser_title_filter_5jobs_20260617.json",
+    "source_trace_path": null,
+    "baseline": {
+      "jobs_seen": 5,
+      "jobs_opened": 5,
+      "jobs_fully_read": 5,
+      "post_click_layout_drift_count": 0,
+      "wrong_scope_scroll_count": 0,
+      "final_submissions": 0,
+      "submit_clicks": 0,
+      "accuracy_status": "pass"
+    }
+  },
+  "coordinate_policy": {
+    "coordinate_space": "window_screenshot",
+    "do_not_reuse_absolute_coordinates_without_reobserve": true,
+    "bbox_is_guidance_not_authorization": true,
+    "click_point_requires_current_validation": true,
+    "coordinate_evidence_required_in_trace": true
+  },
+  "state_match_policy": {
+    "minimum_confidence": 0.75,
+    "required_regions": [
+      "top_search_area",
+      "results_list",
+      "job_detail"
+    ],
+    "required_anchors_any": [
+      "SEEK",
+      "jobs",
+      "Apply",
+      "Save"
+    ],
+    "reject_if": [
+      "application_form_detected",
+      "external_site_detected",
+      "login_or_captcha"
+    ]
+  },
+  "states": [
+    {
+      "state_id": "seek_search_results_empty_detail",
+      "description": "SEEK results page before a job card has been selected.",
+      "required_regions": [
+        "top_search_area",
+        "results_list"
+      ]
+    },
+    {
+      "state_id": "seek_search_results_with_selected_job",
+      "description": "SEEK results page with a selected job loaded in the detail pane.",
+      "required_regions": [
+        "results_list",
+        "job_detail",
+        "detail_header"
+      ]
+    },
+    {
+      "state_id": "seek_detail_scrolled",
+      "description": "The selected job detail pane has been scrolled for more evidence.",
+      "required_regions": [
+        "job_detail",
+        "detail_body"
+      ]
+    },
+    {
+      "state_id": "seek_results_list_scrolled",
+      "description": "The results list has been scrolled to expose more job cards.",
+      "required_regions": [
+        "results_list"
+      ]
+    },
+    {
+      "state_id": "seek_apply_entry_form",
+      "description": "An apply flow entry state was reached; final submit remains forbidden.",
+      "safety": {
+        "final_submit": "forbidden"
+      }
+    },
+    {
+      "state_id": "seek_external_or_blocked",
+      "description": "Execution should stop because the page left the learned safe surface or hit a blocker.",
+      "terminal": true
+    }
+  ],
+  "regions": [
+    {
+      "region_id": "top_search_area",
+      "role": "search_controls",
+      "label": "SEEK top search and filters area",
+      "parent_region_id": null,
+      "container_id": null,
+      "repeatable": false,
+      "contains": [
+        "search_keywords",
+        "search_location",
+        "filters"
+      ],
+      "bbox_policy": {
+        "source": "learned_layout_seed",
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      }
+    },
+    {
+      "region_id": "results_list",
+      "role": "list",
+      "label": "SEEK left job results list",
+      "parent_region_id": null,
+      "container_id": "seek:results_list",
+      "repeatable": false,
+      "contains": [
+        "job_card"
+      ],
+      "bbox_policy": {
+        "source": "learned_layout_seed",
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      }
+    },
+    {
+      "region_id": "job_detail",
+      "role": "detail",
+      "label": "SEEK right job detail pane",
+      "parent_region_id": null,
+      "container_id": "seek:job_detail",
+      "repeatable": false,
+      "contains": [
+        "detail_header",
+        "detail_body"
+      ],
+      "bbox_policy": {
+        "source": "learned_layout_seed",
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      }
+    },
+    {
+      "region_id": "job_card",
+      "role": "entity_card",
+      "label": "Job result card",
+      "parent_region_id": "results_list",
+      "container_id": null,
+      "repeatable": true,
+      "contains": [],
+      "bbox_policy": {
+        "source": "learned_layout_seed",
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      }
+    },
+    {
+      "region_id": "detail_header",
+      "role": "detail_header",
+      "label": "Opened job title/company/apply area",
+      "parent_region_id": "job_detail",
+      "container_id": null,
+      "repeatable": false,
+      "contains": [],
+      "bbox_policy": {
+        "source": "learned_layout_seed",
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      }
+    },
+    {
+      "region_id": "detail_body",
+      "role": "detail_body",
+      "label": "Opened job description body",
+      "parent_region_id": "job_detail",
+      "container_id": null,
+      "repeatable": false,
+      "contains": [],
+      "bbox_policy": {
+        "source": "learned_layout_seed",
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      }
+    }
+  ],
+  "scroll_containers": [
+    {
+      "container_id": "seek:page",
+      "role": "page",
+      "scroll_scope": "page",
+      "axis": "vertical",
+      "used_by": [],
+      "safe_point_policy": {
+        "source": "current_observe_or_container_detection",
+        "avoid_action_buttons": false,
+        "requires_before_after_trace": true
+      },
+      "artifact_is_authorization": false
+    },
+    {
+      "container_id": "seek:results_list",
+      "role": "results_list",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "used_by": [
+        "open_job_card",
+        "load_more_results"
+      ],
+      "safe_point_policy": {
+        "source": "current_observe_or_container_detection",
+        "avoid_action_buttons": false,
+        "requires_before_after_trace": true
+      },
+      "artifact_is_authorization": false
+    },
+    {
+      "container_id": "seek:job_detail",
+      "role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "used_by": [
+        "read_detail",
+        "apply_entry"
+      ],
+      "safe_point_policy": {
+        "source": "current_observe_or_container_detection",
+        "avoid_action_buttons": true,
+        "requires_before_after_trace": true
+      },
+      "artifact_is_authorization": false
+    }
+  ],
+  "entities": [
+    {
+      "entity_id": "seek:job_card:sample:0",
+      "entity_type": "job_card",
+      "region_id": "results_list",
+      "container_id": "seek:results_list",
+      "title": "Applications Software Engineer",
+      "company": "Temperzone",
+      "location": "Manukau, Auckland",
+      "bbox": {
+        "x": 36,
+        "y": 529,
+        "w": 426,
+        "h": 350
+      },
+      "click_point": {
+        "x": 249,
+        "y": 704
+      },
+      "coordinate_evidence": {
+        "source_contract": "seek_job_card_v1",
+        "bbox_source": "traversal_report",
+        "click_point_policy": "seeded_safe_point_inside_card_bbox",
+        "requires_current_reobserve": true,
+        "requires_vista_or_equivalent_validation": true
+      }
+    },
+    {
+      "entity_id": "seek:job_card:sample:1",
+      "entity_type": "job_card",
+      "region_id": "results_list",
+      "container_id": "seek:results_list",
+      "title": "Senior Integrations Engineer",
+      "company": "Halter",
+      "location": "Auckland CBD, Auckland",
+      "bbox": {
+        "x": 56,
+        "y": 909,
+        "w": 375,
+        "h": 230
+      },
+      "click_point": {
+        "x": 175,
+        "y": 921
+      },
+      "coordinate_evidence": {
+        "source_contract": "seek_job_card_v1",
+        "bbox_source": "traversal_report",
+        "click_point_policy": "seeded_safe_point_inside_card_bbox",
+        "requires_current_reobserve": true,
+        "requires_vista_or_equivalent_validation": true
+      }
+    },
+    {
+      "entity_id": "seek:job_card:sample:2",
+      "entity_type": "job_card",
+      "region_id": "results_list",
+      "container_id": "seek:results_list",
+      "title": "Software Engineers",
+      "company": "Plexure Limited",
+      "location": "Auckland CBD, Auckland (Hybrid)",
+      "bbox": {
+        "x": 57,
+        "y": 759,
+        "w": 354,
+        "h": 252
+      },
+      "click_point": {
+        "x": 139,
+        "y": 771
+      },
+      "coordinate_evidence": {
+        "source_contract": "seek_job_card_v1",
+        "bbox_source": "traversal_report",
+        "click_point_policy": "seeded_safe_point_inside_card_bbox",
+        "requires_current_reobserve": true,
+        "requires_vista_or_equivalent_validation": true
+      }
+    },
+    {
+      "entity_id": "seek:job_card:sample:3",
+      "entity_type": "job_card",
+      "region_id": "results_list",
+      "container_id": "seek:results_list",
+      "title": "Senior Software Engineer",
+      "company": "Absolute IT Limited",
+      "location": "Auckland CBD, Auckland",
+      "bbox": {
+        "x": 57,
+        "y": 796,
+        "w": 381,
+        "h": 251
+      },
+      "click_point": {
+        "x": 162,
+        "y": 809
+      },
+      "coordinate_evidence": {
+        "source_contract": "seek_job_card_v1",
+        "bbox_source": "traversal_report",
+        "click_point_policy": "seeded_safe_point_inside_card_bbox",
+        "requires_current_reobserve": true,
+        "requires_vista_or_equivalent_validation": true
+      }
+    },
+    {
+      "entity_id": "seek:job_card:sample:4",
+      "entity_type": "job_card",
+      "region_id": "results_list",
+      "container_id": "seek:results_list",
+      "title": "Head of Delivery| Software Engineer",
+      "company": "Enterprise Technology Recruitment Ltd",
+      "location": "Auckland CBD, Auckland (Hybrid)",
+      "bbox": {
+        "x": 56,
+        "y": 837,
+        "w": 369,
+        "h": 247
+      },
+      "click_point": {
+        "x": 209,
+        "y": 847
+      },
+      "coordinate_evidence": {
+        "source_contract": "seek_job_card_v1",
+        "bbox_source": "traversal_report",
+        "click_point_policy": "seeded_safe_point_inside_card_bbox",
+        "requires_current_reobserve": true,
+        "requires_vista_or_equivalent_validation": true
+      }
+    }
+  ],
+  "dynamic_collections": [
+    {
+      "collection_id": "seek:job_cards",
+      "entity_type": "job_card",
+      "region_id": "results_list",
+      "container_id": "seek:results_list",
+      "entity_pattern_ref": "seek:entity_pattern:job_card",
+      "load_more_action_template_id": "load_more_results"
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "seek:transition:open_job_card",
+      "action_template_id": "open_job_card",
+      "from_state_id": "seek_search_results_empty_detail",
+      "to_state_id": "seek_search_results_with_selected_job",
+      "verification_refs": [
+        "open_job_card_detail_match"
+      ]
+    },
+    {
+      "transition_id": "seek:transition:read_detail",
+      "action_template_id": "read_detail",
+      "from_state_id": "seek_search_results_with_selected_job",
+      "to_state_id": "seek_detail_scrolled",
+      "verification_refs": [
+        "read_detail_scroll_scope"
+      ]
+    },
+    {
+      "transition_id": "seek:transition:load_more_results",
+      "action_template_id": "load_more_results",
+      "from_state_id": "seek_search_results_with_selected_job",
+      "to_state_id": "seek_results_list_scrolled",
+      "verification_refs": [
+        "load_more_results_scroll_scope"
+      ]
+    },
+    {
+      "transition_id": "seek:transition:apply_entry_guarded",
+      "action_template_id": "apply_entry",
+      "from_state_id": "seek_search_results_with_selected_job",
+      "to_state_id": "seek_apply_entry_form",
+      "verification_refs": [
+        "final_submit_forbidden"
+      ],
+      "default_available": false
+    }
+  ],
+  "action_templates": [
+    {
+      "action_id": "open_job_card",
+      "goal_template": "Click the SEEK job result card titled {title} at {company}",
+      "target_entity": "job_card",
+      "scroll_target": {
+        "target_pane": "results_list",
+        "target_container_id": "seek:results_list"
+      },
+      "candidate_constraints": {
+        "required_container_id": "seek:results_list",
+        "use_seeded_candidate": true,
+        "seed_source_contract": "seek_job_card_v1",
+        "require_card_bbox": true,
+        "require_click_point": true,
+        "require_point_inside_seed_bbox": true
+      },
+      "verification_policy": {
+        "post_click": "detail_title_company_must_match_clicked_card",
+        "failure_reason": "post_click_layout_drift"
+      },
+      "forbidden_targets": [
+        "Apply",
+        "Quick Apply",
+        "Save",
+        "Submit",
+        "Send application",
+        "Complete application"
+      ],
+      "action_template_id": "open_job_card",
+      "artifact_is_authorization": false,
+      "requires_current_validation": true,
+      "learned_skill_ref": "skill.open_card_from_list",
+      "transition_ref": "seek:transition:open_job_card"
+    },
+    {
+      "action_id": "read_detail",
+      "target_entity": "job_detail",
+      "scroll_target": {
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail"
+      },
+      "verification_policy": {
+        "complete_contract": "seek_job_detail_completeness_v1",
+        "required_evidence": [
+          "title",
+          "company",
+          "location",
+          "description_sections",
+          "role_evidence"
+        ]
+      },
+      "action_template_id": "read_detail",
+      "artifact_is_authorization": false,
+      "requires_current_validation": true,
+      "learned_skill_ref": "skill.read_detail_pane_until_bounded",
+      "transition_ref": "seek:transition:read_detail"
+    },
+    {
+      "action_id": "load_more_results",
+      "target_entity": "results_list",
+      "scroll_target": {
+        "target_pane": "results_list",
+        "target_container_id": "seek:results_list"
+      },
+      "verification_policy": {
+        "target_container_content_should_change": true,
+        "wrong_scope_detected_must_be_false": true
+      },
+      "action_template_id": "load_more_results",
+      "artifact_is_authorization": false,
+      "requires_current_validation": true,
+      "learned_skill_ref": "skill.scroll_list_until_new_entities",
+      "transition_ref": "seek:transition:load_more_results"
+    },
+    {
+      "action_id": "apply_entry",
+      "target_entity": "apply_button",
+      "scroll_target": {
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail"
+      },
+      "candidate_constraints": {
+        "required_container_id": "seek:job_detail",
+        "forbid_final_submit": true
+      },
+      "verification_policy": {
+        "pre_apply_detail_verification_required": true,
+        "stop_after_application_state_observe": true
+      },
+      "action_template_id": "apply_entry",
+      "artifact_is_authorization": false,
+      "requires_current_validation": true,
+      "learned_skill_ref": "skill.block_final_submit",
+      "transition_ref": "seek:transition:apply_entry_guarded",
+      "availability_policy": {
+        "default_available": false,
+        "requires_real_profile": true,
+        "requires_explicit_user_approval": true,
+        "final_submit_remains_forbidden": true
+      }
+    }
+  ],
+  "verification_rules": [
+    {
+      "rule_id": "open_job_card_detail_match",
+      "applies_to": [
+        "open_job_card"
+      ],
+      "required": true,
+      "description": "After a card click, the right detail title/company must match the clicked card."
+    },
+    {
+      "rule_id": "read_detail_scroll_scope",
+      "applies_to": [
+        "read_detail"
+      ],
+      "required_container_id": "seek:job_detail",
+      "required": true
+    },
+    {
+      "rule_id": "load_more_results_scroll_scope",
+      "applies_to": [
+        "load_more_results"
+      ],
+      "required_container_id": "seek:results_list",
+      "required": true
+    },
+    {
+      "rule_id": "final_submit_forbidden",
+      "applies_to": [
+        "apply_entry",
+        "safe_fill",
+        "all_actions"
+      ],
+      "required": true,
+      "forbidden_terms": [
+        "Submit",
+        "Send application",
+        "Complete application",
+        "Review and submit",
+        "Finish application"
+      ]
+    }
+  ],
+  "safety_policy": {
+    "policy_id": "seek_final_submit_forbidden_v1",
+    "final_submit": "forbidden",
+    "forbidden_actions": [
+      "Submit",
+      "Send application",
+      "Complete application",
+      "Review and submit",
+      "Finish application"
+    ],
+    "real_clicks_require": [
+      "recognition_plan_v1",
+      "pre_click_decision_v1.allowed",
+      "post_click_verification"
+    ],
+    "apply_entry_requires": [
+      "strong_apply",
+      "pre_apply_detail_verification_v1",
+      "final_submit_guard_v1"
+    ],
+    "safe_fill_requires": [
+      "candidate_profile_readiness_v1.live_smoke_ready",
+      "safe_form_fill_trace_v1",
+      "post_fill_verification_v1"
+    ]
+  },
+  "visual_asset_refs": [
+    "seek:visual:apply_button",
+    "seek:visual:quick_apply_button",
+    "seek:visual:save_icon",
+    "seek:visual:job_card_shape",
+    "seek:visual:selected_card_highlight",
+    "seek:visual:results_scrollbar",
+    "seek:visual:detail_scrollbar"
+  ],
+  "learned_skill_refs": [
+    "skill.open_card_from_list",
+    "skill.scroll_container_until_new_content",
+    "skill.scroll_list_until_new_entities",
+    "skill.read_detail_pane_until_bounded",
+    "skill.click_seeded_candidate_with_point_validation",
+    "skill.block_final_submit"
+  ],
+  "metrics": {
+    "jobs_seen": 5,
+    "jobs_opened": 5,
+    "jobs_fully_read": 5,
+    "post_click_layout_drift_count": 0,
+    "wrong_scope_scroll_count": 0,
+    "final_submissions": 0,
+    "submit_clicks": 0,
+    "accuracy_status": "pass",
+    "sample_entity_count": 5,
+    "artifact_is_authorization": false
+  }
+}

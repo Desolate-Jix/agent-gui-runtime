@@ -188,6 +188,72 @@ def test_scroll_dry_run_validates_without_dispatch(monkeypatch) -> None:
     assert result["trace_path"].endswith("scroll-dry-run.json")
 
 
+def test_scroll_container_dry_run_resolves_seek_job_detail(monkeypatch) -> None:
+    monkeypatch.setattr(
+        action_api.window_manager,
+        "get_bound_window",
+        lambda: SimpleNamespace(
+            handle=1,
+            title="Software Engineer Jobs in All Auckland, Job Vacancies | SEEK - Microsoft Edge",
+            rect=SimpleNamespace(left=0, top=0, right=1246, bottom=1194),
+        ),
+    )
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/seek-scroll-dry-run.json")
+    monkeypatch.setattr(
+        action_api.input_controller,
+        "scroll_window",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("dry run should not scroll")),
+    )
+
+    response = action_api.scroll(
+        ScrollRequest(
+            contract_version="scroll_request_v2",
+            scroll_scope="container",
+            target_pane="job_detail",
+            target_container_id="seek:job_detail",
+            direction="down",
+            dry_run=True,
+            reason="required_detail_section_not_visible",
+        )
+    )
+
+    assert response.success is True
+    result = response.data["result"]
+    assert result["contract_version"] == "scroll_action_v2"
+    assert result["target_container"]["container_id"] == "seek:job_detail"
+    assert result["precondition_decision"]["decision"] == "ALLOW"
+    assert result["resolved_target"]["point_inside_container"] is True
+    assert result["outcome"]["status"] == "dry_run_ready"
+
+
+def test_scroll_container_rejects_coordinate_window_size_mismatch(monkeypatch) -> None:
+    monkeypatch.setattr(
+        action_api.window_manager,
+        "get_bound_window",
+        lambda: SimpleNamespace(
+            handle=1,
+            title="Software Engineer Jobs in All Auckland, Job Vacancies | SEEK - Microsoft Edge",
+            rect=SimpleNamespace(left=0, top=0, right=1246, bottom=1194),
+        ),
+    )
+
+    response = action_api.scroll(
+        ScrollRequest(
+            contract_version="scroll_request_v2",
+            scroll_scope="container",
+            target_pane="results_list",
+            target_container_id="seek:results_list",
+            coordinate_window_size={"width": 999, "height": 1194},
+            dry_run=True,
+        )
+    )
+
+    assert response.success is False
+    assert response.error is not None
+    assert response.error.code == "scroll_precondition_rejected"
+    assert "coordinate_window_size_mismatch" in response.data["precondition_decision"]["reject_reasons"]
+
+
 def test_scroll_dispatches_and_verifies(monkeypatch) -> None:
     monkeypatch.setattr(
         action_api.window_manager,

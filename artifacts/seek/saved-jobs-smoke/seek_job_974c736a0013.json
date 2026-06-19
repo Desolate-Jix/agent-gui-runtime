@@ -1,0 +1,416 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_974c736a0013",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.73,
+    "job_id": "seek_job_974c736a0013",
+    "title": "Applications Software Engineer",
+    "company": "Temperzone",
+    "positive_evidence": [
+      "matched_skills: SQL, software engineer",
+      "matched_target_roles: Software Engineer",
+      "location_matches: All Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_d29ccace8f40",
+    "title": "Applications Software Engineer",
+    "company": "Temperzone",
+    "location": "Manukau, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": "Applications Software Engineer",
+    "card_bbox": {
+      "x": 36,
+      "y": 529,
+      "w": 426,
+      "h": 341
+    },
+    "click_point": {
+      "x": 249,
+      "y": 699
+    },
+    "source_url": null,
+    "source_card_id": "card_10_applications-software-engineer",
+    "primary_action_id": "action_uia_146_applications-software-engineer",
+    "child_action_ids": [
+      "action_screen_9_applications-software-engineer",
+      "action_uia_145_modify-my-search",
+      "action_uia_147_hyperlink",
+      "action_uia_148_this-is-a-featured-job",
+      "action_uia_149_hyperlink"
+    ],
+    "child_page_element_ids": [
+      "page_text_29_applications-software-engineer",
+      "page_text_30_temperzone",
+      "page_text_31_temperzone",
+      "page_text_32_manukau-auckland",
+      "page_text_33_onsite-cafeteria-parking-security",
+      "page_text_34_opportunities-for-continuous-professional",
+      "page_text_35_development",
+      "page_text_36_comprehensive-health-insurance-cover",
+      "page_text_37_build-and-support-modern-applications-that-conne",
+      "page_text_38_systems-streamline-processes-and-power-business",
+      "page_text_39_efficiency",
+      "page_text_40_featured",
+      "page_text_41_口"
+    ],
+    "evidence": {
+      "texts": [
+        "Applications Software Engineer",
+        "Temperzone",
+        "temperzone",
+        "Manukau, Auckland",
+        "Onsite cafeteria + parking + security.",
+        "Opportunities for continuous professional",
+        "development",
+        "Comprehensive Health Insurance Cover",
+        "Build and support modern applications that connect",
+        "systems, streamline processes, and power business",
+        "efficiency.",
+        "Featured",
+        "口",
+        "Applications Software Engineer",
+        "Modify my search",
+        "hyperlink",
+        "This is a featured job",
+        "hyperlink"
+      ],
+      "source_contract": "screen_inventory_v1"
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_974c736a0013",
+    "title": "Applications Software Engineer",
+    "company": "Temperzone",
+    "location": "All Auckland",
+    "work_type": "Full time",
+    "classification": "Applications Software Engineer",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "All Auckland"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "SEEK"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Listing time"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "temperzone"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "climate innovations"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "Over65yearsof ClimateInnovations"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "Applications Software Engineer"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Temperzone View all jobs"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Manukau,Auckland"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Engineering-Software(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "Posted 23h ago"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "Apply C"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "4 skills and credentials match your profile"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "https://nz.seek.com/job/92736230?type=promoted&ref=search-standalone&origin=jobCard#sol=fbe73a84fd99d986c336f2d55f526cfcf8d0e116 pript Programming Language"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "Temperzone View alljobs"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "Manukau, Auckland"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "√ API"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "SQL Query Language"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "Typescript Programming Language"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "+1more"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "WelcometoTemperzone!Astherecipientof the2022ARBSProductExcellence"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "Award,we stand asAustralasia's longest-serving air conditioning manufacturer."
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "Ourdedicationtoqualityandeco-consciousinitiativesreflectsinour"
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "internationally acclaimed product line. Joining Temperzone means more than"
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "justemployment;it'sjoiningatight-knitfamilywhereourcultureandvalues"
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "permeateeveryaspectofourwork."
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "AbouttheRole"
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "Areyoupassionateaboutleveragingtechnologytodeliverbusinessefficiency"
+      },
+      {
+        "index": 31,
+        "role": "body",
+        "text": "and innovation?Temperzone is looking fora skilled ApplicationSoftware"
+      }
+    ],
+    "requirements": [
+      "4 skills and credentials match your profile"
+    ],
+    "responsibilities": [
+      "AbouttheRole"
+    ],
+    "benefits": [],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Apply C",
+      "bbox": {
+        "x": 559,
+        "y": 979,
+        "w": 84,
+        "h": 32
+      },
+      "click_point": {
+        "x": 601,
+        "y": 995
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save button",
+      "bbox": {
+        "x": 560,
+        "y": 815,
+        "w": 60,
+        "h": 35
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 513,
+        "y": 346,
+        "w": 709,
+        "h": 832
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false
+      },
+      "safe_points": [
+        {
+          "x": 867,
+          "y": 762,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 513,
+      "y": 126,
+      "w": 709,
+      "h": 1052
+    },
+    "detail_scroll_history": [
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260617-090044-130739__scroll__scroll-down.json",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": true
+          }
+        },
+        "missing_evidence": [
+          "responsibilities"
+        ]
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-090042-397225__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-090100-997061__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 35,
+      "action_count": 34,
+      "texts": [
+        "All Auckland",
+        "SEEK",
+        "Listing time",
+        "temperzone",
+        "climate innovations",
+        "Over65yearsof ClimateInnovations",
+        "Applications Software Engineer",
+        "Temperzone View all jobs",
+        "Manukau,Auckland",
+        "国",
+        "Engineering-Software(Information&CommunicationTechnology)",
+        "Full time",
+        "Posted 23h ago",
+        "Apply C",
+        "Save",
+        "tA",
+        "How you match ①",
+        "4 skills and credentials match your profile",
+        "https://nz.seek.com/job/92736230?type=promoted&ref=search-standalone&origin=jobCard#sol=fbe73a84fd99d986c336f2d55f526cfcf8d0e116 pript Programming Language",
+        "Temperzone View alljobs",
+        "Manukau, Auckland",
+        "√ API",
+        "SQL Query Language",
+        "Typescript Programming Language",
+        "+1more",
+        "WelcometoTemperzone!Astherecipientof the2022ARBSProductExcellence",
+        "Award,we stand asAustralasia's longest-serving air conditioning manufacturer.",
+        "Ourdedicationtoqualityandeco-consciousinitiativesreflectsinour",
+        "internationally acclaimed product line. Joining Temperzone means more than",
+        "justemployment;it'sjoiningatight-knitfamilywhereourcultureandvalues",
+        "permeateeveryaspectofourwork.",
+        "A",
+        "AbouttheRole",
+        "Areyoupassionateaboutleveragingtechnologytodeliverbusinessefficiency",
+        "and innovation?Temperzone is looking fora skilled ApplicationSoftware"
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

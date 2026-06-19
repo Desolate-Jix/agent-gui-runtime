@@ -35,18 +35,26 @@ for path in (
     path.mkdir(parents=True, exist_ok=True)
 
 
-def slugify(value: Optional[str], *, fallback: str = "item") -> str:
+def slugify(value: Optional[str], *, fallback: str = "item", max_length: int = 80) -> str:
     text = (value or "").strip().lower()
     text = re.sub(r"[^a-z0-9]+", "-", text)
     text = text.strip("-")
     if text:
-        return text
+        return _limit_slug(text, source=value or "", max_length=max_length)
 
     source = (value or "").strip()
     if source:
         digest = hashlib.sha1(source.encode("utf-8")).hexdigest()[:8]
-        return f"{fallback}-{digest}"
-    return fallback
+        return _limit_slug(f"{fallback}-{digest}", source=source, max_length=max_length)
+    return _limit_slug(fallback, source=fallback, max_length=max_length)
+
+
+def _limit_slug(slug: str, *, source: str, max_length: int) -> str:
+    if max_length <= 0 or len(slug) <= max_length:
+        return slug
+    digest = hashlib.sha1(source.encode("utf-8")).hexdigest()[:8]
+    prefix_length = max(1, max_length - len(digest) - 1)
+    return f"{slug[:prefix_length].rstrip('-')}-{digest}"
 
 
 def timestamp_label() -> str:

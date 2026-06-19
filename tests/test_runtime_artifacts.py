@@ -46,6 +46,24 @@ def test_write_trace_writes_json(monkeypatch, tmp_path) -> None:
     assert payload["result"]["final_ok"] is True
 
 
+def test_write_trace_limits_long_name_hint(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(runtime_artifacts, "TRACES_DIR", tmp_path / "traces")
+    monkeypatch.setattr(runtime_artifacts, "timestamp_label", lambda: "20260504-190000-000003")
+    long_title = "Software Engineer Jobs in All Auckland Job Vacancies Jun 2026 SEEK Microsoft Edge " * 8
+
+    path = runtime_artifacts.write_trace(
+        category="vision",
+        operation="render_recognition_plan_overlay",
+        payload={"success": True},
+        name_hint=long_title,
+    )
+
+    saved = Path(path)
+    assert saved.exists()
+    assert len(saved.name) < 180
+    assert saved.name.startswith("20260504-190000-000003__render-recognition-plan-overlay__software-engineer")
+
+
 def test_runtime_timer_records_steps() -> None:
     timer = runtime_artifacts.RuntimeTimer()
 

@@ -1,0 +1,179 @@
+{
+  "contract_version": "path_graph_seed_v1",
+  "seed_id": "seek_search_results_detail_path_seed_v1",
+  "app_id": "seek",
+  "page_type": "seek_search_results_with_detail",
+  "coordinate_space": "window_screenshot",
+  "sections": [
+    {
+      "section_id": "top_search_area",
+      "role": "search_controls",
+      "label": "SEEK top search and filters area",
+      "contains": [
+        "search_keywords",
+        "search_location",
+        "filters"
+      ]
+    },
+    {
+      "section_id": "results_list",
+      "role": "list",
+      "label": "SEEK left job results list",
+      "container_id": "seek:results_list",
+      "contains": [
+        "job_card"
+      ]
+    },
+    {
+      "section_id": "job_detail",
+      "role": "detail",
+      "label": "SEEK right job detail pane",
+      "container_id": "seek:job_detail",
+      "contains": [
+        "detail_header",
+        "detail_body"
+      ]
+    },
+    {
+      "section_id": "job_card",
+      "role": "entity_card",
+      "label": "Job result card",
+      "parent_section_id": "results_list",
+      "repeatable": true
+    },
+    {
+      "section_id": "detail_header",
+      "role": "detail_header",
+      "label": "Opened job title/company/apply area",
+      "parent_section_id": "job_detail"
+    },
+    {
+      "section_id": "detail_body",
+      "role": "detail_body",
+      "label": "Opened job description body",
+      "parent_section_id": "job_detail"
+    }
+  ],
+  "edges": [
+    {
+      "from": "top_search_area",
+      "to": "results_list",
+      "relation": "filters_or_search_updates"
+    },
+    {
+      "from": "results_list",
+      "to": "job_card",
+      "relation": "contains_repeated"
+    },
+    {
+      "from": "job_card",
+      "to": "job_detail",
+      "relation": "open_job_card_updates_detail"
+    },
+    {
+      "from": "job_detail",
+      "to": "detail_header",
+      "relation": "contains"
+    },
+    {
+      "from": "job_detail",
+      "to": "detail_body",
+      "relation": "contains"
+    }
+  ],
+  "action_bindings": {
+    "open_job_card": {
+      "source_section_id": "job_card",
+      "target_section_id": "job_detail",
+      "required_container_id": "seek:results_list"
+    },
+    "read_detail": {
+      "source_section_id": "job_detail",
+      "scroll_container_id": "seek:job_detail"
+    },
+    "load_more_results": {
+      "source_section_id": "results_list",
+      "scroll_container_id": "seek:results_list"
+    }
+  },
+  "sample_entities": {
+    "job_cards": [
+      {
+        "title": "Applications Software Engineer",
+        "company": "Temperzone",
+        "location": "Manukau, Auckland",
+        "card_bbox": {
+          "x": 36,
+          "y": 529,
+          "w": 426,
+          "h": 350
+        },
+        "click_point": {
+          "x": 249,
+          "y": 704
+        }
+      },
+      {
+        "title": "Senior Integrations Engineer",
+        "company": "Halter",
+        "location": "Auckland CBD, Auckland",
+        "card_bbox": {
+          "x": 56,
+          "y": 909,
+          "w": 375,
+          "h": 230
+        },
+        "click_point": {
+          "x": 175,
+          "y": 921
+        }
+      },
+      {
+        "title": "Software Engineers",
+        "company": "Plexure Limited",
+        "location": "Auckland CBD, Auckland (Hybrid)",
+        "card_bbox": {
+          "x": 57,
+          "y": 759,
+          "w": 354,
+          "h": 252
+        },
+        "click_point": {
+          "x": 139,
+          "y": 771
+        }
+      },
+      {
+        "title": "Senior Software Engineer",
+        "company": "Absolute IT Limited",
+        "location": "Auckland CBD, Auckland",
+        "card_bbox": {
+          "x": 57,
+          "y": 796,
+          "w": 381,
+          "h": 251
+        },
+        "click_point": {
+          "x": 162,
+          "y": 809
+        }
+      },
+      {
+        "title": "Head of Delivery| Software Engineer",
+        "company": "Enterprise Technology Recruitment Ltd",
+        "location": "Auckland CBD, Auckland (Hybrid)",
+        "card_bbox": {
+          "x": 56,
+          "y": 837,
+          "w": 369,
+          "h": 247
+        },
+        "click_point": {
+          "x": 209,
+          "y": 847
+        }
+      }
+    ]
+  },
+  "safety_policy_ref": "seek_final_submit_forbidden_v1"
+}

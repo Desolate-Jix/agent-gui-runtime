@@ -1,0 +1,374 @@
+{
+  "contract_version": "runtime_path_graph_v1",
+  "graph_id": "github_issues_runtime_path_graph_v1",
+  "app_id": "github",
+  "domain": "software_project_tracking",
+  "page_type": "issues_list_to_issue_detail",
+  "created_from": {
+    "learn_mode": "manual_seeded_from_seek_and_wikipedia_path_graph_patterns",
+    "source_pattern": "list records -> detail page navigation",
+    "safety_mode": "read_only"
+  },
+  "coordinate_policy": {
+    "coordinate_space": "window_screenshot",
+    "do_not_reuse_absolute_coordinates_without_reobserve": true,
+    "bbox_is_guidance_not_authorization": true,
+    "click_point_requires_current_validation": true,
+    "coordinate_evidence_required_in_trace": true
+  },
+  "state_match_policy": {
+    "minimum_confidence": 0.75,
+    "required_regions_any": [
+      "repo_header",
+      "issues_list",
+      "issue_detail_header",
+      "issue_body"
+    ],
+    "required_anchors_any": [
+      "Issues",
+      "Open",
+      "Closed",
+      "Labels",
+      "Projects",
+      "Assignees",
+      "github"
+    ],
+    "reject_if": [
+      "comment_editor_focused",
+      "new_issue_form_detected",
+      "login_or_captcha",
+      "permission_prompt"
+    ]
+  },
+  "states": [
+    {
+      "state_id": "github_issues_list",
+      "label": "GitHub Issues list",
+      "url_hint": "github.com/*/*/issues",
+      "page_type": "record_list",
+      "required_regions": [
+        "repo_header",
+        "issues_list"
+      ]
+    },
+    {
+      "state_id": "github_issue_detail",
+      "label": "GitHub issue detail",
+      "url_hint": "github.com/*/*/issues/*",
+      "page_type": "record_detail",
+      "required_regions": [
+        "issue_detail_header",
+        "issue_body"
+      ]
+    },
+    {
+      "state_id": "github_issue_detail_scrolled",
+      "label": "GitHub issue detail scrolled",
+      "page_type": "record_detail",
+      "required_regions": [
+        "issue_body"
+      ]
+    },
+    {
+      "state_id": "github_issues_list_scrolled",
+      "label": "GitHub Issues list scrolled",
+      "page_type": "record_list",
+      "required_regions": [
+        "issues_list"
+      ]
+    }
+  ],
+  "regions": [
+    {
+      "region_id": "repo_header",
+      "role": "top_navigation",
+      "description": "Repository title and primary repository navigation tabs",
+      "contains": [
+        "Issues",
+        "Pull requests",
+        "Actions",
+        "Projects"
+      ],
+      "bbox_policy": {
+        "source": "learned_layout_seed",
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      }
+    },
+    {
+      "region_id": "issue_filters",
+      "role": "filter_toolbar",
+      "description": "Issue search/filter toolbar and Open/Closed counters",
+      "contains": [
+        "Filters",
+        "Open",
+        "Closed",
+        "Labels",
+        "Milestones"
+      ],
+      "bbox_policy": {
+        "source": "learned_layout_seed",
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      }
+    },
+    {
+      "region_id": "issues_list",
+      "role": "results_list",
+      "description": "List of issue rows; this region is not treated as an internal scroll container by default",
+      "container_id": "github:page",
+      "contains": [
+        "issue_row"
+      ],
+      "bbox_policy": {
+        "source": "learned_layout_seed",
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      }
+    },
+    {
+      "region_id": "issue_row",
+      "role": "entity_row",
+      "description": "One issue row with title, issue number, labels, status icon, and metadata",
+      "parent_region_id": "issues_list",
+      "repeatable": true,
+      "contains": [
+        "issue_title",
+        "issue_number",
+        "issue_labels",
+        "status_icon"
+      ],
+      "bbox_policy": {
+        "source": "learned_layout_seed",
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      }
+    },
+    {
+      "region_id": "issue_detail_header",
+      "role": "detail_header",
+      "description": "Issue title, issue number, author, and open/closed state",
+      "contains": [
+        "issue_title",
+        "issue_number",
+        "issue_state"
+      ],
+      "bbox_policy": {
+        "source": "learned_layout_seed",
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      }
+    },
+    {
+      "region_id": "issue_body",
+      "role": "detail_body",
+      "description": "Issue conversation body and comments",
+      "contains": [
+        "issue_description",
+        "comments"
+      ],
+      "bbox_policy": {
+        "source": "learned_layout_seed",
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      }
+    },
+    {
+      "region_id": "right_sidebar",
+      "role": "metadata_sidebar",
+      "description": "Assignees, labels, projects, milestone, and development metadata",
+      "contains": [
+        "assignees",
+        "labels",
+        "projects",
+        "milestone"
+      ],
+      "bbox_policy": {
+        "source": "learned_layout_seed",
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      }
+    }
+  ],
+  "scroll_containers": [
+    {
+      "container_id": "github:page",
+      "region_id": "issue_body",
+      "pane_role": "page",
+      "scroll_scope": "page",
+      "scroll_axis": "vertical",
+      "safe_scroll_point_policy": "window_center",
+      "notes": "GitHub Issues list and detail pages normally scroll the browser page; issues_list is a region, not an internal scroll container unless current evidence proves otherwise.",
+      "artifact_is_authorization": false
+    }
+  ],
+  "dynamic_collections": [
+    {
+      "collection_id": "github:issue_rows",
+      "entity_type": "issue",
+      "region_id": "issues_list",
+      "container_id": "github:page",
+      "entity_pattern_ref": "github:entity_pattern:issue_row",
+      "primary_text_role": "issue_title",
+      "secondary_text_roles": [
+        "issue_number",
+        "labels",
+        "author",
+        "updated_time"
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "from_state_id": "github_issues_list",
+      "to_state_id": "github_issue_detail",
+      "action_template_id": "open_issue_from_list",
+      "verification_refs": [
+        "github:issue_detail_title_matches_row"
+      ]
+    },
+    {
+      "from_state_id": "github_issue_detail",
+      "to_state_id": "github_issue_detail_scrolled",
+      "action_template_id": "read_issue_detail",
+      "verification_refs": [
+        "github:issue_body_content_changes_or_extends"
+      ]
+    },
+    {
+      "from_state_id": "github_issues_list",
+      "to_state_id": "github_issues_list_scrolled",
+      "action_template_id": "load_more_issues",
+      "verification_refs": [
+        "github:more_issue_rows_or_pagination_visible"
+      ]
+    }
+  ],
+  "action_templates": [
+    {
+      "action_template_id": "open_issue_from_list",
+      "action_type": "click",
+      "goal_template": "Click the title text of the first visible GitHub issue row below the Open/Closed filter bar; do not click the Open tab, Closed tab, issue count, filter controls, Labels, Milestones, or New issue",
+      "target_entity": "github:issue_row",
+      "candidate_constraints": {
+        "required_region_id": "issues_list",
+        "required_container_id": "github:page",
+        "prefer_text_links": true,
+        "prefer_status_icon_adjacent_title": true,
+        "exclude_targets": [
+          "New issue",
+          "Search",
+          "Open",
+          "Closed",
+          "Open count",
+          "Labels",
+          "Milestones",
+          "Assignees",
+          "Projects",
+          "Sort",
+          "Subscribe"
+        ]
+      },
+      "verification_policy": {
+        "post_click": "issue_detail_title_or_url_number_must_match_clicked_row",
+        "detail_title_source": "issue_detail_header"
+      },
+      "learned_skill_ref": "skill.open_record_from_list",
+      "requires_current_validation": true,
+      "artifact_is_authorization": false
+    },
+    {
+      "action_template_id": "read_issue_detail",
+      "action_type": "scroll",
+      "scroll_target": {
+        "target_pane": "page",
+        "target_container_id": "github:page"
+      },
+      "verification_policy": {
+        "post_scroll": "issue_body_or_comments_content_changes_or_extends",
+        "header_should_remain_same_issue_when_visible": true
+      },
+      "learned_skill_ref": "skill.read_detail_page_until_bounded",
+      "requires_current_validation": true,
+      "artifact_is_authorization": false
+    },
+    {
+      "action_template_id": "load_more_issues",
+      "action_type": "scroll",
+      "scroll_target": {
+        "target_pane": "page",
+        "target_container_id": "github:page"
+      },
+      "verification_policy": {
+        "post_scroll": "more_issue_rows_or_pagination_visible"
+      },
+      "learned_skill_ref": "skill.scroll_page_until_new_content",
+      "requires_current_validation": true,
+      "artifact_is_authorization": false
+    }
+  ],
+  "verification_rules": [
+    {
+      "rule_id": "github:issue_detail_title_matches_row",
+      "kind": "post_click_semantic_change",
+      "description": "After opening an issue row, the URL should include /issues/<number> and the detail header title should match the clicked row title."
+    },
+    {
+      "rule_id": "github:issue_body_content_changes_or_extends",
+      "kind": "post_scroll_reveal",
+      "description": "After scrolling an issue detail page, body/comment content should change or more discussion content should be visible without focusing the comment editor."
+    },
+    {
+      "rule_id": "github:more_issue_rows_or_pagination_visible",
+      "kind": "post_scroll_reveal",
+      "description": "After scrolling the issues list page, more issue rows or pagination controls may become visible."
+    },
+    {
+      "rule_id": "github:write_actions_forbidden",
+      "kind": "safety_guard",
+      "description": "New issue, comment, close/reopen, assign, label edit, project edit, and submit/comment buttons are write actions and must not be clicked by this read-only artifact."
+    }
+  ],
+  "safety_policy": {
+    "mode": "read_only",
+    "forbid_final_submit": true,
+    "allow_apply_entry": false,
+    "allow_safe_fill": false,
+    "allow_live_input": false,
+    "artifact_is_authorization": false,
+    "forbidden_targets": [
+      "New issue",
+      "Comment",
+      "Submit new issue",
+      "Close issue",
+      "Reopen issue",
+      "Assign yourself",
+      "Edit",
+      "Delete",
+      "Transfer issue",
+      "Lock conversation",
+      "Labels",
+      "Projects",
+      "Milestone",
+      "Subscribe",
+      "Unsubscribe"
+    ]
+  },
+  "learned_skill_refs": [
+    "skill.open_record_from_list",
+    "skill.read_detail_page_until_bounded",
+    "skill.scroll_page_until_new_content",
+    "skill.block_write_actions"
+  ],
+  "visual_asset_refs": [
+    "github:issue_status_icon_open",
+    "github:issue_row_label_chip",
+    "github:issue_number_text",
+    "github:write_action_buttons"
+  ],
+  "metrics": {
+    "artifact_is_authorization": false,
+    "sample_entity_count": 0,
+    "live_smoke_required": true
+  }
+}

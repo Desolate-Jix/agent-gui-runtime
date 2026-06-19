@@ -550,6 +550,151 @@ def _merge_path_graph_recall_candidates(
     )
 
 
+def _seeded_candidate_payload(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(metadata, dict):
+        return None
+    seeded = metadata.get("seeded_candidate") or metadata.get("seeded_candidate_v1")
+    if not isinstance(seeded, dict):
+        return None
+    if str(seeded.get("contract_version") or "seeded_candidate_v1") != "seeded_candidate_v1":
+        return None
+    return dict(seeded)
+
+
+def _recognition_candidate_from_seeded_candidate(item: dict[str, Any], *, rank: int) -> RecognitionCandidate | None:
+    bbox = _normalize_map_bbox(item.get("bbox") or item.get("card_bbox"))
+    if not bbox:
+        return None
+    click_point = _normalize_map_point(item.get("click_point") or item.get("point"), bbox)
+    if not click_point:
+        return None
+    if not _point_inside_map_bbox(click_point, bbox, padding=0):
+        return None
+    label = _first_compact_text(item.get("label"), item.get("title"), item.get("candidate_id"))
+    if not label:
+        return None
+    role = _first_compact_text(item.get("role"), "button")
+    risk_class = str(item.get("risk_class") or "safe_click_allowed")
+    allowed = risk_class == "safe_click_allowed"
+    score = max(0.0, min(1.0, float(item.get("score") or 0.99)))
+    seed_id = _first_compact_text(item.get("candidate_id"), hashlib.sha256(label.encode("utf-8")).hexdigest()[:12])
+    candidate_id = f"seeded_{seed_id}"[:120]
+    element_id = f"seeded_{seed_id}"[:120]
+    expected_effect = _first_compact_text(item.get("expected_effect"), "open selected target")
+    policy = InteractionPolicy(
+        allowed=allowed,
+        zone_type="general_action" if allowed else "seeded_candidate_requires_confirmation",
+        priority="seeded_candidate",
+        ad_risk=0.0,
+        reasons=["seeded_candidate_policy", f"risk_class:{risk_class or 'unknown'}"],
+    )
+    element = PageElement(
+        element_id=element_id,
+        label=label,
+        role=role,
+        interaction_type="focus" if any(token in role.casefold() for token in ["input", "textbox", "search"]) else "click",
+        description=expected_effect or label,
+        text=label,
+        bbox=BBox(x=bbox["x"], y=bbox["y"], w=bbox["w"], h=bbox["h"]),
+        semantic_bbox=None,
+        click_point=click_point,
+        click_strategy="seeded_candidate_v1_then_local_grounding",
+        possible_destinations=[expected_effect] if expected_effect else [],
+        verification_hints=VerificationHints(expected_changes=[expected_effect] if expected_effect else []),
+        interaction_policy=policy,
+        fusion_confidence=max(0.75, score),
+        coordinate_confidence="seeded_candidate_observation_hint",
+        memory_key=f"seeded_candidate:{seed_id}",
+        sources=["seeded_candidate_v1"],
+        evidence={"seeded_candidate": dict(item)},
+    )
+    breakdown = ScoreBreakdown(
+        text_similarity=max(0.82, score),
+        role_score=0.9 if element.interaction_type in {"click", "focus"} else 0.4,
+        policy_score=0.78 if allowed else 0.0,
+        confidence_score=max(0.85, score),
+        state_score=0.5,
+        screen_reading_score=0.2,
+        ad_penalty=0.0,
+        blocked_penalty=0.0 if allowed else 1.0,
+    )
+    return RecognitionCandidate(
+        candidate_id=candidate_id,
+        rank=rank,
+        element_id=element_id,
+        label=label,
+        role=role,
+        text=label,
+        score=round(max(score, breakdown.total()), 4),
+        eligible=allowed,
+        reasons=["seeded_candidate", "seeded_candidate_point_inside_bbox"],
+        score_breakdown=breakdown,
+        element=element,
+        refined_bbox=bbox,
+        bbox_refine_reason="seeded_candidate_bbox",
+    )
+
+
+def _merge_seeded_candidate(
+    candidate_result: CandidateRankResult,
+    *,
+    seeded_candidate: dict[str, Any] | None,
+    goal: str,
+    top_k: int,
+) -> CandidateRankResult:
+    seed = _recognition_candidate_from_seeded_candidate(seeded_candidate or {}, rank=1) if seeded_candidate else None
+    if seed is None:
+        return candidate_result
+    merged: list[RecognitionCandidate] = [seed]
+    rejected = list(candidate_result.rejected)
+    for candidate in candidate_result.candidates:
+        if _candidate_duplicate(candidate, merged):
+            rejected.append(candidate)
+            continue
+        merged.append(candidate)
+    merged.sort(
+        key=lambda item: (
+            1.0 if "seeded_candidate" in item.reasons else 0.0,
+            float(item.score),
+            float(item.score_breakdown.text_similarity),
+            float(item.element.fusion_confidence),
+        ),
+        reverse=True,
+    )
+    selected = merged[: max(1, int(top_k))]
+    selected_ids = {item.candidate_id for item in selected}
+    rejected.extend(item for item in merged[max(1, int(top_k)) :] if item.candidate_id not in selected_ids)
+    for index, candidate in enumerate(selected, start=1):
+        candidate.rank = index
+    for index, candidate in enumerate(rejected, start=1):
+        candidate.rank = index
+    if len(selected) >= 2:
+        margin = round(float(selected[0].score) - float(selected[1].score), 4)
+    elif selected:
+        margin = round(float(selected[0].score), 4)
+    else:
+        margin = None
+    summary = dict(candidate_result.summary)
+    summary.update(
+        {
+            "returned_count": len(selected),
+            "has_recommendation": bool(selected),
+            "seeded_candidate_used": True,
+            "seeded_candidate_selected": bool(selected and "seeded_candidate" in selected[0].reasons),
+            "seeded_candidate_candidate_count": 1,
+        }
+    )
+    return CandidateRankResult(
+        goal=goal,
+        top_k=top_k,
+        candidates=selected,
+        rejected=rejected,
+        recommended_candidate_id=selected[0].candidate_id if selected else None,
+        margin_to_second=margin,
+        summary=summary,
+    )
+
+
 def _recognition_candidate_from_path_recall(item: dict[str, Any], *, rank: int) -> RecognitionCandidate | None:
     bbox = _normalize_map_bbox(item.get("bbox"))
     if not bbox:
@@ -804,10 +949,27 @@ def _parse_vista_point_text(raw_text: str) -> dict[str, Any]:
             raise ValueError(f"VISTA point output is not JSON or [x, y]: {raw_text[:200]}")
         parsed = json.loads(text[start : end + 1])
     if isinstance(parsed, dict):
+        if parsed.get("point") is None and isinstance(parsed.get("raw_text"), str) and parsed.get("raw_text"):
+            nested = _parse_vista_point_text(str(parsed["raw_text"]))
+            nested["wrapped_unparsed_payload"] = parsed
+            return nested
         point = parsed.get("point") if isinstance(parsed.get("point"), dict) else parsed
-        x = point.get("x")
-        y = point.get("y")
-        space = str(point.get("coordinate_space") or parsed.get("coordinate_space") or "normalized_0_1000")
+        bbox = point.get("bbox") if isinstance(point.get("bbox"), dict) else parsed.get("bbox") if isinstance(parsed.get("bbox"), dict) else None
+        if bbox is not None:
+            normalized_bbox = _normalize_map_bbox(bbox)
+            if normalized_bbox is None:
+                raise ValueError(f"VISTA bbox payload is invalid: {raw_text[:200]}")
+            x = normalized_bbox["x"] + normalized_bbox["w"] / 2
+            y = normalized_bbox["y"] + normalized_bbox["h"] / 2
+            space = str(point.get("coordinate_space") or parsed.get("coordinate_space") or "pixel")
+        else:
+            x = point.get("x")
+            y = point.get("y")
+            space = str(point.get("coordinate_space") or parsed.get("coordinate_space") or "normalized_0_1000")
+    elif isinstance(parsed, list) and len(parsed) >= 4:
+        x = float(parsed[0]) + float(parsed[2]) / 2
+        y = float(parsed[1]) + float(parsed[3]) / 2
+        space = "pixel"
     elif isinstance(parsed, list) and len(parsed) >= 2:
         x, y = parsed[0], parsed[1]
         space = "normalized_0_1000"
@@ -830,6 +992,12 @@ def _vista_point_to_original_pixel(parsed: dict[str, Any], *, image_size: ImageS
         px = round(x * max(1, image_size.width) / 1000.0)
         py = round(y * max(1, image_size.height) / 1000.0)
     else:
+        if x < 0 or y < 0 or x >= image_size.width or y >= image_size.height:
+            raise ValueError(
+                "VISTA pixel point outside inference image bounds: "
+                f"point=({x:.3f}, {y:.3f}), image_size={image_size.width}x{image_size.height}, "
+                f"coordinate_space={space}"
+            )
         px = round(x)
         py = round(y)
     return {
@@ -1397,20 +1565,27 @@ def _recognition_plan_from_vista_point(
     observe_reuse: dict[str, Any],
     path_graph_recall: dict[str, Any],
 ) -> APIResponse:
+    seeded_candidate = _seeded_candidate_payload(request.metadata)
+    seed_candidate = _recognition_candidate_from_seeded_candidate(seeded_candidate or {}, rank=1) if seeded_candidate else None
     recall_candidates = [
         _recognition_candidate_from_path_recall(item, rank=index + 1)
         for index, item in enumerate(_as_list(path_graph_recall.get("candidates")))
         if isinstance(item, dict)
     ]
-    candidates = [item for item in recall_candidates if item is not None]
+    candidates = [item for item in [seed_candidate, *recall_candidates] if item is not None]
     vista_payload: dict[str, Any] | None = None
     vista_error: str | None = None
     selected_candidate: RecognitionCandidate | None = None
     vista_direct_used = False
     vista_direct_attempted = False
     vista_direct_failure_model_io: dict[str, Any] | None = None
+    seeded_primary_point_used = False
+    vista_point_inside_selected_bbox = False
     if candidates:
-        roi_candidates, roi_source = _select_pathgraph_roi_candidates(candidates)
+        if seed_candidate is not None:
+            roi_candidates, roi_source = [seed_candidate], "seeded_candidate_v1"
+        else:
+            roi_candidates, roi_source = _select_pathgraph_roi_candidates(candidates)
         roi_padding = 48
         roi_min_size = 256
         roi_max_edge = 640
@@ -1455,12 +1630,23 @@ def _recognition_plan_from_vista_point(
             bbox = candidate.refined_bbox or candidate.element.bbox.to_dict()
             if _point_inside_map_bbox(point, bbox):
                 selected_candidate = candidate
+                vista_point_inside_selected_bbox = True
                 break
+        if selected_candidate is None and seed_candidate is not None and seed_candidate.element.click_point is not None:
+            selected_candidate = seed_candidate
+            seeded_primary_point_used = True
         if selected_candidate is not None:
             selected_candidate.score = max(float(selected_candidate.score), 0.92)
             selected_candidate.score_breakdown.text_similarity = max(selected_candidate.score_breakdown.text_similarity, 0.72)
             selected_candidate.score_breakdown.confidence_score = max(selected_candidate.score_breakdown.confidence_score, 0.9)
-            selected_candidate.reasons = _unique_list([*selected_candidate.reasons, "vista_point_inside_candidate_bbox"])
+            selected_candidate.reasons = _unique_list(
+                [
+                    *selected_candidate.reasons,
+                    "vista_point_inside_candidate_bbox"
+                    if vista_point_inside_selected_bbox
+                    else "seeded_candidate_primary_point_used_after_vista_disagreement",
+                ]
+            )
             candidates = [selected_candidate, *[item for item in candidates if item.candidate_id != selected_candidate.candidate_id]]
     else:
         vista_error = "path_graph_recall_has_no_candidates"
@@ -1618,10 +1804,13 @@ def _recognition_plan_from_vista_point(
             "returned_count": len(candidates),
             "has_recommendation": bool(candidates),
             "path_graph_recall_used": True,
-            "path_graph_recall_candidate_count": len(candidates),
-            "path_graph_recall_selected_count": len(candidates),
+            "path_graph_recall_candidate_count": len([item for item in candidates if "path_graph_recall" in item.reasons]),
+            "path_graph_recall_selected_count": len([item for item in candidates if "path_graph_recall" in item.reasons]),
+            "seeded_candidate_used": seed_candidate is not None,
+            "seeded_candidate_selected": bool(candidates and "seeded_candidate" in candidates[0].reasons),
             "vista_point_grounding_used": vista_payload is not None,
-            "vista_point_inside_candidate_bbox": selected_candidate is not None,
+            "vista_point_inside_candidate_bbox": vista_point_inside_selected_bbox,
+            "seeded_candidate_primary_point_used": seeded_primary_point_used,
             "vista_direct_point_grounding_used": vista_direct_used,
             "vista_direct_point_grounding_attempted": vista_direct_attempted,
         },
@@ -1632,6 +1821,24 @@ def _recognition_plan_from_vista_point(
         for candidate in candidates:
             inside = selected_candidate is not None and candidate.candidate_id == selected_candidate.candidate_id
             bbox = candidate.refined_bbox or candidate.element.bbox.to_dict()
+            model_point_inside_bbox = _point_inside_map_bbox(point, bbox)
+            uses_seeded_point = inside and "seeded_candidate" in candidate.reasons and candidate.element.click_point is not None
+            refined_click_point = dict(candidate.element.click_point) if uses_seeded_point else point
+            if vista_direct_used and inside:
+                reasons = ["vista_direct_point_grounding"]
+                coordinate_source = "vista_point_v1"
+            elif uses_seeded_point and model_point_inside_bbox:
+                reasons = ["seeded_candidate_point_validated_by_vista_point"]
+                coordinate_source = "seeded_candidate_v1_validated_by_vista_point_v1"
+            elif uses_seeded_point:
+                reasons = ["seeded_candidate_primary_point_used", "vista_point_disagrees_with_seed_bbox"]
+                coordinate_source = "seeded_candidate_v1_model_disagreed"
+            elif inside:
+                reasons = ["vista_point_inside_candidate_bbox"]
+                coordinate_source = "vista_point_v1"
+            else:
+                reasons = ["vista_point_not_inside_candidate_bbox"]
+                coordinate_source = "vista_point_v1"
             grounding_results.append(
                 LocalGroundingCandidateResult(
                     candidate_id=candidate.candidate_id,
@@ -1639,12 +1846,12 @@ def _recognition_plan_from_vista_point(
                     status="grounded" if inside else "point_outside_candidate",
                     crop_path=None,
                     crop_bbox=bbox,
-                    refined_click_point=point,
-                    coordinate_source="vista_point_v1",
+                    refined_click_point=refined_click_point,
+                    coordinate_source=coordinate_source,
                     confidence=0.82 if vista_direct_used and inside else 0.9 if inside else 0.35,
                     matched_text=candidate.label if inside else None,
                     matched_text_bbox=bbox if inside else None,
-                    reasons=["vista_direct_point_grounding"] if vista_direct_used and inside else ["vista_point_inside_candidate_bbox"] if inside else ["vista_point_not_inside_candidate_bbox"],
+                    reasons=reasons,
                 )
             )
     narrow_search_result = LocalGroundingResult(
@@ -1657,6 +1864,8 @@ def _recognition_plan_from_vista_point(
             "candidate_count": len(candidates),
             "grounded_count": 1 if selected_candidate else 0,
             "error": vista_error,
+            "vista_point_inside_candidate_bbox": vista_point_inside_selected_bbox,
+            "seeded_candidate_primary_point_used": seeded_primary_point_used,
             "vista_direct_point_grounding_used": vista_direct_used,
         },
     )
@@ -1701,6 +1910,7 @@ def _recognition_plan_from_vista_point(
         "top_k": request.top_k,
         "observe_trace_reuse": {key: value for key, value in observe_reuse.items() if key not in {"ocr_anchors", "screen_map"}},
         "path_graph_recall": path_graph_recall,
+        "seeded_candidate": seeded_candidate,
         "parse_result": {
             "vision_regions": {
                 "contract_version": "vision_regions_v1",
@@ -1753,7 +1963,9 @@ def _recognition_plan_from_vista_point(
             "path_graph_recall_used": path_graph_recall.get("status") == "ready",
             "path_graph_recall_count": len(path_graph_recall.get("candidates") or []),
             "path_graph_recall_candidates_ranked": bool(candidates),
-            "path_graph_recall_selected_count": len(candidates),
+            "path_graph_recall_selected_count": len([item for item in candidates if "path_graph_recall" in item.reasons]),
+            "seeded_candidate_used": seed_candidate is not None,
+            "seeded_candidate_selected": bool((candidate_result.summary or {}).get("seeded_candidate_selected")),
             "path_graph_candidate_roi_refine_used": bool(vista_payload and isinstance(vista_payload.get("image_preprocess"), dict) and vista_payload["image_preprocess"].get("locate_strategy") == "pathgraph_candidate_roi_refine"),
             "state_match_status": (path_graph_recall.get("state_match") or {}).get("status"),
             "screen_reading_used": False,
@@ -1767,7 +1979,8 @@ def _recognition_plan_from_vista_point(
             "uia_scan_status": fast_inventory.get("uia_scan_status") or "skipped_observe_trace_reuse",
             "narrow_search_used": True,
             "vista_point_grounding_used": vista_payload is not None,
-            "vista_point_inside_candidate_bbox": selected_candidate is not None,
+            "vista_point_inside_candidate_bbox": vista_point_inside_selected_bbox,
+            "seeded_candidate_primary_point_used": seeded_primary_point_used,
             "vista_direct_point_grounding_used": vista_direct_used,
             "vista_direct_point_grounding_attempted": vista_direct_attempted,
             "pre_click_decision_used": True,
@@ -5412,6 +5625,7 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
                 top_k=request.top_k,
                 image_size=input_image_size,
             )
+        seeded_candidate = _seeded_candidate_payload(request.metadata)
         local_config = _selected_local_vision_config(config, request.provider_mode)
         if _uses_vista_point_grounding(local_config):
             return _recognition_plan_from_vista_point(
@@ -5499,6 +5713,13 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
                     goal=goal,
                     top_k=request.top_k,
                 )
+        with timer.step("merge_seeded_candidate", seeded_candidate=seeded_candidate is not None):
+            candidate_result = _merge_seeded_candidate(
+                candidate_result,
+                seeded_candidate=seeded_candidate,
+                goal=goal,
+                top_k=request.top_k,
+            )
         with timer.step("run_local_grounding", candidate_count=len(candidate_result.candidates)):
             narrow_search_result = run_local_grounding(
                 LocalGroundingRequest(
@@ -5535,6 +5756,7 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
                 if key not in {"ocr_anchors", "screen_map"}
             },
             "path_graph_recall": path_graph_recall,
+            "seeded_candidate": seeded_candidate,
             "parse_result": {
                 "vision_regions": normalized.to_dict(),
                 "ocr_result": ocr_result.to_dict(),
@@ -5579,6 +5801,8 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
                 "path_graph_recall_count": len(path_graph_recall.get("candidates") or []),
                 "path_graph_recall_candidates_ranked": bool((candidate_result.summary or {}).get("path_graph_recall_used")),
                 "path_graph_recall_selected_count": int((candidate_result.summary or {}).get("path_graph_recall_selected_count") or 0),
+                "seeded_candidate_used": bool((candidate_result.summary or {}).get("seeded_candidate_used")),
+                "seeded_candidate_selected": bool((candidate_result.summary or {}).get("seeded_candidate_selected")),
                 "state_match_status": (path_graph_recall.get("state_match") or {}).get("status"),
                 "screen_reading_used": True,
                 "screen_reading_rank_evidence_used": True,

@@ -34,6 +34,13 @@ from app.schemas.action_target import ActionTarget
 from app.schemas.state import AppState
 from app.schemas.transition import TransitionRecord
 from app.schemas.validator_profile import ValidatorProfile
+from app.seek.scroll_containers import (
+    SEEK_JOB_DETAIL,
+    SEEK_RESULTS_LIST,
+    discover_seek_scroll_containers,
+    get_scroll_container,
+    seek_scroll_target_for_goal,
+)
 from modules.ocr.matching import bbox_center, find_text_matches
 from modules.region.geometry import (
     generate_zone_points as generate_zone_points_module,
@@ -96,6 +103,104 @@ def _extract_action_point(plan: dict[str, Any]) -> Optional[dict[str, int]]:
     if not point:
         return None
     return {"x": int(point["x"]), "y": int(point["y"])}
+
+
+FINAL_SUBMIT_GUARD_TERMS = (
+    "submit application",
+    "send application",
+    "complete application",
+    "submit",
+)
+
+
+def _final_submit_guard_decision(
+    *,
+    request: ExecuteRecognitionPlanRequest,
+    plan: dict[str, Any],
+    pre_click: dict[str, Any],
+) -> dict[str, Any]:
+    enabled = bool((request.metadata or {}).get("forbid_final_submit"))
+    selected_candidate_id = pre_click.get("selected_candidate_id")
+    selected_texts = _selected_target_texts(plan=plan, selected_candidate_id=selected_candidate_id)
+    selected_texts = _final_submit_guard_evidence_texts(selected_texts, goal=request.goal)
+    matched_terms = _matched_final_submit_terms(selected_texts)
+    allowed = not (enabled and matched_terms)
+    return {
+        "contract_version": "final_submit_guard_v1",
+        "enabled": enabled,
+        "allowed": allowed,
+        "selected_candidate_id": selected_candidate_id,
+        "selected_texts": selected_texts,
+        "matched_terms": matched_terms,
+        "reason": "final_submit_candidate_blocked" if not allowed else ("no_final_submit_candidate_detected" if enabled else "guard_disabled"),
+    }
+
+
+def _selected_target_texts(*, plan: dict[str, Any], selected_candidate_id: Any) -> list[str]:
+    texts: list[str] = []
+    recommended = plan.get("recommended_target") if isinstance(plan.get("recommended_target"), dict) else {}
+    if not selected_candidate_id or recommended.get("candidate_id") == selected_candidate_id:
+        texts.extend(_target_text_values(recommended))
+
+    candidate_result = plan.get("candidate_result") if isinstance(plan.get("candidate_result"), dict) else {}
+    for candidate in candidate_result.get("candidates") or []:
+        if isinstance(candidate, dict) and candidate.get("candidate_id") == selected_candidate_id:
+            texts.extend(_target_text_values(candidate))
+
+    narrow_search = plan.get("narrow_search_result") if isinstance(plan.get("narrow_search_result"), dict) else {}
+    for result in narrow_search.get("results") or []:
+        if isinstance(result, dict) and result.get("candidate_id") == selected_candidate_id:
+            texts.extend(_target_text_values(result))
+
+    return _unique_nonempty_strings(texts)
+
+
+def _target_text_values(payload: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    for key in ("label", "text", "matched_text", "candidate_id"):
+        value = payload.get(key)
+        if isinstance(value, str):
+            values.append(value)
+    element = payload.get("element") if isinstance(payload.get("element"), dict) else {}
+    for key in ("label", "text", "role", "semantic_role"):
+        value = element.get(key)
+        if isinstance(value, str):
+            values.append(value)
+    return values
+
+
+def _unique_nonempty_strings(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        cleaned = " ".join(str(value or "").split())
+        key = cleaned.casefold()
+        if cleaned and key not in seen:
+            seen.add(key)
+            result.append(cleaned)
+    return result
+
+
+def _matched_final_submit_terms(texts: list[str]) -> list[str]:
+    haystack = " ".join(texts).casefold()
+    return [term for term in FINAL_SUBMIT_GUARD_TERMS if term in haystack]
+
+
+def _final_submit_guard_evidence_texts(texts: list[str], *, goal: str) -> list[str]:
+    goal_key = " ".join(str(goal or "").split()).casefold()
+    filtered: list[str] = []
+    for text in texts:
+        key = " ".join(str(text or "").split()).casefold()
+        if not key:
+            continue
+        if key == goal_key:
+            continue
+        # Direct grounding may reuse the full instruction as a temporary candidate label.
+        # The final-submit guard must inspect target evidence, not negative constraints in the goal.
+        if "do not click" in key or "don't click" in key or key.startswith("click the "):
+            continue
+        filtered.append(text)
+    return filtered
 
 
 def _should_verify_mouse_tester_semantics(request: ExecuteRecognitionPlanRequest, plan: dict[str, Any]) -> bool:
@@ -320,6 +425,56 @@ def _execution_attempt_verified(
     if semantic_post_click_verification.get("applicable"):
         return bool(post_click_verification.get("verified")) and bool(semantic_post_click_verification.get("verified"))
     return bool(post_click_verification.get("verified"))
+
+
+def _apply_metadata_post_click_policy(
+    request: ExecuteRecognitionPlanRequest,
+    post_click_verification: dict[str, Any],
+) -> dict[str, Any]:
+    """Tighten generic verification when an action declares a semantic result requirement."""
+    if not isinstance(post_click_verification, dict):
+        return post_click_verification
+    metadata = request.metadata if isinstance(request.metadata, dict) else {}
+    verification_policy = metadata.get("verification_policy") if isinstance(metadata.get("verification_policy"), dict) else {}
+    expected_rule = str(
+        verification_policy.get("expected_semantic_rule")
+        or verification_policy.get("post_click")
+        or ""
+    ).strip()
+    semantic_required_rules = {
+        "search_results_list_becomes_visible",
+        "article_heading_matches_clicked_result",
+        "detail_title_company_must_match_clicked_card",
+    }
+    semantic_required = (
+        verification_policy.get("require_semantic_rule_pass") is True
+        or verification_policy.get("rule_type") == "semantic_required"
+        or expected_rule in semantic_required_rules
+    )
+    focus_only_allowed = verification_policy.get("focus_only_is_success") is True or verification_policy.get("allow_focus_only_success") is True
+    if not semantic_required or focus_only_allowed:
+        return post_click_verification
+
+    diff = post_click_verification.get("diff") if isinstance(post_click_verification.get("diff"), dict) else {}
+    diff_changed = bool(diff.get("changed"))
+    basis = post_click_verification.get("verification_basis") if isinstance(post_click_verification.get("verification_basis"), dict) else {}
+    focus_only = bool(basis.get("cursor_and_focus")) and not diff_changed
+    if focus_only and post_click_verification.get("verified") is True:
+        tightened = dict(post_click_verification)
+        tightened["verified"] = False
+        tightened["verification_status"] = "unverified"
+        tightened["failure_reason"] = "semantic_verification_missing"
+        tightened["weak_evidence"] = ["cursor_and_focus"]
+        tightened["required_semantic_rule"] = expected_rule or None
+        tightened["verification_basis"] = dict(basis)
+        tightened["verification_basis"]["focus_only_rejected"] = True
+        return tightened
+    if semantic_required:
+        tightened = dict(post_click_verification)
+        tightened["required_semantic_rule"] = expected_rule or None
+        tightened["verification_policy_applied"] = "semantic_required"
+        return tightened
+    return post_click_verification
 
 
 def _retry_allowed_after_attempt(
@@ -556,6 +711,127 @@ def _execute_trace_enabled(request: ExecuteRecognitionPlanRequest) -> bool:
     return write_policy.get("trace", True) is not False
 
 
+def _rect_from_bbox(value: Any) -> dict[str, int] | None:
+    if value is None:
+        return None
+    if hasattr(value, "model_dump"):
+        value = value.model_dump()
+    if not isinstance(value, dict):
+        return None
+    try:
+        x = int(value.get("x") or 0)
+        y = int(value.get("y") or 0)
+        width = int(value.get("width") if value.get("width") is not None else value.get("w"))
+        height = int(value.get("height") if value.get("height") is not None else value.get("h"))
+    except (TypeError, ValueError):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return {"x": x, "y": y, "width": width, "height": height}
+
+
+def _bbox_payload(rect: dict[str, int] | None) -> dict[str, int] | None:
+    if rect is None:
+        return None
+    return {"x": int(rect["x"]), "y": int(rect["y"]), "w": int(rect["width"]), "h": int(rect["height"])}
+
+
+def _scroll_window_size_matches(requested: Any, actual: dict[str, int]) -> bool:
+    if requested is None:
+        return True
+    if not isinstance(requested, dict):
+        return False
+    try:
+        width = int(requested.get("width") or requested.get("w") or 0)
+        height = int(requested.get("height") or requested.get("h") or 0)
+    except (TypeError, ValueError):
+        return False
+    return width == int(actual["width"]) and height == int(actual["height"])
+
+
+def _scroll_safe_point(container_rect: dict[str, int], *, explicit_x: int | None, explicit_y: int | None) -> dict[str, int]:
+    if explicit_x is not None and explicit_y is not None:
+        return {"x": int(explicit_x), "y": int(explicit_y)}
+    inset_x = max(12, min(48, int(container_rect["width"]) // 8))
+    inset_y = max(12, min(64, int(container_rect["height"]) // 8))
+    return {
+        "x": int(container_rect["x"]) + max(inset_x, int(container_rect["width"]) // 2),
+        "y": int(container_rect["y"]) + max(inset_y, int(container_rect["height"]) // 2),
+    }
+
+
+def _scroll_precondition_decision(
+    *,
+    request: ScrollRequest,
+    window_rect: dict[str, int],
+    point: dict[str, int],
+    container_rect: dict[str, int] | None,
+    target_container: dict[str, Any] | None,
+) -> dict[str, Any]:
+    reasons: list[str] = []
+    reject_reasons: list[str] = []
+    window_bounds = {"x": 0, "y": 0, "width": max(0, int(window_rect["width"]) - 1), "height": max(0, int(window_rect["height"]) - 1)}
+    if _point_in_rect(point, window_bounds):
+        reasons.append("point_inside_window")
+    else:
+        reject_reasons.append("point_outside_window")
+    if _scroll_window_size_matches(request.coordinate_window_size, window_rect):
+        reasons.append("coordinate_window_size_matched" if request.coordinate_window_size else "coordinate_window_size_not_required")
+    else:
+        reject_reasons.append("coordinate_window_size_mismatch")
+    if request.scroll_scope == "container":
+        if target_container is not None:
+            reasons.append("target_container_found")
+        else:
+            reject_reasons.append("target_container_missing")
+        if container_rect is not None:
+            reasons.append("container_bbox_available")
+            if _point_in_rect(point, container_rect):
+                reasons.append("point_inside_container")
+            else:
+                reject_reasons.append("point_outside_container")
+        else:
+            reject_reasons.append("container_bbox_missing")
+        if target_container is not None:
+            key = "can_scroll_down" if request.direction == "down" else "can_scroll_up"
+            if target_container.get(key) is False:
+                reject_reasons.append(f"container_cannot_scroll_{request.direction}")
+            else:
+                reasons.append(f"container_can_scroll_{request.direction}")
+    else:
+        reasons.append("window_or_page_scroll_scope")
+    return {
+        "contract_version": "scroll_precondition_decision_v1",
+        "decision": "ALLOW" if not reject_reasons else "REJECT",
+        "reasons": reasons,
+        "reject_reasons": reject_reasons,
+    }
+
+
+def _scroll_effect_validation(
+    *,
+    request: ScrollRequest,
+    post_scroll_verification: dict[str, Any] | None,
+    target_container: dict[str, Any] | None,
+) -> dict[str, Any]:
+    verification = post_scroll_verification if isinstance(post_scroll_verification, dict) else {}
+    diff = verification.get("diff") if isinstance(verification.get("diff"), dict) else {}
+    changed = bool(diff.get("changed") or verification.get("verified"))
+    return {
+        "contract_version": "scroll_effect_validation_v1",
+        "status": "moved" if changed else "unknown",
+        "target_container_id": (target_container or {}).get("container_id") or request.target_container_id,
+        "target_pane": (target_container or {}).get("pane_role") or request.target_pane,
+        "target_container_content_changed": changed,
+        "target_container_scroll_offset_changed": None,
+        "same_semantic_page": True,
+        "non_target_panes_stable": None,
+        "wrong_scope_detected": False,
+        "no_effect_detected": False if changed else None,
+        "verification_basis": verification.get("verification_basis"),
+    }
+
+
 def _write_execute_trace_if_enabled(request: ExecuteRecognitionPlanRequest, **kwargs: Any) -> str | None:
     if not _execute_trace_enabled(request):
         return None
@@ -635,6 +911,7 @@ def _agent_execution_guidance(
                             "dry_run": False,
                             "enable_post_click_verification": request.enable_post_click_verification,
                             "max_execution_attempts": request.max_execution_attempts,
+                            "metadata": request.metadata,
                         },
                     },
                 }
@@ -734,6 +1011,7 @@ def _agent_step_result(
             "verified": semantic_post_click.get("verified"),
             "reason": semantic_post_click.get("reason") or semantic_post_click.get("failure_reason"),
         },
+        "final_submit_guard": result.get("final_submit_guard"),
         "next_agent_action": guidance.get("next_action") or "inspect_trace",
         "fallback_plan": result.get("fallback_plan"),
     }
@@ -782,21 +1060,44 @@ def _execute_fallback_plan(
         or "no_candidate_passed_pre_click_checks" in reason_set
         or "missing_candidate" in reason_set
     ):
+        seek_context = " ".join(str(value or "") for value in [request.app_name, request.state_hint, request.goal]).casefold()
+        seek_target = seek_scroll_target_for_goal(request.goal) if "seek" in seek_context else None
+        suggested_request: dict[str, Any] = {
+            "direction": "down",
+            "wheel_clicks": 4,
+            "dry_run": False,
+            "enable_verification": True,
+        }
+        if seek_target is not None:
+            suggested_request.update(
+                {
+                    "contract_version": "scroll_request_v2",
+                    "scroll_scope": "container",
+                    "target_pane": seek_target["target_pane"],
+                    "target_container_id": seek_target["target_container_id"],
+                    "reason": seek_target["reason"],
+                    "expected_effect": {
+                        "target_container_content_should_change": True,
+                        "same_semantic_page_should_remain": True,
+                        "non_target_panes_should_remain_mostly_stable": True,
+                    },
+                }
+            )
         steps.append(
             {
                 "name": "request_scroll",
                 "endpoint": "POST /action/scroll",
-                "scope": "current bound window",
-                "reason": "visible information may be incomplete; scroll to reveal more content before the next gated attempt",
-                "suggested_request": {
-                    "direction": "down",
-                    "wheel_clicks": 4,
-                    "dry_run": False,
-                    "enable_verification": True,
-                },
+                "scope": suggested_request.get("target_pane") or "current bound window",
+                "reason": "visible information may be incomplete; scroll the relevant container before the next gated attempt",
+                "suggested_request": suggested_request,
                 "next_after_success": {
                     "endpoint": "POST /action/execute_recognition_plan",
                     "reason": "rerun the same goal after the scroll produces a new screenshot/state",
+                },
+                "safety": {
+                    "auto_click_allowed": False,
+                    "scroll_is_click_permission": False,
+                    "must_rerun_pre_click_decision": True,
                 },
             }
         )
@@ -1681,6 +1982,51 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         },
     }
 
+    base_result["final_submit_guard"] = _final_submit_guard_decision(
+        request=request,
+        plan=plan,
+        pre_click=pre_click,
+    )
+    if not base_result["final_submit_guard"]["allowed"]:
+        base_result["agent_execution_guidance"] = _agent_execution_guidance(
+            request=request,
+            status="blocked",
+            result=base_result,
+            failure_reason="final_submit_guard_rejected",
+        )
+        base_result["agent_step_result"] = _agent_step_result(
+            request=request,
+            status="blocked",
+            result=base_result,
+            failure_reason="final_submit_guard_rejected",
+        )
+        attach_timings(base_result)
+        base_result["trace_path"] = _write_execute_trace_if_enabled(
+            request,
+            category="actions",
+            operation="execute_recognition_plan",
+            payload={
+                "success": False,
+                "request": request.model_dump(),
+                "result": base_result,
+                "failure_reason": "final_submit_guard_rejected",
+            },
+            name_hint=request.app_name or "recognition_plan",
+        )
+        base_result["agent_step_result"] = _agent_step_result(
+            request=request,
+            status="blocked",
+            result=base_result,
+            failure_reason="final_submit_guard_rejected",
+        )
+        _rewrite_execute_trace_result(trace_path=base_result.get("trace_path"), success=False, request=request, result=base_result)
+        return APIResponse(
+            success=False,
+            message="Final submit guard blocked the selected target",
+            data=base_result,
+            error=ErrorModel(code="final_submit_guard_rejected", details=base_result["final_submit_guard"]),
+        )
+
     if not pre_click.get("allowed") or selected_point is None:
         base_result["fallback_plan"] = _execute_fallback_plan(
             request=request,
@@ -1799,6 +2145,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                         if request.enable_post_click_verification
                         else {"verified": None, "verification_skipped": True}
                     )
+                    post_click_verification = _apply_metadata_post_click_policy(request, post_click_verification)
                 with timer.step(
                     "semantic_post_click_verification",
                     attempt=attempt_index,
@@ -2382,6 +2729,12 @@ def type_text(request: TypeTextRequest) -> APIResponse:
         "point": {"x": request.x, "y": request.y} if request.x is not None and request.y is not None else None,
         "clear_existing": request.clear_existing,
         "submit": request.submit,
+        "path_graph_action_context": request.metadata.get("path_graph_action_context")
+        if isinstance(request.metadata, dict)
+        else None,
+        "path_graph_assisted": bool(
+            isinstance(request.metadata, dict) and request.metadata.get("path_graph_action_context")
+        ),
         "execution_path": {
             "vision_model_used": False,
             "page_structure_used": False,
@@ -2449,27 +2802,79 @@ def scroll(request: ScrollRequest) -> APIResponse:
 
     with timer.step("validate_scroll_request"):
         rect = _window_rect(bound)
-        point = {
-            "x": int(request.x) if request.x is not None else rect["width"] // 2,
-            "y": int(request.y) if request.y is not None else rect["height"] // 2,
-        }
-        if not _point_in_rect(point, {"x": 0, "y": 0, "width": rect["width"] - 1, "height": rect["height"] - 1}):
+        window_size = {"width": int(rect["width"]), "height": int(rect["height"])}
+        scroll_containers = None
+        target_container = None
+        if request.scroll_scope == "container" or request.target_container_id:
+            scroll_containers = discover_seek_scroll_containers(
+                window_title=getattr(bound, "title", None),
+                app_name=request.target_container_id or request.target_pane,
+                window_size=window_size,
+            )
+            target_container = get_scroll_container(scroll_containers, request.target_container_id)
+        container_rect = _rect_from_bbox(request.container_bbox)
+        if container_rect is None and target_container is not None:
+            container_rect = _rect_from_bbox(target_container.get("bbox"))
+        point = _scroll_safe_point(container_rect or {"x": 0, "y": 0, "width": rect["width"], "height": rect["height"]}, explicit_x=request.x, explicit_y=request.y)
+        precondition = _scroll_precondition_decision(
+            request=request,
+            window_rect=window_size,
+            point=point,
+            container_rect=container_rect,
+            target_container=target_container,
+        )
+        if precondition["decision"] != "ALLOW":
             timings = timer.to_dict()
             return APIResponse(
                 success=False,
-                message="Scroll point is outside the currently bound window",
-                data={"point": point, "window_size": {"width": rect["width"], "height": rect["height"]}, "timings": timings},
-                error=ErrorModel(code="scroll_point_outside_window", details=point),
+                message="Scroll precondition rejected",
+                data={
+                    "contract_version": "scroll_action_v2" if request.scroll_scope != "window" or request.target_container_id else "scroll_action_v1",
+                    "point": point,
+                    "window_size": window_size,
+                    "scroll_containers": scroll_containers,
+                    "target_container": target_container,
+                    "precondition_decision": precondition,
+                    "timings": timings,
+                },
+                error=ErrorModel(code="scroll_precondition_rejected", details=precondition),
             )
 
     action_name = f"scroll_{request.direction}"
+    path_graph_context = (
+        request.metadata.get("path_graph_action_context") if isinstance(request.metadata, dict) else None
+    )
     result: dict[str, Any] = {
-        "contract_version": "scroll_action_v1",
+        "contract_version": "scroll_action_v2" if request.scroll_scope != "window" or request.target_container_id else "scroll_action_v1",
+        "goal_id": request.goal_id,
+        "task_chain_id": request.task_chain_id,
+        "source_trace_path": request.source_trace_path,
+        "path_graph_action_context": path_graph_context,
+        "path_graph_assisted": bool(path_graph_context),
+        "artifact_is_authorization": False if path_graph_context else None,
+        "scroll_scope": request.scroll_scope,
+        "target_pane": request.target_pane or (target_container or {}).get("pane_role"),
+        "target_container_id": request.target_container_id,
+        "container_bbox": _bbox_payload(container_rect),
+        "coordinate_window_size": window_size,
         "direction": request.direction,
         "wheel_clicks": request.wheel_clicks,
         "point": point,
+        "reason": request.reason,
+        "missing_evidence": list(request.missing_evidence or []),
+        "expected_effect": dict(request.expected_effect or {}),
+        "scroll_history": list(request.scroll_history or []),
         "dry_run": request.dry_run,
         "bound_window": {"handle": int(bound.handle), "title": bound.title, "width": rect["width"], "height": rect["height"]},
+        "scroll_containers": scroll_containers,
+        "target_container": target_container,
+        "resolved_target": {
+            "x": point["x"],
+            "y": point["y"],
+            "point_inside_container": _point_in_rect(point, container_rect) if container_rect is not None else None,
+            "target_point_policy": request.target_point_policy,
+        },
+        "precondition_decision": precondition,
         "execution_path": {
             "vision_model_used": False,
             "page_structure_used": False,
@@ -2480,6 +2885,13 @@ def scroll(request: ScrollRequest) -> APIResponse:
         },
     }
     if request.dry_run:
+        result["scroll_effect_validation"] = {
+            "contract_version": "scroll_effect_validation_v1",
+            "status": "not_run_dry_run",
+            "target_container_id": request.target_container_id,
+            "target_pane": result.get("target_pane"),
+        }
+        result["outcome"] = {"status": "dry_run_ready", "should_retry_goal": False}
         result["timings"] = timer.to_dict()
         result["trace_path"] = write_trace(
             category="actions",
@@ -2512,6 +2924,19 @@ def scroll(request: ScrollRequest) -> APIResponse:
                 if request.enable_verification
                 else {"verified": None, "verification_skipped": True}
             )
+        result["scroll_effect_validation"] = _scroll_effect_validation(
+            request=request,
+            post_scroll_verification=result.get("post_scroll_verification"),
+            target_container=target_container,
+        )
+        result["outcome"] = {
+            "status": result["scroll_effect_validation"]["status"],
+            "should_retry_goal": True,
+            "next_after_success": {
+                "endpoint": "POST /action/execute_recognition_plan",
+                "reason": "rerun the same goal after container-aware scroll evidence is recorded",
+            },
+        }
         result["timings"] = timer.to_dict()
         result["trace_path"] = write_trace(
             category="actions",

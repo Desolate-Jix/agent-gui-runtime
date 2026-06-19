@@ -1,0 +1,410 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_3418e8e101ea",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.73,
+    "job_id": "seek_job_3418e8e101ea",
+    "title": "Engineering Manager-Software",
+    "company": "Halter",
+    "positive_evidence": [
+      "matched_skills: backend, software engineer",
+      "matched_target_roles: Software Engineer",
+      "location_matches: All Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_6e39e4289177",
+    "title": "Engineering Manager - Software",
+    "company": "Halter",
+    "location": "Auckland CBD, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": "Engineering Manager - Software",
+    "card_bbox": {
+      "x": 56,
+      "y": 906,
+      "w": 376,
+      "h": 231
+    },
+    "click_point": {
+      "x": 152,
+      "y": 921
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_16",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_42_engineering-manager",
+      "page_text_43_software",
+      "page_text_44_halter",
+      "page_text_45_auckland-cbd-auckland",
+      "page_text_46_we-re-looking-for-a-software-engineering-manager",
+      "page_text_47_lead-a-team-of-engineers-frontend-and-backend",
+      "page_text_49_featured",
+      "page_text_51_save-this-search"
+    ],
+    "evidence": {
+      "texts": [
+        "Engineering Manager - Software",
+        "Halter",
+        "Auckland CBD, Auckland",
+        "We're looking for a Software Engineering Manager to",
+        "lead a team of engineers - frontend and backend!",
+        "Featured",
+        "Save this search"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": false,
+        "has_salary": false
+      }
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_3418e8e101ea",
+    "title": "Engineering Manager-Software",
+    "company": "Halter",
+    "location": "All Auckland",
+    "work_type": "Full time",
+    "classification": "Engineering Manager-Software",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "All Auckland"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "SEEK"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Listing time"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "出 Halter."
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "Engineering Manager-Software"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "Halter View all jobs"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "Auckland CBD,Auckland"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Management(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Posted 1d ago"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "Apply C"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "AboutHalter"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "AtHalter,we'reonamissiontoenablefarmersandgrazierstorunthemost"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "productive and sustainable operations. Our customers are using Halter to break"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "Management (Information&CommunicationTechnology)"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "About Halter"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "At Halter,we'reon amissionto enable farmers and graziers torun the most"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "productiveandsustainableoperations.OurcustomersareusingHaltertobreak"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "freefrom the time-intensiveconstraintsof conventional practices.Imagine"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "watching5o0cattlestand upandwalkcalmlytowardstheirnextbreak?Noquad"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "bikes, no dogs, no fences. Just a group of cattle walking at their own pace."
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "People say it looks like magic.Our customers arerevolutionizing grazing with"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "Halter.It'schanginglives andtransforming anindustry.PeoplejoinHaltertodo"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "meaningful work. By joining us you'll be solving challenging problems within a"
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "talented team anda culturebuilt forhighperformance.Ourteam out-think,out-"
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "workandout-care.We'recommitted todeliveringrealchangeintheworld-this"
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "isn't easy,and in truth,welove thatit'shard."
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "We're backed to deliver on a mission that matters by Tier1 investors including"
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "FoundersFund,BessemerVenturePartners,BOND,DCVC,Blackbird,Promus"
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "Ventures,RocketLab'sPeterBeckandIcehouseventures."
+      },
+      {
+        "index": 31,
+        "role": "body",
+        "text": "About therole"
+      },
+      {
+        "index": 32,
+        "role": "body",
+        "text": "We'relookingforaSoftwareEngineeringManagerwhobuildsandelevatestheir"
+      }
+    ],
+    "requirements": [],
+    "responsibilities": [
+      "About therole"
+    ],
+    "benefits": [],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Apply C",
+      "bbox": {
+        "x": 559,
+        "y": 979,
+        "w": 84,
+        "h": 32
+      },
+      "click_point": {
+        "x": 601,
+        "y": 995
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save",
+      "bbox": {
+        "x": 707,
+        "y": 982,
+        "w": 45,
+        "h": 22
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 513,
+        "y": 346,
+        "w": 709,
+        "h": 832
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false
+      },
+      "safe_points": [
+        {
+          "x": 867,
+          "y": 762,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 513,
+      "y": 126,
+      "w": 709,
+      "h": 1052
+    },
+    "detail_scroll_history": [
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260617-131919-385786__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": true
+          }
+        },
+        "missing_evidence": [
+          "role_evidence"
+        ]
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-131917-639931__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-131936-745418__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 36,
+      "action_count": 37,
+      "texts": [
+        "。",
+        "All Auckland",
+        "SEEK",
+        "Listing time",
+        "出 Halter.",
+        "Engineering Manager-Software",
+        "Halter View all jobs",
+        "Auckland CBD,Auckland",
+        "Management(Information&CommunicationTechnology)",
+        "Full time",
+        "Posted 1d ago",
+        "Apply C",
+        "Save",
+        "tA",
+        "AboutHalter",
+        "AtHalter,we'reonamissiontoenablefarmersandgrazierstorunthemost",
+        "productive and sustainable operations. Our customers are using Halter to break",
+        "Management (Information&CommunicationTechnology)",
+        "About Halter",
+        "At Halter,we'reon amissionto enable farmers and graziers torun the most",
+        "productiveandsustainableoperations.OurcustomersareusingHaltertobreak",
+        "freefrom the time-intensiveconstraintsof conventional practices.Imagine",
+        "watching5o0cattlestand upandwalkcalmlytowardstheirnextbreak?Noquad",
+        "bikes, no dogs, no fences. Just a group of cattle walking at their own pace.",
+        "People say it looks like magic.Our customers arerevolutionizing grazing with",
+        "Halter.It'schanginglives andtransforming anindustry.PeoplejoinHaltertodo",
+        "meaningful work. By joining us you'll be solving challenging problems within a",
+        "talented team anda culturebuilt forhighperformance.Ourteam out-think,out-",
+        "workandout-care.We'recommitted todeliveringrealchangeintheworld-this",
+        "isn't easy,and in truth,welove thatit'shard.",
+        "We're backed to deliver on a mission that matters by Tier1 investors including",
+        "FoundersFund,BessemerVenturePartners,BOND,DCVC,Blackbird,Promus",
+        "Ventures,RocketLab'sPeterBeckandIcehouseventures.",
+        "A",
+        "About therole",
+        "We'relookingforaSoftwareEngineeringManagerwhobuildsandelevatestheir"
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

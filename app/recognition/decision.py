@@ -125,6 +125,7 @@ def _candidate_decision(
         reasons.append("ad_like_candidate")
 
     click_point = dict(candidate.element.click_point)
+    resolved_click_point: dict[str, object] | None = None
     if local is None:
         allowed = False
         reasons.append("missing_narrow_search_result")
@@ -136,8 +137,15 @@ def _candidate_decision(
             allowed = False
             reasons.append("missing_refined_click_point")
         else:
-            click_point = dict(local.refined_click_point)
-            if not _point_inside_bbox(click_point, _candidate_decision_bbox(candidate), padding=8):
+            bbox = _candidate_decision_bbox(candidate)
+            raw_point = dict(local.refined_click_point)
+            click_point, resolved_click_point = _resolve_click_point(candidate=candidate, bbox=bbox, raw_point=raw_point)
+            if resolved_click_point.get("chosen_point_source") == "bbox_safe_center":
+                reasons.append("bbox_safe_center_used")
+            if not resolved_click_point.get("raw_inside_bbox"):
+                allowed = False
+                reasons.append("refined_point_outside_candidate_bbox")
+            elif not _point_inside_bbox(click_point, bbox, padding=8):
                 allowed = False
                 reasons.append("refined_point_outside_candidate_bbox")
         if local.matched_text:
@@ -186,6 +194,7 @@ def _candidate_decision(
         score=candidate.score,
         click_point=click_point if click_point else None,
         reasons=_unique(reasons),
+        resolved_click_point=resolved_click_point,
     )
 
 
@@ -217,6 +226,68 @@ def _candidate_decision_bbox(candidate: RecognitionCandidate) -> BBox:
         y=int(bbox.get("y", 0)),
         w=int(bbox.get("w", bbox.get("width", 0))),
         h=int(bbox.get("h", bbox.get("height", 0))),
+    )
+
+
+def _resolve_click_point(
+    *,
+    candidate: RecognitionCandidate,
+    bbox: BBox,
+    raw_point: dict[str, int],
+) -> tuple[dict[str, int], dict[str, object]]:
+    role = str(candidate.role or candidate.element.role or "").casefold()
+    raw = {"x": int(raw_point.get("x", 0)), "y": int(raw_point.get("y", 0))}
+    safe_center = _bbox_safe_center(bbox)
+    edge_margin = _point_edge_margin(raw, bbox)
+    min_margin = _safe_edge_margin(bbox)
+    bbox_payload = {"x": int(bbox.x), "y": int(bbox.y), "w": int(bbox.w), "h": int(bbox.h)}
+    raw_inside_bbox = _point_inside_bbox(raw, bbox)
+    should_use_center = _safe_center_role(role) and raw_inside_bbox and edge_margin < min_margin and _valid_bbox(bbox)
+    chosen = safe_center if should_use_center else raw
+    source = "bbox_safe_center" if should_use_center else "raw_grounding_point"
+    reason = "raw_model_point_near_edge" if should_use_center else "raw_grounding_point_within_safe_margin"
+    return chosen, {
+        "contract_version": "resolved_click_point_v1",
+        "target_text": candidate.text or candidate.label,
+        "target_role": role or None,
+        "bbox": bbox_payload,
+        "bbox_source": "candidate_refined_bbox" if candidate.refined_bbox else "candidate_element_bbox",
+        "raw_model_point": raw,
+        "chosen_point": chosen,
+        "chosen_point_source": source,
+        "adjustment_reason": reason,
+        "inside_bbox": _point_inside_bbox(chosen, bbox),
+        "raw_inside_bbox": raw_inside_bbox,
+        "edge_margin_px": int(edge_margin),
+        "min_edge_margin_px": int(min_margin),
+    }
+
+
+def _safe_center_role(role: str) -> bool:
+    return role in {"button", "menuitem", "checkbox", "radio", "tab", "toggle", "switch"}
+
+
+def _valid_bbox(bbox: BBox) -> bool:
+    return int(bbox.w) > 0 and int(bbox.h) > 0
+
+
+def _bbox_safe_center(bbox: BBox) -> dict[str, int]:
+    return {"x": int(round(bbox.x + bbox.w / 2)), "y": int(round(bbox.y + bbox.h / 2))}
+
+
+def _safe_edge_margin(bbox: BBox) -> int:
+    short_side = max(1, min(int(bbox.w), int(bbox.h)))
+    return max(4, min(10, int(round(short_side * 0.15))))
+
+
+def _point_edge_margin(point: dict[str, int], bbox: BBox) -> int:
+    x = int(point.get("x", 0))
+    y = int(point.get("y", 0))
+    return min(
+        abs(x - int(bbox.x)),
+        abs(int(bbox.x + bbox.w) - x),
+        abs(y - int(bbox.y)),
+        abs(int(bbox.y + bbox.h) - y),
     )
 
 

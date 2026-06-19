@@ -1,0 +1,409 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_85cd0a761d91",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.73,
+    "job_id": "seek_job_85cd0a761d91",
+    "title": "Principal Engineer",
+    "company": "BraveGen",
+    "positive_evidence": [
+      "matched_skills: C#, backend",
+      "matched_target_roles: Backend Developer",
+      "location_matches: All Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_0461f7a3deed",
+    "title": "Principal Engineer",
+    "company": "BraveGen",
+    "location": "Auckland CBD, Auckland (Hybrid)",
+    "posted_at_text": null,
+    "work_type": "Auckland CBD, Auckland (Hybrid)",
+    "salary_text": null,
+    "classification": null,
+    "card_bbox": {
+      "x": 58,
+      "y": 798,
+      "w": 247,
+      "h": 82
+    },
+    "click_point": {
+      "x": 134,
+      "y": 811
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_12",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_37_principal-engineer",
+      "page_text_38_bravegen",
+      "page_text_40_auckland-cbd-auckland-hybrid"
+    ],
+    "evidence": {
+      "texts": [
+        "Principal Engineer",
+        "BraveGen",
+        "Auckland CBD, Auckland (Hybrid)"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": true,
+        "has_salary": false
+      }
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_85cd0a761d91",
+    "title": "Principal Engineer",
+    "company": "BraveGen",
+    "location": "All Auckland",
+    "work_type": "Auckland CBD,Auckland (Hybrid)",
+    "classification": "Engineering-Software(Information& Communication Technology)",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "All Auckland"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "SEEK"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Listing time"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "Climate Action"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "not CarbonAdmin"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "BraveGen"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "Responsive hirer"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Principal Engineer"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "BraveGen View all jobs"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Auckland CBD,Auckland (Hybrid)"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "Engineering-Software(Information& Communication Technology)"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "Posted18dago·Mediumapplicationvolume"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "Quick apply"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "Auckland CBD, Auckland (Hybrid)"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "Engineering-Software(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "Posted 18d ago·Medium application volume"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "3 skills and credentials match your profile"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "√API"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "√AWS"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "C#Programming"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "Show all"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "Role Overview"
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "WeareseekinganexperiencedandtechnicallyexceptionalPrincipalEngineerto"
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "providetechnical leadershipacrossourbackendanddatapipelinesplatform."
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "Thisroleextendsbeyondindividualcontribution.ThePrincipalEngineeris"
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "responsible for:"
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "·Settingthetechnicalownershipofbackendservices"
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "·Ensuring architectural consistency,qualityandcompliancewithguidelines"
+      },
+      {
+        "index": 31,
+        "role": "body",
+        "text": "and practices"
+      },
+      {
+        "index": 32,
+        "role": "body",
+        "text": "·Mentoring backend developers"
+      }
+    ],
+    "requirements": [
+      "3 skills and credentials match your profile",
+      "WeareseekinganexperiencedandtechnicallyexceptionalPrincipalEngineerto"
+    ],
+    "responsibilities": [
+      "Role Overview",
+      "Thisroleextendsbeyondindividualcontribution.ThePrincipalEngineeris"
+    ],
+    "benefits": [
+      "Auckland CBD,Auckland (Hybrid)",
+      "Auckland CBD, Auckland (Hybrid)"
+    ],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply",
+      "bbox": {
+        "x": 546,
+        "y": 1007,
+        "w": 103,
+        "h": 28
+      },
+      "click_point": {
+        "x": 597,
+        "y": 1021
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save button",
+      "bbox": {
+        "x": 560,
+        "y": 840,
+        "w": 60,
+        "h": 30
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 513,
+        "y": 346,
+        "w": 709,
+        "h": 832
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false
+      },
+      "safe_points": [
+        {
+          "x": 867,
+          "y": 762,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 513,
+      "y": 126,
+      "w": 709,
+      "h": 1052
+    },
+    "detail_scroll_history": [
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260617-120101-813538__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": true
+          }
+        },
+        "missing_evidence": [
+          "role_evidence"
+        ]
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-120100-049017__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-120116-953068__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 37,
+      "action_count": 37,
+      "texts": [
+        "All Auckland",
+        "SEEK",
+        "Listing time",
+        "Climate Action",
+        "not CarbonAdmin",
+        "BraveGen",
+        "Responsive hirer",
+        "Principal Engineer",
+        "BraveGen View all jobs",
+        "Auckland CBD,Auckland (Hybrid)",
+        "Engineering-Software(Information& Communication Technology)",
+        "Full time",
+        "Posted18dago·Mediumapplicationvolume",
+        "Quick apply",
+        "Save",
+        "tA",
+        "How you match ①",
+        "HL",
+        "Auckland CBD, Auckland (Hybrid)",
+        "国",
+        "Engineering-Software(Information&CommunicationTechnology)",
+        "?",
+        "Posted 18d ago·Medium application volume",
+        "3 skills and credentials match your profile",
+        "√API",
+        "√AWS",
+        "C#Programming",
+        "Show all",
+        "Role Overview",
+        "WeareseekinganexperiencedandtechnicallyexceptionalPrincipalEngineerto",
+        "providetechnical leadershipacrossourbackendanddatapipelinesplatform.",
+        "Thisroleextendsbeyondindividualcontribution.ThePrincipalEngineeris",
+        "responsible for:",
+        "·Settingthetechnicalownershipofbackendservices",
+        "·Ensuring architectural consistency,qualityandcompliancewithguidelines",
+        "and practices",
+        "·Mentoring backend developers"
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

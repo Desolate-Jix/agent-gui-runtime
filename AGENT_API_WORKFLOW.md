@@ -10,6 +10,25 @@ The core rule is:
 
 The desktop test panel also exposes `POST /action/execute_confirmed_point` for an operator who has visibly reviewed a candidate bbox and deliberately presses its coordinate-click button. This diagnostic path is not an autonomous agent execution path and does not replace `pre_click_decision_v1`.
 
+## Path-Graph-Assisted Single-Step Execute
+
+When a `runtime_path_graph_v1` exists for the current page family, an upper-layer agent may ask for graph-assisted actions before choosing the next step:
+
+```http
+POST /execute/available_actions
+POST /execute/step
+```
+
+`/execute/available_actions` returns `available_actions_response_v1` with `path_graph_resolution_v1` and `available_actions_v1`. `/execute/step` accepts one selected action and returns `execute_step_response_v1` with `path_graph_action_context_v1` plus a low-level click or scroll request plan. When `dispatch_low_level=true`, it dispatches exactly one generated request through the existing gated action route and records the low-level response/trace.
+
+This layer is guidance only:
+
+- `artifact_is_authorization` must remain `false`.
+- `/execute/step` is single-step; the agent decides whether to call it again after reading the result.
+- Real clicks still must go through `POST /action/execute_recognition_plan` and its `pre_click_decision_v1`.
+- Real scrolls still must go through `POST /action/scroll` and its scroll precondition checks.
+- Multi-step traversal belongs in the upper agent or smoke harness, not inside `/execute/step`.
+
 ## Model-Facing Language Rule
 
 The upper-layer agent should keep the user's original instruction for audit, but send normalized English task fields to vision-model routes whenever possible.
@@ -347,9 +366,39 @@ Agent decision:
 
 - Treat scroll as a reveal/navigation action, not a click permission.
 - Use the suggested request from `fallback_plan` when present; otherwise choose `direction: "down"` for more lower-page content or `direction: "up"` to return to earlier content.
-- The scroll point defaults to the center of the bound window. Provide `x` and `y` only when a specific scrollable pane has been visually reviewed.
+- The legacy scroll point defaults to the center of the bound window. For SEEK automation, do not use the legacy center default when reading lists or details; use `scroll_scope: "container"` with `target_container_id: "seek:results_list"` for the left job list or `target_container_id: "seek:job_detail"` for the right detail pane.
 - After a real scroll, inspect `post_scroll_verification` and trace evidence, then rerun the same `POST /action/execute_recognition_plan` goal on the new screenshot.
 - The retry must still pass `pre_click_decision_v1`; never use scroll as a shortcut to dispatch a click.
+- Container-aware scroll returns `scroll_action_v2`, `scroll_precondition_decision_v1`, and `scroll_effect_validation_v1`. If the precondition is rejected, do not retry by scrolling the whole window; inspect the rejection reason or ask for a clearer scroll target.
+- For SEEK traversal, convert the visible evidence after each card open/scroll into `seek_job_card_v1` and visible `seek_job_detail_v1` through `app.seek.extraction`; then use `seek_job_detail_completeness_v1` from `app.seek.traversal` to decide bounded right-pane scrolling. The traversal runner must verify that the post-click detail title matches the clicked card title before counting a job as opened, and should defer bottom-edge cards until results-list scrolling brings their click point into a safer band. Once a job detail is opened and merged, `app.seek.matching` can score it against `candidate_profile_v1` and save `saved_seek_job_record_v1` for `strong_apply` / `maybe_apply`. After each run, inspect `seek_mvp_run_report_v1.traversal_trace_path`; the referenced `seek_mvp_traversal_trace_v1` is the audit timeline for card-click traces, nested scrolls, detail-read traces, match decisions, saved jobs, Apply Entry stops, answer-plan previews, safe-fill attempts, and safety counters. Before continuing to Apply Entry or safe-fill, run `scripts\seek_mvp_run_audit.py --report <report> --mode readonly|apply_entry --fail-on-error`; `seek_mvp_run_audit_v1.decision` must be `pass`.
+- Apply Entry is allowed only for `strong_apply` by default and only through `POST /action/execute_recognition_plan` dry-run plus approved-plan real execution. The request metadata must include `forbid_final_submit=true` and `required_container_id=seek:job_detail`; the goal must explicitly forbid `Submit`, `Send application`, and `Complete application`. The action route emits `final_submit_guard_v1` and blocks before clicking if the selected target is a final-submit candidate. After Apply / Quick Apply, observe once, classify `seek_application_flow_state_v1`, and stop with `blocked_need_user_or_gpt_decision`; do not fill fields in the Apply Entry slice.
+- For SEEK profile preparation, keep the domain workflow in `skills/seek-high-precision/SKILL.md` and use the reusable profile helper only to prepare local data:
+
+```powershell
+uv run python scripts\candidate_profile_from_cv.py --cv "D:\资料\CV\WENQING JI.docx" --out artifacts\seek\candidate_profile_wenqingji_draft.json
+uv run python scripts\seek_profile_readiness.py --candidate-profile artifacts\seek\candidate_profile_wenqingji_draft.json --out logs\smoke\seek_profile_readiness_wenqingji_draft.json --fail-if-blocked
+```
+
+Agent decision:
+
+- The CV helper may extract name/contact/skills/roles/experience evidence, but it must not infer work rights, salary, availability, relocation, sensitive answers, or final application choices.
+- If readiness blocks on `work_rights_summary`, stop and ask the user for that field. Do not use model guesses or CV implications to pass the gate.
+- After readiness passes, run no-apply traversal + audit before any Apply Entry. Apply Entry and safe-fill are still guarded separately.
+- For SEEK Learn Mode artifact export, derive reusable execution experience only from a stable audited run:
+
+```powershell
+uv run python scripts\seek_export_learn_artifacts.py `
+  --report logs\smoke\seek_mvp_traversal_report.json `
+  --out artifacts\seek\learned_seek_mvp_latest.json `
+  --profile-out artifacts\seek\learned_app_profile_seek_mvp_latest.json `
+  --path-graph-out artifacts\seek\path_graph_seed_seek_mvp_latest.json
+```
+
+Agent decision:
+
+- `learned_app_profile_v1` is guidance for scroll target, candidate constraints, verification rules, and safety policy. It is not permission to click.
+- `path_graph_seed_v1` is a structural seed for Learn Mode and PathGraph initialization.
+- When calling the SEEK runner, `--learned-artifact` may be supplied to prefer artifact-derived `open_job_card`, `read_detail`, and `load_more_results` rules. The runner must still use the existing gated Execute path and preserve `final_submissions=0`.
 
 ### 5. Read Runtime State
 

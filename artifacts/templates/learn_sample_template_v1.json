@@ -1,0 +1,83 @@
+{
+  "contract_version": "learn_sample_template_v1",
+  "sample_id": "",
+  "app_id": "",
+  "page_type": "",
+  "target_window_policy": {
+    "binding_required": true,
+    "allowed_targets": [
+      "external_browser",
+      "native_windows_app"
+    ],
+    "forbidden_targets": [
+      "codex_in_app_browser"
+    ],
+    "codex_in_app_browser_role": "chatgpt_consultation_only"
+  },
+  "safety_mode": "read_only_first",
+  "allowed_actions": [
+    "observe",
+    "available_actions",
+    "dry_run_click",
+    "safe_live_click",
+    "scroll",
+    "read",
+    "public_input_dry_run"
+  ],
+  "forbidden_actions": [
+    "final_submit",
+    "payment",
+    "delete",
+    "upload_private_file",
+    "private_or_pii_input",
+    "unsafe_system_action"
+  ],
+  "expected_skills": [
+    "skill:open_record_from_list",
+    "skill:read_detail_until_bounded",
+    "skill:scroll_container",
+    "skill:safe_public_input",
+    "skill:verify_state_after_action"
+  ],
+  "expected_artifacts": [
+    "learned_app_profile_v1",
+    "path_graph_seed_v1",
+    "runtime_path_graph_v1",
+    "learned_skill_v1",
+    "visual_asset_v1",
+    "safe_validation_report_v1",
+    "task_run_report_v1"
+  ],
+  "required_workflow": [
+    {
+      "step": "observe_or_available_actions_dry_run",
+      "live_action_allowed": false
+    },
+    {
+      "step": "execute_step_dry_run",
+      "live_action_allowed": false
+    },
+    {
+      "step": "single_safe_live_action",
+      "live_action_allowed": true
+    },
+    {
+      "step": "small_task_run",
+      "live_action_allowed": true
+    },
+    {
+      "step": "add_to_regression_suite",
+      "live_action_allowed": false
+    }
+  ],
+  "smoke_acceptance": {
+    "wrong_target_clicks": 0,
+    "wrong_scope_scroll_count": 0,
+    "write_actions_clicked": 0,
+    "final_submissions": 0,
+    "high_risk_actions_executed": 0,
+    "artifact_authorizes_click": false,
+    "trace_required": true,
+    "path_graph_highlight_required": true
+  }
+}

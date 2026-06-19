@@ -1,0 +1,407 @@
+{
+  "contract_version": "learned_skill_matrix_v1",
+  "baseline_count": 5,
+  "skills": [
+    {
+      "skill_ref": "skill.block_final_submit",
+      "used_by": [
+        "seek"
+      ],
+      "action_templates": [
+        "apply_entry"
+      ],
+      "low_level_action_types": [
+        "click"
+      ],
+      "action_kinds": [
+        "click"
+      ],
+      "verified_cases": 1,
+      "safety_scope": [
+        "final_submit_forbidden",
+        "gated_click",
+        "guarded_or_hidden_by_default"
+      ],
+      "artifact_is_authorization": false
+    },
+    {
+      "skill_ref": "skill.open_card_from_list",
+      "used_by": [
+        "seek"
+      ],
+      "action_templates": [
+        "open_job_card"
+      ],
+      "low_level_action_types": [
+        "click"
+      ],
+      "action_kinds": [
+        "click"
+      ],
+      "verified_cases": 1,
+      "safety_scope": [
+        "gated_click"
+      ],
+      "artifact_is_authorization": false
+    },
+    {
+      "skill_ref": "skill.open_record_from_list",
+      "used_by": [
+        "github"
+      ],
+      "action_templates": [
+        "open_issue_from_list"
+      ],
+      "low_level_action_types": [
+        "click"
+      ],
+      "action_kinds": [
+        "click"
+      ],
+      "verified_cases": 1,
+      "safety_scope": [
+        "gated_click"
+      ],
+      "artifact_is_authorization": false
+    },
+    {
+      "skill_ref": "skill.open_result_from_search_list",
+      "used_by": [
+        "wikipedia"
+      ],
+      "action_templates": [
+        "open_search_result"
+      ],
+      "low_level_action_types": [
+        "click"
+      ],
+      "action_kinds": [
+        "click"
+      ],
+      "verified_cases": 1,
+      "safety_scope": [
+        "gated_click"
+      ],
+      "artifact_is_authorization": false
+    },
+    {
+      "skill_ref": "skill.read_detail_page_until_bounded",
+      "used_by": [
+        "github",
+        "wikipedia"
+      ],
+      "action_templates": [
+        "read_article",
+        "read_issue_detail"
+      ],
+      "low_level_action_types": [
+        "scroll"
+      ],
+      "action_kinds": [
+        "read"
+      ],
+      "verified_cases": 2,
+      "safety_scope": [
+        "no_write_scroll"
+      ],
+      "artifact_is_authorization": false
+    },
+    {
+      "skill_ref": "skill.read_detail_pane_until_bounded",
+      "used_by": [
+        "seek"
+      ],
+      "action_templates": [
+        "read_detail"
+      ],
+      "low_level_action_types": [
+        "scroll"
+      ],
+      "action_kinds": [
+        "read"
+      ],
+      "verified_cases": 1,
+      "safety_scope": [
+        "no_write_scroll"
+      ],
+      "artifact_is_authorization": false
+    },
+    {
+      "skill_ref": "skill.scroll_list_until_new_entities",
+      "used_by": [
+        "seek"
+      ],
+      "action_templates": [
+        "load_more_results"
+      ],
+      "low_level_action_types": [
+        "scroll"
+      ],
+      "action_kinds": [
+        "scroll"
+      ],
+      "verified_cases": 1,
+      "safety_scope": [
+        "no_write_scroll"
+      ],
+      "artifact_is_authorization": false
+    },
+    {
+      "skill_ref": "skill.scroll_page_until_new_content",
+      "used_by": [
+        "github"
+      ],
+      "action_templates": [
+        "load_more_issues"
+      ],
+      "low_level_action_types": [
+        "scroll"
+      ],
+      "action_kinds": [
+        "scroll"
+      ],
+      "verified_cases": 1,
+      "safety_scope": [
+        "no_write_scroll"
+      ],
+      "artifact_is_authorization": false
+    },
+    {
+      "skill_ref": "skill:block_write_actions",
+      "used_by": [
+        "table_directory"
+      ],
+      "action_templates": [
+        "blocked_write_action"
+      ],
+      "low_level_action_types": [
+        "click"
+      ],
+      "action_kinds": [
+        "click"
+      ],
+      "verified_cases": 1,
+      "safety_scope": [
+        "final_submit_forbidden",
+        "gated_click",
+        "guarded_or_hidden_by_default"
+      ],
+      "artifact_is_authorization": false
+    },
+    {
+      "skill_ref": "skill:click_search_button",
+      "used_by": [
+        "python_docs"
+      ],
+      "action_templates": [
+        "trigger_search"
+      ],
+      "low_level_action_types": [
+        "click"
+      ],
+      "action_kinds": [
+        "click"
+      ],
+      "verified_cases": 1,
+      "safety_scope": [
+        "gated_click"
+      ],
+      "artifact_is_authorization": false
+    },
+    {
+      "skill_ref": "skill:open_record_from_list",
+      "used_by": [
+        "python_docs"
+      ],
+      "action_templates": [
+        "open_search_result"
+      ],
+      "low_level_action_types": [
+        "click"
+      ],
+      "action_kinds": [
+        "click"
+      ],
+      "verified_cases": 1,
+      "safety_scope": [
+        "gated_click"
+      ],
+      "artifact_is_authorization": false
+    },
+    {
+      "skill_ref": "skill:open_record_from_table",
+      "used_by": [
+        "table_directory"
+      ],
+      "action_templates": [
+        "open_record_from_table"
+      ],
+      "low_level_action_types": [
+        "click"
+      ],
+      "action_kinds": [
+        "click"
+      ],
+      "verified_cases": 1,
+      "safety_scope": [
+        "gated_click"
+      ],
+      "artifact_is_authorization": false
+    },
+    {
+      "skill_ref": "skill:read_record_detail",
+      "used_by": [
+        "table_directory"
+      ],
+      "action_templates": [
+        "read_record_detail"
+      ],
+      "low_level_action_types": [
+        "scroll"
+      ],
+      "action_kinds": [
+        "read"
+      ],
+      "verified_cases": 1,
+      "safety_scope": [
+        "no_write_scroll"
+      ],
+      "artifact_is_authorization": false
+    },
+    {
+      "skill_ref": "skill:return_to_record_list",
+      "used_by": [
+        "table_directory"
+      ],
+      "action_templates": [
+        "return_to_table"
+      ],
+      "low_level_action_types": [
+        "click"
+      ],
+      "action_kinds": [
+        "click"
+      ],
+      "verified_cases": 1,
+      "safety_scope": [
+        "gated_click"
+      ],
+      "artifact_is_authorization": false
+    },
+    {
+      "skill_ref": "skill:safe_public_search_input",
+      "used_by": [
+        "python_docs"
+      ],
+      "action_templates": [
+        "type_public_search_query"
+      ],
+      "low_level_action_types": [
+        "input"
+      ],
+      "action_kinds": [
+        "input"
+      ],
+      "verified_cases": 1,
+      "safety_scope": [
+        "explicit_submit_allowed_by_policy",
+        "final_submit_forbidden",
+        "public_search_query"
+      ],
+      "artifact_is_authorization": false
+    },
+    {
+      "skill_ref": "skill:scroll_page_until_more_content",
+      "used_by": [
+        "python_docs"
+      ],
+      "action_templates": [
+        "read_article"
+      ],
+      "low_level_action_types": [
+        "scroll"
+      ],
+      "action_kinds": [
+        "read"
+      ],
+      "verified_cases": 1,
+      "safety_scope": [
+        "no_write_scroll"
+      ],
+      "artifact_is_authorization": false
+    },
+    {
+      "skill_ref": "skill:scroll_table_until_new_records",
+      "used_by": [
+        "table_directory"
+      ],
+      "action_templates": [
+        "load_more_records"
+      ],
+      "low_level_action_types": [
+        "scroll"
+      ],
+      "action_kinds": [
+        "scroll"
+      ],
+      "verified_cases": 1,
+      "safety_scope": [
+        "no_write_scroll"
+      ],
+      "artifact_is_authorization": false
+    },
+    {
+      "skill_ref": "skill:sort_records_by_column_or_control",
+      "used_by": [
+        "table_directory"
+      ],
+      "action_templates": [
+        "sort_records"
+      ],
+      "low_level_action_types": [
+        "click"
+      ],
+      "action_kinds": [
+        "click"
+      ],
+      "verified_cases": 1,
+      "safety_scope": [
+        "gated_click"
+      ],
+      "artifact_is_authorization": false
+    },
+    {
+      "skill_ref": "skill:switch_filter_or_tab",
+      "used_by": [
+        "table_directory"
+      ],
+      "action_templates": [
+        "switch_filter_tab"
+      ],
+      "low_level_action_types": [
+        "click"
+      ],
+      "action_kinds": [
+        "click"
+      ],
+      "verified_cases": 1,
+      "safety_scope": [
+        "final_submit_forbidden",
+        "gated_click"
+      ],
+      "artifact_is_authorization": false
+    }
+  ],
+  "summary": {
+    "skill_count": 19,
+    "covers_click": true,
+    "covers_scroll": true,
+    "covers_input": true,
+    "covers_read": true,
+    "covers_guarded_actions": true,
+    "covers_filter_or_tab": true,
+    "covers_sort_or_filter_click": true,
+    "covers_table_record_open": true,
+    "artifact_authorizes_click": false
+  }
+}

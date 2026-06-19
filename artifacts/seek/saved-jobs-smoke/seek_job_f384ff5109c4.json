@@ -1,0 +1,767 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_f384ff5109c4",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.82,
+    "job_id": "seek_job_f384ff5109c4",
+    "title": "Software Engineer (Test Systems)",
+    "company": "Quantifi Photonics",
+    "positive_evidence": [
+      "matched_skills: C#, software engineer, debugging",
+      "matched_target_roles: Software Engineer",
+      "location_matches: All Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_6eb90b062c82",
+    "title": "Software Engineer (Test Systems)",
+    "company": "Systems)",
+    "location": "Rosedale, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": "Software Engineer (Test",
+    "card_bbox": {
+      "x": 36,
+      "y": 529,
+      "w": 426,
+      "h": 222
+    },
+    "click_point": {
+      "x": 249,
+      "y": 640
+    },
+    "source_url": "https://jobs.teradyne.com/job-invite/11792/",
+    "source_card_id": "card_10_software-engineer-test-systems",
+    "primary_action_id": "action_uia_146_software-engineer-test-systems",
+    "child_action_ids": [
+      "action_screen_6_software-engineer-test-systems",
+      "action_uia_145_modify-my-search",
+      "action_uia_147_hyperlink",
+      "action_uia_148_this-is-a-featured-job",
+      "action_uia_149_image"
+    ],
+    "child_page_element_ids": [
+      "page_text_29_software-engineer-test",
+      "page_text_30_systems",
+      "page_text_31_quantifi",
+      "page_text_32_photonics",
+      "page_text_33_quantifi-photonics",
+      "page_text_34_rosedale-auckland",
+      "page_text_35_https-jobs-teradyne-com-job-invite-11792",
+      "page_text_36_featured",
+      "page_text_37_口"
+    ],
+    "evidence": {
+      "texts": [
+        "Software Engineer (Test",
+        "Systems)",
+        "QUANTIFI",
+        "PHOTONICS",
+        "Quantifi Photonics",
+        "Rosedale, Auckland",
+        "https://jobs.teradyne.com/job-invite/11792/",
+        "Featured",
+        "口",
+        "Software Engineer (Test Systems)",
+        "Modify my search",
+        "hyperlink",
+        "This is a featured job",
+        "image"
+      ],
+      "source_contract": "screen_inventory_v1"
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_f384ff5109c4",
+    "title": "Software Engineer (Test Systems)",
+    "company": "Quantifi Photonics",
+    "location": "All Auckland",
+    "work_type": "Full time",
+    "classification": "Software Engineer (Test Systems)",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "All Auckland"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "SEEK"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Listing time"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "QUANTIFI"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "PHOTONICS"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "A Teradyne Company"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "Software Engineer (Test Systems)"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Quantifi Photonics View all jobs"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Rosedale,Auckland"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Other(Engineering)"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "Posted 1d ago"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "Apply C"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "1 skill or credential matches your profile"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "Quantifi Photonics"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "View all jobs"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "Rosedale, Auckland"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "Other (Engineering)"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "C# Programming"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "Showall"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "Company description:"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "OurPurpose"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "TERADYNE,whereexperiencemeetsinnovationand driving excellence inevery"
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "connection. We are fuelled by creativity and diversity of thought and in our"
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "workforce.Ouremployees aresupported toinnovate and learnsomethingnew"
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "everyday."
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "Based inAuckland,QuantifiPhotonicsisproud tobepartof theTeradyne"
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "family,combiningNewZealand'sinnovative spirit with theresources of a global"
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "leaderintest,automation,androbotics.We're growing fast,tackling increasingly"
+      },
+      {
+        "index": 31,
+        "role": "body",
+        "text": "complexchallenges,andarelookingforpassionate,talentedpeopletohelptake"
+      },
+      {
+        "index": 32,
+        "role": "body",
+        "text": "ApplyC"
+      },
+      {
+        "index": 33,
+        "role": "body",
+        "text": "Our Purpose"
+      },
+      {
+        "index": 34,
+        "role": "body",
+        "text": "TERADYNE,whereexperiencemeets innovationanddriving excellence inevery"
+      },
+      {
+        "index": 35,
+        "role": "body",
+        "text": "connection.Wearefuelledbycreativityanddiversityofthoughtandinour"
+      },
+      {
+        "index": 36,
+        "role": "body",
+        "text": "workforce.Ouremployees are supported to innovate and learnsomething new"
+      },
+      {
+        "index": 37,
+        "role": "body",
+        "text": "every day."
+      },
+      {
+        "index": 38,
+        "role": "body",
+        "text": "BasedinAuckland,QuantifiPhotonicsisproud tobepartoftheTeradyne"
+      },
+      {
+        "index": 39,
+        "role": "body",
+        "text": "family,combining NewZealand's innovative spirit with theresources of a global"
+      },
+      {
+        "index": 40,
+        "role": "body",
+        "text": "leader in test, automation, and robotics. We're growing fast, tackling increasingly"
+      },
+      {
+        "index": 41,
+        "role": "body",
+        "text": "complex challenges, and are looking for passionate, talented people to help take"
+      },
+      {
+        "index": 42,
+        "role": "body",
+        "text": "QuantifiPhotonics to thenextlevel."
+      },
+      {
+        "index": 43,
+        "role": "body",
+        "text": "QuantifiPhotonics designs and manufactures advanced optical and electronic"
+      },
+      {
+        "index": 44,
+        "role": "body",
+        "text": "test instruments thatenableengineers todevelop andscale up next-generation"
+      },
+      {
+        "index": 45,
+        "role": "body",
+        "text": "photonics technologies. Our customers include global tech companies, leading"
+      },
+      {
+        "index": 46,
+        "role": "body",
+        "text": "universities,and world-classresearchinstitutionsinover 25 countries;working"
+      },
+      {
+        "index": 47,
+        "role": "body",
+        "text": "acrossR&D,high-volumemanufacturing,defence,aerospace,andacademia."
+      },
+      {
+        "index": 48,
+        "role": "body",
+        "text": "We cultivatea cultureof inclusionforallemployees that respects theirindividual"
+      },
+      {
+        "index": 49,
+        "role": "body",
+        "text": "strengths,views,andexperiences.Webelievethatourdifferencesenableusto"
+      },
+      {
+        "index": 50,
+        "role": "body",
+        "text": "be abetterteam-one thatmakesbetterdecisions,drivesinnovation and"
+      },
+      {
+        "index": 51,
+        "role": "body",
+        "text": "delivers betterbusinessresults."
+      },
+      {
+        "index": 52,
+        "role": "body",
+        "text": "Job description:"
+      },
+      {
+        "index": 53,
+        "role": "body",
+        "text": "Quantifi Photonics designs and manufacturesadvanced optical and electronic"
+      },
+      {
+        "index": 54,
+        "role": "body",
+        "text": "testinstrumentsthatenableengineerstodevelopandscaleupnext-generation"
+      },
+      {
+        "index": 55,
+        "role": "body",
+        "text": "photonicstechnologies.Our customers include global tech companies,leading"
+      },
+      {
+        "index": 56,
+        "role": "body",
+        "text": "universities,and world-classresearchinstitutionsinover25 countries;working"
+      },
+      {
+        "index": 57,
+        "role": "body",
+        "text": "across R&D, high-volume manufacturing, defence, aerospace, and academia."
+      },
+      {
+        "index": 58,
+        "role": "body",
+        "text": "Wecultivate a culture of inclusionforall employeesthat respectstheir individual"
+      },
+      {
+        "index": 59,
+        "role": "body",
+        "text": "strengths,views,and experiences.Webelieve that ourdifferences enableus to"
+      },
+      {
+        "index": 60,
+        "role": "body",
+        "text": "be a betterteam-one that makesbetterdecisions,drivesinnovation and"
+      },
+      {
+        "index": 61,
+        "role": "body",
+        "text": "delivers betterbusiness results."
+      },
+      {
+        "index": 62,
+        "role": "body",
+        "text": "Opportunity Overview"
+      },
+      {
+        "index": 63,
+        "role": "body",
+        "text": "TheSoftwareEngineerdesigns andimplementsplatformsoftware that"
+      },
+      {
+        "index": 64,
+        "role": "body",
+        "text": "orchestratesandintegratesmodulesandcomponentsintofullyfunctionalTest"
+      },
+      {
+        "index": 65,
+        "role": "body",
+        "text": "Systems.This roleplays a key part in enabling end-to-end solutionsbyproviding"
+      },
+      {
+        "index": 66,
+        "role": "body",
+        "text": "thecontrol,automation,anduserinterfacesneededtoensurereliablesystem"
+      },
+      {
+        "index": 67,
+        "role": "body",
+        "text": "performance and ease of use across development,manufacturing, and customer"
+      },
+      {
+        "index": 68,
+        "role": "body",
+        "text": "applications."
+      },
+      {
+        "index": 69,
+        "role": "body",
+        "text": "Designandimplementsoftwaremodulesthatinterfacewithinternalhardware"
+      },
+      {
+        "index": 70,
+        "role": "body",
+        "text": "and optical products to form cohesive test systems."
+      },
+      {
+        "index": 71,
+        "role": "section_hint",
+        "text": "·Workcloselywith cross-functional teams todefinesoftwarerequirements,"
+      },
+      {
+        "index": 72,
+        "role": "body",
+        "text": "integrationpoints,andsystembehaviour."
+      },
+      {
+        "index": 73,
+        "role": "body",
+        "text": "Createscripts,tools,and applicationsforautomatedtestexecution,"
+      },
+      {
+        "index": 74,
+        "role": "body",
+        "text": "configuration,and system control."
+      },
+      {
+        "index": 75,
+        "role": "body",
+        "text": "Assist in debugging system-level issues,validating performance,and refining"
+      },
+      {
+        "index": 76,
+        "role": "body",
+        "text": "softwareassystemsevolve."
+      }
+    ],
+    "requirements": [
+      "TERADYNE,whereexperiencemeetsinnovationand driving excellence inevery",
+      "TERADYNE,whereexperiencemeets innovationanddriving excellence inevery",
+      "strengths,views,andexperiences.Webelievethatourdifferencesenableusto",
+      "strengths,views,and experiences.Webelieve that ourdifferences enableus to",
+      "·Workcloselywith cross-functional teams todefinesoftwarerequirements,"
+    ],
+    "responsibilities": [
+      "Systems.This roleplays a key part in enabling end-to-end solutionsbyproviding"
+    ],
+    "benefits": [],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Apply C",
+      "bbox": {
+        "x": 559,
+        "y": 979,
+        "w": 84,
+        "h": 32
+      },
+      "click_point": {
+        "x": 601,
+        "y": 995
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save button",
+      "bbox": {
+        "x": 580,
+        "y": 814,
+        "w": 60,
+        "h": 40
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 513,
+        "y": 346,
+        "w": 709,
+        "h": 832
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false
+      },
+      "safe_points": [
+        {
+          "x": 867,
+          "y": 762,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 513,
+      "y": 126,
+      "w": 709,
+      "h": 1052
+    },
+    "detail_scroll_history": [
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260617-095920-227261__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": true
+          }
+        },
+        "missing_evidence": [
+          "responsibilities"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260617-095938-148134__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "missing_evidence": [
+          "responsibilities"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260617-095957-179231__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "missing_evidence": [
+          "responsibilities"
+        ]
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-095918-507833__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-095936-436257__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-095955-421422__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-100014-836137__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 79,
+      "action_count": 73,
+      "texts": [
+        "All Auckland",
+        "SEEK",
+        "Listing time",
+        "QUANTIFI",
+        "PHOTONICS",
+        "A Teradyne Company",
+        "Software Engineer (Test Systems)",
+        "Quantifi Photonics View all jobs",
+        "Rosedale,Auckland",
+        "Other(Engineering)",
+        "Full time",
+        "Posted 1d ago",
+        "Apply C",
+        "Save",
+        "tA",
+        "How you match ①",
+        "1 skill or credential matches your profile",
+        "Quantifi Photonics",
+        "View all jobs",
+        "Rosedale, Auckland",
+        "Other (Engineering)",
+        "C# Programming",
+        "Showall",
+        "Company description:",
+        "OurPurpose",
+        "TERADYNE,whereexperiencemeetsinnovationand driving excellence inevery",
+        "connection. We are fuelled by creativity and diversity of thought and in our",
+        "workforce.Ouremployees aresupported toinnovate and learnsomethingnew",
+        "everyday.",
+        "A",
+        "Based inAuckland,QuantifiPhotonicsisproud tobepartof theTeradyne",
+        "family,combiningNewZealand'sinnovative spirit with theresources of a global",
+        "leaderintest,automation,androbotics.We're growing fast,tackling increasingly",
+        "complexchallenges,andarelookingforpassionate,talentedpeopletohelptake",
+        "ApplyC",
+        "Our Purpose",
+        "TERADYNE,whereexperiencemeets innovationanddriving excellence inevery",
+        "connection.Wearefuelledbycreativityanddiversityofthoughtandinour",
+        "workforce.Ouremployees are supported to innovate and learnsomething new",
+        "every day.",
+        "BasedinAuckland,QuantifiPhotonicsisproud tobepartoftheTeradyne",
+        "family,combining NewZealand's innovative spirit with theresources of a global",
+        "leader in test, automation, and robotics. We're growing fast, tackling increasingly",
+        "complex challenges, and are looking for passionate, talented people to help take",
+        "QuantifiPhotonics to thenextlevel.",
+        "QuantifiPhotonics designs and manufactures advanced optical and electronic",
+        "test instruments thatenableengineers todevelop andscale up next-generation",
+        "photonics technologies. Our customers include global tech companies, leading",
+        "universities,and world-classresearchinstitutionsinover 25 countries;working",
+        "acrossR&D,high-volumemanufacturing,defence,aerospace,andacademia.",
+        "We cultivatea cultureof inclusionforallemployees that respects theirindividual",
+        "strengths,views,andexperiences.Webelievethatourdifferencesenableusto",
+        "be abetterteam-one thatmakesbetterdecisions,drivesinnovation and",
+        "delivers betterbusinessresults.",
+        "Job description:",
+        "Quantifi Photonics designs and manufacturesadvanced optical and electronic",
+        "testinstrumentsthatenableengineerstodevelopandscaleupnext-generation",
+        "photonicstechnologies.Our customers include global tech companies,leading",
+        "universities,and world-classresearchinstitutionsinover25 countries;working",
+        "across R&D, high-volume manufacturing, defence, aerospace, and academia.",
+        "Wecultivate a culture of inclusionforall employeesthat respectstheir individual",
+        "strengths,views,and experiences.Webelieve that ourdifferences enableus to",
+        "be a betterteam-one that makesbetterdecisions,drivesinnovation and",
+        "delivers betterbusiness results.",
+        "Opportunity Overview",
+        "TheSoftwareEngineerdesigns andimplementsplatformsoftware that",
+        "orchestratesandintegratesmodulesandcomponentsintofullyfunctionalTest",
+        "Systems.This roleplays a key part in enabling end-to-end solutionsbyproviding",
+        "thecontrol,automation,anduserinterfacesneededtoensurereliablesystem",
+        "performance and ease of use across development,manufacturing, and customer",
+        "applications.",
+        "Designandimplementsoftwaremodulesthatinterfacewithinternalhardware",
+        "and optical products to form cohesive test systems.",
+        "·Workcloselywith cross-functional teams todefinesoftwarerequirements,",
+        "integrationpoints,andsystembehaviour.",
+        "Createscripts,tools,and applicationsforautomatedtestexecution,",
+        "configuration,and system control.",
+        "Assist in debugging system-level issues,validating performance,and refining",
+        "softwareassystemsevolve."
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

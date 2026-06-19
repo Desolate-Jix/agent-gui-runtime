@@ -45,6 +45,7 @@ VK_RETURN = 0x0D
 VK_V = 0x56
 SM_CXSCREEN = 0
 SM_CYSCREEN = 1
+CLIPBOARD_PASTE_SETTLE_SECONDS = 0.15
 
 
 class MOUSEINPUT(ctypes.Structure):
@@ -220,7 +221,14 @@ class InputController:
             self._press_chord([VK_CONTROL, VK_A])
             time.sleep(0.03)
         self._set_clipboard_text(text)
+        clipboard_after_set = self._get_clipboard_text()
+        if clipboard_after_set != text:
+            raise RuntimeError(
+                "Clipboard write verification failed before paste: "
+                f"expected {len(text)} chars, got {len(clipboard_after_set or '')} chars"
+            )
         self._press_chord([VK_CONTROL, VK_V])
+        time.sleep(CLIPBOARD_PASTE_SETTLE_SECONDS)
         if submit:
             time.sleep(0.03)
             self._press_key(VK_RETURN)
@@ -238,6 +246,8 @@ class InputController:
             "clear_existing": bool(clear_existing),
             "submit": bool(submit),
             "restore_clipboard": bool(restore_clipboard),
+            "clipboard_verified_before_paste": True,
+            "clipboard_paste_settle_ms": int(CLIPBOARD_PASTE_SETTLE_SECONDS * 1000),
         }
 
     def scroll_window(

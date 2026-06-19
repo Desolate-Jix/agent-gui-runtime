@@ -1,0 +1,410 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_cd2ede816a42",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.73,
+    "job_id": "seek_job_cd2ede816a42",
+    "title": "SoftwareEngineer",
+    "company": "ANZBankNewZealandLimited",
+    "positive_evidence": [
+      "matched_skills: SQL, software engineer",
+      "matched_target_roles: Software Engineer",
+      "location_matches: All Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_0f1048472ab0",
+    "title": "Software Engineer",
+    "company": "ANZ Bank New Zealand Limited",
+    "location": "ANZ Bank New Zealand Limited",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": "Software Engineer",
+    "card_bbox": {
+      "x": 195,
+      "y": 853,
+      "w": 428,
+      "h": 240
+    },
+    "click_point": {
+      "x": 272,
+      "y": 864
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_14",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_60_software-engineer",
+      "page_text_62_anz-bank-new-zealand-limited",
+      "page_text_66_auckland-cbd-auckland",
+      "page_text_68_be-at-the-forefront-of-pioneering-new-ideas-and-",
+      "page_text_70_strong-professional-development-opportunities",
+      "page_text_72_access-exclusive-staff-banking-benefits-includin",
+      "page_text_73_and-insurance",
+      "page_text_76_shape-investment-platforms-delivering-scalable-r",
+      "page_text_79_solutions-that-evolve-with-customer-needs"
+    ],
+    "evidence": {
+      "texts": [
+        "Software Engineer",
+        "ANZ Bank New Zealand Limited",
+        "Auckland CBD, Auckland",
+        "Be at the forefront of pioneering new ideas and solutions",
+        "Strong professional development opportunities",
+        "Access exclusive staff banking benefits, including banking",
+        "and insurance",
+        "Shape investment platforms, delivering scalable, robust",
+        "solutions that evolve with customer needs"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": false,
+        "has_salary": false
+      }
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_cd2ede816a42",
+    "title": "SoftwareEngineer",
+    "company": "ANZBankNewZealandLimited",
+    "location": "All Auckland",
+    "work_type": null,
+    "classification": "SoftwareEngineer",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "All Auckland"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "SEEK"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Listing time"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "ANZ"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "SoftwareEngineer"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "ANZBankNewZealandLimited"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "★3.98reviews·View alljobs"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "DATACOM"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Auckland CBD,Auckland"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Engineering-Software(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "Fulltime"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "Posted 8h ago"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "Apply"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "ANz?"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "1 skill or credential matches your profile"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "SQL Query Language Show all"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "KoMatou-About Us"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "Classification"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "SQL Query LanguageShow all"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "Kia HangaITeAo,E Ora Ai,ETupu Ai,TeTangata Me TeKainga.At ANZ,we're shaping a"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "world wherepeople andcommunitiesthrive,drivenbyacommongoal:toimprove the"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "financialwellbeing andsustainabilityofourmillionsofcustomers."
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "Moteturanga-About therole"
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "This is a rare opportunity to stepintoFunds Technology,working on platforms that"
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "underpinANZ'sinvestment and assetmanagementservices."
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "AsaSeniorSoftware Engineer, you'll take aleading role in shaping and delivering"
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "technology thatsupportsourDiscretionary Investment ManagementServices(DIMS)and"
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "advisory channels. You won't just be maintaining systems, you'll be influencing how they"
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "evolve,partnering closely with engineers,architects,and vendors to design and deliver"
+      },
+      {
+        "index": 31,
+        "role": "body",
+        "text": "solutions that arerobust,scalable and fit forthe future."
+      }
+    ],
+    "requirements": [],
+    "responsibilities": [
+      "Moteturanga-About therole",
+      "AsaSeniorSoftware Engineer, you'll take aleading role in shaping and delivering"
+    ],
+    "benefits": [],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Apply button",
+      "bbox": {
+        "x": 565,
+        "y": 790,
+        "w": 115,
+        "h": 45
+      },
+      "click_point": {
+        "x": 622,
+        "y": 812
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save button",
+      "bbox": {
+        "x": 680,
+        "y": 790,
+        "w": 90,
+        "h": 45
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 544,
+        "y": 346,
+        "w": 1075,
+        "h": 832
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false
+      },
+      "safe_points": [
+        {
+          "x": 1081,
+          "y": 762,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 544,
+      "y": 126,
+      "w": 1075,
+      "h": 1052
+    },
+    "detail_scroll_history": [
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260619-023226-844112__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "learned_app_profile_v1",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": true
+          }
+        },
+        "missing_evidence": [
+          "role_evidence"
+        ]
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260619-023225-078902__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260619-023242-839076__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 36,
+      "action_count": 51,
+      "texts": [
+        "All Auckland",
+        "SEEK",
+        "Listing time",
+        "ANZ",
+        "口",
+        "SoftwareEngineer",
+        "ANZBankNewZealandLimited",
+        "★3.98reviews·View alljobs",
+        "DATACOM",
+        "Auckland CBD,Auckland",
+        "Engineering-Software(Information&CommunicationTechnology)",
+        "?",
+        "Fulltime",
+        "Posted 8h ago",
+        "Apply",
+        "Save",
+        "How you match ①",
+        "ANz?",
+        "1 skill or credential matches your profile",
+        "SQL Query Language Show all",
+        "KoMatou-About Us",
+        "×",
+        "Classification",
+        "SQL Query LanguageShow all",
+        "Kia HangaITeAo,E Ora Ai,ETupu Ai,TeTangata Me TeKainga.At ANZ,we're shaping a",
+        "world wherepeople andcommunitiesthrive,drivenbyacommongoal:toimprove the",
+        "financialwellbeing andsustainabilityofourmillionsofcustomers.",
+        "Moteturanga-About therole",
+        "This is a rare opportunity to stepintoFunds Technology,working on platforms that",
+        "underpinANZ'sinvestment and assetmanagementservices.",
+        "AsaSeniorSoftware Engineer, you'll take aleading role in shaping and delivering",
+        "A",
+        "technology thatsupportsourDiscretionary Investment ManagementServices(DIMS)and",
+        "advisory channels. You won't just be maintaining systems, you'll be influencing how they",
+        "evolve,partnering closely with engineers,architects,and vendors to design and deliver",
+        "solutions that arerobust,scalable and fit forthe future."
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

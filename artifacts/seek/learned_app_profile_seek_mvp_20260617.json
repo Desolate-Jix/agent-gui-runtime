@@ -1,0 +1,244 @@
+{
+  "contract_version": "learned_app_profile_v1",
+  "profile_id": "seek_search_results_detail_mvp_v1",
+  "app_id": "seek",
+  "site": "seek.co.nz",
+  "page_type": "seek_search_results_with_detail",
+  "source_contracts": {
+    "report": "seek_mvp_run_report_v1",
+    "traversal_trace": null,
+    "report_path": "logs\\smoke\\seek_mvp_readonly_after_parser_title_filter_5jobs_20260617.json",
+    "trace_path": null
+  },
+  "evidence_summary": {
+    "jobs_seen": 5,
+    "jobs_opened": 5,
+    "jobs_fully_read": 5,
+    "post_click_layout_drift_count": 0,
+    "wrong_scope_scroll_count": 0,
+    "final_submissions": 0,
+    "submit_clicks": 0,
+    "accuracy_status": "pass",
+    "observed_job_titles": [
+      "Applications Software Engineer",
+      "Senior Integrations Engineer",
+      "Software Engineers",
+      "Senior Software Engineer",
+      "Head of Delivery| Software Engineer"
+    ],
+    "traversal_event_count": 5
+  },
+  "scroll_containers": [
+    {
+      "container_id": "seek:page",
+      "role": "page",
+      "scroll_scope": "page",
+      "axis": "vertical",
+      "used_by": []
+    },
+    {
+      "container_id": "seek:results_list",
+      "role": "results_list",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "used_by": [
+        "open_job_card",
+        "load_more_results"
+      ]
+    },
+    {
+      "container_id": "seek:job_detail",
+      "role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "used_by": [
+        "read_detail",
+        "apply_entry"
+      ]
+    }
+  ],
+  "entity_patterns": [
+    {
+      "entity_type": "job_card",
+      "section_id": "results_list",
+      "source_contract": "seek_job_card_v1",
+      "required_fields": [
+        "title",
+        "company",
+        "card_bbox",
+        "click_point"
+      ],
+      "optional_fields": [
+        "location",
+        "posted_at_text",
+        "work_type",
+        "salary_text",
+        "classification"
+      ],
+      "reject_if": [
+        "filter_card",
+        "right_detail_text",
+        "overwide_bbox",
+        "incomplete_title"
+      ]
+    },
+    {
+      "entity_type": "job_detail",
+      "section_id": "job_detail",
+      "source_contract": "seek_job_detail_v1",
+      "required_fields": [
+        "title",
+        "company",
+        "location",
+        "description_sections",
+        "role_evidence"
+      ],
+      "scroll_until": "seek_job_detail_completeness_v1.complete"
+    }
+  ],
+  "action_templates": [
+    {
+      "action_id": "open_job_card",
+      "goal_template": "Click the SEEK job result card titled {title} at {company}",
+      "target_entity": "job_card",
+      "scroll_target": {
+        "target_pane": "results_list",
+        "target_container_id": "seek:results_list"
+      },
+      "candidate_constraints": {
+        "required_container_id": "seek:results_list",
+        "use_seeded_candidate": true,
+        "seed_source_contract": "seek_job_card_v1",
+        "require_card_bbox": true,
+        "require_click_point": true,
+        "require_point_inside_seed_bbox": true
+      },
+      "verification_policy": {
+        "post_click": "detail_title_company_must_match_clicked_card",
+        "failure_reason": "post_click_layout_drift"
+      },
+      "forbidden_targets": [
+        "Apply",
+        "Quick Apply",
+        "Save",
+        "Submit",
+        "Send application",
+        "Complete application"
+      ]
+    },
+    {
+      "action_id": "read_detail",
+      "target_entity": "job_detail",
+      "scroll_target": {
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail"
+      },
+      "verification_policy": {
+        "complete_contract": "seek_job_detail_completeness_v1",
+        "required_evidence": [
+          "title",
+          "company",
+          "location",
+          "description_sections",
+          "role_evidence"
+        ]
+      }
+    },
+    {
+      "action_id": "load_more_results",
+      "target_entity": "results_list",
+      "scroll_target": {
+        "target_pane": "results_list",
+        "target_container_id": "seek:results_list"
+      },
+      "verification_policy": {
+        "target_container_content_should_change": true,
+        "wrong_scope_detected_must_be_false": true
+      }
+    },
+    {
+      "action_id": "apply_entry",
+      "target_entity": "apply_button",
+      "scroll_target": {
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail"
+      },
+      "candidate_constraints": {
+        "required_container_id": "seek:job_detail",
+        "forbid_final_submit": true
+      },
+      "verification_policy": {
+        "pre_apply_detail_verification_required": true,
+        "stop_after_application_state_observe": true
+      }
+    }
+  ],
+  "verification_rules": [
+    {
+      "rule_id": "open_job_card_detail_match",
+      "applies_to": [
+        "open_job_card"
+      ],
+      "required": true,
+      "description": "After a card click, the right detail title/company must match the clicked card."
+    },
+    {
+      "rule_id": "read_detail_scroll_scope",
+      "applies_to": [
+        "read_detail"
+      ],
+      "required_container_id": "seek:job_detail",
+      "required": true
+    },
+    {
+      "rule_id": "load_more_results_scroll_scope",
+      "applies_to": [
+        "load_more_results"
+      ],
+      "required_container_id": "seek:results_list",
+      "required": true
+    },
+    {
+      "rule_id": "final_submit_forbidden",
+      "applies_to": [
+        "apply_entry",
+        "safe_fill",
+        "all_actions"
+      ],
+      "required": true,
+      "forbidden_terms": [
+        "Submit",
+        "Send application",
+        "Complete application",
+        "Review and submit",
+        "Finish application"
+      ]
+    }
+  ],
+  "safety_policy": {
+    "policy_id": "seek_final_submit_forbidden_v1",
+    "final_submit": "forbidden",
+    "forbidden_actions": [
+      "Submit",
+      "Send application",
+      "Complete application",
+      "Review and submit",
+      "Finish application"
+    ],
+    "real_clicks_require": [
+      "recognition_plan_v1",
+      "pre_click_decision_v1.allowed",
+      "post_click_verification"
+    ],
+    "apply_entry_requires": [
+      "strong_apply",
+      "pre_apply_detail_verification_v1",
+      "final_submit_guard_v1"
+    ],
+    "safe_fill_requires": [
+      "candidate_profile_readiness_v1.live_smoke_ready",
+      "safe_form_fill_trace_v1",
+      "post_fill_verification_v1"
+    ]
+  }
+}

@@ -1,0 +1,419 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_74bb8157a2ac",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.82,
+    "job_id": "seek_job_74bb8157a2ac",
+    "title": "Software Engineer",
+    "company": "Potentia",
+    "positive_evidence": [
+      "matched_skills: C#, Python, software engineer",
+      "matched_target_roles: Software Engineer",
+      "location_matches: Auckland (Hybrid)"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_74bb8157a2ac",
+    "title": "Software Engineer",
+    "company": "Potentia",
+    "location": "Auckland (Hybrid)",
+    "posted_at_text": null,
+    "work_type": "Auckland (Hybrid)",
+    "salary_text": null,
+    "classification": "Software Engineer",
+    "card_bbox": {
+      "x": 58,
+      "y": 626,
+      "w": 371,
+      "h": 229
+    },
+    "click_point": {
+      "x": 135,
+      "y": 637
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_9",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_44_software-engineer",
+      "page_text_46_potentia",
+      "page_text_49_auckland-hybrid",
+      "page_text_51_help-buildings-decarbonise-at-scale-with",
+      "page_text_52_measurable-impact",
+      "page_text_54_build-scalable-software-using-python-c-in-a",
+      "page_text_56_cloud-environment",
+      "page_text_58_mission-driven-team-with-investment-backing-and",
+      "page_text_59_real-growth-runway"
+    ],
+    "evidence": {
+      "texts": [
+        "Software Engineer",
+        "Potentia",
+        "Auckland (Hybrid)",
+        "·Help buildings decarbonise at scale with",
+        "measurable impact",
+        "Build scalable software using Python & C# in a",
+        "cloud environment",
+        "Mission-driven team with investment backing and",
+        "real growth runway"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements"
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_74bb8157a2ac",
+    "title": "Software Engineer",
+    "company": "Potentia",
+    "location": "Auckland (Hybrid)",
+    "work_type": "Auckland (Hybrid)",
+    "classification": "Software Engineer",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "BTune"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "Potentia"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Software Engineer"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "Potentia View all jobs"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "Auckland (Hybrid)"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "Engineering-Software (Information& Communication Technology)"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Add expected salary to your profile forinsights"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Posted 8d ago"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Quick apply"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "SoftwareEngineer|BTune"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "Helpbuildingsdecarboniseatscalewithoutcompromise"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "BTunewas createdwitha clearmission:tohelpbuildingsdecarboniseatglobal"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "scalewhileremovingthetraditionaltrade-offbetweenenvironmental"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "occupantcomfort,and loweroperatingcostsdeliveringmeasurableoutcomes"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "without requiring costly capital upgrades or business disruption."
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "ouitwaicLlyllicci"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "Potentia View alljobs"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "Add expected salary toyourprofile forinsights"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "BTune was created with a clearmission:to help buildings decarbonise at global"
+      },
+      {
+        "index": 21,
+        "role": "section_hint",
+        "text": "responsibility and commercial performance. Their platform enables building"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "without requiring costly capital upgradesorbusiness disruption."
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "Withincominginvestmentandincreasingcustomerdemand,BTuneisnow"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "entering its next stage of growth.They're expanding engineering capability to"
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "evolvingarobustcustomer-readysolution."
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "Thisiswhere you come in."
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "The Role:"
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "Reporting directly to the Chief Technology Officer, youll play a pivotal role in"
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "designing,building,and maintaining BTune's software solutions.Your work will"
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "directly contribute toscalable,measurable energy and carbon savings in"
+      },
+      {
+        "index": 31,
+        "role": "body",
+        "text": "commercial buildings."
+      },
+      {
+        "index": 32,
+        "role": "body",
+        "text": "Thisisn'tjust aboutwritingcode,it's aboutcreatingsystemsthatperformreliably"
+      },
+      {
+        "index": 33,
+        "role": "body",
+        "text": "at scale,deliverreal-world impact,and support BTune's mission to decarbonise"
+      },
+      {
+        "index": 34,
+        "role": "body",
+        "text": "thebuiltenvironment."
+      }
+    ],
+    "requirements": [],
+    "responsibilities": [
+      "responsibility and commercial performance. Their platform enables building",
+      "The Role:",
+      "Reporting directly to the Chief Technology Officer, youll play a pivotal role in"
+    ],
+    "benefits": [
+      "Auckland (Hybrid)"
+    ],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply",
+      "bbox": {
+        "x": 546,
+        "y": 838,
+        "w": 103,
+        "h": 31
+      },
+      "click_point": {
+        "x": 598,
+        "y": 854
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save button",
+      "bbox": {
+        "x": 568,
+        "y": 700,
+        "w": 60,
+        "h": 30
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 513,
+        "y": 346,
+        "w": 709,
+        "h": 832
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false
+      },
+      "safe_points": [
+        {
+          "x": 867,
+          "y": 762,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 513,
+      "y": 126,
+      "w": 709,
+      "h": 1052
+    },
+    "detail_scroll_history": [
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260617-075633-430520__scroll__scroll-down.json",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": true
+          }
+        },
+        "missing_evidence": [
+          "responsibilities"
+        ]
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-075631-652825__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-075647-590270__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 39,
+      "action_count": 25,
+      "texts": [
+        "BTune",
+        "Potentia",
+        "Software Engineer",
+        "Potentia View all jobs",
+        "Auckland (Hybrid)",
+        "国",
+        "Engineering-Software (Information& Communication Technology)",
+        "?",
+        "Full time",
+        "回",
+        "Add expected salary to your profile forinsights",
+        "Posted 8d ago",
+        "Quick apply",
+        "Save",
+        "SoftwareEngineer|BTune",
+        "Helpbuildingsdecarboniseatscalewithoutcompromise",
+        "BTunewas createdwitha clearmission:tohelpbuildingsdecarboniseatglobal",
+        "scalewhileremovingthetraditionaltrade-offbetweenenvironmental",
+        "tA",
+        "occupantcomfort,and loweroperatingcostsdeliveringmeasurableoutcomes",
+        "without requiring costly capital upgrades or business disruption.",
+        "ouitwaicLlyllicci",
+        "Potentia View alljobs",
+        "Add expected salary toyourprofile forinsights",
+        "BTune was created with a clearmission:to help buildings decarbonise at global",
+        "responsibility and commercial performance. Their platform enables building",
+        "without requiring costly capital upgradesorbusiness disruption.",
+        "Withincominginvestmentandincreasingcustomerdemand,BTuneisnow",
+        "entering its next stage of growth.They're expanding engineering capability to",
+        "evolvingarobustcustomer-readysolution.",
+        "Thisiswhere you come in.",
+        "The Role:",
+        "Reporting directly to the Chief Technology Officer, youll play a pivotal role in",
+        "designing,building,and maintaining BTune's software solutions.Your work will",
+        "directly contribute toscalable,measurable energy and carbon savings in",
+        "commercial buildings.",
+        "Thisisn'tjust aboutwritingcode,it's aboutcreatingsystemsthatperformreliably",
+        "at scale,deliverreal-world impact,and support BTune's mission to decarbonise",
+        "thebuiltenvironment."
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

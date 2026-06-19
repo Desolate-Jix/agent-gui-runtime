@@ -1,0 +1,293 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_deb1806b8e87",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "maybe_apply",
+    "score": 0.64,
+    "job_id": "seek_job_deb1806b8e87",
+    "title": "make it work evenbetterforthem.Thisposition will suit anEngineerwith a good",
+    "company": "product sensewhoiscomfortableworkingrelatively autonomouslybut who can",
+    "positive_evidence": [
+      "matched_skills: software engineer",
+      "matched_target_roles: Software Engineer",
+      "location_matches: This opportunityis based in ourfullyrenovated Auckland office.Wehave a"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_7a737fe8da95",
+    "title": "Job title",
+    "company": "obe p8",
+    "location": "Parnell, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": "Staff Software Engineer",
+    "card_bbox": {
+      "x": 37,
+      "y": 388,
+      "w": 341,
+      "h": 182
+    },
+    "click_point": {
+      "x": 208,
+      "y": 479
+    },
+    "source_url": null,
+    "source_card_id": "card_1_job-title",
+    "primary_action_id": "action_screen_4_job-title",
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_35_obe-p8",
+      "page_text_38_staff-software-engineer",
+      "page_text_41_kami-holdings-limited",
+      "page_text_43_parnell-auckland"
+    ],
+    "evidence": {
+      "texts": [
+        "obe p8",
+        "Staff Software Engineer",
+        "Kami Holdings Limited",
+        "Parnell, Auckland"
+      ],
+      "source_contract": "screen_inventory_v1"
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_deb1806b8e87",
+    "title": "make it work evenbetterforthem.Thisposition will suit anEngineerwith a good",
+    "company": "product sensewhoiscomfortableworkingrelatively autonomouslybut who can",
+    "location": "This opportunityis based in ourfullyrenovated Auckland office.Wehave a",
+    "work_type": "hybrid arrangement of Mondays, Wednesdays and Fridays in office.Tuesdays",
+    "classification": null,
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "Add expected salary to your profile for insights"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "Posted 14d ago"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Quick apply"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "About Kami"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "Kami is a thriving organisation filled to the brim with talented,creative, and"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "passionatepeople! It'shard not tolovewhat you dowhen ourleading digital"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "classroomplatformoffersmeaningfulsolutionstoover5Omillionusers"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "worldwide,empowering students and supporting teachers!"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "You'll be joining at a pretty magical time. Kami's user base is growing by the day."
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "Withover170teammembersacrosstheworld,wecouldn'tbeprouderofthe"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "accomplishmentsand milestoneswe'veachievedtodate.Now,thisisyour"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "chance tojoinourteam and becomeanintegral memberofKami's growth,while"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "shaping your own future (and having fun doing it)!"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "The Opportunity"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "As an engineer for this forward-thinking scaleup, you will not be locked in the"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "backroom implementing specs sheets—-you'll be talking to the"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "customers/teacherswho alreadylove theirproduct andfiguring out how to"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "make it work evenbetterforthem.Thisposition will suit anEngineerwith a good"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "product sensewhoiscomfortableworkingrelatively autonomouslybut who can"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "also collaborate well both internally and externally."
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "This opportunityis based in ourfullyrenovated Auckland office.Wehave a"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "hybrid arrangement of Mondays, Wednesdays and Fridays in office.Tuesdays"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "and Thursdays are work from home."
+      }
+    ],
+    "requirements": [],
+    "responsibilities": [
+      "As an engineer for this forward-thinking scaleup, you will not be locked in the"
+    ],
+    "benefits": [
+      "hybrid arrangement of Mondays, Wednesdays and Fridays in office.Tuesdays"
+    ],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply",
+      "bbox": {
+        "x": 547,
+        "y": 466,
+        "w": 102,
+        "h": 28
+      },
+      "click_point": {
+        "x": 598,
+        "y": 480
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save button",
+      "bbox": {
+        "x": 560,
+        "y": 383,
+        "w": 60,
+        "h": 37
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 513,
+        "y": 346,
+        "w": 709,
+        "h": 832
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false
+      },
+      "safe_points": [
+        {
+          "x": 867,
+          "y": 762,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_scroll_history": [],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-063536-519691__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 25,
+      "action_count": 7,
+      "texts": [
+        "回",
+        "Add expected salary to your profile for insights",
+        "Posted 14d ago",
+        "Quick apply",
+        "Save",
+        "About Kami",
+        "Kami is a thriving organisation filled to the brim with talented,creative, and",
+        "passionatepeople! It'shard not tolovewhat you dowhen ourleading digital",
+        "classroomplatformoffersmeaningfulsolutionstoover5Omillionusers",
+        "worldwide,empowering students and supporting teachers!",
+        "You'll be joining at a pretty magical time. Kami's user base is growing by the day.",
+        "Withover170teammembersacrosstheworld,wecouldn'tbeprouderofthe",
+        "accomplishmentsand milestoneswe'veachievedtodate.Now,thisisyour",
+        "chance tojoinourteam and becomeanintegral memberofKami's growth,while",
+        "shaping your own future (and having fun doing it)!",
+        "The Opportunity",
+        "As an engineer for this forward-thinking scaleup, you will not be locked in the",
+        "backroom implementing specs sheets—-you'll be talking to the",
+        "customers/teacherswho alreadylove theirproduct andfiguring out how to",
+        "make it work evenbetterforthem.Thisposition will suit anEngineerwith a good",
+        "product sensewhoiscomfortableworkingrelatively autonomouslybut who can",
+        "also collaborate well both internally and externally.",
+        "This opportunityis based in ourfullyrenovated Auckland office.Wehave a",
+        "hybrid arrangement of Mondays, Wednesdays and Fridays in office.Tuesdays",
+        "and Thursdays are work from home."
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

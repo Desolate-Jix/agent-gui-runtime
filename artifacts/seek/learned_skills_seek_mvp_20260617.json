@@ -1,0 +1,130 @@
+{
+  "contract_version": "learned_skill_v1",
+  "skill_set_id": "seek_extracted_generic_skills_v1",
+  "source_app_id": "seek",
+  "source_baseline": {
+    "jobs_seen": 5,
+    "jobs_opened": 5,
+    "jobs_fully_read": 5,
+    "post_click_layout_drift_count": 0,
+    "wrong_scope_scroll_count": 0,
+    "final_submissions": 0,
+    "submit_clicks": 0,
+    "accuracy_status": "pass"
+  },
+  "skills": [
+    {
+      "skill_id": "skill.open_card_from_list",
+      "intent": "Open a repeated list card and verify the detail view matches the selected entity.",
+      "inputs": [
+        "list_container_id",
+        "entity_title",
+        "entity_company",
+        "seeded_candidate_v1"
+      ],
+      "requires": [
+        "current_screenshot",
+        "current_candidate_validation",
+        "pre_click_decision_v1"
+      ],
+      "verification": [
+        "detail_title_company_must_match_clicked_card"
+      ],
+      "safety": {
+        "artifact_is_guidance_only": true,
+        "final_submit_allowed": false
+      }
+    },
+    {
+      "skill_id": "skill.scroll_container_until_new_content",
+      "intent": "Scroll one named container only when visible information is incomplete.",
+      "inputs": [
+        "target_container_id",
+        "target_pane",
+        "completion_rule"
+      ],
+      "requires": [
+        "scroll_precondition_decision_v1",
+        "before_after_container_evidence"
+      ],
+      "verification": [
+        "target_container_content_should_change"
+      ],
+      "safety": {
+        "wrong_scope_scroll_must_abort": true
+      }
+    },
+    {
+      "skill_id": "skill.scroll_list_until_new_entities",
+      "intent": "Scroll a result list until additional entities are available.",
+      "inputs": [
+        "results_container_id",
+        "entity_pattern_ref"
+      ],
+      "requires": [
+        "container_scope_evidence",
+        "entity_count_before_after"
+      ],
+      "verification": [
+        "new_entities_or_end_of_list_detected"
+      ],
+      "safety": {
+        "wrong_scope_scroll_must_abort": true
+      }
+    },
+    {
+      "skill_id": "skill.read_detail_pane_until_bounded",
+      "intent": "Read a detail pane by bounded scrolling until required fields are complete.",
+      "inputs": [
+        "detail_container_id",
+        "required_evidence"
+      ],
+      "requires": [
+        "detail_identity_verification",
+        "bounded_scroll_budget"
+      ],
+      "verification": [
+        "detail_completeness_contract_passed"
+      ],
+      "safety": {
+        "do_not_click_action_buttons_while_reading": true
+      }
+    },
+    {
+      "skill_id": "skill.click_seeded_candidate_with_point_validation",
+      "intent": "Use a learned candidate only after current screenshot validation confirms bbox and click point.",
+      "inputs": [
+        "seeded_candidate_v1",
+        "current_screenshot"
+      ],
+      "requires": [
+        "point_inside_bbox",
+        "vista_or_equivalent_validation",
+        "pre_click_decision_v1"
+      ],
+      "verification": [
+        "post_click_verification"
+      ],
+      "safety": {
+        "seed_is_not_authorization": true
+      }
+    },
+    {
+      "skill_id": "skill.block_final_submit",
+      "intent": "Block irreversible final submission actions unless a later explicit approval policy allows them.",
+      "inputs": [
+        "candidate_label",
+        "page_state"
+      ],
+      "requires": [
+        "final_submit_guard_v1"
+      ],
+      "verification": [
+        "blocked_decision_recorded"
+      ],
+      "safety": {
+        "final_submit": "forbidden"
+      }
+    }
+  ]
+}

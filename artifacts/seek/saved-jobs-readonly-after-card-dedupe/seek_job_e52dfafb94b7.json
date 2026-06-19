@@ -1,0 +1,574 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_e52dfafb94b7",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.73,
+    "job_id": "seek_job_e52dfafb94b7",
+    "title": "Software Engineering Manager",
+    "company": "Halter",
+    "positive_evidence": [
+      "matched_skills: backend, software engineer",
+      "matched_target_roles: Software Engineer",
+      "location_matches: All Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_fff429b74863",
+    "title": "Software Engineering Manager",
+    "company": "Halter",
+    "location": "Auckland CBD, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": "Software Engineering Manager",
+    "card_bbox": {
+      "x": 36,
+      "y": 529,
+      "w": 426,
+      "h": 362
+    },
+    "click_point": {
+      "x": 249,
+      "y": 710
+    },
+    "source_url": null,
+    "source_card_id": "card_10_software-engineering-manager",
+    "primary_action_id": "action_uia_146_software-engineering-manager",
+    "child_action_ids": [
+      "action_screen_9_software-engineering-manager",
+      "action_uia_145_modify-my-search",
+      "action_uia_147_hyperlink",
+      "action_uia_148_this-is-a-featured-job",
+      "action_uia_149_hyperlink"
+    ],
+    "child_page_element_ids": [
+      "page_text_29_software-engineering-manager",
+      "page_text_30_halter",
+      "page_text_31_auckland-cbd-auckland",
+      "page_text_32_own-the-technical-direction-and-delivery-of-your",
+      "page_text_33_team-s-work",
+      "page_text_34_hands-on-technical-role-while-creating-the-space",
+      "page_text_35_for-others-to-grow",
+      "page_text_36_great-work-culture-and-solve-impactful-problems-",
+      "page_text_37_a-global-scale",
+      "page_text_38_we-re-looking-for-a-software-engineering-manager",
+      "page_text_39_lead-a-team-of-engineers-frontend-and-backend",
+      "page_text_40_featured-expiring"
+    ],
+    "evidence": {
+      "texts": [
+        "Software Engineering Manager",
+        "Halter",
+        "Auckland CBD, Auckland",
+        "Own the technical direction and delivery of your",
+        "team's work!",
+        "Hands-on technical role while creating the space",
+        "for others to grow!",
+        "Great work culture and solve impactful problems at",
+        "a global scale!",
+        "We're looking for a Software Engineering Manager to",
+        "lead a team of engineers - frontend and backend!",
+        "Featured · Expiring",
+        "Software Engineering Manager",
+        "Modify my search",
+        "hyperlink",
+        "This is a featured job",
+        "hyperlink"
+      ],
+      "source_contract": "screen_inventory_v1"
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_e52dfafb94b7",
+    "title": "Software Engineering Manager",
+    "company": "Halter",
+    "location": "All Auckland",
+    "work_type": "Full time",
+    "classification": "Software Engineering Manager",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "All Auckland"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "SEEK"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Listing time"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "出 Halter."
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "Software Engineering Manager"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "Halter View all jobs"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "Auckland CBD,Auckland"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Engineering-Software(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Posted 28d ago"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "Apply C"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "1 skill or credential matches your profile"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "PipelinesShow all"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "AboutHalter"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "At Halter,we're on a mission toenablefarmers and graziers to run the most"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "productive and sustainableoperations.Our customers are using Haltertobreak"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "free from the time-intensive constraints of conventionalpractices.Imagine"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "watching 500 cattle stand up and walk calmly towards their next break? No quad"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "bikes, no dogs, no fences. Just a group of cattle walking at their own pace."
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "People say it looks like magic.Ourcustomers arerevolutionizing grazing with"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "Halter. It's changing lives and transforming an industry.People join Halter to do"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "meaningful work.By joining us you'llbe solving challenging problems within a"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "talented team andaculturebuiltforhighperformance.Ourteamout-think,out-"
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "workandout-care.We'recommitted todeliveringreal changeintheworld-this"
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "ApplyC"
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "Halter"
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "About Halter"
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "At Halter, we're on a mission to enable farmers and graziers to run the most"
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "productive and sustainable operations.Our customers are using Haltertobreak"
+      },
+      {
+        "index": 31,
+        "role": "body",
+        "text": "freefromthe time-intensive constraints of conventional practices.Imagine"
+      },
+      {
+        "index": 32,
+        "role": "body",
+        "text": "watching5oocattlestandupandwalkcalmlytowardstheirnextbreak?Noquad"
+      },
+      {
+        "index": 33,
+        "role": "body",
+        "text": "People say it looks like magic. Our customers are revolutionizing grazing with"
+      },
+      {
+        "index": 34,
+        "role": "body",
+        "text": "Halter.It's changing lives and transforming an industry.People join Halter to do"
+      },
+      {
+        "index": 35,
+        "role": "body",
+        "text": "meaningful work.By joining us you'll be solving challenging problems within a"
+      },
+      {
+        "index": 36,
+        "role": "body",
+        "text": "talented teamanda culturebuiltforhighperformance.Ourteamout-think,out-"
+      },
+      {
+        "index": 37,
+        "role": "body",
+        "text": "workand out-care.We'recommitted todeliveringreal change intheworld-this"
+      },
+      {
+        "index": 38,
+        "role": "body",
+        "text": "isn't easy,and in truth,we love that it's hard."
+      },
+      {
+        "index": 39,
+        "role": "body",
+        "text": "We'rebacked todeliveron a missionthat mattersbyTier1investors including"
+      },
+      {
+        "index": 40,
+        "role": "body",
+        "text": "FoundersFund,BessemerVenturePartners,BOND,DCVC,Blackbird,Promus"
+      },
+      {
+        "index": 41,
+        "role": "body",
+        "text": "Ventures,RocketLab'sPeterBeckandIcehouseventures."
+      },
+      {
+        "index": 42,
+        "role": "body",
+        "text": "About therole"
+      },
+      {
+        "index": 43,
+        "role": "body",
+        "text": "We'relookingforaSoftwareEngineeringManagerwhobuildsandelevatestheir"
+      },
+      {
+        "index": 44,
+        "role": "body",
+        "text": "team,drives strong technical solutions,and goes deep on hard,real-world"
+      },
+      {
+        "index": 45,
+        "role": "body",
+        "text": "problems. This isn't a pure delivery or pure people role. You'll be in the work,"
+      },
+      {
+        "index": 46,
+        "role": "body",
+        "text": "shaping technical direction,collaborating closelywith design andproduct,and"
+      },
+      {
+        "index": 47,
+        "role": "body",
+        "text": "helping your team do the best work of their careers. Don't worry, you'll also be"
+      },
+      {
+        "index": 48,
+        "role": "body",
+        "text": "hands-on."
+      },
+      {
+        "index": 49,
+        "role": "body",
+        "text": "Youll need to hold the technical bar high while creating the space for others to"
+      },
+      {
+        "index": 50,
+        "role": "body",
+        "text": "grow.We'resolvingproblems that haven't been solved before,and you'll be"
+      }
+    ],
+    "requirements": [],
+    "responsibilities": [
+      "About therole",
+      "problems. This isn't a pure delivery or pure people role. You'll be in the work,"
+    ],
+    "benefits": [],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Apply C",
+      "bbox": {
+        "x": 559,
+        "y": 979,
+        "w": 84,
+        "h": 32
+      },
+      "click_point": {
+        "x": 601,
+        "y": 995
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save button",
+      "bbox": {
+        "x": 555,
+        "y": 815,
+        "w": 65,
+        "h": 38
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 513,
+        "y": 346,
+        "w": 709,
+        "h": 832
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false
+      },
+      "safe_points": [
+        {
+          "x": 867,
+          "y": 762,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 513,
+      "y": 126,
+      "w": 709,
+      "h": 1052
+    },
+    "detail_scroll_history": [
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260617-113347-166438__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": true
+          }
+        },
+        "missing_evidence": [
+          "responsibilities"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260617-113405-297806__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "missing_evidence": [
+          "responsibilities"
+        ]
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-113345-406199__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-113403-506327__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-113421-298726__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 56,
+      "action_count": 52,
+      "texts": [
+        "。",
+        "All Auckland",
+        "SEEK",
+        "Listing time",
+        "出 Halter.",
+        "Software Engineering Manager",
+        "Halter View all jobs",
+        "Auckland CBD,Auckland",
+        "国",
+        "Engineering-Software(Information&CommunicationTechnology)",
+        "Full time",
+        "Posted 28d ago",
+        "Apply C",
+        "Save",
+        "tA",
+        "How you match ①",
+        "1 skill or credential matches your profile",
+        "PipelinesShow all",
+        "AboutHalter",
+        "At Halter,we're on a mission toenablefarmers and graziers to run the most",
+        "productive and sustainableoperations.Our customers are using Haltertobreak",
+        "free from the time-intensive constraints of conventionalpractices.Imagine",
+        "watching 500 cattle stand up and walk calmly towards their next break? No quad",
+        "bikes, no dogs, no fences. Just a group of cattle walking at their own pace.",
+        "People say it looks like magic.Ourcustomers arerevolutionizing grazing with",
+        "切",
+        "Halter. It's changing lives and transforming an industry.People join Halter to do",
+        "meaningful work.By joining us you'llbe solving challenging problems within a",
+        "talented team andaculturebuiltforhighperformance.Ourteamout-think,out-",
+        "workandout-care.We'recommitted todeliveringreal changeintheworld-this",
+        "ApplyC",
+        "Halter",
+        "About Halter",
+        "At Halter, we're on a mission to enable farmers and graziers to run the most",
+        "productive and sustainable operations.Our customers are using Haltertobreak",
+        "freefromthe time-intensive constraints of conventional practices.Imagine",
+        "watching5oocattlestandupandwalkcalmlytowardstheirnextbreak?Noquad",
+        "People say it looks like magic. Our customers are revolutionizing grazing with",
+        "Halter.It's changing lives and transforming an industry.People join Halter to do",
+        "meaningful work.By joining us you'll be solving challenging problems within a",
+        "talented teamanda culturebuiltforhighperformance.Ourteamout-think,out-",
+        "workand out-care.We'recommitted todeliveringreal change intheworld-this",
+        "isn't easy,and in truth,we love that it's hard.",
+        "We'rebacked todeliveron a missionthat mattersbyTier1investors including",
+        "FoundersFund,BessemerVenturePartners,BOND,DCVC,Blackbird,Promus",
+        "Ventures,RocketLab'sPeterBeckandIcehouseventures.",
+        "About therole",
+        "We'relookingforaSoftwareEngineeringManagerwhobuildsandelevatestheir",
+        "team,drives strong technical solutions,and goes deep on hard,real-world",
+        "problems. This isn't a pure delivery or pure people role. You'll be in the work,",
+        "shaping technical direction,collaborating closelywith design andproduct,and",
+        "A",
+        "helping your team do the best work of their careers. Don't worry, you'll also be",
+        "hands-on.",
+        "Youll need to hold the technical bar high while creating the space for others to",
+        "grow.We'resolvingproblems that haven't been solved before,and you'll be"
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

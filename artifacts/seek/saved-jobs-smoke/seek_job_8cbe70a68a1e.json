@@ -1,0 +1,444 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_8cbe70a68a1e",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.73,
+    "job_id": "seek_job_8cbe70a68a1e",
+    "title": "StaffSoftwareEngineer",
+    "company": "Kami Holdings Limited",
+    "positive_evidence": [
+      "matched_skills: JavaScript, software engineer",
+      "matched_target_roles: Software Engineer",
+      "location_matches: Parnell, Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_b7c5c0ee5c31",
+    "title": "Staff Software Engineer",
+    "company": "Kami Holdings Limited",
+    "location": "Parnell, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": "Staff Software Engineer",
+    "card_bbox": {
+      "x": 55,
+      "y": 748,
+      "w": 377,
+      "h": 246
+    },
+    "click_point": {
+      "x": 155,
+      "y": 760
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_15",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_42_staff-software-engineer",
+      "page_text_44_kami-holdings-limited",
+      "page_text_46_new-to-you",
+      "page_text_49_parnell-auckland",
+      "page_text_50_provide-technical-leadership-in-a-modern-full-st",
+      "page_text_51_environment-powering-much-loved-edtech-products",
+      "page_text_53_used-by-7om-users-worldwide",
+      "page_text_55_14d-ago"
+    ],
+    "evidence": {
+      "texts": [
+        "Staff Software Engineer",
+        "Kami Holdings Limited",
+        "New to you",
+        "Parnell, Auckland",
+        "Provide technical leadership in a modern full-stack",
+        "environment powering much-loved EdTech products",
+        "used by 7oM+ users worldwide",
+        "14d ago"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements"
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_8cbe70a68a1e",
+    "title": "StaffSoftwareEngineer",
+    "company": "Kami Holdings Limited",
+    "location": "Parnell, Auckland",
+    "work_type": "Full time",
+    "classification": "StaffSoftwareEngineer",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "Elevate instruction."
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "Reach everylearner"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "kami"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "Responsive hirer"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "StaffSoftwareEngineer"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "Kami Holdings Limited View all jobs"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "Parnell, Auckland"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Engineering-Software(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Posted 14d ago·Medium application volume"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "Quick apply"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "5 skills and credentials match yourprofile"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "JavaScriptProgramming"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "√HTML"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "√CSS"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "+2more"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "AboutKami"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "https://nz.seek.com/job/92453693?type=standard&ref=search-standalone&origin=jobCard#sol=997b5a39f0fd5e0fbd89c4376a9c0f305d4bd724 ith talented, Creative, and"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "Engineering-Software (Information&CommunicationTechnology)"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "Posted 14d ago·Medium applicationvolume"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "5 skills and credentials match your profile"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "JavaScript Programming"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "√CSS+2more"
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "Kami is a thriving organisation filled to the brim with talented, creative, and"
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "passionate people!It's hard not to love what you do when our leading digital"
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "classroomplatformoffersmeaningfulsolutionstoover5Omillionusers"
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "worldwide,empowering students and supporting teachers!"
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "You'll be joining at a pretty magical time. Kami's user base is growing by the day."
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "Withover17Oteammembersacrosstheworld,wecouldn'tbeprouderofthe"
+      },
+      {
+        "index": 31,
+        "role": "body",
+        "text": "accomplishments and milestones we've achieved to date.Now,this is your"
+      },
+      {
+        "index": 32,
+        "role": "body",
+        "text": "chancetojoinourteamandbecomeanintegralmemberofKami'sgrowth,while"
+      },
+      {
+        "index": 33,
+        "role": "body",
+        "text": "shaping your own future (and having fun doing it)!"
+      },
+      {
+        "index": 34,
+        "role": "body",
+        "text": "The Opportunity"
+      },
+      {
+        "index": 35,
+        "role": "body",
+        "text": "As an engineerforthisforward-thinking scaleup,you will not belocked in the"
+      },
+      {
+        "index": 36,
+        "role": "body",
+        "text": "backroom implementing specs sheets—you'llbe talking to the"
+      },
+      {
+        "index": 37,
+        "role": "body",
+        "text": "make it work even betterforthem.This position will suit an Engineer with a good"
+      },
+      {
+        "index": 38,
+        "role": "body",
+        "text": "product sense who is comfortable workina relativelv autonomouslv but who can"
+      }
+    ],
+    "requirements": [
+      "5 skills and credentials match yourprofile",
+      "5 skills and credentials match your profile"
+    ],
+    "responsibilities": [
+      "As an engineerforthisforward-thinking scaleup,you will not belocked in the"
+    ],
+    "benefits": [],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply",
+      "bbox": {
+        "x": 546,
+        "y": 831,
+        "w": 103,
+        "h": 29
+      },
+      "click_point": {
+        "x": 598,
+        "y": 846
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save button",
+      "bbox": {
+        "x": 567,
+        "y": 692,
+        "w": 58,
+        "h": 32
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 513,
+        "y": 346,
+        "w": 709,
+        "h": 832
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false
+      },
+      "safe_points": [
+        {
+          "x": 867,
+          "y": 762,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 513,
+      "y": 126,
+      "w": 709,
+      "h": 1052
+    },
+    "detail_scroll_history": [
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260617-095619-695770__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": true
+          }
+        },
+        "missing_evidence": [
+          "responsibilities"
+        ]
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-095617-962785__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-095637-911962__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 43,
+      "action_count": 26,
+      "texts": [
+        "Elevate instruction.",
+        "Reach everylearner",
+        "kami",
+        "Responsive hirer",
+        "StaffSoftwareEngineer",
+        "Kami Holdings Limited View all jobs",
+        "Parnell, Auckland",
+        "Engineering-Software(Information&CommunicationTechnology)",
+        "Full time",
+        "Posted 14d ago·Medium application volume",
+        "Quick apply",
+        "Save",
+        "How you match ①",
+        "5 skills and credentials match yourprofile",
+        "JavaScriptProgramming",
+        "√HTML",
+        "√CSS",
+        "+2more",
+        "tA",
+        "AboutKami",
+        "https://nz.seek.com/job/92453693?type=standard&ref=search-standalone&origin=jobCard#sol=997b5a39f0fd5e0fbd89c4376a9c0f305d4bd724 ith talented, Creative, and",
+        "用",
+        "Engineering-Software (Information&CommunicationTechnology)",
+        "Posted 14d ago·Medium applicationvolume",
+        "5 skills and credentials match your profile",
+        "JavaScript Programming",
+        "√CSS+2more",
+        "Kami is a thriving organisation filled to the brim with talented, creative, and",
+        "passionate people!It's hard not to love what you do when our leading digital",
+        "classroomplatformoffersmeaningfulsolutionstoover5Omillionusers",
+        "worldwide,empowering students and supporting teachers!",
+        "You'll be joining at a pretty magical time. Kami's user base is growing by the day.",
+        "Withover17Oteammembersacrosstheworld,wecouldn'tbeprouderofthe",
+        "accomplishments and milestones we've achieved to date.Now,this is your",
+        "chancetojoinourteamandbecomeanintegralmemberofKami'sgrowth,while",
+        "shaping your own future (and having fun doing it)!",
+        "8",
+        "The Opportunity",
+        "A",
+        "As an engineerforthisforward-thinking scaleup,you will not belocked in the",
+        "backroom implementing specs sheets—you'llbe talking to the",
+        "make it work even betterforthem.This position will suit an Engineer with a good",
+        "product sense who is comfortable workina relativelv autonomouslv but who can"
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

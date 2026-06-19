@@ -1,0 +1,293 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_dfb809ec2add",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.82,
+    "job_id": "seek_job_dfb809ec2add",
+    "title": "Software Engineer",
+    "company": "Potentia",
+    "positive_evidence": [
+      "matched_skills: C#, Python, software engineer",
+      "matched_target_roles: Software Engineer",
+      "location_matches: All Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_74bb8157a2ac",
+    "title": "Software Engineer",
+    "company": "Potentia",
+    "location": "Auckland (Hybrid)",
+    "posted_at_text": null,
+    "work_type": "Auckland (Hybrid)",
+    "salary_text": null,
+    "classification": "Software Engineer",
+    "card_bbox": {
+      "x": 57,
+      "y": 753,
+      "w": 371,
+      "h": 228
+    },
+    "click_point": {
+      "x": 135,
+      "y": 766
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_12",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_29_software-engineer",
+      "page_text_30_potentia",
+      "page_text_32_auckland-hybrid",
+      "page_text_33_help-buildings-decarbonise-at-scale-with",
+      "page_text_34_measurable-impact",
+      "page_text_35_build-scalable-software-using-python-c-in-a",
+      "page_text_36_cloud-environment",
+      "page_text_37_mission-driven-team-with-investment-backing-and",
+      "page_text_38_real-growth-runway"
+    ],
+    "evidence": {
+      "texts": [
+        "Software Engineer",
+        "Potentia",
+        "Auckland (Hybrid)",
+        "Help buildings decarbonise at scale with",
+        "measurable impact",
+        "Build scalable software using Python & C# in a",
+        "cloud environment",
+        "Mission-driven team with investment backing and",
+        "real growth runway"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements"
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_dfb809ec2add",
+    "title": "Software Engineer",
+    "company": "Potentia",
+    "location": "All Auckland",
+    "work_type": "Auckland (Hybrid)",
+    "classification": "Software Engineer",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "All Auckland"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "SEEK"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Listing time"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "Potentia"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "PPotentia"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "Software Engineer"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "Potentia View all jobs"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Auckland (Hybrid)"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Engineering-Software(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "Posted 8d ago·Mediumapplicationvolume"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "Quick apply"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "1 skill or credential matches your profile"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "C# ProgrammingShow all"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "SoftwareEngineer|BTune"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "Helpbuildingsdecarboniseatscalewithoutcompromise"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "BTune was created with a clear mission:to helpbuildings decarbonise at global"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "scalewhileremovingthetraditionaltrade-offbetweenenvironmental"
+      },
+      {
+        "index": 20,
+        "role": "section_hint",
+        "text": "responsibilityand commercial performance.Theirplatformenablesbuilding"
+      }
+    ],
+    "requirements": [],
+    "responsibilities": [
+      "responsibilityand commercial performance.Theirplatformenablesbuilding"
+    ],
+    "benefits": [
+      "Auckland (Hybrid)"
+    ],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply",
+      "bbox": {
+        "x": 546,
+        "y": 716,
+        "w": 103,
+        "h": 29
+      },
+      "click_point": {
+        "x": 598,
+        "y": 730
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save button",
+      "bbox": {
+        "x": 563,
+        "y": 598,
+        "w": 65,
+        "h": 30
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 513,
+        "y": 346,
+        "w": 709,
+        "h": 832
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false
+      },
+      "safe_points": [
+        {
+          "x": 867,
+          "y": 762,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 513,
+      "y": 126,
+      "w": 709,
+      "h": 1052
+    },
+    "detail_scroll_history": [],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-095520-556302__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 23,
+      "action_count": 16,
+      "texts": [
+        "All Auckland",
+        "SEEK",
+        "Listing time",
+        "Potentia",
+        "PPotentia",
+        "Software Engineer",
+        "Potentia View all jobs",
+        "Auckland (Hybrid)",
+        "国",
+        "Engineering-Software(Information&CommunicationTechnology)",
+        "Full time",
+        "Posted 8d ago·Mediumapplicationvolume",
+        "Quick apply",
+        "Save",
+        "How you match ①",
+        "1 skill or credential matches your profile",
+        "C# ProgrammingShow all",
+        "SoftwareEngineer|BTune",
+        "Helpbuildingsdecarboniseatscalewithoutcompromise",
+        "A",
+        "BTune was created with a clear mission:to helpbuildings decarbonise at global",
+        "scalewhileremovingthetraditionaltrade-offbetweenenvironmental",
+        "responsibilityand commercial performance.Theirplatformenablesbuilding"
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

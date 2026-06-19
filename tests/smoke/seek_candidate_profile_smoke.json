@@ -1,0 +1,32 @@
+{
+  "contract_version": "candidate_profile_v1",
+  "profile_purpose": "smoke_test_only_not_user_resume",
+  "skills": [
+    "C#",
+    "Python",
+    "JavaScript",
+    "SQL",
+    "test automation",
+    "backend",
+    "software engineer",
+    "debugging"
+  ],
+  "target_roles": [
+    "Software Engineer",
+    "Backend Developer",
+    "Full Stack Developer",
+    "Test Systems Engineer"
+  ],
+  "location_constraints": [
+    "Auckland",
+    "Remote",
+    "Hybrid"
+  ],
+  "experience_summary": [
+    "Synthetic smoke profile for validating SEEK traversal and matching plumbing.",
+    "Do not use for real cover letters or real applications."
+  ],
+  "work_rights_summary": "unknown",
+  "salary_preference": "unknown",
+  "risk_do_not_invent": true
+}

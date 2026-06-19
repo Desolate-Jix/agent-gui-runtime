@@ -5,6 +5,7 @@ import json
 
 from fastapi.testclient import TestClient
 from PIL import Image
+import pytest
 
 from app.main import app
 from app.api import vision as vision_api
@@ -849,7 +850,7 @@ def test_vision_recognition_plan_uses_vista_point_grounding_with_path_graph(tmp_
                 "point": {"x": 112.0, "y": 577.0, "coordinate_space": "normalized_0_1000"},
             },
             "point": {"x": 56, "y": 150},
-            "image_size": {"width": 500, "height": 260},
+            "image_size": {"width": 900, "height": 760},
         }
 
     monkeypatch.setattr(
@@ -1007,6 +1008,234 @@ def test_vision_recognition_plan_uses_path_graph_candidate_roi_for_vista(tmp_pat
     assert result["pre_click_decision"]["allowed"] is True
     assert result["model_io"]["attempt_count"] == 1
     assert result["model_io"]["attempts"][0]["vista_stage"] == "pathgraph_candidate_roi_refine"
+
+
+def test_vision_recognition_plan_uses_seeded_candidate_roi_for_vista(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (900, 760), color=(255, 255, 255)).save(image_path)
+    calls: list[dict] = []
+
+    def fake_vista(**kwargs):
+        calls.append(kwargs)
+        return {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": "vista_point_grounding",
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(kwargs["image_path"]),
+            "goal": kwargs["goal"],
+            "prompt": "Locate seeded card",
+            "raw_text": "[500, 500]",
+            "raw_response": {"choices": [{"message": {"content": "[500, 500]"}}]},
+            "parsed": {
+                "contract_version": "vista_point_v1",
+                "point": {"x": 500.0, "y": 500.0, "coordinate_space": "normalized_0_1000"},
+            },
+            "point": {"x": 220, "y": 510},
+            "image_size": {"width": 500, "height": 260},
+            "image_preprocess": kwargs["image_preprocess"],
+        }
+
+    monkeypatch.setattr("app.api.vision.VISTA_DIRECT_IMAGES_DIR", tmp_path / "vista-direct")
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr("app.api.vision._call_vista_point_grounding", fake_vista)
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "Click the SEEK job result card titled Software Engineer",
+            "app_name": "SEEK",
+            "agent_mode": "execute",
+            "top_k": 3,
+            "metadata": {
+                "seeded_candidate": {
+                    "contract_version": "seeded_candidate_v1",
+                    "candidate_id": "seek-card-1",
+                    "source": "seek_job_card_v1",
+                    "label": "Software Engineer | Example Co",
+                    "role": "button",
+                    "bbox": {"x": 24, "y": 400, "w": 410, "h": 220},
+                    "click_point": {"x": 220, "y": 510},
+                    "risk_class": "safe_click_allowed",
+                    "expected_effect": "open SEEK job detail pane",
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    assert calls
+    assert [candidate.candidate_id for candidate in calls[0]["candidates"]] == ["seeded_seek-card-1"]
+    assert calls[0]["image_preprocess"]["roi_source"] == "seeded_candidate_v1"
+    candidate = result["candidate_result"]["candidates"][0]
+    assert candidate["candidate_id"] == "seeded_seek-card-1"
+    assert candidate["element"]["sources"] == ["seeded_candidate_v1"]
+    assert result["candidate_result"]["summary"]["seeded_candidate_used"] is True
+    assert result["execution_path"]["seeded_candidate_selected"] is True
+    assert result["pre_click_decision"]["allowed"] is True
+    assert result["pre_click_decision"]["selected_click_point"] == {"x": 220, "y": 510}
+    assert result["narrow_search_result"]["results"][0]["coordinate_source"] == "seeded_candidate_v1_validated_by_vista_point_v1"
+    assert result["parse_result"]["vista_point_grounding"]["image_preprocess"]["roi_source"] == "seeded_candidate_v1"
+
+
+def test_seeded_candidate_rejects_point_outside_bbox() -> None:
+    candidate = vision_api._recognition_candidate_from_seeded_candidate(
+        {
+            "contract_version": "seeded_candidate_v1",
+            "candidate_id": "bad-seed",
+            "label": "Bad seed",
+            "bbox": {"x": 100, "y": 100, "w": 50, "h": 50},
+            "click_point": {"x": 300, "y": 300},
+            "risk_class": "safe_click_allowed",
+        },
+        rank=1,
+    )
+
+    assert candidate is None
+
+
+def test_seeded_candidate_uses_seed_point_when_vista_roi_point_disagrees(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (900, 760), color=(255, 255, 255)).save(image_path)
+
+    def fake_vista(**kwargs):
+        return {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": "vista_point_grounding",
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(kwargs["image_path"]),
+            "goal": kwargs["goal"],
+            "prompt": "Locate seeded button",
+            "raw_text": "[100, 100]",
+            "raw_response": {"choices": [{"message": {"content": "[100, 100]"}}]},
+            "parsed": {
+                "contract_version": "vista_point_v1",
+                "point": {"x": 100.0, "y": 100.0, "coordinate_space": "normalized_0_1000"},
+            },
+            "point": {"x": 160, "y": 140},
+            "image_size": {"width": 500, "height": 260},
+            "image_preprocess": kwargs["image_preprocess"],
+        }
+
+    monkeypatch.setattr("app.api.vision.VISTA_DIRECT_IMAGES_DIR", tmp_path / "vista-direct")
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr("app.api.vision._call_vista_point_grounding", fake_vista)
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "Click search",
+            "app_name": "Docs",
+            "agent_mode": "execute",
+            "top_k": 3,
+            "metadata": {
+                "seeded_candidate": {
+                    "contract_version": "seeded_candidate_v1",
+                    "candidate_id": "docs-search",
+                    "label": "search",
+                    "role": "button",
+                    "bbox": {"x": 497, "y": 272, "w": 57, "h": 22},
+                    "click_point": {"x": 525, "y": 283},
+                    "risk_class": "safe_click_allowed",
+                    "expected_effect": "search results visible",
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    narrow = result["narrow_search_result"]
+    pre_click = result["pre_click_decision"]
+    assert narrow["results"][0]["status"] == "grounded"
+    assert narrow["results"][0]["coordinate_source"] == "seeded_candidate_v1_model_disagreed"
+    assert "vista_point_disagrees_with_seed_bbox" in narrow["results"][0]["reasons"]
+    assert narrow["summary"]["vista_point_inside_candidate_bbox"] is False
+    assert narrow["summary"]["seeded_candidate_primary_point_used"] is True
+    assert pre_click["allowed"] is True
+    assert pre_click["selected_click_point"] == {"x": 525, "y": 283}
+    assert result["execution_path"]["seeded_candidate_primary_point_used"] is True
+
+
+def test_parse_vista_point_text_accepts_pixel_bbox_quad() -> None:
+    parsed = vision_api._parse_vista_point_text("[36, 48, 426, 350]")
+
+    assert parsed == {
+        "contract_version": "vista_point_v1",
+        "point": {"x": 249.0, "y": 223.0, "coordinate_space": "pixel"},
+    }
+
+
+def test_parse_vista_point_text_accepts_wrapped_unparsed_bbox_quad() -> None:
+    parsed = vision_api._parse_vista_point_text(
+        json.dumps(
+            {
+                "contract_version": "vista_point_v1",
+                "status": "unparsed",
+                "point": None,
+                "raw_text": "[36, 48, 426, 350]",
+            }
+        )
+    )
+
+    assert parsed["point"] == {"x": 249.0, "y": 223.0, "coordinate_space": "pixel"}
+    assert parsed["wrapped_unparsed_payload"]["status"] == "unparsed"
+
+
+def test_vista_pixel_point_outside_inference_image_is_not_clamped() -> None:
+    parsed = {
+        "contract_version": "vista_point_v1",
+        "point": {"x": 9999.0, "y": 120.0, "coordinate_space": "pixel"},
+    }
+
+    with pytest.raises(ValueError, match="outside inference image bounds"):
+        vision_api._vista_point_to_original_pixel(parsed, image_size=vision_api.ImageSize(width=640, height=480))
 
 
 def test_execute_recognition_plan_uses_vista_direct_grounding_without_path_graph(tmp_path, monkeypatch) -> None:

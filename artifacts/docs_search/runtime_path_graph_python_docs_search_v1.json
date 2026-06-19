@@ -1,0 +1,427 @@
+{
+  "contract_version": "runtime_path_graph_v1",
+  "graph_id": "python_docs_search_runtime_path_graph_v1",
+  "app_id": "python_docs",
+  "domain": "documentation_search",
+  "page_type": "docs_search_results_with_article",
+  "created_from": {
+    "learn_mode": "manual_seeded_from_seek_wikipedia_github_path_graph_patterns",
+    "source_pattern": "public docs search input -> results list -> article page",
+    "safety_mode": "dry_run_public_search_input_until_live_smoke"
+  },
+  "coordinate_policy": {
+    "coordinate_space": "window_screenshot",
+    "do_not_reuse_absolute_coordinates_without_reobserve": true,
+    "bbox_is_guidance_not_authorization": true,
+    "click_point_requires_current_validation": true,
+    "coordinate_evidence_required_in_trace": true
+  },
+  "state_match_policy": {
+    "minimum_confidence": 0.75,
+    "required_regions_any": [
+      "docs:search_form",
+      "docs:search_results_list",
+      "docs:article_header",
+      "docs:article_body"
+    ],
+    "required_anchors_any": [
+      "Python",
+      "Documentation",
+      "Search",
+      "docs.python.org"
+    ],
+    "reject_if": [
+      "login_or_captcha",
+      "edit_mode_detected",
+      "permission_prompt"
+    ]
+  },
+  "states": [
+    {
+      "state_id": "docs:search_page",
+      "label": "Python documentation search page",
+      "url_hint": "docs.python.org/*/search.html",
+      "page_type": "search_form",
+      "required_regions": [
+        "docs:search_form"
+      ]
+    },
+    {
+      "state_id": "docs:search_results",
+      "label": "Python documentation search results",
+      "url_hint": "docs.python.org/*/search.html?q=",
+      "page_type": "search_results",
+      "required_regions": [
+        "docs:search_results_list"
+      ]
+    },
+    {
+      "state_id": "docs:article_page",
+      "label": "Python documentation article page",
+      "url_hint": "docs.python.org/*/",
+      "page_type": "article_detail",
+      "required_regions": [
+        "docs:article_header",
+        "docs:article_body"
+      ]
+    },
+    {
+      "state_id": "docs:article_scrolled",
+      "label": "Python documentation article scrolled",
+      "page_type": "article_detail",
+      "required_regions": [
+        "docs:article_body"
+      ]
+    },
+    {
+      "state_id": "docs:blocked_write_or_login",
+      "label": "Blocked write/login surface",
+      "page_type": "blocked_risk_state"
+    }
+  ],
+  "regions": [
+    {
+      "region_id": "docs:page_header",
+      "role": "top_navigation",
+      "description": "Python documentation header and version navigation"
+    },
+    {
+      "region_id": "docs:search_form",
+      "role": "search_form",
+      "description": "Documentation search form containing the public query input and Search button"
+    },
+    {
+      "region_id": "docs:search_input",
+      "role": "text_input",
+      "description": "Public documentation query input",
+      "parent_region_id": "docs:search_form"
+    },
+    {
+      "region_id": "docs:search_button",
+      "role": "button",
+      "description": "Search button for the public documentation query",
+      "parent_region_id": "docs:search_form"
+    },
+    {
+      "region_id": "docs:search_results_list",
+      "role": "results_list",
+      "description": "List of documentation search results"
+    },
+    {
+      "region_id": "docs:search_result_item",
+      "role": "entity_row",
+      "description": "One documentation search result title/snippet row",
+      "parent_region_id": "docs:search_results_list",
+      "repeatable": true
+    },
+    {
+      "region_id": "docs:article_header",
+      "role": "detail_header",
+      "description": "Article title and local navigation header"
+    },
+    {
+      "region_id": "docs:article_body",
+      "role": "detail_body",
+      "description": "Scrollable documentation article body"
+    },
+    {
+      "region_id": "docs:sidebar_toc",
+      "role": "table_of_contents",
+      "description": "Documentation side table of contents and local links"
+    },
+    {
+      "region_id": "docs:page_footer",
+      "role": "footer",
+      "description": "Documentation footer links"
+    }
+  ],
+  "scroll_containers": [
+    {
+      "container_id": "docs:page",
+      "region_id": "docs:article_body",
+      "pane_role": "page",
+      "scroll_scope": "page",
+      "scroll_axis": "vertical",
+      "safe_scroll_point_policy": "window_center",
+      "artifact_is_authorization": false
+    }
+  ],
+  "dynamic_collections": [
+    {
+      "collection_id": "docs:search_results",
+      "entity_type": "documentation_result",
+      "region_id": "docs:search_results_list",
+      "container_id": "docs:page",
+      "entity_pattern_ref": "docs:entity_pattern:search_result_item",
+      "primary_text_role": "result_title",
+      "secondary_text_roles": [
+        "result_snippet",
+        "section_path"
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "from_state_id": "docs:search_page",
+      "to_state_id": "docs:search_page",
+      "action_template_id": "type_public_search_query",
+      "verification_refs": [
+        "docs:verify:query_text_visible"
+      ]
+    },
+    {
+      "from_state_id": "docs:search_page",
+      "to_state_id": "docs:search_results",
+      "action_template_id": "trigger_search",
+      "verification_refs": [
+        "docs:verify:search_results_visible"
+      ]
+    },
+    {
+      "from_state_id": "docs:search_results",
+      "to_state_id": "docs:article_page",
+      "action_template_id": "open_search_result",
+      "verification_refs": [
+        "docs:verify:article_heading_matches_result"
+      ]
+    },
+    {
+      "from_state_id": "docs:article_page",
+      "to_state_id": "docs:article_scrolled",
+      "action_template_id": "read_article",
+      "verification_refs": [
+        "docs:verify:article_scroll_effect"
+      ]
+    }
+  ],
+  "action_templates": [
+    {
+      "action_template_id": "type_public_search_query",
+      "action_type": "input",
+      "low_level_action_type": "input",
+      "goal_template": "Type a public Python documentation search query into the search box without submitting it",
+      "target_entity": "docs:search_input",
+      "input_target": {
+        "role": "searchbox",
+        "region_id": "docs:search_input",
+        "bbox": {
+          "x": 316,
+          "y": 272,
+          "w": 177,
+          "h": 22
+        },
+        "click_point": {
+          "x": 404,
+          "y": 283
+        }
+      },
+      "input_policy": {
+        "input_category": "public_search_query",
+        "requires_agent_text": true,
+        "clear_existing": true,
+        "submit_allowed": true,
+        "forbid_pii": true,
+        "requires_explicit_live_smoke_mode": true
+      },
+      "verification_policy": {
+        "post_input": "search_field_contains_expected_public_query_without_navigation"
+      },
+      "learned_skill_ref": "skill:safe_public_search_input",
+      "requires_current_validation": true,
+      "artifact_is_authorization": false
+    },
+    {
+      "action_template_id": "trigger_search",
+      "action_type": "click",
+      "low_level_action_type": "click",
+      "goal_template": "Click the small rectangular button labeled exactly \"search\" immediately to the right of the search input field. Do not click inside the text input.",
+      "target_entity": "docs:search_button",
+      "seeded_candidate": {
+        "contract_version": "seeded_candidate_v1",
+        "candidate_id": "docs_search_button_seed",
+        "label": "search",
+        "role": "button",
+        "bbox": {
+          "x": 497,
+          "y": 272,
+          "w": 57,
+          "h": 22
+        },
+        "click_point": {
+          "x": 525,
+          "y": 283
+        },
+        "risk_class": "safe_click_allowed",
+        "expected_effect": "search_results_list_becomes_visible",
+        "score": 0.99,
+        "source": "python_docs_live_smoke_button_bbox_20260619"
+      },
+      "candidate_constraints": {
+        "required_region_id": "docs:search_form",
+        "required_text": "search",
+        "must_be_right_of_entity": "docs:search_input",
+        "reject_if_inside_entity": "docs:search_input",
+        "exclude_targets": [
+          "Log in",
+          "Edit",
+          "Submit",
+          "Save",
+          "Delete",
+          "Upload",
+          "Comment"
+        ]
+      },
+      "verification_policy": {
+        "post_click": "search_results_list_becomes_visible"
+      },
+      "learned_skill_ref": "skill:click_search_button",
+      "requires_current_validation": true,
+      "artifact_is_authorization": false
+    },
+    {
+      "action_template_id": "open_search_result",
+      "action_type": "click",
+      "low_level_action_type": "click",
+      "goal_template": "Open the first relevant Python documentation search result title",
+      "target_entity": "docs:search_result_item",
+      "seeded_candidate": {
+        "contract_version": "seeded_candidate_v1",
+        "candidate_id": "docs_first_search_result_seed",
+        "label": "Glossary",
+        "role": "link",
+        "bbox": {
+          "x": 356,
+          "y": 602,
+          "w": 78,
+          "h": 24
+        },
+        "click_point": {
+          "x": 392,
+          "y": 614
+        },
+        "risk_class": "safe_click_allowed",
+        "expected_effect": "article_heading_matches_clicked_result",
+        "score": 0.99,
+        "source": "python_docs_live_smoke_result_link_bbox_20260619"
+      },
+      "candidate_constraints": {
+        "required_region_id": "docs:search_results_list",
+        "prefer_text_links": true,
+        "exclude_targets": [
+          "Search",
+          "Log in",
+          "Edit",
+          "Submit",
+          "Save",
+          "Delete",
+          "Upload",
+          "Comment"
+        ]
+      },
+      "verification_policy": {
+        "post_click": "article_heading_matches_clicked_result"
+      },
+      "learned_skill_ref": "skill:open_record_from_list",
+      "requires_current_validation": true,
+      "artifact_is_authorization": false
+    },
+    {
+      "action_template_id": "read_article",
+      "action_type": "scroll",
+      "low_level_action_type": "scroll",
+      "scroll_target": {
+        "target_pane": "page",
+        "target_container_id": "docs:page"
+      },
+      "verification_policy": {
+        "post_scroll": "article_body_content_changes_or_reveals_more_sections"
+      },
+      "learned_skill_ref": "skill:scroll_page_until_more_content",
+      "requires_current_validation": true,
+      "artifact_is_authorization": false
+    }
+  ],
+  "verification_rules": [
+    {
+      "rule_id": "docs:verify:query_text_visible",
+      "kind": "post_input_field_value",
+      "description": "After typing a public search query, the search box should contain the expected query and the page should not navigate yet."
+    },
+    {
+      "rule_id": "docs:verify:search_results_visible",
+      "kind": "post_click_semantic_change",
+      "description": "After triggering search, a documentation search results list should be visible."
+    },
+    {
+      "rule_id": "docs:verify:article_heading_matches_result",
+      "kind": "post_click_semantic_change",
+      "description": "After opening a result, the article heading should match or clearly relate to the clicked result title."
+    },
+    {
+      "rule_id": "docs:verify:article_scroll_effect",
+      "kind": "post_scroll_reveal",
+      "description": "After scrolling an article, body content should change or reveal more sections while staying on the same article."
+    }
+  ],
+  "safety_policy": {
+    "mode": "read_only_except_public_search",
+    "read_only_except_public_search": true,
+    "artifact_cannot_authorize_click": true,
+    "artifact_is_authorization": false,
+    "forbid_final_submit": true,
+    "allow_apply_entry": false,
+    "allow_safe_fill": false,
+    "allow_live_input": false,
+    "final_submit": "forbidden",
+    "live_input_policy": {
+      "allowed_categories": [
+        "public_search_query"
+      ],
+      "requires_explicit_live_smoke_mode": true,
+      "default_dispatch_low_level": false
+    },
+    "forbidden_input_categories": [
+      "pii",
+      "profile_field",
+      "credential",
+      "payment",
+      "comment",
+      "application_form",
+      "safe_fill"
+    ],
+    "forbidden_click_texts": [
+      "Log in",
+      "Sign in",
+      "Edit",
+      "Submit",
+      "Save",
+      "Delete",
+      "Upload",
+      "Comment"
+    ],
+    "forbidden_targets": [
+      "Log in",
+      "Sign in",
+      "Edit",
+      "Submit",
+      "Save",
+      "Delete",
+      "Upload",
+      "Comment"
+    ]
+  },
+  "learned_skill_refs": [
+    "skill:safe_public_search_input",
+    "skill:click_search_button",
+    "skill:open_record_from_list",
+    "skill:scroll_page_until_more_content",
+    "skill:block_write_actions"
+  ],
+  "visual_asset_refs": [],
+  "metrics": {
+    "artifact_is_authorization": false,
+    "sample_entity_count": 0,
+    "live_smoke_required": true,
+    "step2_live_input_allowed": false
+  }
+}

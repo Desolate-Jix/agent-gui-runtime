@@ -1,0 +1,169 @@
+{
+  "contract_version": "runtime_path_graph_v1",
+  "graph_id": "wikipedia_search_runtime_path_graph_v1",
+  "app_id": "wikipedia",
+  "domain": "knowledge_search",
+  "page_type": "search_results_to_article",
+  "created_from": {
+    "learn_mode": "manual_seeded_from_seek_path_graph_pattern",
+    "source_pattern": "search/list results -> detail page",
+    "safety_mode": "read_only"
+  },
+  "coordinate_policy": {
+    "coordinate_space": "window_screenshot",
+    "do_not_reuse_absolute_coordinates_without_reobserve": true,
+    "bbox_is_guidance_not_authorization": true,
+    "click_point_requires_current_validation": true,
+    "coordinate_evidence_required_in_trace": true
+  },
+  "states": [
+    {
+      "state_id": "wikipedia_search_results",
+      "label": "Wikipedia search results",
+      "url_hint": "wikipedia.org/w/index.php?search=",
+      "page_type": "search_results"
+    },
+    {
+      "state_id": "wikipedia_article",
+      "label": "Wikipedia article page",
+      "page_type": "detail_article"
+    },
+    {
+      "state_id": "wikipedia_article_scrolled",
+      "label": "Wikipedia article scrolled",
+      "page_type": "detail_article"
+    }
+  ],
+  "regions": [
+    {
+      "region_id": "search_header",
+      "role": "top_search_area",
+      "description": "Search input and site navigation"
+    },
+    {
+      "region_id": "results_list",
+      "role": "results_list",
+      "description": "List of Wikipedia search results"
+    },
+    {
+      "region_id": "article_header",
+      "role": "detail_header",
+      "description": "Article title and summary header"
+    },
+    {
+      "region_id": "article_body",
+      "role": "detail_body",
+      "description": "Scrollable article content"
+    }
+  ],
+  "scroll_containers": [
+    {
+      "container_id": "wikipedia:page",
+      "region_id": "article_body",
+      "pane_role": "page",
+      "scroll_axis": "vertical",
+      "safe_scroll_point_policy": "window_center"
+    }
+  ],
+  "dynamic_collections": [
+    {
+      "collection_id": "wikipedia:search_results",
+      "entity_type": "search_result",
+      "region_id": "results_list",
+      "container_id": "wikipedia:page",
+      "entity_pattern_ref": "wikipedia:entity_pattern:search_result"
+    }
+  ],
+  "transitions": [
+    {
+      "from_state_id": "wikipedia_search_results",
+      "to_state_id": "wikipedia_article",
+      "action_template_id": "open_search_result",
+      "verification_refs": [
+        "wikipedia:article_title_matches_result"
+      ]
+    },
+    {
+      "from_state_id": "wikipedia_article",
+      "to_state_id": "wikipedia_article_scrolled",
+      "action_template_id": "read_article",
+      "verification_refs": [
+        "wikipedia:article_content_changes_or_extends"
+      ]
+    }
+  ],
+  "action_templates": [
+    {
+      "action_template_id": "open_search_result",
+      "action_type": "click",
+      "goal_template": "Open the first organic Wikipedia search result title",
+      "target_entity": "wikipedia:search_result",
+      "candidate_constraints": {
+        "required_region_id": "results_list",
+        "prefer_text_links": true,
+        "exclude_targets": [
+          "Search",
+          "Create account",
+          "Log in",
+          "Donate",
+          "Tools"
+        ]
+      },
+      "verification_policy": {
+        "post_click": "article_title_or_url_must_change_from_search_results"
+      },
+      "learned_skill_ref": "skill.open_result_from_search_list",
+      "requires_current_validation": true,
+      "artifact_is_authorization": false
+    },
+    {
+      "action_template_id": "read_article",
+      "action_type": "scroll",
+      "scroll_target": {
+        "target_pane": "page",
+        "target_container_id": "wikipedia:page"
+      },
+      "verification_policy": {
+        "post_scroll": "article_body_content_changes_or_reveals_more_sections"
+      },
+      "learned_skill_ref": "skill.read_detail_page_until_bounded",
+      "requires_current_validation": true,
+      "artifact_is_authorization": false
+    }
+  ],
+  "verification_rules": [
+    {
+      "rule_id": "wikipedia:article_title_matches_result",
+      "kind": "post_click_semantic_change",
+      "description": "After opening a result, the page should no longer be the search results page and should show an article title."
+    },
+    {
+      "rule_id": "wikipedia:article_content_changes_or_extends",
+      "kind": "post_scroll_reveal",
+      "description": "After scrolling the article page, body content should change or new sections should be visible."
+    }
+  ],
+  "safety_policy": {
+    "mode": "read_only",
+    "forbid_final_submit": true,
+    "allow_apply_entry": false,
+    "allow_safe_fill": false,
+    "allow_live_input": false,
+    "forbidden_targets": [
+      "Create account",
+      "Log in",
+      "Donate",
+      "Publish",
+      "Save changes"
+    ]
+  },
+  "learned_skill_refs": [
+    "skill.open_result_from_search_list",
+    "skill.read_detail_page_until_bounded",
+    "skill.scroll_page_until_new_content"
+  ],
+  "metrics": {
+    "artifact_is_authorization": false,
+    "sample_entity_count": 0
+  }
+}

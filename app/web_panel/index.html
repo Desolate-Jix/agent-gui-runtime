@@ -3,16 +3,16 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>agent-gui-runtime panel</title>
+    <title>OpenClaw Console</title>
     <link rel="stylesheet" href="/panel/assets/panel.css" />
   </head>
   <body>
     <div class="app-shell">
       <aside class="sidebar">
         <div class="brand">
-          <div class="brand-mark">AG</div>
+          <div class="brand-mark">OC</div>
           <div>
-            <h1>agent-gui-runtime</h1>
+            <h1>OpenClaw Console</h1>
             <p id="runtimeState">checking runtime</p>
           </div>
         </div>
@@ -23,18 +23,48 @@
             <button type="button" class="language-option" data-language="en-US">EN</button>
           </div>
         </div>
-        <nav class="stage-nav" aria-label="Workflow stages">
-          <button class="stage active" data-stage="open_bind" data-i18n="nav_open_bind">Open / Bind</button>
-          <button class="stage" data-stage="capture" data-i18n="nav_capture">Capture</button>
-          <button class="stage" data-stage="observe" data-i18n="nav_observe">Observe</button>
-          <button class="stage" data-stage="locate" data-i18n="nav_locate">Locate</button>
-          <button class="stage" data-stage="execute" data-i18n="nav_execute">Click Gate</button>
-          <button class="stage" data-stage="input" data-i18n="nav_input">Input</button>
-          <button class="stage" data-stage="trace" data-i18n="nav_trace">Trace</button>
+        <div class="workspace-switch">
+          <span data-i18n="workspace_switch">Workspace</span>
+          <div class="workspace-toggle" role="group" aria-label="Workspace">
+            <button id="agentModeLearnBtn" type="button" class="workspace-option active" data-mode="learn" data-i18n="learn_mode">Learn Mode</button>
+            <button id="agentModeExecuteBtn" type="button" class="workspace-option" data-mode="execute" data-i18n="execute_mode">Execute Mode</button>
+          </div>
+          <p class="workspace-hint workspace-hint-learn" data-i18n="workspace_hint_learn">Build and calibrate the map</p>
+          <p class="workspace-hint workspace-hint-execute" data-i18n="workspace_hint_execute">Locate, gate, act, verify</p>
+        </div>
+        <nav class="stage-nav" aria-label="Workflow workspaces">
+          <div class="nav-group nav-group-system" data-workflow="system">
+            <div class="nav-group-title" data-i18n="nav_group_system">Session / System</div>
+            <button class="stage active" data-stage="open_bind" data-step="S" data-i18n="nav_open_bind">Open / Bind</button>
+            <button class="stage" data-stage="capture" data-step="S" data-i18n="nav_capture">Capture</button>
+            <button class="stage" data-stage="trace" data-step="S" data-i18n="nav_trace_audit">Trace Audit</button>
+          </div>
+          <div class="nav-group nav-group-learn" data-workflow="learn">
+            <div class="nav-group-title" data-i18n="nav_group_learn">Learn Mode</div>
+            <p class="nav-group-subtitle" data-i18n="nav_group_learn_flow">Observe -> calibrate coordinates -> write PathGraph</p>
+            <button class="stage" data-stage="observe" data-step="1" data-i18n="nav_learn_observe">Learn Fast</button>
+            <button class="stage" data-stage="learn_locate" data-step="2" data-i18n="nav_learn_locate">Learn Deep</button>
+            <button class="stage" data-stage="learn_replay" data-step="3" data-i18n="nav_learn_replay">Artifact Replay</button>
+            <button class="stage" data-stage="learn_validation" data-step="4" data-i18n="nav_learn_validation">PathGraph Validation</button>
+          </div>
+          <div class="nav-group nav-group-execute" data-workflow="execute">
+            <div class="nav-group-title" data-i18n="nav_group_execute">Execute Mode</div>
+            <p class="nav-group-subtitle" data-i18n="nav_group_execute_flow">Available actions -> locate -> gate -> action evidence</p>
+            <button class="stage" data-stage="execute_actions" data-step="1" data-i18n="nav_execute_actions">Available Actions</button>
+            <button class="stage" data-stage="execute_task_run" data-step="2" data-i18n="nav_execute_task_run">PathGraph Task Run</button>
+            <button class="stage" data-stage="execute_locate" data-step="3" data-i18n="nav_execute_locate">Precise Locate</button>
+            <button class="stage" data-stage="execute" data-step="4" data-i18n="nav_execute_gate">Click Gate</button>
+            <button class="stage" data-stage="input" data-step="5" data-i18n="nav_execute_input">Input</button>
+          </div>
         </nav>
-        <div class="side-actions">
-          <button id="healthBtn" data-i18n="health">Health</button>
-          <button class="stage" data-stage="model_test" data-i18n="nav_models">Models</button>
+        <div class="settings-entry">
+          <button id="settingsBtn" type="button" class="settings-gear" aria-label="Settings" title="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path>
+              <path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.2a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 0 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.2a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 0 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3h.1a1.6 1.6 0 0 0 .9-1.5V3a2 2 0 0 1 4 0v.2a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 0 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5.9h.2a2 2 0 0 1 0 4h-.2a1.6 1.6 0 0 0-1.5 1Z"></path>
+            </svg>
+            <span data-i18n="settings">Settings</span>
+          </button>
         </div>
       </aside>
 
@@ -52,15 +82,17 @@
           <div>
             <h2 id="stageTitle">Open / Bind</h2>
             <p id="stageSubtitle">Open software, refresh the window dropdown, and bind the target window</p>
+            <div class="page-meta-strip" id="pageMetaStrip" aria-label="Page API and risk">
+              <span id="pageWorkspaceBadge">System</span>
+              <span id="pageApiBadge">API: -</span>
+              <span id="pageSideEffectBadge">No real action</span>
+              <button id="resetLayoutBtn" type="button" class="meta-action" data-i18n="reset_layout">Reset layout</button>
+            </div>
           </div>
           <div class="status-pill" id="requestStatus">idle</div>
         </section>
 
-        <section class="mode-strip" aria-label="Agent mode">
-          <div class="mode-group" role="group" aria-label="Agent mode">
-            <button id="agentModeLearnBtn" type="button" class="mode-option active" data-mode="learn" data-i18n="learn_mode">Learn Mode</button>
-            <button id="agentModeExecuteBtn" type="button" class="mode-option" data-mode="execute" data-i18n="execute_mode">Execute Mode</button>
-          </div>
+        <section class="mode-strip policy-strip" aria-label="Write policy">
           <div class="write-policy-row">
             <label><input id="writePathGraph" type="checkbox" checked /> <span data-i18n="write_path_graph">PathGraph</span></label>
             <label><input id="writeElementMemory" type="checkbox" /> <span data-i18n="write_element_memory">ElementMemory</span></label>
@@ -98,6 +130,7 @@
                 <textarea id="modelTestPrompt" rows="4">Describe this interface. What can the user do here? List the main interactive elements.</textarea>
               </label>
               <div class="button-row">
+                <button id="healthBtn" data-i18n="health">Health</button>
                 <button id="modelTestSendBtn" data-i18n="model_test_send">Send</button>
               </div>
               <div class="model-test-response" id="modelTestResponse">
@@ -118,12 +151,14 @@
                   <input id="appUrl" value="" />
                 </label>
                 <label>
-                  <span data-i18n="app_catalog">App catalog</span>
+                  <span data-i18n="app_catalog">Launchable apps</span>
                   <select id="appCatalogSelect"></select>
+                  <small class="form-help" data-i18n="app_catalog_help">Configured apps that can be opened by the runtime.</small>
                 </label>
                 <label class="wide-control">
-                  <span data-i18n="window_candidates">Open windows</span>
+                  <span data-i18n="window_candidates">Bindable windows</span>
                   <select id="windowSelect"></select>
+                  <small class="form-help" data-i18n="window_candidates_help">Already-open windows; screenshots and actions use the bound window.</small>
                 </label>
                 <label>
                   <span data-i18n="process_name">Process name</span>
@@ -308,6 +343,204 @@
               </div>
             </section>
 
+            <section class="panel stage-page" data-page="execute_actions">
+              <h3 data-i18n="execute_actions_title">Current State / Available Actions</h3>
+              <div class="mode-help mode-help-execute" data-mode-scope="execute" data-i18n="execute_actions_hint">Execute Mode first observes the current state through learned artifacts, then lists safe action candidates without running full Learn Mode.</div>
+              <div class="form-grid">
+                <label>
+                  <span data-i18n="app_name">App name</span>
+                  <input id="executeActionsApp" value="" />
+                </label>
+                <label>
+                  <span data-i18n="state_hint">State hint</span>
+                  <input id="executeActionsState" value="" />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="runtime_graph_path">Runtime PathGraph path</span>
+                  <input id="executeActionsGraphPath" value="" placeholder="artifacts/.../runtime_path_graph.json" />
+                </label>
+                <label class="wide-label">
+                  <span data-i18n="runtime_path_graph_json">Runtime PathGraph JSON</span>
+                  <textarea id="executeActionsGraphJson" rows="7" placeholder='{"contract_version":"runtime_path_graph_v1", ...}'></textarea>
+                </label>
+                <label class="wide-label">
+                  <span data-i18n="screen_inventory_json">Screen inventory JSON</span>
+                  <textarea id="executeActionsInventoryJson" rows="4" placeholder='{"available_actions":[],"page_elements":[]}'></textarea>
+                </label>
+                <label class="checkline">
+                  <input id="executeActionsAllowApply" type="checkbox" />
+                  <span data-i18n="allow_apply_entry">Allow apply entry</span>
+                </label>
+                <small class="form-help form-help-wide" data-i18n="allow_apply_entry_help">Allows opening Apply / Quick Apply only. Final submit remains blocked.</small>
+              </div>
+              <div class="button-row">
+                <button id="executeObserveBtn" data-i18n="execute_observe_current_screen">Understand current screen</button>
+                <button id="availableActionsBtn" data-i18n="refresh_available_actions">Refresh available actions</button>
+              </div>
+            </section>
+
+            <section class="panel stage-page" data-page="learn_validation">
+              <h3 data-i18n="learn_validation_title">PathGraph Safe Validation</h3>
+              <div class="mode-help mode-help-learn" data-mode-scope="learn" data-i18n="learn_validation_hint">Validate candidate PathGraph with read-only/no-write safe actions. Input, Apply, Submit, and write actions are filtered out.</div>
+              <div class="form-grid">
+                <label class="wide-control">
+                  <span data-i18n="runtime_graph_path">Runtime PathGraph path</span>
+                  <input id="learnValidationGraphPath" value="" placeholder="artifacts/seek/runtime_path_graph_seek_mvp_20260617.json" />
+                </label>
+                <label>
+                  <span data-i18n="safety_mode">Safety mode</span>
+                  <select id="learnValidationSafetyMode">
+                    <option value="read_only">read_only</option>
+                    <option value="no_write">no_write</option>
+                    <option value="no_submit">no_submit</option>
+                  </select>
+                </label>
+                <label>
+                  <span data-i18n="current_state_id">Current state ID</span>
+                  <input id="learnValidationStateId" value="" placeholder="optional" />
+                </label>
+                <label class="checkline">
+                  <input id="learnValidationDispatch" type="checkbox" />
+                  <span data-i18n="dispatch_low_level">Dispatch low level</span>
+                </label>
+              </div>
+              <div class="button-row">
+                <button id="learnValidationPlanBtn" data-i18n="generate_validation_plan">Generate validation plan</button>
+                <button id="learnValidationPreviewBtn" data-i18n="dry_run_next_step">Dry-run next step</button>
+                <button id="learnValidationStepBtn" data-i18n="execute_next_safe_action">Execute next safe action</button>
+                <button id="learnValidationResetBtn" data-i18n="reset_timeline">Reset timeline</button>
+              </div>
+              <div class="run-summary" id="learnValidationSummary"></div>
+              <div class="action-table" id="learnValidationActions"></div>
+              <div class="run-timeline" id="learnValidationTimeline"></div>
+            </section>
+
+            <section class="panel stage-page" data-page="learn_replay">
+              <h3 data-i18n="learn_replay_title">Artifact Replay / PathGraph Validation</h3>
+              <div class="mode-help mode-help-learn" data-mode-scope="learn" data-i18n="learn_replay_hint">Load a learned runtime PathGraph, inspect its structure, then reuse the same single-step Execute APIs for safe validation and task timeline replay.</div>
+              <div class="form-grid">
+                <label>
+                  <span data-i18n="artifact_preset">Artifact preset</span>
+                  <select id="replayPreset">
+                    <option value="seek">SEEK</option>
+                    <option value="wikipedia">Wikipedia</option>
+                    <option value="github_issues">GitHub Issues</option>
+                    <option value="python_docs_search">Python Docs Search</option>
+                    <option value="table_directory">Table Directory</option>
+                    <option value="input_demo">Input demo</option>
+                  </select>
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="runtime_graph_path">Runtime PathGraph path</span>
+                  <input id="replayGraphPath" value="artifacts/seek/runtime_path_graph_seek_mvp_20260617.json" />
+                </label>
+                <label>
+                  <span data-i18n="task_template">Task template</span>
+                  <select id="replayTaskTemplate">
+                    <option value="read_n_list_details">read_n_list_details</option>
+                    <option value="read_article_page">read_article_page</option>
+                    <option value="read_issue_thread">read_issue_thread</option>
+                    <option value="input_dry_run_demo">input_dry_run_demo</option>
+                  </select>
+                </label>
+                <label>
+                  <span data-i18n="current_state_id">Current state ID</span>
+                  <input id="replayStateId" value="" placeholder="optional" />
+                </label>
+              </div>
+              <div class="button-row">
+                <button id="replayLoadBtn" data-i18n="load_artifact">Load artifact</button>
+                <button id="replayUseValidationBtn" data-i18n="use_for_safe_validation">Use for safe validation</button>
+                <button id="replayUseTaskBtn" data-i18n="use_for_task_run">Use for task run</button>
+                <button id="replayValidationPlanBtn" data-i18n="generate_validation_plan">Generate validation plan</button>
+                <button id="replayTaskStepBtn" data-i18n="execute_next_step">Execute next step</button>
+              </div>
+              <div class="artifact-summary" id="replayGraphSummary"></div>
+              <div class="action-table" id="replayGraphActions"></div>
+              <div class="subpanel">
+                <h4 data-i18n="regression_suite">Regression Suite</h4>
+                <div class="form-grid">
+                  <label class="wide-control">
+                    <span data-i18n="regression_report_path">Regression report path</span>
+                    <input id="replayRegressionPath" value="logs/smoke/artifact_replay_regression_20260619.json" />
+                  </label>
+                </div>
+                <div class="button-row">
+                  <button id="replayRegressionLoadBtn" data-i18n="load_regression_report">Load regression report</button>
+                </div>
+                <div class="run-summary" id="replayRegressionSummary"></div>
+                <div class="action-table" id="replayRegressionBaselines"></div>
+                <div class="subpanel">
+                  <h4 data-i18n="learn_sample_gate">New Learn Sample Gate</h4>
+                  <div class="form-grid">
+                    <label class="wide-control">
+                      <span data-i18n="learn_sample_gate_path">Readiness gate path</span>
+                      <input id="learnSampleGatePath" value="logs/smoke/learn_sample_readiness_gate_20260619.json" />
+                    </label>
+                  </div>
+                  <div class="button-row">
+                    <button id="learnSampleGateLoadBtn" data-i18n="load_learn_sample_gate">Load readiness gate</button>
+                  </div>
+                  <div class="run-summary" id="learnSampleGateSummary"></div>
+                </div>
+              </div>
+              <div class="subpanel">
+                <h4 data-i18n="safe_validation_replay">Safe validation replay</h4>
+                <div class="run-summary" id="replayValidationSummary"></div>
+                <div class="action-table" id="replayValidationActions"></div>
+                <div class="run-timeline" id="replayValidationTimeline"></div>
+              </div>
+              <div class="subpanel">
+                <h4 data-i18n="task_run_replay">Task run replay</h4>
+                <div class="run-summary" id="replayTaskRunSummary"></div>
+                <div class="run-timeline" id="replayTaskRunTimeline"></div>
+              </div>
+            </section>
+
+            <section class="panel stage-page" data-page="execute_task_run">
+              <h3 data-i18n="execute_task_run_title">PathGraph Task Run</h3>
+              <div class="mode-help mode-help-execute" data-mode-scope="execute" data-i18n="execute_task_run_hint">A test harness that simulates an agent loop. Each step still calls Execute Mode once; input demo is dry-run only.</div>
+              <div class="form-grid">
+                <label class="wide-control">
+                  <span data-i18n="goal">Goal</span>
+                  <input id="taskRunGoal" value="读取 3 个列表项详情" />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="runtime_graph_path">Runtime PathGraph path</span>
+                  <input id="taskRunGraphPath" value="" placeholder="artifacts/seek/runtime_path_graph_seek_mvp_20260617.json" />
+                </label>
+                <label>
+                  <span data-i18n="task_template">Task template</span>
+                  <select id="taskRunTemplate">
+                    <option value="read_n_list_details">read_n_list_details</option>
+                    <option value="read_article_page">read_article_page</option>
+                    <option value="read_issue_thread">read_issue_thread</option>
+                    <option value="input_dry_run_demo">input_dry_run_demo</option>
+                  </select>
+                </label>
+                <label>
+                  <span data-i18n="max_items">Max items</span>
+                  <input id="taskRunMaxItems" type="number" min="1" max="20" value="3" />
+                </label>
+                <label>
+                  <span data-i18n="max_steps">Max steps</span>
+                  <input id="taskRunMaxSteps" type="number" min="1" max="50" value="20" />
+                </label>
+                <label>
+                  <span data-i18n="demo_input_text">Demo input text</span>
+                  <input id="taskRunInputText" value="software engineer" />
+                </label>
+              </div>
+              <div class="button-row">
+                <button id="taskRunStartBtn" data-i18n="start_task_run">Start task run</button>
+                <button id="taskRunNextBtn" data-i18n="execute_next_step">Execute next step</button>
+                <button id="taskRunStopBtn" data-i18n="stop">Stop</button>
+                <button id="taskRunResetBtn" data-i18n="reset_timeline">Reset timeline</button>
+              </div>
+              <div class="run-summary" id="taskRunSummary"></div>
+              <div class="run-timeline" id="taskRunTimeline"></div>
+            </section>
+
             <section class="panel stage-page" data-page="input">
               <h3 data-i18n="type_text">Type Text</h3>
               <div class="form-grid">
@@ -410,6 +643,10 @@
             <section class="panel nav-path-panel" id="navPathPanel">
               <div class="panel-heading">
                 <h3 data-i18n="path_graph_title">Navigation Path</h3>
+                <div class="path-status-strip">
+                  <span id="pathGraphModeBadge">live</span>
+                  <span id="pathGraphStateBadge">idle</span>
+                </div>
               </div>
               <div class="path-toolbar">
                 <div class="path-toolbar-left">

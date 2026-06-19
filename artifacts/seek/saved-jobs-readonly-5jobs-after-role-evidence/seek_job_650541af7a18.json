@@ -1,0 +1,316 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_650541af7a18",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.73,
+    "job_id": "seek_job_650541af7a18",
+    "title": "SeniorSoftwareEngineer",
+    "company": "Absolute IT Limited",
+    "positive_evidence": [
+      "matched_skills: SQL, software engineer",
+      "matched_target_roles: Software Engineer",
+      "location_matches: All Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_dd93aaf98bf1",
+    "title": "Senior Software Engineer",
+    "company": "Absolute IT Limited",
+    "location": "Auckland CBD, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": "$150,000 - $160,000 per annum",
+    "classification": "Senior Software Engineer",
+    "card_bbox": {
+      "x": 57,
+      "y": 772,
+      "w": 379,
+      "h": 249
+    },
+    "click_point": {
+      "x": 162,
+      "y": 784
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_14",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_46_senior-software-engineer",
+      "page_text_48_absolute-it-limited",
+      "page_text_51_be-an-early-applicant",
+      "page_text_53_auckland-cbd-auckland",
+      "page_text_55_150-000-160-000-per-annum",
+      "page_text_58_shape-high-impact-network-management-and-data",
+      "page_text_59_platforms",
+      "page_text_61_work-across-modern-stacks-including-nodejs",
+      "page_text_62_angular-and-cloud-native-tooling"
+    ],
+    "evidence": {
+      "texts": [
+        "Senior Software Engineer",
+        "Absolute IT Limited",
+        "Be an early applicant",
+        "Auckland CBD, Auckland",
+        "$150,000 - $160,000 per annum",
+        "Shape high-impact network management and data",
+        "platforms",
+        "Work across modern stacks including NodeJS,",
+        "Angular and cloud-native tooling"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": false,
+        "has_salary": true
+      }
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_650541af7a18",
+    "title": "SeniorSoftwareEngineer",
+    "company": "Absolute IT Limited",
+    "location": "All Auckland",
+    "work_type": "Full time",
+    "classification": "SeniorSoftwareEngineer",
+    "salary_text": "$150,000-$160,000 perannum",
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "All Auckland"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "SEEK"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Listing time"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "absoluteIT"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "absolute IT"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "SeniorSoftwareEngineer"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "Absolute IT Limited View alljobs"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Auckland CBD,Auckland"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Engineering-Software(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "$150,000-$160,000 perannum"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "Posted 37m ago·Low applicationvolume"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "Quick apply"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "3 skills and credentials match your profile"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "√Pipelines"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "√ MySQL"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "√Database Systems"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "Show all"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "AbouttheOrganisation"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "Our client is apurpose-driven technology organisationfocused on delivering"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "secure,reliabledigitalinfrastructureandservicesthatsupportconnectivity"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "across large,distributed environments.Theyoperateat scale andpartner closely"
+      }
+    ],
+    "requirements": [
+      "3 skills and credentials match your profile"
+    ],
+    "responsibilities": [],
+    "benefits": [],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply",
+      "bbox": {
+        "x": 545,
+        "y": 750,
+        "w": 105,
+        "h": 31
+      },
+      "click_point": {
+        "x": 598,
+        "y": 766
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save button",
+      "bbox": {
+        "x": 570,
+        "y": 625,
+        "w": 50,
+        "h": 35
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 513,
+        "y": 346,
+        "w": 709,
+        "h": 832
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false
+      },
+      "safe_points": [
+        {
+          "x": 867,
+          "y": 762,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 513,
+      "y": 126,
+      "w": 709,
+      "h": 1052
+    },
+    "detail_scroll_history": [],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-120225-671654__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 26,
+      "action_count": 16,
+      "texts": [
+        "All Auckland",
+        "SEEK",
+        "Listing time",
+        "absoluteIT",
+        "absolute IT",
+        "SeniorSoftwareEngineer",
+        "Absolute IT Limited View alljobs",
+        "Auckland CBD,Auckland",
+        "Engineering-Software(Information&CommunicationTechnology)",
+        "Full time",
+        "回",
+        "$150,000-$160,000 perannum",
+        "Posted 37m ago·Low applicationvolume",
+        "Quick apply",
+        "Save",
+        "How you match ①",
+        "3 skills and credentials match your profile",
+        "√Pipelines",
+        "√ MySQL",
+        "√Database Systems",
+        "Show all",
+        "AbouttheOrganisation",
+        "tA",
+        "Our client is apurpose-driven technology organisationfocused on delivering",
+        "secure,reliabledigitalinfrastructureandservicesthatsupportconnectivity",
+        "across large,distributed environments.Theyoperateat scale andpartner closely"
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

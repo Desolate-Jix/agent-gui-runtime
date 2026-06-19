@@ -1,0 +1,483 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_6dcd7127af62",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.82,
+    "job_id": "seek_job_6dcd7127af62",
+    "title": "Yourapplicationwill includethefollowingquestions:",
+    "company": "WhichofthefollowingstatementsbestdescribesyourrighttoworkinNew",
+    "positive_evidence": [
+      "matched_skills: C#, Python, software engineer",
+      "matched_target_roles: Software Engineer",
+      "location_matches: Auckland CBD,Auckland, NZ"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_19352f2f2aa2",
+    "title": "Software Engineer | Python & C#| Help accelerate",
+    "company": "global decarbonisation through scalable, purpose-",
+    "location": "Parnell, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": "Software Engineer | Python & C#| Help accelerate",
+    "card_bbox": {
+      "x": 55,
+      "y": 866,
+      "w": 359,
+      "h": 237
+    },
+    "click_point": {
+      "x": 236,
+      "y": 876
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_19",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_69_software-engineer-python-c-help-accelerate",
+      "page_text_70_global-decarbonisation-through-scalable-purpose",
+      "page_text_72_driven-technology",
+      "page_text_73_obe-p8",
+      "page_text_76_staff-software-engineer",
+      "page_text_78_kami-holdings-limited",
+      "page_text_83_parnell-auckland"
+    ],
+    "evidence": {
+      "texts": [
+        "Software Engineer | Python & C#| Help accelerate",
+        "global decarbonisation through scalable, purpose-",
+        "driven technology",
+        "obe p8",
+        "Staff Software Engineer",
+        "Kami Holdings Limited",
+        "Parnell, Auckland"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements"
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_6dcd7127af62",
+    "title": "Yourapplicationwill includethefollowingquestions:",
+    "company": "WhichofthefollowingstatementsbestdescribesyourrighttoworkinNew",
+    "location": "Auckland CBD,Auckland, NZ",
+    "work_type": null,
+    "classification": "Howmany years'experience do you have as a software engineer?",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "Readyto Make an Impact?"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "If you're excited about contributing to a rapidly scaling company whilehelping"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "acceleratethetransitiontoamoresustainablefuture,let'stalk."
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "ApplynoworreachouttotheteamatPotentiaforaconfidentialconversation."
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "REF:19961"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "Are you a Strong applicant for this role?"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "Sign in and have an up to date profile and resume to see Strong"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "applicant matching and an Al summary."
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Sign In"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Register"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "Employerquestions"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "Yourapplicationwill includethefollowingquestions:"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "WhichofthefollowingstatementsbestdescribesyourrighttoworkinNew"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "Zealand?"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "Howmany years'experience do you have as a software engineer?"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "·Howmany years'experience do you have ina software development role?"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "Becareful"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "Employer questions"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "Your application will include thefollowing questions:"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "Which of thefollowing statementsbestdescribesyourright towork inNew"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "Howmany years'experiencedo you have as asoftwareengineer?"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "Be careful"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "Don't provide your bank or credit card details when applying for jobs."
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "Learnhowtoprotectyourself"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "Reportthisjobad"
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "Featured jobs"
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "QUANTIFI"
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "PHOTONICS'"
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "Software Engineers(All levels!)"
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "Software Engineer"
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "Halter"
+      },
+      {
+        "index": 31,
+        "role": "body",
+        "text": "QuantifiPhotonics"
+      },
+      {
+        "index": 32,
+        "role": "body",
+        "text": "·Howmanyyears'experiencedoyouhaveinasoftwaredevelopmentrole?"
+      },
+      {
+        "index": 33,
+        "role": "body",
+        "text": "Don't provide yourbankor credit card details when applyingforjobs."
+      },
+      {
+        "index": 34,
+        "role": "body",
+        "text": "Report this job ad"
+      },
+      {
+        "index": 35,
+        "role": "body",
+        "text": "SoftwareEngineers(Alllevels!)"
+      },
+      {
+        "index": 36,
+        "role": "body",
+        "text": "Quantifi Photonics"
+      },
+      {
+        "index": 37,
+        "role": "body",
+        "text": "Auckland CBD,Auckland, NZ"
+      },
+      {
+        "index": 38,
+        "role": "body",
+        "text": "Rosedale, Auckland, NZ"
+      },
+      {
+        "index": 39,
+        "role": "body",
+        "text": "1d ago"
+      },
+      {
+        "index": 40,
+        "role": "body",
+        "text": "12d ago"
+      },
+      {
+        "index": 41,
+        "role": "body",
+        "text": "What can I earn as a Software Engineer"
+      },
+      {
+        "index": 42,
+        "role": "body",
+        "text": "See more detailed salary information →"
+      }
+    ],
+    "requirements": [
+      "Howmany years'experience do you have as a software engineer?",
+      "·Howmany years'experience do you have ina software development role?",
+      "Howmany years'experiencedo you have as asoftwareengineer?",
+      "·Howmanyyears'experiencedoyouhaveinasoftwaredevelopmentrole?"
+    ],
+    "responsibilities": [
+      "Are you a Strong applicant for this role?",
+      "·Howmany years'experience do you have ina software development role?",
+      "·Howmanyyears'experiencedoyouhaveinasoftwaredevelopmentrole?"
+    ],
+    "benefits": [],
+    "apply_button_state": {
+      "visible": false,
+      "label": null,
+      "bbox": null,
+      "click_point": null
+    },
+    "save_button_state": {
+      "visible": false,
+      "label": null,
+      "bbox": null
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 513,
+        "y": 346,
+        "w": 709,
+        "h": 832
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false
+      },
+      "safe_points": [
+        {
+          "x": 867,
+          "y": 762,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_scroll_history": [
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260617-062052-435274__scroll__scroll-down.json",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": true
+          }
+        },
+        "missing_evidence": [
+          "location"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260617-062109-693166__scroll__scroll-down.json",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "missing_evidence": [
+          "location"
+        ]
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-062050-520663__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-062107-950547__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-062125-787792__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 46,
+      "action_count": 20,
+      "texts": [
+        "Readyto Make an Impact?",
+        "If you're excited about contributing to a rapidly scaling company whilehelping",
+        "acceleratethetransitiontoamoresustainablefuture,let'stalk.",
+        "ApplynoworreachouttotheteamatPotentiaforaconfidentialconversation.",
+        "REF:19961",
+        "Are you a Strong applicant for this role?",
+        "Sign in and have an up to date profile and resume to see Strong",
+        "applicant matching and an Al summary.",
+        "Sign In",
+        "Register",
+        "Employerquestions",
+        "Yourapplicationwill includethefollowingquestions:",
+        "WhichofthefollowingstatementsbestdescribesyourrighttoworkinNew",
+        "Zealand?",
+        "Howmany years'experience do you have as a software engineer?",
+        "A",
+        "·Howmany years'experience do you have ina software development role?",
+        "Becareful",
+        "Employer questions",
+        "Your application will include thefollowing questions:",
+        "Which of thefollowing statementsbestdescribesyourright towork inNew",
+        "Howmany years'experiencedo you have as asoftwareengineer?",
+        "Be careful",
+        "Don't provide your bank or credit card details when applying for jobs.",
+        "Learnhowtoprotectyourself",
+        "Reportthisjobad",
+        "Featured jobs",
+        "+A",
+        "口",
+        "QUANTIFI",
+        "PHOTONICS'",
+        "Software Engineers(All levels!)",
+        "Software Engineer",
+        "Halter",
+        "QuantifiPhotonics",
+        "·Howmanyyears'experiencedoyouhaveinasoftwaredevelopmentrole?",
+        "Don't provide yourbankor credit card details when applyingforjobs.",
+        "Report this job ad",
+        "SoftwareEngineers(Alllevels!)",
+        "Quantifi Photonics",
+        "Auckland CBD,Auckland, NZ",
+        "Rosedale, Auckland, NZ",
+        "1d ago",
+        "12d ago",
+        "What can I earn as a Software Engineer",
+        "See more detailed salary information →"
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

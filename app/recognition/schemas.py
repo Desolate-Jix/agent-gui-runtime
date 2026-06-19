@@ -178,9 +178,10 @@ class PreClickCandidateDecision:
     score: float
     click_point: dict[str, int] | None
     reasons: list[str] = field(default_factory=list)
+    resolved_click_point: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "candidate_id": self.candidate_id,
             "element_id": self.element_id,
             "allowed": bool(self.allowed),
@@ -188,6 +189,9 @@ class PreClickCandidateDecision:
             "click_point": dict(self.click_point) if self.click_point is not None else None,
             "reasons": list(self.reasons),
         }
+        if self.resolved_click_point is not None:
+            payload["resolved_click_point"] = dict(self.resolved_click_point)
+        return payload
 
 
 @dataclass

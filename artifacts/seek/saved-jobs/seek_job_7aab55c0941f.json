@@ -1,0 +1,191 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_7aab55c0941f",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.73,
+    "job_id": "seek_job_7aab55c0941f",
+    "title": "Software Engineer (Test Systems)",
+    "company": "Quantifi Photonics",
+    "positive_evidence": [
+      "matched_skills: C#, photonics",
+      "matched_target_roles: Software Engineer",
+      "location_matches: Rosedale, Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_7aab55c0941f",
+    "title": "Software Engineer (Test Systems)",
+    "company": "Quantifi Photonics",
+    "location": "Rosedale, Auckland",
+    "posted_at_text": null,
+    "work_type": "Full time",
+    "salary_text": null,
+    "classification": "Software Engineer (Test Systems)",
+    "card_bbox": {
+      "x": 24,
+      "y": 400,
+      "w": 410,
+      "h": 220
+    },
+    "click_point": {
+      "x": 220,
+      "y": 510
+    },
+    "source_url": null,
+    "source_card_id": "card_job_1",
+    "primary_action_id": "action_job_1",
+    "child_action_ids": [
+      "action_job_1"
+    ],
+    "child_page_element_ids": [
+      "company",
+      "location",
+      "work_type"
+    ],
+    "evidence": {
+      "texts": [
+        "Quantifi Photonics",
+        "Rosedale, Auckland",
+        "Full time",
+        "Software Engineer (Test Systems)"
+      ],
+      "source_contract": "screen_inventory_v1"
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_7aab55c0941f",
+    "title": "Software Engineer (Test Systems)",
+    "company": "Quantifi Photonics",
+    "location": "Rosedale, Auckland",
+    "work_type": "Full time",
+    "classification": "Software Engineer (Test Systems)",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "Software Engineer (Test Systems)"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "Quantifi Photonics"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Rosedale, Auckland"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 4,
+        "role": "section_hint",
+        "text": "Requirements: C# programming experience and test automation skills."
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "You will build and support test systems for photonics products."
+      }
+    ],
+    "requirements": [
+      "Requirements: C# programming experience and test automation skills."
+    ],
+    "responsibilities": [
+      "You will build and support test systems for photonics products."
+    ],
+    "benefits": [],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Apply",
+      "bbox": {
+        "x": 520,
+        "y": 820,
+        "w": 110,
+        "h": 48
+      },
+      "click_point": {
+        "x": 575,
+        "y": 844
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save",
+      "bbox": {
+        "x": 650,
+        "y": 820,
+        "w": 88,
+        "h": 48
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 496,
+        "y": 290,
+        "w": 680,
+        "h": 694
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false
+      },
+      "safe_points": [
+        {
+          "x": 836,
+          "y": 637,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 496,
+      "y": 70,
+      "w": 680,
+      "h": 914
+    },
+    "detail_scroll_history": [],
+    "trace_paths": [
+      "logs/traces/vision/detail-complete.json"
+    ],
+    "evidence": {
+      "text_count": 6,
+      "action_count": 2,
+      "texts": [
+        "Software Engineer (Test Systems)",
+        "Quantifi Photonics",
+        "Rosedale, Auckland",
+        "Full time",
+        "Requirements: C# programming experience and test automation skills.",
+        "You will build and support test systems for photonics products."
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

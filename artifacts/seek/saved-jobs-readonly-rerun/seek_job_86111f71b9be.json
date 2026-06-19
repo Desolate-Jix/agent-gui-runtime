@@ -1,0 +1,323 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_86111f71b9be",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "maybe_apply",
+    "score": 0.64,
+    "job_id": "seek_job_86111f71b9be",
+    "title": "LeadSoftwareEngineer",
+    "company": "Younity",
+    "positive_evidence": [
+      "matched_skills: software engineer",
+      "matched_target_roles: Software Engineer",
+      "location_matches: All Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_b37613cb0167",
+    "title": "Lead Software Engineer",
+    "company": "Younity",
+    "location": "Auckland CBD, Auckland (Hybrid)",
+    "posted_at_text": null,
+    "work_type": "Auckland CBD, Auckland (Hybrid)",
+    "salary_text": null,
+    "classification": "Lead Software Engineer",
+    "card_bbox": {
+      "x": 55,
+      "y": 840,
+      "w": 334,
+      "h": 241
+    },
+    "click_point": {
+      "x": 158,
+      "y": 851
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_16",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_35_lead-software-engineer",
+      "page_text_36_younity",
+      "page_text_38_new-to-you",
+      "page_text_39_auckland-cbd-auckland-hybrid",
+      "page_text_40_excellent-location",
+      "page_text_41_great-team-environment",
+      "page_text_42_hybrid-work",
+      "page_text_43_software-lead-responsible-for-leading-software"
+    ],
+    "evidence": {
+      "texts": [
+        "Lead Software Engineer",
+        "Younity",
+        "New to you",
+        "Auckland CBD, Auckland (Hybrid)",
+        "Excellent Location",
+        "Great Team Environment",
+        "Hybrid Work",
+        "Software Lead responsible for leading software"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements"
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_86111f71b9be",
+    "title": "LeadSoftwareEngineer",
+    "company": "Younity",
+    "location": "All Auckland",
+    "work_type": "Auckland CBD,Auckland (Hybrid)",
+    "classification": "LeadSoftwareEngineer",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "All Auckland"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "SEEK"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Listing time"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "www.younity.co.nz"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "YOUnIlY"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "LeadSoftwareEngineer"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "Younity View all jobs"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Auckland CBD,Auckland (Hybrid)"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Engineering-Software(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "Posted 4d ago·Medium application volume"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "Quick apply"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "About theRole"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "We are looking fora hands-on Lead Software Engineer to join our client, a large"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "and well-established organisation,at a critical and exciting time.With10"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "applications to support and evolve, this role is pivotal in driving the deployment"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "of theirtradingplatformwhilecontributing toawell-defined modernisation"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "roadmap. You will be a captain and lead, someone who rolls up their sleeves and"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "gets things done alongside the team, not just from the sidelines."
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "AbouttheOrganisation"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "Our client is a large,well-respected organisation with the scale, resources and"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "ambition to match.Their modernisation journey is already underway with a clear"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "roadmap in place, so you will not be starting from scratch. Instead, you will be"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "steppingintoaccelerateprogress,bringenergy and direction,and helptheteam"
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "deliver with confidence at scale."
+      }
+    ],
+    "requirements": [],
+    "responsibilities": [
+      "About theRole",
+      "applications to support and evolve, this role is pivotal in driving the deployment",
+      "roadmap. You will be a captain and lead, someone who rolls up their sleeves and",
+      "roadmap in place, so you will not be starting from scratch. Instead, you will be"
+    ],
+    "benefits": [
+      "Auckland CBD,Auckland (Hybrid)"
+    ],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply",
+      "bbox": {
+        "x": 546,
+        "y": 716,
+        "w": 103,
+        "h": 29
+      },
+      "click_point": {
+        "x": 598,
+        "y": 730
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save button",
+      "bbox": {
+        "x": 560,
+        "y": 598,
+        "w": 65,
+        "h": 32
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 513,
+        "y": 346,
+        "w": 709,
+        "h": 832
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false
+      },
+      "safe_points": [
+        {
+          "x": 867,
+          "y": 762,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 513,
+      "y": 126,
+      "w": 709,
+      "h": 1052
+    },
+    "detail_scroll_history": [],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-110010-054106__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 27,
+      "action_count": 17,
+      "texts": [
+        "All Auckland",
+        "SEEK",
+        "Listing time",
+        "www.younity.co.nz",
+        "YOUnIlY",
+        "LeadSoftwareEngineer",
+        "Younity View all jobs",
+        "Auckland CBD,Auckland (Hybrid)",
+        "国",
+        "Engineering-Software(Information&CommunicationTechnology)",
+        "Full time",
+        "Posted 4d ago·Medium application volume",
+        "Quick apply",
+        "Save",
+        "About theRole",
+        "We are looking fora hands-on Lead Software Engineer to join our client, a large",
+        "and well-established organisation,at a critical and exciting time.With10",
+        "applications to support and evolve, this role is pivotal in driving the deployment",
+        "of theirtradingplatformwhilecontributing toawell-defined modernisation",
+        "roadmap. You will be a captain and lead, someone who rolls up their sleeves and",
+        "gets things done alongside the team, not just from the sidelines.",
+        "AbouttheOrganisation",
+        "Our client is a large,well-respected organisation with the scale, resources and",
+        "ambition to match.Their modernisation journey is already underway with a clear",
+        "roadmap in place, so you will not be starting from scratch. Instead, you will be",
+        "steppingintoaccelerateprogress,bringenergy and direction,and helptheteam",
+        "deliver with confidence at scale."
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

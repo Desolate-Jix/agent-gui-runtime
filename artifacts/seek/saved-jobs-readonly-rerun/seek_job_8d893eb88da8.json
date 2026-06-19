@@ -1,0 +1,563 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_8d893eb88da8",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "maybe_apply",
+    "score": 0.64,
+    "job_id": "seek_job_8d893eb88da8",
+    "title": "SeniorSoftwareEngineer-Al",
+    "company": "Halter",
+    "positive_evidence": [
+      "matched_skills: software engineer",
+      "matched_target_roles: Software Engineer",
+      "location_matches: All Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_2a2a2af1fbc8",
+    "title": "Senior Software Engineer - Al",
+    "company": "Halter",
+    "location": "Auckland CBD, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": "Senior Software Engineer - Al",
+    "card_bbox": {
+      "x": 57,
+      "y": 877,
+      "w": 243,
+      "h": 84
+    },
+    "click_point": {
+      "x": 178,
+      "y": 891
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_16",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_41_senior-software-engineer-al",
+      "page_text_42_halter",
+      "page_text_43_auckland-cbd-auckland"
+    ],
+    "evidence": {
+      "texts": [
+        "Senior Software Engineer - Al",
+        "Halter",
+        "Auckland CBD, Auckland"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements"
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_8d893eb88da8",
+    "title": "SeniorSoftwareEngineer-Al",
+    "company": "Halter",
+    "location": "All Auckland",
+    "work_type": "Full time",
+    "classification": "SeniorSoftwareEngineer-Al",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "All Auckland"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "SEEK"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Listing time"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "出 Halter."
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "SeniorSoftwareEngineer-Al"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "Halter View all jobs"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "Auckland CBD,Auckland"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Engineering-Software(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Posted 25d ago"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "Apply C"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "4 skills and credentials match your profile"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "+1more"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "√ API"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "Typescript Programming"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "Pipelines"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "AboutHalter"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "At Halter,we're on a mission to enablefarmers and graziers to run the most"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "productiveandsustainableoperations.OurcustomersareusingHaltertobreak"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "free from the time-intensive constraints of conventionalpractices.Imagine"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "watching 500 cattle stand up and walk calmly towards their next break? No quad"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "bikes, no dogs, no fences. Just a group of cattle walking at their own pace."
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "People say it looks like magic.Our customers arerevolutionizing grazing with"
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "Halter. It's changing lives and transforming an industry.People join Halter to do"
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "meaningful work.By joining us you'llbe solving challenging problems within a"
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "talentedteamandaculturebuiltforhighperformance.Ourteamout-think,out-"
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "workandout-care.We'recommittedtodeliveringrealchangeintheworld-this"
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "Senior Software Engineer - Al"
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "ApplyC"
+      },
+      {
+        "index": 31,
+        "role": "body",
+        "text": "Halter"
+      },
+      {
+        "index": 32,
+        "role": "body",
+        "text": "About Halter"
+      },
+      {
+        "index": 33,
+        "role": "body",
+        "text": "At Halter, we're on a mission to enable farmers and graziers to run the most"
+      },
+      {
+        "index": 34,
+        "role": "body",
+        "text": "productive and sustainable operations.Our customers are using Haltertobreak"
+      },
+      {
+        "index": 35,
+        "role": "body",
+        "text": "freefrom the time-intensive constraints of conventional practices.Imagine"
+      },
+      {
+        "index": 36,
+        "role": "body",
+        "text": "watching5o0cattlestandupandwalkcalmlytowardstheirnextbreak?Noquad"
+      },
+      {
+        "index": 37,
+        "role": "body",
+        "text": "People say it looks like magic. Our customers are revolutionizing grazing with"
+      },
+      {
+        "index": 38,
+        "role": "body",
+        "text": "Halter.It's changing lives and transforming an industry.People join Halter to do"
+      },
+      {
+        "index": 39,
+        "role": "body",
+        "text": "talented team and a culturebuilt forhighperformance.Ourteam out-think,out-"
+      },
+      {
+        "index": 40,
+        "role": "body",
+        "text": "workand out-care.We're committed todeliveringreal change in theworld-this"
+      },
+      {
+        "index": 41,
+        "role": "body",
+        "text": "isn't easy, and in truth, we love that it's hard."
+      },
+      {
+        "index": 42,
+        "role": "body",
+        "text": "We'rebacked todeliveron a missionthat mattersbyTier1investors including"
+      },
+      {
+        "index": 43,
+        "role": "body",
+        "text": "FoundersFund,BessemerVenturePartners,BOND,DCVC,Blackbird,Promus"
+      },
+      {
+        "index": 44,
+        "role": "body",
+        "text": "Ventures,RocketLab'sPeterBeck and lcehouseventures."
+      },
+      {
+        "index": 45,
+        "role": "body",
+        "text": "About therole"
+      },
+      {
+        "index": 46,
+        "role": "body",
+        "text": "Imagine taking one of the world's most advanced ag-tech platforms... and"
+      },
+      {
+        "index": 47,
+        "role": "body",
+        "text": "levelling it up with Al-powered products built to last.not demos, not prototypes,"
+      },
+      {
+        "index": 48,
+        "role": "body",
+        "text": "but real software that ships, scales, and makes a genuine difference."
+      },
+      {
+        "index": 49,
+        "role": "body",
+        "text": "ThisroleisforaSeniorSoftware Engineerwhohappens toloveAl,someone"
+      },
+      {
+        "index": 50,
+        "role": "body",
+        "text": "whocaresdeeplyaboutsystemdesign,cleanarchitecture,andbuildingfull-"
+      },
+      {
+        "index": 51,
+        "role": "body",
+        "text": "stack products end-to-end. You'll be working across the stack to design, build,"
+      },
+      {
+        "index": 52,
+        "role": "body",
+        "text": "and scale the Al-powered tools and surfaces that ourcustomers,support teams,"
+      },
+      {
+        "index": 53,
+        "role": "body",
+        "text": "and commercial teamsrelyonevery day."
+      }
+    ],
+    "requirements": [
+      "4 skills and credentials match your profile"
+    ],
+    "responsibilities": [
+      "About therole",
+      "ThisroleisforaSeniorSoftware Engineerwhohappens toloveAl,someone"
+    ],
+    "benefits": [],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Apply C",
+      "bbox": {
+        "x": 559,
+        "y": 979,
+        "w": 84,
+        "h": 32
+      },
+      "click_point": {
+        "x": 601,
+        "y": 995
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save button",
+      "bbox": {
+        "x": 563,
+        "y": 816,
+        "w": 64,
+        "h": 37
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 513,
+        "y": 346,
+        "w": 709,
+        "h": 832
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false
+      },
+      "safe_points": [
+        {
+          "x": 867,
+          "y": 762,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 513,
+      "y": 126,
+      "w": 709,
+      "h": 1052
+    },
+    "detail_scroll_history": [
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260617-105418-903348__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": true
+          }
+        },
+        "missing_evidence": [
+          "responsibilities"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260617-105436-203022__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "missing_evidence": [
+          "responsibilities"
+        ]
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-105417-173320__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-105434-465888__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-105452-475803__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 56,
+      "action_count": 54,
+      "texts": [
+        "All Auckland",
+        "SEEK",
+        "Listing time",
+        "出 Halter.",
+        "SeniorSoftwareEngineer-Al",
+        "Halter View all jobs",
+        "Auckland CBD,Auckland",
+        "Engineering-Software(Information&CommunicationTechnology)",
+        "?",
+        "Full time",
+        "Posted 25d ago",
+        "Apply C",
+        "Save",
+        "tA",
+        "How you match ①",
+        "4 skills and credentials match your profile",
+        "+1more",
+        "√ API",
+        "Typescript Programming",
+        "Pipelines",
+        "AboutHalter",
+        "At Halter,we're on a mission to enablefarmers and graziers to run the most",
+        "productiveandsustainableoperations.OurcustomersareusingHaltertobreak",
+        "free from the time-intensive constraints of conventionalpractices.Imagine",
+        "watching 500 cattle stand up and walk calmly towards their next break? No quad",
+        "bikes, no dogs, no fences. Just a group of cattle walking at their own pace.",
+        "People say it looks like magic.Our customers arerevolutionizing grazing with",
+        "Halter. It's changing lives and transforming an industry.People join Halter to do",
+        "meaningful work.By joining us you'llbe solving challenging problems within a",
+        "talentedteamandaculturebuiltforhighperformance.Ourteamout-think,out-",
+        "workandout-care.We'recommittedtodeliveringrealchangeintheworld-this",
+        "Senior Software Engineer - Al",
+        "ApplyC",
+        "Halter",
+        "About Halter",
+        "At Halter, we're on a mission to enable farmers and graziers to run the most",
+        "productive and sustainable operations.Our customers are using Haltertobreak",
+        "freefrom the time-intensive constraints of conventional practices.Imagine",
+        "watching5o0cattlestandupandwalkcalmlytowardstheirnextbreak?Noquad",
+        "People say it looks like magic. Our customers are revolutionizing grazing with",
+        "Halter.It's changing lives and transforming an industry.People join Halter to do",
+        "talented team and a culturebuilt forhighperformance.Ourteam out-think,out-",
+        "workand out-care.We're committed todeliveringreal change in theworld-this",
+        "isn't easy, and in truth, we love that it's hard.",
+        "We'rebacked todeliveron a missionthat mattersbyTier1investors including",
+        "FoundersFund,BessemerVenturePartners,BOND,DCVC,Blackbird,Promus",
+        "Ventures,RocketLab'sPeterBeck and lcehouseventures.",
+        "About therole",
+        "Imagine taking one of the world's most advanced ag-tech platforms... and",
+        "levelling it up with Al-powered products built to last.not demos, not prototypes,",
+        "but real software that ships, scales, and makes a genuine difference.",
+        "ThisroleisforaSeniorSoftware Engineerwhohappens toloveAl,someone",
+        "whocaresdeeplyaboutsystemdesign,cleanarchitecture,andbuildingfull-",
+        "stack products end-to-end. You'll be working across the stack to design, build,",
+        "and scale the Al-powered tools and surfaces that ourcustomers,support teams,",
+        "and commercial teamsrelyonevery day."
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

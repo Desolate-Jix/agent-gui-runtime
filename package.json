@@ -1,0 +1,25 @@
+{
+  "name": "agent-gui-runtime",
+  "version": "1.0.0",
+  "description": "[中文](README.md) | [English](README.en.md)",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Desolate-Jix/agent-gui-runtime.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Desolate-Jix/agent-gui-runtime/issues"
+  },
+  "homepage": "https://github.com/Desolate-Jix/agent-gui-runtime#readme"
+}

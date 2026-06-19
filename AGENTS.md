@@ -68,6 +68,7 @@ When a task is substantial, architectural, risky, ambiguous, blocked, or explici
 
 Use this as a visible, user-directed workflow:
 
+- Treat the Codex in-app browser as reserved for ChatGPT consultation by default. Reuse the default ChatGPT conversation `https://chatgpt.com/c/6a313e9c-e2d4-83e8-b487-83e69eb0ff58` unless the user gives a different session. Do not use the Codex in-app browser as the default test target for the local panel or real website automation; bind an external browser or application window instead. Use the in-app browser for panel testing only when external browser/window control is unavailable and clearly report that exception.
 - summarize the current user goal, plan, key evidence, blockers, and proposed next step
 - reuse the user's already-open ChatGPT thread when they say one is open
 - do not send secrets, credentials, private files, screenshots, traces, or externally sensitive data unless the user approved that specific content

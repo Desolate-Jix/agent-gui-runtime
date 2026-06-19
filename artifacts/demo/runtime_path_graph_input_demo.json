@@ -1,0 +1,74 @@
+{
+  "contract_version": "runtime_path_graph_v1",
+  "graph_id": "demo_input_runtime_path_graph_v1",
+  "app_id": "demo_input",
+  "domain": "demo",
+  "page_type": "input_fixture",
+  "coordinate_policy": {
+    "coordinate_space": "window_screenshot",
+    "do_not_reuse_absolute_coordinates_without_reobserve": true,
+    "bbox_is_guidance_not_authorization": true,
+    "click_point_requires_current_validation": true
+  },
+  "states": [
+    {
+      "state_id": "demo_input_form",
+      "label": "Demo input form"
+    }
+  ],
+  "transitions": [
+    {
+      "from_state_id": "demo_input_form",
+      "to_state_id": "demo_input_form",
+      "action_template_id": "fill_demo_text_field",
+      "verification_refs": [
+        "demo:input_dry_run_only"
+      ]
+    }
+  ],
+  "action_templates": [
+    {
+      "action_template_id": "fill_demo_text_field",
+      "action_type": "input",
+      "label": "Preview filling a demo text field",
+      "target_entity": "demo:text_field",
+      "input_target": {
+        "role": "searchbox",
+        "label": "Demo text field",
+        "click_point": {
+          "x": 180,
+          "y": 96
+        }
+      },
+      "input_policy": {
+        "requires_agent_text": true,
+        "clear_existing": true,
+        "submit_allowed": false,
+        "dry_run_only": true,
+        "allow_live_input": false
+      },
+      "learned_skill_ref": "skill.safe_text_field_fill",
+      "requires_current_validation": true,
+      "artifact_is_authorization": false
+    }
+  ],
+  "verification_rules": [
+    {
+      "rule_id": "demo:input_dry_run_only",
+      "kind": "dry_run_only",
+      "description": "This fixture demonstrates input skill planning without dispatching /action/type_text."
+    }
+  ],
+  "safety_policy": {
+    "mode": "demo_dry_run",
+    "forbid_final_submit": true,
+    "allow_live_input": false,
+    "artifact_is_authorization": false
+  },
+  "learned_skill_refs": [
+    "skill.safe_text_field_fill"
+  ],
+  "metrics": {
+    "artifact_is_authorization": false
+  }
+}

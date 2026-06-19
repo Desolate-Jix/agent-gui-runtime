@@ -1,0 +1,265 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_992349fff538",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.73,
+    "job_id": "seek_job_992349fff538",
+    "title": "Senior Software Engineer",
+    "company": "Propellerhead",
+    "positive_evidence": [
+      "matched_skills: C#, software engineer",
+      "matched_target_roles: Software Engineer",
+      "location_matches: Auckland CBD,Auckland (Hybrid)"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_bd74593fbdf2",
+    "title": "Senior Software Engineer",
+    "company": "Propellerhead",
+    "location": "Auckland CBD, Auckland (Hybrid)",
+    "posted_at_text": null,
+    "work_type": "Auckland CBD, Auckland (Hybrid)",
+    "salary_text": null,
+    "classification": "Senior Software Engineer",
+    "card_bbox": {
+      "x": 58,
+      "y": 932,
+      "w": 360,
+      "h": 225
+    },
+    "click_point": {
+      "x": 163,
+      "y": 943
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_19",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_55_senior-software-engineer",
+      "page_text_56_propellerhead",
+      "page_text_60_auckland-cbd-auckland-hybrid",
+      "page_text_65_we-prioritise-technical-excellence-curiosity-and",
+      "page_text_66_forward-thinking-design",
+      "page_text_67_make-a-tangible-difference-in-the-way-people",
+      "page_text_68_interact-wi",
+      "page_text_69_work-fron",
+      "page_text_70_save-this-search",
+      "page_text_72_home"
+    ],
+    "evidence": {
+      "texts": [
+        "Senior Software Engineer",
+        "Propellerhead",
+        "Auckland CBD, Auckland (Hybrid)",
+        "We prioritise technical excellence, curiosity, and",
+        "forward-thinking design",
+        "Make a tangible difference in the way people",
+        "interact wi",
+        "Work fron",
+        "Save this search",
+        "home"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": true,
+        "has_salary": false
+      }
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_992349fff538",
+    "title": "Senior Software Engineer",
+    "company": "Propellerhead",
+    "location": "Auckland CBD,Auckland (Hybrid)",
+    "work_type": "Auckland CBD,Auckland (Hybrid)",
+    "classification": "Senior Software Engineer",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "Propellerhead*"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "Senior Software Engineer"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Propellerhead View all jobs"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "Auckland CBD,Auckland (Hybrid)"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "Engineering-Software(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "Posted 11d ago·Medium application volume"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Quick apply"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "5 skills and credentials match your profile"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "Typescript Programming Language"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "C#Programming"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "JavaProgramming"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "+2more"
+      }
+    ],
+    "requirements": [
+      "5 skills and credentials match your profile"
+    ],
+    "responsibilities": [],
+    "benefits": [
+      "Auckland CBD,Auckland (Hybrid)"
+    ],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply",
+      "bbox": {
+        "x": 546,
+        "y": 804,
+        "w": 103,
+        "h": 28
+      },
+      "click_point": {
+        "x": 598,
+        "y": 818
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save button",
+      "bbox": {
+        "x": 560,
+        "y": 668,
+        "w": 60,
+        "h": 32
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 513,
+        "y": 346,
+        "w": 709,
+        "h": 832
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false
+      },
+      "safe_points": [
+        {
+          "x": 867,
+          "y": 762,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 513,
+      "y": 126,
+      "w": 709,
+      "h": 1052
+    },
+    "detail_scroll_history": [],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-131416-395832__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 16,
+      "action_count": 17,
+      "texts": [
+        "Propellerhead*",
+        "Senior Software Engineer",
+        "Propellerhead View all jobs",
+        "Auckland CBD,Auckland (Hybrid)",
+        "国",
+        "Engineering-Software(Information&CommunicationTechnology)",
+        "Full time",
+        "Posted 11d ago·Medium application volume",
+        "Quick apply",
+        "Save",
+        "How you match ①",
+        "5 skills and credentials match your profile",
+        "Typescript Programming Language",
+        "C#Programming",
+        "JavaProgramming",
+        "+2more"
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

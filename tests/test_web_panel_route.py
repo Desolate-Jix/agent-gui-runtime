@@ -18,12 +18,44 @@ def test_web_panel_serves_browser_control_surface() -> None:
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert "charset=utf-8" in response.headers["content-type"]
-    assert "agent-gui-runtime panel" in response.text
+    assert "OpenClaw Console" in response.text
     assert "/panel/assets/panel.js" in response.text
     assert 'class="language-toggle"' in response.text
     assert 'data-language="zh-CN"' in response.text
+    assert 'class="workspace-switch"' in response.text
+    assert 'data-i18n="workspace_switch"' in response.text
+    assert 'class="workspace-hint workspace-hint-learn"' in response.text
+    assert 'class="workspace-hint workspace-hint-execute"' in response.text
     assert 'id="agentModeLearnBtn"' in response.text
     assert 'id="agentModeExecuteBtn"' in response.text
+    assert 'id="agentModeSystemBtn"' not in response.text
+    assert 'id="settingsBtn"' in response.text
+    assert 'class="settings-gear"' in response.text
+    assert 'class="workspace-option active"' in response.text
+    assert 'class="mode-group"' not in response.text
+    assert 'data-i18n="nav_group_system"' in response.text
+    assert 'data-i18n="nav_group_learn"' in response.text
+    assert 'data-i18n="nav_group_execute"' in response.text
+    assert 'data-i18n="nav_group_learn_flow"' in response.text
+    assert 'data-i18n="nav_group_execute_flow"' in response.text
+    assert 'data-stage="learn_locate"' in response.text
+    assert 'data-stage="learn_replay"' in response.text
+    assert 'data-stage="learn_validation"' in response.text
+    assert 'data-stage="execute_actions"' in response.text
+    assert 'data-stage="execute_task_run"' in response.text
+    assert 'data-stage="execute_locate"' in response.text
+    assert 'data-stage="learn_locate" data-step="2"' in response.text
+    assert 'data-i18n="nav_group_replay"' not in response.text
+    assert 'data-i18n="nav_group_replay_flow"' not in response.text
+    assert 'data-stage="learn_replay" data-step="3"' in response.text
+    assert 'data-stage="learn_validation" data-step="4"' in response.text
+    assert 'data-stage="execute_task_run" data-step="2"' in response.text
+    assert 'data-stage="execute_actions" data-step="1"' in response.text
+    assert 'data-stage="execute_locate" data-step="3"' in response.text
+    assert 'id="pageMetaStrip"' in response.text
+    assert 'id="pageApiBadge"' in response.text
+    assert 'id="pageSideEffectBadge"' in response.text
+    assert 'id="resetLayoutBtn"' in response.text
     assert 'data-mode-scope="learn"' in response.text
     assert 'data-mode-scope="execute"' in response.text
     assert 'id="traceModeFilter"' in response.text
@@ -44,6 +76,30 @@ def test_web_panel_serves_browser_control_surface() -> None:
     assert 'id="locateApp" value=""' in response.text
     assert 'id="locateState" value=""' in response.text
     assert 'id="executeApp" value=""' in response.text
+    assert 'id="executeActionsApp" value=""' in response.text
+    assert 'id="executeActionsGraphPath"' in response.text
+    assert 'id="executeActionsGraphJson"' in response.text
+    assert 'id="executeObserveBtn"' in response.text
+    assert 'id="availableActionsBtn"' in response.text
+    assert 'id="learnValidationPlanBtn"' in response.text
+    assert 'id="learnValidationStepBtn"' in response.text
+    assert 'id="replayPreset"' in response.text
+    assert 'value="github_issues">GitHub Issues' in response.text
+    assert 'id="replayGraphPath"' in response.text
+    assert 'id="replayLoadBtn"' in response.text
+    assert 'id="replayRegressionPath"' in response.text
+    assert 'id="replayRegressionLoadBtn"' in response.text
+    assert 'id="learnSampleGatePath"' in response.text
+    assert 'id="learnSampleGateLoadBtn"' in response.text
+    assert 'data-i18n="learn_sample_gate"' in response.text
+    assert 'value="python_docs_search">Python Docs Search' in response.text
+    assert 'id="replayValidationPlanBtn"' in response.text
+    assert 'id="replayTaskStepBtn"' in response.text
+    assert 'id="taskRunStartBtn"' in response.text
+    assert 'id="taskRunNextBtn"' in response.text
+    assert 'data-i18n="app_catalog_help"' in response.text
+    assert 'data-i18n="window_candidates_help"' in response.text
+    assert 'data-i18n="allow_apply_entry_help"' in response.text
     assert 'id="pointX" type="number"' in response.text
     assert 'id="pointY" type="number"' in response.text
     assert 'id="dryRunBtn" data-i18n="plan_click_preview"' in response.text
@@ -97,7 +153,7 @@ def test_web_panel_serves_static_assets() -> None:
     assert 'observe: "qwen3_vl_4b_q4_k_m"' in response.text
     assert 'locate: "vista_4b_transformers"' in response.text
     assert 'on("modelTestStage", "change", () => syncModelTestProfile())' in response.text
-    assert 'state === "warning"' in response.text
+    assert 'warning: { color: "#71634e"' in response.text
     assert 'setStatus("model service loading", "warning")' in response.text
     assert "model service not found" in response.text
     assert "ensureStageModelReady" in response.text
@@ -106,8 +162,48 @@ def test_web_panel_serves_static_assets() -> None:
     assert "syncAppAndStateFields" in response.text
     assert "appNameFromWindow" in response.text
     assert "appIdFromProcessName" in response.text
-    assert "Plan Click Preview" in response.text
-    assert "Point execute click" in response.text
+    assert "PAGE_REGISTRY" in response.text
+    assert "/execute/available_actions" in response.text
+    assert "/vision/observe_screen" in response.text
+    assert "callExecuteObserve" in response.text
+    assert "callAvailableActions" in response.text
+    assert "buildAvailableActionsPayload" in response.text
+    assert "generateLearnValidationPlan" in response.text
+    assert "runLearnValidationStep" in response.text
+    assert "loadReplayArtifact" in response.text
+    assert "renderReplayGraph" in response.text
+    assert "DEFAULT_SEEK_GRAPH_PATH" in response.text
+    assert "DEFAULT_WIKIPEDIA_GRAPH_PATH" in response.text
+    assert "DEFAULT_GITHUB_ISSUES_GRAPH_PATH" in response.text
+    assert "DEFAULT_PYTHON_DOCS_SEARCH_GRAPH_PATH" in response.text
+    assert "DEFAULT_ARTIFACT_REPLAY_REGRESSION_PATH" in response.text
+    assert "renderReplayRegressionReport" in response.text
+    assert "loadReplayRegressionReport" in response.text
+    assert "executeTaskRunNextStep" in response.text
+    assert "DEFAULT_INPUT_DEMO_GRAPH_PATH" in response.text
+    assert "read_issue_thread" in response.text
+    assert "input_write_action_forbidden_in_learn_validation" in response.text
+    assert "planned_not_executed" in response.text
+    assert "responseAllowsPathGraphWrite" in response.text
+    assert "select_launch_app" in response.text
+    assert "Coordinate Calibration / Learn Deep" in response.text
+    assert "Build click plan (no window action)" in response.text
+    assert "Real coordinate click" in response.text
+    assert "refreshDraggableCards" in response.text
+    assert "cardCanMoveToContainer" in response.text
+    assert "preparePointerCardDrag" in response.text
+    assert "CARD_DRAG_START_THRESHOLD_PX" in response.text
+    assert "startPointerCardDrag" in response.text
+    assert "syncDraggedCardToPoint" in response.text
+    assert "card-drag-placeholder" in response.text
+    assert "card-drag-zone" in response.text
+    assert "card-drag-handle" not in response.text
+    assert "data-drag-label" not in response.text
+    assert "isOperationalProfile" in response.text
+    assert "modelProfiles.filter(isOperationalProfile)" in response.text
+    assert "previous && isOperationalProfile(previousProfile) ? previous : defaultProfileId(stage)" in response.text
+    assert "resetCardLayout" in response.text
+    assert "CARD_ORDER_STORAGE_KEY" in response.text
     assert "BROWSER_APP_IDS" in response.text
     assert "appNameFromUrl" in response.text
     assert "MouseTesterWeb" in response.text
@@ -166,8 +262,116 @@ def test_web_panel_serves_static_assets() -> None:
     assert "tf-path-map" in css_response.text
     assert "tf-path-graph" in css_response.text
     assert "mode-strip" in css_response.text
+    assert "workspace-switch" in css_response.text
+    assert "workspace-option" in css_response.text
+    assert "nav-group-subtitle" in css_response.text
+    assert "body.agent-mode-learn .nav-group-execute" in css_response.text
+    assert "body.agent-mode-execute .nav-group-learn" in css_response.text
+    assert ".settings-entry" in css_response.text
+    assert "body.agent-mode-learn .nav-group-system" not in css_response.text
+    assert "card-drop-active" in css_response.text
+    assert "card-drag-zone" in css_response.text
+    assert "card-drag-placeholder" in css_response.text
+    assert "card-dragging-active" in css_response.text
+    assert "meta-action" in css_response.text
+    assert "run-summary" in css_response.text
+    assert "run-timeline" in css_response.text
+    assert "action-table" in css_response.text
     assert "ctrl-focused" in css_response.text
     assert "focused-control-card" in css_response.text
+
+
+def test_input_demo_runtime_path_graph_fixture_is_dry_run_only() -> None:
+    path = Path("artifacts/demo/runtime_path_graph_input_demo.json")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+
+    assert payload["contract_version"] == "runtime_path_graph_v1"
+    action = payload["action_templates"][0]
+    assert action["action_template_id"] == "fill_demo_text_field"
+    assert action["action_type"] == "input"
+    assert action["input_policy"]["dry_run_only"] is True
+    assert action["input_policy"]["allow_live_input"] is False
+    assert action["input_policy"]["submit_allowed"] is False
+    assert payload["safety_policy"]["allow_live_input"] is False
+    assert payload["safety_policy"]["forbid_final_submit"] is True
+
+
+def test_wikipedia_runtime_path_graph_fixture_is_read_only_page_scroll() -> None:
+    path = Path("artifacts/wikipedia/runtime_path_graph_wikipedia_search_v1.json")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+
+    assert payload["contract_version"] == "runtime_path_graph_v1"
+    assert payload["app_id"] == "wikipedia"
+    actions = {item["action_template_id"]: item for item in payload["action_templates"]}
+    assert actions["open_search_result"]["action_type"] == "click"
+    assert actions["read_article"]["action_type"] == "scroll"
+    assert actions["read_article"]["scroll_target"]["target_container_id"] == "wikipedia:page"
+    assert actions["read_article"]["scroll_target"]["target_pane"] == "page"
+    assert payload["safety_policy"]["forbid_final_submit"] is True
+    assert payload["safety_policy"]["allow_live_input"] is False
+
+
+def test_github_issues_runtime_path_graph_fixture_is_read_only_page_scroll() -> None:
+    path = Path("artifacts/github/runtime_path_graph_github_issues_v1.json")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+
+    assert payload["contract_version"] == "runtime_path_graph_v1"
+    assert payload["app_id"] == "github"
+    assert payload["page_type"] == "issues_list_to_issue_detail"
+    actions = {item["action_template_id"]: item for item in payload["action_templates"]}
+    assert actions["open_issue_from_list"]["action_type"] == "click"
+    assert "do not click the Open tab" in actions["open_issue_from_list"]["goal_template"]
+    assert actions["open_issue_from_list"]["candidate_constraints"]["required_region_id"] == "issues_list"
+    assert "Open" in actions["open_issue_from_list"]["candidate_constraints"]["exclude_targets"]
+    assert actions["read_issue_detail"]["action_type"] == "scroll"
+    assert actions["read_issue_detail"]["scroll_target"]["target_container_id"] == "github:page"
+    assert actions["read_issue_detail"]["scroll_target"]["target_pane"] == "page"
+    assert actions["load_more_issues"]["scroll_target"]["target_container_id"] == "github:page"
+    assert payload["safety_policy"]["mode"] == "read_only"
+    assert payload["safety_policy"]["forbid_final_submit"] is True
+    assert payload["safety_policy"]["allow_live_input"] is False
+
+
+def test_python_docs_search_runtime_path_graph_fixture_has_input_dry_run_policy() -> None:
+    path = Path("artifacts/docs_search/runtime_path_graph_python_docs_search_v1.json")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+
+    assert payload["contract_version"] == "runtime_path_graph_v1"
+    assert payload["app_id"] == "python_docs"
+    assert payload["page_type"] == "docs_search_results_with_article"
+    state_ids = {item["state_id"] for item in payload["states"]}
+    assert {
+        "docs:search_page",
+        "docs:search_results",
+        "docs:article_page",
+        "docs:article_scrolled",
+        "docs:blocked_write_or_login",
+    } <= state_ids
+    region_ids = {item["region_id"] for item in payload["regions"]}
+    assert {
+        "docs:search_form",
+        "docs:search_input",
+        "docs:search_button",
+        "docs:search_results_list",
+        "docs:search_result_item",
+        "docs:article_body",
+    } <= region_ids
+    actions = {item["action_template_id"]: item for item in payload["action_templates"]}
+    assert actions["type_public_search_query"]["low_level_action_type"] == "input"
+    assert actions["type_public_search_query"]["input_policy"]["input_category"] == "public_search_query"
+    assert actions["type_public_search_query"]["input_policy"]["submit_allowed"] is True
+    assert actions["type_public_search_query"]["input_policy"]["requires_explicit_live_smoke_mode"] is True
+    assert actions["trigger_search"]["low_level_action_type"] == "click"
+    assert actions["open_search_result"]["low_level_action_type"] == "click"
+    assert actions["read_article"]["low_level_action_type"] == "scroll"
+    assert actions["read_article"]["scroll_target"]["target_container_id"] == "docs:page"
+    assert payload["safety_policy"]["artifact_cannot_authorize_click"] is True
+    assert payload["safety_policy"]["forbid_final_submit"] is True
+    assert payload["safety_policy"]["allow_live_input"] is False
+    assert "pii" in payload["safety_policy"]["forbidden_input_categories"]
+    assert "Submit" in payload["safety_policy"]["forbidden_click_texts"]
+    forbidden = set(payload["safety_policy"]["forbidden_targets"])
+    assert {"Log in", "Edit", "Submit", "Save", "Delete", "Upload", "Comment"} <= forbidden
 
 
 def test_web_panel_uploads_and_serves_image() -> None:

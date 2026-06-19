@@ -1,0 +1,550 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_b9ef4d2103ed",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "maybe_apply",
+    "score": 0.64,
+    "job_id": "seek_job_b9ef4d2103ed",
+    "title": "SoftwareEngineers(Alllevels!)",
+    "company": "Halter",
+    "positive_evidence": [
+      "matched_skills: software engineer",
+      "matched_target_roles: Software Engineer",
+      "location_matches: All Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_4fe0e859f8a3",
+    "title": "Software Engineers (All levels!)",
+    "company": "Halter",
+    "location": "Auckland CBD, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": "Software Engineers (All levels!)",
+    "card_bbox": {
+      "x": 36,
+      "y": 529,
+      "w": 426,
+      "h": 248
+    },
+    "click_point": {
+      "x": 249,
+      "y": 653
+    },
+    "source_url": null,
+    "source_card_id": "card_10_software-engineers-all-levels",
+    "primary_action_id": "action_uia_146_software-engineers-all-levels",
+    "child_action_ids": [
+      "action_screen_9_software-engineers-all-levels",
+      "action_uia_145_modify-my-search",
+      "action_uia_147_hyperlink",
+      "action_uia_148_this-is-a-featured-job",
+      "action_uia_149_hyperlink"
+    ],
+    "child_page_element_ids": [
+      "page_text_28_software-engineers-all-levels",
+      "page_text_29_halter",
+      "page_text_30_auckland-cbd-auckland",
+      "page_text_31_we-re-looking-for-standout-engineers-with-a-deep",
+      "page_text_32_product-instinct-people-who-care-as-much-about-t",
+      "page_text_33_problem-as-the-solution",
+      "page_text_34_featured"
+    ],
+    "evidence": {
+      "texts": [
+        "Software Engineers (All levels!)",
+        "Halter",
+        "Auckland CBD, Auckland",
+        "We're looking for standout Engineers with a deep",
+        "product instinct: people who care as much about the",
+        "problem as the solution.",
+        "Featured",
+        "Software Engineers (All levels!)",
+        "Modify my search",
+        "hyperlink",
+        "This is a featured job",
+        "hyperlink"
+      ],
+      "source_contract": "screen_inventory_v1"
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_b9ef4d2103ed",
+    "title": "SoftwareEngineers(Alllevels!)",
+    "company": "Halter",
+    "location": "All Auckland",
+    "work_type": "Full time",
+    "classification": "SoftwareEngineers(Alllevels!)",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "All Auckland"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "SEEK"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Listing time"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "Halter."
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "SoftwareEngineers(Alllevels!)"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "Halter View all jobs"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "Auckland CBD,Auckland"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Engineering-Software(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Posted 1d ago"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "ApplyC"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "Visitedemployer'sapplicationsiteon16Jun2026"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "Howyou match"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "Apply"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "① Visited employer's application site on 16 Jun 2026"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "2 skills and credentials match your profile"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "√Pipelines"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "√AmazonWebServices"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "Showall"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "AtHalter,we'reonamissiontoenablefarmers andgrazierstorunthemost"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "productive and sustainable operations. Our customers are using Halter to break"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "freefromthetime-intensiveconstraintsofconventionalpractices.Imagine"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "watching5o0cattlestandupandwalkcalmlytowardstheirnextbreak?Noquad"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "bikes, no dogs, no fences. Just a group of cattle walking at their own pace."
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "People say it looks like magic.Our customers arerevolutionizing grazing with"
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "Halter. It's changing lives and transforming an industry.People join Halter to do"
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "meaningful work.By joining us you'll be solving challenging problems within a"
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "talented team and a culture built for high performance. Our team out-think, out-"
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "work and out-care.We're committed to delivering real change intheworld-this"
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "Software Engineers (All levels!)"
+      },
+      {
+        "index": 31,
+        "role": "body",
+        "text": "Halter"
+      },
+      {
+        "index": 32,
+        "role": "body",
+        "text": "At Halter, we're on a mission to enable farmers and graziers to run the most"
+      },
+      {
+        "index": 33,
+        "role": "body",
+        "text": "productive and sustainable operations.Our customers are using Haltertobreak"
+      },
+      {
+        "index": 34,
+        "role": "body",
+        "text": "People say it looks like magic. Our customers are revolutionizing grazing with"
+      },
+      {
+        "index": 35,
+        "role": "body",
+        "text": "meaningful work. By joining us you'll be solving challenging problems within a"
+      },
+      {
+        "index": 36,
+        "role": "body",
+        "text": "talented teamand a culturebuiltforhighperformance.Ourteamout-think,out-"
+      },
+      {
+        "index": 37,
+        "role": "body",
+        "text": "work and out-care.We're committed to deliveringreal change intheworld-this"
+      },
+      {
+        "index": 38,
+        "role": "body",
+        "text": "isn't easy, and in truth, we love that it's hard."
+      },
+      {
+        "index": 39,
+        "role": "body",
+        "text": "We'rebacked todeliveron a missionthat mattersbyTier1investors including"
+      },
+      {
+        "index": 40,
+        "role": "body",
+        "text": "FoundersFund,BessemerVenturePartners,BOND,DCVC,Blackbird,Promus"
+      },
+      {
+        "index": 41,
+        "role": "body",
+        "text": "Ventures,RocketLab'sPeterBeckandIcehouseventures."
+      },
+      {
+        "index": 42,
+        "role": "body",
+        "text": "To find out more, visit our Linkedln & Instagram."
+      },
+      {
+        "index": 43,
+        "role": "body",
+        "text": "AtHalter,weknowhowmuchfarmerscare-fortheiranimalsand theirpasture."
+      },
+      {
+        "index": 44,
+        "role": "body",
+        "text": "Butthetoolstheyrelyonhaven'tkeptup,andwe'reonamissiontochange that."
+      },
+      {
+        "index": 45,
+        "role": "body",
+        "text": "Halter helps farmersmake smarter decisions-fast. We reckon good pasture"
+      },
+      {
+        "index": 46,
+        "role": "body",
+        "text": "management is thekeytomoreproductive and sustainablefarms.Moregrass."
+      },
+      {
+        "index": 47,
+        "role": "body",
+        "text": "Healthiersoil. Happier animals.And more time back forthe people doing the"
+      },
+      {
+        "index": 48,
+        "role": "body",
+        "text": "work."
+      },
+      {
+        "index": 49,
+        "role": "section_hint",
+        "text": "About the role"
+      },
+      {
+        "index": 50,
+        "role": "body",
+        "text": "We'relookingforstandoutSeniorEngineerswitha deepproduct instinct:people"
+      }
+    ],
+    "requirements": [
+      "2 skills and credentials match your profile"
+    ],
+    "responsibilities": [
+      "About the role"
+    ],
+    "benefits": [],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Apply",
+      "bbox": {
+        "x": 560,
+        "y": 581,
+        "w": 83,
+        "h": 27
+      },
+      "click_point": {
+        "x": 602,
+        "y": 594
+      }
+    },
+    "save_button_state": {
+      "visible": false,
+      "label": null,
+      "bbox": null
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 513,
+        "y": 346,
+        "w": 709,
+        "h": 832
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false
+      },
+      "safe_points": [
+        {
+          "x": 867,
+          "y": 762,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 513,
+      "y": 126,
+      "w": 709,
+      "h": 1052
+    },
+    "detail_scroll_history": [
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260617-085526-309569__scroll__scroll-down.json",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": true
+          }
+        },
+        "missing_evidence": [
+          "responsibilities"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260617-085545-215569__scroll__scroll-down.json",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "missing_evidence": [
+          "responsibilities"
+        ]
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-085524-558972__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-085543-468306__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260617-085602-993099__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 54,
+      "action_count": 46,
+      "texts": [
+        "All Auckland",
+        "SEEK",
+        "Listing time",
+        "Halter.",
+        "SoftwareEngineers(Alllevels!)",
+        "Halter View all jobs",
+        "Auckland CBD,Auckland",
+        "Engineering-Software(Information&CommunicationTechnology)",
+        "?",
+        "Full time",
+        "Posted 1d ago",
+        "ApplyC",
+        "Visitedemployer'sapplicationsiteon16Jun2026",
+        "tA",
+        "Howyou match",
+        "Apply",
+        "① Visited employer's application site on 16 Jun 2026",
+        "How you match ①",
+        "2 skills and credentials match your profile",
+        "√Pipelines",
+        "√AmazonWebServices",
+        "Showall",
+        "AtHalter,we'reonamissiontoenablefarmers andgrazierstorunthemost",
+        "productive and sustainable operations. Our customers are using Halter to break",
+        "freefromthetime-intensiveconstraintsofconventionalpractices.Imagine",
+        "watching5o0cattlestandupandwalkcalmlytowardstheirnextbreak?Noquad",
+        "品",
+        "bikes, no dogs, no fences. Just a group of cattle walking at their own pace.",
+        "People say it looks like magic.Our customers arerevolutionizing grazing with",
+        "Halter. It's changing lives and transforming an industry.People join Halter to do",
+        "meaningful work.By joining us you'll be solving challenging problems within a",
+        "talented team and a culture built for high performance. Our team out-think, out-",
+        "work and out-care.We're committed to delivering real change intheworld-this",
+        "Software Engineers (All levels!)",
+        "Halter",
+        "At Halter, we're on a mission to enable farmers and graziers to run the most",
+        "productive and sustainable operations.Our customers are using Haltertobreak",
+        "People say it looks like magic. Our customers are revolutionizing grazing with",
+        "meaningful work. By joining us you'll be solving challenging problems within a",
+        "talented teamand a culturebuiltforhighperformance.Ourteamout-think,out-",
+        "work and out-care.We're committed to deliveringreal change intheworld-this",
+        "isn't easy, and in truth, we love that it's hard.",
+        "We'rebacked todeliveron a missionthat mattersbyTier1investors including",
+        "FoundersFund,BessemerVenturePartners,BOND,DCVC,Blackbird,Promus",
+        "Ventures,RocketLab'sPeterBeckandIcehouseventures.",
+        "To find out more, visit our Linkedln & Instagram.",
+        "AtHalter,weknowhowmuchfarmerscare-fortheiranimalsand theirpasture.",
+        "Butthetoolstheyrelyonhaven'tkeptup,andwe'reonamissiontochange that.",
+        "Halter helps farmersmake smarter decisions-fast. We reckon good pasture",
+        "management is thekeytomoreproductive and sustainablefarms.Moregrass.",
+        "Healthiersoil. Happier animals.And more time back forthe people doing the",
+        "work.",
+        "About the role",
+        "We'relookingforstandoutSeniorEngineerswitha deepproduct instinct:people"
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

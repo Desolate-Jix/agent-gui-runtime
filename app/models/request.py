@@ -114,15 +114,31 @@ class TypeTextRequest(BaseModel):
     submit: bool = False
     restore_clipboard: bool = True
     dry_run: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ScrollRequest(BaseModel):
     """Request model for scrolling the currently bound window."""
 
+    contract_version: Optional[str] = None
+    goal_id: Optional[str] = None
+    task_chain_id: Optional[str] = None
+    source_trace_path: Optional[str] = None
+    scroll_scope: Literal["window", "page", "container"] = "window"
+    target_pane: Optional[Literal["page", "results_list", "job_detail", "filter_panel", "modal", "dropdown", "unknown"]] = None
+    target_container_id: Optional[str] = None
+    container_bbox: Optional[ROIModel] = None
+    coordinate_window_size: Optional[dict[str, int]] = None
+    target_point_policy: Literal["explicit_point", "safe_interior_center"] = "safe_interior_center"
     direction: Literal["down", "up"] = "down"
     wheel_clicks: int = Field(default=4, ge=1, le=20)
     x: Optional[int] = Field(default=None, ge=0)
     y: Optional[int] = Field(default=None, ge=0)
+    reason: Optional[str] = None
+    missing_evidence: list[str] = Field(default_factory=list)
+    expected_effect: dict[str, Any] = Field(default_factory=dict)
+    scroll_history: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     dry_run: bool = False
     enable_verification: bool = True
 
@@ -168,6 +184,47 @@ class ExecuteRecognitionPlanRequest(BaseModel):
     enable_post_click_verification: bool = True
     max_execution_attempts: int = Field(default=2, ge=1, le=3)
     dry_run: bool = False
+
+
+class AvailableActionsRequest(BaseModel):
+    """Request model for path-graph-assisted Execute action discovery."""
+
+    contract_version: Literal["available_actions_request_v1"] = "available_actions_request_v1"
+    runtime_graph_path: Optional[str] = None
+    runtime_path_graph: dict[str, Any] = Field(default_factory=dict)
+    capture_live: bool = False
+    include_screen_inventory: bool = True
+    include_scroll_containers: bool = True
+    current_state_id: Optional[str] = None
+    screen_inventory: dict[str, Any] = Field(default_factory=dict)
+    scroll_containers: dict[str, Any] | list[dict[str, Any]] | None = None
+    task_context: dict[str, Any] = Field(default_factory=dict)
+    safety: dict[str, Any] = Field(
+        default_factory=lambda: {"forbid_final_submit": True, "allow_apply_entry": False, "allow_safe_fill": False}
+    )
+
+
+class ExecuteStepRequest(BaseModel):
+    """Request model for executing one selected path-graph action step."""
+
+    contract_version: Literal["execute_step_request_v1"] = "execute_step_request_v1"
+    runtime_graph_path: Optional[str] = None
+    runtime_path_graph: dict[str, Any] = Field(default_factory=dict)
+    available_actions_trace_path: Optional[str] = None
+    current_state_id: Optional[str] = None
+    requested_action_id: Optional[str] = None
+    approved_plan_id: Optional[str] = None
+    path_graph_resolution: dict[str, Any] = Field(default_factory=dict)
+    selected_action: dict[str, Any] = Field(default_factory=dict)
+    input_text: Optional[str] = None
+    target_point: dict[str, Any] | None = None
+    clear_existing: Optional[bool] = None
+    submit: Optional[bool] = None
+    safety: dict[str, Any] = Field(
+        default_factory=lambda: {"forbid_final_submit": True, "allow_apply_entry": False, "allow_safe_fill": False}
+    )
+    dry_run: bool = True
+    dispatch_low_level: bool = False
 
 
 class ExecuteConfirmedPointRequest(BaseModel):
