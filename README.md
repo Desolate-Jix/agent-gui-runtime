@@ -594,6 +594,7 @@ node --check app\web_panel\panel.js
 - `AGENT_API_WORKFLOW.md`：Agent 调用 API 的标准流程
 - `API_FIELD_REFERENCE.zh-CN.md`：每个 API 的字段级中文设计参考
 - `PROJECT_STRUCTURE.md`：文件结构、配置、产物位置
+- `docs/PANEL_LEARN_EXECUTE_WORKFLOW.zh-CN.md`：测试面板 Learn / Execute 两套工作区的按钮级操作流程
 - `PROJECT_SUMMARY.md`：项目摘要
 - `CURRENT_STATE.md`：当前状态
 - `NEXT_STEPS.md`：下一步计划
