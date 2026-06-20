@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
-from app.seek.matching import load_candidate_profile, save_suitable_job_record, score_seek_job
+from app.seek.matching import load_candidate_profile, merge_seek_job_identity, save_suitable_job_record, score_seek_job
 
 
 def _card() -> dict:
@@ -65,11 +66,65 @@ def test_profile_match_scores_and_saves_suitable_job(tmp_path) -> None:
 
     assert decision["decision"] == "strong_apply"
     assert decision["score"] >= 0.7
+    assert decision["fit_summary"].startswith("strong_apply with score")
+    assert "matched_skills" in decision["fit_summary"]
+    assert decision["recommended_next_action"] == "open_apply_entry_and_prepare_safe_fields"
     assert any("matched_skills" in item for item in decision["positive_evidence"])
     assert saved_path is not None
     saved = json.loads((tmp_path / "saved" / "seek_job_software_engineer.json").read_text(encoding="utf-8"))
     assert saved["contract_version"] == "saved_seek_job_record_v1"
     assert saved["decision"]["decision"] == "strong_apply"
+
+
+def test_profile_match_normalizes_ai_and_api_ocr_variants() -> None:
+    detail = {
+        **_detail(),
+        "title": "Intermediate Engineer - Al Automation & Integration",
+        "requirements": ["Implement Al-enabled solutions", "Design APl integrations", "React frontend delivery"],
+        "responsibilities": ["Build chatbots and workflow automation with Azure Al services."],
+    }
+
+    decision = score_seek_job(
+        profile={
+            "contract_version": "candidate_profile_v1",
+            "skills": ["AI", "API", "React", "Automation"],
+            "target_roles": ["AI Engineer", "Automation Engineer"],
+            "location_constraints": ["Auckland"],
+            "preferred_work_modes": ["hybrid"],
+        },
+        card={**_card(), "title": "Intermediate Engineer - Al Automation & Integration"},
+        detail=detail,
+    )
+
+    assert decision["decision"] == "strong_apply"
+    assert any("AI" in item and "API" in item for item in decision["positive_evidence"])
+
+
+def test_profile_match_target_role_allows_reordered_role_tokens() -> None:
+    decision = score_seek_job(
+        profile={
+            "contract_version": "candidate_profile_v1",
+            "skills": ["AI", "Automation"],
+            "target_roles": ["AI Engineer", "Automation Engineer"],
+            "location_constraints": ["Auckland"],
+            "preferred_work_modes": ["hybrid"],
+        },
+        card={
+            **_card(),
+            "title": "IntermediateEngineer-AlAutomation&Integration",
+            "location": "Auckland CBD, Auckland (Hybrid)",
+        },
+        detail={
+            **_detail(),
+            "title": "IntermediateEngineer-AlAutomation&Integration",
+            "location": "Auckland CBD, Auckland (Hybrid)",
+            "requirements": ["Build Al automation and integration solutions"],
+            "benefits": ["Hybrid work"],
+        },
+    )
+
+    assert decision["decision"] == "strong_apply"
+    assert any("matched_target_roles" in item for item in decision["positive_evidence"])
 
 
 def test_location_mismatch_can_skip() -> None:
@@ -86,6 +141,27 @@ def test_location_mismatch_can_skip() -> None:
 
     assert decision["decision"] == "skip"
     assert any("location_mismatch" in item for item in decision["negative_evidence"])
+
+
+def test_new_zealand_constraint_accepts_other_nz_cities() -> None:
+    decision = score_seek_job(
+        profile={
+            "contract_version": "candidate_profile_v1",
+            "skills": ["React", "SQL", "Frontend"],
+            "target_roles": ["Software Engineer"],
+            "location_constraints": ["Auckland", "New Zealand"],
+        },
+        card={**_card(), "location": "Christchurch Central, Canterbury"},
+        detail={
+            **_detail(),
+            "location": "Christchurch Central, Canterbury",
+            "requirements": ["React frontend development", "SQL"],
+        },
+    )
+
+    assert any("location_matches: Christchurch Central, Canterbury" in item for item in decision["positive_evidence"])
+    assert not any("location_mismatch" in item for item in decision["negative_evidence"])
+    assert decision["decision"] in {"strong_apply", "maybe_apply"}
 
 
 def test_incomplete_detail_forces_review_even_with_matching_profile(tmp_path) -> None:
@@ -184,3 +260,50 @@ def test_work_rights_or_background_check_terms_require_review() -> None:
     assert decision["decision"] == "need_user_review"
     assert "work_rights_or_background_check_requires_review" in decision["risk_flags"]
     assert any("work_rights_or_background_check_requires_review" in item for item in decision["unknowns"])
+
+
+def test_card_identity_repairs_compact_ocr_title_and_missing_location(tmp_path) -> None:
+    card = {
+        **_card(),
+        "title": "Senior Android Developer",
+        "company": "Fiserv New Zealand Limited",
+        "location": "Auckland CBD, Auckland",
+    }
+    detail = {
+        **_detail(),
+        "job_id": "seek_job_android",
+        "title": "SeniorAndroid Developer",
+        "company": "Fiserv New Zealand Limited",
+        "location": None,
+        "requirements": ["Android development", "React Native", "AI tools"],
+        "evidence": {"texts": ["Android", "React Native", "AI tools"]},
+    }
+
+    decision = score_seek_job(
+        profile={
+            "contract_version": "candidate_profile_v1",
+            "skills": ["Android", "React Native", "AI"],
+            "target_roles": ["Android Developer"],
+            "location_constraints": ["Auckland"],
+        },
+        card=card,
+        detail=detail,
+    )
+    saved_path = save_suitable_job_record(decision=decision, card=card, detail=detail, output_dir=tmp_path / "saved")
+
+    assert decision["title"] == "Senior Android Developer"
+    assert any("location_matches: Auckland CBD, Auckland" in item for item in decision["positive_evidence"])
+    assert saved_path is not None
+    saved = json.loads(Path(saved_path).read_text(encoding="utf-8"))
+    assert saved["detail"]["title"] == "Senior Android Developer"
+    assert saved["detail"]["location"] == "Auckland CBD, Auckland"
+
+
+def test_merge_seek_job_identity_is_reusable_for_apply_entry_goal() -> None:
+    merged = merge_seek_job_identity(
+        {"title": "Senior Android Developer", "company": "Fiserv", "location": "Auckland CBD, Auckland"},
+        {"title": "SeniorAndroid Developer", "company": "Fiserv", "location": None},
+    )
+
+    assert merged["title"] == "Senior Android Developer"
+    assert merged["location"] == "Auckland CBD, Auckland"

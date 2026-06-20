@@ -1,4 +1,5 @@
 from app.seek.application import assess_seek_application_flow_state
+from app.seek.application_artifacts import build_seek_application_flow_artifact
 from app.seek.answer_plan import build_application_answer_plan
 from app.seek.audit import audit_seek_mvp_run
 from app.seek.cover_letter import build_cover_letter_draft
@@ -21,6 +22,7 @@ __all__ = [
     "build_seek_mvp_accuracy_summary",
     "build_seek_mvp_run_report",
     "build_application_answer_plan",
+    "build_seek_application_flow_artifact",
     "build_cover_letter_draft",
     "build_learned_app_profile",
     "build_path_graph_seed",

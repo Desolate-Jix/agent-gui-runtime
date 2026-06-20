@@ -10,6 +10,7 @@ def build_cover_letter_draft(
     detail: dict[str, Any] | None,
     match_decision: dict[str, Any] | None,
     application_flow_state: dict[str, Any] | None = None,
+    allow_maybe_apply: bool = False,
 ) -> dict[str, Any]:
     """Build a truthful draft-only cover letter artifact.
 
@@ -48,7 +49,9 @@ def build_cover_letter_draft(
     if not _profile_is_real_resume(profile_payload):
         return {**base, "blocked_reason": "candidate_profile_is_missing_or_marked_smoke_test"}
 
-    if decision_payload.get("decision") != "strong_apply":
+    decision = str(decision_payload.get("decision") or "")
+    decision_allowed = decision == "strong_apply" or (allow_maybe_apply and decision == "maybe_apply")
+    if not decision_allowed:
         return {
             **base,
             "status": "blocked_decision_not_strong_apply",
@@ -132,7 +135,26 @@ def _job_themes(detail: dict[str, Any]) -> list[str]:
     if not themes:
         evidence = detail.get("evidence") if isinstance(detail.get("evidence"), dict) else {}
         themes.extend(_strings(evidence.get("texts")))
-    return [_clean(item) for item in themes if _clean(item)]
+    cleaned: list[str] = []
+    for item in themes:
+        theme = _job_theme_fragment(item)
+        if theme and theme not in cleaned:
+            cleaned.append(theme)
+    return cleaned
+
+
+def _job_theme_fragment(value: Any) -> str:
+    text = _clean(value).strip(" .")
+    lowered = text.casefold()
+    for prefix in (
+        "the role stood out to me because it aligns with",
+        "role stood out to me because it aligns with",
+        "it aligns with",
+    ):
+        if lowered.startswith(prefix):
+            text = text[len(prefix) :].strip(" .")
+            break
+    return text
 
 
 def _compose_draft(

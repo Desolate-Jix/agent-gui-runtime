@@ -60,6 +60,7 @@ class OpenAppRequest(BaseModel):
     process_name: Optional[str] = None
     title: Optional[str] = None
     bind_after_open: bool = True
+    prefer_new_window: bool = True
     wait_seconds: float = Field(default=1.5, ge=0.0, le=10.0)
 
 

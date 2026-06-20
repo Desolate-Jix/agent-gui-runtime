@@ -1,0 +1,409 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_6162506912de",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "maybe_apply",
+    "score": 0.53,
+    "job_id": "seek_job_6162506912de",
+    "title": "Senior Android Developer",
+    "company": "Fiserv New Zealand Limited",
+    "fit_summary": "maybe_apply with score 0.530. positive: matched_skills: React, AI; location_matches: Auckland CBD, Auckland.",
+    "recommended_next_action": "review_then_optionally_open_apply_entry",
+    "positive_evidence": [
+      "matched_skills: React, AI",
+      "location_matches: Auckland CBD, Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_f2b91747b959",
+    "title": "Senior Android Developer",
+    "company": "Fiserv New Zealand Limited",
+    "location": "Auckland CBD, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": null,
+    "card_bbox": {
+      "x": 632,
+      "y": 529,
+      "w": 475,
+      "h": 239
+    },
+    "click_point": {
+      "x": 869,
+      "y": 648
+    },
+    "source_url": null,
+    "source_card_id": "card_12_hyperlink",
+    "primary_action_id": "action_uia_146_hyperlink",
+    "child_action_ids": [
+      "action_screen_3_senior-android-developer",
+      "action_screen_4_strong-applicant-jobs",
+      "action_uia_144_modify-my-search",
+      "action_uia_145_senior-android-developer",
+      "action_uia_147_this-is-a-featured-job",
+      "action_uia_148_image",
+      "action_uia_149_senior-android-developer"
+    ],
+    "child_page_element_ids": [
+      "page_text_25_senior-android-developer",
+      "page_text_26_fiserv-new-zealand-limited",
+      "page_text_27_fiserv",
+      "page_text_28_be-an-early-applicant",
+      "page_text_29_auckland-cbd-auckland",
+      "page_text_30_featured",
+      "page_text_31_口"
+    ],
+    "evidence": {
+      "texts": [
+        "Senior Android Developer",
+        "Fiserv New Zealand Limited",
+        "fiserv.",
+        "Be an early applicant",
+        "Auckland CBD, Auckland",
+        "Featured",
+        "口",
+        "Senior Android Developer",
+        "Strong applicant jobs",
+        "Modify my search",
+        "Senior Android Developer",
+        "This is a featured job",
+        "image",
+        "Senior Android Developer"
+      ],
+      "source_contract": "screen_inventory_v1"
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_6162506912de",
+    "title": "Senior Android Developer",
+    "company": "Fiserv New Zealand Limited",
+    "location": "Auckland CBD, Auckland",
+    "work_type": null,
+    "classification": "·Support the development of high-quality mobile software within a scrum team",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "Companies"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "Recruiters"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Employer site"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "All Auckland"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "SEEK"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "Listing time"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "SeniorAndroid Developer"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Apply"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Fiserv New Zealand Limited"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "What You'll Do:"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "·Support the development of high-quality mobile software within a scrum team"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "·Contribute to improving code quality through maintaining and enhancing high quality"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "software development standards"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "prototyping of new concepts"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "·Support team members to ensure successful sprint outcomes"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "·Encourage and mentorjunior teammembers to support them in their development"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "·Raising technical, security, delivery and performance risks"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "·Bepart of and help promote our DevOps culture"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "·Identify and implement continuous improvements to the development practice."
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "WhatYou'll Need To Have:"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "·A passion for delivering market leading software products; keeping up to date on the"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "latest technologies and industry trends"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "·Minimum 5-year hands-on software development experience writing Android"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "downloadable mobile applications."
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "·Deep knowledge of Android development and design best practices including Android"
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "Design Standards."
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "·A willingness to expand your technical horizons"
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "·Keenness to work in an agile scrum environment"
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "·Excellent collaboration and communication skills"
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "·Experience working on a large-scale product as part of a large and complex enterprise,"
+      },
+      {
+        "index": 31,
+        "role": "body",
+        "text": "with both new technologies and building on top of legacy systems."
+      },
+      {
+        "index": 32,
+        "role": "body",
+        "text": "Nice to have:"
+      },
+      {
+        "index": 33,
+        "role": "body",
+        "text": "·Working knowledge of React-Native technologies."
+      },
+      {
+        "index": 34,
+        "role": "body",
+        "text": "·Financial/banking sector experience is an advantage."
+      },
+      {
+        "index": 35,
+        "role": "body",
+        "text": "·Experience using Al tools and Al-driven practices to enhance engineering productivity."
+      },
+      {
+        "index": 36,
+        "role": "body",
+        "text": "Perks At Work"
+      },
+      {
+        "index": 37,
+        "role": "body",
+        "text": "·Onsite yoga and cardio"
+      }
+    ],
+    "requirements": [
+      "·Minimum 5-year hands-on software development experience writing Android",
+      "·Excellent collaboration and communication skills",
+      "·Experience working on a large-scale product as part of a large and complex enterprise,",
+      "·Financial/banking sector experience is an advantage.",
+      "·Experience using Al tools and Al-driven practices to enhance engineering productivity."
+    ],
+    "responsibilities": [],
+    "benefits": [],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Apply button",
+      "bbox": {
+        "x": 1300,
+        "y": 520,
+        "w": 100,
+        "h": 50
+      },
+      "click_point": {
+        "x": 1350,
+        "y": 545
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save button",
+      "bbox": {
+        "x": 1420,
+        "y": 520,
+        "w": 40,
+        "h": 50
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 1134,
+        "y": 280,
+        "w": 896,
+        "h": 1104
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false,
+        "content_left": 530,
+        "content_width": 1500
+      },
+      "safe_points": [
+        {
+          "x": 1582,
+          "y": 832,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 1134,
+      "y": 60,
+      "w": 896,
+      "h": 1324
+    },
+    "detail_bottom_reached": false,
+    "detail_scroll_history": [],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260619-192248-657342__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 38,
+      "action_count": 24,
+      "texts": [
+        "Companies",
+        "Recruiters",
+        "Employer site",
+        "All Auckland",
+        "SEEK",
+        "Listing time",
+        "SeniorAndroid Developer",
+        "Apply",
+        "Save",
+        "Fiserv New Zealand Limited",
+        "What You'll Do:",
+        "·Support the development of high-quality mobile software within a scrum team",
+        "·Contribute to improving code quality through maintaining and enhancing high quality",
+        "software development standards",
+        "prototyping of new concepts",
+        "·Support team members to ensure successful sprint outcomes",
+        "·Encourage and mentorjunior teammembers to support them in their development",
+        "·Raising technical, security, delivery and performance risks",
+        "·Bepart of and help promote our DevOps culture",
+        "·Identify and implement continuous improvements to the development practice.",
+        "WhatYou'll Need To Have:",
+        "·A passion for delivering market leading software products; keeping up to date on the",
+        "latest technologies and industry trends",
+        "·Minimum 5-year hands-on software development experience writing Android",
+        "downloadable mobile applications.",
+        "·Deep knowledge of Android development and design best practices including Android",
+        "Design Standards.",
+        "·A willingness to expand your technical horizons",
+        "·Keenness to work in an agile scrum environment",
+        "·Excellent collaboration and communication skills",
+        "·Experience working on a large-scale product as part of a large and complex enterprise,",
+        "with both new technologies and building on top of legacy systems.",
+        "Nice to have:",
+        "·Working knowledge of React-Native technologies.",
+        "·Financial/banking sector experience is an advantage.",
+        "·Experience using Al tools and Al-driven practices to enhance engineering productivity.",
+        "Perks At Work",
+        "·Onsite yoga and cardio"
+      ],
+      "source_contract": "screen_inventory_v1"
+    }
+  }
+}

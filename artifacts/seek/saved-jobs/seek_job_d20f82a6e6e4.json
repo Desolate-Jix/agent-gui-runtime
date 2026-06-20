@@ -1,0 +1,368 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_d20f82a6e6e4",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "maybe_apply",
+    "score": 0.62,
+    "job_id": "seek_job_d20f82a6e6e4",
+    "title": "Linux DevOps Engineer",
+    "company": "Developers/Programmers(Information&CommunicationTechnology)",
+    "positive_evidence": [
+      "matched_skills: AI, API, Automation",
+      "location_matches: All Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_1bbd3a282f7d",
+    "title": "Linux DevOps Engineer",
+    "company": "Grinding Gear Games",
+    "location": "Henderson, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": null,
+    "card_bbox": {
+      "x": 57,
+      "y": 544,
+      "w": 333,
+      "h": 241
+    },
+    "click_point": {
+      "x": 155,
+      "y": 555
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_10",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_39_linux-devops-engineer",
+      "page_text_41_grinding-gear-games",
+      "page_text_43_jobs-at-grinding-gear-games",
+      "page_text_44_henderson-auckland",
+      "page_text_46_flexible-work-hours",
+      "page_text_49_convenience-store-s-range-of-drinks-and",
+      "page_text_50_snacks-a-few-meters-from-your-desk",
+      "page_text_51_catered-meals-offered-every-week-as-part",
+      "page_text_52_of-our-monday-mid-morning-meetings",
+      "page_text_54_we-are-the-creators-of-the-award-winning"
+    ],
+    "evidence": {
+      "texts": [
+        "Linux DevOps Engineer",
+        "Grinding Gear Games",
+        "Jobs at Grinding Gear Games",
+        "Henderson, Auckland",
+        "Flexible work hours",
+        "Convenience store's range of drinks and",
+        "snacks a few meters from your desk",
+        "Catered meals offered every week as part",
+        "of our Monday mid-morning meetings",
+        "We are the creators of the award-winning"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": false,
+        "has_salary": false
+      }
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_d20f82a6e6e4",
+    "title": "Linux DevOps Engineer",
+    "company": "Developers/Programmers(Information&CommunicationTechnology)",
+    "location": "All Auckland",
+    "work_type": "Full time",
+    "classification": "Developers/Programmers(Information&CommunicationTechnology)",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "All Auckland"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "SEEK"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Listing time"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "Linux DevOps Engineer"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "Grinding Gear Games Vview alljobs"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "Henderson, Auckland"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "Developers/Programmers(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Posted14d ago·Medium application volume"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Quick apply"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "1skill orcredentialmatchesyourprofile"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "1 skillor credential matches your profile"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "√APIShowall"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "Weareseeking aLinuxDevOpsEngineertojoinourserver"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "administrationteaminAuckland,NewZealand."
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "Location:Onsite in Henderson,Auckland"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "Relocation assistance (forthe right candidate,if needed)"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "Fulltimeposition-4Ohoursaweek"
+      },
+      {
+        "index": 20,
+        "role": "section_hint",
+        "text": "Responsibilities:"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "As one of our server administrators you will beresponsible for"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "supporting both our online games,Path of Exile and Path of Exile 2, as"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "wellas ourinternalserverinfrastructure.You will alsohelpmaintain"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "and improve the tooling and automationrequired bythesesystems."
+      }
+    ],
+    "requirements": [],
+    "responsibilities": [
+      "Responsibilities:",
+      "As one of our server administrators you will beresponsible for",
+      "wellas ourinternalserverinfrastructure.You will alsohelpmaintain"
+    ],
+    "benefits": [],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply",
+      "bbox": {
+        "x": 489,
+        "y": 686,
+        "w": 102,
+        "h": 26
+      },
+      "click_point": {
+        "x": 540,
+        "y": 699
+      }
+    },
+    "save_button_state": {
+      "visible": false,
+      "label": null,
+      "bbox": null
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 460,
+        "y": 261,
+        "w": 617,
+        "h": 624
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false
+      },
+      "safe_points": [
+        {
+          "x": 768,
+          "y": 573,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 460,
+      "y": 41,
+      "w": 617,
+      "h": 844
+    },
+    "detail_scroll_history": [
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260619-165631-104267__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "learned_app_profile_v1",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": true
+          }
+        },
+        "missing_evidence": [
+          "role_evidence"
+        ]
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260619-165629-455619__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260619-165638-836676__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 32,
+      "action_count": 0,
+      "texts": [
+        "G",
+        "3",
+        "聊天",
+        "All Auckland",
+        "SEEK",
+        "Listing time",
+        "Linux DevOps Engineer",
+        "Grinding Gear Games Vview alljobs",
+        "Henderson, Auckland",
+        "Developers/Programmers(Information&CommunicationTechnology)",
+        "Full time",
+        "Posted14d ago·Medium application volume",
+        "Quick apply",
+        "Save",
+        "tA",
+        "How you match ①",
+        "1skill orcredentialmatchesyourprofile",
+        "丨",
+        "。",
+        "×",
+        "1 skillor credential matches your profile",
+        "√APIShowall",
+        "Weareseeking aLinuxDevOpsEngineertojoinourserver",
+        "administrationteaminAuckland,NewZealand.",
+        "Location:Onsite in Henderson,Auckland",
+        "Relocation assistance (forthe right candidate,if needed)",
+        "Fulltimeposition-4Ohoursaweek",
+        "Responsibilities:",
+        "As one of our server administrators you will beresponsible for",
+        "supporting both our online games,Path of Exile and Path of Exile 2, as",
+        "wellas ourinternalserverinfrastructure.You will alsohelpmaintain",
+        "and improve the tooling and automationrequired bythesesystems."
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

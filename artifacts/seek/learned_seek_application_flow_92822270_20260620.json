@@ -1,0 +1,414 @@
+{
+  "contract_version": "seek_application_flow_artifact_v1",
+  "generated_at": "2026-06-20T02:36:12.517269+00:00",
+  "artifact_id": "seek_station_internal_application_flow_v1",
+  "app_id": "seek",
+  "page_type": "seek_station_internal_application",
+  "milestone": {
+    "status": "reviewed_stop_before_submit",
+    "artifact_is_authorization": false,
+    "safe_fill_primary_path_status": "needs_hardening_before_replay"
+  },
+  "source": {
+    "record_path": "logs\\smoke\\seek_apply_live_92822270_debug_20260620_selected_value\\application_fill_record.json",
+    "audit_path": "logs\\smoke\\seek_apply_live_92822270_debug_20260620_selected_value\\final_review_audit.json",
+    "application_fill_record_path": "logs\\smoke\\seek_apply_live_92822270_debug_20260620_selected_value\\application_fill_record.json",
+    "final_review_audit_path": "logs\\smoke\\seek_apply_live_92822270_debug_20260620_selected_value\\final_review_audit.json",
+    "record_contract": "seek_application_fill_record_v1",
+    "audit_contract": "seek_application_final_review_audit_v1",
+    "audit_decision": "pass_stopped_before_final_submit",
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-102819-600650__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-102821-538116__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-102821-903117__type-text__type-text.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-102833-300644__scroll__scroll-down.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-102836-607330__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-102838-544144__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-104231-006245__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141143-017691__execute-confirmed-point__seek-employer-question-q2-yes.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141143-300692__execute-confirmed-point__seek-employer-question-q2-yes.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141143-303711__execute-confirmed-point__seek-employer-question-q3-yes.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141143-585688__execute-confirmed-point__seek-employer-question-q3-yes.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141143-587688__execute-confirmed-point__seek-employer-question-q4-text-field.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141143-869297__execute-confirmed-point__seek-employer-question-q4-text-field.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141144-212677__type-text__type-text.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141145-983953__scroll__scroll-down.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141149-315364__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141151-274278__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141239-710362__scroll__scroll-down.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141243-147779__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141244-918458__scroll__scroll-down.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141248-395042__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141250-364900__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-142417-890092__execute-confirmed-point__seek-review-cover-letter-edit.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-142544-415569__type-text__type-text.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-142626-056911__execute-confirmed-point__seek-cover-letter-modal-save.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-102207-555900__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-102357-234594__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-102522-664738__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-102847-922044__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-102831-561099__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-102819-554144__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-102836-556330__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-102816-658404__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-103758-578792__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-104228-058453__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-104230-959738__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-140909-164225__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-141200-851921__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-141149-251364__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-141143-003664__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-141259-497012__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-141248-331042__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-141237-950930__observe-screen__edge.json"
+    ],
+    "screenshot_paths": [
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-microsoft-edge__capture__full-window__20260620-102159-663434.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-microsoft-edge__capture__full-window__20260620-102208-192903.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-microsoft-edge__capture__full-window__20260620-102350-892130.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-microsoft-edge__capture__full-window__20260620-102357-875696.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-microsoft-edge__capture__full-window__20260620-102516-303520.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-microsoft-edge__capture__full-window__20260620-102523-301391.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-microsoft-edge__capture__full-window__20260620-102808-625326.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\answer-employer-questions-seek-microsoft-edge__capture__full-window__20260620-102848-554244.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\answer-employer-questions-seek-microsoft-edge__capture__full-window__20260620-103751-927657.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\answer-employer-questions-seek-microsoft-edge__capture__full-window__20260620-103759-219615.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\answer-employer-questions-seek-microsoft-edge__capture__full-window__20260620-104221-832603.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\answer-employer-questions-seek-microsoft-edge__capture__full-window__20260620-104231-657073.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\answer-employer-questions-seek-microsoft-edge__capture__full-window__20260620-140900-508014.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\answer-employer-questions-seek-microsoft-edge__capture__full-window__20260620-140909-809899.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\answer-employer-questions-seek-microsoft-edge__capture__full-window__20260620-141135-014388.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\update-seek-profile-seek-microsoft-edge__capture__full-window__20260620-141201-496953.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\update-seek-profile-seek-microsoft-edge__capture__full-window__20260620-141229-757020.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\review-and-submit-seek-microsoft-edge__capture__full-window__20260620-141300-142412.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\review-and-submit-seek-microsoft-edge__capture__full-window__20260620-142340-270560.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\review-and-submit-seek-microsoft-edge__capture__full-window__20260620-142545-882932.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\review-and-submit-seek-microsoft-edge__capture__full-window__20260620-142627-735425.png"
+    ],
+    "job_id": "seek_job_92822270",
+    "job_title": "Software Engineer (Business Systems)",
+    "company": "Sourced | IT Recruitment Specialists",
+    "reached_review_and_submit": true,
+    "final_submissions": 0
+  },
+  "job": {
+    "job_id": "seek_job_92822270",
+    "title": "Software Engineer (Business Systems)",
+    "company": "Sourced | IT Recruitment Specialists",
+    "apply_url": "https://nz.seek.com/job/92822270/apply/review?sol=4c60151f44af2b8a6ef9ea7b85dfee6678c0986e"
+  },
+  "state_sequence": [
+    {
+      "state_id": "choose_documents",
+      "url_pattern": "/apply",
+      "purpose": "keep default resume and write or replace cover letter",
+      "required_evidence": [
+        "resume_selected",
+        "cover_letter_written"
+      ],
+      "next_action": "continue_to_employer_questions"
+    },
+    {
+      "state_id": "answer_employer_questions",
+      "url_pattern": "/apply/role-requirements",
+      "purpose": "answer evidence-backed employer questions",
+      "required_evidence": [
+        "all_visible_questions_answered"
+      ],
+      "question_count": 4,
+      "next_action": "continue_to_update_seek_profile"
+    },
+    {
+      "state_id": "update_seek_profile",
+      "url_pattern": "/apply/profile",
+      "purpose": "review SEEK profile without persistent mutation",
+      "required_evidence": [
+        "no_add_or_edit_profile_actions_clicked"
+      ],
+      "next_action": "continue_to_review"
+    },
+    {
+      "state_id": "review_and_submit",
+      "url_pattern": "/apply/review",
+      "purpose": "final human review boundary",
+      "required_evidence": [
+        "final_submit_visible_blocker"
+      ],
+      "next_action": "stop_before_submit"
+    }
+  ],
+  "states": [
+    {
+      "state_id": "seek_apply:choose_documents",
+      "state_type": "form_step",
+      "terminal": false,
+      "purpose": "keep default documents and prepare cover letter entry"
+    },
+    {
+      "state_id": "seek_apply:cover_letter",
+      "state_type": "form_step",
+      "terminal": false,
+      "purpose": "fill a job-specific cover letter with safe-fill verification"
+    },
+    {
+      "state_id": "seek_apply:answer_employer_questions",
+      "state_type": "form_step",
+      "terminal": false,
+      "purpose": "answer employer questions from candidate profile and reviewed evidence"
+    },
+    {
+      "state_id": "seek_apply:update_seek_profile",
+      "state_type": "form_step",
+      "terminal": false,
+      "purpose": "continue without persistent SEEK Profile mutation"
+    },
+    {
+      "state_id": "seek_apply:review_and_submit",
+      "state_type": "review_boundary",
+      "terminal": false,
+      "purpose": "review filled application before human-approved final submit"
+    },
+    {
+      "state_id": "seek_apply:final_submit_blocked",
+      "state_type": "safe_terminal",
+      "terminal": true,
+      "purpose": "correct stop state before final submission"
+    },
+    {
+      "state_id": "seek_apply:third_party_ats_deferred",
+      "state_type": "deferred_terminal",
+      "terminal": true,
+      "purpose": "defer external ATS applications for later dedicated learning"
+    },
+    {
+      "state_id": "seek_apply:blocked_upload_or_login",
+      "state_type": "blocked_terminal",
+      "terminal": true,
+      "purpose": "stop when login, upload, captcha, or unsafe required fields appear"
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "seek_apply:keep_default_documents",
+      "from_state": "seek_apply:choose_documents",
+      "to_state": "seek_apply:cover_letter",
+      "action_template_id": "continue_keep_default_resume",
+      "requires": [
+        "default_resume_visible",
+        "no_resume_replacement"
+      ]
+    },
+    {
+      "transition_id": "seek_apply:fill_cover_letter",
+      "from_state": "seek_apply:cover_letter",
+      "to_state": "seek_apply:answer_employer_questions",
+      "action_template_id": "fill_cover_letter_and_continue",
+      "requires": [
+        "safe_fill_focus_verified",
+        "post_fill_value_verified",
+        "submit_false"
+      ]
+    },
+    {
+      "transition_id": "seek_apply:answer_questions",
+      "from_state": "seek_apply:answer_employer_questions",
+      "to_state": "seek_apply:update_seek_profile",
+      "action_template_id": "answer_employer_questions_and_continue",
+      "requires": [
+        "answers_have_evidence_source",
+        "all_visible_questions_answered"
+      ]
+    },
+    {
+      "transition_id": "seek_apply:skip_profile_update",
+      "from_state": "seek_apply:update_seek_profile",
+      "to_state": "seek_apply:review_and_submit",
+      "action_template_id": "continue_without_persistent_profile_update",
+      "requires": [
+        "no_add_or_edit_profile_actions_clicked",
+        "persistent_profile_updates_zero"
+      ]
+    },
+    {
+      "transition_id": "seek_apply:block_final_submit",
+      "from_state": "seek_apply:review_and_submit",
+      "to_state": "seek_apply:final_submit_blocked",
+      "action_template_id": "stop_before_final_submit",
+      "requires": [
+        "final_submit_visible",
+        "final_submissions_zero"
+      ]
+    }
+  ],
+  "action_templates": [
+    {
+      "action_id": "write_cover_letter",
+      "kind": "input",
+      "low_level_action_type": "type_text",
+      "state_id": "choose_documents",
+      "value_source": "cover_letter_draft_v1.draft",
+      "submit": false,
+      "requires_trace": true
+    },
+    {
+      "action_id": "answer_employer_questions",
+      "kind": "input_or_select",
+      "state_id": "answer_employer_questions",
+      "question_count": 4,
+      "value_source": "candidate_profile_v1 + reviewed evidence",
+      "requires_evidence_source": true
+    },
+    {
+      "action_id": "continue_without_profile_mutation",
+      "kind": "click",
+      "low_level_action_type": "execute_confirmed_point_or_recognition_plan",
+      "state_id": "update_seek_profile",
+      "forbidden_targets": [
+        "Add role",
+        "Add education",
+        "Add skills",
+        "Edit",
+        "Submit application"
+      ]
+    },
+    {
+      "action_id": "stop_before_final_submit",
+      "kind": "guard",
+      "state_id": "review_and_submit",
+      "forbidden_targets": [
+        "Submit application",
+        "Send application",
+        "Complete application"
+      ]
+    }
+  ],
+  "verification_rules": [
+    {
+      "rule_id": "resume_kept",
+      "check": "resume field exists and no resume replacement action was clicked"
+    },
+    {
+      "rule_id": "cover_letter_filled",
+      "check": "cover letter body exists or review page says a cover letter was written"
+    },
+    {
+      "rule_id": "questions_answered",
+      "check": "answered count equals employer_question_total"
+    },
+    {
+      "rule_id": "profile_not_mutated",
+      "check": "persistent_profile_updates == 0"
+    },
+    {
+      "rule_id": "final_review_boundary",
+      "check": "current_step == review_and_submit and final_submit_visible_blocker.blocked == true"
+    },
+    {
+      "rule_id": "no_final_submit",
+      "check": "final_submissions == 0 and submit_clicks == 0"
+    }
+  ],
+  "safety_policy": {
+    "contract_version": "seek_application_safety_policy_v1",
+    "artifact_is_authorization": false,
+    "final_submit_forbidden": true,
+    "external_apply_deferred": true,
+    "default_resume_policy": "keep_seek_default_resume",
+    "seek_profile_mutation_policy": "forbidden_without_explicit_user_approval",
+    "profile_suggestion_policy": "not_shown",
+    "final_submissions": 0,
+    "submit_clicks": 0,
+    "audit_decision": "pass_stopped_before_final_submit"
+  },
+  "field_fill_policy": {
+    "contract_version": "seek_application_field_fill_policy_v1",
+    "safe_fill_required_for_future_replay": true,
+    "direct_type_text_is_milestone_evidence_only": true,
+    "field_focus_required": true,
+    "post_fill_value_verification_required": true,
+    "submit_during_fill_forbidden": true,
+    "known_issues_from_run": [
+      "Earlier Continue targeting selected a right-edge floating browser/plugin widget; the runner now rejects right-edge/header/bottom-edge Continue points before execution."
+    ]
+  },
+  "filled_content_summary": {
+    "resume": "WENQING JI.pdf (SEEK default/selected resume)",
+    "cover_letter_length": 1234,
+    "employer_question_count": 4,
+    "seek_profile_mutation": "none; Update SEEK Profile step was continued without pressing Add/Edit controls"
+  },
+  "evidence": {
+    "screenshots": [
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-microsoft-edge__capture__full-window__20260620-102159-663434.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-microsoft-edge__capture__full-window__20260620-102208-192903.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-microsoft-edge__capture__full-window__20260620-102350-892130.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-microsoft-edge__capture__full-window__20260620-102357-875696.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-microsoft-edge__capture__full-window__20260620-102516-303520.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-microsoft-edge__capture__full-window__20260620-102523-301391.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-microsoft-edge__capture__full-window__20260620-102808-625326.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\answer-employer-questions-seek-microsoft-edge__capture__full-window__20260620-102848-554244.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\answer-employer-questions-seek-microsoft-edge__capture__full-window__20260620-103751-927657.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\answer-employer-questions-seek-microsoft-edge__capture__full-window__20260620-103759-219615.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\answer-employer-questions-seek-microsoft-edge__capture__full-window__20260620-104221-832603.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\answer-employer-questions-seek-microsoft-edge__capture__full-window__20260620-104231-657073.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\answer-employer-questions-seek-microsoft-edge__capture__full-window__20260620-140900-508014.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\answer-employer-questions-seek-microsoft-edge__capture__full-window__20260620-140909-809899.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\answer-employer-questions-seek-microsoft-edge__capture__full-window__20260620-141135-014388.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\update-seek-profile-seek-microsoft-edge__capture__full-window__20260620-141201-496953.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\update-seek-profile-seek-microsoft-edge__capture__full-window__20260620-141229-757020.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\review-and-submit-seek-microsoft-edge__capture__full-window__20260620-141300-142412.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\review-and-submit-seek-microsoft-edge__capture__full-window__20260620-142340-270560.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\review-and-submit-seek-microsoft-edge__capture__full-window__20260620-142545-882932.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\review-and-submit-seek-microsoft-edge__capture__full-window__20260620-142627-735425.png"
+    ],
+    "action_traces": [
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-102819-600650__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-102821-538116__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-102821-903117__type-text__type-text.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-102833-300644__scroll__scroll-down.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-102836-607330__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-102838-544144__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-104231-006245__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141143-017691__execute-confirmed-point__seek-employer-question-q2-yes.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141143-300692__execute-confirmed-point__seek-employer-question-q2-yes.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141143-303711__execute-confirmed-point__seek-employer-question-q3-yes.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141143-585688__execute-confirmed-point__seek-employer-question-q3-yes.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141143-587688__execute-confirmed-point__seek-employer-question-q4-text-field.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141143-869297__execute-confirmed-point__seek-employer-question-q4-text-field.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141144-212677__type-text__type-text.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141145-983953__scroll__scroll-down.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141149-315364__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141151-274278__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141239-710362__scroll__scroll-down.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141243-147779__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141244-918458__scroll__scroll-down.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141248-395042__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-141250-364900__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-142417-890092__execute-confirmed-point__seek-review-cover-letter-edit.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-142544-415569__type-text__type-text.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-142626-056911__execute-confirmed-point__seek-cover-letter-modal-save.json"
+    ],
+    "vision_traces": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-102207-555900__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-102357-234594__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-102522-664738__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-102847-922044__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-102831-561099__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-102819-554144__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-102836-556330__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-102816-658404__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-103758-578792__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-104228-058453__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-104230-959738__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-140909-164225__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-141200-851921__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-141149-251364__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-141143-003664__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-141259-497012__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-141248-331042__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-141237-950930__observe-screen__edge.json"
+    ],
+    "review_before_submit_screenshot": "D:\\agent-gui-runtime\\artifacts\\screenshots\\review-and-submit-seek-microsoft-edge__capture__full-window__20260620-142627-735425.png",
+    "cover_letter_type_text_trace": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-142544-415569__type-text__type-text.json"
+  }
+}

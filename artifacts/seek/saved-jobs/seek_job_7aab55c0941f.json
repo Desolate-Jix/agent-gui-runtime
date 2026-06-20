@@ -8,6 +8,8 @@
     "job_id": "seek_job_7aab55c0941f",
     "title": "Software Engineer (Test Systems)",
     "company": "Quantifi Photonics",
+    "fit_summary": "strong_apply with score 0.730. positive: matched_skills: C#, photonics; matched_target_roles: Software Engineer; location_matches: Rosedale, Auckland.",
+    "recommended_next_action": "open_apply_entry_and_prepare_safe_fields",
     "positive_evidence": [
       "matched_skills: C#, photonics",
       "matched_target_roles: Software Engineer",
@@ -140,10 +142,10 @@
       "scroll_scope": "container",
       "axis": "vertical",
       "bbox": {
-        "x": 496,
-        "y": 290,
-        "w": 680,
-        "h": 694
+        "x": 484,
+        "y": 200,
+        "w": 700,
+        "h": 784
       },
       "can_scroll_up": true,
       "can_scroll_down": true,
@@ -154,22 +156,25 @@
       "evidence": {
         "layout": "left_results_right_detail",
         "role_hint": "right job detail pane",
-        "title_contains_seek": false
+        "title_contains_seek": false,
+        "content_left": 16,
+        "content_width": 1168
       },
       "safe_points": [
         {
-          "x": 836,
-          "y": 637,
+          "x": 834,
+          "y": 592,
           "reason": "inside_job_detail_body"
         }
       ]
     },
     "detail_read_bbox": {
-      "x": 496,
-      "y": 70,
-      "w": 680,
-      "h": 914
+      "x": 484,
+      "y": 0,
+      "w": 700,
+      "h": 984
     },
+    "detail_bottom_reached": true,
     "detail_scroll_history": [],
     "trace_paths": [
       "logs/traces/vision/detail-complete.json"

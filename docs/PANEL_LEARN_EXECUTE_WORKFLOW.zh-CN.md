@@ -81,6 +81,27 @@
 
 这个页面回答：“学习产物里学到了什么？”
 
+### 1.3.1 SEEK 申请证据检查
+
+入口仍在 `学习产物回放` 页面里。
+
+按钮路径：
+
+1. 确认 `Application fill record path` 指向 `logs/smoke/seek_apply_live_92822270_20260620_b/application_fill_record.json`，或换成当前测试 run 的 `application_fill_record.json`。
+2. 确认 `Final review audit path` 指向对应的 `final_review_audit.json`。
+3. 确认 `Application flow artifact path` 指向对应的 `seek_application_flow_artifact_v1`，例如 `artifacts/seek/learned_seek_application_flow_92822270_20260620.json`。
+4. 点击 `加载申请证据`。
+
+期望响应：
+
+- API 响应 `success: true`。
+- 响应合同为 `seek_application_evidence_panel_load_v1`。
+- 摘要显示 record/audit/artifact 路径、岗位、状态、雇主问题数量、求职信长度、截图数量、action trace 数量、vision trace 数量。
+- 当 `audit_decision=pass_stopped_before_final_submit`、`artifact_is_authorization=false`、`final_submit_forbidden=true`、`final_submissions=0` 同时成立时，状态显示 `safe review boundary`。
+- 填写字段表格展示默认 resume、cover letter 和每个 employer question 的填写值/证据；如果 employer question 是 `0/0`，这是显式合法状态，不要补造答案。
+
+这个页面回答：“这次站内申请到底填了什么？有没有真的停在最终提交前？”
+
 ### 1.4 路径图安全验证
 
 入口 A：

@@ -15,6 +15,7 @@ from app.vision.schemas import BBox
 def _candidate(
     *,
     candidate_id: str = "candidate_element_start",
+    label: str = "Start detection",
     score: float = 0.8,
     text_similarity: float = 1.0,
     allowed: bool = True,
@@ -25,11 +26,11 @@ def _candidate(
 ) -> RecognitionCandidate:
     element = PageElement(
         element_id="element_start",
-        label="Start detection",
+        label=label,
         role="button",
         interaction_type="click",
-        description="Start detection button",
-        text="Start detection",
+        description=f"{label} button",
+        text=label,
         bbox=BBox(x=100, y=80, w=140, h=80),
         semantic_bbox=BBox(x=100, y=80, w=140, h=80),
         click_point={"x": 170, "y": 120},
@@ -127,13 +128,44 @@ def test_pre_click_decision_rejects_candidate_that_matches_local_ocr_but_not_goa
     candidate = _candidate(text_similarity=0.4)
 
     result = decide_pre_click(
-        goal="click start detection",
+        goal="click settings",
         candidates=_rank_result(candidate),
         grounding=_grounding(matched_text="Start detection"),
     )
 
     assert result.allowed is False
     assert "candidate_goal_text_mismatch" in result.candidate_decisions[0].reasons
+
+
+def test_pre_click_decision_allows_short_label_when_goal_mentions_it_in_long_instruction() -> None:
+    candidate = _candidate(label="Continue", text_similarity=0.35)
+
+    result = decide_pre_click(
+        goal=(
+            "Click only the visible SEEK application form Continue or Save and continue button to move to the next "
+            "application step. Do not click Review and submit, Submit, Send application, or Complete application."
+        ),
+        candidates=_rank_result(candidate),
+        grounding=_grounding(matched_text="Continue"),
+    )
+
+    assert result.allowed is True
+    assert "goal_explicitly_mentions_candidate_label" in result.candidate_decisions[0].reasons
+    assert "candidate_goal_text_mismatch" not in result.candidate_decisions[0].reasons
+
+
+def test_pre_click_decision_does_not_treat_negated_label_as_positive_goal_match() -> None:
+    candidate = _candidate(label="Submit", text_similarity=0.35)
+
+    result = decide_pre_click(
+        goal="Click Continue to move to the next step. Do not click Submit.",
+        candidates=_rank_result(candidate),
+        grounding=_grounding(matched_text="Submit"),
+    )
+
+    assert result.allowed is False
+    assert "candidate_goal_text_mismatch" in result.candidate_decisions[0].reasons
+    assert "goal_explicitly_mentions_candidate_label" not in result.candidate_decisions[0].reasons
 
 
 def test_pre_click_decision_rejects_refined_point_outside_candidate_bbox() -> None:

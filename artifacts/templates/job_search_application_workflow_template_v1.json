@@ -1,0 +1,366 @@
+{
+  "contract_version": "path_graph_template_v1",
+  "template_version": "job_search_application_workflow_template_v1",
+  "template_id": "template:job_search_application_workflow",
+  "template_type": "nonfinal_job_search_and_application_workflow",
+  "status": "candidate_generic",
+  "artifact_is_authorization": false,
+  "generalization_provenance": {
+    "source_app": "seek",
+    "source_samples": [
+      "seek:job:92822270",
+      "seek:homepage_application_debug_20260620",
+      "seek:homepage_application_debug_20260620_next"
+    ],
+    "source_artifacts": [
+      "artifacts/seek/learned_seek_mvp_from_5job_smoke_20260617.json",
+      "artifacts/seek/runtime_path_graph_seek_mvp_20260617.json",
+      "artifacts/seek/learned_seek_application_flow_92822270_20260620.json",
+      "logs/smoke/seek_apply_live_92822270_debug_20260620_selected_value/application_fill_record.json",
+      "logs/smoke/seek_apply_live_92822270_debug_20260620_selected_value/final_review_audit.json"
+    ],
+    "abstracted_from_site_specific_runner": true,
+    "validated_on": [
+      {
+        "target": "seek",
+        "status": "pass",
+        "evidence": "logs/smoke/learn_execute_mvp_checkpoint_92822270_20260620.json"
+      },
+      {
+        "target": "local_non_seek_job_board_fixture",
+        "status": "pending"
+      }
+    ]
+  },
+  "workflow_inputs": {
+    "contract_version": "job_search_workflow_request_v1",
+    "candidate_profile": "candidate_profile_v1",
+    "cv_profile": "cv_profile_v1",
+    "job_search_policy": "job_search_policy_v1",
+    "nonfinal_application_policy": "nonfinal_application_policy_v1",
+    "source_surface": {
+      "app_id": "",
+      "window_binding_required": true,
+      "start_url": "",
+      "target_window_policy": {
+        "allowed_targets": [
+          "external_browser",
+          "native_windows_app"
+        ],
+        "forbidden_targets": [
+          "codex_in_app_browser"
+        ],
+        "codex_in_app_browser_role": "chatgpt_consultation_only"
+      }
+    }
+  },
+  "regions": [
+    {
+      "region_id": "job_results_list",
+      "role": "repeated_job_list_or_cards",
+      "required": true,
+      "evidence_required": [
+        "visible_job_card_bbox",
+        "card_title_or_role_text"
+      ]
+    },
+    {
+      "region_id": "job_detail",
+      "role": "job_detail_pane_or_page",
+      "required": true,
+      "evidence_required": [
+        "detail_title",
+        "company",
+        "location_or_work_arrangement"
+      ]
+    },
+    {
+      "region_id": "application_entry",
+      "role": "apply_or_quick_apply_entry",
+      "required": false
+    },
+    {
+      "region_id": "internal_application_form",
+      "role": "same_site_internal_application_form",
+      "required": false
+    },
+    {
+      "region_id": "external_ats",
+      "role": "external_or_unsupported_application_surface",
+      "required": false
+    }
+  ],
+  "states": [
+    {
+      "state_id": "job_search:results_list",
+      "role": "visible_job_results"
+    },
+    {
+      "state_id": "job_search:job_card_selected",
+      "role": "one_job_card_opened_or_selected"
+    },
+    {
+      "state_id": "job_search:detail_opened",
+      "role": "job_detail_header_visible"
+    },
+    {
+      "state_id": "job_search:detail_read_complete",
+      "role": "job_detail_read_until_bounded"
+    },
+    {
+      "state_id": "job_search:screening_decision_ready",
+      "role": "candidate_profile_match_decision_ready"
+    },
+    {
+      "state_id": "job_search:application_entry_ready",
+      "role": "safe_nonfinal_application_entry_ready"
+    },
+    {
+      "state_id": "job_search:internal_application_flow",
+      "role": "same_site_nonfinal_application_flow"
+    },
+    {
+      "state_id": "job_search:review_before_submit",
+      "role": "review_page_before_final_submit"
+    },
+    {
+      "state_id": "job_search:final_submit_blocked",
+      "role": "hard_stop_final_submit_forbidden"
+    },
+    {
+      "state_id": "job_search:external_ats_deferred",
+      "role": "external_site_or_unsupported_apply_deferred"
+    },
+    {
+      "state_id": "job_search:needs_user_review",
+      "role": "human_review_required"
+    },
+    {
+      "state_id": "job_search:skipped",
+      "role": "job_rejected_or_not_enough_fit"
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "job_search:select_job_card",
+      "from": "job_search:results_list",
+      "to": "job_search:job_card_selected",
+      "action_template_ref": "job_search:open_job_record_from_list",
+      "skill_ref": "skill:open_record_from_list_or_card",
+      "requires": [
+        "fresh_screenshot",
+        "visible_job_card_bbox",
+        "pre_click_decision_v1"
+      ]
+    },
+    {
+      "transition_id": "job_search:read_detail",
+      "from": "job_search:job_card_selected",
+      "to": "job_search:detail_read_complete",
+      "action_template_ref": "job_search:read_job_detail_until_complete",
+      "skill_ref": "skill:read_fixed_detail_pane_until_complete",
+      "requires": [
+        "job_detail_container",
+        "scroll_effect_validation_v1",
+        "no_progress_stop"
+      ]
+    },
+    {
+      "transition_id": "job_search:screen_job",
+      "from": "job_search:detail_read_complete",
+      "to": "job_search:screening_decision_ready",
+      "action_template_ref": "job_search:screen_job_against_profile",
+      "skill_ref": "skill:screen_job_against_candidate_profile",
+      "requires": [
+        "candidate_profile_v1",
+        "job_record_v1"
+      ]
+    },
+    {
+      "transition_id": "job_search:skip_job",
+      "from": "job_search:screening_decision_ready",
+      "to": "job_search:skipped",
+      "conditions": [
+        "screening_decision in ['skip', 'needs_review']",
+        "screening_decision == 'maybe_apply' and user_approval_missing"
+      ]
+    },
+    {
+      "transition_id": "job_search:enter_internal_application",
+      "from": "job_search:screening_decision_ready",
+      "to": "job_search:internal_application_flow",
+      "action_template_ref": "job_search:enter_nonfinal_application_flow",
+      "skill_ref": "skill:enter_nonfinal_application_flow",
+      "conditions": [
+        "screening_decision == 'strong_apply'",
+        "application_surface == 'same_site_internal'",
+        "entry_is_final_submit == false"
+      ],
+      "requires": [
+        "pre_apply_detail_verification_v1",
+        "final_submit_guard_v1"
+      ]
+    },
+    {
+      "transition_id": "job_search:defer_external_ats",
+      "from": "job_search:screening_decision_ready",
+      "to": "job_search:external_ats_deferred",
+      "conditions": [
+        "application_surface == 'external_ats'"
+      ]
+    },
+    {
+      "transition_id": "job_search:delegate_internal_form",
+      "from": "job_search:internal_application_flow",
+      "to": "job_search:review_before_submit",
+      "child_template_ref": "multi_step_form_review_template_v1"
+    },
+    {
+      "transition_id": "job_search:block_final_submit",
+      "from": "job_search:review_before_submit",
+      "to": "job_search:final_submit_blocked",
+      "skill_refs": [
+        "skill:block_final_submit",
+        "skill:review_before_submit_reconciliation"
+      ],
+      "requires": [
+        "review_reconciliation_v1",
+        "submit_clicks == 0",
+        "final_submissions == 0"
+      ]
+    }
+  ],
+  "action_templates": [
+    {
+      "action_id": "job_search:open_job_record_from_list",
+      "kind": "click",
+      "low_level_action_type": "click",
+      "description": "Open one visible job/list record after card bbox and identity evidence are verified.",
+      "coordinate_policy": "use_current_card_bbox_or_learned_seed_only_after_pre_click_gate",
+      "post_action_verification": [
+        "detail_title_matches_card_title_or_reasonable_alias",
+        "company_or_location_evidence_matches"
+      ],
+      "artifact_is_authorization": false
+    },
+    {
+      "action_id": "job_search:read_job_detail_until_complete",
+      "kind": "read",
+      "low_level_action_type": "scroll",
+      "description": "Read a fixed detail pane or detail page until content stops changing or required sections are complete.",
+      "scroll_policy": {
+        "target_scope": "job_detail",
+        "adaptive_scroll_clicks": [
+          4,
+          8,
+          12
+        ],
+        "stop_when_repeated_fingerprint_count": 2,
+        "wrong_scope_scroll_forbidden": true
+      }
+    },
+    {
+      "action_id": "job_search:screen_job_against_profile",
+      "kind": "read_decide",
+      "low_level_action_type": "none",
+      "description": "Compare job evidence with candidate profile and produce a bounded decision.",
+      "allowed_decisions": [
+        "strong_apply",
+        "maybe_apply",
+        "skip",
+        "needs_review"
+      ]
+    },
+    {
+      "action_id": "job_search:enter_nonfinal_application_flow",
+      "kind": "click",
+      "low_level_action_type": "click",
+      "allowed_labels": [
+        "Apply",
+        "Quick Apply",
+        "Apply now"
+      ],
+      "forbidden_labels": [
+        "Submit",
+        "Submit application",
+        "Send application",
+        "Complete application",
+        "Purchase",
+        "Pay"
+      ],
+      "requires": [
+        "strong_apply",
+        "same_site_internal_application",
+        "final_submit_guard_v1.allowed == true"
+      ],
+      "artifact_is_authorization": false
+    }
+  ],
+  "child_templates": [
+    {
+      "template_ref": "list_detail_path_pattern_v1",
+      "role": "job_discovery_and_detail_reading"
+    },
+    {
+      "template_ref": "multi_step_form_review_template_v1",
+      "role": "same_site_internal_application_form"
+    }
+  ],
+  "learned_skill_refs": [
+    "skill:record_job_and_company_snapshot",
+    "skill:open_record_from_list_or_card",
+    "skill:read_fixed_detail_pane_until_complete",
+    "skill:screen_job_against_candidate_profile",
+    "skill:enter_nonfinal_application_flow",
+    "skill:answer_question_group",
+    "skill:safe_fill_long_text_field",
+    "skill:select_local_option_by_question_proximity",
+    "skill:review_before_submit_reconciliation",
+    "skill:block_final_submit"
+  ],
+  "policy_not_skill": [
+    "prefer_auckland_accept_other_new_zealand_locations",
+    "prefer_roles_matching_candidate_profile_skills",
+    "maybe_apply_requires_user_approval",
+    "external_ats_deferred",
+    "final_submit_forbidden",
+    "profile_mutation_forbidden_by_default",
+    "upload_replace_remove_document_requires_user_approval"
+  ],
+  "outputs": {
+    "job_records": "job_record_v1[]",
+    "company_records": "company_record_v1[]",
+    "screening_decisions": "job_screening_decision_v1[]",
+    "application_fill_records": "application_fill_record_v1[]",
+    "run_report": "job_search_application_run_report_v1"
+  },
+  "smoke_acceptance": {
+    "minimum_job_records": 3,
+    "minimum_company_records": 2,
+    "minimum_screening_decisions": 3,
+    "requires_at_least_one_strong_apply": true,
+    "requires_at_least_one_skip_or_needs_review": true,
+    "same_site_strong_apply_reaches_review_before_submit": true,
+    "external_ats_is_deferred": true,
+    "wrong_scope_scroll_count": 0,
+    "write_actions_clicked": 0,
+    "submit_clicks": 0,
+    "final_submissions": 0,
+    "trace_required": true,
+    "screenshot_each_step_required": true
+  },
+  "safety_policy": {
+    "artifact_is_authorization": false,
+    "fresh_observation_required": true,
+    "pre_click_decision_required": true,
+    "post_action_verification_required": true,
+    "strong_apply_required_before_application_entry": true,
+    "maybe_apply_requires_user_approval": true,
+    "external_ats_deferred": true,
+    "final_submit_forbidden": true,
+    "profile_mutation_forbidden_by_default": true,
+    "upload_replace_remove_document_requires_user_approval": true,
+    "record_every_step": true,
+    "screenshot_each_debug_step": true
+  }
+}

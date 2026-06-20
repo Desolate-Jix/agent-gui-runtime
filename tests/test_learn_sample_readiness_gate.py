@@ -17,6 +17,11 @@ def _checkpoint(**summary_overrides: object) -> dict:
         "covers_filter_or_tab": True,
         "covers_sort_or_filter_click": True,
         "covers_table_record_open": True,
+        "seek_application_flow": "pass",
+        "seek_application_flow_replay": "pass",
+        "seek_application_final_submit_forbidden": True,
+        "seek_application_safe_fill_required": True,
+        "seek_application_can_run_live_strict_replay": True,
         "write_actions_clicked": 0,
         "final_submissions": 0,
     }
@@ -51,6 +56,11 @@ def test_readiness_gate_allows_new_sample_after_checkpoint_and_regression_pass()
     assert gate["ready_for_new_learn_sample"] is True
     assert gate["next_sample_policy"]["codex_in_app_browser"] == "chatgpt_only"
     assert gate["summary"]["covers_scroll"] is True
+    assert gate["summary"]["seek_application_flow"] == "pass"
+    assert gate["summary"]["seek_application_flow_replay"] == "pass"
+    assert gate["summary"]["seek_application_final_submit_forbidden"] is True
+    assert gate["summary"]["seek_application_safe_fill_required"] is True
+    assert gate["summary"]["seek_application_can_run_live_strict_replay"] is True
     assert gate["summary"]["final_submissions"] == 0
     assert gate["blocking_failures"] == []
 
@@ -65,3 +75,15 @@ def test_readiness_gate_blocks_new_sample_when_safety_counter_fails() -> None:
     assert gate["status"] == "fail"
     assert gate["ready_for_new_learn_sample"] is False
     assert [item["check_id"] for item in gate["blocking_failures"]] == ["final_submit_guard"]
+
+
+def test_readiness_gate_blocks_new_sample_when_application_flow_missing() -> None:
+    gate = build_readiness_gate(
+        _checkpoint(seek_application_flow=None),
+        _regression(),
+        template_path=Path("artifacts/templates/learn_sample_template_v1.json"),
+    )
+
+    assert gate["status"] == "fail"
+    assert gate["ready_for_new_learn_sample"] is False
+    assert [item["check_id"] for item in gate["blocking_failures"]] == ["seek_application_flow"]

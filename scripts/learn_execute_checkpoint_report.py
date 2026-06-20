@@ -16,10 +16,12 @@ from fastapi.testclient import TestClient
 
 from app.learn.skill_matrix import build_learned_skill_matrix
 from app.main import app
+from scripts.seek_application_flow_replay_report import build_seek_application_flow_replay_report
 
 
 DEFAULT_SEEK_GRAPH = Path("artifacts/seek/runtime_path_graph_seek_mvp_20260617.json")
 DEFAULT_SEEK_3JOB_REPORT = Path("logs/smoke/seek_artifact_replay_readonly_3job_20260619_after_reset.json")
+DEFAULT_SEEK_APPLICATION_FLOW_ARTIFACT = Path("artifacts/seek/learned_seek_application_flow_plexure_20260620.json")
 DEFAULT_GRAPH_PATHS = [
     DEFAULT_SEEK_GRAPH,
     Path("artifacts/wikipedia/runtime_path_graph_wikipedia_search_v1.json"),
@@ -225,6 +227,141 @@ def build_coordinate_policy_audit() -> dict[str, Any]:
     }
 
 
+def build_seek_application_flow_checkpoint_report(artifact: dict[str, Any]) -> dict[str, Any]:
+    states = artifact.get("state_sequence") if isinstance(artifact.get("state_sequence"), list) else []
+    actions = artifact.get("action_templates") if isinstance(artifact.get("action_templates"), list) else []
+    safety = artifact.get("safety_policy") if isinstance(artifact.get("safety_policy"), dict) else {}
+    milestone = artifact.get("milestone") if isinstance(artifact.get("milestone"), dict) else {}
+    field_policy = artifact.get("field_fill_policy") if isinstance(artifact.get("field_fill_policy"), dict) else {}
+    source = artifact.get("source") if isinstance(artifact.get("source"), dict) else {}
+    filled_summary = artifact.get("filled_content_summary") if isinstance(artifact.get("filled_content_summary"), dict) else {}
+    review_reconciliation = artifact.get("review_reconciliation") if isinstance(artifact.get("review_reconciliation"), dict) else {}
+    review_checks = review_reconciliation.get("checks") if isinstance(review_reconciliation.get("checks"), dict) else {}
+    learned_skills = artifact.get("learned_skills") if isinstance(artifact.get("learned_skills"), list) else []
+    state_ids = [str(item.get("state_id") or "") for item in states if isinstance(item, dict)]
+    action_ids = [str(item.get("action_id") or "") for item in actions if isinstance(item, dict)]
+    machine_states = artifact.get("states") if isinstance(artifact.get("states"), list) else []
+    transitions = artifact.get("transitions") if isinstance(artifact.get("transitions"), list) else []
+    machine_state_ids = [str(item.get("state_id") or "") for item in machine_states if isinstance(item, dict)]
+    transition_ids = [str(item.get("transition_id") or "") for item in transitions if isinstance(item, dict)]
+    expected_states = ["choose_documents", "answer_employer_questions", "update_seek_profile", "review_and_submit"]
+    expected_machine_states = [
+        "seek_apply:choose_documents",
+        "seek_apply:cover_letter",
+        "seek_apply:answer_employer_questions",
+        "seek_apply:update_seek_profile",
+        "seek_apply:review_and_submit",
+        "seek_apply:final_submit_blocked",
+        "seek_apply:third_party_ats_deferred",
+        "seek_apply:blocked_upload_or_login",
+    ]
+    expected_transitions = [
+        "seek_apply:keep_default_documents",
+        "seek_apply:fill_cover_letter",
+        "seek_apply:answer_questions",
+        "seek_apply:skip_profile_update",
+        "seek_apply:block_final_submit",
+    ]
+    expected_actions = [
+        "write_cover_letter",
+        "answer_employer_questions",
+        "continue_without_profile_mutation",
+        "stop_before_final_submit",
+    ]
+    checks = [
+        _check("contract", artifact.get("contract_version") == "seek_application_flow_artifact_v1", "application flow artifact contract is current", artifact.get("contract_version")),
+        _check("audit_passed", source.get("audit_decision") == "pass_stopped_before_final_submit", "source final-review audit passed", source.get("audit_decision")),
+        _check("source_record_path", bool(source.get("application_fill_record_path")), "source records application_fill_record_path", source.get("application_fill_record_path")),
+        _check("source_audit_path", bool(source.get("final_review_audit_path")), "source records final_review_audit_path", source.get("final_review_audit_path")),
+        _check("source_reached_review", source.get("reached_review_and_submit") is True, "source reached review-and-submit boundary", source.get("reached_review_and_submit")),
+        _check("state_sequence", state_ids == expected_states, "station-internal application state sequence is complete", state_ids),
+        _check("state_machine", machine_state_ids == expected_machine_states, "prefixed application state machine is complete", machine_state_ids),
+        _check("transitions", all(transition_id in transition_ids for transition_id in expected_transitions), "application state transitions are present", transition_ids),
+        _check("action_templates", all(action_id in action_ids for action_id in expected_actions), "application action templates are present", action_ids),
+        _check("artifact_not_authorization", milestone.get("artifact_is_authorization") is False and safety.get("artifact_is_authorization") is False, "artifact is evidence, not authorization"),
+        _check("final_submit_forbidden", safety.get("final_submit_forbidden") is True, "final submit remains forbidden"),
+        _check("safe_fill_required", field_policy.get("safe_fill_required_for_future_replay") is True, "future replay requires safe-fill verification"),
+        _check("direct_type_text_not_replay", field_policy.get("direct_type_text_is_milestone_evidence_only") is True, "direct type_text is milestone evidence only"),
+        _check("profile_mutation_forbidden", safety.get("seek_profile_mutation_policy") == "forbidden_without_explicit_user_approval", "SEEK profile mutation remains forbidden", safety.get("seek_profile_mutation_policy")),
+        _check("zero_submit_counters", int(safety.get("final_submissions") or 0) == 0 and int(safety.get("submit_clicks") or 0) == 0, "source run has zero submit counters", {"final_submissions": safety.get("final_submissions"), "submit_clicks": safety.get("submit_clicks")}),
+    ]
+    if source.get("final_review_extraction_status"):
+        checks.extend(
+            [
+                _check(
+                    "final_review_extraction",
+                    source.get("final_review_extraction_status") == "pass",
+                    "final Review extraction passed",
+                    source.get("final_review_extraction_status"),
+                ),
+                _check(
+                    "review_reconciliation",
+                    review_reconciliation.get("status") == "pass",
+                    "Review page content reconciles with application fill record",
+                    review_reconciliation.get("status"),
+                ),
+                _check(
+                    "review_reconciliation_skill",
+                    any(
+                        isinstance(item, dict)
+                        and item.get("skill_ref") == "skill:review_before_submit_reconciliation"
+                        for item in learned_skills
+                    ),
+                    "final Review learning exports reusable review-before-submit skill",
+                ),
+            ]
+        )
+    return {
+        "contract_version": "seek_application_flow_checkpoint_report_v1",
+        "generated_at": _now(),
+        "status": "pass" if all(item["status"] == "pass" for item in checks) else "fail",
+        "mode": "learn_application_flow_checkpoint",
+        "artifact_id": artifact.get("artifact_id"),
+        "app_id": artifact.get("app_id"),
+        "page_type": artifact.get("page_type"),
+        "source": source,
+        "summary": {
+            "state_count": len(state_ids),
+            "state_machine_count": len(machine_state_ids),
+            "transition_count": len(transition_ids),
+            "action_template_count": len(action_ids),
+            "audit_decision": source.get("audit_decision"),
+            "final_review_extraction": source.get("final_review_extraction_status") or "not_recorded",
+            "review_reconciliation": review_reconciliation.get("status") or "not_recorded",
+            "review_answers_matched": (
+                f"{review_checks.get('employer_questions_matched')}/{review_checks.get('employer_questions_expected')}"
+                if review_checks
+                and review_checks.get("employer_questions_matched") is not None
+                and review_checks.get("employer_questions_expected") is not None
+                else None
+            ),
+            "employer_question_count": int(filled_summary.get("employer_question_count") or 0),
+            "review_before_submit_skill_exported": any(
+                isinstance(item, dict) and item.get("skill_ref") == "skill:review_before_submit_reconciliation"
+                for item in learned_skills
+            ),
+            "artifact_authorizes_submit": bool(milestone.get("artifact_is_authorization") or safety.get("artifact_is_authorization")),
+            "final_submit_forbidden": safety.get("final_submit_forbidden") is True,
+            "safe_fill_required_for_future_replay": field_policy.get("safe_fill_required_for_future_replay") is True,
+            "direct_type_text_is_milestone_evidence_only": field_policy.get("direct_type_text_is_milestone_evidence_only") is True,
+            "write_actions_clicked": 0,
+            "submit_clicks": int(safety.get("submit_clicks") or 0),
+            "final_submissions": int(safety.get("final_submissions") or 0),
+        },
+        "checks": checks,
+        "timeline": [
+            {
+                "state_id": state_id,
+                "status": "learned_evidence_only",
+                "requires_current_observe": True,
+                "requires_safe_fill_verification": state_id in {"choose_documents", "answer_employer_questions"},
+                "final_submit_allowed": False,
+            }
+            for state_id in state_ids
+        ],
+    }
+
+
 def _check(check_id: str, passed: bool, message: str, evidence: Any = None) -> dict[str, Any]:
     item: dict[str, Any] = {"check_id": check_id, "status": "pass" if passed else "fail", "message": message}
     if evidence is not None:
@@ -244,8 +381,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build Learn/Execute checkpoint reports for artifact replay.")
     parser.add_argument("--seek-graph", type=Path, default=DEFAULT_SEEK_GRAPH)
     parser.add_argument("--seek-source-report", type=Path, default=DEFAULT_SEEK_3JOB_REPORT)
+    parser.add_argument("--seek-application-flow-artifact", type=Path, default=DEFAULT_SEEK_APPLICATION_FLOW_ARTIFACT)
     parser.add_argument("--seek-safe-out", type=Path, default=Path("logs/smoke/seek_learn_safe_validation_20260619.json"))
     parser.add_argument("--seek-task-out", type=Path, default=Path("logs/smoke/seek_learn_task_run_3jobs_20260619.json"))
+    parser.add_argument("--seek-application-flow-out", type=Path, default=Path("logs/smoke/seek_application_flow_checkpoint_20260620.json"))
     parser.add_argument("--skill-matrix-out", type=Path, default=Path("artifacts/skills/learned_skill_matrix_v1.json"))
     parser.add_argument("--checkpoint-out", type=Path, default=Path("logs/smoke/learn_execute_mvp_checkpoint_20260619.json"))
     parser.add_argument("--fail-on-error", action="store_true")
@@ -253,10 +392,13 @@ def main(argv: list[str] | None = None) -> int:
 
     seek_graph = read_json(args.seek_graph)
     seek_source_report = read_json(args.seek_source_report)
+    seek_application_flow_artifact = read_json(args.seek_application_flow_artifact)
     graphs = [read_json(path) for path in DEFAULT_GRAPH_PATHS if path.exists()]
 
     seek_safe = run_seek_safe_validation(seek_graph)
     seek_task = build_seek_task_replay_report(seek_source_report)
+    seek_application_flow = build_seek_application_flow_checkpoint_report(seek_application_flow_artifact)
+    seek_application_replay = build_seek_application_flow_replay_report(seek_application_flow_artifact)
     skill_matrix = build_learned_skill_matrix(graphs)
     coordinate_audit = build_coordinate_policy_audit()
     checkpoint = {
@@ -265,6 +407,8 @@ def main(argv: list[str] | None = None) -> int:
         "status": "pass"
         if seek_safe.get("status") == "pass"
         and seek_task.get("status") == "pass"
+        and seek_application_flow.get("status") == "pass"
+        and seek_application_replay.get("status") == "pass"
         and skill_matrix.get("summary", {}).get("artifact_authorizes_click") is False
         and skill_matrix.get("summary", {}).get("covers_click") is True
         and skill_matrix.get("summary", {}).get("covers_scroll") is True
@@ -278,11 +422,14 @@ def main(argv: list[str] | None = None) -> int:
         "reports": {
             "seek_safe_validation": str(args.seek_safe_out),
             "seek_task_run": str(args.seek_task_out),
+            "seek_application_flow": str(args.seek_application_flow_out),
             "skill_matrix": str(args.skill_matrix_out),
         },
         "summary": {
             "seek_safe_validation": seek_safe.get("status"),
             "seek_task_run": seek_task.get("status"),
+            "seek_application_flow": seek_application_flow.get("status"),
+            "seek_application_flow_replay": seek_application_replay.get("status"),
             "skill_count": skill_matrix.get("summary", {}).get("skill_count"),
             "artifact_authorizes_click": skill_matrix.get("summary", {}).get("artifact_authorizes_click"),
             "covers_click": skill_matrix.get("summary", {}).get("covers_click"),
@@ -296,17 +443,24 @@ def main(argv: list[str] | None = None) -> int:
             "write_actions_clicked": max(
                 int((seek_safe.get("summary") or {}).get("write_actions_clicked") or 0),
                 int((seek_task.get("summary") or {}).get("write_actions_clicked") or 0),
+                int((seek_application_flow.get("summary") or {}).get("write_actions_clicked") or 0),
             ),
             "final_submissions": max(
                 int((seek_safe.get("summary") or {}).get("final_submissions") or 0),
                 int((seek_task.get("summary") or {}).get("final_submissions") or 0),
+                int((seek_application_flow.get("summary") or {}).get("final_submissions") or 0),
             ),
+            "seek_application_final_submit_forbidden": (seek_application_flow.get("summary") or {}).get("final_submit_forbidden"),
+            "seek_application_safe_fill_required": (seek_application_flow.get("summary") or {}).get("safe_fill_required_for_future_replay"),
+            "seek_application_can_run_live_strict_replay": (seek_application_replay.get("summary") or {}).get("can_run_live_strict_replay"),
         },
         "coordinate_policy_audit": coordinate_audit,
+        "seek_application_flow_replay": seek_application_replay,
     }
 
     write_json(args.seek_safe_out, seek_safe)
     write_json(args.seek_task_out, seek_task)
+    write_json(args.seek_application_flow_out, seek_application_flow)
     write_json(args.skill_matrix_out, skill_matrix)
     write_json(args.checkpoint_out, checkpoint)
 

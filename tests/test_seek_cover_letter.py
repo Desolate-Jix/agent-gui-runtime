@@ -75,6 +75,31 @@ def test_cover_letter_draft_generates_truthful_draft_for_real_profile() -> None:
     assert draft["truthfulness_checks"]["draft_only_not_pasted"] is True
 
 
+def test_cover_letter_draft_strips_template_prefix_from_job_themes() -> None:
+    detail = _detail()
+    detail["responsibilities"] = [
+        "The role stood out to me because it aligns with collaboration and innovation",
+        "Write clear, efficient and modular code",
+    ]
+    draft = build_cover_letter_draft(
+        profile={
+            "contract_version": "candidate_profile_v1",
+            "candidate_name": "Alex Chen",
+            "profile_purpose": "real_resume_summary",
+            "skills": ["Python", "backend"],
+            "target_roles": ["Software Engineer"],
+            "experience_summary": ["Built backend APIs and test automation for local developer tools"],
+            "risk_do_not_invent": True,
+        },
+        detail=detail,
+        match_decision=_decision(),
+    )
+
+    assert draft["status"] == "draft_only_not_pasted"
+    assert "aligns with collaboration and innovation" in draft["draft"]
+    assert "aligns with The role stood out" not in draft["draft"]
+
+
 def test_cover_letter_draft_requires_strong_apply() -> None:
     decision = {**_decision(), "decision": "maybe_apply"}
 
@@ -91,3 +116,27 @@ def test_cover_letter_draft_requires_strong_apply() -> None:
 
     assert draft["status"] == "blocked_decision_not_strong_apply"
     assert draft["draft"] == ""
+
+
+def test_cover_letter_draft_allows_maybe_apply_when_explicitly_enabled() -> None:
+    decision = {**_decision(), "decision": "maybe_apply"}
+
+    draft = build_cover_letter_draft(
+        profile={
+            "contract_version": "candidate_profile_v1",
+            "candidate_name": "Alex Chen",
+            "profile_purpose": "real_resume_summary",
+            "skills": ["Python", "test automation", "backend"],
+            "experience_summary": [
+                "Built a Windows GUI automation runtime with gated execution and trace logging",
+                "Implemented backend APIs and test automation for local developer tools",
+            ],
+        },
+        detail=_detail(),
+        match_decision=decision,
+        allow_maybe_apply=True,
+    )
+
+    assert draft["status"] == "draft_only_not_pasted"
+    assert "Software Engineer" in draft["draft"]
+    assert "Example Systems" in draft["draft"]

@@ -29,6 +29,53 @@ This layer is guidance only:
 - Real scrolls still must go through `POST /action/scroll` and its scroll precondition checks.
 - Multi-step traversal belongs in the upper agent or smoke harness, not inside `/execute/step`.
 
+## External Agent Continuous Task Protocol
+
+When the user gives a free-form task such as "find five suitable SEEK jobs and prepare applications for review", the upper agent owns task decomposition and repeated calls. The runtime stays a single-step execution kernel.
+
+Required loop:
+
+1. Bind or open the target window.
+2. Normalize the user goal into a task record with `goal_original`, safety constraints, max steps, and stop conditions.
+3. Call Observe or `POST /execute/available_actions` to understand the current state and safe action menu.
+4. Choose exactly one next action.
+5. Call `POST /execute/step` or the domain runner for one bounded step.
+6. Read the returned trace, overlay, verification, state transition, and extracted content.
+7. Decide whether to continue, scroll, input, ask the user, or stop.
+8. Stop on ambiguity, missing evidence, stale binding, wrong window, no progress, final-submit risk, login/captcha/permission blockers, or user interruption.
+
+The agent must produce an operator-readable result summary after the loop:
+
+- every selected action and why it was selected
+- every trace path and important screenshot/overlay path
+- extracted records, such as job cards and detail reads
+- match or skip decisions with evidence
+- fields filled, fields skipped, and why
+- explicit safety counters, especially `final_submissions=0`
+
+For free-form instructions, the runtime response is not the final answer. It is evidence for the agent's next decision.
+
+## SEEK Debug Step Runner
+
+For live SEEK debugging, do not run the full traversal loop unattended. Use the single-step runner so each command performs one bounded step, writes screenshots, records traces, and then exits:
+
+```powershell
+uv run python scripts\seek_debug_step_runner.py --step open --allow-close-windows
+uv run python scripts\seek_debug_step_runner.py --step bind_and_resize_verify
+uv run python scripts\seek_debug_step_runner.py --step extract_cards
+uv run python scripts\seek_debug_step_runner.py --step dry_run_card --job-index 0
+uv run python scripts\seek_debug_step_runner.py --step execute_card --job-index 0
+uv run python scripts\seek_debug_step_runner.py --step verify_detail
+uv run python scripts\seek_debug_step_runner.py --step read_detail_scroll
+uv run python scripts\seek_debug_step_runner.py --step match
+```
+
+Each step writes `seek_debug_step_report_v1` under `logs/smoke/seek_debug_step_run_latest/step_NNN_<step>/step_report.json` and updates `state.json`. Reports include `before_image`, `after_image`, trace paths, selected card/detail evidence, and for detail scrolling a `right_detail_scroll_validation_v1` record. The detail-scroll validation must include visual left-pane stability evidence (`left_results_visual_stability`) so a right-pane scroll is not falsely judged by noisy card text extraction, and so accidental scroll bleed into the left results list is visible. It also records compact left-card stability keys, visible detail line hashes, `new_unique_line_count`, `no_progress_count`, `next_recommendation`, `next_wheel_clicks`, and `next_allowed_steps`; debug mode remains one scroll per command, so the agent can inspect each screenshot before continuing. Formal execution may later use the full traversal runner, but only after this step-by-step path proves the coordinates, scroll target, and safety counters.
+
+When a detail pane is scrolled far below the header, later widgets such as company profiles, salary panels, or safety notices must not overwrite the verified job header. `verify_detail` and `read_detail_scroll` merge details by preserving the current card/header `job_id`, `title`, `company`, and location unless the new header matches the same compact identity. Salary widgets such as `What can I earn as ...` and `See more detailed salary information` are body evidence, not a new job title/company. If `match` returns `need_user_review`, the agent must stop before Apply Entry and present the job record and screenshots for review.
+
+Debug `open` requests a separate browser window with `msedge.exe --new-window` or `chrome.exe --new-window`. `close_old_seek_windows --allow-close-windows` only closes dedicated SEEK top-level browser windows; if the title indicates a multi-tab browser window, it records `skip_reason="multi_tab_browser_window"` instead of closing the whole window.
+
 ## Model-Facing Language Rule
 
 The upper-layer agent should keep the user's original instruction for audit, but send normalized English task fields to vision-model routes whenever possible.
@@ -371,7 +418,14 @@ Agent decision:
 - The retry must still pass `pre_click_decision_v1`; never use scroll as a shortcut to dispatch a click.
 - Container-aware scroll returns `scroll_action_v2`, `scroll_precondition_decision_v1`, and `scroll_effect_validation_v1`. If the precondition is rejected, do not retry by scrolling the whole window; inspect the rejection reason or ask for a clearer scroll target.
 - For SEEK traversal, convert the visible evidence after each card open/scroll into `seek_job_card_v1` and visible `seek_job_detail_v1` through `app.seek.extraction`; then use `seek_job_detail_completeness_v1` from `app.seek.traversal` to decide bounded right-pane scrolling. The traversal runner must verify that the post-click detail title matches the clicked card title before counting a job as opened, and should defer bottom-edge cards until results-list scrolling brings their click point into a safer band. Once a job detail is opened and merged, `app.seek.matching` can score it against `candidate_profile_v1` and save `saved_seek_job_record_v1` for `strong_apply` / `maybe_apply`. After each run, inspect `seek_mvp_run_report_v1.traversal_trace_path`; the referenced `seek_mvp_traversal_trace_v1` is the audit timeline for card-click traces, nested scrolls, detail-read traces, match decisions, saved jobs, Apply Entry stops, answer-plan previews, safe-fill attempts, and safety counters. Before continuing to Apply Entry or safe-fill, run `scripts\seek_mvp_run_audit.py --report <report> --mode readonly|apply_entry --fail-on-error`; `seek_mvp_run_audit_v1.decision` must be `pass`.
-- Apply Entry is allowed only for `strong_apply` by default and only through `POST /action/execute_recognition_plan` dry-run plus approved-plan real execution. The request metadata must include `forbid_final_submit=true` and `required_container_id=seek:job_detail`; the goal must explicitly forbid `Submit`, `Send application`, and `Complete application`. The action route emits `final_submit_guard_v1` and blocks before clicking if the selected target is a final-submit candidate. After Apply / Quick Apply, observe once, classify `seek_application_flow_state_v1`, and stop with `blocked_need_user_or_gpt_decision`; do not fill fields in the Apply Entry slice.
+- Real SEEK card clicks must leave a small visible settle gap after mouse move before dispatching mouse-down. The current runtime click path uses `settle_ms=200` for recognition-plan execution and confirmed-point tests so hover/focus/layout changes can settle before the click without slowing repeated card traversal too much.
+- On SEEK pages, locate `seek:results_list` from current screen evidence first. Visible job-card bboxes in `screen_inventory_v1.cards` are the primary source for the results-list container and scroll point. The centered-layout heuristic is only a fallback. If no current job-card evidence exists and a run records `blocked_no_initial_job_cards` or `blocked_no_new_jobs_after_results_scroll`, stop and inspect the screenshot instead of continuing to scroll.
+- After a job card is opened and verified, reading the right pane should use the known `seek:job_detail` container directly. Do not run another precise target relocation just to read the same right-side detail pane; record the read as `fixed_seek_job_detail_container_after_card_click` and scroll that container when information is incomplete.
+- SEEK runner scrolls should adapt to observed progress. Start with moderate container wheel clicks, increase the next scroll when visible detail/list fingerprints repeat, and treat repeated no-change observations as bottom/progress evidence rather than continuing indefinitely.
+- When debugging SEEK traversal, run one visible step at a time and inspect screenshot/overlay evidence before the next real action. The debug sequence is: capture before click, dry-run card click and inspect overlay, execute one card click, capture opened detail, perform one right-pane scroll, capture again, then continue only if the right pane moved and the left results list stayed visually stable.
+- A SEEK detail read is complete only when required detail evidence is present and the right detail pane has bottom evidence (`detail_bottom_reached=true` or an equivalent no-effect boundary probe). Field presence alone is not enough to count `jobs_fully_read`.
+- If a SEEK runner must be stopped locally, use `scripts\stop_seek_mvp_runner.ps1`. It targets only `scripts\seek_mvp_traversal_runner.py` processes and should not be replaced with manual Task Manager cleanup.
+- Apply Entry is an application-flow entrance, not final submission. It is allowed only for `strong_apply` by default and only through `POST /action/execute_recognition_plan` dry-run plus approved-plan real execution. The request metadata must include `forbid_final_submit=true` and `required_container_id=seek:job_detail`; the goal must explicitly forbid `Submit`, `Send application`, and `Complete application`. The action route emits `final_submit_guard_v1` and blocks before clicking if the selected target is a final-submit candidate. After Apply / Quick Apply, observe once, classify `seek_application_flow_state_v1`, generate the read-only `application_answer_plan_v1`, and either stop for review or fill only explicitly safe fields when `--fill-safe-fields` is enabled and profile gates pass. The true final submit step remains forbidden until explicit user review.
 - For SEEK profile preparation, keep the domain workflow in `skills/seek-high-precision/SKILL.md` and use the reusable profile helper only to prepare local data:
 
 ```powershell

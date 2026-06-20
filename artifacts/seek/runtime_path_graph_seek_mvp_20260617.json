@@ -4,7 +4,7 @@
   "app_id": "seek",
   "domain": "job_search",
   "page_type": "seek_search_results_with_detail",
-  "created_at": "2026-06-17T04:34:43.448217+00:00",
+  "created_at": "2026-06-19T15:23:10.115622+00:00",
   "source": {
     "learn_mode": "manual_seeded_from_successful_seek_mvp_run",
     "source_contract": "seek_learn_artifact_export_v1",
@@ -377,6 +377,111 @@
       "load_more_action_template_id": "load_more_results"
     }
   ],
+  "path_patterns": [
+    {
+      "contract_version": "list_detail_path_pattern_v1",
+      "pattern_id": "seek:pattern:list_detail_right_pane",
+      "pattern_type": "split_list_detail",
+      "list_container_id": "seek:results_list",
+      "detail_container_id": "seek:job_detail",
+      "list_region_id": "results_list",
+      "detail_region_id": "job_detail",
+      "list_entity_type": "job_card",
+      "detail_entity_type": "job_detail",
+      "open_action_template_id": "open_job_card",
+      "read_detail_action_template_id": "read_detail",
+      "load_more_action_template_id": "load_more_results",
+      "identity_mapping": {
+        "list_entity_type": "job_card",
+        "detail_entity_type": "job_detail_header",
+        "primary_key_fields": [
+          {
+            "list_field": "title",
+            "detail_field": "title",
+            "match_type": "text_similarity",
+            "min_similarity": 0.82,
+            "required": true
+          }
+        ],
+        "secondary_fields": [
+          {
+            "list_field": "company",
+            "detail_field": "company",
+            "match_type": "partial_text_match",
+            "required": false
+          },
+          {
+            "list_field": "location",
+            "detail_field": "location",
+            "match_type": "partial_text_match",
+            "required": false
+          }
+        ],
+        "reject_if_detail_title_source": [
+          "detail_body",
+          "unknown"
+        ]
+      },
+      "detail_read_policy": {
+        "detail_container_id": "seek:job_detail",
+        "scroll_scope": "container",
+        "requires_container_bbox": true,
+        "header_region_id": "detail_header",
+        "body_region_id": "detail_body",
+        "preserve_header_fields_on_scroll": true,
+        "adaptive_scroll": {
+          "enabled": true,
+          "initial_wheel_clicks": 5,
+          "max_wheel_clicks": 10,
+          "increase_wheel_on_low_progress": true,
+          "stop_after_no_progress_count": 2,
+          "progress_signals": [
+            "new_unique_text_lines",
+            "detail_crop_hash_changed",
+            "scroll_effect_moved"
+          ]
+        },
+        "non_target_stability": {
+          "required": true,
+          "stable_container_id": "seek:results_list",
+          "signals": [
+            "visible_card_hashes_stable",
+            "top_card_title_stable",
+            "results_list_crop_hash_stable"
+          ]
+        },
+        "stop_reasons": [
+          "bottom_reached",
+          "right_detail_no_progress_after_scroll",
+          "max_scrolls_reached",
+          "wrong_scope_scroll_detected"
+        ]
+      },
+      "pre_action_cleanup": [
+        {
+          "for_action_template_id": "open_job_card",
+          "when_previous_action_in": [
+            "read_detail",
+            "read_detail_pane_until_bounded"
+          ],
+          "cleanup_action": "reset_detail_container_to_header",
+          "target_container_id": "seek:job_detail",
+          "direction": "up",
+          "wheel_clicks": 8,
+          "verify_after_cleanup": {
+            "detail_header_visible": true,
+            "wrong_scope_detected": false
+          },
+          "reason": "ensure_detail_header_visible_for_next_post_click_verification"
+        }
+      ],
+      "safety_policy_refs": [
+        "final_submit_guard_v1",
+        "artifact_cannot_authorize_click"
+      ],
+      "artifact_is_authorization": false
+    }
+  ],
   "transitions": [
     {
       "transition_id": "seek:transition:open_job_card",
@@ -602,7 +707,12 @@
     "skill.scroll_list_until_new_entities",
     "skill.read_detail_pane_until_bounded",
     "skill.click_seeded_candidate_with_point_validation",
-    "skill.block_final_submit"
+    "skill.block_final_submit",
+    "skill.open_record_from_list_or_card",
+    "skill.read_fixed_detail_pane_until_complete",
+    "skill.scroll_target_container_until_progress_or_boundary",
+    "skill.reset_detail_container_to_header",
+    "skill.block_final_submit_or_write_action"
   ],
   "metrics": {
     "jobs_seen": 5,

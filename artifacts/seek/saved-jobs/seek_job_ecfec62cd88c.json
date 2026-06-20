@@ -1,0 +1,683 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_ecfec62cd88c",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.78,
+    "job_id": "seek_job_ecfec62cd88c",
+    "title": "Join Indes Al,Automation,&Integration team and collaborate with a talented group of specialists",
+    "company": "Inde Technology",
+    "fit_summary": "strong_apply with score 0.780. positive: matched_skills: AI, Automation; matched_target_roles: AI Engineer, Automation Engineer; location_matches: Auckland CBD, Auckland (Hybrid).",
+    "recommended_next_action": "open_apply_entry_and_prepare_safe_fields",
+    "positive_evidence": [
+      "matched_skills: AI, Automation",
+      "matched_target_roles: AI Engineer, Automation Engineer",
+      "location_matches: Auckland CBD, Auckland (Hybrid)",
+      "matched_preferred_work_modes: hybrid"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_ecfec62cd88c",
+    "title": "IntermediateEngineer-AlAutomation&Integration",
+    "company": "Inde Technology",
+    "location": "Auckland CBD, Auckland (Hybrid)",
+    "posted_at_text": null,
+    "work_type": "Full time",
+    "salary_text": null,
+    "classification": "Inde Technology",
+    "card_bbox": {
+      "x": 650,
+      "y": 996,
+      "w": 484,
+      "h": 242
+    },
+    "click_point": {
+      "x": 895,
+      "y": 1007
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_23",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_59_intermediateengineer-alautomation-integration",
+      "page_text_60_inde-technology",
+      "page_text_62_strong-applicant",
+      "page_text_63_full-time",
+      "page_text_64_auckland-cbd-auckland-hybrid",
+      "page_text_65_employee-owned-use-your-skills-experience-to-mak",
+      "page_text_66_tech-led-partnership-approach-with-valued-enterp",
+      "page_text_67_focus-on-continuous-leaming-and-development-at-a",
+      "page_text_68_11d-ago"
+    ],
+    "evidence": {
+      "texts": [
+        "IntermediateEngineer-AlAutomation&Integration",
+        "Inde Technology",
+        "Strong applicant",
+        "Full time",
+        "Auckland CBD, Auckland (Hybrid)",
+        "Employee-owned. Use your skills & experience to make a difference",
+        "Tech-led, partnership approach with valued enterprise clients",
+        "Focus on continuous leaming and development at a values-led organisation",
+        "11d ago"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": true,
+        "has_salary": false
+      }
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_ecfec62cd88c",
+    "title": "Join Indes Al,Automation,&Integration team and collaborate with a talented group of specialists",
+    "company": "Inde Technology",
+    "location": "Auckland CBD, Auckland (Hybrid)",
+    "work_type": "Hybrid",
+    "classification": "Inde Technology",
+    "salary_text": "$22-$26/hr",
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "出目☆"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "Quick apply"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "2 skills and credentials match your profile"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "Typescript Programming Language"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "AWsShowall"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Welcome to Inde, New Zealand’s leading employee-owned IT consultancy.Big enough to work"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "with the country's largest customers, yet agile enough to make things happen without"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "bureaucracy. Your effort doesn't enrich distant investors - it rewards you."
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "Technically led and outcome focused, our technical experts - that's you - lead the way for our"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "customers, while the rest of us help you make it happen. The whole company exists to help you,"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "help our customers succeed."
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "Join Indes Al,Automation,&Integration team and collaborate with a talented group of specialists"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "to design and deliver innovative integration and automation solutions for our enterprise customers."
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "Reporting to the Al & Data Technical Director, you will have the opportunity to work in a cloud-first"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "environment, solving real-world business problems with both code and low-code tools. We keep"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "our processes agile - rather than offering off-the-shelf answers, you'll have the autonomy to craft"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "customer-focused solutions that address each client's unique needs."
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "What You'll Do"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "· Build cutting-edge integration & automation solutions using your expertise and the support of"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "your team. You'll connect systems and streamline processes to create tangible business"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "outcomes."
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "· Implement Al-enabled solutions such as intelligent document processing, Al-assisted search,"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "chatbots, and workflow augmentation using Azure Al services."
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "·Consult and collaborate with a diverse range of enterprise customers - from gathering"
+      },
+      {
+        "index": 26,
+        "role": "section_hint",
+        "text": "requirements to designing and implementing the right technical solutions that turn their needs"
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "into reality."
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "our culture: we invest time and resources in training, certifications, and personal development"
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "every week."
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "·Work in a supportive, cross-functional team environment where knowledge-sharing, coaching"
+      },
+      {
+        "index": 31,
+        "role": "body",
+        "text": "and collective problem-solving are the norm. You'llboth draw on your team's knowledge and"
+      },
+      {
+        "index": 32,
+        "role": "body",
+        "text": "contribute to upskilling others."
+      },
+      {
+        "index": 33,
+        "role": "body",
+        "text": "· Enjoy flexibility in how you work. We support hybrid working (mix of home and office) and"
+      },
+      {
+        "index": 34,
+        "role": "body",
+        "text": "occasional customer site visits, so you can deliver your best work in the environment that suits"
+      },
+      {
+        "index": 35,
+        "role": "body",
+        "text": "you."
+      },
+      {
+        "index": 36,
+        "role": "body",
+        "text": "What You'll Bring"
+      },
+      {
+        "index": 37,
+        "role": "body",
+        "text": "· Integrations bringing together separate systems to solve customer problems"
+      },
+      {
+        "index": 38,
+        "role": "body",
+        "text": "·Knowledge of automation tools to streamline processes and improve efficiency"
+      },
+      {
+        "index": 39,
+        "role": "body",
+        "text": "·Low-code/ No-code integration frameworks"
+      },
+      {
+        "index": 40,
+        "role": "body",
+        "text": "React"
+      },
+      {
+        "index": 41,
+        "role": "body",
+        "text": "Posted 11d ago"
+      },
+      {
+        "index": 42,
+        "role": "body",
+        "text": "High application volume"
+      },
+      {
+        "index": 43,
+        "role": "body",
+        "text": "inde"
+      },
+      {
+        "index": 44,
+        "role": "body",
+        "text": "Strong applicant"
+      },
+      {
+        "index": 45,
+        "role": "body",
+        "text": "IntermediateEngineer-Al Automation&Integration"
+      },
+      {
+        "index": 46,
+        "role": "body",
+        "text": "Inde Technology View all jobs"
+      },
+      {
+        "index": 47,
+        "role": "body",
+        "text": "Auckland CBD, Auckland (Hybrid)"
+      },
+      {
+        "index": 48,
+        "role": "body",
+        "text": "Developers/Programmers (Information & Communication Technology)"
+      },
+      {
+        "index": 49,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 50,
+        "role": "body",
+        "text": "Posted 11ld ago · High application volume"
+      },
+      {
+        "index": 51,
+        "role": "body",
+        "text": "√ Typescript Programming Language"
+      },
+      {
+        "index": 52,
+        "role": "body",
+        "text": "AWSShowall"
+      },
+      {
+        "index": 53,
+        "role": "body",
+        "text": "Welcome to Inde, New Zealand's leading employee-owned IT consultancy. Big enough to work"
+      },
+      {
+        "index": 54,
+        "role": "body",
+        "text": "Join Inde's Al, Automation, & Integration team and collaborate with a talented group of specialists"
+      },
+      {
+        "index": 55,
+        "role": "body",
+        "text": "Reporting to the Al& Data Technical Director, you wil have the opportunity to work in a cloud-first"
+      },
+      {
+        "index": 56,
+        "role": "body",
+        "text": "our processes agile - rather than offering off-the-shelf answers, youll have the autonomy to craft"
+      },
+      {
+        "index": 57,
+        "role": "body",
+        "text": "your team. Youll connect systems and streamline processes to create tangible business"
+      },
+      {
+        "index": 58,
+        "role": "body",
+        "text": "·Consult and collaborate with a diverse range of enterprise customers -from gathering"
+      },
+      {
+        "index": 59,
+        "role": "body",
+        "text": "Auckland CBD,Auckland (Hybrid)"
+      },
+      {
+        "index": 60,
+        "role": "body",
+        "text": "Posted 1ld ago · High application volume"
+      },
+      {
+        "index": 61,
+        "role": "body",
+        "text": "√AWS"
+      },
+      {
+        "index": 62,
+        "role": "body",
+        "text": "Show all"
+      },
+      {
+        "index": 63,
+        "role": "body",
+        "text": "Technically led and outcome focused, our technical experts - that's you - lead the way forour"
+      },
+      {
+        "index": 64,
+        "role": "body",
+        "text": "Posted 11d ago · High application volume"
+      },
+      {
+        "index": 65,
+        "role": "body",
+        "text": "IntermediateEngineer-Al Automation &IntegrationC"
+      },
+      {
+        "index": 66,
+        "role": "body",
+        "text": "Inde Technology"
+      },
+      {
+        "index": 67,
+        "role": "body",
+        "text": "Join Inde's Al, Automation,& Integration team and collaborate with a talented group of specialists"
+      },
+      {
+        "index": 68,
+        "role": "body",
+        "text": "to design and deliverinnovative integration and automation solutionsfor our enterprise customers."
+      },
+      {
+        "index": 69,
+        "role": "body",
+        "text": "our processes agile- rather than offering off-the-shelf answers, youll have the autonomy to craft"
+      },
+      {
+        "index": 70,
+        "role": "body",
+        "text": "WhatYou'll Do"
+      },
+      {
+        "index": 71,
+        "role": "body",
+        "text": "·Build cutting-edge integration& automation solutions using yourexpertise and the support of"
+      },
+      {
+        "index": 72,
+        "role": "body",
+        "text": "·Implement Al-enabled solutions such as intelligent document processing,Al-assisted search,"
+      },
+      {
+        "index": 73,
+        "role": "body",
+        "text": "·Consult and collaborate with a diverse range of enterprise customers-from gathering"
+      },
+      {
+        "index": 74,
+        "role": "body",
+        "text": "·Take on challenging projects that push you to learn and grow.Continuous learning is part of"
+      },
+      {
+        "index": 75,
+        "role": "body",
+        "text": "our culture:we invest time and resources in training,certifications,and personal development"
+      },
+      {
+        "index": 76,
+        "role": "body",
+        "text": "·Work ina supportive,cross-functional teamenvironment whereknowledge-sharing,coaching"
+      },
+      {
+        "index": 77,
+        "role": "body",
+        "text": "and collective problem-solving are the norm. You'll both draw on your team's knowledge and"
+      },
+      {
+        "index": 78,
+        "role": "body",
+        "text": "·Enjoy flexibility in how you work. We support hybrid working (mix of home and office) and"
+      },
+      {
+        "index": 79,
+        "role": "body",
+        "text": "occasional customer site visits,soyou can deliveryourbest work in the environment that suits"
+      },
+      {
+        "index": 80,
+        "role": "body",
+        "text": "·Integrations bringing togetherseparate systems to solve customer problems"
+      },
+      {
+        "index": 81,
+        "role": "body",
+        "text": "·Low-code/No-code integration frameworks"
+      },
+      {
+        "index": 82,
+        "role": "body",
+        "text": "·Programming & scripting skills, including competency with PowerShell scripting and TypeScript"
+      },
+      {
+        "index": 83,
+        "role": "body",
+        "text": "Bus, Power Apps,Power Platform, AWS Step Functions, Lambda, Boomi, etc.)"
+      },
+      {
+        "index": 84,
+        "role": "body",
+        "text": "Experience with Azure Al services (including Azure OpenAl, Azure Al Search,Azure Document"
+      },
+      {
+        "index": 85,
+        "role": "body",
+        "text": "Intelligence,AlFoundry),implementation of Al-driven automation solutions,and chatbot"
+      },
+      {
+        "index": 86,
+        "role": "body",
+        "text": "development."
+      },
+      {
+        "index": 87,
+        "role": "body",
+        "text": "·DevOps operations and CI/CD frameworks"
+      },
+      {
+        "index": 88,
+        "role": "body",
+        "text": "·Connector and APl Management, working across various data sources"
+      },
+      {
+        "index": 89,
+        "role": "body",
+        "text": "·Consulting with customers on options and features required to meet business needs"
+      },
+      {
+        "index": 90,
+        "role": "body",
+        "text": "·Designing and presenting solutions and scopes of work to customers"
+      },
+      {
+        "index": 91,
+        "role": "body",
+        "text": "·Strong analytical and problem-solving skills with an ability to conduct research into issues"
+      },
+      {
+        "index": 92,
+        "role": "body",
+        "text": "·The ability to communicate complex topics in audience-appropriate detail and terminology"
+      },
+      {
+        "index": 93,
+        "role": "body",
+        "text": "·Self-motivated,able to prioritise tasks"
+      },
+      {
+        "index": 94,
+        "role": "body",
+        "text": "·Previous experience inaprofessional services environment is highly desirable"
+      },
+      {
+        "index": 95,
+        "role": "body",
+        "text": "As an ideal candidate,you will have the ability to conduct research into issues and problems,"
+      },
+      {
+        "index": 96,
+        "role": "body",
+        "text": "present ideas in audience-appropriate language, be self-motivated, and able to effectively"
+      },
+      {
+        "index": 97,
+        "role": "body",
+        "text": "Intermediate Engineer - AI Automation & Integration"
+      },
+      {
+        "index": 98,
+        "role": "body",
+        "text": "Welcome to Inde, New Zealand’s leading employee-owned IT consultancy. Big enough to work with the country’s largest customers, yet agile enough to make things happen without bureaucracy. Your effort doesn’t enrich distant investors - it rewards you."
+      }
+    ],
+    "requirements": [
+      "2 skills and credentials match your profile",
+      "requirements to designing and implementing the right technical solutions that turn their needs",
+      "·Programming & scripting skills, including competency with PowerShell scripting and TypeScript",
+      "Experience with Azure Al services (including Azure OpenAl, Azure Al Search,Azure Document",
+      "·Strong analytical and problem-solving skills with an ability to conduct research into issues",
+      "·Previous experience inaprofessional services environment is highly desirable"
+    ],
+    "responsibilities": [
+      "Reporting to the Al & Data Technical Director, you will have the opportunity to work in a cloud-first",
+      "As an ideal candidate,you will have the ability to conduct research into issues and problems,"
+    ],
+    "benefits": [
+      "· Enjoy flexibility in how you work. We support hybrid working (mix of home and office) and",
+      "Auckland CBD, Auckland (Hybrid)",
+      "Auckland CBD,Auckland (Hybrid)",
+      "·Enjoy flexibility in how you work. We support hybrid working (mix of home and office) and"
+    ],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply button",
+      "bbox": {
+        "x": 1756,
+        "y": 172,
+        "w": 114,
+        "h": 44
+      },
+      "click_point": {
+        "x": 1813,
+        "y": 194
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save button",
+      "bbox": {
+        "x": 1880,
+        "y": 172,
+        "w": 56,
+        "h": 44
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 1600,
+        "y": 80,
+        "w": 944,
+        "h": 1304
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_detail_drawer_anchor_bbox"
+      ],
+      "evidence": {
+        "layout": "right_detail_drawer",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false,
+        "content_left": 530,
+        "content_width": 1500,
+        "source": "seek_detail_drawer_anchor_bbox"
+      },
+      "safe_points": [
+        {
+          "x": 2072,
+          "y": 732,
+          "reason": "inside_seek_detail_drawer_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 1600,
+      "y": 0,
+      "w": 944,
+      "h": 1384
+    },
+    "detail_bottom_reached": false,
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-050813-801094__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-050718-090512__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-050623-539523__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-050548-021642__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-050642-069329__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-050736-680996__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-050832-472503__observe-screen__edge.json"
+    ]
+  }
+}

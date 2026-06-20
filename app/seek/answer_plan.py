@@ -108,7 +108,7 @@ def _classify_item(item: dict[str, Any], profile: dict[str, Any], draft: dict[st
     answer_source = None
     value = None
 
-    if _contains_any(key, FINAL_SUBMIT_TERMS):
+    if _contains_any(key, FINAL_SUBMIT_TERMS) and not _is_generic_generated_submit_label(item, label):
         category = "danger_final_submit"
         reason = "final_submit_action_visible"
     elif _contains_any(key, UPLOAD_TERMS):
@@ -117,6 +117,15 @@ def _classify_item(item: dict[str, Any], profile: dict[str, Any], draft: dict[st
     elif _contains_any(key, SENSITIVE_TERMS):
         category = "blocked_sensitive"
         reason = "sensitive_or_uncertain_question"
+    elif simple_text_field and _looks_like_cover_letter_body(label):
+        if draft.get("status") == "draft_only_not_pasted" and _clean(draft.get("draft")):
+            category = "auto_safe_known"
+            reason = "cover_letter_body_field_detected"
+            answer_source = "cover_letter_draft_v1.draft"
+            value = _clean(draft.get("draft"))
+        else:
+            category = "needs_user_review"
+            reason = "cover_letter_draft_missing_or_blocked"
     elif "visa" in key or "right to work" in key or "work rights" in key:
         work_rights = _clean(profile.get("work_rights_summary"))
         if work_rights and work_rights.casefold() not in {"unknown", "unspecified", "n/a"}:
@@ -128,7 +137,10 @@ def _classify_item(item: dict[str, Any], profile: dict[str, Any], draft: dict[st
             category = "blocked_sensitive"
             reason = "work_rights_unknown_or_sensitive"
     elif "cover letter" in key or "supporting statement" in key:
-        if draft.get("status") == "draft_only_not_pasted" and _clean(draft.get("draft")):
+        if _is_cover_letter_option_control(key):
+            category = "unsupported"
+            reason = "cover_letter_option_control_not_textarea"
+        elif simple_text_field and draft.get("status") == "draft_only_not_pasted" and _clean(draft.get("draft")):
             category = "auto_safe_known"
             reason = "cover_letter_draft_available_but_not_pasted"
             answer_source = "cover_letter_draft_v1.draft"
@@ -156,6 +168,7 @@ def _classify_item(item: dict[str, Any], profile: dict[str, Any], draft: dict[st
             "id": item.get("id"),
             "role": item.get("role"),
             "bbox": item.get("bbox"),
+            "source_text": item.get("source_text"),
         },
         "answer_source": answer_source,
         "value_preview": _redacted_value_preview(value, answer_source=answer_source),
@@ -207,6 +220,31 @@ def _is_simple_text_field(item: dict[str, Any]) -> bool:
     if any(term in role for term in ("button", "checkbox", "radio", "select", "dropdown", "file")):
         return False
     return any(term in role for term in SIMPLE_TEXT_ROLE_TERMS)
+
+
+def _looks_like_cover_letter_body(label: str) -> bool:
+    lowered = _clean(label).casefold()
+    return lowered.startswith("dear ") and len(lowered) > 120
+
+
+def _is_cover_letter_option_control(key: str) -> bool:
+    return any(
+        phrase in key
+        for phrase in (
+            "upload a cover letter",
+            "upload cover letter",
+            "write a cover letter",
+            "don't include a cover letter",
+            "dont include a cover letter",
+        )
+    )
+
+
+def _is_generic_generated_submit_label(item: dict[str, Any], label: str) -> bool:
+    source_id = str(item.get("id") or "").casefold()
+    collection = str(item.get("collection") or "").casefold()
+    key = _clean(label).casefold()
+    return collection == "available_actions" and source_id.startswith("action_screen_") and key in {"submit", "submit button"}
 
 
 def _clean(value: Any) -> str:

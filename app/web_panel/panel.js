@@ -34,10 +34,14 @@ const DEFAULT_PYTHON_DOCS_SEARCH_GRAPH_PATH = "artifacts/docs_search/runtime_pat
 const DEFAULT_INPUT_DEMO_GRAPH_PATH = "artifacts/demo/runtime_path_graph_input_demo.json";
 const DEFAULT_TABLE_DIRECTORY_GRAPH_PATH = "artifacts/table_directory/runtime_path_graph_table_directory_v1.json";
 const DEFAULT_ARTIFACT_REPLAY_REGRESSION_PATH = "logs/smoke/artifact_replay_regression_20260619.json";
-const DEFAULT_LEARN_SAMPLE_READINESS_PATH = "logs/smoke/learn_sample_readiness_gate_20260619.json";
+const DEFAULT_LEARN_SAMPLE_READINESS_PATH = "logs/smoke/learn_sample_readiness_gate_20260620.json";
+const DEFAULT_SEEK_APPLICATION_RECORD_PATH = "logs/smoke/seek_apply_live_92822270_20260620_b/application_fill_record.json";
+const DEFAULT_SEEK_APPLICATION_AUDIT_PATH = "logs/smoke/seek_apply_live_92822270_20260620_b/final_review_audit.json";
+const DEFAULT_SEEK_APPLICATION_ARTIFACT_PATH = "artifacts/seek/learned_seek_application_flow_92822270_20260620.json";
 let replayArtifact = null;
 let replayRegressionReport = null;
 let learnSampleReadinessGate = null;
+let seekApplicationEvidence = null;
 
 /* Navigation path graph state */
 // Each page node:
@@ -409,6 +413,12 @@ const translations = {
     learn_replay_hint: "加载学习产物，查看路径图结构、动作模板、skill 和安全规则；多步回放只在面板 harness 串联，后端 Execute 仍一次只执行一步。",
     artifact_preset: "产物预设",
     load_artifact: "加载产物",
+    seek_application_evidence: "SEEK 申请证据",
+    seek_application_evidence_hint: "检查站内申请填写记录、最终审核和非授权 application-flow 产物，确认填了什么以及是否停在最终提交前。",
+    application_fill_record_path: "申请填写记录路径",
+    final_review_audit_path: "最终审核路径",
+    application_flow_artifact_path: "申请流程产物路径",
+    load_application_evidence: "加载申请证据",
     regression_suite: "统一回归门禁",
     regression_report_path: "回归报告路径",
     load_regression_report: "加载回归报告",
@@ -655,6 +665,12 @@ const translations = {
     learn_replay_hint: "Load a learned artifact, inspect PathGraph structure, action templates, skills, and safety rules. Multi-step replay is chained by the panel harness; backend Execute still performs one step at a time.",
     artifact_preset: "Artifact preset",
     load_artifact: "Load artifact",
+    seek_application_evidence: "SEEK Application Evidence",
+    seek_application_evidence_hint: "Inspect station-internal application fill records, final-review audit, and non-authorizing application-flow artifacts before replay.",
+    application_fill_record_path: "Application fill record path",
+    final_review_audit_path: "Final review audit path",
+    application_flow_artifact_path: "Application flow artifact path",
+    load_application_evidence: "Load application evidence",
     regression_suite: "Regression Suite",
     regression_report_path: "Regression report path",
     load_regression_report: "Load regression report",
@@ -4888,6 +4904,132 @@ function renderLearnSampleReadinessGate(gate, path) {
     </div>`;
 }
 
+function renderSeekApplicationEvidence(evidence) {
+  const summary = $("seekApplicationEvidenceSummary");
+  const fields = $("seekApplicationFilledFields");
+  if (!summary || !fields) return;
+  if (!evidence) {
+    summary.innerHTML = `<p class="trace-idle">${t("pending")}</p>`;
+    fields.innerHTML = "";
+    return;
+  }
+  const { record = {}, audit = {}, artifact = {}, paths = {} } = evidence;
+  const recordEvidence = record.evidence && typeof record.evidence === "object" ? record.evidence : {};
+  const filledContent = record.filled_content && typeof record.filled_content === "object" ? record.filled_content : {};
+  const safety = artifact.safety_policy && typeof artifact.safety_policy === "object" ? artifact.safety_policy : {};
+  const artifactSummary = artifact.filled_content_summary && typeof artifact.filled_content_summary === "object" ? artifact.filled_content_summary : {};
+  const screenshots = Array.isArray(recordEvidence.screenshots) ? recordEvidence.screenshots : [];
+  const actionTraces = Array.isArray(recordEvidence.action_traces) ? recordEvidence.action_traces : [];
+  const visionTraces = Array.isArray(recordEvidence.vision_traces) ? recordEvidence.vision_traces : [];
+  const employerQuestionCount = Number(record.employer_question_total ?? artifactSummary.employer_question_count ?? 0);
+  const auditPassed = audit.decision === "pass_stopped_before_final_submit";
+  const artifactNotAuthorization = artifact.milestone?.artifact_is_authorization === false && safety.artifact_is_authorization === false;
+  const finalSubmitForbidden = safety.final_submit_forbidden === true;
+  const finalSubmissions = Number(record.final_submissions ?? safety.final_submissions ?? 0);
+  const submitClicks = Number(record.submit_clicks ?? safety.submit_clicks ?? 0);
+  const reviewSafe = auditPassed && artifactNotAuthorization && finalSubmitForbidden && finalSubmissions === 0;
+  const pairs = [
+    ["record", paths.record || ""],
+    ["audit", paths.audit || ""],
+    ["artifact", paths.artifact || ""],
+    ["record_contract", record.contract_version || ""],
+    ["audit_decision", audit.decision || ""],
+    ["artifact_contract", artifact.contract_version || ""],
+    ["job", [record.job_title || record.job?.title || "", record.job?.company || ""].filter(Boolean).join(" / ")],
+    ["status", record.status || ""],
+    ["employer_questions", `${employerQuestionCount}/${employerQuestionCount}`],
+    ["cover_letter_length", artifactSummary.cover_letter_length ?? String(filledContent.cover_letter || "").length],
+    ["screenshots", screenshots.length],
+    ["action_traces", actionTraces.length],
+    ["vision_traces", visionTraces.length],
+    ["audit_passed", auditPassed],
+    ["artifact_is_authorization", !artifactNotAuthorization],
+    ["final_submit_forbidden", finalSubmitForbidden],
+    ["submit_clicks", submitClicks],
+    ["final_submissions", finalSubmissions],
+  ];
+  summary.innerHTML = `
+    <div class="summary-grid summary-grid-pairs">
+      ${pairs.map(([label, value]) => `
+        <div class="summary-item${["record", "audit", "artifact"].includes(label) ? " summary-item-wide" : ""}">
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(String(value))}</strong>
+        </div>`).join("")}
+    </div>
+    <div class="evidence-note">
+      <span class="run-badge ${reviewSafe ? "ok" : "blocked"}">${reviewSafe ? "safe review boundary" : "needs review"}</span>
+      <code>${escapeHtml(recordEvidence.review_before_submit_screenshot || "")}</code>
+    </div>`;
+
+  const filledFields = Array.isArray(record.filled_fields) ? record.filled_fields : [];
+  if (!filledFields.length) {
+    fields.innerHTML = `<p class="trace-idle">${t("no_response")}</p>`;
+    return;
+  }
+  fields.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>Step</th>
+          <th>Field</th>
+          <th>Value / policy</th>
+          <th>Evidence</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${filledFields.map((item) => {
+          const value = String(item.value || item.policy || "");
+          const shortened = value.length > 260 ? `${value.slice(0, 260)}...` : value;
+          return `
+            <tr>
+              <td>${escapeHtml(item.step || "")}</td>
+              <td>${escapeHtml(item.field || "")}</td>
+              <td>${escapeHtml(shortened)}</td>
+              <td>${escapeHtml(item.evidence || item.policy || "")}</td>
+            </tr>`;
+        }).join("")}
+      </tbody>
+    </table>`;
+}
+
+async function loadSeekApplicationEvidence() {
+  const recordPath = String($("seekApplicationRecordPath")?.value || DEFAULT_SEEK_APPLICATION_RECORD_PATH).trim();
+  const auditPath = String($("seekApplicationAuditPath")?.value || DEFAULT_SEEK_APPLICATION_AUDIT_PATH).trim();
+  const artifactPath = String($("seekApplicationArtifactPath")?.value || DEFAULT_SEEK_APPLICATION_ARTIFACT_PATH).trim();
+  if (!recordPath || !auditPath || !artifactPath) {
+    renderResponse({ success: false, message: "application evidence paths are required" }, "SEEK application evidence");
+    return null;
+  }
+  try {
+    const [record, audit, artifact] = await Promise.all([
+      readArtifactJson(recordPath),
+      readArtifactJson(auditPath),
+      readArtifactJson(artifactPath),
+    ]);
+    seekApplicationEvidence = { record, audit, artifact, paths: { record: recordPath, audit: auditPath, artifact: artifactPath } };
+    renderSeekApplicationEvidence(seekApplicationEvidence);
+    renderResponse({
+      success: true,
+      message: "SEEK application evidence loaded",
+      data: {
+        contract_version: "seek_application_evidence_panel_load_v1",
+        record_contract: record.contract_version,
+        audit_decision: audit.decision,
+        artifact_contract: artifact.contract_version,
+        job_title: record.job_title || record.job?.title,
+        employer_question_count: Number(record.employer_question_total ?? artifact.filled_content_summary?.employer_question_count ?? 0),
+        final_submissions: Number(record.final_submissions ?? artifact.safety_policy?.final_submissions ?? 0),
+        artifact_is_authorization: artifact.milestone?.artifact_is_authorization !== false,
+      },
+    }, "SEEK application evidence");
+    return seekApplicationEvidence;
+  } catch (error) {
+    renderSeekApplicationEvidence(null);
+    renderResponse({ success: false, message: "SEEK application evidence load failed", error: String(error.message || error) }, "SEEK application evidence");
+    return null;
+  }
+}
+
 async function loadReplayRegressionReport() {
   const path = String($("replayRegressionPath")?.value || DEFAULT_ARTIFACT_REPLAY_REGRESSION_PATH).trim();
   if (!path) {
@@ -5572,6 +5714,7 @@ function bindEvents() {
   on("learnValidationResetBtn", "click", resetLearnValidation);
   on("replayPreset", "change", applyReplayPreset);
   on("replayLoadBtn", "click", loadReplayArtifact);
+  on("seekApplicationEvidenceLoadBtn", "click", loadSeekApplicationEvidence);
   on("replayRegressionLoadBtn", "click", loadReplayRegressionReport);
   on("learnSampleGateLoadBtn", "click", loadLearnSampleReadinessGate);
   on("replayUseValidationBtn", "click", useReplayForValidation);
@@ -5777,9 +5920,19 @@ async function boot() {
   if ($("learnSampleGatePath") && !String($("learnSampleGatePath").value || "").trim()) {
     $("learnSampleGatePath").value = DEFAULT_LEARN_SAMPLE_READINESS_PATH;
   }
+  if ($("seekApplicationRecordPath") && !String($("seekApplicationRecordPath").value || "").trim()) {
+    $("seekApplicationRecordPath").value = DEFAULT_SEEK_APPLICATION_RECORD_PATH;
+  }
+  if ($("seekApplicationAuditPath") && !String($("seekApplicationAuditPath").value || "").trim()) {
+    $("seekApplicationAuditPath").value = DEFAULT_SEEK_APPLICATION_AUDIT_PATH;
+  }
+  if ($("seekApplicationArtifactPath") && !String($("seekApplicationArtifactPath").value || "").trim()) {
+    $("seekApplicationArtifactPath").value = DEFAULT_SEEK_APPLICATION_ARTIFACT_PATH;
+  }
   renderReplayGraph(null, "");
   renderReplayRegressionReport(null, "");
   renderLearnSampleReadinessGate(null, "");
+  renderSeekApplicationEvidence(null);
   if ($("taskRunTemplate")?.value === "input_dry_run_demo" && $("taskRunGraphPath")) {
     $("taskRunGraphPath").value = DEFAULT_INPUT_DEMO_GRAPH_PATH;
   } else if ($("taskRunTemplate")?.value === "read_issue_thread" && $("taskRunGraphPath") && !String($("taskRunGraphPath").value || "").trim()) {

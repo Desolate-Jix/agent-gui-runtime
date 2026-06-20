@@ -1,6 +1,6 @@
 {
   "contract_version": "seek_learn_artifact_export_v1",
-  "generated_at": "2026-06-17T04:34:43.448217+00:00",
+  "generated_at": "2026-06-19T15:23:10.115622+00:00",
   "source": {
     "report_path": "logs\\smoke\\seek_mvp_readonly_after_parser_title_filter_5jobs_20260617.json",
     "trace_path": null,

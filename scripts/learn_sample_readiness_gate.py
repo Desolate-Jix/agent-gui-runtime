@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_CHECKPOINT = Path("logs/smoke/learn_execute_mvp_checkpoint_20260619.json")
+DEFAULT_CHECKPOINT = Path("logs/smoke/learn_execute_mvp_checkpoint_20260620.json")
 DEFAULT_REGRESSION = Path("logs/smoke/artifact_replay_regression_20260619.json")
 DEFAULT_TEMPLATE = Path("artifacts/templates/learn_sample_template_v1.json")
 
@@ -67,6 +67,34 @@ def build_readiness_gate(
     ]
     checks = [
         check("checkpoint_status", checkpoint.get("status") == "pass", "Learn/Execute checkpoint passed", checkpoint.get("status")),
+        check(
+            "seek_application_flow",
+            checkpoint_summary.get("seek_application_flow") == "pass",
+            "SEEK station-internal application-flow artifact checkpoint passed",
+            checkpoint_summary.get("seek_application_flow"),
+        ),
+        check(
+            "seek_application_final_submit_forbidden",
+            checkpoint_summary.get("seek_application_final_submit_forbidden") is True,
+            "SEEK application-flow artifact keeps final submit forbidden",
+            checkpoint_summary.get("seek_application_final_submit_forbidden"),
+        ),
+        check(
+            "seek_application_safe_fill_required",
+            checkpoint_summary.get("seek_application_safe_fill_required") is True,
+            "SEEK application-flow replay requires safe-fill verification",
+            checkpoint_summary.get("seek_application_safe_fill_required"),
+        ),
+        check(
+            "seek_application_flow_replay",
+            checkpoint_summary.get("seek_application_flow_replay") == "pass"
+            and checkpoint_summary.get("seek_application_can_run_live_strict_replay") is True,
+            "SEEK application-flow dry-run replay plan is ready for live strict replay",
+            {
+                "seek_application_flow_replay": checkpoint_summary.get("seek_application_flow_replay"),
+                "seek_application_can_run_live_strict_replay": checkpoint_summary.get("seek_application_can_run_live_strict_replay"),
+            },
+        ),
         check(
             "regression_status",
             regression.get("status") == "pass" and regression_gate.get("can_continue_to_new_family") is True,
@@ -136,6 +164,11 @@ def build_readiness_gate(
             "covers_input": checkpoint_summary.get("covers_input"),
             "covers_read": checkpoint_summary.get("covers_read"),
             "covers_guarded_actions": checkpoint_summary.get("covers_guarded_actions"),
+            "seek_application_flow": checkpoint_summary.get("seek_application_flow"),
+            "seek_application_final_submit_forbidden": checkpoint_summary.get("seek_application_final_submit_forbidden"),
+            "seek_application_safe_fill_required": checkpoint_summary.get("seek_application_safe_fill_required"),
+            "seek_application_flow_replay": checkpoint_summary.get("seek_application_flow_replay"),
+            "seek_application_can_run_live_strict_replay": checkpoint_summary.get("seek_application_can_run_live_strict_replay"),
             "artifact_authorizes_click": checkpoint_summary.get("artifact_authorizes_click"),
             "write_actions_clicked": checkpoint_summary.get("write_actions_clicked"),
             "final_submissions": checkpoint_summary.get("final_submissions"),
@@ -150,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT)
     parser.add_argument("--regression", type=Path, default=DEFAULT_REGRESSION)
     parser.add_argument("--template", type=Path, default=DEFAULT_TEMPLATE)
-    parser.add_argument("--out", type=Path, default=Path("logs/smoke/learn_sample_readiness_gate_20260619.json"))
+    parser.add_argument("--out", type=Path, default=Path("logs/smoke/learn_sample_readiness_gate_20260620.json"))
     parser.add_argument("--fail-on-error", action="store_true")
     args = parser.parse_args(argv)
 

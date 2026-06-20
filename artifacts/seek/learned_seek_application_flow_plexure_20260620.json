@@ -1,0 +1,477 @@
+{
+  "contract_version": "seek_application_flow_artifact_v1",
+  "generated_at": "2026-06-19T19:49:47.796895+00:00",
+  "artifact_id": "seek_station_internal_application_flow_v1",
+  "app_id": "seek",
+  "page_type": "seek_station_internal_application",
+  "milestone": {
+    "status": "reviewed_stop_before_submit",
+    "artifact_is_authorization": false,
+    "safe_fill_primary_path_status": "needs_hardening_before_replay"
+  },
+  "source": {
+    "record_path": "logs\\smoke\\seek_debug_homepage_20260620_next\\application_fill_record.json",
+    "audit_path": "logs\\smoke\\seek_debug_homepage_20260620_next\\final_review_audit.json",
+    "application_fill_record_path": "logs\\smoke\\seek_debug_homepage_20260620_next\\application_fill_record.json",
+    "final_review_audit_path": "logs\\smoke\\seek_debug_homepage_20260620_next\\final_review_audit.json",
+    "record_contract": "seek_application_fill_record_v1",
+    "audit_contract": "seek_application_final_review_audit_v1",
+    "audit_decision": "pass_stopped_before_final_submit",
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-070222-954265__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-070244-948282__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-070246-989129__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-070440-057812__scroll__scroll-down.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-070530-506937__scroll__scroll-down.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-070627-535342__scroll__scroll-down.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-070931-111142__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-071018-394677__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-071020-451748__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-071553-847682__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-071555-848895__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-071556-251376__type-text__type-text.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-071825-275496__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-071827-281555__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-071827-679555__type-text__type-text.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072216-216584__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072218-243919__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072218-608918__type-text__type-text.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072234-251076__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072236-280613__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072505-910210__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072507-916913__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072508-291913__type-text__type-text.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072523-249775__scroll__scroll-down.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072526-389387__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072528-403835__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072654-360075__scroll__scroll-down.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072657-626735__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072659-649008__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-073339-276604__scroll__scroll-down.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-073342-944782__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-073344-786756__scroll__scroll-down.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-073348-450279__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-073350-497252__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070204-434462__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070222-883265__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070244-877282__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070303-077289__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070409-757929__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070438-121386__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070450-486657__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070528-563262__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070547-209165__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070625-609672__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070645-718896__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070927-749407__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070931-030142__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-071015-702993__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-071018-311677__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-071034-938804__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-071330-726545__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-071526-851719__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-071550-729585__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-071604-440069__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-071553-774682__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-071822-439322__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-071840-975677__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-071825-204438__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072245-366220__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072231-679582__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072216-137296__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072234-188076__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072213-301407__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072540-273700__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072521-404224__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072505-829210__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072526-328387__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072503-123670__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072711-150289__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072657-566735__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072652-533914__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-073400-757538__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-073348-383279__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-073337-412694__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-073547-227855__observe-screen__edge.json"
+    ],
+    "screenshot_paths": [
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\jobs-on-seek-new-zealand-s-no-1-employment-career-and-recruitment-site-5a69a861__capture__full-window__20260620-071001-344893.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-071041-625217.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-071321-644131.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-071331-400760.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-071519-975711.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-071527-515386.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-071538-252257.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-071605-112391.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-071807-925409.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-071841-638632.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-072200-192997.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-072246-035649.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-072450-183995.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\update-seek-profile-seek-1-microsoft-edge__capture__full-window__20260620-072540-931506.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\update-seek-profile-seek-1-microsoft-edge__capture__full-window__20260620-072639-726057.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\seek-update-seek-profile-seek-1-microsoft-edge__capture__full-window__20260620-072711-814566.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\seek-update-seek-profile-seek-1-microsoft-edge__capture__full-window__20260620-073326-191029.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\review-and-submit-seek-1-microsoft-edge__capture__full-window__20260620-073401-418268.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\review-and-submit-seek-1-microsoft-edge__capture__full-window__20260620-073537-592624.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\review-and-submit-seek-1-microsoft-edge__capture__full-window__20260620-073547-883604.png"
+    ],
+    "job_id": "seek_job_ee40c18949f8",
+    "job_title": "Software Engineers",
+    "company": "Plexure Limited",
+    "reached_review_and_submit": true,
+    "final_submissions": 0
+  },
+  "job": {
+    "job_id": "seek_job_ee40c18949f8",
+    "title": "Software Engineers",
+    "company": "Plexure Limited",
+    "apply_url": "https://nz.seek.com/job/92763500/apply/review?sol=c360f0ddec84db7c8a3bb51b3bd7cc0f01182f42"
+  },
+  "state_sequence": [
+    {
+      "state_id": "choose_documents",
+      "url_pattern": "/apply",
+      "purpose": "keep default resume and write or replace cover letter",
+      "required_evidence": [
+        "resume_selected",
+        "cover_letter_written"
+      ],
+      "next_action": "continue_to_employer_questions"
+    },
+    {
+      "state_id": "answer_employer_questions",
+      "url_pattern": "/apply/role-requirements",
+      "purpose": "answer evidence-backed employer questions",
+      "required_evidence": [
+        "all_visible_questions_answered"
+      ],
+      "question_count": 0,
+      "next_action": "continue_to_update_seek_profile"
+    },
+    {
+      "state_id": "update_seek_profile",
+      "url_pattern": "/apply/profile",
+      "purpose": "review SEEK profile without persistent mutation",
+      "required_evidence": [
+        "no_add_or_edit_profile_actions_clicked"
+      ],
+      "next_action": "continue_to_review"
+    },
+    {
+      "state_id": "review_and_submit",
+      "url_pattern": "/apply/review",
+      "purpose": "final human review boundary",
+      "required_evidence": [
+        "final_submit_visible_blocker"
+      ],
+      "next_action": "stop_before_submit"
+    }
+  ],
+  "states": [
+    {
+      "state_id": "seek_apply:choose_documents",
+      "state_type": "form_step",
+      "terminal": false,
+      "purpose": "keep default documents and prepare cover letter entry"
+    },
+    {
+      "state_id": "seek_apply:cover_letter",
+      "state_type": "form_step",
+      "terminal": false,
+      "purpose": "fill a job-specific cover letter with safe-fill verification"
+    },
+    {
+      "state_id": "seek_apply:answer_employer_questions",
+      "state_type": "form_step",
+      "terminal": false,
+      "purpose": "answer employer questions from candidate profile and reviewed evidence"
+    },
+    {
+      "state_id": "seek_apply:update_seek_profile",
+      "state_type": "form_step",
+      "terminal": false,
+      "purpose": "continue without persistent SEEK Profile mutation"
+    },
+    {
+      "state_id": "seek_apply:review_and_submit",
+      "state_type": "review_boundary",
+      "terminal": false,
+      "purpose": "review filled application before human-approved final submit"
+    },
+    {
+      "state_id": "seek_apply:final_submit_blocked",
+      "state_type": "safe_terminal",
+      "terminal": true,
+      "purpose": "correct stop state before final submission"
+    },
+    {
+      "state_id": "seek_apply:third_party_ats_deferred",
+      "state_type": "deferred_terminal",
+      "terminal": true,
+      "purpose": "defer external ATS applications for later dedicated learning"
+    },
+    {
+      "state_id": "seek_apply:blocked_upload_or_login",
+      "state_type": "blocked_terminal",
+      "terminal": true,
+      "purpose": "stop when login, upload, captcha, or unsafe required fields appear"
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "seek_apply:keep_default_documents",
+      "from_state": "seek_apply:choose_documents",
+      "to_state": "seek_apply:cover_letter",
+      "action_template_id": "continue_keep_default_resume",
+      "requires": [
+        "default_resume_visible",
+        "no_resume_replacement"
+      ]
+    },
+    {
+      "transition_id": "seek_apply:fill_cover_letter",
+      "from_state": "seek_apply:cover_letter",
+      "to_state": "seek_apply:answer_employer_questions",
+      "action_template_id": "fill_cover_letter_and_continue",
+      "requires": [
+        "safe_fill_focus_verified",
+        "post_fill_value_verified",
+        "submit_false"
+      ]
+    },
+    {
+      "transition_id": "seek_apply:answer_questions",
+      "from_state": "seek_apply:answer_employer_questions",
+      "to_state": "seek_apply:update_seek_profile",
+      "action_template_id": "answer_employer_questions_and_continue",
+      "requires": [
+        "answers_have_evidence_source",
+        "all_visible_questions_answered"
+      ]
+    },
+    {
+      "transition_id": "seek_apply:skip_profile_update",
+      "from_state": "seek_apply:update_seek_profile",
+      "to_state": "seek_apply:review_and_submit",
+      "action_template_id": "continue_without_persistent_profile_update",
+      "requires": [
+        "no_add_or_edit_profile_actions_clicked",
+        "persistent_profile_updates_zero"
+      ]
+    },
+    {
+      "transition_id": "seek_apply:block_final_submit",
+      "from_state": "seek_apply:review_and_submit",
+      "to_state": "seek_apply:final_submit_blocked",
+      "action_template_id": "stop_before_final_submit",
+      "requires": [
+        "final_submit_visible",
+        "final_submissions_zero"
+      ]
+    }
+  ],
+  "action_templates": [
+    {
+      "action_id": "write_cover_letter",
+      "kind": "input",
+      "low_level_action_type": "type_text",
+      "state_id": "choose_documents",
+      "value_source": "cover_letter_draft_v1.draft",
+      "submit": false,
+      "requires_trace": true
+    },
+    {
+      "action_id": "answer_employer_questions",
+      "kind": "input_or_select",
+      "state_id": "answer_employer_questions",
+      "question_count": 0,
+      "value_source": "candidate_profile_v1 + reviewed evidence",
+      "requires_evidence_source": true
+    },
+    {
+      "action_id": "continue_without_profile_mutation",
+      "kind": "click",
+      "low_level_action_type": "execute_confirmed_point_or_recognition_plan",
+      "state_id": "update_seek_profile",
+      "forbidden_targets": [
+        "Add role",
+        "Add education",
+        "Add skills",
+        "Edit",
+        "Submit application"
+      ]
+    },
+    {
+      "action_id": "stop_before_final_submit",
+      "kind": "guard",
+      "state_id": "review_and_submit",
+      "forbidden_targets": [
+        "Submit application",
+        "Send application",
+        "Complete application"
+      ]
+    }
+  ],
+  "verification_rules": [
+    {
+      "rule_id": "resume_kept",
+      "check": "resume field exists and no resume replacement action was clicked"
+    },
+    {
+      "rule_id": "cover_letter_filled",
+      "check": "cover letter body exists or review page says a cover letter was written"
+    },
+    {
+      "rule_id": "questions_answered",
+      "check": "answered count equals employer_question_total"
+    },
+    {
+      "rule_id": "profile_not_mutated",
+      "check": "persistent_profile_updates == 0"
+    },
+    {
+      "rule_id": "final_review_boundary",
+      "check": "current_step == review_and_submit and final_submit_visible_blocker.blocked == true"
+    },
+    {
+      "rule_id": "no_final_submit",
+      "check": "final_submissions == 0 and submit_clicks == 0"
+    }
+  ],
+  "safety_policy": {
+    "contract_version": "seek_application_safety_policy_v1",
+    "artifact_is_authorization": false,
+    "final_submit_forbidden": true,
+    "external_apply_deferred": true,
+    "default_resume_policy": "keep_seek_default_resume",
+    "seek_profile_mutation_policy": "forbidden_without_explicit_user_approval",
+    "profile_suggestion_policy": "not_shown",
+    "final_submissions": 0,
+    "submit_clicks": 0,
+    "audit_decision": "pass_stopped_before_final_submit"
+  },
+  "field_fill_policy": {
+    "contract_version": "seek_application_field_fill_policy_v1",
+    "safe_fill_required_for_future_replay": true,
+    "direct_type_text_is_milestone_evidence_only": true,
+    "field_focus_required": true,
+    "post_fill_value_verification_required": true,
+    "submit_during_fill_forbidden": true,
+    "known_issues_from_run": [
+      "This run had no visible employer-question step; employer_question_total is recorded as 0/0 rather than inventing answers.",
+      "Earlier Continue targeting selected a right-edge floating browser/plugin widget; the runner now rejects right-edge/header/bottom-edge Continue points before execution."
+    ]
+  },
+  "filled_content_summary": {
+    "resume": "WENQING JI.pdf (SEEK default/selected resume)",
+    "cover_letter_length": 1108,
+    "employer_question_count": 0,
+    "seek_profile_mutation": "none; Update SEEK Profile step was continued without pressing Add/Edit controls"
+  },
+  "evidence": {
+    "screenshots": [
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\jobs-on-seek-new-zealand-s-no-1-employment-career-and-recruitment-site-5a69a861__capture__full-window__20260620-071001-344893.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-071041-625217.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-071321-644131.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-071331-400760.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-071519-975711.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-071527-515386.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-071538-252257.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-071605-112391.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-071807-925409.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-071841-638632.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-072200-192997.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-072246-035649.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\choose-documents-seek-1-microsoft-edge__capture__full-window__20260620-072450-183995.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\update-seek-profile-seek-1-microsoft-edge__capture__full-window__20260620-072540-931506.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\update-seek-profile-seek-1-microsoft-edge__capture__full-window__20260620-072639-726057.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\seek-update-seek-profile-seek-1-microsoft-edge__capture__full-window__20260620-072711-814566.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\seek-update-seek-profile-seek-1-microsoft-edge__capture__full-window__20260620-073326-191029.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\review-and-submit-seek-1-microsoft-edge__capture__full-window__20260620-073401-418268.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\review-and-submit-seek-1-microsoft-edge__capture__full-window__20260620-073537-592624.png",
+      "D:\\agent-gui-runtime\\artifacts\\screenshots\\review-and-submit-seek-1-microsoft-edge__capture__full-window__20260620-073547-883604.png"
+    ],
+    "action_traces": [
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-070222-954265__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-070244-948282__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-070246-989129__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-070440-057812__scroll__scroll-down.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-070530-506937__scroll__scroll-down.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-070627-535342__scroll__scroll-down.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-070931-111142__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-071018-394677__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-071020-451748__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-071553-847682__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-071555-848895__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-071556-251376__type-text__type-text.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-071825-275496__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-071827-281555__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-071827-679555__type-text__type-text.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072216-216584__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072218-243919__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072218-608918__type-text__type-text.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072234-251076__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072236-280613__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072505-910210__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072507-916913__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072508-291913__type-text__type-text.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072523-249775__scroll__scroll-down.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072526-389387__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072528-403835__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072654-360075__scroll__scroll-down.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072657-626735__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072659-649008__execute-mode-click__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-073339-276604__scroll__scroll-down.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-073342-944782__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-073344-786756__scroll__scroll-down.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-073348-450279__execute-mode-plan-preview__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-073350-497252__execute-mode-click__edge.json"
+    ],
+    "vision_traces": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070204-434462__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070222-883265__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070244-877282__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070303-077289__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070409-757929__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070438-121386__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070450-486657__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070528-563262__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070547-209165__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070625-609672__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070645-718896__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070927-749407__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070931-030142__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-071015-702993__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-071018-311677__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-071034-938804__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-071330-726545__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-071526-851719__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-071550-729585__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-071604-440069__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-071553-774682__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-071822-439322__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-071840-975677__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-071825-204438__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072245-366220__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072231-679582__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072216-137296__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072234-188076__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072213-301407__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072540-273700__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072521-404224__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072505-829210__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072526-328387__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072503-123670__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072711-150289__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072657-566735__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-072652-533914__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-073400-757538__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-073348-383279__execute-mode-recognition-plan__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-073337-412694__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-073547-227855__observe-screen__edge.json"
+    ],
+    "review_before_submit_screenshot": "D:\\agent-gui-runtime\\artifacts\\screenshots\\review-and-submit-seek-1-microsoft-edge__capture__full-window__20260620-073547-883604.png",
+    "cover_letter_type_text_trace": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260620-072508-291913__type-text__type-text.json"
+  }
+}

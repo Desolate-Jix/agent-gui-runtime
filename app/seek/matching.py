@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,26 @@ WORK_RIGHTS_REVIEW_TERMS = (
     "security clearance",
     "police check",
     "background check",
+)
+NEW_ZEALAND_LOCATION_TERMS = (
+    "new zealand",
+    "nz",
+    "aotearoa",
+    "auckland",
+    "wellington",
+    "christchurch",
+    "canterbury",
+    "hamilton",
+    "tauranga",
+    "dunedin",
+    "queenstown",
+    "nelson",
+    "napier",
+    "hastings",
+    "palmerston north",
+    "rotorua",
+    "new plymouth",
+    "invercargill",
 )
 
 
@@ -45,7 +66,7 @@ def score_seek_job(
     """Score a SEEK job against a candidate profile without inventing missing experience."""
 
     card_payload = card if isinstance(card, dict) else {}
-    detail_payload = detail if isinstance(detail, dict) else {}
+    detail_payload = merge_seek_job_identity(card_payload, detail if isinstance(detail, dict) else {})
     if not detail_complete:
         missing = [str(item) for item in missing_detail_evidence or [] if str(item or "").strip()]
         return _decision(
@@ -109,13 +130,13 @@ def score_seek_job(
     else:
         unknowns.append("no candidate skills matched visible job detail")
 
-    matched_roles = [role for role in target_roles if _contains(title, role) or _contains(job_text, role)]
+    matched_roles = [role for role in target_roles if _matches_role(title, role) or _matches_role(job_text, role)]
     if matched_roles:
         positive.append("matched_target_roles: " + ", ".join(matched_roles[:5]))
 
     job_location = str(detail_payload.get("location") or card_payload.get("location") or "")
     if locations and job_location:
-        if any(_contains(job_location, location) or _contains(location, job_location) for location in locations):
+        if any(_location_matches(job_location, location) for location in locations):
             positive.append(f"location_matches: {job_location}")
         else:
             negative.append(f"location_mismatch: {job_location}")
@@ -176,19 +197,40 @@ def save_suitable_job_record(
 ) -> str | None:
     if decision.get("decision") not in {"strong_apply", "maybe_apply"}:
         return None
+    detail_payload = merge_seek_job_identity(card, detail)
     directory = Path(output_dir)
     directory.mkdir(parents=True, exist_ok=True)
-    job_id = str(detail.get("job_id") or card.get("job_id") or _stable_id(card, detail))
+    job_id = str(detail_payload.get("job_id") or card.get("job_id") or _stable_id(card, detail_payload))
     path = directory / f"{job_id}.json"
     payload = {
         "contract_version": "saved_seek_job_record_v1",
         "job_id": job_id,
         "decision": decision,
         "card": card,
-        "detail": detail,
+        "detail": detail_payload,
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return str(path)
+
+
+def merge_seek_job_identity(card: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(detail)
+    for key in ("title", "company", "location", "work_type"):
+        card_value = str(card.get(key) or "").strip()
+        detail_value = str(merged.get(key) or "").strip()
+        if not card_value:
+            continue
+        if not detail_value or _same_compact_text(card_value, detail_value):
+            merged[key] = card_value
+    return merged
+
+
+def _same_compact_text(left: str, right: str) -> bool:
+    return _compact_text(left) == _compact_text(right)
+
+
+def _compact_text(value: str) -> str:
+    return "".join(ch for ch in value.casefold() if ch.isalnum())
 
 
 def _valid_profile(profile: dict[str, Any] | None) -> bool:
@@ -206,13 +248,22 @@ def _decision(
     card: dict[str, Any],
     detail: dict[str, Any],
 ) -> dict[str, Any]:
+    decision_value = decision if decision in MATCH_DECISIONS else "need_user_review"
     return {
         "contract_version": "seek_job_match_decision_v1",
-        "decision": decision if decision in MATCH_DECISIONS else "need_user_review",
+        "decision": decision_value,
         "score": score,
         "job_id": detail.get("job_id") or card.get("job_id"),
         "title": detail.get("title") or card.get("title"),
         "company": detail.get("company") or card.get("company"),
+        "fit_summary": _fit_summary(
+            decision=decision_value,
+            score=score,
+            positive=positive,
+            negative=negative,
+            unknowns=unknowns,
+        ),
+        "recommended_next_action": _recommended_next_action(decision_value),
         "positive_evidence": positive,
         "negative_evidence": negative,
         "unknowns": unknowns,
@@ -231,6 +282,34 @@ def _job_text(card: dict[str, Any], detail: dict[str, Any]) -> str:
         for key in ("requirements", "responsibilities", "benefits"):
             parts.extend(_strings(payload.get(key)))
     return " ".join(parts).casefold()
+
+
+def _fit_summary(
+    *,
+    decision: str,
+    score: float,
+    positive: list[str],
+    negative: list[str],
+    unknowns: list[str],
+) -> str:
+    parts = [f"{decision} with score {score:.3f}"]
+    if positive:
+        parts.append("positive: " + "; ".join(positive[:3]))
+    if negative:
+        parts.append("negative: " + "; ".join(negative[:3]))
+    if unknowns:
+        parts.append("needs review: " + "; ".join(unknowns[:3]))
+    return ". ".join(parts) + "."
+
+
+def _recommended_next_action(decision: str) -> str:
+    if decision == "strong_apply":
+        return "open_apply_entry_and_prepare_safe_fields"
+    if decision == "maybe_apply":
+        return "review_then_optionally_open_apply_entry"
+    if decision == "skip":
+        return "skip_job"
+    return "ask_user_or_gpt_for_review"
 
 
 def _strings(value: Any) -> list[str]:
@@ -257,7 +336,38 @@ def _profile_terms(profile: dict[str, Any], *keys: str) -> list[str]:
 
 
 def _contains(haystack: str, needle: str) -> bool:
-    return str(needle or "").casefold().strip() in str(haystack or "").casefold()
+    normalized_needle = _match_normalized_text(needle)
+    if not normalized_needle:
+        return False
+    return normalized_needle in _match_normalized_text(haystack)
+
+
+def _location_matches(job_location: str, constraint: str) -> bool:
+    if _contains(job_location, constraint) or _contains(constraint, job_location):
+        return True
+    normalized_constraint = _match_normalized_text(constraint)
+    if normalized_constraint not in {"new zealand", "nz", "aotearoa"}:
+        return False
+    normalized_location = _match_normalized_text(job_location)
+    return any(term in normalized_location for term in NEW_ZEALAND_LOCATION_TERMS if term not in {"new zealand", "nz", "aotearoa"})
+
+
+def _matches_role(haystack: str, role: str) -> bool:
+    if _contains(haystack, role):
+        return True
+    haystack_tokens = set(_match_normalized_text(haystack).split())
+    role_tokens = [token for token in _match_normalized_text(role).split() if len(token) >= 2]
+    if not role_tokens:
+        return False
+    return all(token in haystack_tokens or any(item.endswith(token) for item in haystack_tokens) for token in role_tokens)
+
+
+def _match_normalized_text(value: Any) -> str:
+    text = str(value or "").casefold()
+    text = re.sub(r"\bapls?\b", " api ", text)
+    text = re.sub(r"\bal\b", " ai ", text)
+    text = re.sub(r"[^a-z0-9+#.]+", " ", text)
+    return " ".join(text.split())
 
 
 def _stable_id(card: dict[str, Any], detail: dict[str, Any]) -> str:

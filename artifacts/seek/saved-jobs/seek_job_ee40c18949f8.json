@@ -1,0 +1,700 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_ee40c18949f8",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "maybe_apply",
+    "score": 0.69,
+    "job_id": "seek_job_ee40c18949f8",
+    "title": "Software Engineers",
+    "company": "Plexure Limited",
+    "fit_summary": "maybe_apply with score 0.690. positive: matched_skills: AI; matched_target_roles: Software Engineer; location_matches: Auckland CBD, Auckland (Hybrid).",
+    "recommended_next_action": "review_then_optionally_open_apply_entry",
+    "positive_evidence": [
+      "matched_skills: AI",
+      "matched_target_roles: Software Engineer",
+      "location_matches: Auckland CBD, Auckland (Hybrid)",
+      "matched_preferred_work_modes: hybrid"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_28f816d50ef9",
+    "title": "Software Engineers",
+    "company": "Plexure Limited",
+    "location": "Auckland CBD, Auckland (Hybrid)",
+    "posted_at_text": null,
+    "work_type": "Full time",
+    "salary_text": "2k training budget, insurance, meal vouchers, WFH+",
+    "classification": "Software Engineers",
+    "card_bbox": {
+      "x": 652,
+      "y": 1096,
+      "w": 507,
+      "h": 227
+    },
+    "click_point": {
+      "x": 745,
+      "y": 1112
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_27",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_60_software-engineers",
+      "page_text_61_plexure-limited",
+      "page_text_63_full-time",
+      "page_text_64_auckland-cbd-auckland-hybrid",
+      "page_text_65_2k-training-budget-insurance-meal-vouchers-wfh",
+      "page_text_66_join-a-global-growing-saas-company-with-over-300",
+      "page_text_67_enjoy-a-2k-training-budget-paid-wellness-days-di",
+      "page_text_68_become-part-of-a-friendly-team-and-a-company-tha",
+      "page_text_70_2d-ago-viewed"
+    ],
+    "evidence": {
+      "texts": [
+        "Software Engineers",
+        "Plexure Limited",
+        "Full time",
+        "Auckland CBD, Auckland (Hybrid)",
+        "2k training budget, insurance, meal vouchers, WFH+",
+        "Join a global, growing SaaS company with over 300 million users",
+        "· Enjoy a 2k training budget, paid wellness days, dinner vouchers, summer hours +",
+        "Become part of a friendly team and a company that invests in your development",
+        "2d ago · Viewed"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": true,
+        "has_salary": true
+      }
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_ee40c18949f8",
+    "title": "Software Engineers",
+    "company": "Plexure Limited",
+    "location": "Auckland CBD, Auckland (Hybrid)",
+    "work_type": "Hybrid",
+    "classification": "Software Engineers",
+    "salary_text": "2k training budget,insurance,meal vouchers, WFH+",
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "出目☆"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "Software Engineers"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Quick apply"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "Plexure Limited"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "But I think Plexure does thing剪往平台观看：YouTube"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "We're looking for two Software Engineers to join the Plexure team based in Auckland CBD - one"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Intermediate and one Intermediate or Senior-level Engineer."
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Become partof a global,growingSaaS companyat anexciting point inourgrowthjourney!Youll"
+      },
+      {
+        "index": 9,
+        "role": "section_hint",
+        "text": "enjoy WFH days each week + lots of lovely benefits (more on those below)."
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "Who are we?"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "·Plexure redefines the customer experience and drives results through personalized mobile"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "marketing and next-generation loyalty programs for household names such as McDonald’s."
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "·Ourindustry-leading customerengagement data platform has over 300 million users in 60+"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "countries around the globe."
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "What will you do?"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "·Reporting to an Engineering Team Lead, youllcontribute to the design, development, and"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "testing of innovativebackend solutions:"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "·Contribute to design discussions that shape reliable,scalable systems."
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "·Troubleshoot,debug,and optimize backend systems for performance and reliability."
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "·Contribute to Cl/CD pipelines and automated testing to streamline deployments."
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "·Participate in code reviews and provide constructive feedback to peers."
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "·Help with monitoring, respond to alerts, and support stabilisation as new features go live."
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "·Work in an Al-enabled engineering environment,using Al tools to help define"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "specifications,accelerate development,validatecode,mproveworkflows,and support"
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "high-quality engineering outcomes."
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "·Our tech stack: C#,.NET, React, Git, SQL, OAuth/OpenlD Connect, Azure DevOps,YAML,"
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "Bicep and Azure services."
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "·Ourenvironment: Become part of a friendly, supportive, and inclusive team within an"
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "organisation that genuinely invests in your development!"
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "Your team"
+      },
+      {
+        "index": 31,
+        "role": "body",
+        "text": "You'll join one of our backend engineering squads:"
+      },
+      {
+        "index": 32,
+        "role": "body",
+        "text": "Windows登录提醒"
+      },
+      {
+        "index": 33,
+        "role": "body",
+        "text": "Personalized Content &Integrations(Intermediate)"
+      },
+      {
+        "index": 34,
+        "role": "body",
+        "text": "Thissquad empowers brands to deliver tailored customer expe"
+      },
+      {
+        "index": 35,
+        "role": "body",
+        "text": "注销被取消"
+      },
+      {
+        "index": 36,
+        "role": "body",
+        "text": "计划的关闭已取消。"
+      },
+      {
+        "index": 37,
+        "role": "body",
+        "text": "integrations between brands and Plexure."
+      },
+      {
+        "index": 38,
+        "role": "body",
+        "text": "隐藏播放器控件"
+      },
+      {
+        "index": 39,
+        "role": "body",
+        "text": "Plexure Culture Video"
+      },
+      {
+        "index": 40,
+        "role": "body",
+        "text": "Plexure"
+      },
+      {
+        "index": 41,
+        "role": "body",
+        "text": "thumbnail-image"
+      },
+      {
+        "index": 42,
+        "role": "body",
+        "text": "1 位订阅者"
+      },
+      {
+        "index": 43,
+        "role": "body",
+        "text": "grammarly-integration"
+      },
+      {
+        "index": 44,
+        "role": "body",
+        "text": "{\"mode\":\"full\",\"isActive\":true,\"isUserDisabled\":false}"
+      },
+      {
+        "index": 45,
+        "role": "body",
+        "text": "Auckland CBD, Auckland (Hybrid)"
+      },
+      {
+        "index": 46,
+        "role": "body",
+        "text": "Engineering - Software (Information & Communication Technology)"
+      },
+      {
+        "index": 47,
+        "role": "body",
+        "text": "①Fulltime"
+      },
+      {
+        "index": 48,
+        "role": "body",
+        "text": "2k training budget,insurance,meal vouchers, WFH+"
+      },
+      {
+        "index": 49,
+        "role": "body",
+        "text": "Posted 2d ago · High application volume"
+      },
+      {
+        "index": 50,
+        "role": "body",
+        "text": "Quickapply"
+      },
+      {
+        "index": 51,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 52,
+        "role": "body",
+        "text": "2 skills and credentials match your profile"
+      },
+      {
+        "index": 53,
+        "role": "body",
+        "text": "√ Pipelines"
+      },
+      {
+        "index": 54,
+        "role": "body",
+        "text": "C#Programming"
+      },
+      {
+        "index": 55,
+        "role": "body",
+        "text": "Show all v"
+      },
+      {
+        "index": 56,
+        "role": "body",
+        "text": "But I think Plexure does thin郭往平台观看: YouTube"
+      },
+      {
+        "index": 57,
+        "role": "body",
+        "text": "Become part of a global, growing SaaS company at an exciting point in our growth journey! You'll"
+      },
+      {
+        "index": 58,
+        "role": "body",
+        "text": "marketing and next-generation loyalty programs for househald n"
+      },
+      {
+        "index": 59,
+        "role": "body",
+        "text": "·Ourindustry-leading customer engagement data platform"
+      },
+      {
+        "index": 60,
+        "role": "body",
+        "text": "View all jobs"
+      },
+      {
+        "index": 61,
+        "role": "body",
+        "text": "Everyday"
+      },
+      {
+        "index": 62,
+        "role": "body",
+        "text": "00000"
+      },
+      {
+        "index": 63,
+        "role": "body",
+        "text": "plexure"
+      },
+      {
+        "index": 64,
+        "role": "body",
+        "text": "Plexure Limited View alljobs"
+      },
+      {
+        "index": 65,
+        "role": "body",
+        "text": "Engineering-Software (Information& Communication Technology)"
+      },
+      {
+        "index": 66,
+        "role": "body",
+        "text": "2k training budget, insurance, meal vouchers, WFH+"
+      },
+      {
+        "index": 67,
+        "role": "body",
+        "text": "Plexure CultureVideo"
+      },
+      {
+        "index": 68,
+        "role": "body",
+        "text": "marketing and next-generation loyalty programs for househald r"
+      },
+      {
+        "index": 69,
+        "role": "body",
+        "text": "·Reporting to an Engineering Team Lead,you'll contribute to the design,development,and"
+      },
+      {
+        "index": 70,
+        "role": "body",
+        "text": "Contribute to design discussions that shape reliable,scalable systems."
+      },
+      {
+        "index": 71,
+        "role": "body",
+        "text": "·Troubleshoot,debug,and optimize backend systems forperformance and reliability."
+      },
+      {
+        "index": 72,
+        "role": "body",
+        "text": "·Paricipate in code reviews and provide constructive feedback to peers."
+      },
+      {
+        "index": 73,
+        "role": "body",
+        "text": "·Help with monitoring,respond to alerts, and support stabilisation as new features go live."
+      },
+      {
+        "index": 74,
+        "role": "body",
+        "text": "·Work in an Al-enabled engineering environment, using Al tools to help define"
+      },
+      {
+        "index": 75,
+        "role": "body",
+        "text": "specifications,accelerate development,validate code,improve workflows,and support"
+      },
+      {
+        "index": 76,
+        "role": "body",
+        "text": "·Our tech stack:C#,.NET,React, Git, SQL,OAuth/OpenlD Connect, Azure DevOps, YAML,"
+      },
+      {
+        "index": 77,
+        "role": "body",
+        "text": "·Ourenvironment:Become part of a friendly, supportive, and inclusive team within an"
+      },
+      {
+        "index": 78,
+        "role": "body",
+        "text": "organisation that genuinely invests inyourdevelopment!"
+      },
+      {
+        "index": 79,
+        "role": "body",
+        "text": "Personalized Content&Integrations(Intermediate)"
+      },
+      {
+        "index": 80,
+        "role": "body",
+        "text": "This squad empowers brands to deliver tailored customer experiences and seamless, extensible"
+      },
+      {
+        "index": 81,
+        "role": "body",
+        "text": "Projects:"
+      },
+      {
+        "index": 82,
+        "role": "body",
+        "text": "The initial focus willbe on platform health&engineering"
+      },
+      {
+        "index": 83,
+        "role": "body",
+        "text": "increasing automated test coverage,resolving technical debt and improving delivery quality"
+      },
+      {
+        "index": 84,
+        "role": "body",
+        "text": "and reliability."
+      },
+      {
+        "index": 85,
+        "role": "body",
+        "text": "·There'll alsobeopportunities to contribute to loyalty program initiatives and some frontend"
+      },
+      {
+        "index": 86,
+        "role": "body",
+        "text": "development for our customer portals."
+      },
+      {
+        "index": 87,
+        "role": "body",
+        "text": "Identity (Intermediate orSenior)"
+      },
+      {
+        "index": 88,
+        "role": "body",
+        "text": "This squad focuses onbuilding and strengthening Plexure's identity and authentication platform,"
+      },
+      {
+        "index": 89,
+        "role": "body",
+        "text": "including authentication, authorisation,fraud detection,and broader platform security."
+      },
+      {
+        "index": 90,
+        "role": "body",
+        "text": "·The initial focus will be on building a new highly available Identity Provider (IDP) platform from"
+      },
+      {
+        "index": 91,
+        "role": "body",
+        "text": "the ground up, covering authentication, authorisation, login flows, and identity management."
+      },
+      {
+        "index": 92,
+        "role": "body",
+        "text": "·There'll also be opportunities to contribute to related security and platform initiatives, including"
+      },
+      {
+        "index": 93,
+        "role": "body",
+        "text": "security hardening,fraud detection,third-party security integrations, and cloud-native"
+      },
+      {
+        "index": 94,
+        "role": "body",
+        "text": "infrastructure improvements."
+      },
+      {
+        "index": 95,
+        "role": "body",
+        "text": "What are we looking for?"
+      },
+      {
+        "index": 96,
+        "role": "body",
+        "text": "·A passion forback-end development."
+      },
+      {
+        "index": 97,
+        "role": "body",
+        "text": "·Experience with C#,.NET."
+      },
+      {
+        "index": 98,
+        "role": "body",
+        "text": "Plexure redefines the customer experience and drives results through personalized mobile marketing and next-generation loyalty programs for household names such as McDonald's."
+      },
+      {
+        "index": 99,
+        "role": "body",
+        "text": "Plexure redefines the customer experience"
+      },
+      {
+        "index": 100,
+        "role": "body",
+        "text": "personalized mobile marketing"
+      },
+      {
+        "index": 101,
+        "role": "body",
+        "text": "next-generation loyalty programs"
+      },
+      {
+        "index": 102,
+        "role": "body",
+        "text": "McDonald's."
+      }
+    ],
+    "requirements": [
+      "·Plexure redefines the customer experience and drives results through personalized mobile",
+      "2 skills and credentials match your profile",
+      "This squad empowers brands to deliver tailored customer experiences and seamless, extensible",
+      "·Experience with C#,.NET.",
+      "Plexure redefines the customer experience and drives results through personalized mobile marketing and next-generation loyalty programs for household names such as McDonald's.",
+      "Plexure redefines the customer experience"
+    ],
+    "responsibilities": [],
+    "benefits": [
+      "enjoy WFH days each week + lots of lovely benefits (more on those below).",
+      "Auckland CBD, Auckland (Hybrid)",
+      "2k training budget,insurance,meal vouchers, WFH+",
+      "2k training budget, insurance, meal vouchers, WFH+"
+    ],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply button",
+      "bbox": {
+        "x": 1758,
+        "y": 170,
+        "w": 112,
+        "h": 40
+      },
+      "click_point": {
+        "x": 1814,
+        "y": 190
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save button",
+      "bbox": {
+        "x": 1878,
+        "y": 170,
+        "w": 58,
+        "h": 40
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 1600,
+        "y": 80,
+        "w": 944,
+        "h": 1304
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_detail_drawer_anchor_bbox"
+      ],
+      "evidence": {
+        "layout": "right_detail_drawer",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false,
+        "content_left": 530,
+        "content_width": 1500,
+        "source": "seek_detail_drawer_anchor_bbox"
+      },
+      "safe_points": [
+        {
+          "x": 2072,
+          "y": 732,
+          "reason": "inside_seek_detail_drawer_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 1600,
+      "y": 0,
+      "w": 944,
+      "h": 1384
+    },
+    "detail_bottom_reached": false,
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070625-609672__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070528-563262__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070438-121386__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070409-757929__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070450-486657__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070547-209165__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-070645-718896__observe-screen__edge.json"
+    ]
+  }
+}

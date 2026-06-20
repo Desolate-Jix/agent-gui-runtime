@@ -5,6 +5,7 @@ from typing import Any
 
 
 RUNTIME_PATH_GRAPH_CONTRACT = "runtime_path_graph_v1"
+LIST_DETAIL_PATH_PATTERN_CONTRACT = "list_detail_path_pattern_v1"
 LEARNED_SKILL_CONTRACT = "learned_skill_v1"
 VISUAL_ASSET_CONTRACT = "visual_asset_v1"
 RUNTIME_PATH_GRAPH_EXPORT_CONTRACT = "runtime_path_graph_export_v1"
@@ -70,6 +71,7 @@ def build_runtime_path_graph_from_seek_artifact(seek_artifact: dict[str, Any] | 
                 "load_more_action_template_id": "load_more_results",
             }
         ],
+        "path_patterns": _seek_path_patterns(),
         "transitions": _seek_transitions(),
         "action_templates": _runtime_action_templates(profile),
         "verification_rules": profile.get("verification_rules") or [],
@@ -90,6 +92,11 @@ def build_runtime_path_graph_from_seek_artifact(seek_artifact: dict[str, Any] | 
             "skill.read_detail_pane_until_bounded",
             "skill.click_seeded_candidate_with_point_validation",
             "skill.block_final_submit",
+            "skill.open_record_from_list_or_card",
+            "skill.read_fixed_detail_pane_until_complete",
+            "skill.scroll_target_container_until_progress_or_boundary",
+            "skill.reset_detail_container_to_header",
+            "skill.block_final_submit_or_write_action",
         ],
         "metrics": {
             **baseline,
@@ -154,6 +161,46 @@ def build_learned_skills_from_seek_artifact(seek_artifact: dict[str, Any] | None
                 "requires": ["final_submit_guard_v1"],
                 "verification": ["blocked_decision_recorded"],
                 "safety": {"final_submit": "forbidden"},
+            },
+            {
+                "skill_id": "skill.open_record_from_list_or_card",
+                "intent": "Open a repeated record from a list, card stack, table, or search result and verify identity in the detail surface.",
+                "inputs": ["list_container_id", "entity_pattern_ref", "identity_mapping"],
+                "requires": ["current_candidate_validation", "identity_mapping.primary_key_fields"],
+                "verification": ["selected_record_identity_matches_detail"],
+                "safety": {"artifact_is_guidance_only": True, "final_submit_allowed": False},
+            },
+            {
+                "skill_id": "skill.read_fixed_detail_pane_until_complete",
+                "intent": "Read a fixed detail pane with bounded adaptive scrolling while preserving detail identity.",
+                "inputs": ["detail_container_id", "detail_read_policy"],
+                "requires": ["detail_header_visible", "bounded_scroll_budget"],
+                "verification": ["detail_required_evidence_complete"],
+                "safety": {"wrong_scope_scroll_must_abort": True},
+            },
+            {
+                "skill_id": "skill.scroll_target_container_until_progress_or_boundary",
+                "intent": "Scroll only the selected container until new evidence appears or a boundary/no-progress condition is reached.",
+                "inputs": ["target_container_id", "progress_signals", "stop_after_no_progress_count"],
+                "requires": ["before_after_container_evidence", "non_target_stability"],
+                "verification": ["progress_or_boundary_recorded"],
+                "safety": {"wrong_scope_scroll_must_abort": True},
+            },
+            {
+                "skill_id": "skill.reset_detail_container_to_header",
+                "intent": "Reset a detail pane to its header before opening the next record so post-click verification starts from a clean state.",
+                "inputs": ["detail_container_id", "header_region_id"],
+                "requires": ["previous_action_was_detail_read", "target_container_bbox"],
+                "verification": ["detail_header_visible_after_cleanup"],
+                "safety": {"wrong_scope_cleanup_blocks_next_click": True},
+            },
+            {
+                "skill_id": "skill.block_final_submit_or_write_action",
+                "intent": "Block final submission or persistent write actions unless a later explicit approval policy allows them.",
+                "inputs": ["candidate_label", "page_state", "safety_policy_refs"],
+                "requires": ["final_submit_guard_v1"],
+                "verification": ["blocked_decision_recorded"],
+                "safety": {"final_submit": "forbidden", "persistent_write_requires_user_approval": True},
             },
         ],
     }
@@ -255,6 +302,105 @@ def _entities_from_sample_cards(sample_cards: list[dict[str, Any]]) -> list[dict
             }
         )
     return entities
+
+
+def _seek_path_patterns() -> list[dict[str, Any]]:
+    return [
+        {
+            "contract_version": LIST_DETAIL_PATH_PATTERN_CONTRACT,
+            "pattern_id": "seek:pattern:list_detail_right_pane",
+            "pattern_type": "split_list_detail",
+            "list_container_id": "seek:results_list",
+            "detail_container_id": "seek:job_detail",
+            "list_region_id": "results_list",
+            "detail_region_id": "job_detail",
+            "list_entity_type": "job_card",
+            "detail_entity_type": "job_detail",
+            "open_action_template_id": "open_job_card",
+            "read_detail_action_template_id": "read_detail",
+            "load_more_action_template_id": "load_more_results",
+            "identity_mapping": {
+                "list_entity_type": "job_card",
+                "detail_entity_type": "job_detail_header",
+                "primary_key_fields": [
+                    {
+                        "list_field": "title",
+                        "detail_field": "title",
+                        "match_type": "text_similarity",
+                        "min_similarity": 0.82,
+                        "required": True,
+                    }
+                ],
+                "secondary_fields": [
+                    {
+                        "list_field": "company",
+                        "detail_field": "company",
+                        "match_type": "partial_text_match",
+                        "required": False,
+                    },
+                    {
+                        "list_field": "location",
+                        "detail_field": "location",
+                        "match_type": "partial_text_match",
+                        "required": False,
+                    },
+                ],
+                "reject_if_detail_title_source": ["detail_body", "unknown"],
+            },
+            "detail_read_policy": {
+                "detail_container_id": "seek:job_detail",
+                "scroll_scope": "container",
+                "requires_container_bbox": True,
+                "header_region_id": "detail_header",
+                "body_region_id": "detail_body",
+                "preserve_header_fields_on_scroll": True,
+                "adaptive_scroll": {
+                    "enabled": True,
+                    "initial_wheel_clicks": 5,
+                    "max_wheel_clicks": 10,
+                    "increase_wheel_on_low_progress": True,
+                    "stop_after_no_progress_count": 2,
+                    "progress_signals": [
+                        "new_unique_text_lines",
+                        "detail_crop_hash_changed",
+                        "scroll_effect_moved",
+                    ],
+                },
+                "non_target_stability": {
+                    "required": True,
+                    "stable_container_id": "seek:results_list",
+                    "signals": [
+                        "visible_card_hashes_stable",
+                        "top_card_title_stable",
+                        "results_list_crop_hash_stable",
+                    ],
+                },
+                "stop_reasons": [
+                    "bottom_reached",
+                    "right_detail_no_progress_after_scroll",
+                    "max_scrolls_reached",
+                    "wrong_scope_scroll_detected",
+                ],
+            },
+            "pre_action_cleanup": [
+                {
+                    "for_action_template_id": "open_job_card",
+                    "when_previous_action_in": ["read_detail", "read_detail_pane_until_bounded"],
+                    "cleanup_action": "reset_detail_container_to_header",
+                    "target_container_id": "seek:job_detail",
+                    "direction": "up",
+                    "wheel_clicks": 8,
+                    "verify_after_cleanup": {
+                        "detail_header_visible": True,
+                        "wrong_scope_detected": False,
+                    },
+                    "reason": "ensure_detail_header_visible_for_next_post_click_verification",
+                }
+            ],
+            "safety_policy_refs": ["final_submit_guard_v1", "artifact_cannot_authorize_click"],
+            "artifact_is_authorization": False,
+        }
+    ]
 
 
 def _runtime_action_templates(profile: dict[str, Any]) -> list[dict[str, Any]]:

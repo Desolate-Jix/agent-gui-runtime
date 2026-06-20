@@ -46,6 +46,7 @@ def merge_seek_job_details(details: list[dict[str, Any]] | tuple[dict[str, Any],
 
     merged["apply_button_state"] = _preferred_button_state(items, "apply_button_state")
     merged["save_button_state"] = _preferred_button_state(items, "save_button_state")
+    merged["detail_bottom_reached"] = any(_detail_bottom_reached(item) for item in items)
     merged["detail_scroll_history"] = _unique_scroll_history(
         entry for item in items for entry in _list_of_dicts(item.get("detail_scroll_history"))
     )
@@ -60,6 +61,7 @@ def assess_seek_job_detail_completeness(
     scroll_count: int = 0,
     max_scrolls: int = DEFAULT_MAX_DETAIL_SCROLLS,
     required_sections: tuple[str, ...] = DEFAULT_REQUIRED_DETAIL_SECTIONS,
+    require_bottom: bool = False,
 ) -> dict[str, Any]:
     """Decide whether the traversal runner should keep scrolling the SEEK detail pane."""
 
@@ -75,6 +77,9 @@ def assess_seek_job_detail_completeness(
     for section in required_sections:
         if not _list_of_strings(payload.get(section)):
             missing.append(section)
+    bottom_reached = _detail_bottom_reached(payload)
+    if require_bottom and not bottom_reached:
+        missing.append("detail_bottom")
 
     complete = not missing
     can_scroll = int(scroll_count) < int(max_scrolls)
@@ -90,6 +95,8 @@ def assess_seek_job_detail_completeness(
         "complete": complete,
         "should_scroll": should_scroll,
         "missing_evidence": missing,
+        "bottom_reached": bottom_reached,
+        "require_bottom": bool(require_bottom),
         "scroll_count": int(scroll_count),
         "max_scrolls": int(max_scrolls),
         "stop_reason": stop_reason,
@@ -99,6 +106,15 @@ def assess_seek_job_detail_completeness(
 
 def _has_role_evidence(detail: dict[str, Any]) -> bool:
     return bool(_list_of_strings(detail.get("responsibilities")) or _list_of_strings(detail.get("requirements")))
+
+
+def _detail_bottom_reached(detail: dict[str, Any]) -> bool:
+    if detail.get("detail_bottom_reached") is True or detail.get("bottom_reached") is True:
+        return True
+    for item in _list_of_dicts(detail.get("detail_scroll_history")):
+        if item.get("bottom_reached") is True:
+            return True
+    return False
 
 
 def build_seek_mvp_run_report(

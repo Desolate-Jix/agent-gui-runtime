@@ -143,6 +143,40 @@ def test_seek_artifact_converts_to_runtime_path_graph_skills_and_visual_assets()
     }
     assert graph["entities"][0]["coordinate_evidence"]["requires_current_reobserve"] is True
     assert graph["entities"][0]["coordinate_evidence"]["requires_vista_or_equivalent_validation"] is True
+    patterns = graph["path_patterns"]
+    assert [pattern["contract_version"] for pattern in patterns] == ["list_detail_path_pattern_v1"]
+    list_detail = patterns[0]
+    assert list_detail["pattern_type"] == "split_list_detail"
+    assert list_detail["list_container_id"] == "seek:results_list"
+    assert list_detail["detail_container_id"] == "seek:job_detail"
+    assert list_detail["open_action_template_id"] == "open_job_card"
+    assert list_detail["read_detail_action_template_id"] == "read_detail"
+    assert list_detail["load_more_action_template_id"] == "load_more_results"
+
+    identity_mapping = list_detail["identity_mapping"]
+    assert identity_mapping["primary_key_fields"][0] == {
+        "list_field": "title",
+        "detail_field": "title",
+        "match_type": "text_similarity",
+        "min_similarity": 0.82,
+        "required": True,
+    }
+    assert "detail_body" in identity_mapping["reject_if_detail_title_source"]
+
+    detail_policy = list_detail["detail_read_policy"]
+    assert detail_policy["scroll_scope"] == "container"
+    assert detail_policy["detail_container_id"] == "seek:job_detail"
+    assert detail_policy["non_target_stability"]["stable_container_id"] == "seek:results_list"
+    assert detail_policy["adaptive_scroll"]["stop_after_no_progress_count"] >= 2
+    assert "wrong_scope_scroll_detected" in detail_policy["stop_reasons"]
+
+    cleanup = list_detail["pre_action_cleanup"][0]
+    assert cleanup["for_action_template_id"] == "open_job_card"
+    assert "read_detail" in cleanup["when_previous_action_in"]
+    assert cleanup["cleanup_action"] == "reset_detail_container_to_header"
+    assert cleanup["target_container_id"] == "seek:job_detail"
+    assert cleanup["verify_after_cleanup"]["detail_header_visible"] is True
+    assert cleanup["verify_after_cleanup"]["wrong_scope_detected"] is False
 
     skills = runtime_export["learned_skills"]
     assert skills["contract_version"] == "learned_skill_v1"
@@ -151,6 +185,11 @@ def test_seek_artifact_converts_to_runtime_path_graph_skills_and_visual_assets()
         "skill.scroll_container_until_new_content",
         "skill.read_detail_pane_until_bounded",
         "skill.block_final_submit",
+        "skill.open_record_from_list_or_card",
+        "skill.read_fixed_detail_pane_until_complete",
+        "skill.scroll_target_container_until_progress_or_boundary",
+        "skill.reset_detail_container_to_header",
+        "skill.block_final_submit_or_write_action",
     }
 
     visual_assets = runtime_export["visual_assets"]

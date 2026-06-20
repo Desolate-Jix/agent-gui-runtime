@@ -4,9 +4,9 @@ import re
 from difflib import SequenceMatcher
 from typing import Any, Iterable
 
-from app.page_structure.schemas import PageElement, PageText
+from app.page_structure.schemas import InteractionPolicy, PageElement, PageText, VerificationHints
 from app.recognition.schemas import CandidateRankRequest, CandidateRankResult, RecognitionCandidate, ScoreBreakdown
-from app.vision.schemas import ImageSize
+from app.vision.schemas import BBox, ImageSize
 
 
 SUPPORTED_INTERACTIONS = {"click", "focus"}
@@ -19,8 +19,14 @@ def rank_candidates(request: CandidateRankRequest) -> CandidateRankResult:
     rejected: list[RecognitionCandidate] = []
     texts_by_id = {text.text_id: text for text in request.page_structure.texts}
     screen_index = _screen_reading_index(request.screen_reading)
+    virtual_elements = _screen_inventory_virtual_elements(
+        request.screen_reading,
+        existing_element_ids={item.element_id for item in request.page_structure.elements},
+        goal=request.goal,
+    )
+    elements_to_rank = [*request.page_structure.elements, *virtual_elements]
 
-    for element in request.page_structure.elements:
+    for element in elements_to_rank:
         screen_evidence = _screen_evidence_for_element(element, screen_index)
         breakdown, reasons, eligible = _score_element(
             element,
@@ -87,6 +93,8 @@ def rank_candidates(request: CandidateRankRequest) -> CandidateRankResult:
         margin_to_second=margin,
         summary={
             "element_count": len(request.page_structure.elements),
+            "ranked_element_count": len(elements_to_rank),
+            "screen_inventory_virtual_element_count": len(virtual_elements),
             "eligible_count": len(ranked),
             "rejected_count": len(rejected),
             "returned_count": len(selected),
@@ -114,10 +122,13 @@ def _score_element(
     reasons: list[str] = []
     precision_visual_match = _is_precision_visual_goal_match(element, goal)
     visual_goal = _goal_requests_visual_icon(goal)
+    text_entry_goal = _goal_requests_text_entry(goal)
     base_text_similarity = _best_text_similarity(goal, _element_text_values(element))
     precision_text_match = _is_precision_text_goal_match(element, goal=goal, text_similarity=base_text_similarity)
     screen_text_similarity = _best_text_similarity(goal, _screen_reading_text_values(screen_evidence))
     text_similarity = max(base_text_similarity, screen_text_similarity)
+    explicit_label_match = _goal_explicitly_requests_element_label(goal, element)
+    negated_label_match = _goal_negates_element_label(goal, element)
     role_score = _role_score(element)
     policy_score = _policy_score(element)
     confidence_score = _confidence_score(element)
@@ -139,6 +150,24 @@ def _score_element(
         text_similarity = min(text_similarity, 0.35)
         reasons.append("text_control_does_not_satisfy_icon_goal")
 
+    if negated_label_match:
+        text_similarity = min(text_similarity, 0.2)
+        screen_reading_score = min(screen_reading_score, 0.55)
+        reasons.append("goal_negates_candidate_label")
+    elif explicit_label_match:
+        text_similarity = max(text_similarity, 0.9)
+        reasons.append("goal_explicitly_mentions_candidate_label")
+
+    if text_entry_goal:
+        if _is_text_entry_element(element):
+            role_score = max(role_score, 1.0)
+            if _text_entry_goal_overlaps_element(goal, element):
+                text_similarity = max(text_similarity, 0.78)
+                reasons.append("text_entry_target_matches_field_goal")
+        elif text_similarity >= 0.65:
+            text_similarity = min(text_similarity, 0.42)
+            reasons.append("non_typeable_label_does_not_satisfy_field_goal")
+
     if screen_text_similarity > base_text_similarity:
         reasons.append("screen_reading_text_match")
     if text_similarity >= 0.75:
@@ -149,6 +178,8 @@ def _score_element(
         reasons.append("supported_interaction")
     if policy.zone_type in HIGH_PRIORITY_ZONES:
         reasons.append(f"trusted_zone:{policy.zone_type}")
+    if isinstance(element.evidence.get("screen_inventory_action"), dict):
+        reasons.append("screen_inventory_action_candidate")
     if ad_penalty >= 0.6:
         reasons.append("ad_risk_penalty")
     if blocked_penalty:
@@ -190,6 +221,43 @@ def _goal_requests_visual_icon(goal: str) -> bool:
     return any(hint in normalized for hint in hints)
 
 
+def _goal_requests_text_entry(goal: str) -> bool:
+    normalized = _normalize_text(goal)
+    return any(
+        hint in normalized
+        for hint in (
+            "text box",
+            "textbox",
+            "text area",
+            "textarea",
+            "input",
+            "field",
+            "cover letter",
+            "\u8f93\u5165\u6846",
+            "\u6587\u672c\u6846",
+            "\u5b57\u6bb5",
+        )
+    )
+
+
+def _is_text_entry_element(element: PageElement) -> bool:
+    return element.role in {"input", "text_input", "textarea", "edit", "search_box", "search_input"} or element.interaction_type in {"focus", "input"}
+
+
+def _text_entry_goal_overlaps_element(goal: str, element: PageElement) -> bool:
+    normalized_goal = _normalize_text(goal)
+    normalized_element = " ".join(_normalize_text(value) for value in _element_text_values(element))
+    if "cover letter" in normalized_goal and "cover letter" in normalized_element:
+        return True
+    goal_tokens = {
+        token
+        for token in normalized_goal.split()
+        if len(token) >= 5 and token not in {"click", "field", "application", "complete", "submit", "review", "continue"}
+    }
+    element_tokens = set(normalized_element.split())
+    return bool(goal_tokens & element_tokens)
+
+
 def _is_precision_visual_goal_match(element: PageElement, goal: str) -> bool:
     return element.interaction_policy.zone_type == "precise_visual_target" and _goal_requests_visual_icon(goal)
 
@@ -211,8 +279,6 @@ def _element_text_values(element: PageElement) -> list[str]:
         element.text,
         element.description,
         *element.possible_destinations,
-        element.role,
-        element.interaction_type,
     ]
 
 
@@ -220,6 +286,15 @@ def _screen_reading_text_values(screen_evidence: dict[str, Any] | None) -> list[
     if not screen_evidence:
         return []
     values: list[str] = []
+    screen_inventory_action = screen_evidence.get("screen_inventory_action")
+    if isinstance(screen_inventory_action, dict):
+        metadata = screen_inventory_action.get("metadata") if isinstance(screen_inventory_action.get("metadata"), dict) else {}
+        values.extend(
+            [
+                str(screen_inventory_action.get("label") or ""),
+                str(metadata.get("automation_id") or ""),
+            ]
+        )
     ui_element = screen_evidence.get("ui_element")
     if isinstance(ui_element, dict):
         values.extend(
@@ -252,6 +327,41 @@ def _best_text_similarity(goal: str, candidates: Iterable[str]) -> float:
     if not normalized_goal:
         return 0.0
     return round(max((_text_similarity(normalized_goal, _normalize_text(item)) for item in candidates), default=0.0), 4)
+
+
+def _goal_explicitly_requests_element_label(goal: str, element: PageElement) -> bool:
+    return _goal_label_match(goal, _element_text_values(element), negated=False)
+
+
+def _goal_negates_element_label(goal: str, element: PageElement) -> bool:
+    return _goal_label_match(goal, _element_text_values(element), negated=True)
+
+
+def _goal_label_match(goal: str, labels: Iterable[str], *, negated: bool) -> bool:
+    goal_text = _normalize_text(goal)
+    if not goal_text:
+        return False
+    for label in labels:
+        label_text = _normalize_text(label)
+        if len(label_text) < 3:
+            continue
+        for match in re.finditer(rf"(?<!\w){re.escape(label_text)}(?!\w)", goal_text):
+            before = goal_text[max(0, match.start() - 40) : match.start()].strip()
+            is_negated = _negates_next_click_target(before)
+            if is_negated is negated:
+                return True
+    return False
+
+
+def _negates_next_click_target(preceding_text: str) -> bool:
+    words = preceding_text.split()
+    tail = " ".join(words[-5:])
+    return bool(
+        re.search(
+            r"\b(do not|don t|dont|never|not|avoid|exclude|excluding|forbid|forbidden)\b",
+            tail,
+        )
+    )
 
 
 def _text_similarity(left: str, right: str) -> float:
@@ -318,6 +428,21 @@ def _screen_reading_score(
         return 0.0, []
     score = 0.0
     reasons: list[str] = []
+    screen_inventory_action = screen_evidence.get("screen_inventory_action")
+    if isinstance(screen_inventory_action, dict):
+        confidence = max(0.0, min(float(screen_inventory_action.get("confidence") or 0.0), 1.0))
+        score += 0.55 + (confidence * 0.2)
+        reasons.append("screen_inventory_action_match")
+        action_label = str(screen_inventory_action.get("label") or "")
+        if _goal_label_match(goal, [action_label], negated=True):
+            score = min(score, 0.55)
+            reasons.append("screen_inventory_action_goal_label_negated")
+        elif _best_text_similarity(goal, [action_label]) >= 0.55:
+            score += 0.15
+            reasons.append("screen_inventory_action_goal_label_match")
+        if screen_inventory_action.get("coordinate_confidence") == "high":
+            score += 0.05
+            reasons.append("screen_inventory_high_coordinate_confidence")
     ui_element = screen_evidence.get("ui_element")
     uia_match: dict[str, Any] | None = None
     if isinstance(ui_element, dict):
@@ -335,7 +460,11 @@ def _screen_reading_score(
             uia_score = max(0.0, min(float(uia_match.get("score") or 0.0), 1.0))
             score += 0.62 + (uia_score * 0.18)
             reasons.append("screen_reading_uia_match")
-            if _best_text_similarity(goal, [str(uia_match.get("name") or "")]) >= 0.75:
+            uia_name = str(uia_match.get("name") or "")
+            if _goal_label_match(goal, [uia_name], negated=True):
+                score = min(score, 0.62)
+                reasons.append("screen_reading_uia_goal_name_negated")
+            elif _best_text_similarity(goal, [uia_name]) >= 0.75:
                 score += 0.15
                 reasons.append("screen_reading_uia_goal_name_match")
             if element.interaction_type == "click" and "Invoke" in list(uia_match.get("patterns") or []):
@@ -368,7 +497,127 @@ def _screen_reading_index(screen_reading: dict[str, Any] | None) -> dict[str, di
 
 def _screen_evidence_for_element(element: PageElement, screen_index: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
     evidence = screen_index.get(element.element_id)
+    if evidence is None and isinstance(element.evidence.get("screen_inventory_action"), dict):
+        evidence = {"screen_inventory_action": element.evidence["screen_inventory_action"]}
     return evidence if evidence else None
+
+
+def _screen_inventory_virtual_elements(
+    screen_reading: dict[str, Any] | None,
+    *,
+    existing_element_ids: set[str],
+    goal: str,
+) -> list[PageElement]:
+    if not isinstance(screen_reading, dict):
+        return []
+    inventory = screen_reading.get("screen_inventory")
+    if not isinstance(inventory, dict):
+        return []
+    actions = inventory.get("available_actions")
+    if not isinstance(actions, list):
+        return []
+
+    elements: list[PageElement] = []
+    for index, action in enumerate(actions):
+        if not isinstance(action, dict):
+            continue
+        source_id = str(action.get("source_id") or "")
+        if source_id and source_id in existing_element_ids:
+            continue
+        element = _page_element_from_screen_inventory_action(action, index=index, goal=goal)
+        if element is not None:
+            elements.append(element)
+    return elements
+
+
+def _page_element_from_screen_inventory_action(action: dict[str, Any], *, index: int, goal: str) -> PageElement | None:
+    bbox = _bbox_from_mapping(action.get("bbox"))
+    if bbox is None:
+        return None
+    click_point = _point_from_mapping(action.get("click_point"), bbox)
+    raw_label = str(action.get("label") or "").strip()
+    role = _normalize_screen_inventory_role(action.get("role"))
+    action_type = str(action.get("action_type") or "").casefold()
+    semantic_label = _semantic_screen_inventory_label(raw_label, role=role, action_type=action_type, goal=goal)
+    interaction_type = "focus" if action_type == "input_text" or role == "input" else "click"
+    coordinate_confidence = str(action.get("coordinate_confidence") or "medium")
+    source = str(action.get("source") or "screen_inventory")
+    priority = "high" if source == "windows_uia.controls" and coordinate_confidence == "high" else "medium"
+    element_id = f"screen_inventory_{str(action.get('id') or index)}"
+    return PageElement(
+        element_id=element_id,
+        label=semantic_label or raw_label or role,
+        role=role,
+        interaction_type=interaction_type,
+        description=f"Screen inventory action from {source}: {semantic_label or raw_label or role}",
+        text=raw_label or semantic_label or role,
+        bbox=bbox,
+        semantic_bbox=bbox,
+        click_point=click_point,
+        click_strategy="screen_inventory_action_point",
+        possible_destinations=[],
+        verification_hints=VerificationHints(
+            expected_changes=["focus_change"] if interaction_type == "focus" else ["content_change"],
+            target_scope="local",
+        ),
+        interaction_policy=InteractionPolicy(
+            allowed=True,
+            zone_type="general_action",
+            priority=priority,
+            ad_risk=0.0,
+            reasons=["screen_inventory_available_action"],
+        ),
+        fusion_confidence=max(0.0, min(float(action.get("confidence") or 0.5), 1.0)),
+        coordinate_confidence=coordinate_confidence,
+        memory_key=f"screen_inventory|role:{role}|label:{_normalize_text(semantic_label or raw_label)}|source:{source}",
+        sources=[source, "screen_inventory.available_actions"],
+        evidence={"screen_inventory_action": dict(action)},
+    )
+
+
+def _bbox_from_mapping(value: Any) -> BBox | None:
+    if not isinstance(value, dict):
+        return None
+    try:
+        bbox = BBox(
+            x=int(value.get("x") or 0),
+            y=int(value.get("y") or 0),
+            w=int(value.get("w") or value.get("width") or 0),
+            h=int(value.get("h") or value.get("height") or 0),
+        )
+    except (TypeError, ValueError):
+        return None
+    if bbox.w <= 0 or bbox.h <= 0:
+        return None
+    return bbox
+
+
+def _point_from_mapping(value: Any, bbox: BBox) -> dict[str, int]:
+    if isinstance(value, dict):
+        try:
+            return {"x": int(value.get("x")), "y": int(value.get("y"))}
+        except (TypeError, ValueError):
+            pass
+    return {"x": int(bbox.x + bbox.w / 2), "y": int(bbox.y + bbox.h / 2)}
+
+
+def _normalize_screen_inventory_role(value: Any) -> str:
+    role = str(value or "").casefold().strip()
+    if role in {"edit", "text_input", "textbox", "textarea", "text area", "search_box", "search_input"}:
+        return "input"
+    if not role:
+        return "button"
+    return role
+
+
+def _semantic_screen_inventory_label(raw_label: str, *, role: str, action_type: str, goal: str) -> str:
+    normalized_goal = _normalize_text(goal)
+    normalized_label = _normalize_text(raw_label)
+    if (role == "input" or action_type == "input_text") and "cover letter" in normalized_goal:
+        if normalized_label.startswith("dear ") or "dear " in normalized_label:
+            return f"Cover letter text box containing {raw_label}".strip()
+        return "Cover letter text box"
+    return raw_label
 
 
 def _normalize_text(value: str) -> str:

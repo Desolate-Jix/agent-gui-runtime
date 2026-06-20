@@ -59,6 +59,7 @@ def test_open_app_launches_catalog_entry_and_binds(monkeypatch) -> None:
         "load_app_catalog",
         "resolve_app",
         "resolve_launch_command",
+        "list_visible_windows_before_open",
         "launch_process",
         "wait_after_open",
         "list_visible_windows",
@@ -135,7 +136,7 @@ def test_open_app_uses_requested_browser_url_wait(monkeypatch, tmp_path) -> None
 
     assert response.success is True
     assert sleeps == [1.5]
-    wait_step = response.data["timings"]["steps"][4]
+    wait_step = next(step for step in response.data["timings"]["steps"] if step["name"] == "wait_after_open")
     assert wait_step["name"] == "wait_after_open"
     assert wait_step["wait_seconds"] == 1.5
     assert wait_step["requested_wait_seconds"] == 1.5
@@ -185,3 +186,74 @@ def test_open_app_retries_catalog_title_bind_by_process(monkeypatch) -> None:
     assert response.success is True
     assert response.data["bound_window"]["window_title"] == "Google News - Microsoft Edge"
     assert calls == [("msedge.exe", "Microsoft Edge"), ("msedge.exe", None)]
+
+
+def test_open_app_prefers_new_window_handle_over_existing_title_match(monkeypatch) -> None:
+    monkeypatch.setattr(
+        apps_api,
+        "_load_app_catalog",
+        lambda: {
+            "contract_version": "app_catalog_v1",
+            "apps": [
+                {
+                    "app_id": "edge",
+                    "launch_command": ["edge.exe"],
+                    "process_name": "msedge.exe",
+                    "title_hint": "Microsoft Edge",
+                    "capabilities": ["browser_ui"],
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(apps_api.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(apps_api.subprocess, "Popen", lambda command: SimpleNamespace(pid=4321, command=command))
+    snapshots = [
+        [
+            {
+                "handle": 10,
+                "title": "Review and submit | SEEK - Microsoft Edge",
+                "process_id": 111,
+                "process_name": "msedge.exe",
+            }
+        ],
+        [
+            {
+                "handle": 10,
+                "title": "Review and submit | SEEK - Microsoft Edge",
+                "process_id": 111,
+                "process_name": "msedge.exe",
+            },
+            {
+                "handle": 20,
+                "title": "New tab - Microsoft Edge",
+                "process_id": 111,
+                "process_name": "msedge.exe",
+            },
+        ],
+    ]
+
+    def fake_list_visible_windows():
+        return snapshots.pop(0)
+
+    bound = SimpleNamespace(
+        handle=20,
+        title="New tab - Microsoft Edge",
+        process_id=111,
+        process_name="msedge.exe",
+        rect=SimpleNamespace(left=0, top=0, right=100, bottom=100),
+        is_active=True,
+    )
+    bind_calls: list[tuple[str | None, str | None]] = []
+    handle_calls: list[int] = []
+    monkeypatch.setattr(apps_api.window_manager, "list_visible_windows", fake_list_visible_windows)
+    monkeypatch.setattr(apps_api.window_manager, "bind_window_by_handle", lambda handle: handle_calls.append(handle) or bound)
+    monkeypatch.setattr(apps_api.window_manager, "bind_window", lambda process_name, title: bind_calls.append((process_name, title)) or bound)
+    monkeypatch.setattr(apps_api, "write_trace", lambda **_kwargs: "trace.json")
+
+    response = apps_api.open_app(OpenAppRequest(app_id="edge", url="https://nz.seek.com/", title="SEEK"))
+
+    assert response.success is True
+    assert response.data["bound_window"]["handle"] == 20
+    assert handle_calls == [20]
+    assert bind_calls == []
+    assert response.data["windows_before_open"][0]["handle"] == 10

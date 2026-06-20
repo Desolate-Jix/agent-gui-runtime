@@ -251,7 +251,11 @@ def test_execute_mode_reuses_approved_plan_for_next_call(monkeypatch, tmp_path) 
             "verification_basis": {"pixel_change_ratio": 0.2},
         },
     )
-    monkeypatch.setattr(action_api.input_controller, "click_point", lambda x, y, **kwargs: clicked.update({"x": x, "y": y}) or {"clicked": True})
+    monkeypatch.setattr(
+        action_api.input_controller,
+        "click_point",
+        lambda x, y, **kwargs: clicked.update({"x": x, "y": y, "settle_ms": kwargs.get("settle_ms")}) or {"clicked": True},
+    )
     monkeypatch.setattr(action_api.transition_memory, "save", lambda record: str(tmp_path / "transition.json"))
     monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: written_operations.append(kwargs["operation"]) or f"logs/traces/actions/{kwargs['operation']}.json")
 
@@ -264,7 +268,7 @@ def test_execute_mode_reuses_approved_plan_for_next_call(monkeypatch, tmp_path) 
     assert dry.success is True
     assert real.success is True
     assert recognition_calls["count"] == 1
-    assert clicked == {"x": 315, "y": 246}
+    assert clicked == {"x": 315, "y": 246, "settle_ms": 200}
     assert real.data["result"]["execution_path"]["approved_plan_reused"] is True
     assert real.data["result"]["agent_execution_guidance"]["next_action"] == "done"
     step_result = real.data["result"]["agent_step_result"]

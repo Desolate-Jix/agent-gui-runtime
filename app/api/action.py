@@ -2132,7 +2132,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                         selected_point["x"],
                         selected_point["y"],
                         move_before_click=True,
-                        settle_ms=100,
+                        settle_ms=200,
                         hold_ms=70,
                     )
                 with timer.step("post_click_verification", attempt=attempt_index, enabled=request.enable_post_click_verification):
@@ -2430,7 +2430,7 @@ def execute_confirmed_point(request: ExecuteConfirmedPointRequest) -> APIRespons
                 point["x"],
                 point["y"],
                 move_before_click=True,
-                settle_ms=100,
+                settle_ms=200,
                 hold_ms=70,
             )
         result["execution_path"]["action_executed"] = True

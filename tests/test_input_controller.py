@@ -37,6 +37,7 @@ def test_type_text_verifies_clipboard_before_paste_and_restores_after_settle(mon
 
     assert result["typed"] is True
     assert result["clipboard_verified_before_paste"] is True
+    assert result["clipboard_verify_attempts"] == 1
     assert result["clipboard_paste_settle_ms"] == 150
     assert events == [
         ("ensure", None),
@@ -53,7 +54,7 @@ def test_type_text_verifies_clipboard_before_paste_and_restores_after_settle(mon
 def test_type_text_fails_when_clipboard_write_verification_mismatches(monkeypatch) -> None:
     controller = InputController()
     events: list[tuple[str, object]] = []
-    clipboard_reads = iter(["previous clipboard", "stale browser url"])
+    monotonic_values = iter([100.0, 100.1, 100.4, 100.6])
 
     monkeypatch.setattr(controller, "_ensure_windows_input", lambda: None)
     monkeypatch.setattr(
@@ -62,8 +63,14 @@ def test_type_text_fails_when_clipboard_write_verification_mismatches(monkeypatc
         lambda: SimpleNamespace(handle=7, title="Python Docs"),
     )
     monkeypatch.setattr(controller, "_focus_window", lambda handle: True)
-    monkeypatch.setattr(controller, "_get_clipboard_text", lambda: next(clipboard_reads))
+    monkeypatch.setattr(
+        controller,
+        "_get_clipboard_text",
+        lambda: "previous clipboard" if not events else "stale browser url",
+    )
     monkeypatch.setattr(controller, "_set_clipboard_text", lambda text: events.append(("set_clipboard", text)))
+    monkeypatch.setattr(input_module.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(input_module.time, "sleep", lambda seconds: events.append(("sleep", seconds)))
     monkeypatch.setattr(
         controller,
         "_press_chord",
@@ -77,4 +84,8 @@ def test_type_text_fails_when_clipboard_write_verification_mismatches(monkeypatc
     else:  # pragma: no cover - defensive assertion path
         raise AssertionError("expected clipboard verification failure")
 
-    assert events == [("set_clipboard", "list comprehension")]
+    assert events == [
+        ("set_clipboard", "list comprehension"),
+        ("sleep", input_module.CLIPBOARD_VERIFY_RETRY_SECONDS),
+        ("sleep", input_module.CLIPBOARD_VERIFY_RETRY_SECONDS),
+    ]

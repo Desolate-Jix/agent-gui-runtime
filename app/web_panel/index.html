@@ -458,6 +458,29 @@
               <div class="artifact-summary" id="replayGraphSummary"></div>
               <div class="action-table" id="replayGraphActions"></div>
               <div class="subpanel">
+                <h4 data-i18n="seek_application_evidence">SEEK Application Evidence</h4>
+                <div class="mode-help mode-help-learn" data-mode-scope="learn" data-i18n="seek_application_evidence_hint">Inspect station-internal application fill records, final-review audit, and non-authorizing application-flow artifacts before replay.</div>
+                <div class="form-grid">
+                  <label class="wide-control">
+                    <span data-i18n="application_fill_record_path">Application fill record path</span>
+                    <input id="seekApplicationRecordPath" value="logs/smoke/seek_apply_live_92822270_20260620_b/application_fill_record.json" />
+                  </label>
+                  <label class="wide-control">
+                    <span data-i18n="final_review_audit_path">Final review audit path</span>
+                    <input id="seekApplicationAuditPath" value="logs/smoke/seek_apply_live_92822270_20260620_b/final_review_audit.json" />
+                  </label>
+                  <label class="wide-control">
+                    <span data-i18n="application_flow_artifact_path">Application flow artifact path</span>
+                    <input id="seekApplicationArtifactPath" value="artifacts/seek/learned_seek_application_flow_92822270_20260620.json" />
+                  </label>
+                </div>
+                <div class="button-row">
+                  <button id="seekApplicationEvidenceLoadBtn" data-i18n="load_application_evidence">Load application evidence</button>
+                </div>
+                <div class="run-summary" id="seekApplicationEvidenceSummary"></div>
+                <div class="action-table" id="seekApplicationFilledFields"></div>
+              </div>
+              <div class="subpanel">
                 <h4 data-i18n="regression_suite">Regression Suite</h4>
                 <div class="form-grid">
                   <label class="wide-control">

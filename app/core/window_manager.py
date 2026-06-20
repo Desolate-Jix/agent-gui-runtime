@@ -70,6 +70,18 @@ class WindowManager:
         self._bound_window = bound
         return bound
 
+    def bind_window_by_handle(self, handle: int) -> BoundWindow:
+        """Bind a specific visible top-level window handle."""
+        self._ensure_windows_backend()
+        if not self._is_bound_handle_valid(handle):
+            raise ValueError(f"Window handle is not valid: {handle}")
+        wrapper = HwndWrapper(handle)  # type: ignore[operator]
+        if not self._is_candidate_window(wrapper):
+            raise ValueError(f"Window handle is not a visible top-level titled window: {handle}")
+        bound = self._build_bound_window(wrapper)
+        self._bound_window = bound
+        return bound
+
     def get_bound_window(self) -> Optional[BoundWindow]:
         """Return the currently bound window, if any."""
         if self._bound_window is None:

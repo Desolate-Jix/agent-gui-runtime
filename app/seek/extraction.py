@@ -13,18 +13,23 @@ def extract_seek_job_cards(source: dict[str, Any] | None, *, goal: str | None = 
 
     inventory = _inventory(source, goal=goal)
     size = _inventory_size(source)
-    containers = discover_seek_scroll_containers(window_size=size, app_name="seek")
-    results_container = get_scroll_container(containers, SEEK_RESULTS_LIST)
-    results_bbox = _bbox((results_container or {}).get("bbox"))
     actions = {item.get("id"): item for item in _items(inventory.get("available_actions"))}
     page_elements = {item.get("id"): item for item in _items(inventory.get("page_elements"))}
+    evidence_results_bbox = infer_results_list_bbox_from_inventory(inventory, window_size=size)
+    containers = discover_seek_scroll_containers(
+        window_size=size,
+        app_name="seek",
+        evidence={"results_list_bbox": evidence_results_bbox} if evidence_results_bbox else None,
+    )
+    results_container = get_scroll_container(containers, SEEK_RESULTS_LIST)
+    results_bbox = _bbox((results_container or {}).get("bbox"))
     jobs: list[dict[str, Any]] = []
     seen_jobs: set[str] = set()
     for card in _items(inventory.get("cards")):
         label = _clean_text(card.get("label"))
-        if not label or _looks_like_filter_card(label):
-            continue
         card_bbox = _bbox(card.get("bbox"))
+        if not label or _looks_like_filter_card(label) or _looks_like_non_job_card(card, window_size=size):
+            continue
         if results_bbox is not None and not _inside(card.get("bbox"), results_bbox):
             continue
         if results_bbox is not None and card_bbox is not None and card_bbox["y"] < results_bbox["y"]:
@@ -32,11 +37,20 @@ def extract_seek_job_cards(source: dict[str, Any] | None, *, goal: str | None = 
         child_actions = [actions[item_id] for item_id in card.get("child_action_ids") or [] if item_id in actions]
         child_pages = [page_elements[item_id] for item_id in card.get("child_page_element_ids") or [] if item_id in page_elements]
         primary_action = actions.get(card.get("primary_action_id"))
+        if card.get("primary_action_id") and primary_action is None:
+            continue
         evidence_texts = [_clean_text(item.get("text") or item.get("label")) for item in child_pages + child_actions]
         evidence_texts = [item for item in evidence_texts if item]
         generic_label = _looks_like_generic_job_label(label)
         title = _card_title(label, evidence_texts)
         if not title:
+            continue
+        if _card_label_conflicts_with_child_title(
+            label=label,
+            title=title,
+            evidence_texts=evidence_texts,
+            generic_label=generic_label,
+        ):
             continue
         if _title_needs_continuation(title):
             continue
@@ -46,8 +60,12 @@ def extract_seek_job_cards(source: dict[str, Any] | None, *, goal: str | None = 
             if generic_label and title_index >= 0
             else [text for text in evidence_texts if text != title]
         )
-        company = _first_company(company_candidates)
-        location = _first_location(evidence_texts)
+        company = _first_company(company_candidates, title=title)
+        if not company and generic_label:
+            company = _first_company([text for text in evidence_texts if text != title], title=title)
+        location = _first_location(evidence_texts, company=company)
+        if not _has_job_card_identity(title=title, company=company, location=location, evidence_texts=evidence_texts):
+            continue
         if _looks_like_incomplete_duplicate(title=title, company=company, location=location, seen_jobs=seen_jobs):
             continue
         job_key = _job_key(title=title, company=company, location=location, bbox=card_bbox)
@@ -108,14 +126,34 @@ def extract_seek_job_cards(source: dict[str, Any] | None, *, goal: str | None = 
         ):
             continue
         if job_key in seen_jobs:
+            replacement_index = next(
+                (
+                    index
+                    for index, existing in enumerate(jobs)
+                    if _job_key(
+                        title=existing.get("title"),
+                        company=existing.get("company"),
+                        location=existing.get("location"),
+                        bbox=existing.get("card_bbox"),
+                    )
+                    == job_key
+                    and _same_overlapping_job_candidate(existing, job)
+                    and _job_candidate_quality(job) > _job_candidate_quality(existing)
+                ),
+                None,
+            )
+            if replacement_index is not None:
+                jobs[replacement_index] = job
             continue
         seen_jobs.add(job_key)
         jobs.append(job)
-    jobs = _dedupe_overlapping_job_candidates(jobs)
+    jobs = sorted(_dedupe_overlapping_job_candidates(jobs), key=_job_visual_order_key)
     return {
         "contract_version": "seek_job_cards_v1",
         "source_contract": inventory.get("contract_version"),
         "image_size": size,
+        "results_list_container": results_container,
+        "results_list_bbox_source": (results_container or {}).get("sources"),
         "jobs": jobs,
         "summary": {"jobs_seen": len(jobs)},
     }
@@ -133,16 +171,40 @@ def extract_seek_job_detail(
     size = _inventory_size(source)
     containers = scroll_containers or discover_seek_scroll_containers(window_size=size, app_name="seek")
     detail_container = get_scroll_container(containers, SEEK_JOB_DETAIL)
+    if scroll_containers is None:
+        drawer_bbox = _infer_seek_detail_drawer_bbox(inventory, window_size=size)
+        if drawer_bbox is not None:
+            detail_container = {
+                **(detail_container or {}),
+                "container_id": SEEK_JOB_DETAIL,
+                "bbox": drawer_bbox,
+                "sources": ["seek_detail_drawer_anchor_bbox"],
+                "safe_points": [
+                    {
+                        "x": drawer_bbox["x"] + drawer_bbox["w"] // 2,
+                        "y": drawer_bbox["y"] + drawer_bbox["h"] // 2,
+                        "reason": "inside_seek_detail_drawer_body",
+                    }
+                ],
+                "evidence": {
+                    **((detail_container or {}).get("evidence") if isinstance((detail_container or {}).get("evidence"), dict) else {}),
+                    "layout": "right_detail_drawer",
+                    "source": "seek_detail_drawer_anchor_bbox",
+                },
+            }
     detail_bbox = _bbox((detail_container or {}).get("bbox"))
     detail_read_bbox = _expand_bbox_up(detail_bbox, pixels=220)
-    actions = [item for item in _items(inventory.get("available_actions")) if _inside(item.get("bbox"), detail_read_bbox)]
-    page_elements = [item for item in _items(inventory.get("page_elements")) if _inside(item.get("bbox"), detail_read_bbox)]
+    actions = [item for item in _items(inventory.get("available_actions")) if _inside_detail_bbox(item.get("bbox"), detail_read_bbox)]
+    page_elements = [item for item in _items(inventory.get("page_elements")) if _inside_detail_bbox(item.get("bbox"), detail_read_bbox)]
     texts = [_clean_text(item.get("text") or item.get("label")) for item in page_elements]
     texts = [item for item in texts if item]
+    texts = _trim_seek_detail_texts(texts)
     title = _first_job_title(texts) or _first_heading(texts)
     title_index = texts.index(title) if title in texts else -1
-    company_candidates = texts[title_index + 1 :] if title_index >= 0 else texts
-    company = _first_company(company_candidates)
+    company_candidates = _detail_header_company_candidates(texts, title_index)
+    company = _first_company(company_candidates, title=title)
+    detail_after_title = texts[title_index + 1 :] if title_index >= 0 else texts
+    location = _first_location(detail_after_title, company=company)
     apply_action = _first_action(actions, {"apply", "quick apply"}) or _first_text_button(page_elements, {"apply", "quick apply"})
     save_action = _first_action(actions, {"save", "save job"})
     requirements = [text for text in texts if _contains_any(text, {"requirement", "requirements", "must have", "skills", "experience"})]
@@ -150,10 +212,10 @@ def extract_seek_job_detail(
     benefits = [text for text in texts if _contains_any(text, {"benefit", "parking", "insurance", "flexible", "remote", "hybrid"})]
     return {
         "contract_version": "seek_job_detail_v1",
-        "job_id": _job_id(label=title, company=company, location=_first_location(texts)),
+        "job_id": _job_id(label=title, company=company, location=location),
         "title": title,
         "company": company,
-        "location": _first_location(texts),
+        "location": location,
         "work_type": _first_work_type(texts),
         "classification": _first_classification(texts),
         "salary_text": _first_salary(texts),
@@ -174,6 +236,7 @@ def extract_seek_job_detail(
         },
         "detail_container": detail_container,
         "detail_read_bbox": detail_read_bbox,
+        "detail_bottom_reached": bool((source or {}).get("detail_bottom_reached")),
         "detail_scroll_history": [],
         "trace_paths": [],
         "evidence": {
@@ -194,12 +257,231 @@ def _inventory(source: dict[str, Any] | None, *, goal: str | None = None) -> dic
     return build_screen_inventory(payload, goal=goal)
 
 
+def _detail_header_company_candidates(texts: list[str], title_index: int) -> list[str]:
+    if title_index < 0:
+        return texts
+    for text in texts[title_index + 1 :]:
+        normalized = _normalized(text)
+        if _is_detail_header_action_text(normalized):
+            continue
+        if _looks_like_bullet_body_line(text):
+            break
+        if _is_detail_company_boundary(normalized) or _looks_like_detail_body_start(text):
+            break
+        return [text]
+    return []
+
+
+def _is_detail_header_action_text(normalized_text: str) -> bool:
+    return normalized_text in {"apply", "quick apply", "quick apply button", "save", "save button", "save job", "save job button"}
+
+
+def _is_detail_company_boundary(normalized_text: str) -> bool:
+    if not normalized_text:
+        return False
+    return _contains_any(
+        normalized_text,
+        {
+            "posted",
+            "application volume",
+            "fulltime",
+            "how you match",
+            "skill",
+            "credential",
+            "show all",
+            "our why",
+            "about the role",
+            "responsibilities",
+            "requirements",
+            "benefits",
+        },
+    )
+
+
+def _looks_like_detail_body_start(text: str) -> bool:
+    normalized = _normalized(text)
+    if _looks_like_bullet_body_line(text):
+        return True
+    if normalized in {"ourwhy", "our why", "what you ll bring", "what youll bring", "required experience", "nice to have", "requirements", "benefits"}:
+        return True
+    return normalized.startswith(
+        (
+            "about the role",
+            "at the moment",
+            "bachelor",
+            "additional certification",
+            "datacom is ",
+            "we are ",
+            "you ll ",
+            "youll ",
+            "spaces ",
+            "spaces,",
+            "to work",
+            "work in ",
+            "will never",
+            "we want ",
+            "your application will include",
+        )
+    )
+
+
 def _inventory_size(source: dict[str, Any] | None) -> dict[str, int]:
     payload = source if isinstance(source, dict) else {}
     image_size = payload.get("image_size") if isinstance(payload.get("image_size"), dict) else {}
     width = int(image_size.get("width") or payload.get("image_width") or 1246)
     height = int(image_size.get("height") or payload.get("image_height") or 1194)
     return {"width": width, "height": height}
+
+
+def _infer_seek_detail_drawer_bbox(
+    inventory: dict[str, Any] | None,
+    *,
+    window_size: dict[str, int],
+) -> dict[str, int] | None:
+    width = int(window_size.get("width") or 0)
+    height = int(window_size.get("height") or 0)
+    if width < 1800 or height < 700:
+        return None
+    anchors: list[dict[str, int]] = []
+    min_anchor_x = int(width * 0.55)
+    for item in [*_items((inventory or {}).get("available_actions")), *_items((inventory or {}).get("page_elements"))]:
+        bbox = _bbox(item.get("bbox"))
+        if bbox is None or bbox["x"] < min_anchor_x:
+            continue
+        text = _clean_text(item.get("label") or item.get("text"))
+        normalized = _normalized(text)
+        if not normalized:
+            continue
+        if normalized.startswith("apply for ") or normalized in {"quick apply", "quick apply button"}:
+            anchors.append(bbox)
+            continue
+        if normalized == "how you match" or "skills and credentials match your profile" in normalized:
+            anchors.append(bbox)
+            continue
+        if "application volume" in normalized or "view all jobs" in normalized:
+            anchors.append(bbox)
+    if not anchors:
+        return None
+    left = max(int(width * 0.62), min(anchor["x"] for anchor in anchors) - 80)
+    top = max(80, min(anchor["y"] for anchor in anchors) - 220)
+    right = width - 16
+    if right - left < 360:
+        right = min(width - 16, left + max(600, width - left - 16))
+    bottom = height - 16
+    if bottom <= top + 220:
+        return None
+    return {"x": left, "y": top, "w": right - left, "h": bottom - top}
+
+
+def infer_results_list_bbox_from_inventory(
+    inventory: dict[str, Any] | None,
+    *,
+    window_size: dict[str, int] | None = None,
+) -> dict[str, int] | None:
+    payload = inventory if isinstance(inventory, dict) else {}
+    size = window_size if isinstance(window_size, dict) else {}
+    candidates: list[dict[str, int]] = []
+    actions = {item.get("id"): item for item in _items(payload.get("available_actions"))}
+    page_elements = {item.get("id"): item for item in _items(payload.get("page_elements"))}
+    for card in _items(payload.get("cards")):
+        label = _clean_text(card.get("label"))
+        card_bbox = _bbox(card.get("bbox"))
+        if not label or _looks_like_filter_card(label) or _looks_like_non_job_card(card, window_size=size):
+            continue
+        if card_bbox is None:
+            continue
+        child_actions = [actions[item_id] for item_id in card.get("child_action_ids") or [] if item_id in actions]
+        child_pages = [page_elements[item_id] for item_id in card.get("child_page_element_ids") or [] if item_id in page_elements]
+        primary_action = actions.get(card.get("primary_action_id"))
+        if card.get("primary_action_id") and primary_action is None:
+            continue
+        texts = [_clean_text(item.get("text") or item.get("label")) for item in child_pages + child_actions]
+        texts = [item for item in texts if item]
+        title = _card_title(label, texts)
+        if not title or _title_needs_continuation(title):
+            continue
+        company_candidates = texts[texts.index(title) + 1 :] if title in texts else [text for text in texts if text != title]
+        company = _first_company(company_candidates, title=title)
+        location = _first_location(texts, company=company)
+        if not _has_job_card_identity(title=title, company=company, location=location, evidence_texts=texts):
+            continue
+        if card_bbox["w"] < 240 or card_bbox["h"] < 80:
+            continue
+        candidate_boxes = [card_bbox]
+        for child in child_pages + child_actions:
+            child_bbox = _bbox(child.get("bbox"))
+            if child_bbox is not None and _is_bounded_child_bbox(child_bbox, card_bbox):
+                candidate_boxes.append(child_bbox)
+        candidates.append(_union_bboxes(candidate_boxes) or card_bbox)
+    if not candidates:
+        return None
+    union = _union_bboxes(candidates)
+    if union is None:
+        return None
+    synthetic_column_boxes = _likely_results_column_text_boxes(page_elements, base_bbox=union, window_size=size)
+    if synthetic_column_boxes:
+        union = _union_bboxes([union, *synthetic_column_boxes]) or union
+    width = int(size.get("width") or 0)
+    height = int(size.get("height") or 0)
+    pad_x = 18
+    pad_top = 28
+    pad_bottom = 80
+    x = max(0, union["x"] - pad_x)
+    y = max(0, union["y"] - pad_top)
+    right_limit = width if width > 0 else union["x"] + union["w"] + pad_x
+    bottom_limit = height if height > 0 else union["y"] + union["h"] + pad_bottom
+    right = min(right_limit, union["x"] + union["w"] + pad_x)
+    bottom = min(bottom_limit, max(union["y"] + union["h"] + pad_bottom, y + union["h"]))
+    return {"x": x, "y": y, "w": max(1, right - x), "h": max(120, bottom - y)}
+
+
+def _likely_results_column_text_boxes(
+    page_elements: dict[Any, dict[str, Any]],
+    *,
+    base_bbox: dict[str, int],
+    window_size: dict[str, int],
+) -> list[dict[str, int]]:
+    width = int(window_size.get("width") or 0)
+    height = int(window_size.get("height") or 0)
+    right_limit = width if width > 0 else base_bbox["x"] + base_bbox["w"] + 120
+    bottom_limit = max(0, height - 80) if height > 0 else base_bbox["y"] + 1200
+    column_left = max(0, base_bbox["x"] - 90)
+    column_right = min(right_limit, base_bbox["x"] + base_bbox["w"] + 90)
+    elements = [
+        item
+        for item in page_elements.values()
+        if isinstance(item, dict)
+        and (bbox := _bbox(item.get("bbox"))) is not None
+        and column_left <= bbox["x"] + bbox["w"] / 2 <= column_right
+        and base_bbox["y"] - 40 <= bbox["y"] <= bottom_limit
+        and _clean_text(item.get("text") or item.get("label"))
+    ]
+    elements.sort(key=lambda item: (_bbox(item.get("bbox")) or {"y": 0, "x": 0})["y"])
+    boxes: list[dict[str, int]] = []
+    for index, item in enumerate(elements):
+        text = _clean_text(item.get("text") or item.get("label"))
+        title = _first_job_title([text])
+        title_bbox = _bbox(item.get("bbox"))
+        if not title or title_bbox is None:
+            continue
+        nearby_boxes = [title_bbox]
+        for other in elements[index + 1 :]:
+            other_bbox = _bbox(other.get("bbox"))
+            if other_bbox is None:
+                continue
+            other_text = _clean_text(other.get("text") or other.get("label"))
+            if other_bbox["y"] <= title_bbox["y"]:
+                continue
+            if other_bbox["y"] - title_bbox["y"] > 230:
+                break
+            if other_bbox["y"] - title_bbox["y"] > 45 and _first_job_title([other_text]):
+                break
+            if abs(other_bbox["x"] - title_bbox["x"]) > 110 and other_bbox["x"] > title_bbox["x"] + 300:
+                continue
+            nearby_boxes.append(other_bbox)
+        if len(nearby_boxes) >= 2:
+            boxes.extend(nearby_boxes)
+    return boxes
 
 
 def _items(value: Any) -> list[dict[str, Any]]:
@@ -231,6 +513,32 @@ def _inside(child: Any, container: dict[str, int] | None) -> bool:
     return container["x"] <= cx <= container["x"] + container["w"] and container["y"] <= cy <= container["y"] + container["h"]
 
 
+def _inside_detail_bbox(child: Any, container: dict[str, int] | None) -> bool:
+    child_bbox = _bbox(child)
+    if child_bbox is None or container is None:
+        return False
+    if child_bbox["x"] < container["x"] - 16:
+        return False
+    return _inside(child_bbox, container)
+
+
+def _is_bounded_child_bbox(child_bbox: dict[str, int], parent_bbox: dict[str, int]) -> bool:
+    if not _inside(child_bbox, parent_bbox):
+        return False
+    pad = 36
+    if child_bbox["w"] > parent_bbox["w"] + pad or child_bbox["h"] > parent_bbox["h"] + pad:
+        return False
+    if child_bbox["x"] < parent_bbox["x"] - pad:
+        return False
+    if child_bbox["y"] < parent_bbox["y"] - pad:
+        return False
+    if child_bbox["x"] + child_bbox["w"] > parent_bbox["x"] + parent_bbox["w"] + pad:
+        return False
+    if child_bbox["y"] + child_bbox["h"] > parent_bbox["y"] + parent_bbox["h"] + pad:
+        return False
+    return True
+
+
 def _clean_text(value: Any) -> str:
     return " ".join(str(value or "").split())
 
@@ -242,6 +550,25 @@ def _normalized(value: Any) -> str:
 def _contains_any(value: str, terms: set[str]) -> bool:
     normalized = _normalized(value)
     return any(term in normalized for term in terms)
+
+
+_SEEK_DETAIL_TRAILING_RECOMMENDATION_MARKERS = {
+    "featured jobs",
+    "similar jobs",
+    "recommended jobs",
+    "more jobs like this",
+}
+
+
+def _trim_seek_detail_texts(texts: list[str]) -> list[str]:
+    """Keep the current job detail body and drop the trailing recommendation feed."""
+
+    for index, text in enumerate(texts):
+        if index <= 0:
+            continue
+        if _contains_any(text, _SEEK_DETAIL_TRAILING_RECOMMENDATION_MARKERS):
+            return texts[:index]
+    return texts
 
 
 def _first_by_hint(items: list[dict[str, Any]], hint: str) -> str | None:
@@ -282,6 +609,8 @@ def _synthetic_jobs_from_page_elements(
             other_text = _clean_text(other.get("text") or other.get("label"))
             if other_bbox["y"] <= title_top:
                 continue
+            if _looks_like_filter_card(other_text):
+                continue
             if other_bbox["y"] - title_top > 230:
                 break
             if other_bbox["y"] - title_top > 45 and _first_job_title([other_text]):
@@ -292,8 +621,8 @@ def _synthetic_jobs_from_page_elements(
         texts = [_clean_text(item.get("text") or item.get("label")) for item in nearby]
         texts = [text for text in texts if text]
         title, texts = _merge_split_job_title(title, texts)
-        company = _first_company([text for text in texts[1:] if text != title])
-        location = _first_location(texts)
+        company = _first_company([text for text in texts[1:] if text != title], title=title)
+        location = _first_location(texts, company=company)
         if not _has_synthetic_job_card_anchor(texts=texts, company=company, location=location):
             continue
         card_bbox = _union_bboxes([_bbox(item.get("bbox")) for item in nearby])
@@ -403,7 +732,7 @@ def _job_candidate_quality(job: dict[str, Any]) -> int:
     elif primary_action_id.startswith("action_screen"):
         score += 2
     if source_card_id.startswith("synthetic_results_text"):
-        score += 1
+        score += 4
     if title in evidence_texts:
         score += 2
     if len(title.split()) >= 3:
@@ -430,10 +759,20 @@ def _first_salary(texts: list[str]) -> str | None:
     return None
 
 
-def _first_location(texts: list[str]) -> str | None:
+def _first_location(texts: list[str], *, company: str | None = None) -> str | None:
     location_terms = {"auckland", "wellington", "christchurch", "hamilton", "tauranga", "remote", "new zealand", "nz"}
+    normalized_company = _normalized(company)
     for text in texts:
         if _looks_like_url_or_noise(text) or _looks_like_summary_sentence(text):
+            continue
+        if _looks_like_bullet_body_line(text):
+            continue
+        if _looks_like_detail_body_start(text):
+            continue
+        normalized = _normalized(text)
+        if normalized_company and normalized == normalized_company:
+            continue
+        if re.search(r"\b(ltd|limited|pty|p/l|inc|corp|company|group)\b", normalized):
             continue
         if len(text) <= 80 and _contains_any(text, location_terms):
             return text
@@ -442,14 +781,56 @@ def _first_location(texts: list[str]) -> str | None:
 
 def _first_work_type(texts: list[str]) -> str | None:
     for text in texts:
-        if _contains_any(text, {"full time", "part time", "contract", "casual", "permanent", "hybrid", "remote"}):
+        if _looks_like_bullet_body_line(text):
+            continue
+        if _looks_like_detail_body_start(text):
+            continue
+        normalized = _normalized(text)
+        if len(text.split()) > 5:
+            continue
+        if _contains_any(normalized, {"auckland", "wellington", "christchurch", "hamilton", "tauranga", "new zealand", "nz"}):
+            if "hybrid" in normalized:
+                return "Hybrid"
+            if "remote" in normalized:
+                return "Remote"
+            continue
+        if _contains_any(text, {"full time", "fulltime", "part time", "contract", "casual", "permanent", "hybrid", "remote"}):
             return text
     return None
 
 
+def _looks_like_bullet_body_line(text: str) -> bool:
+    stripped = _clean_text(text).lstrip()
+    return stripped.startswith(("\u00b7", "\u2022", "- "))
+
+
 def _first_classification(texts: list[str]) -> str | None:
     for text in texts:
-        if _contains_any(text, {"engineering", "information", "technology", "software", "ict"}):
+        normalized = _normalized(text)
+        if _looks_like_bullet_body_line(text) or _looks_like_summary_sentence(text):
+            continue
+        if normalized.startswith(
+            (
+                "we are ",
+                "internal ",
+                "at least ",
+                "excellent ",
+                "fxcellent ",
+                "understanding of ",
+                "solid understanding ",
+                "knowledge of ",
+                "bachelor",
+                "degree",
+                "additional certification",
+                "certification",
+            )
+        ):
+            continue
+        if "professional services" in normalized or "we have managed" in normalized:
+            continue
+        if len(text.split()) > 8 and "(" not in text:
+            continue
+        if _contains_any(normalized, {"engineering", "information", "technology", "software", "ict"}):
             return text
     return None
 
@@ -462,12 +843,13 @@ def _first_url(texts: list[str]) -> str | None:
     return None
 
 
-def _first_company(texts: list[str]) -> str | None:
+def _first_company(texts: list[str], *, title: str | None = None) -> str | None:
     skipped = {
         "posted",
         "auckland",
         "remote",
         "full time",
+        "fulltime",
         "part time",
         "contract",
         "engineering",
@@ -480,24 +862,77 @@ def _first_company(texts: list[str]) -> str | None:
         "pay",
         "type",
         "new to you",
+        "strong applicant",
         "jobs",
         "save this search",
         "background",
+        "this is a featured job",
+        "featured job",
+        "featured",
+        "image",
+        "key responsibilities",
+        "responsibilities",
+        "requirements",
+        "about the role",
+        "about you",
+        "benefits",
     }
+    normalized_title = _normalized(title)
+    candidates: list[str] = []
     for text in texts:
         text = _clean_company(text)
         normalized = _normalized(text)
         if not text or any(term in normalized for term in skipped):
             continue
+        if _looks_like_seek_header_control_noise(text):
+            continue
+        if _looks_like_bullet_body_line(text):
+            continue
+        if normalized_title and (normalized in normalized_title or normalized_title in normalized):
+            continue
         if _looks_like_url_or_noise(text):
             continue
         if _looks_like_summary_sentence(text):
             continue
+        if _looks_like_detail_body_start(text):
+            continue
+        if _first_job_title([text]) == text:
+            continue
         if re.search(r"\$\s*\d|\b(\d+\s*[dh]|\d+\s*(day|hour|week|month)s?)\s+ago\b|\bviewed\b", normalized):
             continue
         if len(text) <= 80:
-            return text
-    return None
+            candidates.append(text)
+    if not candidates:
+        return None
+    return max(candidates, key=_company_candidate_quality)
+
+
+def _looks_like_seek_header_control_noise(text: str | None) -> bool:
+    cleaned = _clean_text(text)
+    normalized = _normalized(cleaned)
+    if not normalized:
+        return True
+    if normalized in {"x", "×", "close", "dismiss", "share", "more", "..."}:
+        return True
+    if len(normalized) == 1 and normalized.isalpha():
+        return True
+    return False
+
+
+def _company_candidate_quality(text: str) -> tuple[int, int, int]:
+    normalized = _normalized(text)
+    score = 0
+    if re.search(r"\b(ltd|limited|pty|p/l|inc|corp|company|group)\b", normalized):
+        score += 5
+    if len(text.split()) >= 2:
+        score += 2
+    if len(text.split()) > 5:
+        score -= 6
+    if _contains_any(normalized, {"opportunity", "culture", "progression", "growth", "benefits", "responsibilities"}):
+        score -= 4
+    if text.isupper() and len(text) <= 12:
+        score -= 2
+    return score, min(len(text), 80), -len(normalized)
 
 
 def _clean_company(text: str) -> str:
@@ -511,7 +946,39 @@ def _clean_company(text: str) -> str:
 def _card_title(label: str, evidence_texts: list[str]) -> str | None:
     if not _looks_like_generic_job_label(label):
         return label
-    return _first_job_title(evidence_texts)
+    return _best_job_title(evidence_texts)
+
+
+def _card_label_conflicts_with_child_title(
+    *,
+    label: str,
+    title: str,
+    evidence_texts: list[str],
+    generic_label: bool,
+) -> bool:
+    if generic_label or not title:
+        return False
+    child_titles = [
+        candidate
+        for candidate in (_first_job_title([text]) for text in evidence_texts)
+        if candidate and not _same_title(candidate, title)
+    ]
+    if not child_titles:
+        return False
+    label_key = _normalized(label)
+    model_card_label = "job card" in label_key or "listing card" in label_key
+    return model_card_label
+
+
+def _same_title(a: str | None, b: str | None) -> bool:
+    a_key = _normalized(a)
+    b_key = _normalized(b)
+    if not a_key or not b_key:
+        return False
+    if a_key == b_key:
+        return True
+    shorter, longer = sorted([a_key, b_key], key=len)
+    return len(shorter) >= 8 and shorter in longer
 
 
 def _looks_like_generic_job_label(label: str) -> bool:
@@ -566,6 +1033,41 @@ def _first_job_title(texts: list[str]) -> str | None:
     return None
 
 
+def _best_job_title(texts: list[str]) -> str | None:
+    candidates = [text for text in texts if _first_job_title([text]) == text]
+    if not candidates:
+        return None
+    return max(candidates, key=_job_title_quality)
+
+
+def _job_title_quality(text: str) -> tuple[int, int, int]:
+    normalized = _normalized(text)
+    words = [word for word in normalized.split() if word]
+    role_terms = {
+        "engineer",
+        "developer",
+        "analyst",
+        "designer",
+        "manager",
+        "consultant",
+        "architect",
+        "administrator",
+        "specialist",
+        "technician",
+        "tester",
+        "scientist",
+        "support",
+        "application",
+        "software",
+        "data",
+        "frontend",
+        "backend",
+        "platform",
+    }
+    role_hits = sum(1 for word in words if word in role_terms)
+    return (role_hits, len(words), len(text))
+
+
 def _merge_split_job_title(title: str, texts: list[str]) -> tuple[str, list[str]]:
     if len(texts) < 2 or not _title_needs_continuation(title):
         return title, texts
@@ -596,6 +1098,35 @@ def _has_synthetic_job_card_anchor(*, texts: list[str], company: str | None, loc
             _first_salary(texts) is not None,
         ]
     )
+
+
+def _has_job_card_identity(*, title: str | None, company: str | None, location: str | None, evidence_texts: list[str]) -> bool:
+    title_text = _clean_text(title)
+    if not title_text:
+        return False
+    if _looks_like_filter_card(title_text) or _looks_like_non_job_heading(title_text):
+        return False
+    has_secondary = bool(company or location or _first_work_type(evidence_texts) or _first_salary(evidence_texts))
+    if _first_job_title([title_text]) == title_text and has_secondary:
+        return True
+    evidence_title = _best_job_title(evidence_texts)
+    return bool(evidence_title and _same_title(evidence_title, title_text) and has_secondary)
+
+
+def _looks_like_non_job_heading(text: str) -> bool:
+    normalized = _normalized(text)
+    if not normalized:
+        return True
+    if normalized.startswith(("saved search", "saved job", "compensation range", "next button")):
+        return True
+    return normalized in {
+        "saved searches section",
+        "saved searches",
+        "saved jobs",
+        "compensation range selector",
+        "next button",
+        "want better job recommendations",
+    }
 
 
 def _looks_like_detail_classification(text: str) -> bool:
@@ -719,6 +1250,13 @@ def _job_key(*, title: str | None, company: str | None, location: str | None, bb
     return "unknown"
 
 
+def _job_visual_order_key(job: dict[str, Any]) -> tuple[int, int, str]:
+    bbox = _bbox(job.get("card_bbox"))
+    if bbox is None:
+        return (1_000_000, 1_000_000, str(job.get("title") or ""))
+    return (int(bbox["y"]), int(bbox["x"]), str(job.get("title") or ""))
+
+
 def _looks_like_incomplete_duplicate(
     *,
     title: str | None,
@@ -756,4 +1294,52 @@ def _is_less_complete_same_title_job(*, existing: dict[str, Any], replacement: d
 
 def _looks_like_filter_card(label: str) -> bool:
     normalized = _normalized(label)
-    return normalized in {"pay", "type", "remote", "classification", "listing time", "date"}
+    if normalized.startswith("filter ") or normalized.startswith("filter:"):
+        return True
+    if "job filter" in normalized:
+        return True
+    if "strong applicant jobs" in normalized:
+        return True
+    return normalized in {
+        "pay",
+        "type",
+        "remote",
+        "classification",
+        "listing time",
+        "date",
+        "strong applicant jobs toggle",
+        "new to you",
+        "save this search",
+    }
+
+
+def _looks_like_non_job_card(card: dict[str, Any], *, window_size: dict[str, int] | None = None) -> bool:
+    label = _clean_text(card.get("label"))
+    normalized = _normalized(label)
+    role = _normalized(card.get("role"))
+    bbox = _bbox(card.get("bbox"))
+    size = window_size if isinstance(window_size, dict) else {}
+    window_w = int(size.get("width") or 0)
+    window_h = int(size.get("height") or 0)
+    if role in {"window", "pane", "group", "app", "document"}:
+        return True
+    if normalized in {
+        "app",
+        "pane",
+        "group",
+        "search results",
+        "perform a job search",
+        "job search",
+        "refine your search",
+    }:
+        return True
+    if "microsoft edge" in normalized or "job vacancies" in normalized:
+        return True
+    if bbox is not None and window_w > 0 and window_h > 0:
+        area = bbox["w"] * bbox["h"]
+        window_area = max(1, window_w * window_h)
+        if area / window_area >= 0.18:
+            return True
+        if bbox["w"] >= int(window_w * 0.7) or bbox["h"] >= int(window_h * 0.55):
+            return True
+    return False

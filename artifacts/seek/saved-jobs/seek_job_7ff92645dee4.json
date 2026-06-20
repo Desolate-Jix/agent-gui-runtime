@@ -1,0 +1,883 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_7ff92645dee4",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "maybe_apply",
+    "score": 0.49,
+    "job_id": "seek_job_7ff92645dee4",
+    "title": "Application Support Engineer",
+    "company": "Westpac New Zealand Limited",
+    "fit_summary": "maybe_apply with score 0.490. positive: matched_skills: SQL; location_matches: Auckland CBD, Auckland (Hybrid); matched_preferred_work_modes: hybrid.",
+    "recommended_next_action": "review_then_optionally_open_apply_entry",
+    "positive_evidence": [
+      "matched_skills: SQL",
+      "location_matches: Auckland CBD, Auckland (Hybrid)",
+      "matched_preferred_work_modes: hybrid"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_406a9a159fd1",
+    "title": "Application Support Engineer",
+    "company": "Westpac New Zealand Limited",
+    "location": "Auckland CBD, Auckland (Hybrid)",
+    "posted_at_text": null,
+    "work_type": "Full time",
+    "salary_text": "Base salary + Bonus + Laptop",
+    "classification": null,
+    "card_bbox": {
+      "x": 632,
+      "y": 704,
+      "w": 769,
+      "h": 259
+    },
+    "click_point": {
+      "x": 1016,
+      "y": 833
+    },
+    "source_url": null,
+    "source_card_id": "card_13_hyperlink",
+    "primary_action_id": "action_uia_141_hyperlink",
+    "child_action_ids": [
+      "action_screen_5_hide-button",
+      "action_uia_42_jobs-on-seek-new-zealand-s-no-1-employment-caree",
+      "action_uia_140_application-support-engineer",
+      "action_uia_142_application-support-engineer",
+      "action_uia_143_westpac-new-zealand-limited",
+      "action_uia_144_full-time",
+      "action_uia_145_auckland-cbd-auckland",
+      "action_uia_146_hybrid",
+      "action_uia_147_base-salary-bonus-laptop",
+      "action_uia_148_list",
+      "action_uia_149_competitive-salary-10-superannuation-banking-ben"
+    ],
+    "child_page_element_ids": [
+      "page_text_37_application-support-engineer",
+      "page_text_39_westpac-new-zealand-limited",
+      "page_text_40_full-time",
+      "page_text_42_auckland-cbd-auckland-hybrid",
+      "page_text_43_base-salary-bonus-laptop",
+      "page_text_47_competitive-salary-10-superannuation-banking-ben",
+      "page_text_49_hybrid-role-centrally-located-offices-in-britoma",
+      "page_text_50_5-days-well-being-leave-on-top-of-annual-leave",
+      "page_text_52_1dago-viewed",
+      "page_text_53_口",
+      "page_text_54_p-hx"
+    ],
+    "evidence": {
+      "texts": [
+        "Application Support Engineer",
+        "Westpac New Zealand Limited",
+        "Full time",
+        "Auckland CBD, Auckland (Hybrid)",
+        "Base salary + Bonus + Laptop",
+        "Competitive salary + 10% superannuation + banking benefits",
+        "·Hybrid role + centrally located offices in Britomart",
+        "· 5 days well-being leave on top of annual leave",
+        "1dago·Viewed",
+        "口",
+        "P!HX",
+        "Hide button",
+        "Jobs on SEEK - New Zealand's no. 1 Employment, Career and Recruitment site",
+        "Application Support Engineer",
+        "Application Support Engineer",
+        "Westpac New Zealand Limited",
+        "Full time",
+        "Auckland CBD, Auckland",
+        "(Hybrid)",
+        "Base salary + Bonus + Laptop",
+        "list",
+        "Competitive salary + 10% superannuation + banking benefits"
+      ],
+      "source_contract": "screen_inventory_v1"
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_7ff92645dee4",
+    "title": "Application Support Engineer",
+    "company": "Westpac New Zealand Limited",
+    "location": "Auckland CBD, Auckland (Hybrid)",
+    "work_type": "Hybrid",
+    "classification": "Engineering -Software(Information& Communication Technology)",
+    "salary_text": "$22-$26/hr",
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "出目☆"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "Application Support Engineer"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Apply"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "Westpac New Zealand Limited"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "·Recognition-werecogniseandreward our starperformers"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "·School holiday subsidy - help you balance work and family during school holiday"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "·2 Volunteer days per year"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Ko matou teneilOur Organisation"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "customers, and communities.For over160 years we've been drivenby our purpose to Create"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "BetterFuturesTogether."
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "What makes us unique are the incredible people we're lucky enough to have walk through our"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "doors every day. The giant *W”on our building doesn’t just stand for Westpac - it says, double you."
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "We're a place that values,rewards and recognises individuality.Where youcan be yourwhole self,"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "your true self, and your best self.We're recognised as a place where talent is developed, where"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "passions are fuelled and where ambitions of all shapes and sizes thrive. And it all starts with you!"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "Tono mai inaianei| Apply Now!"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "Apply today with your CV and Cover Letter."
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "The people of Aotearoa, New Zealand hail from many cultures and backgrounds. At Westpac New"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "Zealand, we draw on this enormous talent pool to cultivate a team rich in ability and empowered"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "to reach its full potential.Ouraim is to be brave challengers,celebrating our differences and"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "relentlessly advocating for our customers. It starts with us - we believe that when we care deeply"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "all walks of life to apply, including those who are neurodiverse,have chronic health conditions or"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "disabilities - your attitude and passion are as important to us as your experience,qualifications and"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "capabilities."
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "Mahi tahi tatou,kaha ake tatou|Together Greater"
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "Applications close:"
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "27 June 2026"
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "Why Westpac?#WestpacDoubleYou"
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "Ko te tangata te tuatahi"
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "Mahi tahitatou,kaha aketatou."
+      },
+      {
+        "index": 31,
+        "role": "body",
+        "text": "前往平台观看：Youlube"
+      },
+      {
+        "index": 32,
+        "role": "section_hint",
+        "text": "In addition to immersing yourself in a supportive team environment, you'll receive some great job perks and benefits including:"
+      },
+      {
+        "index": 33,
+        "role": "body",
+        "text": "• 4 weeks standard holiday + 5 additional days of wellbeing leave to support you to be your best"
+      },
+      {
+        "index": 34,
+        "role": "body",
+        "text": "grammarly-integration"
+      },
+      {
+        "index": 35,
+        "role": "body",
+        "text": "{\"mode\":\"full\",\"isActive\":true,\"isUserDisabled\":false}"
+      },
+      {
+        "index": 36,
+        "role": "body",
+        "text": "Apply C"
+      },
+      {
+        "index": 37,
+        "role": "body",
+        "text": "·Bachelor's degree in technology or related subject."
+      },
+      {
+        "index": 38,
+        "role": "body",
+        "text": "·Passion for technology."
+      },
+      {
+        "index": 39,
+        "role": "body",
+        "text": "·Preference for candlidates with experience working with some of:Control-M,Snowflake,SQL"
+      },
+      {
+        "index": 40,
+        "role": "body",
+        "text": "Scripting,QRMManager,SharePoint,PowerBl,PowerPlatforms,Dnatrace,PagerDuty,"
+      },
+      {
+        "index": 41,
+        "role": "body",
+        "text": "Splunk,Hashi Corp Vault,Azure DevOp,Bitbucket, and Jenkins."
+      },
+      {
+        "index": 42,
+        "role": "body",
+        "text": "Westpac Hei Wahi Mahi | Working at Westpac"
+      },
+      {
+        "index": 43,
+        "role": "body",
+        "text": "In addition to immersing yourself in a supportive team environment, you'll receive some great job"
+      },
+      {
+        "index": 44,
+        "role": "section_hint",
+        "text": "perks and benefits including:"
+      },
+      {
+        "index": 45,
+        "role": "body",
+        "text": "· 4 weeks standard holiday + 5 additional days of wellbeing leave to support you to be your best"
+      },
+      {
+        "index": 46,
+        "role": "body",
+        "text": "·Additional purchased leave options up to 4 weeks per year"
+      },
+      {
+        "index": 47,
+        "role": "section_hint",
+        "text": "·Banking benefits,insurance discounts and superannuation scheme"
+      },
+      {
+        "index": 48,
+        "role": "body",
+        "text": "·Growth and development- we provide opportunities fordevelopment and promote internal"
+      },
+      {
+        "index": 49,
+        "role": "body",
+        "text": "mobility"
+      },
+      {
+        "index": 50,
+        "role": "body",
+        "text": "·Recognition-we recognise and reward our starperformers"
+      },
+      {
+        "index": 51,
+        "role": "body",
+        "text": "·School holiday subsidy -help you balance work and family during school holiday"
+      },
+      {
+        "index": 52,
+        "role": "body",
+        "text": "·2Volunteer days per year"
+      },
+      {
+        "index": 53,
+        "role": "body",
+        "text": "Komatou tenei|OurOrganisation"
+      },
+      {
+        "index": 54,
+        "role": "body",
+        "text": "At Westpac, we're working togetherto build a fairer and stronger New Zealand for our people,"
+      },
+      {
+        "index": 55,
+        "role": "body",
+        "text": "customers, and communities.For over160 years we've been driven by our purpose to Create"
+      },
+      {
+        "index": 56,
+        "role": "body",
+        "text": "Better Futures Together."
+      },
+      {
+        "index": 57,
+        "role": "body",
+        "text": "doors every day. The giant *W' on our building doesn't just stand for Westpac - it says, double you."
+      },
+      {
+        "index": 58,
+        "role": "body",
+        "text": "We're a place that values, rewards and recognises individuality. Where you can be your whole self,"
+      },
+      {
+        "index": 59,
+        "role": "body",
+        "text": "Tono mai inaianei!| Apply Now!"
+      },
+      {
+        "index": 60,
+        "role": "body",
+        "text": "Zealand,we drawonthis enormous talent poolto cultivate ateam rich inability and empowered"
+      },
+      {
+        "index": 61,
+        "role": "body",
+        "text": "to reach its full potential. Our aim is to be brave challengers, celebrating our differences and"
+      },
+      {
+        "index": 62,
+        "role": "body",
+        "text": "relentlessly advocating for our customers.It starts with us - we believe that when we care deeply"
+      },
+      {
+        "index": 63,
+        "role": "body",
+        "text": "and do ourbest forourpeople,they'lldo theirbest forourcustomers.We encouragepeople from"
+      },
+      {
+        "index": 64,
+        "role": "body",
+        "text": "disabilities-yourattitude and passion are as important tous as yourexperience,qualifications and"
+      },
+      {
+        "index": 65,
+        "role": "body",
+        "text": "Be a team player and collaborate closely with our cross-functional teams to drive quality, experience outcomes."
+      },
+      {
+        "index": 66,
+        "role": "body",
+        "text": "Provide support for Power BI reporting and enhancements"
+      },
+      {
+        "index": 67,
+        "role": "body",
+        "text": "·Ensure smoothdailyoperations and troubleshootingissuesas they arise"
+      },
+      {
+        "index": 68,
+        "role": "body",
+        "text": "·Support DevOps pipelines using Azure DevOp, Bitbucket, and Jenkins tools to run"
+      },
+      {
+        "index": 69,
+        "role": "body",
+        "text": "deployments."
+      },
+      {
+        "index": 70,
+        "role": "body",
+        "text": "·Provide and maintain up to date documentation."
+      },
+      {
+        "index": 71,
+        "role": "body",
+        "text": "·Engage with both internal NZ engineering teams and Australia Westpac team along with"
+      },
+      {
+        "index": 72,
+        "role": "body",
+        "text": "external vendors toresolve and prevent issues"
+      },
+      {
+        "index": 73,
+        "role": "body",
+        "text": "·Ensure all services meet SLA and are compliant with all standards and policies"
+      },
+      {
+        "index": 74,
+        "role": "body",
+        "text": "roadmap items."
+      },
+      {
+        "index": 75,
+        "role": "body",
+        "text": "·Be a team playerand collaborate closely with our cross-functional teams to drive quality,"
+      },
+      {
+        "index": 76,
+        "role": "body",
+        "text": "experience outcomes."
+      },
+      {
+        "index": 77,
+        "role": "body",
+        "text": "·Provide support for Power Bl reporting and enhancements"
+      },
+      {
+        "index": 78,
+        "role": "body",
+        "text": "·On-Call Support and periodic weekend working."
+      },
+      {
+        "index": 79,
+        "role": "body",
+        "text": "Na tau rourou I What will you bring?"
+      },
+      {
+        "index": 80,
+        "role": "body",
+        "text": "·2-3+ years'experience as an Application Support Engineer within a Microsoft environment."
+      },
+      {
+        "index": 81,
+        "role": "body",
+        "text": "Scripting,QRM Manager,SharePoint,Power Bl,PowerPlatforms,Dynatrace,PagerDuty,"
+      },
+      {
+        "index": 82,
+        "role": "body",
+        "text": "Splunk,Hashi Corp Vault, Azure DevOp,Bitbucket, and Jenkins."
+      },
+      {
+        "index": 83,
+        "role": "body",
+        "text": "·4 weeks standard holiday + 5 additional days of wellbeing leave to support you to be your best"
+      },
+      {
+        "index": 84,
+        "role": "body",
+        "text": "·Growth and development -we provide opportunities for development andpromote internal"
+      },
+      {
+        "index": 85,
+        "role": "body",
+        "text": "Komatoutenei|OurOrganisation"
+      },
+      {
+        "index": 86,
+        "role": "body",
+        "text": "customers,and communities.For over160 years we've been driven by our purpose to Create"
+      },
+      {
+        "index": 87,
+        "role": "body",
+        "text": "doors every day.The giant W'on our building doesn't just stand for Westpac -it says, double you."
+      },
+      {
+        "index": 88,
+        "role": "body",
+        "text": "We're a place that values,rewards and recognises individuality.Where you canbe your whole self,"
+      },
+      {
+        "index": 89,
+        "role": "section_hint",
+        "text": "Mō te tūranga | About the Role"
+      },
+      {
+        "index": 90,
+        "role": "body",
+        "text": "OURDIFFERENCES"
+      },
+      {
+        "index": 91,
+        "role": "body",
+        "text": "MAKEUSGREATER"
+      },
+      {
+        "index": 92,
+        "role": "body",
+        "text": "TOGETHER"
+      },
+      {
+        "index": 93,
+        "role": "body",
+        "text": "GREATER"
+      },
+      {
+        "index": 94,
+        "role": "body",
+        "text": "Westpac New Zealand Limited View alljobs"
+      },
+      {
+        "index": 95,
+        "role": "body",
+        "text": "Auckland CBD, Auckland (Hybrid)"
+      },
+      {
+        "index": 96,
+        "role": "body",
+        "text": "Engineering -Software(Information& Communication Technology)"
+      },
+      {
+        "index": 97,
+        "role": "body",
+        "text": "①Fulltime"
+      },
+      {
+        "index": 98,
+        "role": "body",
+        "text": "@Base salary + Bonus + Laptop"
+      },
+      {
+        "index": 99,
+        "role": "body",
+        "text": "Posted 1d ago"
+      },
+      {
+        "index": 100,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 101,
+        "role": "body",
+        "text": "3 skills and credentials match your profle"
+      },
+      {
+        "index": 102,
+        "role": "body",
+        "text": "√ Pipelines"
+      },
+      {
+        "index": 103,
+        "role": "body",
+        "text": "Microsoft Power BI"
+      },
+      {
+        "index": 104,
+        "role": "body",
+        "text": "SQL Query Language Show all"
+      },
+      {
+        "index": 105,
+        "role": "body",
+        "text": "Mo teturanga|About theRole"
+      },
+      {
+        "index": 106,
+        "role": "body",
+        "text": "operational environment for the Balance Sheet Risk and Securitisation streams at Westpac. This"
+      },
+      {
+        "index": 107,
+        "role": "body",
+        "text": "includes daily operations of the High-Performance Computing solution used to measure, report,"
+      },
+      {
+        "index": 108,
+        "role": "body",
+        "text": "and analyze Balance Sheet Risk outcomes: Interest Rate Risk,Transfer Pricing,Cost of Funds and"
+      },
+      {
+        "index": 109,
+        "role": "body",
+        "text": "Hedge Accounting supporting predominantly Treasury customers."
+      },
+      {
+        "index": 110,
+        "role": "body",
+        "text": "Ensure smooth daily operations and troubleshooting issuesas they arise"
+      },
+      {
+        "index": 111,
+        "role": "body",
+        "text": "Scripting,QRMManaer,SharePoint,PowerBl,PowerPlatforms,Dnatrace,PagerDuty,"
+      },
+      {
+        "index": 112,
+        "role": "body",
+        "text": "Westpac Hei Wahi Mahi |Working at Westpac"
+      },
+      {
+        "index": 113,
+        "role": "body",
+        "text": "·Growth and development -we provide opportunities for development and promote internal"
+      },
+      {
+        "index": 114,
+        "role": "body",
+        "text": "·Recognition-we recognise and reward our star performers"
+      },
+      {
+        "index": 115,
+        "role": "body",
+        "text": "Zealand,we draw on this enormous talent poolto cultivate a team rich in ability and empowered"
+      },
+      {
+        "index": 116,
+        "role": "body",
+        "text": "Mahi tahi tatou,kaha aketatou."
+      },
+      {
+        "index": 117,
+        "role": "body",
+        "text": "to reach its full potential.Ouraim is tobe brave challengers,celebrating our differences and"
+      },
+      {
+        "index": 118,
+        "role": "body",
+        "text": "and do ourbest forourpeople,they'll do their best for our customers.We encourage people from"
+      },
+      {
+        "index": 119,
+        "role": "body",
+        "text": "disabilities-your attitude and passion are as important to us as yourexperience,qualifications and"
+      },
+      {
+        "index": 120,
+        "role": "body",
+        "text": "Mahi tahi tatou,kaha ake tatou|TogetherGreater"
+      },
+      {
+        "index": 121,
+        "role": "body",
+        "text": "Applicationsclose:"
+      },
+      {
+        "index": 122,
+        "role": "body",
+        "text": "27June 2026"
+      },
+      {
+        "index": 123,
+        "role": "body",
+        "text": "WhyWestpac?#WestpacDoubleYou"
+      },
+      {
+        "index": 124,
+        "role": "body",
+        "text": "WestpacNZ"
+      },
+      {
+        "index": 125,
+        "role": "body",
+        "text": "Mahi tahi tatou,kaha ake tatou."
+      },
+      {
+        "index": 126,
+        "role": "body",
+        "text": "前往平台观看："
+      },
+      {
+        "index": 127,
+        "role": "body",
+        "text": "YouTube"
+      },
+      {
+        "index": 128,
+        "role": "body",
+        "text": "Company profile"
+      },
+      {
+        "index": 129,
+        "role": "body",
+        "text": "Westpac Bank"
+      },
+      {
+        "index": 130,
+        "role": "body",
+        "text": "Banking&Credit"
+      },
+      {
+        "index": 131,
+        "role": "body",
+        "text": "22 5,001-10,000 employees"
+      },
+      {
+        "index": 132,
+        "role": "body",
+        "text": "As a large New Zealand business and employer, we touch the lives of more than 1.5 million"
+      },
+      {
+        "index": 133,
+        "role": "body",
+        "text": "customers, 5ooo employees and communities nationwide. Our first customer came from"
+      },
+      {
+        "index": 134,
+        "role": "body",
+        "text": "the Otago goldfields in 1861. As our nation grew, we grew too. Now more than 1.5 million..."
+      }
+    ],
+    "requirements": [
+      "disabilities - your attitude and passion are as important to us as your experience,qualifications and",
+      "·Preference for candlidates with experience working with some of:Control-M,Snowflake,SQL",
+      "disabilities-yourattitude and passion are as important tous as yourexperience,qualifications and",
+      "Be a team player and collaborate closely with our cross-functional teams to drive quality, experience outcomes.",
+      "experience outcomes.",
+      "·2-3+ years'experience as an Application Support Engineer within a Microsoft environment.",
+      "3 skills and credentials match your profle",
+      "disabilities-your attitude and passion are as important to us as yourexperience,qualifications and"
+    ],
+    "responsibilities": [
+      "Mō te tūranga | About the Role",
+      "Mo teturanga|About theRole"
+    ],
+    "benefits": [
+      "In addition to immersing yourself in a supportive team environment, you'll receive some great job perks and benefits including:",
+      "perks and benefits including:",
+      "·Banking benefits,insurance discounts and superannuation scheme",
+      "Auckland CBD, Auckland (Hybrid)"
+    ],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Apply button",
+      "bbox": {
+        "x": 1756,
+        "y": 160,
+        "w": 120,
+        "h": 40
+      },
+      "click_point": {
+        "x": 1816,
+        "y": 180
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save button",
+      "bbox": {
+        "x": 1884,
+        "y": 160,
+        "w": 60,
+        "h": 40
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 1600,
+        "y": 80,
+        "w": 944,
+        "h": 1304
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_detail_drawer_anchor_bbox"
+      ],
+      "evidence": {
+        "layout": "right_detail_drawer",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false,
+        "content_left": 530,
+        "content_width": 1500,
+        "source": "seek_detail_drawer_anchor_bbox"
+      },
+      "safe_points": [
+        {
+          "x": 2072,
+          "y": 732,
+          "reason": "inside_seek_detail_drawer_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 1600,
+      "y": 0,
+      "w": 944,
+      "h": 1384
+    },
+    "detail_bottom_reached": false,
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-050108-473141__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-050014-789364__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-045905-798072__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-044146-813558__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-045923-935180__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-050032-539321__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260620-050125-724399__observe-screen__edge.json"
+    ]
+  }
+}

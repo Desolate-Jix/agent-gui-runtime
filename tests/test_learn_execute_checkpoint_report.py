@@ -6,6 +6,7 @@ from pathlib import Path
 from app.learn.skill_matrix import build_learned_skill_matrix
 from scripts.learn_execute_checkpoint_report import (
     build_coordinate_policy_audit,
+    build_seek_application_flow_checkpoint_report,
     build_seek_task_replay_report,
     run_seek_safe_validation,
 )
@@ -77,6 +78,34 @@ def test_learned_skill_matrix_covers_execute_mode_common_skills() -> None:
     assert table_open_skill["low_level_action_types"] == ["click"]
 
 
+def test_seek_application_flow_checkpoint_keeps_submit_forbidden_and_safe_fill_required() -> None:
+    artifact = _read_json("artifacts/seek/learned_seek_application_flow_plexure_20260620.json")
+
+    report = build_seek_application_flow_checkpoint_report(artifact)
+
+    assert report["contract_version"] == "seek_application_flow_checkpoint_report_v1"
+    assert report["status"] == "pass"
+    assert report["summary"]["audit_decision"] == "pass_stopped_before_final_submit"
+    assert report["summary"]["employer_question_count"] == 0
+    assert report["summary"]["state_machine_count"] == 8
+    assert report["summary"]["transition_count"] == 5
+    assert report["summary"]["artifact_authorizes_submit"] is False
+    assert report["summary"]["final_submit_forbidden"] is True
+    assert report["summary"]["safe_fill_required_for_future_replay"] is True
+    assert report["summary"]["direct_type_text_is_milestone_evidence_only"] is True
+    assert report["summary"]["submit_clicks"] == 0
+    assert report["summary"]["final_submissions"] == 0
+    assert [item["state_id"] for item in report["timeline"]] == [
+        "choose_documents",
+        "answer_employer_questions",
+        "update_seek_profile",
+        "review_and_submit",
+    ]
+    assert all(item["final_submit_allowed"] is False for item in report["timeline"])
+    check_ids = {item["check_id"] for item in report["checks"]}
+    assert {"source_record_path", "source_audit_path", "source_reached_review", "state_machine", "transitions"} <= check_ids
+
+
 def test_coordinate_policy_audit_keeps_artifact_as_evidence_not_authorization() -> None:
     audit = build_coordinate_policy_audit()
 
@@ -97,6 +126,8 @@ def test_checkpoint_summary_exposes_readiness_gate_fields(tmp_path: Path) -> Non
             str(tmp_path / "safe.json"),
             "--seek-task-out",
             str(tmp_path / "task.json"),
+            "--seek-application-flow-out",
+            str(tmp_path / "application-flow.json"),
             "--skill-matrix-out",
             str(tmp_path / "skills.json"),
             "--checkpoint-out",
@@ -108,6 +139,12 @@ def test_checkpoint_summary_exposes_readiness_gate_fields(tmp_path: Path) -> Non
     checkpoint = json.loads(checkpoint_out.read_text(encoding="utf-8"))
     assert exit_code == 0
     assert checkpoint["status"] == "pass"
+    assert checkpoint["seek_application_flow_replay"]["summary"]["employer_question_count"] == 0
+    assert checkpoint["summary"]["seek_application_flow"] == "pass"
+    assert checkpoint["summary"]["seek_application_flow_replay"] == "pass"
+    assert checkpoint["summary"]["seek_application_final_submit_forbidden"] is True
+    assert checkpoint["summary"]["seek_application_safe_fill_required"] is True
+    assert checkpoint["summary"]["seek_application_can_run_live_strict_replay"] is True
     assert checkpoint["summary"]["artifact_authorizes_click"] is False
     assert checkpoint["summary"]["write_actions_clicked"] == 0
     assert checkpoint["summary"]["final_submissions"] == 0

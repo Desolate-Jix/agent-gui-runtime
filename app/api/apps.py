@@ -113,6 +113,10 @@ def open_app(request: OpenAppRequest) -> APIResponse:
                 data={"app": app, "timings": timings},
                 error=ErrorModel(code="missing_launch_command", details="Provide app_id with launch_command or request.command"),
             )
+        before_windows: list[dict[str, Any]] = []
+        if request.bind_after_open and request.prefer_new_window:
+            with timer.step("list_visible_windows_before_open"):
+                before_windows = window_manager.list_visible_windows()
         with timer.step("launch_process", executable=command[0] if command else None):
             process = subprocess.Popen(command)
         wait_seconds = float(request.wait_seconds)
@@ -126,8 +130,20 @@ def open_app(request: OpenAppRequest) -> APIResponse:
         title = request.title or app.get("title_hint")
         if request.bind_after_open:
             try:
-                with timer.step("bind_window", process_name=process_name, title=title):
-                    bound = _bind_opened_window(process_name=process_name, title=title, title_required=bool(request.title))
+                with timer.step(
+                    "bind_window",
+                    process_name=process_name,
+                    title=title,
+                    prefer_new_window=request.prefer_new_window,
+                ):
+                    bound = _bind_opened_window(
+                        process_name=process_name,
+                        title=title,
+                        title_required=bool(request.title),
+                        before_windows=before_windows,
+                        after_windows=windows,
+                        prefer_new_window=request.prefer_new_window,
+                    )
                 bound_payload = _bound_window_payload(bound)
             except Exception as exc:
                 bind_error = str(exc)
@@ -137,8 +153,10 @@ def open_app(request: OpenAppRequest) -> APIResponse:
             "command": command,
             "process_id": process.pid,
             "bind_after_open": request.bind_after_open,
+            "prefer_new_window": request.prefer_new_window,
             "bound_window": bound_payload,
             "bind_error": bind_error,
+            "windows_before_open": before_windows,
             "running_windows": windows,
         }
         result["timings"] = timer.to_dict()
@@ -216,13 +234,45 @@ def _is_browser_app(app: dict[str, Any]) -> bool:
     )
 
 
-def _bind_opened_window(process_name: str | None, title: str | None, *, title_required: bool) -> Any:
+def _bind_opened_window(
+    process_name: str | None,
+    title: str | None,
+    *,
+    title_required: bool,
+    before_windows: list[dict[str, Any]] | None = None,
+    after_windows: list[dict[str, Any]] | None = None,
+    prefer_new_window: bool = True,
+) -> Any:
+    if prefer_new_window:
+        new_window = _new_matching_window(before_windows or [], after_windows or [], process_name=process_name)
+        if new_window and new_window.get("handle") is not None:
+            return window_manager.bind_window_by_handle(int(new_window["handle"]))
     try:
         return window_manager.bind_window(process_name=process_name, title=title)
     except Exception:
         if title_required or not process_name or not title:
             raise
         return window_manager.bind_window(process_name=process_name, title=None)
+
+
+def _new_matching_window(
+    before_windows: list[dict[str, Any]],
+    after_windows: list[dict[str, Any]],
+    *,
+    process_name: str | None,
+) -> dict[str, Any] | None:
+    before_handles = {int(item["handle"]) for item in before_windows if isinstance(item, dict) and item.get("handle") is not None}
+    process_query = process_name.strip().lower() if process_name else None
+    new_matches: list[dict[str, Any]] = []
+    for item in after_windows:
+        if not isinstance(item, dict) or item.get("handle") is None:
+            continue
+        if int(item["handle"]) in before_handles:
+            continue
+        if process_query and str(item.get("process_name") or "").strip().lower() != process_query:
+            continue
+        new_matches.append(item)
+    return new_matches[-1] if new_matches else None
 
 
 def _resolve_executable(executable: str, candidates: list[Any]) -> str:

@@ -23,7 +23,7 @@ from app.models.request import (
 from app.models.response import APIResponse, ErrorModel, VisionResultData
 from app.models.request import OCRRegionRequest
 from app.page_structure import build_page_structure
-from app.page_structure.schemas import InteractionPolicy, PageElement, VerificationHints
+from app.page_structure.schemas import InteractionPolicy, PageElement, PageStructure, VerificationHints
 from app.recognition import CandidateRankRequest, LocalGroundingRequest, decide_pre_click, rank_candidates, run_local_grounding
 from app.recognition.schemas import CandidateRankResult, LocalGroundingCandidateResult, LocalGroundingResult, RecognitionCandidate, ScoreBreakdown
 from app.recognition.plan_overlay import render_recognition_plan_overlay
@@ -1492,6 +1492,7 @@ def _execute_fast_inventory_from_uia(
         },
     }
     inventory = build_screen_inventory(screen_reading, goal=goal)
+    screen_reading["screen_inventory"] = inventory
     action_count = int(((inventory.get("summary") or {}).get("available_action_count")) or 0)
     page_count = int(((inventory.get("summary") or {}).get("page_element_count")) or 0)
     result_status = "ready" if status == "ok" and (action_count or page_count) else "empty" if status == "ok" else "unavailable"
@@ -1567,6 +1568,12 @@ def _recognition_plan_from_vista_point(
 ) -> APIResponse:
     seeded_candidate = _seeded_candidate_payload(request.metadata)
     seed_candidate = _recognition_candidate_from_seeded_candidate(seeded_candidate or {}, rank=1) if seeded_candidate else None
+    reviewed_execution = request.metadata.get("reviewed_test_execution") if isinstance(request.metadata, dict) else None
+    allow_reviewed_seed_without_model = bool(
+        seed_candidate is not None
+        and isinstance(reviewed_execution, dict)
+        and reviewed_execution.get("allow_seeded_candidate_without_model") is True
+    )
     recall_candidates = [
         _recognition_candidate_from_path_recall(item, rank=index + 1)
         for index, item in enumerate(_as_list(path_graph_recall.get("candidates")))
@@ -1582,72 +1589,86 @@ def _recognition_plan_from_vista_point(
     seeded_primary_point_used = False
     vista_point_inside_selected_bbox = False
     if candidates:
-        if seed_candidate is not None:
-            roi_candidates, roi_source = [seed_candidate], "seeded_candidate_v1"
-        else:
-            roi_candidates, roi_source = _select_pathgraph_roi_candidates(candidates)
-        roi_padding = 48
-        roi_min_size = 256
-        roi_max_edge = 640
-        pathgraph_roi_preprocess = _prepare_vista_candidate_roi_image(
-            image_path,
-            input_image_size,
-            candidates=roi_candidates,
-            max_edge=roi_max_edge,
-            padding=roi_padding,
-            min_size=roi_min_size,
-            roi_source=roi_source,
-        )
-        pathgraph_roi_image_path = Path(str(pathgraph_roi_preprocess.get("processed_image_path") or image_path))
-        roi_size_raw = pathgraph_roi_preprocess.get("processed_size") if isinstance(pathgraph_roi_preprocess.get("processed_size"), dict) else input_image_size.to_dict()
-        pathgraph_roi_image_size = ImageSize(
-            width=int(roi_size_raw.get("width") or input_image_size.width),
-            height=int(roi_size_raw.get("height") or input_image_size.height),
-        )
-        with timer.step(
-            "vista_point_grounding_pathgraph_roi",
-            candidate_count=len(candidates),
-            roi_candidate_count=len(roi_candidates),
-            roi_source=roi_source,
-            crop_bounds_original=pathgraph_roi_preprocess.get("crop_bounds_original"),
-            max_edge=roi_max_edge,
-        ):
-            vista_payload = _call_vista_point_grounding(
-                local_config=local_config,
-                image_path=pathgraph_roi_image_path,
-                goal=goal,
-                candidates=roi_candidates,
-                image_size=pathgraph_roi_image_size,
-                original_image_size=input_image_size,
-                coordinate_transform=pathgraph_roi_preprocess.get("transform") if isinstance(pathgraph_roi_preprocess.get("transform"), dict) else None,
-                image_preprocess=pathgraph_roi_preprocess,
-                vista_stage="pathgraph_candidate_roi_refine",
-                coordinate_space="processed ROI image",
-                timeout_seconds=float((config.get("vision") or {}).get("timeout_seconds") or 600),
-            )
-        point = vista_payload["point"]
-        for candidate in candidates:
-            bbox = candidate.refined_bbox or candidate.element.bbox.to_dict()
-            if _point_inside_map_bbox(point, bbox):
-                selected_candidate = candidate
-                vista_point_inside_selected_bbox = True
-                break
-        if selected_candidate is None and seed_candidate is not None and seed_candidate.element.click_point is not None:
+        if allow_reviewed_seed_without_model and seed_candidate is not None:
             selected_candidate = seed_candidate
             seeded_primary_point_used = True
-        if selected_candidate is not None:
             selected_candidate.score = max(float(selected_candidate.score), 0.92)
-            selected_candidate.score_breakdown.text_similarity = max(selected_candidate.score_breakdown.text_similarity, 0.72)
+            selected_candidate.score_breakdown.text_similarity = max(selected_candidate.score_breakdown.text_similarity, 0.82)
             selected_candidate.score_breakdown.confidence_score = max(selected_candidate.score_breakdown.confidence_score, 0.9)
             selected_candidate.reasons = _unique_list(
                 [
                     *selected_candidate.reasons,
-                    "vista_point_inside_candidate_bbox"
-                    if vista_point_inside_selected_bbox
-                    else "seeded_candidate_primary_point_used_after_vista_disagreement",
+                    "reviewed_seeded_candidate_primary_point_used_without_model",
                 ]
             )
             candidates = [selected_candidate, *[item for item in candidates if item.candidate_id != selected_candidate.candidate_id]]
+        elif seed_candidate is not None:
+            roi_candidates, roi_source = [seed_candidate], "seeded_candidate_v1"
+        else:
+            roi_candidates, roi_source = _select_pathgraph_roi_candidates(candidates)
+        if selected_candidate is None:
+            roi_padding = 48
+            roi_min_size = 256
+            roi_max_edge = 640
+            pathgraph_roi_preprocess = _prepare_vista_candidate_roi_image(
+                image_path,
+                input_image_size,
+                candidates=roi_candidates,
+                max_edge=roi_max_edge,
+                padding=roi_padding,
+                min_size=roi_min_size,
+                roi_source=roi_source,
+            )
+            pathgraph_roi_image_path = Path(str(pathgraph_roi_preprocess.get("processed_image_path") or image_path))
+            roi_size_raw = pathgraph_roi_preprocess.get("processed_size") if isinstance(pathgraph_roi_preprocess.get("processed_size"), dict) else input_image_size.to_dict()
+            pathgraph_roi_image_size = ImageSize(
+                width=int(roi_size_raw.get("width") or input_image_size.width),
+                height=int(roi_size_raw.get("height") or input_image_size.height),
+            )
+            with timer.step(
+                "vista_point_grounding_pathgraph_roi",
+                candidate_count=len(candidates),
+                roi_candidate_count=len(roi_candidates),
+                roi_source=roi_source,
+                crop_bounds_original=pathgraph_roi_preprocess.get("crop_bounds_original"),
+                max_edge=roi_max_edge,
+            ):
+                vista_payload = _call_vista_point_grounding(
+                    local_config=local_config,
+                    image_path=pathgraph_roi_image_path,
+                    goal=goal,
+                    candidates=roi_candidates,
+                    image_size=pathgraph_roi_image_size,
+                    original_image_size=input_image_size,
+                    coordinate_transform=pathgraph_roi_preprocess.get("transform") if isinstance(pathgraph_roi_preprocess.get("transform"), dict) else None,
+                    image_preprocess=pathgraph_roi_preprocess,
+                    vista_stage="pathgraph_candidate_roi_refine",
+                    coordinate_space="processed ROI image",
+                    timeout_seconds=float((config.get("vision") or {}).get("timeout_seconds") or 600),
+                )
+            point = vista_payload["point"]
+            for candidate in candidates:
+                bbox = candidate.refined_bbox or candidate.element.bbox.to_dict()
+                if _point_inside_map_bbox(point, bbox):
+                    selected_candidate = candidate
+                    vista_point_inside_selected_bbox = True
+                    break
+            if selected_candidate is None and seed_candidate is not None and seed_candidate.element.click_point is not None:
+                selected_candidate = seed_candidate
+                seeded_primary_point_used = True
+            if selected_candidate is not None:
+                selected_candidate.score = max(float(selected_candidate.score), 0.92)
+                selected_candidate.score_breakdown.text_similarity = max(selected_candidate.score_breakdown.text_similarity, 0.72)
+                selected_candidate.score_breakdown.confidence_score = max(selected_candidate.score_breakdown.confidence_score, 0.9)
+                selected_candidate.reasons = _unique_list(
+                    [
+                        *selected_candidate.reasons,
+                        "vista_point_inside_candidate_bbox"
+                        if vista_point_inside_selected_bbox
+                        else "seeded_candidate_primary_point_used_after_vista_disagreement",
+                    ]
+                )
+                candidates = [selected_candidate, *[item for item in candidates if item.candidate_id != selected_candidate.candidate_id]]
     else:
         vista_error = "path_graph_recall_has_no_candidates"
         direct_options = _vista_direct_grounding_options(request)
@@ -1788,6 +1809,68 @@ def _recognition_plan_from_vista_point(
                     ],
                 }
 
+    fast_inventory: dict[str, Any] = {
+        "contract_version": "execute_fast_inventory_v1",
+        "status": "skipped",
+        "reason": "observe_trace_reuse_has_screen_inventory" if isinstance(observe_reuse.get("screen_inventory"), dict) else "not_started",
+        "provider": "windows_uia",
+    }
+    screen_inventory = observe_reuse.get("screen_inventory") if isinstance(observe_reuse.get("screen_inventory"), dict) else None
+    screen_reading_from_fast_inventory = None
+    if screen_inventory is None:
+        with timer.step("uia_inventory_scan"):
+            fast_inventory = _execute_fast_inventory_from_uia(
+                image_path=image_path,
+                image_size=input_image_size,
+                app_name=request.app_name,
+                goal=goal,
+                metadata=request.metadata,
+            )
+        screen_inventory = fast_inventory.get("screen_inventory") if isinstance(fast_inventory.get("screen_inventory"), dict) else None
+        screen_reading_from_fast_inventory = fast_inventory.get("screen_reading") if isinstance(fast_inventory.get("screen_reading"), dict) else None
+    elif screen_inventory is not None:
+        screen_reading_from_fast_inventory = {
+            "contract_version": "screen_reading_v1",
+            "image_path": str(image_path),
+            "image_size": input_image_size.to_dict(),
+            "app_name": request.app_name,
+            "texts": [],
+            "ui_elements": [],
+            "screen_inventory": screen_inventory,
+        }
+    screen_inventory_rank_result: CandidateRankResult | None = None
+    if isinstance(screen_reading_from_fast_inventory, dict) and screen_inventory is not None:
+        with timer.step("rank_screen_inventory_candidates", top_k=request.top_k):
+            screen_inventory_rank_result = rank_candidates(
+                CandidateRankRequest(
+                    goal=goal,
+                    page_structure=PageStructure(
+                        image_size=input_image_size,
+                        screen_summary="execute fast inventory",
+                        state_guess=request.state_hint,
+                        elements=[],
+                        texts=[],
+                    ),
+                    top_k=request.top_k,
+                    state_hint=request.state_hint,
+                    screen_reading=screen_reading_from_fast_inventory,
+                )
+            )
+        existing_candidate_ids = {item.candidate_id for item in candidates}
+        for candidate in screen_inventory_rank_result.candidates:
+            if candidate.candidate_id not in existing_candidate_ids:
+                candidates.append(candidate)
+                existing_candidate_ids.add(candidate.candidate_id)
+        candidates.sort(
+            key=lambda item: (
+                float(item.score),
+                float(item.score_breakdown.text_similarity),
+                float(item.score_breakdown.screen_reading_score),
+            ),
+            reverse=True,
+        )
+        candidates = candidates[: max(1, int(request.top_k or 5))]
+
     for index, candidate in enumerate(candidates, start=1):
         candidate.rank = index
     margin = round(float(candidates[0].score) - float(candidates[1].score), 4) if len(candidates) > 1 else round(float(candidates[0].score), 4) if candidates else None
@@ -1813,6 +1896,8 @@ def _recognition_plan_from_vista_point(
             "seeded_candidate_primary_point_used": seeded_primary_point_used,
             "vista_direct_point_grounding_used": vista_direct_used,
             "vista_direct_point_grounding_attempted": vista_direct_attempted,
+            "screen_inventory_candidate_rank_used": screen_inventory_rank_result is not None,
+            "screen_inventory_candidate_count": len(screen_inventory_rank_result.candidates) if screen_inventory_rank_result else 0,
         },
     )
     grounding_results: list[LocalGroundingCandidateResult] = []
@@ -1854,6 +1939,45 @@ def _recognition_plan_from_vista_point(
                     reasons=reasons,
                 )
             )
+    if allow_reviewed_seed_without_model and selected_candidate is not None and "seeded_candidate" in selected_candidate.reasons:
+        bbox = selected_candidate.refined_bbox or selected_candidate.element.bbox.to_dict()
+        grounding_results.append(
+            LocalGroundingCandidateResult(
+                candidate_id=selected_candidate.candidate_id,
+                element_id=selected_candidate.element_id,
+                status="grounded",
+                crop_path=None,
+                crop_bbox=bbox,
+                refined_click_point=dict(selected_candidate.element.click_point),
+                coordinate_source="seeded_candidate_v1_reviewed_local",
+                confidence=0.9,
+                matched_text=selected_candidate.label,
+                matched_text_bbox=bbox,
+                reasons=["reviewed_seeded_candidate_without_model", "seeded_candidate_point_inside_bbox"],
+            )
+        )
+    grounded_candidate_ids = {item.candidate_id for item in grounding_results}
+    for candidate in candidates:
+        if candidate.candidate_id in grounded_candidate_ids:
+            continue
+        if not isinstance(candidate.element.evidence.get("screen_inventory_action"), dict):
+            continue
+        bbox = candidate.refined_bbox or candidate.element.bbox.to_dict()
+        grounding_results.append(
+            LocalGroundingCandidateResult(
+                candidate_id=candidate.candidate_id,
+                element_id=candidate.element_id,
+                status="grounded",
+                crop_path=None,
+                crop_bbox=bbox,
+                refined_click_point=dict(candidate.element.click_point),
+                coordinate_source="screen_inventory_available_action",
+                confidence=0.86 if candidate.element.coordinate_confidence == "high" else 0.72,
+                matched_text=candidate.label,
+                matched_text_bbox=bbox,
+                reasons=["screen_inventory_available_action", "uia_coordinate_grounding"],
+            )
+        )
     narrow_search_result = LocalGroundingResult(
         goal=goal,
         results=grounding_results,
@@ -1869,7 +1993,6 @@ def _recognition_plan_from_vista_point(
             "vista_direct_point_grounding_used": vista_direct_used,
         },
     )
-    reviewed_execution = request.metadata.get("reviewed_test_execution") if isinstance(request.metadata, dict) else None
     allow_low_margin_when_grounded = bool(
         isinstance(reviewed_execution, dict)
         and reviewed_execution.get("allow_low_margin_when_grounded") is True
@@ -1883,25 +2006,6 @@ def _recognition_plan_from_vista_point(
         )
     recommended = candidate_result.candidates[0].to_dict() if candidate_result.candidates else None
     model_io = vista_direct_failure_model_io or _vista_model_io_trace(vista_payload, error=vista_error)
-    fast_inventory: dict[str, Any] = {
-        "contract_version": "execute_fast_inventory_v1",
-        "status": "skipped",
-        "reason": "observe_trace_reuse_has_screen_inventory" if isinstance(observe_reuse.get("screen_inventory"), dict) else "not_started",
-        "provider": "windows_uia",
-    }
-    screen_inventory = observe_reuse.get("screen_inventory") if isinstance(observe_reuse.get("screen_inventory"), dict) else None
-    screen_reading_from_fast_inventory = None
-    if screen_inventory is None:
-        with timer.step("uia_inventory_scan"):
-            fast_inventory = _execute_fast_inventory_from_uia(
-                image_path=image_path,
-                image_size=input_image_size,
-                app_name=request.app_name,
-                goal=goal,
-                metadata=request.metadata,
-            )
-        screen_inventory = fast_inventory.get("screen_inventory") if isinstance(fast_inventory.get("screen_inventory"), dict) else None
-        screen_reading_from_fast_inventory = fast_inventory.get("screen_reading") if isinstance(fast_inventory.get("screen_reading"), dict) else None
     result_payload = {
         "contract_version": "recognition_plan_v1",
         **_mode_payload(request, fallback_contract="recognition_plan_v1"),

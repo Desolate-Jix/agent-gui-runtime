@@ -48,6 +48,8 @@ def test_answer_plan_classifies_fields_without_filling() -> None:
     assert plan["counts"]["blocked_sensitive"] == 1
     assert plan["counts"]["unsupported"] == 1
     assert any(item["answer_source"] == "cover_letter_draft_v1.draft" for item in plan["planned_answers"])
+    cover_item = next(item for item in plan["planned_answers"] if item["answer_source"] == "cover_letter_draft_v1.draft")
+    assert "source_text" in cover_item["source"]
 
 
 def test_answer_plan_blocks_when_final_submit_visible() -> None:
@@ -66,6 +68,27 @@ def test_answer_plan_blocks_when_final_submit_visible() -> None:
     assert plan["status"] == "blocked_final_submit_visible"
     assert plan["counts"]["danger_final_submit"] == 1
     assert plan["stop_reason"] == "final_submit_visible_stop_before_answering"
+
+
+def test_answer_plan_ignores_generic_generated_submit_button_label() -> None:
+    flow = {
+        "contract_version": "seek_application_flow_state_v1",
+        "final_submit_visible_blocker": {"blocked": False, "matched_items": []},
+        "application_form_inventory": {
+            "contract_version": "application_form_inventory_v1",
+            "fields": [{"id": "cover", "text": "Cover letter", "role": "textarea"}],
+            "actions": [{"collection": "available_actions", "id": "action_screen_2_submit-button", "text": "Submit button", "role": "button"}],
+        },
+    }
+
+    plan = build_application_answer_plan(
+        profile={"contract_version": "candidate_profile_v1"},
+        application_flow_state=flow,
+        cover_letter_draft={"status": "draft_only_not_pasted", "draft": "Dear hiring team..."},
+    )
+
+    assert plan["counts"]["danger_final_submit"] == 0
+    assert plan["status"] == "planned_only_not_filled"
 
 
 def test_answer_plan_recognizes_common_safe_text_fields_only_with_profile_values() -> None:
@@ -172,3 +195,41 @@ def test_answer_plan_does_not_autofill_buttons_or_dropdowns_with_profile_values(
     )
 
     assert all(item["category"] == "needs_user_review" for item in plan["planned_answers"])
+
+
+def test_answer_plan_targets_existing_cover_letter_body_not_option_controls() -> None:
+    existing_cover_letter = (
+        "Dear Alicia, I hold a valid open work visa for New Zealand. "
+        "This old cover letter is long enough to be treated as the editable body field rather than a question label. "
+        "Please replace it with the new tailored draft."
+    )
+    flow = {
+        "contract_version": "seek_application_flow_state_v1",
+        "final_submit_visible_blocker": {"blocked": False, "matched_items": []},
+        "application_form_inventory": {
+            "contract_version": "application_form_inventory_v1",
+            "fields": [
+                {"id": "upload_cover", "text": "Upload a cover letter", "role": "radio"},
+                {"id": "write_cover", "text": "Write a cover letter", "role": "input"},
+                {"id": "cover_body", "text": existing_cover_letter, "role": "input"},
+            ],
+            "actions": [],
+        },
+    }
+
+    plan = build_application_answer_plan(
+        profile={"contract_version": "candidate_profile_v1", "work_rights_summary": "Open work rights in New Zealand"},
+        application_flow_state=flow,
+        cover_letter_draft={
+            "contract_version": "cover_letter_draft_v1",
+            "status": "draft_only_not_pasted",
+            "draft": "Dear hiring team, this is the tailored cover letter.",
+        },
+    )
+
+    by_id = {item["source"]["id"]: item for item in plan["planned_answers"]}
+    assert by_id["upload_cover"]["category"] == "unsupported"
+    assert by_id["write_cover"]["category"] == "unsupported"
+    assert by_id["cover_body"]["category"] == "auto_safe_known"
+    assert by_id["cover_body"]["reason"] == "cover_letter_body_field_detected"
+    assert by_id["cover_body"]["answer_source"] == "cover_letter_draft_v1.draft"

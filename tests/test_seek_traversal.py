@@ -100,6 +100,30 @@ def test_detail_completeness_accepts_requirements_as_role_evidence() -> None:
     assert decision["missing_evidence"] == []
 
 
+def test_detail_completeness_requires_bottom_when_requested() -> None:
+    decision = assess_seek_job_detail_completeness(
+        _detail_slice(detail_bottom_reached=False),
+        scroll_count=0,
+        max_scrolls=3,
+        require_bottom=True,
+    )
+
+    assert decision["complete"] is False
+    assert decision["should_scroll"] is True
+    assert decision["missing_evidence"] == ["detail_bottom"]
+    assert decision["bottom_reached"] is False
+
+    complete = assess_seek_job_detail_completeness(
+        _detail_slice(detail_bottom_reached=True),
+        scroll_count=1,
+        max_scrolls=3,
+        require_bottom=True,
+    )
+
+    assert complete["complete"] is True
+    assert complete["bottom_reached"] is True
+
+
 def test_detail_completeness_requests_scroll_until_role_evidence_or_max_scrolls() -> None:
     incomplete = _detail_slice(requirements=[], responsibilities=[])
 

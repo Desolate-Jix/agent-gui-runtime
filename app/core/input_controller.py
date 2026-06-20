@@ -46,6 +46,10 @@ VK_V = 0x56
 SM_CXSCREEN = 0
 SM_CYSCREEN = 1
 CLIPBOARD_PASTE_SETTLE_SECONDS = 0.15
+CLIPBOARD_OPEN_RETRY_SECONDS = 0.03
+CLIPBOARD_OPEN_ATTEMPTS = 8
+CLIPBOARD_VERIFY_TIMEOUT_SECONDS = 0.5
+CLIPBOARD_VERIFY_RETRY_SECONDS = 0.03
 
 
 class MOUSEINPUT(ctypes.Structure):
@@ -221,7 +225,17 @@ class InputController:
             self._press_chord([VK_CONTROL, VK_A])
             time.sleep(0.03)
         self._set_clipboard_text(text)
-        clipboard_after_set = self._get_clipboard_text()
+        clipboard_after_set = None
+        verify_attempts = 0
+        verify_deadline = time.monotonic() + CLIPBOARD_VERIFY_TIMEOUT_SECONDS
+        while True:
+            verify_attempts += 1
+            clipboard_after_set = self._get_clipboard_text()
+            if clipboard_after_set == text:
+                break
+            if time.monotonic() >= verify_deadline:
+                break
+            time.sleep(CLIPBOARD_VERIFY_RETRY_SECONDS)
         if clipboard_after_set != text:
             raise RuntimeError(
                 "Clipboard write verification failed before paste: "
@@ -247,6 +261,7 @@ class InputController:
             "submit": bool(submit),
             "restore_clipboard": bool(restore_clipboard),
             "clipboard_verified_before_paste": True,
+            "clipboard_verify_attempts": verify_attempts,
             "clipboard_paste_settle_ms": int(CLIPBOARD_PASTE_SETTLE_SECONDS * 1000),
         }
 
@@ -394,14 +409,17 @@ class InputController:
     def _get_clipboard_text(self) -> str | None:
         if win32clipboard is None:
             return None
+        opened = False
         try:
-            win32clipboard.OpenClipboard()  # type: ignore[union-attr]
+            self._open_clipboard()
+            opened = True
             try:
                 if win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT):  # type: ignore[union-attr]
                     return str(win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT))  # type: ignore[union-attr]
                 return None
             finally:
-                win32clipboard.CloseClipboard()  # type: ignore[union-attr]
+                if opened:
+                    win32clipboard.CloseClipboard()  # type: ignore[union-attr]
         except Exception as exc:
             logger.warning("Reading clipboard text failed: {}", exc)
             return None
@@ -409,12 +427,31 @@ class InputController:
     def _set_clipboard_text(self, text: str) -> None:
         if win32clipboard is None:
             raise RuntimeError("win32clipboard is unavailable; cannot paste text")
-        win32clipboard.OpenClipboard()  # type: ignore[union-attr]
+        opened = False
+        self._open_clipboard()
+        opened = True
         try:
             win32clipboard.EmptyClipboard()  # type: ignore[union-attr]
-            win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, text)  # type: ignore[union-attr]
+            win32clipboard.SetClipboardText(text, win32con.CF_UNICODETEXT)  # type: ignore[union-attr]
         finally:
-            win32clipboard.CloseClipboard()  # type: ignore[union-attr]
+            if opened:
+                win32clipboard.CloseClipboard()  # type: ignore[union-attr]
+
+    def _open_clipboard(self) -> None:
+        if win32clipboard is None:
+            raise RuntimeError("win32clipboard is unavailable; cannot open clipboard")
+        last_exc: Exception | None = None
+        for attempt in range(CLIPBOARD_OPEN_ATTEMPTS):
+            try:
+                win32clipboard.OpenClipboard(None)  # type: ignore[union-attr]
+                return
+            except Exception as exc:
+                last_exc = exc
+                if attempt < CLIPBOARD_OPEN_ATTEMPTS - 1:
+                    time.sleep(CLIPBOARD_OPEN_RETRY_SECONDS)
+        raise RuntimeError(
+            f"Opening clipboard failed after {CLIPBOARD_OPEN_ATTEMPTS} attempt(s)"
+        ) from last_exc
 
     def _ensure_windows_input(self) -> None:
         if not WINDOWS_INPUT_AVAILABLE:

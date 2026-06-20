@@ -107,9 +107,12 @@ def _candidate_decision(
     if candidate.score < min_candidate_score:
         allowed = False
         reasons.append("candidate_score_too_low")
-    if candidate.score_breakdown.text_similarity < min_local_text_similarity:
+    goal_mentions_candidate_label = _goal_explicitly_requests_candidate_label(goal, candidate)
+    if candidate.score_breakdown.text_similarity < min_local_text_similarity and not goal_mentions_candidate_label:
         allowed = False
         reasons.append("candidate_goal_text_mismatch")
+    elif goal_mentions_candidate_label:
+        reasons.append("goal_explicitly_mentions_candidate_label")
     policy = candidate.element.interaction_policy
     if not policy.allowed:
         allowed = False
@@ -318,6 +321,43 @@ def _best_similarity(goal: str, matched_text: str, values: list[str]) -> float:
     targets = [_normalize_text(goal), *[_normalize_text(value) for value in values]]
     text = _normalize_text(matched_text)
     return max((_text_similarity(text, target) for target in targets if target), default=0.0)
+
+
+def _goal_explicitly_requests_candidate_label(goal: str, candidate: RecognitionCandidate) -> bool:
+    goal_text = _normalize_text(goal)
+    labels = _candidate_label_values(candidate)
+    for label in labels:
+        label_text = _normalize_text(label)
+        if len(label_text) < 3:
+            continue
+        for match in re.finditer(rf"(?<!\w){re.escape(label_text)}(?!\w)", goal_text):
+            before = goal_text[max(0, match.start() - 40) : match.start()].strip()
+            if _negates_next_click_target(before):
+                continue
+            return True
+    return False
+
+
+def _candidate_label_values(candidate: RecognitionCandidate) -> list[str]:
+    return _unique(
+        [
+            str(candidate.label or ""),
+            str(candidate.text or ""),
+            str(candidate.element.label or ""),
+            str(candidate.element.text or ""),
+        ]
+    )
+
+
+def _negates_next_click_target(preceding_text: str) -> bool:
+    words = preceding_text.split()
+    tail = " ".join(words[-5:])
+    return bool(
+        re.search(
+            r"\b(do not|don t|dont|never|not|avoid|exclude|excluding|forbid|forbidden)\b",
+            tail,
+        )
+    )
 
 
 def _text_similarity(left: str, right: str) -> float:

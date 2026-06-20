@@ -1,0 +1,138 @@
+{
+  "contract_version": "learned_orchestration_skill_v1",
+  "skill_ref": "skill:job_search_application_workflow",
+  "display_name": "Job Search Application Workflow",
+  "status": "candidate_generic",
+  "source": {
+    "derived_from": [
+      "SEEK 5-job no-apply traversal",
+      "SEEK station-internal application-fill debug runs",
+      "review_before_submit_reconciliation"
+    ],
+    "template_ref": "template:job_search_application_workflow",
+    "template_path": "artifacts/templates/job_search_application_workflow_template_v1.json"
+  },
+  "purpose": "Guide an upper agent through job discovery, company/job recording, profile-based screening, same-site nonfinal application filling, and review-before-submit blocking.",
+  "scope": {
+    "allowed": [
+      "record visible job and company evidence",
+      "read job details with bounded scrolling",
+      "screen jobs against candidate_profile_v1",
+      "enter same-site application only for strong matches",
+      "fill non-sensitive application fields only through child form skills",
+      "stop at review before final submit"
+    ],
+    "forbidden": [
+      "final submit",
+      "external ATS form filling",
+      "profile mutation without approval",
+      "upload replace or delete documents without approval",
+      "inventing candidate answers without profile evidence",
+      "using artifact coordinates without fresh verification"
+    ]
+  },
+  "inputs": {
+    "required": [
+      "fresh_screenshot_or_bound_window",
+      "candidate_profile_v1",
+      "job_search_policy_v1",
+      "nonfinal_application_policy_v1"
+    ],
+    "optional": [
+      "cv_profile_v1",
+      "runtime_path_graph_v1",
+      "learned_app_profile_v1",
+      "visual_asset_v1"
+    ]
+  },
+  "outputs": [
+    "job_record_v1",
+    "company_record_v1",
+    "job_screening_decision_v1",
+    "application_fill_record_v1",
+    "review_reconciliation_v1",
+    "job_search_application_run_report_v1"
+  ],
+  "composed_skills": [
+    "skill:record_job_and_company_snapshot",
+    "skill:open_record_from_list_or_card",
+    "skill:read_fixed_detail_pane_until_complete",
+    "skill:screen_job_against_candidate_profile",
+    "skill:enter_nonfinal_application_flow",
+    "skill:safe_fill_long_text_field",
+    "skill:answer_question_group",
+    "skill:select_local_option_by_question_proximity",
+    "skill:review_before_submit_reconciliation",
+    "skill:block_final_submit"
+  ],
+  "run_loop": [
+    {
+      "step": "observe_results",
+      "goal": "Find visible job records and the active detail surface.",
+      "must_record": [
+        "screenshot_path",
+        "screen_inventory_or_path_graph",
+        "job_results_region"
+      ]
+    },
+    {
+      "step": "open_and_read_job",
+      "goal": "Open one job card, verify detail identity, and read the detail pane until bounded.",
+      "must_record": [
+        "click_candidate",
+        "pre_click_decision_v1",
+        "post_click_verification",
+        "detail_scroll_segments"
+      ]
+    },
+    {
+      "step": "record_and_screen",
+      "goal": "Create job/company records and decide strong_apply, maybe_apply, skip, or needs_review.",
+      "must_record": [
+        "job_record_v1",
+        "company_record_v1",
+        "job_screening_decision_v1"
+      ]
+    },
+    {
+      "step": "enter_application_if_allowed",
+      "goal": "Only enter same-site nonfinal application flow for strong_apply jobs.",
+      "must_record": [
+        "pre_apply_detail_verification_v1",
+        "final_submit_guard_v1",
+        "application_surface"
+      ]
+    },
+    {
+      "step": "fill_to_review_boundary",
+      "goal": "Use child multi-step form skills, then stop before final submit.",
+      "must_record": [
+        "application_fill_record_v1",
+        "review_reconciliation_v1",
+        "submit_clicks",
+        "final_submissions"
+      ]
+    }
+  ],
+  "safety_policy": {
+    "artifact_is_authorization": false,
+    "one_backend_step_at_a_time": true,
+    "fresh_observation_required_before_action": true,
+    "pre_click_decision_required": true,
+    "post_action_verification_required": true,
+    "final_submit_forbidden": true,
+    "external_ats_deferred": true,
+    "maybe_apply_requires_user_approval": true,
+    "private_or_sensitive_answer_requires_profile_evidence": true
+  },
+  "minimum_generic_validation": {
+    "seek_baseline": "pass",
+    "local_non_seek_fixture": "pending",
+    "second_real_non_seek_site": "pending",
+    "promotion_rules": {
+      "candidate_generic": "SEEK-only abstraction exists with tests.",
+      "validated_generic_candidate": "SEEK plus local non-SEEK fixture pass.",
+      "stable_generic": "SEEK plus fixture plus second real non-SEEK site pass."
+    }
+  }
+}

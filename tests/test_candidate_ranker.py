@@ -75,6 +75,33 @@ def test_rank_candidates_puts_best_text_match_first() -> None:
     assert result.summary["eligible_count"] == 2
 
 
+def test_rank_candidates_does_not_promote_negated_button_labels_over_requested_radio() -> None:
+    structure = _structure(
+        [
+            _element("element_continue", "Continue", priority="high"),
+            _element("element_review", "Review and submit", priority="high"),
+            _element("element_yes", "Yes", role="radio", priority="high"),
+        ]
+    )
+
+    result = rank_candidates(
+        CandidateRankRequest(
+            goal=(
+                'Click Yes for the question "Do you have at least 1-2 years of experience in web application development?" '
+                "Do not click Continue, Back, Review and submit, Submit, Send application, or Complete application."
+            ),
+            page_structure=structure,
+            top_k=3,
+        )
+    )
+
+    assert result.candidates[0].element_id == "element_yes"
+    assert "goal_explicitly_mentions_candidate_label" in result.candidates[0].reasons
+    continue_candidate = next(item for item in result.candidates if item.element_id == "element_continue")
+    assert "goal_negates_candidate_label" in continue_candidate.reasons
+    assert continue_candidate.score < result.candidates[0].score
+
+
 def test_rank_candidates_rejects_blocked_ad_like_element() -> None:
     structure = _structure(
         [
@@ -256,6 +283,108 @@ def test_rank_candidates_uses_screen_reading_uia_name_to_promote_candidate() -> 
     assert "screen_reading_uia_goal_name_match" in candidate.reasons
     assert result.summary["screen_reading_used"] is True
     assert result.summary["screen_reading_matched_count"] == 1
+
+
+def test_rank_candidates_adds_screen_inventory_uia_input_candidate() -> None:
+    structure = _structure([])
+    screen_reading = {
+        "contract_version": "screen_reading_v1",
+        "screen_inventory": {
+            "contract_version": "screen_inventory_v1",
+            "available_actions": [
+                {
+                    "id": "action_uia_35_dear-alicia",
+                    "label": "Dear Alicia, I am writing to apply for the Junior Java Developer position.",
+                    "role": "input",
+                    "action_type": "input_text",
+                    "bbox": {"x": 838, "y": 1201, "w": 625, "h": 172},
+                    "click_point": {"x": 1150, "y": 1287},
+                    "confidence": 0.82,
+                    "coordinate_confidence": "high",
+                    "source": "windows_uia.controls",
+                    "source_id": "uia_cover_letter",
+                    "metadata": {"control_type": "Edit", "patterns": ["Value"]},
+                }
+            ],
+            "page_elements": [],
+            "cards": [],
+        },
+    }
+
+    result = rank_candidates(
+        CandidateRankRequest(
+            goal="existing cover letter text box containing Dear Alicia",
+            page_structure=structure,
+            top_k=1,
+            screen_reading=screen_reading,
+        )
+    )
+
+    candidate = result.candidates[0]
+    assert candidate.element_id == "screen_inventory_action_uia_35_dear-alicia"
+    assert candidate.role == "input"
+    assert candidate.element.interaction_type == "focus"
+    assert candidate.element.click_point == {"x": 1150, "y": 1287}
+    assert "screen_inventory_action_candidate" in candidate.reasons
+    assert "screen_inventory_action_match" in candidate.reasons
+    assert candidate.score_breakdown.screen_reading_score > 0
+    assert result.summary["element_count"] == 0
+    assert result.summary["ranked_element_count"] == 1
+    assert result.summary["screen_inventory_virtual_element_count"] == 1
+
+
+def test_rank_candidates_prefers_typeable_input_over_matching_field_label() -> None:
+    structure = _structure([])
+    screen_reading = {
+        "contract_version": "screen_reading_v1",
+        "screen_inventory": {
+            "contract_version": "screen_inventory_v1",
+            "available_actions": [
+                {
+                    "id": "action_uia_1_cover-letter",
+                    "label": "Cover letter",
+                    "role": "text",
+                    "action_type": "click",
+                    "bbox": {"x": 802, "y": 1023, "w": 661, "h": 20},
+                    "click_point": {"x": 1132, "y": 1033},
+                    "confidence": 0.82,
+                    "coordinate_confidence": "high",
+                    "source": "windows_uia.controls",
+                    "source_id": "uia_cover_label",
+                    "metadata": {"control_type": "Text", "patterns": ["Text"]},
+                },
+                {
+                    "id": "action_uia_2_dear-alicia",
+                    "label": "Dear Alicia, I am writing to apply for the Junior Java Developer position.",
+                    "role": "input",
+                    "action_type": "input_text",
+                    "bbox": {"x": 838, "y": 1201, "w": 625, "h": 172},
+                    "click_point": {"x": 1150, "y": 1287},
+                    "confidence": 0.82,
+                    "coordinate_confidence": "high",
+                    "source": "windows_uia.controls",
+                    "source_id": "uia_cover_input",
+                    "metadata": {"control_type": "Edit", "patterns": ["Value"]},
+                },
+            ],
+            "page_elements": [],
+            "cards": [],
+        },
+    }
+
+    result = rank_candidates(
+        CandidateRankRequest(
+            goal="Click the existing cover letter text box containing Dear Alicia field",
+            page_structure=structure,
+            top_k=2,
+            screen_reading=screen_reading,
+        )
+    )
+
+    assert result.candidates[0].element_id == "screen_inventory_action_uia_2_dear-alicia"
+    assert result.candidates[0].role == "input"
+    assert "text_entry_target_matches_field_goal" in result.candidates[0].reasons
+    assert "non_typeable_label_does_not_satisfy_field_goal" in result.candidates[1].reasons
 
 
 def test_rank_candidates_keeps_blocked_screen_reading_match_rejected() -> None:

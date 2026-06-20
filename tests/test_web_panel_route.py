@@ -87,6 +87,12 @@ def test_web_panel_serves_browser_control_surface() -> None:
     assert 'value="github_issues">GitHub Issues' in response.text
     assert 'id="replayGraphPath"' in response.text
     assert 'id="replayLoadBtn"' in response.text
+    assert 'id="seekApplicationRecordPath"' in response.text
+    assert 'id="seekApplicationAuditPath"' in response.text
+    assert 'id="seekApplicationArtifactPath"' in response.text
+    assert 'id="seekApplicationEvidenceLoadBtn"' in response.text
+    assert 'id="seekApplicationEvidenceSummary"' in response.text
+    assert 'id="seekApplicationFilledFields"' in response.text
     assert 'id="replayRegressionPath"' in response.text
     assert 'id="replayRegressionLoadBtn"' in response.text
     assert 'id="learnSampleGatePath"' in response.text
@@ -172,6 +178,9 @@ def test_web_panel_serves_static_assets() -> None:
     assert "runLearnValidationStep" in response.text
     assert "loadReplayArtifact" in response.text
     assert "renderReplayGraph" in response.text
+    assert "loadSeekApplicationEvidence" in response.text
+    assert "renderSeekApplicationEvidence" in response.text
+    assert "DEFAULT_SEEK_APPLICATION_RECORD_PATH" in response.text
     assert "DEFAULT_SEEK_GRAPH_PATH" in response.text
     assert "DEFAULT_WIKIPEDIA_GRAPH_PATH" in response.text
     assert "DEFAULT_GITHUB_ISSUES_GRAPH_PATH" in response.text

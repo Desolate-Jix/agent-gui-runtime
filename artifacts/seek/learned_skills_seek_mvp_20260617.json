@@ -125,6 +125,100 @@
       "safety": {
         "final_submit": "forbidden"
       }
+    },
+    {
+      "skill_id": "skill.open_record_from_list_or_card",
+      "intent": "Open a repeated record from a list, card stack, table, or search result and verify identity in the detail surface.",
+      "inputs": [
+        "list_container_id",
+        "entity_pattern_ref",
+        "identity_mapping"
+      ],
+      "requires": [
+        "current_candidate_validation",
+        "identity_mapping.primary_key_fields"
+      ],
+      "verification": [
+        "selected_record_identity_matches_detail"
+      ],
+      "safety": {
+        "artifact_is_guidance_only": true,
+        "final_submit_allowed": false
+      }
+    },
+    {
+      "skill_id": "skill.read_fixed_detail_pane_until_complete",
+      "intent": "Read a fixed detail pane with bounded adaptive scrolling while preserving detail identity.",
+      "inputs": [
+        "detail_container_id",
+        "detail_read_policy"
+      ],
+      "requires": [
+        "detail_header_visible",
+        "bounded_scroll_budget"
+      ],
+      "verification": [
+        "detail_required_evidence_complete"
+      ],
+      "safety": {
+        "wrong_scope_scroll_must_abort": true
+      }
+    },
+    {
+      "skill_id": "skill.scroll_target_container_until_progress_or_boundary",
+      "intent": "Scroll only the selected container until new evidence appears or a boundary/no-progress condition is reached.",
+      "inputs": [
+        "target_container_id",
+        "progress_signals",
+        "stop_after_no_progress_count"
+      ],
+      "requires": [
+        "before_after_container_evidence",
+        "non_target_stability"
+      ],
+      "verification": [
+        "progress_or_boundary_recorded"
+      ],
+      "safety": {
+        "wrong_scope_scroll_must_abort": true
+      }
+    },
+    {
+      "skill_id": "skill.reset_detail_container_to_header",
+      "intent": "Reset a detail pane to its header before opening the next record so post-click verification starts from a clean state.",
+      "inputs": [
+        "detail_container_id",
+        "header_region_id"
+      ],
+      "requires": [
+        "previous_action_was_detail_read",
+        "target_container_bbox"
+      ],
+      "verification": [
+        "detail_header_visible_after_cleanup"
+      ],
+      "safety": {
+        "wrong_scope_cleanup_blocks_next_click": true
+      }
+    },
+    {
+      "skill_id": "skill.block_final_submit_or_write_action",
+      "intent": "Block final submission or persistent write actions unless a later explicit approval policy allows them.",
+      "inputs": [
+        "candidate_label",
+        "page_state",
+        "safety_policy_refs"
+      ],
+      "requires": [
+        "final_submit_guard_v1"
+      ],
+      "verification": [
+        "blocked_decision_recorded"
+      ],
+      "safety": {
+        "final_submit": "forbidden",
+        "persistent_write_requires_user_approval": true
+      }
     }
   ]
 }
