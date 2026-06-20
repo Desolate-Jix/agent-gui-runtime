@@ -2,6 +2,12 @@
 
 [中文](README.md) | [English](README.en.md)
 
+## Runtime cleanup and trace budget update (2026-06-20)
+
+Runtime traces now go through a bounded `write_trace` path. Normal small traces keep their original JSON shape, while very large strings, recursive scroll histories, binary/base64-like fields, and over-budget payloads are truncated or summarized with explicit `trace_truncated` metadata. This prevents `/action/scroll` and other long debug loops from writing multi-hundred-MB or GB JSON traces again.
+
+The first cleanup pass moved old generated traces and visual artifacts out of the workspace into `D:\agent-gui-runtime_cleanup_quarantine_20260620`, deleted the regenerable `.uv-cache`, and kept models, `.venv`, `tools`, source code, tests, SEEK milestone JSON artifacts, templates, and skills in place. Manifests are recorded under `logs\cleanup\cleanup_manifest_20260620_v2.json` and `logs\cleanup\cleanup_manifest_20260620_v3.json`.
+
 ## SEEK MVP execution update (2026-06-17)
 
 The SEEK no-apply traversal path now uses seeded execution candidates for job cards. The runner sends `seeded_candidate_v1` metadata with the extracted card bbox, card click point, container id, title/company, and evidence texts into `POST /action/execute_recognition_plan`. The recognition path still runs VISTA ROI grounding and `pre_click_decision_v1`; when VISTA validates the seed bbox, the final click point is recorded as `seeded_candidate_v1_validated_by_vista_point_v1`.

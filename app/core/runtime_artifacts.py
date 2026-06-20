@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import uuid
 import time
@@ -20,6 +21,12 @@ REVIEW_OVERLAYS_DIR = ARTIFACTS_DIR / "review-overlays"
 RECOGNITION_CROPS_DIR = ARTIFACTS_DIR / "recognition-crops"
 LOCAL_LEARNING_DIR = ARTIFACTS_DIR / "local-learning"
 LEARNED_INSTRUCTION_ARTIFACTS_DIR = LOCAL_LEARNING_DIR / "instructions"
+TRACE_MAX_PAYLOAD_BYTES = int(os.environ.get("OPENCLAW_TRACE_MAX_PAYLOAD_BYTES", str(20 * 1024 * 1024)))
+TRACE_MAX_STRING_CHARS = int(os.environ.get("OPENCLAW_TRACE_MAX_STRING_CHARS", "20000"))
+TRACE_MAX_LIST_ITEMS = int(os.environ.get("OPENCLAW_TRACE_MAX_LIST_ITEMS", "200"))
+TRACE_MAX_DEPTH = int(os.environ.get("OPENCLAW_TRACE_MAX_DEPTH", "12"))
+TRACE_COMPACT_LIST_KEYS = {"scroll_history", "previous_scrolls", "history", "attempts"}
+TRACE_BINARY_TEXT_KEYS = {"image_base64", "base64", "image_bytes", "bytes", "png", "jpg", "jpeg"}
 
 for path in (
     LOGS_DIR,
@@ -141,8 +148,97 @@ def write_trace(*, category: str, operation: str, payload: dict[str, Any], name_
     if name_hint:
         parts.append(slugify(name_hint, fallback="target"))
     path = category_dir / ("__".join(parts) + ".json")
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    payload_to_write = _bounded_trace_payload(payload)
+    path.write_text(json.dumps(payload_to_write, ensure_ascii=False, indent=2), encoding="utf-8")
     return str(path.resolve())
+
+
+def _bounded_trace_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    sanitized = _sanitize_trace_value(payload)
+    encoded = json.dumps(sanitized, ensure_ascii=False, indent=2).encode("utf-8")
+    if len(encoded) <= TRACE_MAX_PAYLOAD_BYTES:
+        return sanitized
+    summary = _summarize_trace_mapping(payload)
+    summary["trace_truncated"] = True
+    summary["trace_truncation"] = {
+        "reason": "trace_payload_exceeded_byte_budget",
+        "max_payload_bytes": TRACE_MAX_PAYLOAD_BYTES,
+        "sanitized_payload_bytes": len(encoded),
+        "policy": "large trace payloads are summarized to avoid embedding recursive history, screenshots, or model dumps",
+    }
+    return summary
+
+
+def _sanitize_trace_value(value: Any, *, key: str | None = None, depth: int = 0) -> Any:
+    if depth > TRACE_MAX_DEPTH:
+        return _trace_summary(value, reason="max_depth_exceeded")
+    if isinstance(value, dict):
+        sanitized: dict[str, Any] = {}
+        for item_key, item_value in value.items():
+            key_text = str(item_key)
+            if key_text.lower() in TRACE_BINARY_TEXT_KEYS:
+                sanitized[key_text] = _trace_summary(item_value, reason="binary_or_base64_payload_omitted")
+                continue
+            sanitized[key_text] = _sanitize_trace_value(item_value, key=key_text, depth=depth + 1)
+        return sanitized
+    if isinstance(value, list):
+        limit = 20 if key in TRACE_COMPACT_LIST_KEYS else TRACE_MAX_LIST_ITEMS
+        items = [_sanitize_trace_value(item, depth=depth + 1) for item in value[:limit]]
+        omitted = len(value) - len(items)
+        if omitted > 0:
+            items.append({"trace_truncated": True, "omitted_items": omitted, "reason": "list_item_limit"})
+        return items
+    if isinstance(value, tuple):
+        return _sanitize_trace_value(list(value), key=key, depth=depth)
+    if isinstance(value, str):
+        if len(value) <= TRACE_MAX_STRING_CHARS:
+            return value
+        digest = hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()[:16]
+        return {
+            "trace_truncated": True,
+            "reason": "string_char_limit",
+            "original_chars": len(value),
+            "sha256_prefix": digest,
+            "preview": value[:TRACE_MAX_STRING_CHARS],
+        }
+    return value
+
+
+def _summarize_trace_mapping(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "contract_version": "bounded_trace_summary_v1",
+        "success": payload.get("success") if isinstance(payload, dict) else None,
+        "top_level_keys": list(payload.keys()) if isinstance(payload, dict) else [],
+        "request": _trace_summary(payload.get("request")) if isinstance(payload, dict) else None,
+        "result": _trace_summary(payload.get("result")) if isinstance(payload, dict) else None,
+        "error": _sanitize_trace_value(payload.get("error")) if isinstance(payload, dict) else None,
+    }
+
+
+def _trace_summary(value: Any, *, reason: str | None = None) -> dict[str, Any]:
+    summary: dict[str, Any] = {
+        "trace_summary": True,
+        "type": type(value).__name__,
+    }
+    if reason:
+        summary["reason"] = reason
+    if isinstance(value, dict):
+        summary["keys"] = list(value.keys())[:80]
+        summary["key_count"] = len(value)
+        for path_key in ("trace_path", "image_path", "before_image_path", "after_image_path"):
+            if isinstance(value.get(path_key), str):
+                summary[path_key] = value[path_key]
+    elif isinstance(value, (list, tuple)):
+        summary["item_count"] = len(value)
+    elif isinstance(value, str):
+        summary["chars"] = len(value)
+        summary["sha256_prefix"] = hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()[:16]
+        summary["preview"] = value[: min(500, len(value))]
+    elif value is None:
+        summary["value"] = None
+    else:
+        summary["repr"] = repr(value)[:500]
+    return summary
 
 
 class RuntimeTimer:

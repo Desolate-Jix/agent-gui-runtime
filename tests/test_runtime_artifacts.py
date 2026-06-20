@@ -64,6 +64,57 @@ def test_write_trace_limits_long_name_hint(monkeypatch, tmp_path) -> None:
     assert saved.name.startswith("20260504-190000-000003__render-recognition-plan-overlay__software-engineer")
 
 
+def test_write_trace_truncates_large_payload(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(runtime_artifacts, "TRACES_DIR", tmp_path / "traces")
+    monkeypatch.setattr(runtime_artifacts, "timestamp_label", lambda: "20260504-190000-000004")
+    monkeypatch.setattr(runtime_artifacts, "TRACE_MAX_STRING_CHARS", 80)
+
+    path = runtime_artifacts.write_trace(
+        category="actions",
+        operation="scroll",
+        payload={
+            "success": True,
+            "request": {
+                "scroll_history": [{"step": index, "model_output": "x" * 120} for index in range(30)],
+            },
+            "result": {
+                "image_base64": "a" * 1000,
+                "raw_model_text": "b" * 200,
+            },
+        },
+        name_hint="scroll-down",
+    )
+
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    history = payload["request"]["scroll_history"]
+    assert len(history) == 21
+    assert history[-1]["omitted_items"] == 10
+    assert payload["result"]["image_base64"]["reason"] == "binary_or_base64_payload_omitted"
+    assert payload["result"]["raw_model_text"]["reason"] == "string_char_limit"
+
+
+def test_write_trace_summarizes_when_byte_budget_is_exceeded(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(runtime_artifacts, "TRACES_DIR", tmp_path / "traces")
+    monkeypatch.setattr(runtime_artifacts, "timestamp_label", lambda: "20260504-190000-000005")
+    monkeypatch.setattr(runtime_artifacts, "TRACE_MAX_PAYLOAD_BYTES", 400)
+
+    path = runtime_artifacts.write_trace(
+        category="actions",
+        operation="scroll",
+        payload={
+            "success": True,
+            "request": {"goal": "read detail", "scroll_history": [{"step": i} for i in range(40)]},
+            "result": {"large": ["value" * 20 for _ in range(40)]},
+        },
+        name_hint="scroll-down",
+    )
+
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    assert payload["contract_version"] == "bounded_trace_summary_v1"
+    assert payload["trace_truncated"] is True
+    assert payload["trace_truncation"]["reason"] == "trace_payload_exceeded_byte_budget"
+
+
 def test_runtime_timer_records_steps() -> None:
     timer = runtime_artifacts.RuntimeTimer()
 

@@ -183,6 +183,7 @@ Execute outputs:
 - `scripts/learn_sample_readiness_gate.py`: CLI for writing `learn_sample_readiness_gate_v1` from the checkpoint and regression reports
 - `app/api/panel.py`: Trace Inspector stages for `Model IO`, `Inventory`, `Path Map`, `Path Deep`, `Path Recall`, `Memory`, and `Fallback`
 - `app/web_panel/`: Learn/Execute mode controls, workspace-scoped replay/validation/task-run harnesses, shared PathGraph card rendering/highlighting, and panel request wiring
+- `app/core/runtime_artifacts.py`: central trace/artifact path utilities. `write_trace` now enforces a bounded trace budget, truncates oversized strings/lists/binary-like fields, summarizes over-budget payloads, and marks them with `trace_truncated` metadata so scroll/debug loops cannot create GB-scale JSON traces.
 - `app/core/transition_memory.py`: writes verified execution transition records under `logs/app-transitions/`
 - `logs/traces/vision/`: Observe, Locate, and RecognitionPlan traces
 - `logs/traces/actions/`: ExecuteRecognitionPlan traces
