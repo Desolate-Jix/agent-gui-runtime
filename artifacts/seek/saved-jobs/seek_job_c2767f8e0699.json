@@ -1,0 +1,523 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_c2767f8e0699",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.91,
+    "job_id": "seek_job_c2767f8e0699",
+    "title": "Graduate Software Engineer- Integration",
+    "company": "$65,000-$90,000 peryear",
+    "fit_summary": "strong_apply with score 0.910. positive: matched_skills: AI, API, Automation, Git; matched_target_roles: Software Engineer, AI Engineer, Automation Engineer, Graduate Software Engineer; location_matches: Auckland CBD, Auckland. needs review: preferred work mode not visible in job detail.",
+    "recommended_next_action": "open_apply_entry_and_prepare_safe_fields",
+    "positive_evidence": [
+      "matched_skills: AI, API, Automation, Git",
+      "matched_target_roles: Software Engineer, AI Engineer, Automation Engineer, Graduate Software Engineer",
+      "location_matches: Auckland CBD, Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [
+      "preferred work mode not visible in job detail"
+    ],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_c2767f8e0699",
+    "title": "Graduate Software Engineer- Integration",
+    "company": "$65,000-$90,000 peryear",
+    "location": "Auckland CBD, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": "$65,000-$90,000 peryear",
+    "classification": "Graduate Software Engineer-",
+    "card_bbox": {
+      "x": 652,
+      "y": 631,
+      "w": 383,
+      "h": 244
+    },
+    "click_point": {
+      "x": 777,
+      "y": 641
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_10",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_45_graduate-software-engineer",
+      "page_text_47_integration",
+      "page_text_50_heartland-bank",
+      "page_text_53_auckland-cbd-auckland",
+      "page_text_54_65-000-90-000-peryear",
+      "page_text_55_grow-your-career",
+      "page_text_56_supportive-leadership",
+      "page_text_58_fast-paced-environment",
+      "page_text_61_we-re-looking-for-graduates-who-are-passionate-a"
+    ],
+    "evidence": {
+      "texts": [
+        "Graduate Software Engineer-",
+        "Integration",
+        "Heartland Bank",
+        "Auckland CBD, Auckland",
+        "$65,000-$90,000 peryear",
+        "Grow your career!",
+        "· Supportive leadership",
+        "·Fast paced environment",
+        "We're looking for graduates who are passionate about"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": false,
+        "has_salary": true
+      }
+    },
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260627-165744-703819__observe-screen__edge.json",
+      "viewport_size": {
+        "width": 2560,
+        "height": 1400
+      },
+      "source": "seek_job_card_extraction",
+      "freshness": "current_capture"
+    }
+  },
+  "detail": {
+    "job_id": "seek_job_c2767f8e0699",
+    "title": "Graduate Software Engineer- Integration",
+    "company": "$65,000-$90,000 peryear",
+    "location": "Auckland CBD, Auckland",
+    "classification": "Graduate Software Engineer-",
+    "salary_text": "$65,000-$90,000 peryear",
+    "runtime_detail_snapshot": {
+      "contract_version": "runtime_detail_snapshot_v1",
+      "source": "read_region_batch",
+      "revision": 2,
+      "previous_snapshot_id": "895fa1be10e15fa1",
+      "snapshot_id": "ec31b7bcdde6f15b"
+    },
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "batch_ocr",
+        "text": "GraduateSoftwareEngineer-Integration"
+      },
+      {
+        "index": 1,
+        "role": "batch_ocr",
+        "text": "Heartland Bank View alljobs"
+      },
+      {
+        "index": 2,
+        "role": "batch_ocr",
+        "text": "Auckland CBD,Auckland"
+      },
+      {
+        "index": 3,
+        "role": "batch_ocr",
+        "text": "Engineering-Software(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 4,
+        "role": "batch_ocr",
+        "text": "?"
+      },
+      {
+        "index": 5,
+        "role": "batch_ocr",
+        "text": "Full time"
+      },
+      {
+        "index": 6,
+        "role": "batch_ocr",
+        "text": "$65,000-$90,000peryear"
+      },
+      {
+        "index": 7,
+        "role": "batch_ocr",
+        "text": "Posted 2d ago"
+      },
+      {
+        "index": 8,
+        "role": "batch_ocr",
+        "text": "Apply"
+      },
+      {
+        "index": 9,
+        "role": "batch_ocr",
+        "text": "Save"
+      },
+      {
+        "index": 10,
+        "role": "batch_ocr",
+        "text": "Howyou match"
+      },
+      {
+        "index": 11,
+        "role": "batch_ocr",
+        "text": "3 skills and credentials match your profile"
+      },
+      {
+        "index": 12,
+        "role": "batch_ocr",
+        "text": "√API"
+      },
+      {
+        "index": 13,
+        "role": "batch_ocr",
+        "text": "√Pipelines"
+      },
+      {
+        "index": 14,
+        "role": "batch_ocr",
+        "text": "Java Programming Show all"
+      },
+      {
+        "index": 15,
+        "role": "batch_ocr",
+        "text": "Launchyourcareerbuilding thefutureofbanking"
+      },
+      {
+        "index": 16,
+        "role": "batch_ocr",
+        "text": "Kia ora-readytoturnwhatyou'velearned intoreal-world impact?"
+      },
+      {
+        "index": 17,
+        "role": "batch_ocr",
+        "text": "At Heartland,we're reimagining what a modern bank canbe.We're building an intelligent,"
+      },
+      {
+        "index": 18,
+        "role": "batch_ocr",
+        "text": "Al-enabled digitalbankingplatformthatdeliversseamlesscustomerexperiencesfrom"
+      },
+      {
+        "index": 19,
+        "role": "batch_ocr",
+        "text": "end to end."
+      },
+      {
+        "index": 20,
+        "role": "batch_ocr",
+        "text": "As a GraduateSoftware Integration Engineer,you'll join a teamof experienced engineers"
+      },
+      {
+        "index": 21,
+        "role": "batch_ocr",
+        "text": "workingonthesystemsthatconnectourproducts,platforms,andcustomers.You'llgain"
+      },
+      {
+        "index": 22,
+        "role": "batch_ocr",
+        "text": "hands-on experiencewith modernintegration technologies,cloud platforms,APls,"
+      },
+      {
+        "index": 23,
+        "role": "batch_ocr",
+        "text": "automationtools,andAl-enabledsolutionswhilelearningfromsomeoftheindustry's"
+      },
+      {
+        "index": 24,
+        "role": "batch_ocr",
+        "text": "best."
+      },
+      {
+        "index": 25,
+        "role": "batch_ocr",
+        "text": "If you're curious, love solving problems, and want to build technology that makes a real"
+      },
+      {
+        "index": 26,
+        "role": "batch_ocr",
+        "text": "difference,we'd lovetohearfromyou."
+      },
+      {
+        "index": 27,
+        "role": "batch_ocr",
+        "text": "Kiaora-readytoturnwhatyou'velearned intoreal-worldimpact?"
+      },
+      {
+        "index": 28,
+        "role": "batch_ocr",
+        "text": "At Heartland,we're reimagining what a modern bank can be.We're building an intelligent,"
+      },
+      {
+        "index": 29,
+        "role": "batch_ocr",
+        "text": "end toend."
+      },
+      {
+        "index": 30,
+        "role": "batch_ocr",
+        "text": "AsaGraduateSoftwareIntegration Engineer,you'lljoina teamofexperienced engineers"
+      },
+      {
+        "index": 31,
+        "role": "batch_ocr",
+        "text": "hands-on experience with modern integration technologies, cloud platforms, APls,"
+      },
+      {
+        "index": 32,
+        "role": "batch_ocr",
+        "text": "automationtools,and Al-enabled solutionswhilelearningfromsome of the industry's"
+      },
+      {
+        "index": 33,
+        "role": "batch_ocr",
+        "text": "Ifyou'recurious,lovesolvingproblems,andwanttobuildtechnologythatmakesareal"
+      },
+      {
+        "index": 34,
+        "role": "batch_ocr",
+        "text": "difference,we'dlovetohearfromyou."
+      },
+      {
+        "index": 35,
+        "role": "batch_ocr",
+        "text": "What you'll bedoing"
+      },
+      {
+        "index": 36,
+        "role": "batch_ocr",
+        "text": "Aspart of Heartland'sDigital Automation&Transformationteam,you'll helpbuild and"
+      },
+      {
+        "index": 37,
+        "role": "batch_ocr",
+        "text": "support the integrations that power our digital banking experiences."
+      },
+      {
+        "index": 38,
+        "role": "batch_ocr",
+        "text": "You'll haveopportunitiesto:"
+      },
+      {
+        "index": 39,
+        "role": "batch_ocr",
+        "text": "·Develop and enhanceAPls and integrationservices"
+      },
+      {
+        "index": 40,
+        "role": "batch_ocr",
+        "text": "·Workwithmodern cloud and containertechnologies"
+      },
+      {
+        "index": 41,
+        "role": "batch_ocr",
+        "text": "·ContributetoCl/CDpipelines and automationinitiatives"
+      },
+      {
+        "index": 42,
+        "role": "batch_ocr",
+        "text": "·Collaboratewithsoftwareengineers,architects,productteams andbusiness"
+      },
+      {
+        "index": 43,
+        "role": "batch_ocr",
+        "text": "stakeholders"
+      },
+      {
+        "index": 44,
+        "role": "batch_ocr",
+        "text": "·Learn best practices in security,scalability and system design"
+      },
+      {
+        "index": 45,
+        "role": "batch_ocr",
+        "text": "·Participate in Agile delivery teams focused on continuous improvement"
+      },
+      {
+        "index": 46,
+        "role": "batch_ocr",
+        "text": "·Help shape the future of Al-enabled banking solutions"
+      },
+      {
+        "index": 47,
+        "role": "batch_ocr",
+        "text": "Fromday one,youllbeworkingon meaningful projectsthat directlyimpact our"
+      },
+      {
+        "index": 48,
+        "role": "batch_ocr",
+        "text": "customers and business."
+      },
+      {
+        "index": 49,
+        "role": "batch_ocr",
+        "text": "Whatwe'relookingfor"
+      },
+      {
+        "index": 50,
+        "role": "batch_ocr",
+        "text": "We'relookingforgraduateswho arepassionate about technologyand eagertolearn."
+      },
+      {
+        "index": 51,
+        "role": "batch_ocr",
+        "text": "You'll have opportunities to:"
+      },
+      {
+        "index": 52,
+        "role": "batch_ocr",
+        "text": "·DevelopandenhanceAPlsandintegrationservices"
+      },
+      {
+        "index": 53,
+        "role": "batch_ocr",
+        "text": "·Workwithmoderncloudandcontainertechnologies"
+      },
+      {
+        "index": 54,
+        "role": "batch_ocr",
+        "text": "·ContributetoCl/CDpipelinesand automationinitiatives"
+      },
+      {
+        "index": 55,
+        "role": "batch_ocr",
+        "text": "·Collaborate with software engineers, architects,product teams and business"
+      },
+      {
+        "index": 56,
+        "role": "batch_ocr",
+        "text": "·Learn best practices in security, scalability and system design"
+      },
+      {
+        "index": 57,
+        "role": "batch_ocr",
+        "text": "·Participate in Agile delivery teamsfocused oncontinuousimprovement"
+      },
+      {
+        "index": 58,
+        "role": "batch_ocr",
+        "text": "·Helpshape thefutureofAl-enabledbankingsolutions"
+      },
+      {
+        "index": 59,
+        "role": "batch_ocr",
+        "text": "We'relooking forgraduates who arepassionate about technology and eagertolearn."
+      },
+      {
+        "index": 60,
+        "role": "batch_ocr",
+        "text": "You'll ideallyhave:"
+      },
+      {
+        "index": 61,
+        "role": "batch_ocr",
+        "text": "·ABachelor's degree inSoftwareEngineering,ComputerScience,Information"
+      },
+      {
+        "index": 62,
+        "role": "batch_ocr",
+        "text": "Technology,Engineering,ora related field"
+      },
+      {
+        "index": 63,
+        "role": "batch_ocr",
+        "text": "·Anunderstandingofprogrammingprinciplesandsoftwaredevelopmentpractices"
+      },
+      {
+        "index": 64,
+        "role": "batch_ocr",
+        "text": "·Exposure toAPl development,cloud technologies,or systems integration through"
+      },
+      {
+        "index": 65,
+        "role": "batch_ocr",
+        "text": "study,internships,projects,orpersonal interests"
+      },
+      {
+        "index": 66,
+        "role": "batch_ocr",
+        "text": "·Strong problem-solving and analytical skills"
+      },
+      {
+        "index": 67,
+        "role": "batch_ocr",
+        "text": "·Excellentcommunicationandteamworkskills"
+      },
+      {
+        "index": 68,
+        "role": "batch_ocr",
+        "text": "·Agrowthmindsetandwillingnesstolearn"
+      },
+      {
+        "index": 69,
+        "role": "batch_ocr",
+        "text": "Exposuretoanyofthefollowingwouldbeabonus:"
+      },
+      {
+        "index": 70,
+        "role": "batch_ocr",
+        "text": "·Java or Spring Boot"
+      },
+      {
+        "index": 71,
+        "role": "batch_ocr",
+        "text": "·RESTAPIs"
+      },
+      {
+        "index": 72,
+        "role": "batch_ocr",
+        "text": "·Azure or cloud technologies"
+      },
+      {
+        "index": 73,
+        "role": "batch_ocr",
+        "text": "·Docker and containerisation"
+      },
+      {
+        "index": 74,
+        "role": "batch_ocr",
+        "text": "·Cl/CD tools and automation"
+      },
+      {
+        "index": 75,
+        "role": "batch_ocr",
+        "text": "·Microservices architecture"
+      },
+      {
+        "index": 76,
+        "role": "batch_ocr",
+        "text": "·Agile ways of working"
+      },
+      {
+        "index": 77,
+        "role": "batch_ocr",
+        "text": "Don't worry if you haven't worked with all of these technologies yet—we're looking for"
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260627-165805-266457__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260627-165808-977396__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260627-165812-622220__ocr-region__ocr-region.json"
+    ],
+    "detail_batch_status": "ok",
+    "detail_batch_stop_reason": "max_captures",
+    "detail_bottom_reached": false,
+    "detail_batch_unique_line_count": 78,
+    "runtime_detail_dataflow": {
+      "contract_version": "runtime_detail_dataflow_v1",
+      "source_batch_contract": "read_region_batch_v1",
+      "source_batch_status": "ok",
+      "merged_text_line_count": 78,
+      "description_section_count": 78
+    },
+    "apply_button_state": {
+      "visible": true,
+      "label": "Apply",
+      "source": "read_detail_batch_ocr"
+    }
+  }
+}

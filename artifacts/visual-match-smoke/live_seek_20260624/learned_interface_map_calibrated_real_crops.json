@@ -1,0 +1,1599 @@
+{
+  "contract_version": "learned_interface_map_v1",
+  "map_id": "seek:seek_search_results_with_detail:interface_map_v1",
+  "app_id": "seek",
+  "page_type": "seek_search_results_with_detail",
+  "generated_at": "2026-06-24T10:51:46.701349+00:00",
+  "source": {
+    "runtime_path_graph_contract": "runtime_path_graph_v1",
+    "visual_assets_contract": "visual_asset_v1",
+    "artifact_is_authorization": false
+  },
+  "states": [
+    {
+      "state_id": "seek_home_page",
+      "label": "SEEK home/search page",
+      "page_type": "seek_search_results_with_detail",
+      "description": "Search results, selected job detail pane, filters, cards, and detail reading regions.",
+      "region_refs": [
+        "top_search_area",
+        "results_list",
+        "job_detail"
+      ],
+      "child_state_ids": [
+        "seek_search_results_empty_detail",
+        "seek_search_results_with_selected_job",
+        "seek_detail_scrolled",
+        "seek_results_list_scrolled"
+      ]
+    },
+    {
+      "state_id": "seek_application_page",
+      "label": "SEEK application page",
+      "page_type": "seek_station_internal_application",
+      "description": "Station-internal application form, profile step, review boundary, and final submit guard.",
+      "region_refs": [
+        "application_form"
+      ],
+      "child_state_ids": [
+        "seek_apply_entry_form"
+      ],
+      "safety": {
+        "final_submit": "forbidden"
+      }
+    }
+  ],
+  "regions": [
+    {
+      "region_id": "top_search_area",
+      "label": "SEEK top search and filters area",
+      "role": "search_controls",
+      "region_type": "navigation",
+      "parent_region_id": null,
+      "container_id": null,
+      "repeatable": false,
+      "default_collapsed": false,
+      "bbox_hint": {
+        "source": "real_seek_screenshot_20260625",
+        "bbox": {
+          "x": 608,
+          "y": 119,
+          "w": 1169,
+          "h": 140
+        },
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true,
+        "source_image_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-171506-036452.png"
+      },
+      "visual_policy": {
+        "fixed_assets_use_template_match": true,
+        "dynamic_content_uses_roi_model": false,
+        "full_screen_model_fallback_only": true
+      },
+      "children": {
+        "fixed_visual_asset_refs": [],
+        "dynamic_area_refs": []
+      },
+      "description": "Search and filter area for keyword, location, and result filters. Fixed search controls use visual assets; result changes should be verified from the results list."
+    },
+    {
+      "region_id": "results_list",
+      "label": "SEEK left job results list",
+      "role": "list",
+      "region_type": "dynamic_collection",
+      "parent_region_id": null,
+      "container_id": "seek:results_list",
+      "repeatable": false,
+      "default_collapsed": true,
+      "bbox_hint": {
+        "source": "real_seek_screenshot_20260624",
+        "bbox": {
+          "x": 608,
+          "y": 384,
+          "w": 474,
+          "h": 1016
+        },
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true,
+        "source_image_path": "artifacts/screenshots/graduate-software-jobs-in-all-auckland-job-vacancies-jun-2026-seek-micr-06bf33e0__capture__full-window__20260624-231504-408645.png"
+      },
+      "visual_policy": {
+        "fixed_assets_use_template_match": false,
+        "dynamic_content_uses_roi_model": true,
+        "full_screen_model_fallback_only": true
+      },
+      "children": {
+        "fixed_visual_asset_refs": [],
+        "dynamic_area_refs": []
+      },
+      "description": "Left-side scrollable job results list. It contains repeating job cards; open_job_card should operate on a current visible card and update the right detail pane."
+    },
+    {
+      "region_id": "job_detail",
+      "label": "SEEK right job detail pane",
+      "role": "detail",
+      "region_type": "detail_content",
+      "parent_region_id": null,
+      "container_id": "seek:job_detail",
+      "repeatable": false,
+      "default_collapsed": true,
+      "bbox_hint": {
+        "source": "real_seek_screenshot_20260624",
+        "bbox": {
+          "x": 1157,
+          "y": 384,
+          "w": 620,
+          "h": 1016
+        },
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true,
+        "source_image_path": "artifacts/screenshots/graduate-software-jobs-in-all-auckland-job-vacancies-jun-2026-seek-micr-06bf33e0__capture__full-window__20260624-231504-408645.png"
+      },
+      "visual_policy": {
+        "fixed_assets_use_template_match": false,
+        "dynamic_content_uses_roi_model": true,
+        "full_screen_model_fallback_only": true
+      },
+      "children": {
+        "fixed_visual_asset_refs": [],
+        "dynamic_area_refs": []
+      },
+      "description": "Right-side selected job detail pane. It contains the fixed apply/header area and the scrollable detail body."
+    },
+    {
+      "region_id": "job_card",
+      "label": "Job result card",
+      "role": "entity_card",
+      "region_type": "dynamic_collection",
+      "parent_region_id": "results_list",
+      "container_id": null,
+      "repeatable": true,
+      "default_collapsed": true,
+      "bbox_hint": {
+        "source": "real_seek_screenshot_20260624",
+        "bbox": {
+          "x": 608,
+          "y": 532,
+          "w": 474,
+          "h": 218
+        },
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true,
+        "source_image_path": "artifacts/screenshots/graduate-software-jobs-in-all-auckland-job-vacancies-jun-2026-seek-micr-06bf33e0__capture__full-window__20260624-231504-408645.png"
+      },
+      "visual_policy": {
+        "fixed_assets_use_template_match": false,
+        "dynamic_content_uses_roi_model": true,
+        "full_screen_model_fallback_only": true
+      },
+      "children": {
+        "fixed_visual_asset_refs": [],
+        "dynamic_area_refs": []
+      },
+      "description": "Repeating job card template inside the results list. The exact title/company changes per result; use ROI/model reading for card text and visual matching for card shape/highlight."
+    },
+    {
+      "region_id": "detail_header",
+      "label": "Opened job title/company/apply area",
+      "role": "detail_header",
+      "region_type": "fixed_controls",
+      "parent_region_id": "job_detail",
+      "container_id": null,
+      "repeatable": false,
+      "default_collapsed": false,
+      "bbox_hint": {
+        "source": "real_seek_screenshot_20260624",
+        "bbox": {
+          "x": 1157,
+          "y": 384,
+          "w": 620,
+          "h": 620
+        },
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true,
+        "source_image_path": "artifacts/screenshots/graduate-software-jobs-in-all-auckland-job-vacancies-jun-2026-seek-micr-06bf33e0__capture__full-window__20260624-231504-408645.png"
+      },
+      "visual_policy": {
+        "fixed_assets_use_template_match": true,
+        "dynamic_content_uses_roi_model": false,
+        "full_screen_model_fallback_only": true
+      },
+      "children": {
+        "fixed_visual_asset_refs": [],
+        "dynamic_area_refs": []
+      },
+      "description": "Fixed header area for the currently opened job, including title/company, Apply or Quick apply, and save controls."
+    },
+    {
+      "region_id": "detail_body",
+      "label": "Opened job description body",
+      "role": "detail_body",
+      "region_type": "detail_content",
+      "parent_region_id": "job_detail",
+      "container_id": null,
+      "repeatable": false,
+      "default_collapsed": true,
+      "bbox_hint": {
+        "source": "real_seek_screenshot_20260624",
+        "bbox": {
+          "x": 1157,
+          "y": 920,
+          "w": 620,
+          "h": 480
+        },
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true,
+        "source_image_path": "artifacts/screenshots/graduate-software-jobs-in-all-auckland-job-vacancies-jun-2026-seek-micr-06bf33e0__capture__full-window__20260624-231504-408645.png"
+      },
+      "visual_policy": {
+        "fixed_assets_use_template_match": false,
+        "dynamic_content_uses_roi_model": true,
+        "full_screen_model_fallback_only": true
+      },
+      "children": {
+        "fixed_visual_asset_refs": [],
+        "dynamic_area_refs": []
+      },
+      "description": "Scrollable job description body. Batch reading should collect the latest detail snapshot before matching or application decisions."
+    },
+    {
+      "region_id": "application_form",
+      "label": "SEEK application form",
+      "role": "form_flow",
+      "region_type": "form_flow",
+      "parent_region_id": null,
+      "container_id": "seek:application_form",
+      "repeatable": false,
+      "default_collapsed": false,
+      "bbox_hint": {
+        "source": "page_level_region_hint",
+        "bbox": null,
+        "requires_current_reobserve": true
+      },
+      "visual_policy": {
+        "fixed_assets_use_template_match": false,
+        "dynamic_content_uses_roi_model": true,
+        "full_screen_model_fallback_only": true
+      },
+      "children": {
+        "fixed_visual_asset_refs": [],
+        "dynamic_area_refs": [],
+        "region_refs": [
+          "application_progress",
+          "application_documents",
+          "application_questions",
+          "application_profile",
+          "application_review_step"
+        ]
+      },
+      "description": "Container for SEEK internal application steps: documents, employer questions, profile review, and final review.",
+      "child_region_ids": [
+        "application_progress",
+        "application_documents",
+        "application_questions",
+        "application_profile",
+        "application_review_step"
+      ]
+    },
+    {
+      "region_id": "application_progress",
+      "label": "Application step progress",
+      "role": "navigation",
+      "region_type": "navigation",
+      "parent_region_id": "application_form",
+      "container_id": "seek:application_progress",
+      "repeatable": false,
+      "default_collapsed": false,
+      "bbox_hint": {
+        "source": "page_level_region_hint",
+        "bbox": null,
+        "requires_current_reobserve": true
+      },
+      "visual_policy": {
+        "fixed_assets_use_template_match": true,
+        "dynamic_content_uses_roi_model": false,
+        "full_screen_model_fallback_only": true
+      },
+      "children": {
+        "fixed_visual_asset_refs": [],
+        "dynamic_area_refs": []
+      },
+      "description": "Read-only progress tracker used to identify the current application step before choosing the next action."
+    },
+    {
+      "region_id": "application_documents",
+      "label": "Choose documents step",
+      "role": "fixed_controls",
+      "region_type": "fixed_controls",
+      "parent_region_id": "application_form",
+      "container_id": "seek:application_documents",
+      "repeatable": false,
+      "default_collapsed": false,
+      "bbox_hint": {
+        "source": "page_level_region_hint",
+        "bbox": null,
+        "requires_current_reobserve": true
+      },
+      "visual_policy": {
+        "fixed_assets_use_template_match": true,
+        "dynamic_content_uses_roi_model": false,
+        "full_screen_model_fallback_only": true
+      },
+      "children": {
+        "fixed_visual_asset_refs": [],
+        "dynamic_area_refs": []
+      },
+      "description": "Document selection step. Keep the default SEEK resume and edit the cover letter only when the job is suitable."
+    },
+    {
+      "region_id": "application_questions",
+      "label": "Employer questions step",
+      "role": "form_flow",
+      "region_type": "form_flow",
+      "parent_region_id": "application_form",
+      "container_id": "seek:application_questions",
+      "repeatable": true,
+      "default_collapsed": true,
+      "bbox_hint": {
+        "source": "page_level_region_hint",
+        "bbox": null,
+        "requires_current_reobserve": true
+      },
+      "visual_policy": {
+        "fixed_assets_use_template_match": false,
+        "dynamic_content_uses_roi_model": true,
+        "full_screen_model_fallback_only": true
+      },
+      "children": {
+        "fixed_visual_asset_refs": [],
+        "dynamic_area_refs": []
+      },
+      "description": "Employer-specific question step. Read each label and answer safe fields from the candidate profile and job detail."
+    },
+    {
+      "region_id": "application_profile",
+      "label": "Update SEEK profile step",
+      "role": "form_flow",
+      "region_type": "form_flow",
+      "parent_region_id": "application_form",
+      "container_id": "seek:application_profile",
+      "repeatable": false,
+      "default_collapsed": true,
+      "bbox_hint": {
+        "source": "page_level_region_hint",
+        "bbox": null,
+        "requires_current_reobserve": true
+      },
+      "visual_policy": {
+        "fixed_assets_use_template_match": false,
+        "dynamic_content_uses_roi_model": true,
+        "full_screen_model_fallback_only": true
+      },
+      "children": {
+        "fixed_visual_asset_refs": [],
+        "dynamic_area_refs": []
+      },
+      "description": "Profile review step. Avoid mutating long-lived SEEK profile data unless the user explicitly authorizes it."
+    },
+    {
+      "region_id": "application_review_step",
+      "label": "Review and submit step",
+      "region_type": "form_flow",
+      "role": "form_flow",
+      "parent_region_id": "application_form",
+      "description": "Review and submit step. Read the final application summary and prepare user review; final submission remains blocked.",
+      "child_region_ids": [
+        "application_review"
+      ],
+      "children": {
+        "region_refs": [
+          "application_review"
+        ]
+      }
+    },
+    {
+      "region_id": "application_review",
+      "label": "Final submit boundary",
+      "role": "danger_zone",
+      "region_type": "danger_zone",
+      "parent_region_id": "application_review_step",
+      "container_id": "seek:application_review",
+      "repeatable": false,
+      "default_collapsed": false,
+      "bbox_hint": {
+        "source": "page_level_region_hint",
+        "bbox": null,
+        "requires_current_reobserve": true
+      },
+      "visual_policy": {
+        "fixed_assets_use_template_match": false,
+        "dynamic_content_uses_roi_model": false,
+        "full_screen_model_fallback_only": true
+      },
+      "children": {
+        "fixed_visual_asset_refs": [],
+        "dynamic_area_refs": []
+      },
+      "description": "Final review boundary. Read and audit the application summary, but final Submit remains hard-blocked."
+    }
+  ],
+  "fixed_visual_assets": [
+    {
+      "asset_id": "seek:visual:search_input",
+      "label": "Search input field",
+      "role": "input",
+      "region_id": "top_search_area",
+      "semantic_action": "type_public_search_query",
+      "danger_level": "low",
+      "is_high_risk": false,
+      "can_authorize_click": false,
+      "requires_gate": true,
+      "allowed_region_ids": [
+        "top_search_area"
+      ],
+      "review_policy": "low risk",
+      "review_reason": "public_search_query_input",
+      "click_permission": "low_risk_fast_lane_eligible",
+      "fast_lane_eligible": true,
+      "fast_lane_allowed": false,
+      "template_refs": {
+        "tight_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_search_input_real.png",
+        "context_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_search_input_context_real.png",
+        "source_image_path": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_search_input_context_real.png",
+        "current_roi_ref": null,
+        "current_match_ref": null
+      },
+      "bbox": {
+        "x": 630,
+        "y": 139,
+        "w": 420,
+        "h": 45
+      },
+      "click_point": {
+        "x": 840,
+        "y": 161
+      },
+      "scope": [
+        "top_search_area"
+      ],
+      "notes": [
+        "Use keyboard submit after focusing this field; do not locate a separate search button for normal keyword search."
+      ]
+    },
+    {
+      "contract_version": "visual_asset_v1",
+      "asset_id": "seek:visual:search_button",
+      "label": "Search button",
+      "role": "button",
+      "region_id": "top_search_area",
+      "allowed_region_ids": [
+        "top_search_area"
+      ],
+      "semantic_action": "search_or_filter_results",
+      "danger_level": "low",
+      "is_high_risk": false,
+      "can_authorize_click": false,
+      "requires_gate": true,
+      "review_policy": "low risk search/navigation action",
+      "click_permission": "low_risk_fast_lane_eligible",
+      "template_refs": {
+        "tight_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_search_button_real.png",
+        "context_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_search_button_context_real.png",
+        "source_image_path": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_search_button_context_real.png",
+        "current_roi_ref": null,
+        "current_match_ref": null
+      },
+      "source_geometry": {
+        "bbox": {
+          "x": 1051,
+          "y": 297,
+          "w": 56,
+          "h": 56
+        },
+        "click_point": {
+          "x": 1079,
+          "y": 325
+        },
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false,
+        "click_point_policy": "learned_relative_point"
+      },
+      "match_policy": {
+        "methods": [
+          "gray_template",
+          "edge_template",
+          "ocr_confirm"
+        ],
+        "scale_variants": [
+          0.9,
+          1,
+          1.1
+        ],
+        "min_score": 0.88,
+        "min_score_gap": 0.06,
+        "nms_iou": 0.4,
+        "roi_policy": "top_search_area_then_current_screen"
+      },
+      "scope": {
+        "allowed_container_ids": [
+          "seek:top_search_area"
+        ],
+        "expected_text": [
+          "SEEK"
+        ],
+        "negative_text": [
+          "Submit",
+          "Send application",
+          "Complete application"
+        ]
+      },
+      "source": {
+        "source_image_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-163501-349708.png",
+        "capture_id": "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-163501-349708.png",
+        "coordinate_space": "source_capture_px",
+        "screenshot_size": {
+          "width": 2560,
+          "height": 1400
+        },
+        "bbox": {
+          "x": 1051,
+          "y": 297,
+          "w": 56,
+          "h": 56
+        },
+        "click_point": {
+          "x": 1079,
+          "y": 325
+        }
+      },
+      "crop": {
+        "tight_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_search_button_real.png",
+        "context_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_search_button_context_real.png",
+        "source_image_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-163501-349708.png",
+        "tight_bbox": {
+          "x": 1051,
+          "y": 297,
+          "w": 56,
+          "h": 56
+        },
+        "context_bbox": {
+          "x": 1019,
+          "y": 265,
+          "w": 120,
+          "h": 120
+        },
+        "size_px": [
+          56,
+          56
+        ]
+      }
+    },
+    {
+      "asset_id": "seek:visual:apply_button",
+      "label": "Apply button",
+      "role": "button",
+      "region_id": "detail_header",
+      "semantic_action": "external_apply_flow",
+      "danger_level": "external_flow_entry",
+      "is_high_risk": false,
+      "can_authorize_click": false,
+      "requires_gate": true,
+      "allowed_region_ids": [
+        "detail_header"
+      ],
+      "expected_text": [
+        "Apply"
+      ],
+      "negative_text": [
+        "Submit",
+        "Send application",
+        "Complete application"
+      ],
+      "template_refs": {
+        "tight_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_apply_button_real.png",
+        "context_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_apply_button_context_real.png",
+        "source_image_path": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_apply_button_context_real.png",
+        "current_roi_ref": null,
+        "current_match_ref": null
+      },
+      "source_geometry": {
+        "bbox": {
+          "x": 1764,
+          "y": 191,
+          "w": 76,
+          "h": 27
+        },
+        "click_point": {
+          "x": 1802,
+          "y": 204
+        },
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false,
+        "click_point_policy": "learned_relative_point"
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      },
+      "review_policy": "external_or_station_apply_entry_gate_required",
+      "source": {
+        "source_image_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-163715-332563.png",
+        "capture_id": "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-163715-332563.png",
+        "coordinate_space": "source_capture_px",
+        "screenshot_size": {
+          "width": 2560,
+          "height": 1400
+        },
+        "bbox": {
+          "x": 1764,
+          "y": 191,
+          "w": 76,
+          "h": 27
+        },
+        "click_point": {
+          "x": 1802,
+          "y": 204
+        }
+      },
+      "crop": {
+        "tight_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_apply_button_real.png",
+        "context_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_apply_button_context_real.png",
+        "source_image_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-163715-332563.png",
+        "tight_bbox": {
+          "x": 1764,
+          "y": 191,
+          "w": 76,
+          "h": 27
+        },
+        "context_bbox": {
+          "x": 1732,
+          "y": 159,
+          "w": 140,
+          "h": 91
+        },
+        "size_px": [
+          76,
+          27
+        ]
+      }
+    },
+    {
+      "asset_id": "seek:visual:quick_apply_button",
+      "label": "Quick Apply button",
+      "role": "button",
+      "region_id": "detail_header",
+      "semantic_action": "open_apply_flow",
+      "danger_level": "low",
+      "is_high_risk": false,
+      "can_authorize_click": false,
+      "requires_gate": true,
+      "allowed_region_ids": [
+        "detail_header"
+      ],
+      "expected_text": [
+        "Quick Apply"
+      ],
+      "negative_text": [
+        "Submit",
+        "Send application",
+        "Complete application"
+      ],
+      "template_refs": {
+        "tight_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_quick_apply_button_real.png",
+        "context_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_quick_apply_button_real.png",
+        "source_image_path": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_quick_apply_button_real.png",
+        "current_roi_ref": "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_quick_apply_button.current_roi.png",
+        "current_match_ref": "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_quick_apply_button.current_match.png"
+      },
+      "source_geometry": {
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "w": 151,
+          "h": 54
+        },
+        "click_point": {
+          "x": 75,
+          "y": 27
+        },
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      },
+      "last_match_evidence": {
+        "contract_version": "visual_asset_match_evidence_v1",
+        "matched": false,
+        "match_score": 0.11779,
+        "score_gap_to_second": 0.033286,
+        "elapsed_ms": 22.442,
+        "match_method": "gray_template",
+        "scale_used": null,
+        "risk_class": "safe_open_apply_flow",
+        "bbox": {
+          "x": 634,
+          "y": 144,
+          "w": 153,
+          "h": 50
+        },
+        "click_point": {
+          "x": 710,
+          "y": 169
+        },
+        "candidate_freshness": {
+          "contract_version": "action_candidate_freshness_v1",
+          "capture_id": "live-seek-20260624",
+          "viewport_size": {
+            "width": 2560,
+            "height": 1400
+          },
+          "source": "visual_asset_match_v1",
+          "freshness": "current_capture"
+        },
+        "current_roi_ref": "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_quick_apply_button.current_roi.png",
+        "current_match_ref": "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_quick_apply_button.current_match.png",
+        "artifact_is_authorization": false
+      },
+      "fast_lane_allowed": false
+    },
+    {
+      "asset_id": "seek:visual:save_icon",
+      "label": "Save icon",
+      "role": "icon_button",
+      "region_id": "detail_header",
+      "semantic_action": "save_or_bookmark",
+      "danger_level": "low",
+      "is_high_risk": false,
+      "can_authorize_click": false,
+      "requires_gate": true,
+      "allowed_region_ids": [
+        "detail_header"
+      ],
+      "expected_text": [
+        "Save",
+        "bookmark"
+      ],
+      "negative_text": [
+        "Submit",
+        "Send application",
+        "Complete application"
+      ],
+      "template_refs": {
+        "tight_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_save_button_real.png",
+        "context_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_save_button_real.png",
+        "source_image_path": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_save_button_real.png",
+        "current_roi_ref": null,
+        "current_match_ref": null
+      },
+      "source_geometry": {
+        "bbox": {
+          "x": 1328,
+          "y": 1061,
+          "w": 82,
+          "h": 54
+        },
+        "click_point": {
+          "x": 1369,
+          "y": 1088
+        },
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      }
+    },
+    {
+      "asset_id": "seek:visual:job_card_shape",
+      "label": "Job card shape",
+      "role": "card",
+      "region_id": "job_card",
+      "semantic_action": "open_detail",
+      "danger_level": "low",
+      "is_high_risk": false,
+      "can_authorize_click": false,
+      "requires_gate": true,
+      "allowed_region_ids": [
+        "job_card"
+      ],
+      "expected_text": [
+        "title",
+        "company",
+        "location"
+      ],
+      "negative_text": [
+        "Submit",
+        "Send application",
+        "Complete application"
+      ],
+      "template_refs": {
+        "tight_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_job_card_shape_real.png",
+        "context_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_job_card_shape_real.png",
+        "source_image_path": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_job_card_shape_real.png",
+        "current_roi_ref": "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_job_card_shape.current_roi.png",
+        "current_match_ref": "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_job_card_shape.current_match.png"
+      },
+      "source_geometry": {
+        "bbox": {
+          "x": 608,
+          "y": 532,
+          "w": 474,
+          "h": 218
+        },
+        "click_point": {
+          "x": 845,
+          "y": 641
+        },
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      },
+      "last_match_evidence": {
+        "contract_version": "visual_asset_match_evidence_v1",
+        "matched": false,
+        "match_score": 0.343516,
+        "score_gap_to_second": null,
+        "elapsed_ms": 35.029,
+        "match_method": "edge_template",
+        "scale_used": null,
+        "risk_class": "safe_click_allowed",
+        "bbox": {
+          "x": 8,
+          "y": 148,
+          "w": 342,
+          "h": 351
+        },
+        "click_point": {
+          "x": 179,
+          "y": 323
+        },
+        "candidate_freshness": {
+          "contract_version": "action_candidate_freshness_v1",
+          "capture_id": "live-seek-20260624",
+          "viewport_size": {
+            "width": 2560,
+            "height": 1400
+          },
+          "source": "visual_asset_match_v1",
+          "freshness": "current_capture"
+        },
+        "current_roi_ref": "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_job_card_shape.current_roi.png",
+        "current_match_ref": "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_job_card_shape.current_match.png",
+        "artifact_is_authorization": false
+      },
+      "fast_lane_allowed": false
+    },
+    {
+      "asset_id": "seek:visual:selected_card_highlight",
+      "label": "Selected card highlight",
+      "role": "selection_state",
+      "region_id": "job_card",
+      "semantic_action": "visual_evidence",
+      "danger_level": "low",
+      "is_high_risk": false,
+      "can_authorize_click": false,
+      "requires_gate": true,
+      "allowed_region_ids": [
+        "job_card"
+      ],
+      "expected_text": [
+        "selected border"
+      ],
+      "negative_text": [
+        "Submit",
+        "Send application",
+        "Complete application"
+      ],
+      "template_refs": {
+        "tight_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_selected_card_highlight_real.png",
+        "context_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_selected_card_highlight_real.png",
+        "source_image_path": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_selected_card_highlight_real.png",
+        "current_roi_ref": null,
+        "current_match_ref": null
+      },
+      "source_geometry": {
+        "bbox": {
+          "x": 608,
+          "y": 532,
+          "w": 474,
+          "h": 218
+        },
+        "click_point": {
+          "x": 845,
+          "y": 641
+        },
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      }
+    },
+    {
+      "asset_id": "seek:visual:results_scrollbar",
+      "label": "Results list scrollbar",
+      "role": "scrollbar",
+      "region_id": "results_list",
+      "semantic_action": "scroll_container",
+      "danger_level": "low",
+      "is_high_risk": false,
+      "can_authorize_click": false,
+      "requires_gate": true,
+      "allowed_region_ids": [
+        "results_list"
+      ],
+      "expected_text": [
+        "left list scrollbar"
+      ],
+      "negative_text": [
+        "Submit",
+        "Send application",
+        "Complete application"
+      ],
+      "template_refs": {
+        "tight_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_results_scrollbar_real.png",
+        "context_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_results_scrollbar_real.png",
+        "source_image_path": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_results_scrollbar_real.png",
+        "current_roi_ref": null,
+        "current_match_ref": null
+      },
+      "source_geometry": {
+        "bbox": {
+          "x": 1386,
+          "y": 291,
+          "w": 44,
+          "h": 71
+        },
+        "click_point": {
+          "x": 1408,
+          "y": 326
+        },
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      }
+    },
+    {
+      "asset_id": "seek:visual:detail_scrollbar",
+      "label": "Job detail scrollbar",
+      "role": "scrollbar",
+      "region_id": "job_detail",
+      "semantic_action": "scroll_container",
+      "danger_level": "low",
+      "is_high_risk": false,
+      "can_authorize_click": false,
+      "requires_gate": true,
+      "allowed_region_ids": [
+        "job_detail"
+      ],
+      "expected_text": [
+        "right detail scrollbar"
+      ],
+      "negative_text": [
+        "Submit",
+        "Send application",
+        "Complete application"
+      ],
+      "template_refs": {
+        "tight_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_detail_scrollbar_real.png",
+        "context_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_detail_scrollbar_real.png",
+        "source_image_path": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_detail_scrollbar_real.png",
+        "current_roi_ref": null,
+        "current_match_ref": null
+      },
+      "source_geometry": {
+        "bbox": {
+          "x": 1419,
+          "y": 411,
+          "w": 12,
+          "h": 354
+        },
+        "click_point": {
+          "x": 1425,
+          "y": 588
+        },
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      }
+    },
+    {
+      "asset_id": "seek:visual:submit_application_button",
+      "label": "Submit application",
+      "role": "button",
+      "region_id": "application_review",
+      "semantic_action": "final_submit",
+      "danger_level": "final_submit",
+      "is_high_risk": true,
+      "can_authorize_click": false,
+      "requires_gate": true,
+      "allowed_region_ids": [
+        "application_review"
+      ],
+      "expected_text": [
+        "Submit application"
+      ],
+      "negative_text": [
+        "Quick apply",
+        "Apply"
+      ],
+      "template_refs": {
+        "tight_crop_ref": "artifacts\\visual-match-smoke\\local_seek_buttons\\crops\\seek_visual_submit_application_button.png",
+        "context_crop_ref": null,
+        "source_image_path": "artifacts\\visual-match-smoke\\local_seek_buttons\\seek_detail_local_screenshot.png",
+        "current_roi_ref": "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_submit_application_button.current_roi.png",
+        "current_match_ref": "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_submit_application_button.current_match.png"
+      },
+      "source_geometry": {
+        "bbox": {
+          "x": 650,
+          "y": 620,
+          "w": 220,
+          "h": 60
+        },
+        "click_point": {
+          "x": 760,
+          "y": 650
+        },
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true
+      },
+      "last_match_evidence": {
+        "contract_version": "visual_asset_match_evidence_v1",
+        "matched": false,
+        "match_score": 0.056194,
+        "score_gap_to_second": 0.02405,
+        "elapsed_ms": 20.34,
+        "match_method": "edge_template",
+        "scale_used": null,
+        "risk_class": "potential_side_effect_action",
+        "bbox": {
+          "x": 669,
+          "y": 606,
+          "w": 220,
+          "h": 60
+        },
+        "click_point": {
+          "x": 779,
+          "y": 636
+        },
+        "candidate_freshness": {
+          "contract_version": "action_candidate_freshness_v1",
+          "capture_id": "live-seek-20260624",
+          "viewport_size": {
+            "width": 2560,
+            "height": 1400
+          },
+          "source": "visual_asset_match_v1",
+          "freshness": "current_capture"
+        },
+        "current_roi_ref": "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_submit_application_button.current_roi.png",
+        "current_match_ref": "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_submit_application_button.current_match.png",
+        "artifact_is_authorization": false
+      },
+      "fast_lane_allowed": false
+    },
+    {
+      "asset_id": "seek:visual:application_progress_steps",
+      "label": "Application progress steps",
+      "role": "progress_indicator",
+      "region_id": "application_progress",
+      "semantic_action": "state_progress",
+      "danger_level": "low",
+      "is_high_risk": false,
+      "can_authorize_click": false,
+      "requires_gate": false,
+      "allowed_region_ids": [
+        "application_progress"
+      ],
+      "expected_text": [
+        "Choose documents",
+        "Answer employer questions",
+        "Update SEEK Profile",
+        "Review and submit"
+      ],
+      "negative_text": [
+        "Submit application",
+        "Send application",
+        "Complete application"
+      ],
+      "template_refs": {
+        "tight_crop_ref": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_application_progress_steps.png",
+        "context_crop_ref": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_application_progress_steps.png",
+        "source_image_path": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_application_progress_steps.png"
+      },
+      "source_geometry": {
+        "bbox": {
+          "x": 640,
+          "y": 420,
+          "w": 660,
+          "h": 70
+        },
+        "click_point": {
+          "x": 970,
+          "y": 455
+        },
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      },
+      "fast_lane_allowed": false,
+      "artifact_is_authorization": false
+    },
+    {
+      "asset_id": "seek:visual:resume_select_dropdown",
+      "label": "Resume selection dropdown",
+      "role": "select",
+      "region_id": "application_documents",
+      "semantic_action": "keep_default_resume",
+      "danger_level": "low",
+      "is_high_risk": false,
+      "can_authorize_click": false,
+      "requires_gate": true,
+      "allowed_region_ids": [
+        "application_documents"
+      ],
+      "expected_text": [
+        "WENQING JI.pdf",
+        "Resume"
+      ],
+      "negative_text": [
+        "Submit application",
+        "Send application",
+        "Complete application"
+      ],
+      "template_refs": {
+        "tight_crop_ref": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_resume_select_dropdown.png",
+        "context_crop_ref": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_resume_select_dropdown.png",
+        "source_image_path": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_resume_select_dropdown.png"
+      },
+      "source_geometry": {
+        "bbox": {
+          "x": 670,
+          "y": 802,
+          "w": 415,
+          "h": 43
+        },
+        "click_point": {
+          "x": 877,
+          "y": 823
+        },
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      },
+      "fast_lane_allowed": false,
+      "artifact_is_authorization": false
+    },
+    {
+      "asset_id": "seek:visual:cover_letter_text_area",
+      "label": "Cover letter text area",
+      "role": "textarea",
+      "region_id": "application_documents",
+      "semantic_action": "fill_field",
+      "danger_level": "low",
+      "is_high_risk": false,
+      "can_authorize_click": false,
+      "requires_gate": true,
+      "allowed_region_ids": [
+        "application_documents"
+      ],
+      "expected_text": [
+        "Dear Hiring Team"
+      ],
+      "negative_text": [
+        "Submit application",
+        "Send application",
+        "Complete application"
+      ],
+      "template_refs": {
+        "tight_crop_ref": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_cover_letter_text_area.png",
+        "context_crop_ref": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_cover_letter_text_area.png",
+        "source_image_path": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_cover_letter_text_area.png"
+      },
+      "source_geometry": {
+        "bbox": {
+          "x": 668,
+          "y": 1083,
+          "w": 505,
+          "h": 36
+        },
+        "click_point": {
+          "x": 920,
+          "y": 1101
+        },
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      },
+      "fast_lane_allowed": false,
+      "artifact_is_authorization": false
+    },
+    {
+      "asset_id": "seek:visual:application_continue_button",
+      "label": "Continue button",
+      "role": "button",
+      "region_id": "application_profile",
+      "semantic_action": "continue_next_step",
+      "danger_level": "medium",
+      "is_high_risk": false,
+      "can_authorize_click": false,
+      "requires_gate": true,
+      "allowed_region_ids": [
+        "application_profile"
+      ],
+      "expected_text": [
+        "Continue"
+      ],
+      "negative_text": [
+        "Submit application",
+        "Send",
+        "Confirm"
+      ],
+      "template_refs": {
+        "tight_crop_ref": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_application_continue_button.png",
+        "context_crop_ref": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_application_continue_button.png",
+        "source_image_path": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_application_continue_button.png"
+      },
+      "source_geometry": {
+        "bbox": {
+          "x": 1054,
+          "y": 912,
+          "w": 118,
+          "h": 40
+        },
+        "click_point": {
+          "x": 1113,
+          "y": 932
+        },
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      },
+      "fast_lane_allowed": false,
+      "artifact_is_authorization": false
+    },
+    {
+      "asset_id": "seek:visual:application_back_button",
+      "label": "Back button",
+      "role": "button",
+      "region_id": "application_profile",
+      "semantic_action": "go_back",
+      "danger_level": "low",
+      "is_high_risk": false,
+      "can_authorize_click": false,
+      "requires_gate": true,
+      "allowed_region_ids": [
+        "application_profile"
+      ],
+      "expected_text": [
+        "Back"
+      ],
+      "negative_text": [
+        "Submit application",
+        "Send application",
+        "Complete application"
+      ],
+      "template_refs": {
+        "tight_crop_ref": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_application_back_button.png",
+        "context_crop_ref": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_application_back_button.png",
+        "source_image_path": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_application_back_button.png"
+      },
+      "source_geometry": {
+        "bbox": {
+          "x": 640,
+          "y": 912,
+          "w": 88,
+          "h": 36
+        },
+        "click_point": {
+          "x": 684,
+          "y": 930
+        },
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      },
+      "fast_lane_allowed": false,
+      "artifact_is_authorization": false
+    },
+    {
+      "asset_id": "seek:visual:review_edit_icon",
+      "label": "Review edit icon",
+      "role": "icon_button",
+      "region_id": "application_review",
+      "semantic_action": "edit_review_section",
+      "danger_level": "medium",
+      "is_high_risk": false,
+      "can_authorize_click": false,
+      "requires_gate": true,
+      "allowed_region_ids": [
+        "application_review"
+      ],
+      "expected_text": [
+        "edit"
+      ],
+      "negative_text": [
+        "Submit application",
+        "Send",
+        "Confirm"
+      ],
+      "template_refs": {
+        "tight_crop_ref": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_review_edit_icon.png",
+        "context_crop_ref": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_review_edit_icon.png",
+        "source_image_path": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_review_edit_icon.png"
+      },
+      "source_geometry": {
+        "bbox": {
+          "x": 1150,
+          "y": 715,
+          "w": 32,
+          "h": 32
+        },
+        "click_point": {
+          "x": 1166,
+          "y": 731
+        },
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      },
+      "fast_lane_allowed": false,
+      "artifact_is_authorization": false
+    }
+  ],
+  "dynamic_areas": [
+    {
+      "area_id": "seek:job_cards",
+      "region_id": "results_list",
+      "container_id": "seek:results_list",
+      "entity_type": "job_card",
+      "roi_policy": {
+        "source": "region_bbox_hint_then_current_detection",
+        "send_roi_to_model": true,
+        "full_screen_fallback": true
+      },
+      "model_budget": {
+        "preferred_scope": "region_roi",
+        "avoid_full_screen_grounding": true
+      },
+      "scroll_policy": {
+        "load_more_action_template_id": "load_more_results",
+        "wrong_scope_detection_required": true
+      },
+      "label": "Job cards list",
+      "description": "Repeatable job result cards inside the left results list. Each card usually contains title, company, location, summary, and opens the right job-detail pane.",
+      "role": "ROI",
+      "semantic_role": "repeatable_job_cards"
+    },
+    {
+      "area_id": "job_detail:content_roi",
+      "region_id": "job_detail",
+      "container_id": "seek:job_detail",
+      "entity_type": "detail_content",
+      "roi_policy": {
+        "source": "region_bbox_hint",
+        "send_roi_to_model": true,
+        "full_screen_fallback": true
+      },
+      "model_budget": {
+        "preferred_scope": "region_roi",
+        "avoid_full_screen_grounding": true
+      },
+      "scroll_policy": {
+        "wrong_scope_detection_required": true
+      },
+      "label": "Job detail pane content",
+      "description": "Scrollable right detail pane content. Use this as the broad ROI when reading the selected job.",
+      "role": "ROI",
+      "semantic_role": "detail_pane_reading_roi"
+    },
+    {
+      "area_id": "detail_body:content_roi",
+      "region_id": "detail_body",
+      "container_id": null,
+      "entity_type": "detail_content",
+      "roi_policy": {
+        "source": "region_bbox_hint",
+        "send_roi_to_model": true,
+        "full_screen_fallback": true
+      },
+      "model_budget": {
+        "preferred_scope": "region_roi",
+        "avoid_full_screen_grounding": true
+      },
+      "scroll_policy": {
+        "wrong_scope_detection_required": true
+      },
+      "label": "Job description body text",
+      "description": "Job description body text ROI. Batch screenshots/OCR should read this until the body reaches bottom.",
+      "role": "ROI",
+      "semantic_role": "detail_body_text_roi"
+    },
+    {
+      "area_id": "seek:application:cover_letter_roi",
+      "label": "Cover letter writing area",
+      "region_id": "application_documents",
+      "role": "ROI",
+      "semantic_role": "cover_letter_text_input",
+      "bbox_hint": {
+        "x": 640,
+        "y": 930,
+        "w": 560,
+        "h": 185
+      },
+      "model_policy": "roi_only_first",
+      "artifact_is_authorization": false,
+      "description": "Application document step ROI containing the cover-letter input. Keep the default resume and rewrite only the cover letter."
+    },
+    {
+      "area_id": "seek:application:question_fields_roi",
+      "label": "Employer question fields",
+      "region_id": "application_questions",
+      "role": "ROI",
+      "semantic_role": "employer_question_fields",
+      "bbox_hint": {
+        "x": 640,
+        "y": 430,
+        "w": 650,
+        "h": 520
+      },
+      "model_policy": "roi_only_first",
+      "artifact_is_authorization": false,
+      "description": "Employer question ROI. Read labels and safe input fields; answer from the candidate profile and current job detail."
+    },
+    {
+      "area_id": "seek:application:profile_review_roi",
+      "label": "Profile review fields",
+      "region_id": "application_profile",
+      "role": "ROI",
+      "semantic_role": "profile_review_fields",
+      "bbox_hint": {
+        "x": 640,
+        "y": 120,
+        "w": 650,
+        "h": 790
+      },
+      "model_policy": "roi_only_first",
+      "artifact_is_authorization": false,
+      "description": "SEEK profile review ROI. Prefer continuing without mutating long-lived profile fields unless explicitly requested."
+    },
+    {
+      "area_id": "seek:application:final_review_roi",
+      "label": "Final review summary",
+      "region_id": "application_review",
+      "role": "ROI",
+      "semantic_role": "final_review_summary",
+      "bbox_hint": {
+        "x": 640,
+        "y": 500,
+        "w": 560,
+        "h": 580
+      },
+      "model_policy": "roi_only_first",
+      "artifact_is_authorization": false,
+      "description": "Final review ROI. Read and audit the application summary, but never authorize final Submit automatically."
+    }
+  ],
+  "danger_zones": [
+    {
+      "zone_id": "danger:seek:visual:submit_application_button",
+      "asset_id": "seek:visual:submit_application_button",
+      "label": "Submit application",
+      "semantic_action": "final_submit",
+      "danger_level": "final_submit",
+      "region_id": "application_review",
+      "review_policy": null,
+      "click_permission": null,
+      "review_required": true,
+      "fast_lane_allowed": false
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "seek:display_transition:open_apply_flow",
+      "action_template_id": "apply_entry",
+      "from_state_id": "seek_home_page",
+      "to_state_id": "seek_application_page",
+      "verification_refs": [
+        "final_submit_forbidden"
+      ],
+      "default_available": false
+    },
+    {
+      "transition_id": "seek:display_transition:browse_home_page",
+      "action_template_id": "browse_and_read_jobs",
+      "from_state_id": "seek_home_page",
+      "to_state_id": "seek_home_page",
+      "verification_refs": [
+        "open_job_card_detail_match",
+        "read_detail_scroll_scope"
+      ]
+    }
+  ],
+  "editor_policy": {
+    "manual_edits_write_trace": true,
+    "editable_fields": [
+      "region.label",
+      "region.role",
+      "region.bbox_hint",
+      "visual_asset.semantic_action",
+      "visual_asset.danger_level",
+      "visual_asset.allowed_region_ids"
+    ],
+    "dangerous_actions_require_review": true,
+    "artifact_authorizes_click": false
+  },
+  "summary": {
+    "state_count": 2,
+    "region_count": 13,
+    "fixed_visual_asset_count": 16,
+    "dynamic_area_count": 7,
+    "danger_zone_count": 1,
+    "real_crop_refs_embedded": true,
+    "real_crop_ref_note": "Fixed visual assets carry direct real crop refs where samples exist; standard Apply is an external application entry, and Quick apply is the SEEK internal application entry.",
+    "region_assignment_normalized": true,
+    "region_assignment_note": "Fixed assets are assigned to the smallest owning region: job cards under job_card, detail buttons under detail_header, and scrollbars under their scroll containers."
+  },
+  "state_display_map": {
+    "seek_search_results_empty_detail": "seek_home_page",
+    "seek_search_results_with_selected_job": "seek_home_page",
+    "seek_detail_scrolled": "seek_home_page",
+    "seek_results_list_scrolled": "seek_home_page",
+    "seek_apply_entry_form": "seek_application_page",
+    "seek_external_or_blocked": "seek_application_page"
+  },
+  "ui_policy": {
+    "navigation_nodes_are_page_level": true,
+    "screen_regions_render_in_path_node_detail": true,
+    "top_level_region_map_hidden": true
+  }
+}

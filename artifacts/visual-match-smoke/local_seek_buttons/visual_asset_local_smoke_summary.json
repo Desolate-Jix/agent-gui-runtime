@@ -1,0 +1,106 @@
+{
+  "contract_version": "visual_asset_local_smoke_v1",
+  "source_image": "artifacts\\visual-match-smoke\\local_seek_buttons\\seek_detail_local_screenshot.png",
+  "interface_map_path": "artifacts\\visual-match-smoke\\local_seek_buttons\\learned_interface_map.json",
+  "interface_map_summary": {
+    "state_count": 6,
+    "region_count": 6,
+    "fixed_visual_asset_count": 8,
+    "dynamic_area_count": 3,
+    "danger_zone_count": 1
+  },
+  "crop_export_summary": {
+    "asset_count": 8,
+    "crop_count": 3,
+    "artifact_is_authorization": false
+  },
+  "quick_apply_crop": "artifacts\\visual-match-smoke\\local_seek_buttons\\crops\\seek_visual_quick_apply_button.png",
+  "submit_application_crop": "artifacts\\visual-match-smoke\\local_seek_buttons\\crops\\seek_visual_submit_application_button.png",
+  "match": {
+    "matched": true,
+    "elapsed_ms": 9.088,
+    "match_score": 1.0,
+    "score_gap_to_second": null,
+    "risk_class": "safe_open_apply_flow",
+    "bbox": {
+      "x": 640,
+      "y": 160,
+      "w": 170,
+      "h": 56
+    },
+    "click_point": {
+      "x": 725,
+      "y": 188
+    },
+    "current_roi_ref": "artifacts\\visual-match-smoke\\local_seek_buttons\\matches\\seek_visual_quick_apply_button.current_roi.png",
+    "current_match_ref": "artifacts\\visual-match-smoke\\local_seek_buttons\\matches\\seek_visual_quick_apply_button.current_match.png",
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "local_visual_asset_smoke_capture",
+      "viewport_size": {
+        "width": 1000,
+        "height": 760
+      },
+      "source": "visual_asset_match_v1",
+      "freshness": "current_capture"
+    }
+  },
+  "submit_match": {
+    "matched": true,
+    "elapsed_ms": 10.366,
+    "match_score": 1.0,
+    "score_gap_to_second": 0.961066,
+    "risk_class": "potential_side_effect_action",
+    "bbox": {
+      "x": 650,
+      "y": 620,
+      "w": 220,
+      "h": 60
+    },
+    "click_point": {
+      "x": 760,
+      "y": 650
+    },
+    "current_roi_ref": "artifacts\\visual-match-smoke\\local_seek_buttons\\matches\\seek_visual_submit_application_button.current_roi.png",
+    "current_match_ref": "artifacts\\visual-match-smoke\\local_seek_buttons\\matches\\seek_visual_submit_application_button.current_match.png",
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "local_visual_asset_smoke_capture",
+      "viewport_size": {
+        "width": 1000,
+        "height": 760
+      },
+      "source": "visual_asset_match_v1",
+      "freshness": "current_capture"
+    },
+    "fast_lane_allowed": false,
+    "requires_review": true
+  },
+  "calibration_report": {
+    "case_count": 8,
+    "matched_count": 3,
+    "fast_lane_success_count": 2,
+    "high_risk_match_count": 1,
+    "wrong_match_count": 0,
+    "final_submit_fast_lane_count": 0,
+    "final_submissions": 0,
+    "median_visual_recall_ms": 10.366,
+    "max_visual_recall_ms": 33.541,
+    "status": "pass",
+    "contract_version": "visual_asset_calibration_report_v1",
+    "quick_apply": {
+      "matched": true,
+      "risk_class": "safe_open_apply_flow",
+      "fast_lane_allowed": true,
+      "elapsed_ms": 9.088
+    },
+    "submit_application": {
+      "matched": true,
+      "risk_class": "potential_side_effect_action",
+      "fast_lane_allowed": false,
+      "requires_review": true,
+      "elapsed_ms": 10.366
+    }
+  },
+  "artifact_is_authorization": false
+}

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from PIL import Image, ImageDraw
 
 from app.api import panel as panel_api
 from app.main import app
@@ -86,7 +88,13 @@ def test_web_panel_serves_browser_control_surface() -> None:
     assert 'id="replayPreset"' in response.text
     assert 'value="github_issues">GitHub Issues' in response.text
     assert 'id="replayGraphPath"' in response.text
+    assert 'id="replayInterfaceMapPath"' in response.text
+    assert 'id="replayInterfaceCalibrationPath"' in response.text
     assert 'id="replayLoadBtn"' in response.text
+    assert 'id="replayInterfaceMapLoadBtn"' in response.text
+    assert 'id="replayInterfaceCalibrationLoadBtn"' in response.text
+    assert 'id="replayInterfaceMapSaveName"' in response.text
+    assert 'id="replayInterfaceMapSaveBtn"' in response.text
     assert 'id="seekApplicationRecordPath"' in response.text
     assert 'id="seekApplicationAuditPath"' in response.text
     assert 'id="seekApplicationArtifactPath"' in response.text
@@ -243,6 +251,42 @@ def test_web_panel_serves_static_assets() -> None:
     assert "PATH_CANVAS_FONT" in response.text
     assert "traceDisplayValue" in response.text
     assert "collectTraceStageVisuals" in response.text
+    assert "current_roi_ref" in response.text
+    assert "current_match_ref" in response.text
+    assert "learned_interface_map" in response.text
+    assert "renderInterfaceMap" in response.text
+    assert "loadReplayInterfaceCalibrationReport" in response.text
+    assert "interfaceCalibrationSummaryHtml" in response.text
+    assert "interfaceCalibrationMatchForAsset" in response.text
+    assert "interfaceReviewPolicyForAsset" in response.text
+    assert "interfaceClickPermissionMeta" in response.text
+    assert "normalizeInterfaceMapReviewPolicies" in response.text
+    assert "syncInterfaceMapDangerZones" in response.text
+    assert "click_permission" in response.text
+    assert "manual_review_required" in response.text
+    assert "gate_required" in response.text
+    assert "initialStageFromQuery" in response.text
+    assert "skip_boot_models" in response.text
+    assert "panelQueryFlag" in response.text
+    assert "low_risk_fast_lane_eligible" in response.text
+    assert "recropInterfaceAsset" in response.text
+    assert "/panel/crop_interface_asset" in response.text
+    assert "data-interface-recrops-asset" in response.text
+    assert "data-interface-crop" in response.text
+    assert "saveReplayInterfaceMap" in response.text
+    assert "/panel/save_interface_map" in response.text
+    assert "data-interface-edit" in response.text
+    assert "data-interface-inspect" in response.text
+    assert "interfaceInspectorHtml" in response.text
+    assert "interfaceStateFlowHtml" in response.text
+    assert "interfaceRegionLaneHtml" in response.text
+    assert "source bbox is learning evidence only" in response.text
+    assert "Current match required" in response.text
+    assert "Visual calibration" in response.text
+    assert "interface_map_calibration_panel_load_v1" in response.text
+    assert "can_authorize_click = false" in response.text
+    assert "replay_current_roi" in response.text
+    assert "score_gap" in response.text or "score gap" in response.text
     assert "activateTraceStageVisuals" in response.text
     assert "tracePathMapHtml" in response.text
     assert "traceDynamicPathGraphHtml" in response.text
@@ -264,6 +308,11 @@ def test_web_panel_serves_static_assets() -> None:
 
     assert css_response.status_code == 200
     assert "path-detail-sections" in css_response.text
+    assert "interface-known-layout-seek-application" in css_response.text
+    assert "interface-region-summary" in css_response.text
+    assert "interface-inspector-summary" in css_response.text
+    assert "interface-inspector-region-action-group" in css_response.text
+    assert "runtime-node-region-action-group" not in css_response.text
     assert "Microsoft YaHei" in css_response.text
     assert "grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr)" in css_response.text
     assert "tf-stage-visuals" in css_response.text
@@ -284,10 +333,119 @@ def test_web_panel_serves_static_assets() -> None:
     assert "card-dragging-active" in css_response.text
     assert "meta-action" in css_response.text
     assert "run-summary" in css_response.text
+    assert "interface-map-panel" in css_response.text
+    assert "interface-workbench" in css_response.text
+    assert "interface-canvas" in css_response.text
+    assert "interface-calibration-summary" in css_response.text
+    assert "interface-calibration-metrics" in css_response.text
+    assert "interface-state-flow" in css_response.text
+    assert "interface-lane-stack" in css_response.text
+    assert "interface-visual-node" in css_response.text
+    assert "interface-node-matched" in css_response.text
+    assert "interface-node-ambiguous" in css_response.text
+    assert ".interface-node-badges i.warn" in css_response.text
+    assert "interface-dynamic-node" in css_response.text
+    assert "interface-danger-node" in css_response.text
+    assert "interface-asset-grid" in css_response.text
+    assert "interface-chip-danger" in css_response.text
+    assert "interface-edit-grid" in css_response.text
+    assert "interface-inspector" in css_response.text
+    assert "interface-evidence-grid" in css_response.text
+    assert "interface-crop-editor" in css_response.text
     assert "run-timeline" in css_response.text
     assert "action-table" in css_response.text
     assert "ctrl-focused" in css_response.text
     assert "focused-control-card" in css_response.text
+    assert ".run-badge.warn" in css_response.text
+
+
+def test_web_panel_saves_interface_map_with_edit_trace() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/panel/save_interface_map",
+        json={
+            "file_name": "panel_test_interface_map.json",
+            "source_path": "artifacts/visual-match-smoke/local_seek_buttons/learned_interface_map.json",
+            "edit_summary": {"edited_in_panel": True, "authorization_changed": False},
+            "payload": {
+                "contract_version": "learned_interface_map_v1",
+                "app_id": "seek",
+                "regions": [{"region_id": "job_detail", "label": "Job detail", "region_type": "detail_content"}],
+                "fixed_visual_assets": [
+                    {
+                        "asset_id": "seek:visual:quick_apply_button",
+                        "label": "Quick apply",
+                        "semantic_action": "open_apply_flow",
+                        "danger_level": "low",
+                        "can_authorize_click": False,
+                    }
+                ],
+                "dynamic_areas": [],
+                "danger_zones": [],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    saved_path = Path(body["data"]["path"])
+    trace_path = Path(body["data"]["trace_path"])
+    assert saved_path.exists()
+    assert trace_path.exists()
+    saved = json.loads(saved_path.read_text(encoding="utf-8"))
+    trace = json.loads(trace_path.read_text(encoding="utf-8"))
+    assert saved["contract_version"] == "learned_interface_map_v1"
+    assert saved["fixed_visual_assets"][0]["can_authorize_click"] is False
+    assert trace["contract_version"] == "learned_interface_map_edit_trace_v1"
+    assert trace["edit_summary"]["authorization_changed"] is False
+    saved_path.unlink(missing_ok=True)
+    trace_path.unlink(missing_ok=True)
+
+
+def test_web_panel_crops_interface_asset_with_trace() -> None:
+    client = TestClient(app)
+    source_path = Path("artifacts/interface-map-crop-test-source.png")
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    image = Image.new("RGB", (240, 160), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((80, 50, 170, 96), radius=8, fill=(230, 0, 125))
+    image.save(source_path)
+
+    response = client.post(
+        "/panel/crop_interface_asset",
+        json={
+            "source_image_path": str(source_path),
+            "asset_id": "seek:visual:quick_apply_button",
+            "label": "Quick apply",
+            "x": 80,
+            "y": 50,
+            "width": 90,
+            "height": 46,
+            "padding_px": 4,
+            "context_padding_px": 12,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    data = body["data"]
+    tight_path = Path(data["tight_crop_ref"])
+    context_path = Path(data["context_crop_ref"])
+    trace_path = Path(data["trace_path"])
+    assert tight_path.exists()
+    assert context_path.exists()
+    assert trace_path.exists()
+    assert data["bbox"] == {"x": 80, "y": 50, "w": 90, "h": 46}
+    assert data["can_authorize_click"] is False
+    trace = json.loads(trace_path.read_text(encoding="utf-8"))
+    assert trace["contract_version"] == "learned_interface_map_asset_crop_trace_v1"
+    assert trace["artifact_is_authorization"] is False
+    tight_path.unlink(missing_ok=True)
+    context_path.unlink(missing_ok=True)
+    trace_path.unlink(missing_ok=True)
+    source_path.unlink(missing_ok=True)
 
 
 def test_input_demo_runtime_path_graph_fixture_is_dry_run_only() -> None:
@@ -406,6 +564,8 @@ def test_web_panel_uploads_and_serves_image() -> None:
 
     assert served.status_code == 200
     assert served.content == png_1x1
+    assert served.headers["cache-control"] == "no-store, max-age=0"
+    assert served.headers["pragma"] == "no-cache"
 
 
 def test_web_panel_file_rejects_outside_paths() -> None:
@@ -664,6 +824,80 @@ def test_web_panel_inspects_trace_result_by_stage(tmp_path) -> None:
     assert data["flow_stages"][2]["raw"]["matches"][0]["text"] == "Start"
     assert data["sections"]["candidates"]["image_path"] == "artifacts/capture.png"
     assert data["sections"]["gate"]["image_path"] == "artifacts/capture.png"
+
+
+def test_web_panel_inspects_visual_asset_recall_stage(tmp_path) -> None:
+    client = TestClient(app)
+    trace_path = tmp_path / "visual-asset-trace.json"
+    trace_path.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "request": {"goal": "click quick apply", "app_name": "seek", "provider_mode": "local_grounding"},
+                "result": {
+                    "contract_version": "recognition_plan_v1",
+                    "image_path": "artifacts/capture.png",
+                    "visual_asset_recall": {
+                        "contract_version": "visual_asset_recall_v1",
+                        "status": "matched",
+                        "matched_count": 1,
+                        "fast_lane_allowed": True,
+                        "selected_asset_id": "seek.quick_apply.primary",
+                        "matches": [
+                            {
+                                "asset_id": "seek.quick_apply.primary",
+                                "label": "Quick apply",
+                                "semantic_action": "open_apply_flow",
+                                "matched": True,
+                                "match_score": 0.99,
+                                "elapsed_ms": 12.3,
+                                "template_path": "artifacts/visual-assets/quick-apply.png",
+                                "current_roi_ref": "artifacts/visual-assets/current-roi.png",
+                                "current_match_ref": "artifacts/visual-assets/current-match.png",
+                                "bbox": {"x": 620, "y": 210, "w": 150, "h": 46},
+                                "click_point": {"x": 695, "y": 233},
+                            }
+                        ],
+                    },
+                    "candidate_result": {
+                        "summary": {
+                            "returned_count": 1,
+                            "has_recommendation": True,
+                            "seeded_candidate_selected": True,
+                        },
+                        "candidates": [],
+                    },
+                    "pre_click_decision": {
+                        "allowed": True,
+                        "selected_click_point": {"x": 695, "y": 233},
+                        "reasons": ["pre_click_candidate_allowed"],
+                    },
+                    "execution_path": {"visual_asset_fast_lane_used": True, "action_executed": False},
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.get("/panel/inspect_trace", params={"path": str(trace_path)})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    data = body["data"]
+    assert data["visual_asset_recall_status"] == "matched"
+    assert data["visual_asset_fast_lane_used"] is True
+    assert data["visual_asset_matched_count"] == 1
+    stage_by_id = {stage["id"]: stage for stage in data["flow_stages"]}
+    visual_stage = stage_by_id["visual_asset_recall"]
+    assert visual_stage["label"] == "Visual Assets"
+    assert "1 matched" in visual_stage["value"]
+    assert "fast lane" in visual_stage["value"]
+    assert "Visual asset recall matched: 1 matched asset(s); fast lane" == visual_stage["summary"]
+    assert visual_stage["raw"]["matches"][0]["template_path"].endswith("quick-apply.png")
+    assert visual_stage["raw"]["matches"][0]["current_roi_ref"].endswith("current-roi.png")
+    assert visual_stage["raw"]["matches"][0]["current_match_ref"].endswith("current-match.png")
 
 
 def test_web_panel_inspects_locate_trace_nested_plan_ocr_and_visuals(tmp_path) -> None:
@@ -1191,3 +1425,301 @@ def test_web_panel_inspects_failed_screen_reading_trace(tmp_path) -> None:
     assert model_io["value"] == "failed, 1 attempt(s), local"
     assert model_io["raw"]["attempts"][0]["model_io"]["output"]["raw_text"] == "{bad json"
     assert "failed to reach local vision endpoint" in data["flow_stages"][-1]["summary"]
+
+
+def test_panel_path_detail_keeps_interface_inspector_and_seek_layout() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8")
+
+    assert "path-detail-interface-workbench" in panel_js
+    assert "path-detail-interface-inspector" in panel_js
+    assert "bindPathDetailInterfaceControls" in panel_js
+    assert "[data-path-detail-inspect], [data-interface-inspect]" in panel_js
+    assert "interfaceKnownSeekRegionLayoutHtml" in panel_js
+    assert "interfaceAssetShouldShowThumb" in panel_js
+    assert "runtimeNodeOperationItemsHtml" in panel_js
+    assert "const operationItems = runtimeNodeOperationItemsHtml(node)" not in panel_js
+    assert "runtimeNodeRegionWorkflowItemsHtml" not in panel_js
+    assert "const regionOperationItems = runtimeNodeRegionWorkflowItemsHtml(node)" not in panel_js
+    assert "interface-inspector-region-action-group" in panel_js
+    assert "runtimePathGraphView.currentStateId = nodeId" in panel_js
+    assert "state: nodeId" in panel_js
+    assert "runtime-node-workflow" not in panel_js
+    assert "graph.action_templates" in panel_js
+    assert "ensureReplayInterfaceMapForRuntimeGraph" in panel_js
+    assert "inferInterfaceMapPresetForGraph" in panel_js
+    assert "interfaceWorkflowActionsForRegion" in panel_js
+    assert "interfaceInspectorStateRegionsHtml" in panel_js
+    assert "interfaceInspectorStateWorkflowHtml" in panel_js
+    assert "interfaceInspectorRegionWorkflowHtml" in panel_js
+    assert "interface-inspector-page-regions" in panel_js
+    assert "interface-inspector-workflow" in panel_js
+    assert "interfacePathNodeIdForStateRef" in panel_js
+    assert "showNavNodeDetail(pathNodeId, null, { preserveInterfaceSelection: true })" in panel_js
+    assert "interfaceKnownSeekApplicationRegionLayoutHtml" in panel_js
+    assert "interfaceKnownRegionWorkflowActions" in panel_js
+    assert "interfaceRegionSummaryText" in panel_js
+    assert "Workflow / 可调用 skill" in panel_js
+    assert "需确认" in panel_js
+    assert "操作已按页面节点和具体区域拆分" in panel_js
+    assert "页面摘要" in panel_js
+    assert "interface-region-ops" not in panel_js
+    assert "path-screen-region-hints" not in panel_js
+    assert "interfaceRegionOperationHints" not in panel_js
+    assert "node.runtimeGraphNode ? \"\" : clickableControls" in panel_js
+    assert "node.runtimeGraphNode ? \"\" : possibleEntries" in panel_js
+    assert "showNavNodeDetail(firstState)" in panel_js
+    assert "interfaceNodeTransitionsHtml(transitions)" not in panel_js
+    assert "${stateRegionsHtml}\n    ${stateWorkflowHtml}\n    ${regionWorkflowHtml}\n    ${regionContentsHtml}\n    ${interfaceInspectorEditorHtml(selected, regionIds)}" in panel_js
+    assert "application_documents" in panel_js
+    assert "application_review_step" in panel_js
+    assert "detect_application_step" in panel_js
+    assert "skill.read_application_progress" in panel_js
+    assert "fill_employer_questions" in panel_js
+    assert "final_submit" in panel_js
+    assert "interface-crop-source-preview" in panel_js
+    assert "interface-crop-disabled" in panel_js
+    assert "interface-inspector-contents" in panel_js
+    assert "replay_region_contents" in panel_js
+    assert "<strong>可用操作</strong>" not in panel_js
+    assert "scroll region" in panel_js
+    assert "visual evidence" in panel_js
+    assert "interfaceDynamicAreaSummary" in panel_js
+    assert "这里会出现岗位卡片" in panel_js
+    assert "最终提交必须阻断" in panel_js
+    assert "top_search_area" in panel_js
+    assert "results_list" in panel_js
+    assert "job_detail" in panel_js
+    assert "runtime-node-edges" not in panel_js
+
+
+def test_panel_translation_keys_stay_bilingual() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8")
+    panel_html = Path("app/web_panel/index.html").read_text(encoding="utf-8")
+    zh_start = panel_js.index('  "zh-CN": {')
+    en_start = panel_js.index('  "en-US": {')
+    end = panel_js.index("};", panel_js.index("const translations"))
+    key_pattern = re.compile(r"^\s*([A-Za-z0-9_]+):", re.M)
+    zh_keys = set(key_pattern.findall(panel_js[zh_start:en_start]))
+    en_keys = set(key_pattern.findall(panel_js[en_start:end]))
+    html_keys = set(re.findall(r'data-i18n="([^"]+)"', panel_html))
+
+    assert zh_keys == en_keys
+    assert html_keys <= zh_keys
+    assert "replay_screen_regions" in zh_keys
+    assert "replay_workflow_skill" in zh_keys
+    assert "replay_region_contents" in zh_keys
+    assert "interface_calibration_report_path" in zh_keys
+    assert "load_interface_calibration" in zh_keys
+    assert "use_current_app_map" in zh_keys
+
+
+def test_panel_region_workflow_stays_in_node_detail_and_inspector() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8")
+
+    runtime_detail_start = panel_js.index("function runtimeNodeDetailHtml")
+    screen_regions_start = panel_js.index("function pathDetailScreenRegionsHtml")
+    layout_panel_start = panel_js.index("function interfaceLayoutRegionPanelHtml")
+    child_layout_start = panel_js.index("function interfaceLayoutChildRegionHtml")
+    inspector_workflow_start = panel_js.index("function interfaceInspectorRegionWorkflowHtml")
+    inspector_state_workflow_start = panel_js.index("function interfaceInspectorStateWorkflowHtml")
+    inspector_editor_start = panel_js.index("function interfaceInspectorEditorHtml")
+
+    runtime_detail_body = panel_js[runtime_detail_start:screen_regions_start]
+    screen_regions_body = panel_js[screen_regions_start:layout_panel_start]
+    layout_panel_body = panel_js[layout_panel_start:child_layout_start]
+    inspector_state_workflow_body = panel_js[inspector_state_workflow_start:inspector_workflow_start]
+    inspector_workflow_body = panel_js[inspector_workflow_start:inspector_editor_start]
+
+    assert "replay_workflow_skill" not in runtime_detail_body
+    assert "runtimeNodeRegionWorkflowItemsHtml(node)" not in runtime_detail_body
+    assert "replay_workflow_skill" in inspector_state_workflow_body
+    assert "interface-inspector-region-action-group" in inspector_state_workflow_body
+    assert "interfaceRegionRefsForState(state, regions)" in inspector_state_workflow_body
+    assert "interfaceWorkflowActionsForRegion(regionId)" in inspector_state_workflow_body
+    assert "replay_workflow_skill" in inspector_workflow_body
+    assert "interfaceInspectorRegionWorkflowHtml" not in screen_regions_body
+    assert "replay_workflow_skill" not in screen_regions_body
+    assert "interfaceInspectorRegionWorkflowHtml" not in layout_panel_body
+    assert "replay_workflow_skill" not in layout_panel_body
+    assert layout_panel_body.index("interface-layout-children") < layout_panel_body.index("interface-layout-assets")
+
+
+def test_panel_interface_map_uses_compact_structural_assets() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8")
+    panel_css = Path("app/web_panel/panel.css").read_text(encoding="utf-8")
+
+    assert "function interfaceRegionContentNodesHtml" in panel_js
+    assert 'loading="eager"' in panel_js
+    assert 'decoding="async"' in panel_js
+    content_nodes_start = panel_js.index("function interfaceRegionContentNodesHtml")
+    content_nodes_end = panel_js.index("function interfaceVisualNodeHtml")
+    content_nodes_body = panel_js[content_nodes_start:content_nodes_end]
+    assert "regionDynamics.map" in content_nodes_body
+    assert "visualAssets.map" in content_nodes_body
+    assert content_nodes_body.index("regionDynamics.map") < content_nodes_body.index("visualAssets.map")
+    assert "const compact = !showThumb && !crop" in panel_js
+    assert "interface-visual-node-compact" in panel_js
+    assert "interface-visual-node-compact" in panel_css
+    assert "结构节点 / no button crop" in panel_css
+    assert "interface-dynamic-summary" in panel_css
+    assert 'data-region-id="application_progress"' in panel_css
+    assert 'data-region-id="application_review_step"' in panel_css
+    assert 'data-region-id="${escapeHtml(regionId)}"' in panel_js
+    assert "while (changed)" in panel_js
+    assert "regionIds.add(regionId)" in panel_js
+    assert 'if (id === "application_review_step") return nestedEntry(id, ["application_review"]);' in panel_js
+    assert 'interfaceLayoutChildRegionHtml(childEntry, assets, dynamicAreas, dangerZones, states, transitions, childEntry.childEntries || [])' in panel_js
+    assert '${childEntries.length ? " open" : ""}' in panel_js
+    assert '.interface-child-region[data-region-id="application_review_step"] > .interface-layout-children' in panel_css
+    assert '.interface-child-region[data-region-id="application_progress"],\n.interface-known-layout-seek-application .interface-child-region[data-region-id="application_review_step"]' not in panel_css
+    assert '.interface-child-region[data-region-id="application_profile"],\n.interface-known-layout-seek-application .interface-child-region[data-region-id="application_review_step"]' in panel_css
+    show_detail_start = panel_js.index("function showNavNodeDetail")
+    show_detail_end = panel_js.index("function bindPathDetailInterfaceControls")
+    show_detail_body = panel_js[show_detail_start:show_detail_end]
+    assert "currentNavNodeId = nodeId" in show_detail_body
+    assert "runtimePathGraphView.currentStateId = nodeId" in show_detail_body
+    assert "setPathGraphBadges" in show_detail_body
+
+
+def test_seek_default_interface_map_contains_application_visual_assets() -> None:
+    map_path = Path("artifacts/visual-match-smoke/live_seek_20260624/learned_interface_map_calibrated_real_crops.json")
+    data = json.loads(map_path.read_text(encoding="utf-8"))
+    graph_path = Path("artifacts/seek/runtime_path_graph_seek_mvp_20260617.json")
+    graph = json.loads(graph_path.read_text(encoding="utf-8"))
+
+    assets = {
+        item.get("asset_id"): item
+        for item in data.get("fixed_visual_assets", [])
+        if str(item.get("region_id", "")).startswith("application_")
+    }
+    assert "seek:visual:application_progress_steps" in assets
+    assert "seek:visual:resume_select_dropdown" in assets
+    assert "seek:visual:cover_letter_text_area" in assets
+    assert "seek:visual:application_continue_button" in assets
+    assert "seek:visual:submit_application_button" in assets
+    assert all((item.get("template_refs") or {}).get("tight_crop_ref") for item in assets.values())
+    assert all(item.get("can_authorize_click") is False for item in assets.values())
+    assert assets["seek:visual:submit_application_button"].get("semantic_action") == "final_submit"
+
+    application_regions = {
+        item.get("region_id"): item
+        for item in data.get("regions", [])
+        if str(item.get("region_id", "")).startswith("application_")
+    }
+    expected_application_steps = [
+        "application_progress",
+        "application_documents",
+        "application_questions",
+        "application_profile",
+        "application_review_step",
+    ]
+    states = {item.get("state_id"): item for item in data.get("states", [])}
+    assert states["seek_application_page"].get("region_refs") == ["application_form"]
+    display_states = {item.get("state_id"): item for item in graph.get("display_states", [])}
+    graph_regions = {item.get("region_id"): item for item in graph.get("regions", [])}
+    graph_actions = {item.get("action_template_id"): item for item in graph.get("action_templates", [])}
+    assert display_states["seek_application_page"].get("region_refs") == ["application_form"]
+    assert graph_regions["application_form"].get("child_region_ids") == expected_application_steps
+    assert graph_regions["application_review_step"].get("parent_region_id") == "application_form"
+    assert graph_regions["application_review_step"].get("child_region_ids") == ["application_review"]
+    assert graph_regions["application_review"].get("parent_region_id") == "application_review_step"
+    for action_id in [
+        "read_application_flow",
+        "detect_application_step",
+        "keep_default_resume",
+        "fill_employer_questions",
+        "continue_application_next_step",
+        "continue_without_profile_mutation",
+        "extract_final_review",
+        "final_submit",
+    ]:
+        assert action_id in graph_actions
+        assert graph_actions[action_id].get("safety_policy", {}).get("final_submit_forbidden") is True
+    assert graph_actions["final_submit"].get("safety_policy", {}).get("hard_block") is True
+    assert application_regions["application_form"].get("description")
+    assert application_regions["application_form"].get("child_region_ids") == expected_application_steps
+    assert application_regions["application_review_step"].get("parent_region_id") == "application_form"
+    assert application_regions["application_review_step"].get("region_type") == "form_flow"
+    assert application_regions["application_review_step"].get("child_region_ids") == ["application_review"]
+    assert application_regions["application_review"].get("parent_region_id") == "application_review_step"
+    assert "final Submit remains hard-blocked" in application_regions["application_review"].get("description", "")
+
+    application_dynamic = {
+        item.get("area_id"): item
+        for item in data.get("dynamic_areas", [])
+        if str(item.get("region_id", "")).startswith("application_")
+    }
+    assert "seek:application:question_fields_roi" in application_dynamic
+    assert "seek:application:final_review_roi" in application_dynamic
+    assert application_dynamic["seek:application:cover_letter_roi"].get("description")
+    assert application_dynamic["seek:application:question_fields_roi"].get("semantic_role") == "employer_question_fields"
+    assert application_dynamic["seek:application:final_review_roi"].get("semantic_role") == "final_review_summary"
+
+
+def test_seek_default_interface_map_contains_home_page_visual_assets() -> None:
+    map_path = Path("artifacts/visual-match-smoke/live_seek_20260624/learned_interface_map_calibrated_real_crops.json")
+    data = json.loads(map_path.read_text(encoding="utf-8"))
+
+    assets = {
+        item.get("asset_id"): item
+        for item in data.get("fixed_visual_assets", [])
+    }
+    states = {item.get("state_id"): item for item in data.get("states", [])}
+    assert states["seek_home_page"].get("region_refs") == ["top_search_area", "results_list", "job_detail"]
+    regions = {item.get("region_id"): item for item in data.get("regions", [])}
+    for region_id in ["top_search_area", "results_list", "job_card", "job_detail", "detail_header", "detail_body"]:
+        assert regions[region_id].get("description")
+    required = {
+        "seek:visual:search_input": ("top_search_area", "type_public_search_query"),
+        "seek:visual:search_button": ("top_search_area", "search_or_filter_results"),
+        "seek:visual:job_card_shape": ("job_card", "open_detail"),
+        "seek:visual:apply_button": ("detail_header", "external_apply_flow"),
+        "seek:visual:quick_apply_button": ("detail_header", "open_apply_flow"),
+        "seek:visual:save_icon": ("detail_header", "save_or_bookmark"),
+    }
+    for asset_id, (region_id, semantic_action) in required.items():
+        asset = assets[asset_id]
+        refs = asset.get("template_refs") or {}
+        crop_path = Path(refs.get("tight_crop_ref") or "")
+        source_path = Path(refs.get("source_image_path") or "")
+        assert asset.get("region_id") == region_id
+        assert asset.get("semantic_action") == semantic_action
+        assert crop_path.exists(), f"{asset_id} crop is missing: {crop_path}"
+        if source_path:
+            assert source_path.exists(), f"{asset_id} source image is missing: {source_path}"
+
+    apply_refs = assets["seek:visual:apply_button"].get("template_refs") or {}
+    apply_ref_text = json.dumps(apply_refs, ensure_ascii=False)
+    search_input_refs = assets["seek:visual:search_input"].get("template_refs") or {}
+    search_input_ref_text = json.dumps(search_input_refs, ensure_ascii=False)
+    assert assets["seek:visual:search_input"].get("role") == "input"
+    assert "search_input" in search_input_ref_text
+    assert "search_button" not in search_input_ref_text
+    assert "quick_apply" not in apply_ref_text
+    assert "quick_apply" not in str(assets["seek:visual:apply_button"].get("template_alias_asset_id", ""))
+    assert "Quick Apply" not in str(assets["seek:visual:apply_button"].get("template_alias_reason", ""))
+    assert "quick_apply" in str((assets["seek:visual:quick_apply_button"].get("template_refs") or {}).get("tight_crop_ref", ""))
+    assert assets["seek:visual:apply_button"].get("danger_level") == "external_flow_entry"
+    assert assets["seek:visual:apply_button"].get("semantic_action") == "external_apply_flow"
+    assert assets["seek:visual:quick_apply_button"].get("semantic_action") == "open_apply_flow"
+    summary = data.get("summary") or {}
+    assert summary.get("state_count") == len(data.get("states") or [])
+    assert summary.get("region_count") == len(data.get("regions") or [])
+    assert summary.get("fixed_visual_asset_count") == len(data.get("fixed_visual_assets") or [])
+    assert summary.get("dynamic_area_count") == len(data.get("dynamic_areas") or [])
+    assert summary.get("danger_zone_count") == len(data.get("danger_zones") or [])
+    assert "Apply uses Quick Apply" not in str(summary.get("real_crop_ref_note", ""))
+    assert "standard Apply is an external application entry" in str(summary.get("real_crop_ref_note", ""))
+
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    assert "external_apply_flow" in panel_js
+    assert "external_flow_entry" in panel_js
+
+    dynamic_areas = {
+        item.get("area_id"): item
+        for item in data.get("dynamic_areas", [])
+    }
+    job_cards_area = dynamic_areas["seek:job_cards"]
+    assert job_cards_area.get("region_id") == "results_list"
+    assert job_cards_area.get("label") == "Job cards list"
+    assert job_cards_area.get("semantic_role") == "repeatable_job_cards"

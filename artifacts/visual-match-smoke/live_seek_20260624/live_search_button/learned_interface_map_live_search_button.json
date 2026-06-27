@@ -1,0 +1,93 @@
+{
+  "contract_version": "learned_interface_map_v1",
+  "map_id": "live_seek_search_button_test",
+  "app_id": "seek",
+  "page_type": "search_results",
+  "fixed_visual_assets": [
+    {
+      "contract_version": "visual_asset_v1",
+      "asset_id": "seek:visual:search_button_live",
+      "label": "SEEK search button",
+      "role": "button",
+      "semantic_action": "open_or_navigation",
+      "danger_level": "safe_navigation",
+      "usable_for_recall": true,
+      "requires_gate": true,
+      "can_authorize_click": false,
+      "template_refs": {
+        "tight_crop_ref": "artifacts\\visual-match-smoke\\live_seek_20260624\\live_search_button\\seek_search_button.tight.png"
+      },
+      "source": {
+        "capture_id": "live-seek-20260624",
+        "source_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\graduate-software-jobs-in-all-auckland-job-vacancies-jun-2026-seek-micr-06bf33e0__capture__full-window__20260624-231124-047285.png",
+        "coordinate_space": "source_capture_px",
+        "screenshot_size": {
+          "width": 2560,
+          "height": 1400
+        },
+        "app_id": "seek",
+        "page_type": "search_results"
+      },
+      "source_geometry": {
+        "bbox": {
+          "x": 1814,
+          "y": 176,
+          "w": 107,
+          "h": 64
+        },
+        "click_point": {
+          "x": 1867,
+          "y": 208
+        },
+        "click_point_policy": "learned_relative_point",
+        "click_point_relative": {
+          "x": 0.5,
+          "y": 0.5
+        }
+      },
+      "match_policy": {
+        "methods": [
+          "gray_template"
+        ],
+        "min_score": 0.88,
+        "min_score_gap": 0.06,
+        "roi_policy": "last_known_then_container_then_page_region"
+      },
+      "scope": {
+        "allowed_page_types": [
+          "search_results"
+        ],
+        "allowed_container_ids": [
+          "top_search_area"
+        ],
+        "expected_text": [
+          "SEEK"
+        ],
+        "negative_text": [
+          "Submit",
+          "Send application",
+          "Complete application"
+        ]
+      }
+    }
+  ],
+  "regions": [
+    {
+      "region_id": "top_search_area",
+      "label": "Top search area",
+      "bbox": {
+        "x": 0,
+        "y": 140,
+        "w": 2560,
+        "h": 190
+      }
+    }
+  ],
+  "summary": {
+    "state_count": 0,
+    "region_count": 1,
+    "fixed_visual_asset_count": 1,
+    "dynamic_area_count": 0,
+    "danger_zone_count": 0
+  }
+}

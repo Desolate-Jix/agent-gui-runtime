@@ -1,0 +1,532 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_22ebfd65012e",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.73,
+    "job_id": "seek_job_22ebfd65012e",
+    "title": "Software Engineer Specialist - Integration",
+    "company": "AIA New Zealand",
+    "fit_summary": "strong_apply with score 0.730. positive: matched_skills: AI, API; matched_target_roles: Software Engineer; location_matches: Takapuna, Auckland. needs review: preferred work mode not visible in job detail.",
+    "recommended_next_action": "open_apply_entry_and_prepare_safe_fields",
+    "positive_evidence": [
+      "matched_skills: AI, API",
+      "matched_target_roles: Software Engineer",
+      "location_matches: Takapuna, Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [
+      "preferred work mode not visible in job detail"
+    ],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_22ebfd65012e",
+    "title": "Software Engineer Specialist - Integration",
+    "company": "AIA New Zealand",
+    "location": "Takapuna, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": "Software Engineer Specialist -",
+    "card_bbox": {
+      "x": 653,
+      "y": 282,
+      "w": 433,
+      "h": 234
+    },
+    "click_point": {
+      "x": 777,
+      "y": 295
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_0",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_20_software-engineer-specialist",
+      "page_text_22_integration",
+      "page_text_25_aia-new-zealand",
+      "page_text_26_takapuna-auckland",
+      "page_text_28_a-strong-culture-of-innovation-with-health-and-w",
+      "page_text_29_its-heart",
+      "page_text_31_help-us-redefine-how-people-think-about-insuranc",
+      "page_text_33_recharge-days-ala-vitality-membership-and",
+      "page_text_35_opportunities-to-advance-your-career"
+    ],
+    "evidence": {
+      "texts": [
+        "Software Engineer Specialist -",
+        "Integration",
+        "AIA New Zealand",
+        "Takapuna, Auckland",
+        "A strong culture of innovation with health and wellbeing at",
+        "its heart",
+        "·Help us redefine how people think about insurance",
+        ".Recharge days, AlA Vitality membership and",
+        "opportunities to advance your career"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": false,
+        "has_salary": false
+      }
+    },
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260626-004129-542770__observe-screen__edge.json",
+      "viewport_size": {
+        "width": 2560,
+        "height": 1400
+      },
+      "source": "seek_job_card_extraction",
+      "freshness": "current_capture"
+    }
+  },
+  "detail": {
+    "job_id": "seek_job_22ebfd65012e",
+    "title": "Software Engineer Specialist - Integration",
+    "company": "AIA New Zealand",
+    "location": "Takapuna, Auckland",
+    "classification": "Software Engineer Specialist -",
+    "runtime_detail_snapshot": {
+      "contract_version": "runtime_detail_snapshot_v1",
+      "source": "read_region_batch",
+      "revision": 2,
+      "previous_snapshot_id": "3b784483efb38bb4",
+      "snapshot_id": "40310cc4e687059b"
+    },
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "batch_ocr",
+        "text": "LONGER,"
+      },
+      {
+        "index": 1,
+        "role": "batch_ocr",
+        "text": "BETTER"
+      },
+      {
+        "index": 2,
+        "role": "batch_ocr",
+        "text": "LIVES"
+      },
+      {
+        "index": 3,
+        "role": "batch_ocr",
+        "text": "TOITO"
+      },
+      {
+        "index": 4,
+        "role": "batch_ocr",
+        "text": "AaccessiblityTick"
+      },
+      {
+        "index": 5,
+        "role": "batch_ocr",
+        "text": "PRD"
+      },
+      {
+        "index": 6,
+        "role": "batch_ocr",
+        "text": "gendertick"
+      },
+      {
+        "index": 7,
+        "role": "batch_ocr",
+        "text": "HEALTHIER,LONGER,"
+      },
+      {
+        "index": 8,
+        "role": "batch_ocr",
+        "text": "BETTERLIVES"
+      },
+      {
+        "index": 9,
+        "role": "batch_ocr",
+        "text": "SoftwareEngineerSpecialist-Integration"
+      },
+      {
+        "index": 10,
+        "role": "batch_ocr",
+        "text": "AlANewZealand★4.97reviews·Viewalljobs"
+      },
+      {
+        "index": 11,
+        "role": "batch_ocr",
+        "text": "Takapuna,Auckland"
+      },
+      {
+        "index": 12,
+        "role": "batch_ocr",
+        "text": "国"
+      },
+      {
+        "index": 13,
+        "role": "batch_ocr",
+        "text": "Engineering-Software(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 14,
+        "role": "batch_ocr",
+        "text": "Full time"
+      },
+      {
+        "index": 15,
+        "role": "batch_ocr",
+        "text": "Posted 2d ago"
+      },
+      {
+        "index": 16,
+        "role": "batch_ocr",
+        "text": "Apply"
+      },
+      {
+        "index": 17,
+        "role": "batch_ocr",
+        "text": "Visited employer's application site on 24 Jun 2026"
+      },
+      {
+        "index": 18,
+        "role": "batch_ocr",
+        "text": "Howyoumatch"
+      },
+      {
+        "index": 19,
+        "role": "batch_ocr",
+        "text": "1 skill or credential matches your profile"
+      },
+      {
+        "index": 20,
+        "role": "batch_ocr",
+        "text": "√C#Programming"
+      },
+      {
+        "index": 21,
+        "role": "batch_ocr",
+        "text": "Show all"
+      },
+      {
+        "index": 22,
+        "role": "batch_ocr",
+        "text": "YourRolewithUs|ToTurangakiaMatou"
+      },
+      {
+        "index": 23,
+        "role": "batch_ocr",
+        "text": "As a Software Engineer Specialist - Integration in our Technology team, you'll play a key"
+      },
+      {
+        "index": 24,
+        "role": "batch_ocr",
+        "text": "role indesigning and delivering integration solutions that keep oursystems connected,"
+      },
+      {
+        "index": 25,
+        "role": "batch_ocr",
+        "text": "secure, and running smoothly. You'll collaborate with architects, engineers, and business"
+      },
+      {
+        "index": 26,
+        "role": "batch_ocr",
+        "text": "stakeholders tobuild robust,scalable platforms that support both strategicinitiatives and"
+      },
+      {
+        "index": 27,
+        "role": "batch_ocr",
+        "text": "day-to-day operations. This is an exciting opportunity to grow your technical expertise,"
+      },
+      {
+        "index": 28,
+        "role": "batch_ocr",
+        "text": "strengthen yourinfluence across teams,and contribute to continuous improvement as"
+      },
+      {
+        "index": 29,
+        "role": "batch_ocr",
+        "text": "YourRolewithUsIToTurangakiaMatou"
+      },
+      {
+        "index": 30,
+        "role": "batch_ocr",
+        "text": "role in designing and delivering integration solutions that keep our systems connected,"
+      },
+      {
+        "index": 31,
+        "role": "batch_ocr",
+        "text": "secure,andrunningsmoothly.You'll collaboratewith architects,engineers,andbusiness"
+      },
+      {
+        "index": 32,
+        "role": "batch_ocr",
+        "text": "stakeholderstobuildrobust,scalableplatformsthatsupportbothstrategicinitiativesand"
+      },
+      {
+        "index": 33,
+        "role": "batch_ocr",
+        "text": "day-to-day operations.This is an exciting opportunity to grow your technical expertise,"
+      },
+      {
+        "index": 34,
+        "role": "batch_ocr",
+        "text": "strengthen your influence across teams, and contribute to continuous improvement as"
+      },
+      {
+        "index": 35,
+        "role": "batch_ocr",
+        "text": "Yourlmpact|ToPanga"
+      },
+      {
+        "index": 36,
+        "role": "batch_ocr",
+        "text": "·Design and deliver integration solutions that enable reliable,secure connectivity and"
+      },
+      {
+        "index": 37,
+        "role": "batch_ocr",
+        "text": "supportbusinessoutcomesacrosstheorganisation."
+      },
+      {
+        "index": 38,
+        "role": "batch_ocr",
+        "text": "·Develop and enhance integration components that meet quality standards, improving"
+      },
+      {
+        "index": 39,
+        "role": "batch_ocr",
+        "text": "system performance and maintainability."
+      },
+      {
+        "index": 40,
+        "role": "batch_ocr",
+        "text": "·Resolve incidents and strengthen reliability,contributing to improved system stability"
+      },
+      {
+        "index": 41,
+        "role": "batch_ocr",
+        "text": "andseamlessoperations."
+      },
+      {
+        "index": 42,
+        "role": "batch_ocr",
+        "text": "·Collaborate with stakeholders to clarify requirements and deliver solutions that align"
+      },
+      {
+        "index": 43,
+        "role": "batch_ocr",
+        "text": "withbusinessneeds andexpectations."
+      },
+      {
+        "index": 44,
+        "role": "batch_ocr",
+        "text": "·Drivecontinuousimprovementbycontributingtoplatformroadmapsandevolving"
+      },
+      {
+        "index": 45,
+        "role": "batch_ocr",
+        "text": "integrationpracticesforlong-termsuccess."
+      },
+      {
+        "index": 46,
+        "role": "batch_ocr",
+        "text": "Your Capabilities|OAheinga"
+      },
+      {
+        "index": 47,
+        "role": "batch_ocr",
+        "text": "·You bring strong experience in integration or C#.NET development, with the ability to"
+      },
+      {
+        "index": 48,
+        "role": "batch_ocr",
+        "text": "deliversolutionsincomplexenvironments."
+      },
+      {
+        "index": 49,
+        "role": "batch_ocr",
+        "text": "·Youhavearelevant tertiaryqualificationinIT,ComputerScience,orarelateddiscipline"
+      },
+      {
+        "index": 50,
+        "role": "batch_ocr",
+        "text": "that underpinsyourtechnicalexpertise."
+      },
+      {
+        "index": 51,
+        "role": "batch_ocr",
+        "text": "·Youcommunicateclearlyandbuildeffectiverelationships,enablingcollaborationwith"
+      },
+      {
+        "index": 52,
+        "role": "batch_ocr",
+        "text": "bothtechnicalandnon-technicalstakeholders."
+      },
+      {
+        "index": 53,
+        "role": "batch_ocr",
+        "text": "delivery outcomes to solve problems effectively."
+      },
+      {
+        "index": 54,
+        "role": "batch_ocr",
+        "text": "·You take ownership and contribute to team success, managing priorities while"
+      },
+      {
+        "index": 55,
+        "role": "batch_ocr",
+        "text": "supporting others through knowledge sharing."
+      },
+      {
+        "index": 56,
+        "role": "batch_ocr",
+        "text": "·You may alsohaverelevantprofessionalcertifications,oradesiretocontinue"
+      },
+      {
+        "index": 57,
+        "role": "batch_ocr",
+        "text": "developing yourcapability."
+      },
+      {
+        "index": 58,
+        "role": "batch_ocr",
+        "text": "YourLifeatAlAIToAokiAlA"
+      },
+      {
+        "index": 59,
+        "role": "batch_ocr",
+        "text": "·You may also haverelevant professional certifications,ora desire to continue"
+      },
+      {
+        "index": 60,
+        "role": "batch_ocr",
+        "text": "developingyourcapability."
+      },
+      {
+        "index": 61,
+        "role": "batch_ocr",
+        "text": "AtAlA,yourexperiencematters,andsodoesyourimpact.Inreturnforyourexpertise,we"
+      },
+      {
+        "index": 62,
+        "role": "batch_ocr",
+        "text": "offer a career where you can apply your skills to meaningful work that improves lives"
+      },
+      {
+        "index": 63,
+        "role": "batch_ocr",
+        "text": "across Asia-Pacific.You'll enjoy flexible ways of working,competitive rewards,and access"
+      },
+      {
+        "index": 64,
+        "role": "batch_ocr",
+        "text": "to continuous learning programs designed to keep you ahead in a rapidly changing world."
+      },
+      {
+        "index": 65,
+        "role": "batch_ocr",
+        "text": "Ourcollaborativeculturevaluesyourideasandempowersyoutoinnovate,solvecomplex"
+      },
+      {
+        "index": 66,
+        "role": "batch_ocr",
+        "text": "challenges, and contribute to our ambition of helping a billion people liveHealthier,"
+      },
+      {
+        "index": 67,
+        "role": "batch_ocr",
+        "text": "Longer,BetterLivesby2030."
+      },
+      {
+        "index": 68,
+        "role": "batch_ocr",
+        "text": "Diversity,equity,and inclusion arecentral towhowe are and howwework.Wevalue"
+      },
+      {
+        "index": 69,
+        "role": "batch_ocr",
+        "text": "people from all walks of life and welcome candidates of all backgrounds, identities, and"
+      },
+      {
+        "index": 70,
+        "role": "batch_ocr",
+        "text": "lived experiences,including thosewithdisabilities,additional mental healthneeds,"
+      },
+      {
+        "index": 71,
+        "role": "batch_ocr",
+        "text": "chronichealthconditions,orwhoareneurodiverse.Ifyou'reexcitedaboutthisrolebut"
+      },
+      {
+        "index": 72,
+        "role": "batch_ocr",
+        "text": "can do to support you during the recruitment process,please contact us at"
+      },
+      {
+        "index": 73,
+        "role": "batch_ocr",
+        "text": "nz....."
+      },
+      {
+        "index": 74,
+        "role": "batch_ocr",
+        "text": "...@aia.com."
+      },
+      {
+        "index": 75,
+        "role": "batch_ocr",
+        "text": "Believe inBetterwithAlANZ"
+      },
+      {
+        "index": 76,
+        "role": "batch_ocr",
+        "text": "AIA NZ"
+      },
+      {
+        "index": 77,
+        "role": "batch_ocr",
+        "text": "YouTube"
+      },
+      {
+        "index": 78,
+        "role": "batch_ocr",
+        "text": "tobepart of that."
+      },
+      {
+        "index": 79,
+        "role": "batch_ocr",
+        "text": "Company profile"
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260626-004135-853052__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260626-004139-903519__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260626-004143-694125__ocr-region__ocr-region.json"
+    ],
+    "detail_batch_status": "ok",
+    "detail_batch_stop_reason": "max_captures",
+    "detail_bottom_reached": false,
+    "detail_batch_unique_line_count": 80,
+    "runtime_detail_dataflow": {
+      "contract_version": "runtime_detail_dataflow_v1",
+      "source_batch_contract": "read_region_batch_v1",
+      "source_batch_status": "ok",
+      "merged_text_line_count": 80,
+      "description_section_count": 80
+    },
+    "apply_button_state": {
+      "visible": true,
+      "label": "Apply",
+      "source": "read_detail_batch_ocr"
+    }
+  }
+}

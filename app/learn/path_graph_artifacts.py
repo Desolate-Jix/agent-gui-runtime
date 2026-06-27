@@ -34,7 +34,9 @@ def build_runtime_path_graph_from_seek_artifact(seek_artifact: dict[str, Any] | 
     seed = _dict(artifact.get("path_graph_seed"))
     baseline = _dict(artifact.get("baseline"))
     source = _dict(artifact.get("source"))
-    sample_cards = [_dict(item) for item in _dict(seed.get("sample_entities")).get("job_cards") or [] if isinstance(item, dict)]
+    sample_entities = _dict(seed.get("sample_entities"))
+    sample_cards = [_dict(item) for item in sample_entities.get("job_cards") or [] if isinstance(item, dict)]
+    sample_visual_controls = [_dict(item) for item in sample_entities.get("visual_controls") or [] if isinstance(item, dict)]
     return {
         "contract_version": RUNTIME_PATH_GRAPH_CONTRACT,
         "graph_id": "seek_search_results_runtime_path_graph_v1",
@@ -58,6 +60,8 @@ def build_runtime_path_graph_from_seek_artifact(seek_artifact: dict[str, Any] | 
         },
         "state_match_policy": _seek_state_match_policy(),
         "states": _seek_states(),
+        "display_states": _seek_display_states(),
+        "state_display_map": _seek_state_display_map(),
         "regions": _regions_from_seed(seed),
         "scroll_containers": _scroll_containers_from_profile(profile),
         "entities": _entities_from_sample_cards(sample_cards),
@@ -73,7 +77,9 @@ def build_runtime_path_graph_from_seek_artifact(seek_artifact: dict[str, Any] | 
         ],
         "path_patterns": _seek_path_patterns(),
         "transitions": _seek_transitions(),
+        "display_transitions": _seek_display_transitions(),
         "action_templates": _runtime_action_templates(profile),
+        "visual_asset_samples": sample_visual_controls[:20],
         "verification_rules": profile.get("verification_rules") or [],
         "safety_policy": profile.get("safety_policy") or {},
         "visual_asset_refs": [
@@ -101,6 +107,7 @@ def build_runtime_path_graph_from_seek_artifact(seek_artifact: dict[str, Any] | 
         "metrics": {
             **baseline,
             "sample_entity_count": len(sample_cards),
+            "visual_asset_sample_count": len(sample_visual_controls),
             "artifact_is_authorization": False,
         },
     }
@@ -234,12 +241,14 @@ def build_visual_assets_from_seek_artifact(seek_artifact: dict[str, Any] | None)
 
 def _regions_from_seed(seed: dict[str, Any]) -> list[dict[str, Any]]:
     regions: list[dict[str, Any]] = []
+    seen_region_ids: set[str] = set()
     for section in seed.get("sections") or []:
         if not isinstance(section, dict):
             continue
         section_id = str(section.get("section_id") or "").strip()
-        if not section_id:
+        if not section_id or section_id in seen_region_ids:
             continue
+        seen_region_ids.add(section_id)
         regions.append(
             {
                 "region_id": section_id,
@@ -256,7 +265,130 @@ def _regions_from_seed(seed: dict[str, Any]) -> list[dict[str, Any]]:
                 },
             }
         )
+    for region in _seek_application_regions():
+        region_id = str(region.get("region_id") or "")
+        if region_id and region_id not in seen_region_ids:
+            seen_region_ids.add(region_id)
+            regions.append(region)
     return regions
+
+
+def _seek_application_regions() -> list[dict[str, Any]]:
+    """补齐 SEEK 申请页结构，供学习面板和后续模型模仿。"""
+
+    return [
+        {
+            "region_id": "application_form",
+            "role": "form_flow",
+            "label": "SEEK application form",
+            "description": "Container for SEEK internal application steps: documents, employer questions, profile review, and final review.",
+            "parent_region_id": None,
+            "container_id": "seek:application_form",
+            "repeatable": False,
+            "contains": [
+                "application_progress",
+                "application_documents",
+                "application_questions",
+                "application_profile",
+                "application_review_step",
+            ],
+            "bbox_policy": {
+                "source": "learned_application_flow_seed",
+                "requires_current_reobserve": True,
+                "no_overlap_except_containment": True,
+            },
+        },
+        {
+            "region_id": "application_progress",
+            "role": "navigation",
+            "label": "Application step progress",
+            "description": "Read-only progress tracker used to identify the current application step before choosing the next action.",
+            "parent_region_id": "application_form",
+            "container_id": "seek:application_form",
+            "repeatable": False,
+            "contains": ["choose_documents", "answer_questions", "update_profile", "review_and_submit"],
+            "bbox_policy": {
+                "source": "learned_application_flow_seed",
+                "requires_current_reobserve": True,
+                "no_overlap_except_containment": True,
+            },
+        },
+        {
+            "region_id": "application_documents",
+            "role": "form_step",
+            "label": "Choose documents step",
+            "description": "Document selection step. Keep the default SEEK resume and edit the cover letter only when the job is suitable.",
+            "parent_region_id": "application_form",
+            "container_id": "seek:application_form",
+            "repeatable": False,
+            "contains": ["resume", "cover_letter", "continue_next_step"],
+            "bbox_policy": {
+                "source": "learned_application_flow_seed",
+                "requires_current_reobserve": True,
+                "no_overlap_except_containment": True,
+            },
+        },
+        {
+            "region_id": "application_questions",
+            "role": "form_step",
+            "label": "Employer questions step",
+            "description": "Employer-specific question step. Read each label and answer safe fields from the candidate profile and job detail.",
+            "parent_region_id": "application_form",
+            "container_id": "seek:application_form",
+            "repeatable": True,
+            "contains": ["question_label", "answer_field", "continue_next_step"],
+            "bbox_policy": {
+                "source": "learned_application_flow_seed",
+                "requires_current_reobserve": True,
+                "no_overlap_except_containment": True,
+            },
+        },
+        {
+            "region_id": "application_profile",
+            "role": "form_step",
+            "label": "Update SEEK profile step",
+            "description": "Profile review step. Avoid mutating long-lived SEEK profile data unless the user explicitly authorizes it.",
+            "parent_region_id": "application_form",
+            "container_id": "seek:application_form",
+            "repeatable": False,
+            "contains": ["profile_fields", "continue_without_profile_mutation"],
+            "bbox_policy": {
+                "source": "learned_application_flow_seed",
+                "requires_current_reobserve": True,
+                "no_overlap_except_containment": True,
+            },
+        },
+        {
+            "region_id": "application_review_step",
+            "role": "form_step",
+            "label": "Review and submit step",
+            "description": "Review step container before final submission. The agent may read and audit it, but must not submit.",
+            "parent_region_id": "application_form",
+            "container_id": "seek:application_form",
+            "repeatable": False,
+            "contains": ["application_review"],
+            "bbox_policy": {
+                "source": "learned_application_flow_seed",
+                "requires_current_reobserve": True,
+                "no_overlap_except_containment": True,
+            },
+        },
+        {
+            "region_id": "application_review",
+            "role": "final_review_boundary",
+            "label": "Review and submit boundary",
+            "description": "Final review boundary. Read and audit the application summary, but final Submit remains hard-blocked.",
+            "parent_region_id": "application_review_step",
+            "container_id": "seek:application_form",
+            "repeatable": False,
+            "contains": ["review_summary", "final_submit_forbidden"],
+            "bbox_policy": {
+                "source": "learned_application_flow_seed",
+                "requires_current_reobserve": True,
+                "no_overlap_except_containment": True,
+            },
+        },
+    ]
 
 
 def _scroll_containers_from_profile(profile: dict[str, Any]) -> list[dict[str, Any]]:
@@ -425,6 +557,8 @@ def _runtime_action_templates(profile: dict[str, Any]) -> list[dict[str, Any]]:
                 "requires_real_profile": True,
                 "requires_explicit_user_approval": True,
                 "final_submit_remains_forbidden": True,
+                "seek_internal_required_label_any": ["Quick apply", "Quick Apply"],
+                "seek_external_forbidden_label_any": ["Apply"],
             }
         templates.append(template)
     return templates
@@ -474,12 +608,74 @@ def _seek_states() -> list[dict[str, Any]]:
     ]
 
 
+def _seek_display_states() -> list[dict[str, Any]]:
+    return [
+        {
+            "state_id": "seek_home_page",
+            "label": "SEEK home/search page",
+            "page_type": "seek_search_results_with_detail",
+            "description": "Search results, selected job detail pane, job cards, filters, and detail reading regions.",
+            "region_refs": [
+                "top_search_area",
+                "results_list",
+                "job_detail",
+                "job_card",
+                "detail_header",
+                "detail_body",
+            ],
+            "child_state_ids": [
+                "seek_search_results_empty_detail",
+                "seek_search_results_with_selected_job",
+                "seek_detail_scrolled",
+                "seek_results_list_scrolled",
+            ],
+        },
+        {
+            "state_id": "seek_application_page",
+            "label": "SEEK application page",
+            "page_type": "seek_station_internal_application",
+            "description": "Station-internal application flow, safe form filling, review boundary, and final submit guard.",
+            "region_refs": [
+                "application_progress",
+                "application_form",
+                "application_documents",
+                "application_questions",
+                "application_profile",
+                "application_review_step",
+                "application_review",
+            ],
+            "child_state_ids": [
+                "seek_apply_entry_form",
+            ],
+            "safety": {"final_submit": "forbidden"},
+        },
+    ]
+
+
+def _seek_state_display_map() -> dict[str, str]:
+    return {
+        "seek_search_results_empty_detail": "seek_home_page",
+        "seek_search_results_with_selected_job": "seek_home_page",
+        "seek_detail_scrolled": "seek_home_page",
+        "seek_results_list_scrolled": "seek_home_page",
+        "seek_apply_entry_form": "seek_application_page",
+        "seek_external_or_blocked": "seek_application_page",
+    }
+
+
 def _seek_transitions() -> list[dict[str, Any]]:
     return [
         {
             "transition_id": "seek:transition:open_job_card",
             "action_template_id": "open_job_card",
             "from_state_id": "seek_search_results_empty_detail",
+            "to_state_id": "seek_search_results_with_selected_job",
+            "verification_refs": ["open_job_card_detail_match"],
+        },
+        {
+            "transition_id": "seek:transition:switch_open_job_card",
+            "action_template_id": "open_job_card",
+            "from_state_id": "seek_search_results_with_selected_job",
             "to_state_id": "seek_search_results_with_selected_job",
             "verification_refs": ["open_job_card_detail_match"],
         },
@@ -508,6 +704,26 @@ def _seek_transitions() -> list[dict[str, Any]]:
     ]
 
 
+def _seek_display_transitions() -> list[dict[str, Any]]:
+    return [
+        {
+            "transition_id": "seek:display_transition:open_apply_flow",
+            "action_template_id": "apply_entry",
+            "from_state_id": "seek_home_page",
+            "to_state_id": "seek_application_page",
+            "verification_refs": ["final_submit_forbidden"],
+            "default_available": False,
+        },
+        {
+            "transition_id": "seek:display_transition:stay_on_search_page",
+            "action_template_id": "browse_and_read_jobs",
+            "from_state_id": "seek_home_page",
+            "to_state_id": "seek_home_page",
+            "verification_refs": ["open_job_card_detail_match", "read_detail_scroll_scope"],
+        },
+    ]
+
+
 def _skill_for_action(action_id: str) -> str | None:
     return {
         "open_job_card": "skill.open_card_from_list",
@@ -527,12 +743,17 @@ def _transition_for_action(action_id: str) -> str | None:
 
 
 def _visual_asset(asset_id: str, label: str, role: str, anchors: list[str], region_id: str) -> dict[str, Any]:
+    semantic_action, danger_level = _visual_asset_action(asset_id=asset_id, label=label)
     return {
         "asset_id": asset_id,
         "label": label,
         "role": role,
         "region_id": region_id,
         "anchors": anchors,
+        "semantic_action": semantic_action,
+        "danger_level": danger_level,
+        "requires_gate": True,
+        "can_authorize_click": False,
         "source": {
             "capture_required": True,
             "crop_path": None,
@@ -544,7 +765,31 @@ def _visual_asset(asset_id: str, label: str, role: str, anchors: list[str], regi
             "requires_region_match": True,
             "requires_current_validation": True,
         },
+        "scope": {
+            "allowed_container_ids": ["seek:job_detail"] if region_id == "job_detail" else ["seek:results_list"] if region_id == "results_list" else [],
+            "expected_text": anchors,
+            "negative_text": ["Submit", "Send application", "Complete application"] if semantic_action != "final_submit" else [],
+        },
     }
+
+
+def _visual_asset_action(*, asset_id: str, label: str) -> tuple[str, str]:
+    text = f"{asset_id} {label}".casefold()
+    if any(term in text for term in ("submit", "send", "confirm", "payment", "complete application")):
+        return "final_submit", "final_submit"
+    if "quick apply" in text:
+        return "open_apply_flow", "low"
+    if "apply" in text and "seek:" in text:
+        return "external_apply_flow", "external_flow_entry"
+    if "apply" in text:
+        return "open_apply_flow", "low"
+    if "save" in text:
+        return "save_or_bookmark", "low"
+    if "job_card" in text:
+        return "open_detail", "low"
+    if "scrollbar" in text:
+        return "scroll_container", "low"
+    return "visual_evidence", "low"
 
 
 def _dict(value: Any) -> dict[str, Any]:

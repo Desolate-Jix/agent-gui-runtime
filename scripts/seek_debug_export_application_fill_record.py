@@ -67,6 +67,10 @@ def _text(value: Any) -> str:
     return " ".join(str(value or "").split())
 
 
+def _normalize_key(value: Any) -> str:
+    return re.sub(r"[^0-9a-z]+", "", str(value or "").casefold())
+
+
 def _unique(values: list[str]) -> list[str]:
     return list(dict.fromkeys(value for value in values if value))
 
@@ -275,6 +279,36 @@ def _employer_questions(report: dict[str, Any] | None) -> list[dict[str, str]]:
     return planned_questions[:answered_count] if answered_count else planned_questions
 
 
+def _looks_like_error_summary_question(question: dict[str, str]) -> bool:
+    text = _normalize_key(question.get("question"))
+    return "pleasemakeaselection" in text or "pleasemakeaselection" in _normalize_key(question.get("answer"))
+
+
+def _canonical_question_key(question: dict[str, str]) -> str:
+    text = _normalize_key(question.get("question"))
+    text = text.replace("pleasemakeaselection", "")
+    answer = _normalize_key(question.get("answer"))
+    if "righttoworkinnewzealand" in text or "visa" in text:
+        return f"work_rights::{answer}"
+    return f"{text}::{answer}"
+
+
+def _dedupe_employer_questions(questions: list[dict[str, str]]) -> list[dict[str, str]]:
+    result: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for question in questions:
+        if not isinstance(question, dict):
+            continue
+        if _looks_like_error_summary_question(question):
+            continue
+        key = _canonical_question_key(question)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(question)
+    return result
+
+
 def _last_capture_path(report: dict[str, Any]) -> str | None:
     captures = [capture for capture in report.get("captures") or [] if isinstance(capture, dict)]
     for capture in reversed(captures):
@@ -329,6 +363,7 @@ def build_record_from_debug_run(run_dir: str | Path, *, created_at: str | None =
         or _employer_questions(automated_questions_report)
         or _employer_questions(manual_questions_report)
     )
+    employer_questions = _dedupe_employer_questions(employer_questions)
     flow = final_report.get("application_flow_state") if isinstance(final_report.get("application_flow_state"), dict) else {}
     blocker = flow.get("final_submit_visible_blocker") if isinstance(flow.get("final_submit_visible_blocker"), dict) else {}
     final_submit_text_visible = final_boundary_report.get("final_submit_text_visible") is True

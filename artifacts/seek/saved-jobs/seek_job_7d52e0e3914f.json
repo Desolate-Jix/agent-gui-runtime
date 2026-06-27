@@ -1,0 +1,425 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_7d52e0e3914f",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.71,
+    "job_id": "seek_job_7d52e0e3914f",
+    "title": "Grad/Junior Test Analyst",
+    "company": "Heartland Bank",
+    "fit_summary": "strong_apply with score 0.710. positive: matched_skills: AI, API, Git, OCR; location_matches: Auckland CBD, Auckland. needs review: preferred work mode not visible in job detail.",
+    "recommended_next_action": "open_apply_entry_and_prepare_safe_fields",
+    "positive_evidence": [
+      "matched_skills: AI, API, Git, OCR",
+      "location_matches: Auckland CBD, Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [
+      "preferred work mode not visible in job detail"
+    ],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_7d52e0e3914f",
+    "title": "Grad/Junior Test Analyst",
+    "company": "Heartland Bank",
+    "location": "Auckland CBD, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": null,
+    "card_bbox": {
+      "x": 652,
+      "y": 663,
+      "w": 382,
+      "h": 199
+    },
+    "click_point": {
+      "x": 757,
+      "y": 674
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_13",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_46_grad-junior-test-analyst",
+      "page_text_47_heartland-bank",
+      "page_text_50_auckland-cbd-auckland",
+      "page_text_52_grow-your-career",
+      "page_text_53_supportive-team",
+      "page_text_55_fast-paced-environment",
+      "page_text_57_this-is-a-fantastic-opportunity-for-a-recent-gra"
+    ],
+    "evidence": {
+      "texts": [
+        "Grad/Junior Test Analyst",
+        "Heartland Bank",
+        "Auckland CBD, Auckland",
+        "·Grow your career",
+        "·Supportive team",
+        "·Fast paced environment",
+        "This is a fantastic opportunity for a recent graduate or"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": false,
+        "has_salary": false
+      }
+    },
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260627-163859-695420__observe-screen__edge.json",
+      "viewport_size": {
+        "width": 2560,
+        "height": 1400
+      },
+      "source": "seek_job_card_extraction",
+      "freshness": "current_capture"
+    }
+  },
+  "detail": {
+    "job_id": "seek_job_7d52e0e3914f",
+    "title": "Grad/Junior Test Analyst",
+    "company": "Heartland Bank",
+    "location": "Auckland CBD, Auckland",
+    "runtime_detail_snapshot": {
+      "contract_version": "runtime_detail_snapshot_v1",
+      "source": "read_region_batch",
+      "revision": 2,
+      "previous_snapshot_id": "48a9c886dbe0f43e",
+      "snapshot_id": "3f05d29a9781c931"
+    },
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "batch_ocr",
+        "text": "Grad/JuniorTestAnalyst"
+      },
+      {
+        "index": 1,
+        "role": "batch_ocr",
+        "text": "Heartland Bank View alljobs"
+      },
+      {
+        "index": 2,
+        "role": "batch_ocr",
+        "text": "Auckland CBD, Auckland"
+      },
+      {
+        "index": 3,
+        "role": "batch_ocr",
+        "text": "Testing&Quality Assurance (Information&CommunicationTechnology)"
+      },
+      {
+        "index": 4,
+        "role": "batch_ocr",
+        "text": "?"
+      },
+      {
+        "index": 5,
+        "role": "batch_ocr",
+        "text": "Full time"
+      },
+      {
+        "index": 6,
+        "role": "batch_ocr",
+        "text": "Posted 3d ago"
+      },
+      {
+        "index": 7,
+        "role": "batch_ocr",
+        "text": "Apply"
+      },
+      {
+        "index": 8,
+        "role": "batch_ocr",
+        "text": "Save"
+      },
+      {
+        "index": 9,
+        "role": "batch_ocr",
+        "text": "How you match ①"
+      },
+      {
+        "index": 10,
+        "role": "batch_ocr",
+        "text": "1 skill or credential matches your profile"
+      },
+      {
+        "index": 11,
+        "role": "batch_ocr",
+        "text": "√ APIShow all"
+      },
+      {
+        "index": 12,
+        "role": "batch_ocr",
+        "text": "Junior Test Analyst-Start yourTech career with us!"
+      },
+      {
+        "index": 13,
+        "role": "batch_ocr",
+        "text": "Kia ora, we have an awesome opportunity we'd love to share with you. Here's some info:"
+      },
+      {
+        "index": 14,
+        "role": "batch_ocr",
+        "text": "Is this your next role?"
+      },
+      {
+        "index": 15,
+        "role": "batch_ocr",
+        "text": "Readytokick-start yourcareerin tech?We'relooking foraJuniorTest Analyst tojoinour"
+      },
+      {
+        "index": 16,
+        "role": "batch_ocr",
+        "text": "onexperienceinasupportiveenvironment."
+      },
+      {
+        "index": 17,
+        "role": "batch_ocr",
+        "text": "This is a fantastic opportunity for a recent graduate or aspiring Test Analyst to build real-"
+      },
+      {
+        "index": 18,
+        "role": "batch_ocr",
+        "text": "world skills while helping ensureoursystems arestable,reliable,and delivergreat"
+      },
+      {
+        "index": 19,
+        "role": "batch_ocr",
+        "text": "outcomesforourcustomers."
+      },
+      {
+        "index": 20,
+        "role": "batch_ocr",
+        "text": "In this role, you'll support the planning and execution of testing across a range of"
+      },
+      {
+        "index": 21,
+        "role": "batch_ocr",
+        "text": "applications.You'll work closely with developers,analysts,and business users,gaining"
+      },
+      {
+        "index": 22,
+        "role": "batch_ocr",
+        "text": "valuable exposure to projects and learning how technology delivers impact across the"
+      },
+      {
+        "index": 23,
+        "role": "batch_ocr",
+        "text": "business."
+      },
+      {
+        "index": 24,
+        "role": "batch_ocr",
+        "text": "If you're passionate about quality, enjoy problem-solving, and want to grow your career in"
+      },
+      {
+        "index": 25,
+        "role": "batch_ocr",
+        "text": "testing-thiscouldbetheperfectnextstepforyou."
+      },
+      {
+        "index": 26,
+        "role": "batch_ocr",
+        "text": "We'relookingforsomeoneatthestartoftheircareerwhoiseagertolearnandgrow."
+      },
+      {
+        "index": 27,
+        "role": "batch_ocr",
+        "text": "You're positive, collaborative, with heaps of energy,happy to flex and at your best in a fast"
+      },
+      {
+        "index": 28,
+        "role": "batch_ocr",
+        "text": "paced environment."
+      },
+      {
+        "index": 29,
+        "role": "batch_ocr",
+        "text": "You'll likely have:"
+      },
+      {
+        "index": 30,
+        "role": "batch_ocr",
+        "text": "·ArecentdegreeinIT,ComputerScience,orarelatedfield"
+      },
+      {
+        "index": 31,
+        "role": "batch_ocr",
+        "text": "·An understanding of software testing concepts (from study or projects)"
+      },
+      {
+        "index": 32,
+        "role": "batch_ocr",
+        "text": "·Exposure to tools like Azure DevOps,JIRA,or similar(helpful but not essential)"
+      },
+      {
+        "index": 33,
+        "role": "batch_ocr",
+        "text": "·BasicknowledgeofwebapplicationsorAPls"
+      },
+      {
+        "index": 34,
+        "role": "batch_ocr",
+        "text": "·Experiencewritingsimpletestcasesorscenarios"
+      },
+      {
+        "index": 35,
+        "role": "batch_ocr",
+        "text": "·Stronganalyticalandproblem-solvingskills"
+      },
+      {
+        "index": 36,
+        "role": "batch_ocr",
+        "text": "·Clearwrittencommunicationskills(fortestcases anddefectreports)"
+      },
+      {
+        "index": 37,
+        "role": "batch_ocr",
+        "text": "·Attention to detail and accuracy"
+      },
+      {
+        "index": 38,
+        "role": "batch_ocr",
+        "text": "·ConfidenceusingMSOffice tool"
+      },
+      {
+        "index": 39,
+        "role": "batch_ocr",
+        "text": "Abitaboutusandwhatwedo"
+      },
+      {
+        "index": 40,
+        "role": "batch_ocr",
+        "text": "Heartland is an NZX/ASX-listed financial services group with big growth plans. Heartland"
+      },
+      {
+        "index": 41,
+        "role": "batch_ocr",
+        "text": "ownsbothHeartlandBankinNewZealandandHeartlandBankinAustralia.Weprovide"
+      },
+      {
+        "index": 42,
+        "role": "batch_ocr",
+        "text": "award-winning savings and finance products to a diverse range of customers including"
+      },
+      {
+        "index": 43,
+        "role": "batch_ocr",
+        "text": "business owners,farmers and retirees.Heartland's strategy is to digitalise everything we"
+      },
+      {
+        "index": 44,
+        "role": "batch_ocr",
+        "text": "do,enabling us to provide customers with what they need in a scalable way.Wecan then"
+      },
+      {
+        "index": 45,
+        "role": "batch_ocr",
+        "text": "passthosebenefitsontothecustomerthroughfasterserviceandbetterrates."
+      },
+      {
+        "index": 46,
+        "role": "batch_ocr",
+        "text": "Can you see yourself here?"
+      },
+      {
+        "index": 47,
+        "role": "batch_ocr",
+        "text": "We'reinnovative and alwaysevolving.Weworktogetherasone team and havebig"
+      },
+      {
+        "index": 48,
+        "role": "batch_ocr",
+        "text": "ambition.We'recommittedtocreatingacultureofinclusivitythatcelebratesourdiverse"
+      },
+      {
+        "index": 49,
+        "role": "batch_ocr",
+        "text": "backgrounds and supports the wellbeing of our people. We offer real opportunities for"
+      },
+      {
+        "index": 50,
+        "role": "batch_ocr",
+        "text": "learningandcareerdevelopment.Youcanalsodrivechangethroughourinternalgroups"
+      },
+      {
+        "index": 51,
+        "role": "batch_ocr",
+        "text": "(including Manawa Whenua - our Maori group, the Rainbow Committee, Diversity &"
+      },
+      {
+        "index": 52,
+        "role": "batch_ocr",
+        "text": "InclusionCommitteeandourGreenTeam)."
+      },
+      {
+        "index": 53,
+        "role": "batch_ocr",
+        "text": "Diversity&Inclusion"
+      },
+      {
+        "index": 54,
+        "role": "batch_ocr",
+        "text": "AtHeartland,we'reproudtocelebratethemanycharacteristicsthatmakeeachofus"
+      },
+      {
+        "index": 55,
+        "role": "batch_ocr",
+        "text": "different.We arecommitted toimproving theinclusivenessofourworkplace,enabling our"
+      },
+      {
+        "index": 56,
+        "role": "batch_ocr",
+        "text": "people tobe authentic and helping us better understand and respond to ourcustomers."
+      },
+      {
+        "index": 57,
+        "role": "batch_ocr",
+        "text": "We'reaLivingWageEmployer,aHearingAccreditedWorkplace,andhavetheRainbow"
+      },
+      {
+        "index": 58,
+        "role": "batch_ocr",
+        "text": "Tick."
+      },
+      {
+        "index": 59,
+        "role": "batch_ocr",
+        "text": "andwewelcomeeveryonetotheteam.Pleaseletusknowifyouneedanyadjustments"
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260627-163903-476190__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260627-163907-536653__ocr-region__ocr-region.json"
+    ],
+    "detail_batch_status": "ok",
+    "detail_batch_stop_reason": "max_captures",
+    "detail_bottom_reached": false,
+    "detail_batch_unique_line_count": 60,
+    "runtime_detail_dataflow": {
+      "contract_version": "runtime_detail_dataflow_v1",
+      "source_batch_contract": "read_region_batch_v1",
+      "source_batch_status": "ok",
+      "merged_text_line_count": 60,
+      "description_section_count": 60
+    },
+    "apply_button_state": {
+      "visible": true,
+      "label": "Apply",
+      "source": "read_detail_batch_ocr"
+    }
+  }
+}

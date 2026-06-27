@@ -1,0 +1,369 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_8b0dd6724397",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.71,
+    "job_id": "seek_job_8b0dd6724397",
+    "title": "Software Developer",
+    "company": "PageProof",
+    "fit_summary": "strong_apply with score 0.710. positive: matched_skills: React, SQL, AI, API; location_matches: Birkenhead, Auckland. needs review: preferred work mode not visible in job detail.",
+    "recommended_next_action": "open_apply_entry_and_prepare_safe_fields",
+    "positive_evidence": [
+      "matched_skills: React, SQL, AI, API",
+      "location_matches: Birkenhead, Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [
+      "preferred work mode not visible in job detail"
+    ],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_8b0dd6724397",
+    "title": "Software Developer",
+    "company": "PageProof",
+    "location": "Birkenhead, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": "Software Developer",
+    "card_bbox": {
+      "x": 653,
+      "y": 452,
+      "w": 169,
+      "h": 85
+    },
+    "click_point": {
+      "x": 737,
+      "y": 466
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_4",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_34_software-developer",
+      "page_text_35_pageproof",
+      "page_text_38_birkenhead-auckland"
+    ],
+    "evidence": {
+      "texts": [
+        "Software Developer",
+        "PageProof",
+        "Birkenhead, Auckland"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": false,
+        "has_salary": false
+      }
+    },
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260627-173452-225546__observe-screen__edge.json",
+      "viewport_size": {
+        "width": 2560,
+        "height": 1400
+      },
+      "source": "seek_job_card_extraction",
+      "freshness": "current_capture"
+    }
+  },
+  "detail": {
+    "job_id": "seek_job_8b0dd6724397",
+    "title": "Software Developer",
+    "company": "PageProof",
+    "location": "Birkenhead, Auckland",
+    "classification": "Software Developer",
+    "runtime_detail_snapshot": {
+      "contract_version": "runtime_detail_snapshot_v1",
+      "source": "read_region_batch",
+      "revision": 2,
+      "previous_snapshot_id": "8bb17ec90f38f9d2",
+      "snapshot_id": "cb624c8acbae849c"
+    },
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "batch_ocr",
+        "text": "Whatyou'lldo"
+      },
+      {
+        "index": 1,
+        "role": "batch_ocr",
+        "text": "You'lldevelop and maintain features across the PageProof platform, monitor performance,"
+      },
+      {
+        "index": 2,
+        "role": "batch_ocr",
+        "text": "troubleshoot issues, and keep our codebase production-ready and scalable.You'll"
+      },
+      {
+        "index": 3,
+        "role": "batch_ocr",
+        "text": "participate in Agile ceremonies, maintain technical documentation, and ensure your work"
+      },
+      {
+        "index": 4,
+        "role": "batch_ocr",
+        "text": "meetssecurity and dataprivacystandards."
+      },
+      {
+        "index": 5,
+        "role": "batch_ocr",
+        "text": "What you'll bring"
+      },
+      {
+        "index": 6,
+        "role": "batch_ocr",
+        "text": "environment. You've worked cross-functionally in Agile teams and communicate clearly-"
+      },
+      {
+        "index": 7,
+        "role": "batch_ocr",
+        "text": "written andverbal.You take ownership of your work and theproblemsyou solve."
+      },
+      {
+        "index": 8,
+        "role": "batch_ocr",
+        "text": "Technical skills: Node.js, TypeScript, C#, AngularJS.Frameworks like Next.js,React, and"
+      },
+      {
+        "index": 9,
+        "role": "batch_ocr",
+        "text": "KoaJS. GraphQL and/or REST APl experience.Familiarity with microservices, Kubernetes,"
+      },
+      {
+        "index": 10,
+        "role": "batch_ocr",
+        "text": "and cloud platforms (Azure, AWS, or GCP). Error monitoring tools like Sentry or Bugsnag."
+      },
+      {
+        "index": 11,
+        "role": "batch_ocr",
+        "text": "Practical experience with Al coding assistants like Cursor or Claude—and the judgment to"
+      },
+      {
+        "index": 12,
+        "role": "batch_ocr",
+        "text": "use themwell."
+      },
+      {
+        "index": 13,
+        "role": "batch_ocr",
+        "text": "Bonus points: Playwright or Selenium. Message queuing (Azure Service Bus, RabbitMQ)."
+      },
+      {
+        "index": 14,
+        "role": "batch_ocr",
+        "text": "Azure services (App Services, Azure SQL, CosmosDB). Caching strategies and Redis."
+      },
+      {
+        "index": 15,
+        "role": "batch_ocr",
+        "text": "Why join us?"
+      },
+      {
+        "index": 16,
+        "role": "batch_ocr",
+        "text": "We mean it when we say \"everybody gets a red pen\"—your voice shapes the product."
+      },
+      {
+        "index": 17,
+        "role": "batch_ocr",
+        "text": "You'll get access to best-in-class Al development tools from day one, a competitive salary"
+      },
+      {
+        "index": 18,
+        "role": "batch_ocr",
+        "text": "based on your experience, annual performance and salary reviews, regular 1-on-1s, and a"
+      },
+      {
+        "index": 19,
+        "role": "batch_ocr",
+        "text": "supportiveteam thatwantstoseeyou doyourbestwork."
+      },
+      {
+        "index": 20,
+        "role": "batch_ocr",
+        "text": "Powerful online proofing for all your creative content | PageProof"
+      },
+      {
+        "index": 21,
+        "role": "batch_ocr",
+        "text": "PageProof"
+      },
+      {
+        "index": 22,
+        "role": "batch_ocr",
+        "text": "PageProof in"
+      },
+      {
+        "index": 23,
+        "role": "batch_ocr",
+        "text": "3 minutes"
+      },
+      {
+        "index": 24,
+        "role": "batch_ocr",
+        "text": "PAGEPROOF.COM"
+      },
+      {
+        "index": 25,
+        "role": "batch_ocr",
+        "text": "前往平台观着："
+      },
+      {
+        "index": 26,
+        "role": "batch_ocr",
+        "text": "YouTube"
+      },
+      {
+        "index": 27,
+        "role": "batch_ocr",
+        "text": "supportive team that wants tosee you doyour best work."
+      },
+      {
+        "index": 28,
+        "role": "batch_ocr",
+        "text": "minutes"
+      },
+      {
+        "index": 29,
+        "role": "batch_ocr",
+        "text": "Employer questions"
+      },
+      {
+        "index": 30,
+        "role": "batch_ocr",
+        "text": "Your application will include the following questions:"
+      },
+      {
+        "index": 31,
+        "role": "batch_ocr",
+        "text": "·Which of the following statements best describes your right to work in New Zealand?"
+      },
+      {
+        "index": 32,
+        "role": "batch_ocr",
+        "text": "How manyyears'experience doyou have asa software developer?"
+      },
+      {
+        "index": 33,
+        "role": "batch_ocr",
+        "text": "·How many years of web app development experience do you have?"
+      },
+      {
+        "index": 34,
+        "role": "batch_ocr",
+        "text": "Have youworked inarolewhichrequiresC#development experience?"
+      },
+      {
+        "index": 35,
+        "role": "batch_ocr",
+        "text": "·What's your expected annual basesalary?"
+      },
+      {
+        "index": 36,
+        "role": "batch_ocr",
+        "text": "Be careful"
+      },
+      {
+        "index": 37,
+        "role": "batch_ocr",
+        "text": "Don't provide your bank or credit card details when applying for jobs."
+      },
+      {
+        "index": 38,
+        "role": "batch_ocr",
+        "text": "Learnhowtoprotectyourself"
+      },
+      {
+        "index": 39,
+        "role": "batch_ocr",
+        "text": "Report this job ad"
+      },
+      {
+        "index": 40,
+        "role": "batch_ocr",
+        "text": "What can I earn as a Software Developer"
+      },
+      {
+        "index": 41,
+        "role": "batch_ocr",
+        "text": "Seemo"
+      },
+      {
+        "index": 42,
+        "role": "batch_ocr",
+        "text": "DYouTube"
+      },
+      {
+        "index": 43,
+        "role": "batch_ocr",
+        "text": "Employerquestions"
+      },
+      {
+        "index": 44,
+        "role": "batch_ocr",
+        "text": "Yourapplicationwill includethefollowingquestions:"
+      },
+      {
+        "index": 45,
+        "role": "batch_ocr",
+        "text": "How manyyears'experiencedoyou have asa software developer?"
+      },
+      {
+        "index": 46,
+        "role": "batch_ocr",
+        "text": "·Have you worked in a role which requires C#development experience?"
+      },
+      {
+        "index": 47,
+        "role": "batch_ocr",
+        "text": "·What's yourexpected annual base salary?"
+      },
+      {
+        "index": 48,
+        "role": "batch_ocr",
+        "text": "Becareful"
+      },
+      {
+        "index": 49,
+        "role": "batch_ocr",
+        "text": "Reportthisjobad"
+      },
+      {
+        "index": 50,
+        "role": "batch_ocr",
+        "text": "See more detailed salary information →"
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260627-173456-018753__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260627-173459-504848__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260627-173503-231847__ocr-region__ocr-region.json"
+    ],
+    "detail_batch_status": "ok",
+    "detail_batch_stop_reason": "max_captures",
+    "detail_bottom_reached": false,
+    "detail_batch_unique_line_count": 51,
+    "runtime_detail_dataflow": {
+      "contract_version": "runtime_detail_dataflow_v1",
+      "source_batch_contract": "read_region_batch_v1",
+      "source_batch_status": "ok",
+      "merged_text_line_count": 51,
+      "description_section_count": 51
+    }
+  }
+}

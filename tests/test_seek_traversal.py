@@ -203,3 +203,56 @@ def test_accuracy_summary_detects_wrong_scope_scrolls_and_final_submission_risk(
     assert summary["safety_invariants"]["submit_clicks_zero"] is False
     assert summary["safety_invariants"]["wrong_scope_scrolls_zero"] is False
     assert summary["status"] == "needs_review"
+
+
+def test_accuracy_summary_requires_quality_invariants_not_only_safety() -> None:
+    summary = build_seek_mvp_accuracy_summary(
+        {
+            "jobs_seen": 3,
+            "jobs_opened": 2,
+            "jobs_fully_read": 1,
+            "match_decisions": [{"decision": "maybe_apply"}, {"decision": "need_user_review"}],
+            "submit_clicks": 0,
+            "final_submissions": 0,
+            "traversal_steps": [
+                {"card_click": {"opened": True}},
+                {"card_click": {"opened": False, "failure_reason": "post_click_layout_drift"}},
+                {"card_click": {"opened": True}},
+            ],
+        }
+    )
+
+    assert summary["safety_invariants"]["final_submissions_zero"] is True
+    assert summary["quality_invariants"]["all_attempted_cards_opened"] is False
+    assert summary["quality_invariants"]["opened_jobs_fully_read"] is False
+    assert summary["quality_invariants"]["post_click_layout_drift_zero"] is False
+    assert summary["status"] == "needs_review"
+
+
+def test_accuracy_summary_flags_title_extracted_from_body_as_quality_issue() -> None:
+    summary = build_seek_mvp_accuracy_summary(
+        {
+            "jobs_seen": 1,
+            "jobs_opened": 1,
+            "jobs_fully_read": 1,
+            "match_decisions": [{"decision": "maybe_apply"}],
+            "submit_clicks": 0,
+            "final_submissions": 0,
+            "traversal_steps": [
+                {
+                    "card_click": {
+                        "opened": True,
+                        "post_click_layout": {
+                            "post_click_detail_header": {
+                                "title_extraction_source": "detail_body",
+                            }
+                        },
+                    }
+                }
+            ],
+        }
+    )
+
+    assert summary["title_extraction_from_body_count"] == 1
+    assert summary["quality_invariants"]["title_not_extracted_from_body"] is False
+    assert summary["status"] == "needs_review"

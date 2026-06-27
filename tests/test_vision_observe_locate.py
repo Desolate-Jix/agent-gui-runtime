@@ -124,6 +124,67 @@ def test_observe_screen_wraps_live_capture_and_screen_reading(monkeypatch) -> No
     assert "POST /vision/locate_target" in result["agent_next_steps"][2]
 
 
+def test_observe_screen_learn_mode_outputs_interface_map_with_visual_assets(monkeypatch, tmp_path) -> None:
+    image_path = tmp_path / "seek_detail.png"
+    image = vision_api.Image.new("RGB", (900, 700), "white")
+    draw = vision_api.ImageDraw.Draw(image)
+    draw.rounded_rectangle((520, 360, 660, 408), radius=8, fill=(229, 0, 125))
+    draw.text((548, 375), "Quick apply", fill="white")
+    image.save(image_path)
+    monkeypatch.setattr(
+        vision_api,
+        "_image_path_for_live_or_saved",
+        lambda **_kwargs: (str(image_path), {"image_path": str(image_path), "image_width": 900, "image_height": 700}),
+    )
+    monkeypatch.setattr(vision_api, "write_trace", lambda **_kwargs: "observe-interface-map-trace.json")
+
+    def fake_screen_reading(_request):
+        return APIResponse(
+            success=True,
+            message="ok",
+            data={
+                "result": {
+                    "image_size": {"width": 900, "height": 700},
+                    "state_guess": "seek job detail",
+                    "screen_summary": "A SEEK job detail page with a Quick apply button.",
+                    "screen_reading": {
+                        "ui": {
+                            "elements": [
+                                {
+                                    "id": "quick_apply",
+                                    "label": "Quick apply",
+                                    "type": "button",
+                                    "bbox": {"x": 520, "y": 360, "w": 140, "h": 48},
+                                    "click_point": {"x": 590, "y": 384},
+                                    "confidence": 0.92,
+                                }
+                            ]
+                        }
+                    },
+                }
+            },
+            error=None,
+        )
+
+    monkeypatch.setattr(vision_api, "screen_reading", fake_screen_reading)
+
+    response = vision_api.observe_screen(VisionObserveScreenRequestModel(app_name="seek", learn_depth="fast"))
+
+    assert response.success is True
+    result = response.data["result"]
+    assert result["visual_asset_learning"]["contract_version"] == "visual_asset_learning_v1"
+    assert result["visual_asset_learning"]["summary"]["asset_count"] == 1
+    assert result["learned_interface_map"]["contract_version"] == "learned_interface_map_v1"
+    assert result["learned_interface_map"]["source"]["artifact_is_authorization"] is False
+    fixed_asset = result["learned_interface_map"]["fixed_visual_assets"][0]
+    assert fixed_asset["semantic_action"] == "open_apply_flow"
+    assert fixed_asset["can_authorize_click"] is False
+    assert fixed_asset["source_geometry"]["bbox"] == {"x": 520, "y": 360, "w": 140, "h": 48}
+    assert fixed_asset["source_geometry"]["click_point"] == {"x": 590, "y": 384}
+    assert Path(fixed_asset["template_refs"]["tight_crop_ref"]).exists()
+    assert result["screen_map"]["learned_interface_map_summary"]["fixed_visual_asset_count"] == 1
+
+
 def test_observe_screen_groups_news_cards_from_ocr_text(monkeypatch) -> None:
     monkeypatch.setattr(
         vision_api,

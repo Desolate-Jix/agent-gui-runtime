@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.execute.action_kinds import infer_low_level_action_type
+from app.execute.action_kinds import classify_action_taxonomy, infer_low_level_action_type
 
 
 PATH_GRAPH_ACTION_CONTEXT_CONTRACT = "path_graph_action_context_v1"
@@ -51,6 +51,7 @@ def build_execute_step_plan(
     context = build_path_graph_action_context(graph, action, state_id=state_id)
     transition = _transition_for_action(graph, action_template_id, state_id=state_id)
     low_level_type = infer_low_level_action_type(action_template_id, template)
+    taxonomy = classify_action_taxonomy(action_template_id, template, label=action.get("label"))
     if low_level_type == "scroll":
         low_level_request = _scroll_request(template, action_template_id, context, dry_run=dry_run)
     elif low_level_type == "click":
@@ -68,6 +69,7 @@ def build_execute_step_plan(
         "status": "planned" if low_level_request else "rejected",
         "action_template_id": action_template_id,
         "low_level_action_type": low_level_type,
+        "action_taxonomy": taxonomy,
         "reject_reasons": reject_reasons,
         "path_graph_assisted": bool(graph),
         "artifact_is_authorization": False,
@@ -129,6 +131,7 @@ def _click_request(
 ) -> dict[str, Any]:
     safety_payload = safety if isinstance(safety, dict) else {}
     goal = str(template.get("goal_template") or "Click the selected path graph target")
+    taxonomy = classify_action_taxonomy(context.get("action_template_id") or "", template, label=action.get("label"))
     return {
         "goal": goal,
         "approved_plan_id": action.get("approved_plan_id") or None,
@@ -143,6 +146,7 @@ def _click_request(
             "candidate_constraints": _dict(template.get("candidate_constraints")),
             "verification_policy": _dict(template.get("verification_policy")),
             "forbid_final_submit": safety_payload.get("forbid_final_submit", True),
+            "action_taxonomy": taxonomy,
             "artifact_is_authorization": False,
             "seeded_candidate": _dict(action.get("seeded_candidate")) or _dict(template.get("seeded_candidate")),
         },

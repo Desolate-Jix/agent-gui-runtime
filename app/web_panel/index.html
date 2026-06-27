@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>OpenClaw Console</title>
-    <link rel="stylesheet" href="/panel/assets/panel.css" />
+    <link rel="stylesheet" href="/panel/assets/panel.css?v=20260625-application-layout-4" />
   </head>
   <body>
     <div class="app-shell">
@@ -434,6 +434,18 @@
                   <span data-i18n="runtime_graph_path">Runtime PathGraph path</span>
                   <input id="replayGraphPath" value="artifacts/seek/runtime_path_graph_seek_mvp_20260617.json" />
                 </label>
+                <label class="wide-control">
+                  <span data-i18n="interface_map_path">Interface Map path</span>
+                  <input id="replayInterfaceMapPath" value="artifacts/visual-match-smoke/live_seek_20260624/learned_interface_map_calibrated_real_crops.json" />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="interface_calibration_report_path">Calibration report path</span>
+                  <input id="replayInterfaceCalibrationPath" value="artifacts/visual-match-smoke/live_seek_20260624/visual_asset_calibration_report.json" />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="interface_map_save_name">Edited Interface Map file</span>
+                  <input id="replayInterfaceMapSaveName" value="learned_interface_map_edited.json" />
+                </label>
                 <label>
                   <span data-i18n="task_template">Task template</span>
                   <select id="replayTaskTemplate">
@@ -450,74 +462,87 @@
               </div>
               <div class="button-row">
                 <button id="replayLoadBtn" data-i18n="load_artifact">Load artifact</button>
+                <button id="replayUseCurrentAppMapBtn" data-i18n="use_current_app_map">Use current app map</button>
+                <button id="replayInterfaceMapLoadBtn" data-i18n="load_interface_map">Load interface map</button>
+                <button id="replayInterfaceCalibrationLoadBtn" data-i18n="load_interface_calibration">Load calibration</button>
+                <button id="replayInterfaceMapSaveBtn" data-i18n="save_interface_map">Save interface map</button>
                 <button id="replayUseValidationBtn" data-i18n="use_for_safe_validation">Use for safe validation</button>
                 <button id="replayUseTaskBtn" data-i18n="use_for_task_run">Use for task run</button>
                 <button id="replayValidationPlanBtn" data-i18n="generate_validation_plan">Generate validation plan</button>
                 <button id="replayTaskStepBtn" data-i18n="execute_next_step">Execute next step</button>
               </div>
               <div class="artifact-summary" id="replayGraphSummary"></div>
+              <div class="interface-map-panel" id="replayInterfaceMapPanel"></div>
               <div class="action-table" id="replayGraphActions"></div>
-              <div class="subpanel">
-                <h4 data-i18n="seek_application_evidence">SEEK Application Evidence</h4>
-                <div class="mode-help mode-help-learn" data-mode-scope="learn" data-i18n="seek_application_evidence_hint">Inspect station-internal application fill records, final-review audit, and non-authorizing application-flow artifacts before replay.</div>
-                <div class="form-grid">
-                  <label class="wide-control">
-                    <span data-i18n="application_fill_record_path">Application fill record path</span>
-                    <input id="seekApplicationRecordPath" value="logs/smoke/seek_apply_live_92822270_20260620_b/application_fill_record.json" />
-                  </label>
-                  <label class="wide-control">
-                    <span data-i18n="final_review_audit_path">Final review audit path</span>
-                    <input id="seekApplicationAuditPath" value="logs/smoke/seek_apply_live_92822270_20260620_b/final_review_audit.json" />
-                  </label>
-                  <label class="wide-control">
-                    <span data-i18n="application_flow_artifact_path">Application flow artifact path</span>
-                    <input id="seekApplicationArtifactPath" value="artifacts/seek/learned_seek_application_flow_92822270_20260620.json" />
-                  </label>
-                </div>
-                <div class="button-row">
-                  <button id="seekApplicationEvidenceLoadBtn" data-i18n="load_application_evidence">Load application evidence</button>
-                </div>
-                <div class="run-summary" id="seekApplicationEvidenceSummary"></div>
-                <div class="action-table" id="seekApplicationFilledFields"></div>
-              </div>
-              <div class="subpanel">
-                <h4 data-i18n="regression_suite">Regression Suite</h4>
-                <div class="form-grid">
-                  <label class="wide-control">
-                    <span data-i18n="regression_report_path">Regression report path</span>
-                    <input id="replayRegressionPath" value="logs/smoke/artifact_replay_regression_20260619.json" />
-                  </label>
-                </div>
-                <div class="button-row">
-                  <button id="replayRegressionLoadBtn" data-i18n="load_regression_report">Load regression report</button>
-                </div>
-                <div class="run-summary" id="replayRegressionSummary"></div>
-                <div class="action-table" id="replayRegressionBaselines"></div>
-                <div class="subpanel">
-                  <h4 data-i18n="learn_sample_gate">New Learn Sample Gate</h4>
+              <details class="replay-advanced-tools">
+                <summary>
+                  <span data-i18n="learn_replay_advanced_tools">Advanced diagnostics</span>
+                  <small data-i18n="learn_replay_advanced_tools_hint">Optional tools for debugging traces, replay reports, and learned samples. Daily map review can stay closed.</small>
+                </summary>
+                <div class="replay-advanced-grid">
+                  <div class="subpanel">
+                    <h4 data-i18n="seek_application_evidence">Application fill check</h4>
+                    <div class="mode-help mode-help-learn" data-mode-scope="learn" data-i18n="seek_application_evidence_hint">Optional: inspect what was filled, what the final review saw, and whether the flow stopped before final submit.</div>
+                    <div class="form-grid">
+                      <label class="wide-control">
+                        <span data-i18n="application_fill_record_path">Filled form record</span>
+                        <input id="seekApplicationRecordPath" value="logs/smoke/seek_apply_live_92822270_20260620_b/application_fill_record.json" />
+                      </label>
+                      <label class="wide-control">
+                        <span data-i18n="final_review_audit_path">Final review file</span>
+                        <input id="seekApplicationAuditPath" value="logs/smoke/seek_apply_live_92822270_20260620_b/final_review_audit.json" />
+                      </label>
+                      <label class="wide-control">
+                        <span data-i18n="application_flow_artifact_path">Application flow map</span>
+                        <input id="seekApplicationArtifactPath" value="artifacts/seek/learned_seek_application_flow_92822270_20260620.json" />
+                      </label>
+                    </div>
+                    <div class="button-row">
+                      <button id="seekApplicationEvidenceLoadBtn" data-i18n="load_application_evidence">Load fill check</button>
+                    </div>
+                    <div class="run-summary" id="seekApplicationEvidenceSummary"></div>
+                    <div class="action-table" id="seekApplicationFilledFields"></div>
+                  </div>
+                  <div class="subpanel">
+                    <h4 data-i18n="regression_suite">Regression check</h4>
+                    <div class="form-grid">
+                      <label class="wide-control">
+                        <span data-i18n="regression_report_path">Regression report file</span>
+                        <input id="replayRegressionPath" value="logs/smoke/artifact_replay_regression_20260619.json" />
+                      </label>
+                    </div>
+                    <div class="button-row">
+                      <button id="replayRegressionLoadBtn" data-i18n="load_regression_report">Load regression check</button>
+                    </div>
+                    <div class="run-summary" id="replayRegressionSummary"></div>
+                    <div class="action-table" id="replayRegressionBaselines"></div>
+                  </div>
+                  <div class="subpanel">
+                    <h4 data-i18n="learn_sample_gate">New sample check</h4>
                   <div class="form-grid">
                     <label class="wide-control">
-                      <span data-i18n="learn_sample_gate_path">Readiness gate path</span>
+                      <span data-i18n="learn_sample_gate_path">Sample check file</span>
                       <input id="learnSampleGatePath" value="logs/smoke/learn_sample_readiness_gate_20260619.json" />
                     </label>
                   </div>
                   <div class="button-row">
-                    <button id="learnSampleGateLoadBtn" data-i18n="load_learn_sample_gate">Load readiness gate</button>
+                    <button id="learnSampleGateLoadBtn" data-i18n="load_learn_sample_gate">Load sample check</button>
                   </div>
                   <div class="run-summary" id="learnSampleGateSummary"></div>
                 </div>
-              </div>
-              <div class="subpanel">
-                <h4 data-i18n="safe_validation_replay">Safe validation replay</h4>
-                <div class="run-summary" id="replayValidationSummary"></div>
-                <div class="action-table" id="replayValidationActions"></div>
-                <div class="run-timeline" id="replayValidationTimeline"></div>
-              </div>
-              <div class="subpanel">
-                <h4 data-i18n="task_run_replay">Task run replay</h4>
-                <div class="run-summary" id="replayTaskRunSummary"></div>
-                <div class="run-timeline" id="replayTaskRunTimeline"></div>
-              </div>
+                  <div class="subpanel">
+                    <h4 data-i18n="safe_validation_replay">Safety replay result</h4>
+                    <div class="run-summary" id="replayValidationSummary"></div>
+                    <div class="action-table" id="replayValidationActions"></div>
+                    <div class="run-timeline" id="replayValidationTimeline"></div>
+                  </div>
+                  <div class="subpanel">
+                    <h4 data-i18n="task_run_replay">Task replay result</h4>
+                    <div class="run-summary" id="replayTaskRunSummary"></div>
+                    <div class="run-timeline" id="replayTaskRunTimeline"></div>
+                  </div>
+                </div>
+              </details>
             </section>
 
             <section class="panel stage-page" data-page="execute_task_run">
@@ -754,7 +779,7 @@
         </div>
       </div>
     </div>
-    <script src="/panel/assets/panel.js"></script>
+    <script src="/panel/assets/panel.js?v=20260625-application-layout-4"></script>
   </body>
 </html>
 

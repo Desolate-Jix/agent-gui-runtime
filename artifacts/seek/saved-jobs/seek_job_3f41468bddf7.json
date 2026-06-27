@@ -1,0 +1,345 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_3f41468bddf7",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "maybe_apply",
+    "score": 0.6,
+    "job_id": "seek_job_3f41468bddf7",
+    "title": "SeniorWebSoftware Engineer",
+    "company": "Serato Limited",
+    "fit_summary": "maybe_apply with score 0.600. positive: matched_target_roles: Software Engineer; location_matches: Ponsonby, Auckland; matched_preferred_work_modes: hybrid, remote. needs review: no candidate skills matched visible job detail.",
+    "recommended_next_action": "review_then_optionally_open_apply_entry",
+    "positive_evidence": [
+      "matched_target_roles: Software Engineer",
+      "location_matches: Ponsonby, Auckland",
+      "matched_preferred_work_modes: hybrid, remote"
+    ],
+    "negative_evidence": [],
+    "unknowns": [
+      "no candidate skills matched visible job detail"
+    ],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_9bb7a03436f6",
+    "title": "SeniorWebSoftware Engineer",
+    "company": "Serato Limited",
+    "location": "Ponsonby, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": "SeniorWebSoftware Engineer",
+    "card_bbox": {
+      "x": 653,
+      "y": 553,
+      "w": 254,
+      "h": 165
+    },
+    "click_point": {
+      "x": 781,
+      "y": 564
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_10",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_35_seniorwebsoftware-engineer",
+      "page_text_38_serato-limited",
+      "page_text_40_ponsonby-auckland",
+      "page_text_41_great-company-culture",
+      "page_text_43_health-insurance-benefits",
+      "page_text_44_opportunity-for-hybrid-work"
+    ],
+    "evidence": {
+      "texts": [
+        "SeniorWebSoftware Engineer",
+        "Serato Limited",
+        "Ponsonby, Auckland",
+        "Great company culture",
+        "Health insurance benefits",
+        "·Opportunity for hybrid work"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": false,
+        "has_salary": false
+      }
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_3f41468bddf7",
+    "title": "SeniorWebSoftware Engineer",
+    "company": "Serato Limited",
+    "location": "Ponsonby, Auckland",
+    "work_type": "Remote v",
+    "classification": "SeniorWebSoftwareEngineer",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "Type v"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "Remote v"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Classification"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "Listing time"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "serato"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "SeniorWebSoftwareEngineer"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "Serato Limited View all jobs"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Ponsonby, Auckland"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Web Development &Production (Information &Communication Technology)"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "Posted 19h ago · Medium application volume"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "Quick apply"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "4 skills and credentials match your profile"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "JavaScript Programming"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "Typescript Programming Language"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "SQLQuery Language+1 more"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "AboutSerato"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "Serato is a world leader in audio software for professional DJs and musicians. Our"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "products are used by world-renowned artists such as Disclosure,Timbaland,Metro"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "Boomin, Snoop Dogg, and DJ Snake. With a 25-year history of innovation and pushing the"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "boundaries of technology in the music industry,we continue to be aleader in DJ and"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "music production software."
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "We're a team of passionate individuals based in central Auckland. We are looking fora"
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "development team. In this role, you will be a key technical contributor, instrumental in the"
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "architecture, design,and implementation of our web applications and services.Youll"
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "leverage your deep expertise in modern web technologies to build reliable,performant,"
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "and scalable platforms that serve our global community of artists."
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "WhatYou'll Do"
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "As aSenior Web Software Engineer,you'll be ahands-on technical expert responsible for"
+      },
+      {
+        "index": 31,
+        "role": "section_hint",
+        "text": "building and enhancing our web platforms. Your key responsibilities willinclude:"
+      },
+      {
+        "index": 32,
+        "role": "body",
+        "text": "·SystemDesign&Architecture:Takealeadling role in thedesign and implementation of"
+      },
+      {
+        "index": 33,
+        "role": "body",
+        "text": "scalable and highly available web applications.You'll contribute tokey architectural"
+      },
+      {
+        "index": 34,
+        "role": "body",
+        "text": "Web Development &Production (Information&Communication Technology)"
+      },
+      {
+        "index": 35,
+        "role": "body",
+        "text": "As aSenior WebSoftware Engineer,you'llbe ahands-on technical expert responsible for"
+      }
+    ],
+    "requirements": [
+      "4 skills and credentials match your profile"
+    ],
+    "responsibilities": [
+      "development team. In this role, you will be a key technical contributor, instrumental in the",
+      "building and enhancing our web platforms. Your key responsibilities willinclude:",
+      "·SystemDesign&Architecture:Takealeadling role in thedesign and implementation of"
+    ],
+    "benefits": [
+      "Remote v"
+    ],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply",
+      "bbox": {
+        "x": 1191,
+        "y": 542,
+        "w": 104,
+        "h": 29
+      },
+      "click_point": {
+        "x": 1243,
+        "y": 556
+      }
+    },
+    "save_button_state": {
+      "visible": false,
+      "label": null,
+      "bbox": null
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 1134,
+        "y": 280,
+        "w": 896,
+        "h": 1104
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false,
+        "content_left": 530,
+        "content_width": 1500
+      },
+      "safe_points": [
+        {
+          "x": 1582,
+          "y": 832,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 1134,
+      "y": 60,
+      "w": 896,
+      "h": 1324
+    },
+    "detail_bottom_reached": false,
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260623-044923-926469__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260623-045104-373142__observe-screen__edge.json"
+    ]
+  }
+}

@@ -76,6 +76,36 @@ def test_profile_match_scores_and_saves_suitable_job(tmp_path) -> None:
     assert saved["decision"]["decision"] == "strong_apply"
 
 
+def test_description_sections_contribute_to_profile_match() -> None:
+    decision = score_seek_job(
+        profile={
+            "contract_version": "candidate_profile_v1",
+            "skills": ["C#", ".NET", "integration"],
+            "target_roles": ["Software Engineer"],
+            "location_constraints": ["Auckland"],
+        },
+        card={**_card(), "title": "Software Engineer Specialist - Integration"},
+        detail={
+            **_detail(),
+            "title": "Software Engineer Specialist - Integration",
+            "requirements": [],
+            "responsibilities": [],
+            "benefits": [],
+            "evidence": {"texts": []},
+            "description_sections": [
+                {
+                    "index": 0,
+                    "role": "batch_ocr",
+                    "text": "You bring strong experience in integration or C# .NET development.",
+                }
+            ],
+        },
+    )
+
+    assert decision["decision"] == "strong_apply"
+    assert any("C#" in item and ".NET" in item for item in decision["positive_evidence"])
+
+
 def test_profile_match_normalizes_ai_and_api_ocr_variants() -> None:
     detail = {
         **_detail(),
@@ -260,6 +290,159 @@ def test_work_rights_or_background_check_terms_require_review() -> None:
     assert decision["decision"] == "need_user_review"
     assert "work_rights_or_background_check_requires_review" in decision["risk_flags"]
     assert any("work_rights_or_background_check_requires_review" in item for item in decision["unknowns"])
+
+
+def test_many_years_experience_requirement_skips_even_with_matching_skills() -> None:
+    detail = {
+        **_detail(),
+        "title": "Senior Web Software Engineer",
+        "requirements": [
+            "7+ years of professional experience in web development.",
+            "Extensive hands-on experience with JavaScript, TypeScript, RESTful APIs and SQL.",
+        ],
+        "responsibilities": ["Take a leading role in architecture and mentor other engineers."],
+    }
+
+    decision = score_seek_job(
+        profile={
+            "contract_version": "candidate_profile_v1",
+            "skills": ["JavaScript", "TypeScript", "SQL", "API"],
+            "target_roles": ["Software Engineer"],
+            "location_constraints": ["Auckland"],
+        },
+        card={**_card(), "title": "Senior Web Software Engineer"},
+        detail=detail,
+    )
+
+    assert decision["decision"] == "skip"
+    assert decision["score"] == 0.0
+    assert "experience_requirement_exceeds_profile_stage" in decision["risk_flags"]
+    assert any("experience_hard_skip: requires 7+ years" in item for item in decision["negative_evidence"])
+
+
+def test_two_plus_years_experience_requirement_skips_even_with_matching_skills() -> None:
+    detail = {
+        **_detail(),
+        "requirements": [
+            "2+ years of commercial web development experience.",
+            "React, JavaScript and SQL experience.",
+        ],
+    }
+
+    decision = score_seek_job(
+        profile={
+            "contract_version": "candidate_profile_v1",
+            "skills": ["React", "JavaScript", "SQL"],
+            "target_roles": ["Software Engineer"],
+            "location_constraints": ["Auckland"],
+        },
+        card=_card(),
+        detail=detail,
+    )
+
+    assert decision["decision"] == "skip"
+    assert decision["score"] == 0.0
+    assert "experience_requirement_exceeds_profile_stage" in decision["risk_flags"]
+    assert any("experience_hard_skip: requires 2+ years" in item for item in decision["negative_evidence"])
+
+
+def test_three_plus_years_experience_requirement_skips_even_with_matching_skills() -> None:
+    detail = {
+        **_detail(),
+        "requirements": [
+            "3+ years of commercial web development experience.",
+            "React, JavaScript and SQL experience.",
+        ],
+    }
+
+    decision = score_seek_job(
+        profile={
+            "contract_version": "candidate_profile_v1",
+            "skills": ["React", "JavaScript", "SQL"],
+            "target_roles": ["Software Engineer"],
+            "location_constraints": ["Auckland"],
+        },
+        card=_card(),
+        detail=detail,
+    )
+
+    assert decision["decision"] == "skip"
+    assert decision["score"] == 0.0
+    assert "experience_requirement_exceeds_profile_stage" in decision["risk_flags"]
+    assert any("experience_hard_skip: requires 3+ years" in item for item in decision["negative_evidence"])
+
+
+def test_three_to_five_years_experience_range_skips_even_with_matching_skills() -> None:
+    detail = {
+        **_detail(),
+        "requirements": [
+            "3-5 years of commercial web development experience.",
+            "React, JavaScript and SQL experience.",
+        ],
+    }
+
+    decision = score_seek_job(
+        profile={
+            "contract_version": "candidate_profile_v1",
+            "skills": ["React", "JavaScript", "SQL"],
+            "target_roles": ["Software Engineer"],
+            "location_constraints": ["Auckland"],
+        },
+        card=_card(),
+        detail=detail,
+    )
+
+    assert decision["decision"] == "skip"
+    assert decision["score"] == 0.0
+    assert "experience_requirement_exceeds_profile_stage" in decision["risk_flags"]
+    assert any("experience_hard_skip: requires 3-5 years" in item for item in decision["negative_evidence"])
+
+
+def test_one_to_two_years_experience_range_requires_review_not_skip() -> None:
+    detail = {
+        **_detail(),
+        "requirements": [
+            "1-2 years of commercial web development experience.",
+            "React, JavaScript and SQL experience.",
+        ],
+    }
+
+    decision = score_seek_job(
+        profile={
+            "contract_version": "candidate_profile_v1",
+            "skills": ["React", "JavaScript", "SQL"],
+            "target_roles": ["Software Engineer"],
+            "location_constraints": ["Auckland"],
+        },
+        card=_card(),
+        detail=detail,
+    )
+
+    assert decision["decision"] == "need_user_review"
+    assert "experience_requirement_requires_review" in decision["risk_flags"]
+    assert any("experience_requires_review: requires 1-2 years" in item for item in decision["unknowns"])
+
+
+def test_senior_title_with_architecture_signal_requires_review() -> None:
+    decision = score_seek_job(
+        profile={
+            "contract_version": "candidate_profile_v1",
+            "skills": ["React", "JavaScript", "SQL"],
+            "target_roles": ["Software Engineer"],
+            "location_constraints": ["Auckland"],
+        },
+        card={**_card(), "title": "Senior Software Engineer"},
+        detail={
+            **_detail(),
+            "title": "Senior Software Engineer",
+            "requirements": ["React, JavaScript and SQL experience."],
+            "responsibilities": ["Take a leading role in architecture decisions and mentor other engineers."],
+        },
+    )
+
+    assert decision["decision"] == "need_user_review"
+    assert "experience_requirement_requires_review" in decision["risk_flags"]
+    assert any("senior role with architecture or leadership signals" in item for item in decision["unknowns"])
 
 
 def test_card_identity_repairs_compact_ocr_title_and_missing_location(tmp_path) -> None:

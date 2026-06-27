@@ -1,0 +1,390 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_c65f37b2cb1a",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "maybe_apply",
+    "score": 0.56,
+    "job_id": null,
+    "title": null,
+    "company": null,
+    "fit_summary": "maybe_apply with score 0.560. positive: matched_skills: SQL, AI, Backend, Git. needs review: job location missing; preferred work mode not visible in job detail.",
+    "recommended_next_action": "review_then_optionally_open_apply_entry",
+    "positive_evidence": [
+      "matched_skills: SQL, AI, Backend, Git"
+    ],
+    "negative_evidence": [],
+    "unknowns": [
+      "job location missing",
+      "preferred work mode not visible in job detail"
+    ],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {},
+  "detail": {
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "batch_ocr",
+        "text": "3"
+      },
+      {
+        "index": 1,
+        "role": "batch_ocr",
+        "text": "10"
+      },
+      {
+        "index": 2,
+        "role": "batch_ocr",
+        "text": "& Communication Technology)"
+      },
+      {
+        "index": 3,
+        "role": "batch_ocr",
+        "text": "vouchers, WFH+"
+      },
+      {
+        "index": 4,
+        "role": "batch_ocr",
+        "text": "e"
+      },
+      {
+        "index": 5,
+        "role": "batch_ocr",
+        "text": "file"
+      },
+      {
+        "index": 6,
+        "role": "batch_ocr",
+        "text": "But I think Plexure does things 前往平台观看："
+      },
+      {
+        "index": 7,
+        "role": "batch_ocr",
+        "text": "YouTube"
+      },
+      {
+        "index": 8,
+        "role": "batch_ocr",
+        "text": "ineers (either Intermediate or Senior) to join the Plexure team based in"
+      },
+      {
+        "index": 9,
+        "role": "batch_ocr",
+        "text": "aaS company at an exciting point in our growth journey! You'll"
+      },
+      {
+        "index": 10,
+        "role": "batch_ocr",
+        "text": "f lovely benefits (more on those below)."
+      },
+      {
+        "index": 11,
+        "role": "batch_ocr",
+        "text": "experience and drives results through personalized mobile"
+      },
+      {
+        "index": 12,
+        "role": "batch_ocr",
+        "text": "oyalty programs for household names such as McDonald's."
+      },
+      {
+        "index": 13,
+        "role": "batch_ocr",
+        "text": "engagement data platform has over 300 million users in 60+ countries"
+      },
+      {
+        "index": 14,
+        "role": "batch_ocr",
+        "text": "m Lead, you'll contribute to the design, development, and"
+      },
+      {
+        "index": 15,
+        "role": "batch_ocr",
+        "text": "utions:"
+      },
+      {
+        "index": 16,
+        "role": "batch_ocr",
+        "text": "ons that shape reliable, scalable systems."
+      },
+      {
+        "index": 17,
+        "role": "batch_ocr",
+        "text": "timize backend systems for performance and reliability."
+      },
+      {
+        "index": 18,
+        "role": "batch_ocr",
+        "text": "s and automated testing to streamline deployments."
+      },
+      {
+        "index": 19,
+        "role": "batch_ocr",
+        "text": "d provide constructive feedback to peers."
+      },
+      {
+        "index": 20,
+        "role": "batch_ocr",
+        "text": "d to alerts, and support stabilisation as new features go live."
+      },
+      {
+        "index": 21,
+        "role": "batch_ocr",
+        "text": "ering environment, using Al tools to help define specifications,"
+      },
+      {
+        "index": 22,
+        "role": "batch_ocr",
+        "text": "late code, improve workflows, and support high-quality engineering"
+      },
+      {
+        "index": 23,
+        "role": "batch_ocr",
+        "text": "Git, SQL, OAuth/OpenID Connect, Azure DevOps, YAML, Bicep and"
+      },
+      {
+        "index": 24,
+        "role": "batch_ocr",
+        "text": "of a friendly, supportive, and inclusive team within an organisation that"
+      },
+      {
+        "index": 25,
+        "role": "batch_ocr",
+        "text": "oment!"
+      },
+      {
+        "index": 26,
+        "role": "batch_ocr",
+        "text": "eering squads:"
+      },
+      {
+        "index": 27,
+        "role": "batch_ocr",
+        "text": "n a Non-Repeatable Rewards project, introducing more sophisticated"
+      },
+      {
+        "index": 28,
+        "role": "batch_ocr",
+        "text": "redemption limits and time-based restrictions."
+      },
+      {
+        "index": 29,
+        "role": "batch_ocr",
+        "text": "0 a broader pipeline of loyalty and rewards initiatives, delivering"
+      },
+      {
+        "index": 30,
+        "role": "batch_ocr",
+        "text": "pabilities that support loyalty experiences at global scale."
+      },
+      {
+        "index": 31,
+        "role": "batch_ocr",
+        "text": "strengthening Plexure's identity and authentication platform,"
+      },
+      {
+        "index": 32,
+        "role": "batch_ocr",
+        "text": "ion, fraud detection, and broader platform security."
+      },
+      {
+        "index": 33,
+        "role": "batch_ocr",
+        "text": "ng a new highly available Identity Provider (IDP) platform from the"
+      },
+      {
+        "index": 34,
+        "role": "batch_ocr",
+        "text": "on, authorisation, login flows, and identity management."
+      },
+      {
+        "index": 35,
+        "role": "batch_ocr",
+        "text": "contribute to related security and platform initiatives, including"
+      },
+      {
+        "index": 36,
+        "role": "batch_ocr",
+        "text": "on, third-party security integrations, and cloud-native infrastructure"
+      },
+      {
+        "index": 37,
+        "role": "batch_ocr",
+        "text": "nent."
+      },
+      {
+        "index": 38,
+        "role": "batch_ocr",
+        "text": "nments (infrastructure or Cl/CD experience would be a plus!)."
+      },
+      {
+        "index": 39,
+        "role": "batch_ocr",
+        "text": "velopmenttools."
+      },
+      {
+        "index": 40,
+        "role": "batch_ocr",
+        "text": "rking collaboratively and tackling challenges as part of a team."
+      },
+      {
+        "index": 41,
+        "role": "batch_ocr",
+        "text": "and developing your skillset."
+      },
+      {
+        "index": 42,
+        "role": "batch_ocr",
+        "text": "ach year + a paid day off in the month of your birthday."
+      },
+      {
+        "index": 43,
+        "role": "batch_ocr",
+        "text": "d support- Receive ongoing coaching from your Engineering Team"
+      },
+      {
+        "index": 44,
+        "role": "batch_ocr",
+        "text": "g budget to use towards upskilling yourself!"
+      },
+      {
+        "index": 45,
+        "role": "batch_ocr",
+        "text": "ll give you a one off payment of $ 1,ooo to help you get set up at"
+      },
+      {
+        "index": 46,
+        "role": "batch_ocr",
+        "text": "staff discounts at PB Tech to help your dollars go further."
+      },
+      {
+        "index": 47,
+        "role": "batch_ocr",
+        "text": "ourself and discounts for family members (Southern Cross - Wellbeing"
+      },
+      {
+        "index": 48,
+        "role": "batch_ocr",
+        "text": "insurance and illness or injury income protection too."
+      },
+      {
+        "index": 49,
+        "role": "batch_ocr",
+        "text": "lunch or dinner in one of Sky City's restaurants (twice a year!) + you'll"
+      },
+      {
+        "index": 50,
+        "role": "batch_ocr",
+        "text": "pressing left to do on a Friday arvo, finish up at 1:0Opm (December -"
+      },
+      {
+        "index": 51,
+        "role": "batch_ocr",
+        "text": "se from more than 200,000 available courses online!"
+      },
+      {
+        "index": 52,
+        "role": "batch_ocr",
+        "text": "as EAP services through Workplace Options."
+      },
+      {
+        "index": 53,
+        "role": "batch_ocr",
+        "text": "across the business and have gained a lot of exposure to different"
+      },
+      {
+        "index": 54,
+        "role": "batch_ocr",
+        "text": "edge technology. It is great to work with different technologies.\""
+      },
+      {
+        "index": 55,
+        "role": "batch_ocr",
+        "text": "k you do. I receive recognition from my leadership, peers and clients."
+      },
+      {
+        "index": 56,
+        "role": "batch_ocr",
+        "text": ": have people from all over the world! We work hard but also like to"
+      },
+      {
+        "index": 57,
+        "role": "batch_ocr",
+        "text": "vices"
+      },
+      {
+        "index": 58,
+        "role": "batch_ocr",
+        "text": "mer engagement data platform captures, analyzes, and"
+      },
+      {
+        "index": 59,
+        "role": "batch_ocr",
+        "text": "ng behavior. This foundation sets the stage for Plexure's deep"
+      },
+      {
+        "index": 60,
+        "role": "batch_ocr",
+        "text": "tralized content management, CRM and messaging integration.."
+      },
+      {
+        "index": 61,
+        "role": "batch_ocr",
+        "text": "ness"
+      },
+      {
+        "index": 62,
+        "role": "batch_ocr",
+        "text": "●Hospitality"
+      },
+      {
+        "index": 63,
+        "role": "batch_ocr",
+        "text": "·Insurance"
+      },
+      {
+        "index": 64,
+        "role": "batch_ocr",
+        "text": "·WFH Flexibility"
+      },
+      {
+        "index": 65,
+        "role": "batch_ocr",
+        "text": "· Parking"
+      },
+      {
+        "index": 66,
+        "role": "batch_ocr",
+        "text": "rd details when applying for jobs."
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-231129-197997__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-231134-502545__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-231140-064507__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-231144-226925__ocr-region__ocr-region.json"
+    ],
+    "detail_batch_status": "ok",
+    "detail_batch_stop_reason": "max_captures",
+    "detail_bottom_reached": false,
+    "detail_batch_unique_line_count": 67,
+    "runtime_detail_dataflow": {
+      "contract_version": "runtime_detail_dataflow_v1",
+      "source_batch_contract": "read_region_batch_v1",
+      "source_batch_status": "ok",
+      "merged_text_line_count": 67,
+      "description_section_count": 67
+    },
+    "runtime_detail_snapshot": {
+      "contract_version": "runtime_detail_snapshot_v1",
+      "source": "read_region_batch",
+      "revision": 1,
+      "previous_snapshot_id": null,
+      "snapshot_id": "ac9a27c7e27ded72"
+    }
+  }
+}

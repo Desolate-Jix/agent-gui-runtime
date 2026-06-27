@@ -1,0 +1,148 @@
+{
+  "contract_version": "visual_asset_calibration_report_v1",
+  "interface_map_path": "artifacts\\visual-match-smoke\\live_seek_20260624\\live_quick_apply_button\\learned_interface_map_live_quick_apply.json",
+  "target_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\graduate-software-jobs-in-all-auckland-job-vacancies-jun-2026-seek-micr-06bf33e0__capture__full-window__20260624-231504-408645.png",
+  "artifact_dir": "artifacts\\visual-match-smoke\\live_seek_20260624\\live_quick_apply_button\\matches",
+  "case_count": 1,
+  "summary": {
+    "case_count": 1,
+    "matched_count": 1,
+    "fast_lane_success_count": 1,
+    "high_risk_match_count": 0,
+    "wrong_match_count": 0,
+    "final_submit_fast_lane_count": 0,
+    "final_submissions": 0,
+    "median_visual_recall_ms": 125.529,
+    "max_visual_recall_ms": 125.529,
+    "status": "pass"
+  },
+  "matches": [
+    {
+      "contract_version": "visual_asset_match_v1",
+      "asset_id": "seek:visual:quick_apply_button_live",
+      "label": "Quick apply",
+      "semantic_action": "open_apply_flow",
+      "template_path": "artifacts\\visual-match-smoke\\live_seek_20260624\\live_quick_apply_button\\seek_quick_apply_button.tight.png",
+      "target_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\graduate-software-jobs-in-all-auckland-job-vacancies-jun-2026-seek-micr-06bf33e0__capture__full-window__20260624-231504-408645.png",
+      "allowed_region": {
+        "x": 1120,
+        "y": 320,
+        "w": 820,
+        "h": 1030,
+        "container_id": "job_detail"
+      },
+      "current_roi_ref": "artifacts\\visual-match-smoke\\live_seek_20260624\\live_quick_apply_button\\matches\\seek_visual_quick_apply_button_live.current_roi.png",
+      "current_match_ref": "artifacts\\visual-match-smoke\\live_seek_20260624\\live_quick_apply_button\\matches\\seek_visual_quick_apply_button_live.current_match.png",
+      "match_score": 1.0,
+      "min_score": 0.88,
+      "score_gap_to_second": 0.642958,
+      "min_score_gap": 0.05,
+      "threshold_ok": true,
+      "score_gap_ok": true,
+      "scope_ok": true,
+      "matched": true,
+      "ambiguous": false,
+      "bbox": {
+        "x": 1162,
+        "y": 1056,
+        "w": 161,
+        "h": 64
+      },
+      "click_point": {
+        "x": 1242,
+        "y": 1088
+      },
+      "scale": 1.0,
+      "match_method": "gray_template",
+      "top_candidates": [
+        {
+          "score": 1.0,
+          "bbox": {
+            "x": 1162,
+            "y": 1056,
+            "w": 161,
+            "h": 64
+          },
+          "scale": 1.0,
+          "method": "gray_template"
+        },
+        {
+          "score": 0.357042,
+          "bbox": {
+            "x": 1450,
+            "y": 592,
+            "w": 145,
+            "h": 58
+          },
+          "scale": 0.9,
+          "method": "edge_template"
+        },
+        {
+          "score": 0.357042,
+          "bbox": {
+            "x": 1382,
+            "y": 592,
+            "w": 145,
+            "h": 58
+          },
+          "scale": 0.9,
+          "method": "edge_template"
+        }
+      ],
+      "elapsed_ms": 125.529,
+      "can_authorize_click": false,
+      "candidate_freshness": {
+        "contract_version": "action_candidate_freshness_v1",
+        "capture_id": "live-seek-quick-apply",
+        "viewport_size": {
+          "width": 2560,
+          "height": 1400
+        },
+        "source": "visual_asset_match_v1",
+        "freshness": "current_capture"
+      },
+      "candidate": {
+        "contract_version": "seeded_candidate_v1",
+        "source": "visual_asset_match_v1",
+        "candidate_id": "visual_asset_seek:visual:quick_apply_button_live",
+        "role": "button",
+        "label": "Quick apply",
+        "container_id": "job_detail",
+        "bbox": {
+          "x": 1162,
+          "y": 1056,
+          "w": 161,
+          "h": 64
+        },
+        "click_point": {
+          "x": 1242,
+          "y": 1088
+        },
+        "risk_class": "safe_open_apply_flow",
+        "expected_effect": "open_apply_flow",
+        "candidate_freshness": {
+          "contract_version": "action_candidate_freshness_v1",
+          "capture_id": "live-seek-quick-apply",
+          "viewport_size": {
+            "width": 2560,
+            "height": 1400
+          },
+          "source": "visual_asset_match_v1",
+          "freshness": "current_capture"
+        }
+      },
+      "calibration": {
+        "contract_version": "visual_asset_calibration_decision_v1",
+        "matched": true,
+        "semantic_action": "open_apply_flow",
+        "danger_level": "flow_entry",
+        "is_high_risk": false,
+        "fast_lane_allowed": true,
+        "requires_review": false,
+        "can_authorize_click": false,
+        "reason": "low_risk_fast_lane_candidate"
+      }
+    }
+  ],
+  "artifact_is_authorization": false
+}

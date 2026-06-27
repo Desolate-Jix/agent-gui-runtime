@@ -12,18 +12,175 @@ from app.api.action import type_text as dispatch_type_text
 from app.core.runtime_artifacts import RuntimeTimer, write_trace
 from app.execute.available_actions import build_available_actions
 from app.execute.path_graph_step import build_execute_step_plan
+from app.execute.read_region_batch import build_read_region_batch_report
+from app.execute.ui_diff_verification import build_ui_diff_verification
 from app.learn.path_graph_resolver import resolve_runtime_path_graph
 from app.models.request import (
     AvailableActionsRequest,
+    ExecuteFormInventoryRequest,
+    ExecuteObserveRequest,
+    ExecuteReadRegionBatchRequest,
     ExecuteRecognitionPlanRequest,
     ExecuteStepRequest,
+    ExecuteVerifyDiffRequest,
     ScrollRequest,
     TypeTextRequest,
 )
 from app.models.response import APIResponse, ErrorModel
+from app.seek.execute_observation import build_seek_execute_observation
+from app.seek.form_inventory import build_seek_form_field_inventory
 
 
 router = APIRouter(prefix="/execute", tags=["execute"])
+
+
+@router.post("/observe", response_model=APIResponse)
+def execute_observe(request: ExecuteObserveRequest) -> APIResponse:
+    timer = RuntimeTimer()
+    try:
+        with timer.step("build_execute_observation", app_id=request.app_id):
+            if str(request.app_id or "").casefold() in {"seek", "nz.seek.com", "seek.co.nz"}:
+                result = build_seek_execute_observation(
+                    request.observation,
+                    application_flow_state=request.application_flow_state,
+                )
+            else:
+                result = _generic_execute_observation(request)
+        result["timings"] = timer.to_dict()
+        trace_path = write_trace(
+            category="execute",
+            operation="execute_observe",
+            payload={"success": True, "request": request.model_dump(), "result": result},
+            name_hint=request.app_id or result.get("page_state") or "execute_observe",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Execute observation built", data=result, error=None)
+    except Exception as exc:
+        timings = timer.to_dict()
+        trace_path = write_trace(
+            category="execute",
+            operation="execute_observe",
+            payload={"success": False, "request": request.model_dump(), "error": str(exc), "timings": timings},
+            name_hint=request.app_id or "execute_observe",
+        )
+        return APIResponse(
+            success=False,
+            message="Execute observation failed",
+            data={"trace_path": trace_path, "timings": timings},
+            error=ErrorModel(code="execute_observe_failed", details=str(exc)),
+        )
+
+
+@router.post("/verify_diff", response_model=APIResponse)
+def verify_diff(request: ExecuteVerifyDiffRequest) -> APIResponse:
+    timer = RuntimeTimer()
+    try:
+        with timer.step("build_ui_diff_verification", expected_change=request.expected_change):
+            result = build_ui_diff_verification(
+                request.before_image,
+                request.after_image,
+                expected_change=request.expected_change,
+                target_bbox=request.target_bbox.model_dump() if request.target_bbox else None,
+            )
+        result["timings"] = timer.to_dict()
+        trace_path = write_trace(
+            category="execute",
+            operation="verify_diff",
+            payload={"success": True, "request": request.model_dump(), "result": result},
+            name_hint=request.expected_change or "verify_diff",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Diff verification completed", data=result, error=None)
+    except Exception as exc:
+        timings = timer.to_dict()
+        trace_path = write_trace(
+            category="execute",
+            operation="verify_diff",
+            payload={"success": False, "request": request.model_dump(), "error": str(exc), "timings": timings},
+            name_hint=request.expected_change or "verify_diff",
+        )
+        return APIResponse(
+            success=False,
+            message="Diff verification failed",
+            data={"trace_path": trace_path, "timings": timings},
+            error=ErrorModel(code="verify_diff_failed", details=str(exc)),
+        )
+
+
+@router.post("/read_region_batch", response_model=APIResponse)
+def read_region_batch(request: ExecuteReadRegionBatchRequest) -> APIResponse:
+    timer = RuntimeTimer()
+    try:
+        with timer.step("build_read_region_batch_report", target_container_id=request.target_container_id):
+            result = build_read_region_batch_report(
+                target_container_id=request.target_container_id,
+                target_bbox=request.target_bbox,
+                captures=request.captures,
+                max_captures=request.max_captures,
+                stop_after_no_new_content=request.stop_after_no_new_content,
+                wrong_scope_detected=request.wrong_scope_detected,
+            )
+        result["timings"] = timer.to_dict()
+        trace_path = write_trace(
+            category="execute",
+            operation="read_region_batch",
+            payload={"success": True, "request": request.model_dump(), "result": result},
+            name_hint=request.target_container_id,
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Region batch read merged", data=result, error=None)
+    except Exception as exc:
+        timings = timer.to_dict()
+        trace_path = write_trace(
+            category="execute",
+            operation="read_region_batch",
+            payload={"success": False, "request": request.model_dump(), "error": str(exc), "timings": timings},
+            name_hint=request.target_container_id,
+        )
+        return APIResponse(
+            success=False,
+            message="Region batch read failed",
+            data={"trace_path": trace_path, "timings": timings},
+            error=ErrorModel(code="read_region_batch_failed", details=str(exc)),
+        )
+
+
+@router.post("/form_inventory", response_model=APIResponse)
+def form_inventory(request: ExecuteFormInventoryRequest) -> APIResponse:
+    timer = RuntimeTimer()
+    try:
+        with timer.step("build_form_field_inventory", app_id=request.app_id):
+            if str(request.app_id or "").casefold() in {"seek", "nz.seek.com", "seek.co.nz"}:
+                result = build_seek_form_field_inventory(
+                    request.application_flow_state,
+                    employer_question_inventory=request.employer_question_inventory,
+                    application_answer_plan=request.application_answer_plan,
+                )
+            else:
+                result = _generic_form_field_inventory(request)
+        result["timings"] = timer.to_dict()
+        trace_path = write_trace(
+            category="execute",
+            operation="form_inventory",
+            payload={"success": True, "request": request.model_dump(), "result": result},
+            name_hint=request.app_id or result.get("form_state") or "form_inventory",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Form inventory built", data=result, error=None)
+    except Exception as exc:
+        timings = timer.to_dict()
+        trace_path = write_trace(
+            category="execute",
+            operation="form_inventory",
+            payload={"success": False, "request": request.model_dump(), "error": str(exc), "timings": timings},
+            name_hint=request.app_id or "form_inventory",
+        )
+        return APIResponse(
+            success=False,
+            message="Form inventory failed",
+            data={"trace_path": trace_path, "timings": timings},
+            error=ErrorModel(code="form_inventory_failed", details=str(exc)),
+        )
 
 
 @router.post("/available_actions", response_model=APIResponse)
@@ -319,6 +476,125 @@ def _extract_low_level_trace_path(response_payload: dict[str, Any]) -> str | Non
     if isinstance(result, dict) and isinstance(result.get("trace_path"), str):
         return result["trace_path"]
     return None
+
+
+def _generic_execute_observation(request: ExecuteObserveRequest) -> dict[str, Any]:
+    items = _generic_observation_items(request.observation, request.application_flow_state)
+    actions = [item for item in items if str(item.get("role") or "").casefold() in {"button", "link", "input", "textbox", "radio", "checkbox"}]
+    danger_actions = [
+        item
+        for item in actions
+        if any(term in str(item.get("text") or "").casefold() for term in ("submit", "send", "complete", "delete", "purchase", "pay"))
+    ]
+    return {
+        "contract_version": "execute_observation_v1",
+        "page_state": "unknown",
+        "state_confidence": 0.2 if items else 0.0,
+        "current_step": request.application_flow_state.get("current_step"),
+        "source_state_type": request.application_flow_state.get("state_type"),
+        "evidence": [{"text": str(item.get("text") or "")[:240]} for item in items[:20] if item.get("text")],
+        "regions": [],
+        "primary_actions": actions[:40],
+        "danger_actions": danger_actions[:20],
+        "profile_mutation_actions": [],
+        "available_actions": actions[:80],
+        "form_fields_hint": [item for item in actions if str(item.get("role") or "").casefold() in {"input", "textbox", "radio", "checkbox"}][:80],
+        "safety_blockers": [
+            {
+                "kind": "danger_action_visible",
+                "reason": "Generic execute observation found submit/send/delete/purchase/pay-like action text.",
+                "actions": danger_actions[:20],
+            }
+        ]
+        if danger_actions
+        else [],
+        "trace_path": request.observation.get("trace_path"),
+    }
+
+
+def _generic_form_field_inventory(request: ExecuteFormInventoryRequest) -> dict[str, Any]:
+    flow = request.application_flow_state if isinstance(request.application_flow_state, dict) else {}
+    inventory = flow.get("application_form_inventory") if isinstance(flow.get("application_form_inventory"), dict) else {}
+    fields: list[dict[str, Any]] = []
+    actions: list[dict[str, Any]] = []
+    for item in inventory.get("fields") or []:
+        if isinstance(item, dict):
+            fields.append(_generic_form_field(item))
+    for item in inventory.get("actions") or []:
+        if isinstance(item, dict):
+            actions.append(_compact_observation_item(item))
+    return {
+        "contract_version": "form_field_inventory_v1",
+        "form_state": flow.get("current_step") or flow.get("state_type") or "unknown",
+        "fields": fields,
+        "continue_action": _first_generic_action(actions, ("continue", "next", "review", "save")),
+        "danger_actions": [
+            action
+            for action in actions
+            if any(term in str(action.get("text") or "").casefold() for term in ("submit", "send", "complete", "delete", "pay", "purchase"))
+        ],
+        "profile_mutation_actions": [
+            action
+            for action in actions
+            if any(term in str(action.get("text") or "").casefold() for term in ("add ", "edit", "upload", "replace", "update profile"))
+        ],
+        "source_contracts": {
+            "application_flow_state": flow.get("contract_version"),
+            "employer_question_inventory": request.employer_question_inventory.get("contract_version"),
+            "application_answer_plan": request.application_answer_plan.get("contract_version"),
+        },
+    }
+
+
+def _generic_form_field(item: dict[str, Any]) -> dict[str, Any]:
+    text = str(item.get("text") or item.get("label") or "").strip()
+    role = str(item.get("role") or "unknown")
+    return {
+        "field_id": item.get("id") or text,
+        "label": text,
+        "field_type": role,
+        "field_bbox": item.get("bbox"),
+        "required": bool(item.get("required", False)),
+        "answer_source_required": True,
+        "source": item.get("collection") or item.get("source") or "application_form_inventory",
+    }
+
+
+def _first_generic_action(actions: list[dict[str, Any]], terms: tuple[str, ...]) -> dict[str, Any] | None:
+    for action in actions:
+        text = str(action.get("text") or "").casefold()
+        if any(term in text for term in terms):
+            return action
+    return None
+
+
+def _generic_observation_items(observation: dict[str, Any], flow_state: dict[str, Any]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    inventory = flow_state.get("application_form_inventory") if isinstance(flow_state.get("application_form_inventory"), dict) else {}
+    for key in ("fields", "actions"):
+        values = inventory.get(key)
+        if isinstance(values, list):
+            items.extend(_compact_observation_item(item) for item in values if isinstance(item, dict))
+    evidence = flow_state.get("evidence") if isinstance(flow_state.get("evidence"), dict) else {}
+    for text in evidence.get("texts") or []:
+        if str(text or "").strip():
+            items.append({"text": str(text), "role": "text", "bbox": None, "source": "flow_state_evidence"})
+    screen_reading = observation.get("screen_reading") if isinstance(observation.get("screen_reading"), dict) else {}
+    for key in ("ui_elements", "elements", "actions"):
+        values = screen_reading.get(key)
+        if isinstance(values, list):
+            items.extend(_compact_observation_item(item) for item in values if isinstance(item, dict))
+    return items
+
+
+def _compact_observation_item(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": item.get("id"),
+        "text": str(item.get("text") or item.get("label") or "")[:240],
+        "role": item.get("role"),
+        "bbox": item.get("bbox"),
+        "source": item.get("collection") or item.get("source"),
+    }
 
 
 def _load_runtime_path_graph(inline_graph: dict[str, Any], graph_path: str | None) -> dict[str, Any]:

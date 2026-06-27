@@ -13,16 +13,96 @@
       "anchors": [
         "Apply"
       ],
+      "semantic_action": "external_apply_flow",
+      "danger_level": "external_flow_entry",
+      "requires_gate": true,
+      "can_authorize_click": false,
       "source": {
         "capture_required": true,
         "crop_path": null,
         "perceptual_hash": null,
-        "embedding_ref": null
+        "embedding_ref": null,
+        "source_image_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-124648-509765.png",
+        "capture_id": "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-124648-509765.png",
+        "coordinate_space": "source_capture_px",
+        "screenshot_size": {
+          "width": 2560,
+          "height": 1400
+        },
+        "bbox": {
+          "x": 1764,
+          "y": 414,
+          "w": 76,
+          "h": 27
+        },
+        "click_point": {
+          "x": 1802,
+          "y": 427
+        }
       },
       "match_policy": {
         "minimum_similarity": 0.82,
         "requires_region_match": true,
         "requires_current_validation": true
+      },
+      "scope": {
+        "allowed_container_ids": [
+          "seek:job_detail"
+        ],
+        "expected_text": [
+          "Apply"
+        ],
+        "negative_text": [
+          "Submit",
+          "Send application",
+          "Complete application"
+        ]
+      },
+      "review_policy": "external_or_station_apply_entry_gate_required",
+      "template_refs": {
+        "tight_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_apply_button_real.png",
+        "context_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_apply_button_context_real.png",
+        "source_image_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-124648-509765.png",
+        "current_roi_ref": null,
+        "current_match_ref": null
+      },
+      "source_geometry": {
+        "bbox": {
+          "x": 1764,
+          "y": 414,
+          "w": 76,
+          "h": 27
+        },
+        "click_point": {
+          "x": 1802,
+          "y": 427
+        },
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false,
+        "click_point_policy": "learned_relative_point"
+      },
+      "crop": {
+        "tight_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_apply_button_real.png",
+        "context_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_apply_button_context_real.png",
+        "source_image_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-124648-509765.png",
+        "tight_bbox": {
+          "x": 1764,
+          "y": 414,
+          "w": 76,
+          "h": 27
+        },
+        "context_bbox": {
+          "x": 1732,
+          "y": 382,
+          "w": 140,
+          "h": 91
+        },
+        "size_px": [
+          144,
+          48
+        ],
+        "hash": "1000000100000000000000000011111000111110001111000000000010000001",
+        "context_hash": "1111111111111111100000011000000110000001100000011111111111111111"
       }
     },
     {
@@ -33,6 +113,10 @@
       "anchors": [
         "Quick Apply"
       ],
+      "semantic_action": "open_apply_flow",
+      "danger_level": "low",
+      "requires_gate": true,
+      "can_authorize_click": false,
       "source": {
         "capture_required": true,
         "crop_path": null,
@@ -43,6 +127,19 @@
         "minimum_similarity": 0.82,
         "requires_region_match": true,
         "requires_current_validation": true
+      },
+      "scope": {
+        "allowed_container_ids": [
+          "seek:job_detail"
+        ],
+        "expected_text": [
+          "Quick Apply"
+        ],
+        "negative_text": [
+          "Submit",
+          "Send application",
+          "Complete application"
+        ]
       }
     },
     {
@@ -54,6 +151,10 @@
         "Save",
         "bookmark"
       ],
+      "semantic_action": "save_or_bookmark",
+      "danger_level": "low",
+      "requires_gate": true,
+      "can_authorize_click": false,
       "source": {
         "capture_required": true,
         "crop_path": null,
@@ -64,6 +165,20 @@
         "minimum_similarity": 0.82,
         "requires_region_match": true,
         "requires_current_validation": true
+      },
+      "scope": {
+        "allowed_container_ids": [
+          "seek:job_detail"
+        ],
+        "expected_text": [
+          "Save",
+          "bookmark"
+        ],
+        "negative_text": [
+          "Submit",
+          "Send application",
+          "Complete application"
+        ]
       }
     },
     {
@@ -76,6 +191,10 @@
         "company",
         "location"
       ],
+      "semantic_action": "open_detail",
+      "danger_level": "low",
+      "requires_gate": true,
+      "can_authorize_click": false,
       "source": {
         "capture_required": true,
         "crop_path": null,
@@ -86,6 +205,21 @@
         "minimum_similarity": 0.82,
         "requires_region_match": true,
         "requires_current_validation": true
+      },
+      "scope": {
+        "allowed_container_ids": [
+          "seek:results_list"
+        ],
+        "expected_text": [
+          "title",
+          "company",
+          "location"
+        ],
+        "negative_text": [
+          "Submit",
+          "Send application",
+          "Complete application"
+        ]
       }
     },
     {
@@ -96,6 +230,10 @@
       "anchors": [
         "selected border"
       ],
+      "semantic_action": "visual_evidence",
+      "danger_level": "low",
+      "requires_gate": true,
+      "can_authorize_click": false,
       "source": {
         "capture_required": true,
         "crop_path": null,
@@ -106,6 +244,19 @@
         "minimum_similarity": 0.82,
         "requires_region_match": true,
         "requires_current_validation": true
+      },
+      "scope": {
+        "allowed_container_ids": [
+          "seek:results_list"
+        ],
+        "expected_text": [
+          "selected border"
+        ],
+        "negative_text": [
+          "Submit",
+          "Send application",
+          "Complete application"
+        ]
       }
     },
     {
@@ -116,6 +267,10 @@
       "anchors": [
         "left list scrollbar"
       ],
+      "semantic_action": "scroll_container",
+      "danger_level": "low",
+      "requires_gate": true,
+      "can_authorize_click": false,
       "source": {
         "capture_required": true,
         "crop_path": null,
@@ -126,6 +281,19 @@
         "minimum_similarity": 0.82,
         "requires_region_match": true,
         "requires_current_validation": true
+      },
+      "scope": {
+        "allowed_container_ids": [
+          "seek:results_list"
+        ],
+        "expected_text": [
+          "left list scrollbar"
+        ],
+        "negative_text": [
+          "Submit",
+          "Send application",
+          "Complete application"
+        ]
       }
     },
     {
@@ -136,6 +304,10 @@
       "anchors": [
         "right detail scrollbar"
       ],
+      "semantic_action": "scroll_container",
+      "danger_level": "low",
+      "requires_gate": true,
+      "can_authorize_click": false,
       "source": {
         "capture_required": true,
         "crop_path": null,
@@ -146,6 +318,19 @@
         "minimum_similarity": 0.82,
         "requires_region_match": true,
         "requires_current_validation": true
+      },
+      "scope": {
+        "allowed_container_ids": [
+          "seek:job_detail"
+        ],
+        "expected_text": [
+          "right detail scrollbar"
+        ],
+        "negative_text": [
+          "Submit",
+          "Send application",
+          "Complete application"
+        ]
       }
     }
   ],

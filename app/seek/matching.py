@@ -8,6 +8,8 @@ from typing import Any
 
 
 MATCH_DECISIONS = {"strong_apply", "maybe_apply", "skip", "need_user_review"}
+EXPERIENCE_HARD_SKIP_MIN_YEARS = 2
+EXPERIENCE_REVIEW_MIN_YEARS = 1
 WORK_RIGHTS_REVIEW_TERMS = (
     "visa",
     "sponsorship",
@@ -39,6 +41,17 @@ NEW_ZEALAND_LOCATION_TERMS = (
     "rotorua",
     "new plymouth",
     "invercargill",
+)
+SENIOR_TITLE_TERMS = ("senior", "principal", "staff", "lead")
+SENIOR_REVIEW_TERMS = (
+    "architecture",
+    "architectural",
+    "mentor",
+    "mentoring",
+    "technical leadership",
+    "team leadership",
+    "lead on complex",
+    "take a leading role",
 )
 
 
@@ -124,6 +137,23 @@ def score_seek_job(
             detail=detail_payload,
         )
 
+    experience_gate = _experience_gate(title=title, job_text=job_text)
+    if experience_gate["decision"] == "skip":
+        negative.append(experience_gate["summary"])
+        return _decision(
+            decision="skip",
+            score=0.0,
+            positive=positive,
+            negative=negative,
+            unknowns=unknowns,
+            risk_flags=[*risk_flags, "experience_requirement_exceeds_profile_stage"],
+            card=card_payload,
+            detail=detail_payload,
+        )
+    if experience_gate["decision"] == "need_user_review":
+        unknowns.append(experience_gate["summary"])
+        risk_flags.append("experience_requirement_requires_review")
+
     matched_skills = [skill for skill in skills if _contains(job_text, skill)]
     if matched_skills:
         positive.append("matched_skills: " + ", ".join(matched_skills[:8]))
@@ -166,7 +196,9 @@ def score_seek_job(
         score -= 0.3
     score = max(0.0, min(1.0, round(score, 3)))
 
-    if "work_rights_or_background_check_requires_review" in risk_flags:
+    if "experience_requirement_requires_review" in risk_flags:
+        decision_value = "need_user_review"
+    elif "work_rights_or_background_check_requires_review" in risk_flags:
         decision_value = "need_user_review"
     elif negative and score < 0.45:
         decision_value = "skip"
@@ -237,6 +269,42 @@ def _valid_profile(profile: dict[str, Any] | None) -> bool:
     return isinstance(profile, dict) and bool(_strings(profile.get("skills")) or _strings(profile.get("target_roles")))
 
 
+def _experience_gate(*, title: str, job_text: str) -> dict[str, Any]:
+    normalized_title = _match_normalized_text(title)
+    normalized_text = _match_normalized_text(job_text)
+    experience_text = _experience_pattern_text(job_text)
+    range_matches = re.findall(r"\b(\d{1,2})\s*(?:-|to)\s*(\d{1,2})\s*(?:years|yrs)\b", experience_text)
+    for lower_text, upper_text in range_matches:
+        lower = int(lower_text)
+        upper = int(upper_text)
+        if lower >= EXPERIENCE_HARD_SKIP_MIN_YEARS:
+            return {"decision": "skip", "summary": f"experience_hard_skip: requires {lower}-{upper} years"}
+        if upper >= EXPERIENCE_HARD_SKIP_MIN_YEARS or lower >= EXPERIENCE_REVIEW_MIN_YEARS:
+            return {"decision": "need_user_review", "summary": f"experience_requires_review: requires {lower}-{upper} years"}
+
+    for match in re.finditer(r"\b(?:at least|minimum|min)?\s*(\d{1,2})\s*(\+)?\s*(?:years|yrs)\b", experience_text):
+        years = int(match.group(1))
+        has_plus = bool(match.group(2))
+        if years >= EXPERIENCE_HARD_SKIP_MIN_YEARS:
+            suffix = "+" if has_plus else ""
+            return {"decision": "skip", "summary": f"experience_hard_skip: requires {years}{suffix} years"}
+        if years >= EXPERIENCE_REVIEW_MIN_YEARS:
+            suffix = "+" if has_plus else ""
+            return {"decision": "need_user_review", "summary": f"experience_requires_review: requires {years}{suffix} years"}
+
+    senior_title = any(term in normalized_title.split() for term in SENIOR_TITLE_TERMS)
+    if senior_title and any(term in normalized_text for term in SENIOR_REVIEW_TERMS):
+        return {"decision": "need_user_review", "summary": "experience_requires_review: senior role with architecture or leadership signals"}
+    return {"decision": "none", "summary": ""}
+
+
+def _experience_pattern_text(value: Any) -> str:
+    text = str(value or "").casefold()
+    text = text.replace("–", "-").replace("—", "-").replace("−", "-")
+    text = re.sub(r"[^a-z0-9+\-]+", " ", text)
+    return " ".join(text.split())
+
+
 def _decision(
     *,
     decision: str,
@@ -279,6 +347,9 @@ def _job_text(card: dict[str, Any], detail: dict[str, Any]) -> str:
             parts.append(str(payload.get(key) or ""))
         evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}
         parts.extend(_strings(evidence.get("texts")))
+        for section in payload.get("description_sections") or []:
+            if isinstance(section, dict):
+                parts.append(str(section.get("text") or ""))
         for key in ("requirements", "responsibilities", "benefits"):
             parts.extend(_strings(payload.get(key)))
     return " ".join(parts).casefold()

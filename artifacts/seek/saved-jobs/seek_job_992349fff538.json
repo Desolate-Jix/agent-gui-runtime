@@ -1,0 +1,828 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_992349fff538",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.78,
+    "job_id": "seek_job_992349fff538",
+    "title": "Senior Software Engineer",
+    "company": "Propellerhead",
+    "fit_summary": "strong_apply with score 0.780. positive: matched_skills: AI, Git; matched_target_roles: Software Engineer, AI Engineer; location_matches: Auckland CBD, Auckland (Hybrid).",
+    "recommended_next_action": "open_apply_entry_and_prepare_safe_fields",
+    "positive_evidence": [
+      "matched_skills: AI, Git",
+      "matched_target_roles: Software Engineer, AI Engineer",
+      "location_matches: Auckland CBD, Auckland (Hybrid)",
+      "matched_preferred_work_modes: hybrid, remote"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_6fc223292793",
+    "title": "Senior Software Engineer",
+    "company": "thinking design",
+    "location": "Auckland CBD, Auckland (Hybrid)",
+    "posted_at_text": null,
+    "work_type": "Hybrid",
+    "salary_text": null,
+    "classification": "Senior Software Engineer",
+    "card_bbox": {
+      "x": 334,
+      "y": 462,
+      "w": 428,
+      "h": 204
+    },
+    "click_point": {
+      "x": 439,
+      "y": 473
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_6",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_52_senior-software-engineer",
+      "page_text_53_propellerhead",
+      "page_text_55_auckland-cbd-auckland-hybrid",
+      "page_text_56_we-prioritise-technical-excellence-curiosity-and",
+      "page_text_57_thinking-design",
+      "page_text_59_make-a-tangible-difference-in-the-way-people-int",
+      "page_text_60_digital-systems",
+      "page_text_61_work-from-our-stunning-auckland-office-and-from-"
+    ],
+    "evidence": {
+      "texts": [
+        "Senior Software Engineer",
+        "Propellerhead",
+        "Auckland CBD, Auckland (Hybrid)",
+        "We prioritise technical excellence, curiosity, and forward-",
+        "thinking design",
+        "Make a tangible difference in the way people interact with",
+        "digital systems",
+        "Work from our stunning Auckland office and from home"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": true,
+        "has_salary": false
+      }
+    },
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-035948-248341__observe-screen__edge.json",
+      "viewport_size": {
+        "width": 1920,
+        "height": 1080
+      },
+      "source": "seek_job_card_extraction",
+      "freshness": "current_capture"
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_992349fff538",
+    "title": "Senior Software Engineer",
+    "company": "Propellerhead",
+    "location": "Auckland CBD, Auckland (Hybrid)",
+    "work_type": "Remote",
+    "classification": "SeniorSoftwareEngineer",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "SoftwX"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "Softw X"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "TRV T X"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "Softw"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "Type"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "Remote"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "Classification"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Listing time"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Propellerhead*"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "SeniorSoftwareEngineer"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "Propellerhead View alljobs"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "Auckland CBD,Auckland (Hybrid)"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "Engineering-Software (Information&Communication Technology)"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "Fulltime"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "Posted 18d ago·Medium application volume"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "Quick apply"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "5 skills and credentials match yourprofile"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "TypescriptProgramming Language"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "C#Programming"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "JavaProgramming"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "目☆)"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "Type v"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "Senior Software Engineer"
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "Propellerhead View alljiobs"
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "Engineering-Software(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "5 skills and credentials match your profile"
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "Typescript Programming Language"
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "Java Programming"
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "+2more"
+      },
+      {
+        "index": 31,
+        "role": "body",
+        "text": "The Role:"
+      },
+      {
+        "index": 32,
+        "role": "body",
+        "text": "Propellerhead islookingforanexperiencedSeniorSoftwareEngineertojoinourcore"
+      },
+      {
+        "index": 33,
+        "role": "body",
+        "text": "engineering team(reporting to the CTO)toresearch and definefuture technical strategies"
+      },
+      {
+        "index": 34,
+        "role": "body",
+        "text": "forPropellerhead and our clients.The engineering team provides the core tools,"
+      },
+      {
+        "index": 35,
+        "role": "body",
+        "text": "techniques,and software libraries tosupport servicedevelopment teams."
+      },
+      {
+        "index": 36,
+        "role": "body",
+        "text": "You will guide proofs of concept to production,mentoring team members on new"
+      },
+      {
+        "index": 37,
+        "role": "body",
+        "text": "technologies and practices. You'll also help ourteams and customers navigate the"
+      },
+      {
+        "index": 38,
+        "role": "body",
+        "text": "development ofeffective,secureenterprisesoftware and deployment architectures in the"
+      },
+      {
+        "index": 39,
+        "role": "body",
+        "text": "age of Al."
+      },
+      {
+        "index": 40,
+        "role": "body",
+        "text": "Yourteamwillconsistof like-mindedsoftwarecraftspeopleandwill operatewithadegree"
+      },
+      {
+        "index": 41,
+        "role": "body",
+        "text": "TRVT X"
+      },
+      {
+        "index": 42,
+        "role": "body",
+        "text": "**."
+      },
+      {
+        "index": 43,
+        "role": "body",
+        "text": "FIRS"
+      },
+      {
+        "index": 44,
+        "role": "body",
+        "text": "Softv"
+      },
+      {
+        "index": 45,
+        "role": "body",
+        "text": "First("
+      },
+      {
+        "index": 46,
+        "role": "body",
+        "text": "Auckl"
+      },
+      {
+        "index": 47,
+        "role": "body",
+        "text": "20da"
+      }
+    ],
+    "requirements": [
+      "5 skills and credentials match yourprofile",
+      "5 skills and credentials match your profile",
+      "Propellerhead islookingforanexperiencedSeniorSoftwareEngineertojoinourcore"
+    ],
+    "responsibilities": [
+      "The Role:",
+      "You will guide proofs of concept to production,mentoring team members on new"
+    ],
+    "benefits": [
+      "Remote",
+      "Auckland CBD,Auckland (Hybrid)"
+    ],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply",
+      "bbox": {
+        "x": 871,
+        "y": 831,
+        "w": 103,
+        "h": 27
+      },
+      "click_point": {
+        "x": 922,
+        "y": 844
+      },
+      "candidate_freshness": {
+        "contract_version": "action_candidate_freshness_v1",
+        "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-040010-113559__observe-screen__edge.json",
+        "viewport_size": {
+          "width": 1920,
+          "height": 1080
+        },
+        "source": "seek_apply_button_extraction",
+        "freshness": "current_capture"
+      }
+    },
+    "save_button_state": {
+      "visible": false,
+      "label": null,
+      "bbox": null
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 814,
+        "y": 216,
+        "w": 896,
+        "h": 848
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false,
+        "content_left": 210,
+        "content_width": 1500
+      },
+      "safe_points": [
+        {
+          "x": 1262,
+          "y": 640,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 814,
+      "y": 0,
+      "w": 896,
+      "h": 1064
+    },
+    "detail_bottom_reached": true,
+    "detail_scroll_history": [
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260624-040011-852456__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": true
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": false,
+        "wheel_clicks": 4,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260624-040023-127675__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": false,
+        "wheel_clicks": 8,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260624-040035-005306__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": false,
+        "wheel_clicks": 12,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260624-040047-019582__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": false,
+        "wheel_clicks": 12,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260624-040059-001421__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": false,
+        "wheel_clicks": 12,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260624-040108-259471__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": false,
+        "wheel_clicks": 12,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260624-040118-781916__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": true,
+        "wheel_clicks": 12,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ],
+        "right_detail_no_progress_after_scroll": true,
+        "adaptive_stop_reason": "right_detail_content_unchanged_after_scroll"
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-040010-113559__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-040021-334173__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-040033-139419__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-040045-249458__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-040057-244158__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-040106-533677__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-040117-039843__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-040127-223258__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 66,
+      "action_count": 0,
+      "texts": [
+        "SoftwX",
+        "Softw X",
+        "TRV T X",
+        "Softw",
+        "目☆",
+        "G",
+        "39",
+        "中",
+        "3",
+        "Type",
+        "√",
+        "Remote",
+        "Classification",
+        "Listing time",
+        "Propellerhead*",
+        "SeniorSoftwareEngineer",
+        "Propellerhead View alljobs",
+        "Auckland CBD,Auckland (Hybrid)",
+        "国",
+        "Engineering-Software (Information&Communication Technology)",
+        "Fulltime",
+        "Posted 18d ago·Medium application volume",
+        "Quick apply",
+        "Save",
+        "How you match ①",
+        "5 skills and credentials match yourprofile",
+        "TypescriptProgramming Language",
+        "C#Programming",
+        "JavaProgramming",
+        "X",
+        "目☆)",
+        "40",
+        "Type v",
+        "Senior Software Engineer",
+        "Propellerhead View alljiobs",
+        "Engineering-Software(Information&CommunicationTechnology)",
+        "5 skills and credentials match your profile",
+        "Typescript Programming Language",
+        "Java Programming",
+        "+2more",
+        "The Role:",
+        "Propellerhead islookingforanexperiencedSeniorSoftwareEngineertojoinourcore",
+        "engineering team(reporting to the CTO)toresearch and definefuture technical strategies",
+        "forPropellerhead and our clients.The engineering team provides the core tools,",
+        "techniques,and software libraries tosupport servicedevelopment teams.",
+        "You will guide proofs of concept to production,mentoring team members on new",
+        "technologies and practices. You'll also help ourteams and customers navigate the",
+        "development ofeffective,secureenterprisesoftware and deployment architectures in the",
+        "age of Al.",
+        "Yourteamwillconsistof like-mindedsoftwarecraftspeopleandwill operatewithadegree",
+        "TRVT X",
+        "口",
+        "聊天",
+        "tA",
+        "5",
+        "A",
+        "十",
+        "四田",
+        "42",
+        "47",
+        "**.",
+        "FIRS",
+        "Softv",
+        "First(",
+        "Auckl",
+        "20da"
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

@@ -37,7 +37,7 @@ from seek_mvp_traversal_runner import (  # noqa: E402
     _trace_apply_entry_summary,
     _write_json,
 )
-from app.seek.application import assess_seek_application_flow_state, build_seek_apply_flow_decision  # noqa: E402
+from app.seek.application import _collect_visible_items, assess_seek_application_flow_state, build_seek_apply_flow_decision  # noqa: E402
 from app.seek.answer_plan import build_application_answer_plan  # noqa: E402
 from app.seek.cover_letter import build_cover_letter_draft  # noqa: E402
 from app.seek.employer_questions import (  # noqa: E402
@@ -46,14 +46,43 @@ from app.seek.employer_questions import (  # noqa: E402
     build_employer_question_inventory,
 )
 from app.seek.extraction import extract_seek_job_cards, extract_seek_job_detail, _trim_seek_detail_texts  # noqa: E402
+from app.seek.execute_observation import build_seek_execute_observation  # noqa: E402
 from app.seek.final_review import build_seek_final_review_extraction  # noqa: E402
+from app.seek.form_inventory import build_seek_form_field_inventory  # noqa: E402
 from app.seek.learn_artifacts import scroll_target_for_action  # noqa: E402
 from app.seek.matching import load_candidate_profile, save_suitable_job_record, score_seek_job  # noqa: E402
+from app.seek.scroll_containers import SEEK_JOB_DETAIL, discover_seek_scroll_containers, get_scroll_container  # noqa: E402
+from app.execute.read_region_batch import build_read_region_batch_report  # noqa: E402
+from app.execute.scroll_scope import build_scroll_scope_invariant  # noqa: E402
+from app.execute.dataflow_contracts import (  # noqa: E402
+    merge_read_batch_into_detail_snapshot,
+    put_latest_detail_snapshot,
+    require_latest_detail_snapshot,
+    with_detail_snapshot,
+)
+from app.execute.candidate_contracts import validate_action_candidate_target_at_point  # noqa: E402
+from app.execute.ui_diff_verification import build_ui_diff_verification  # noqa: E402
 
 
 DEFAULT_SEEK_URL = "https://nz.seek.com/"
 DEFAULT_RUN_DIR = Path("logs/smoke/seek_debug_step_run_latest")
 DEFAULT_APPLICATION_FLOW_REPLAY = Path("logs/smoke/seek_application_flow_replay_20260620.json")
+DEFAULT_PERSONAL_CANDIDATE_PROFILE = Path(r"D:\资料\CV\candidate_profile_wenqingji_personal.json")
+DEFAULT_PROJECT_CANDIDATE_PROFILE = Path("artifacts/seek/candidate_profile_wenqingji_draft.json")
+
+
+def _path_exists_no_raise(path: Path) -> bool:
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
+DEFAULT_CANDIDATE_PROFILE = (
+    DEFAULT_PERSONAL_CANDIDATE_PROFILE
+    if _path_exists_no_raise(DEFAULT_PERSONAL_CANDIDATE_PROFILE)
+    else DEFAULT_PROJECT_CANDIDATE_PROFILE
+)
 STATE_CONTRACT = "seek_debug_step_state_v1"
 REPORT_CONTRACT = "seek_debug_step_report_v1"
 JOB_ARCHIVE_CONTRACT = "seek_job_archive_v1"
@@ -112,6 +141,8 @@ def _screen_reading_from_observation(observation: dict[str, Any]) -> dict[str, A
     parse_result = observation.get("parse_result") if isinstance(observation.get("parse_result"), dict) else {}
     if isinstance(parse_result.get("screen_reading"), dict):
         return parse_result["screen_reading"]
+    if isinstance(observation.get("texts"), list):
+        return observation
     return None
 
 
@@ -210,6 +241,39 @@ def _capture(base_url: str, timeout: float) -> dict[str, Any]:
     return {"response": response, "image_path": _image_path(payload), "payload": payload}
 
 
+def _execute_debug_artifacts(
+    *,
+    observation: dict[str, Any] | None = None,
+    flow_state: dict[str, Any] | None = None,
+    employer_question_inventory: dict[str, Any] | None = None,
+    application_answer_plan: dict[str, Any] | None = None,
+    before_image: str | None = None,
+    after_image: str | None = None,
+    expected_change: str | None = None,
+    target_bbox: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    artifacts: dict[str, Any] = {}
+    if isinstance(observation, dict) or isinstance(flow_state, dict):
+        artifacts["execute_observation"] = build_seek_execute_observation(
+            observation,
+            application_flow_state=flow_state,
+        )
+    if isinstance(flow_state, dict):
+        artifacts["form_field_inventory"] = build_seek_form_field_inventory(
+            flow_state,
+            employer_question_inventory=employer_question_inventory,
+            application_answer_plan=application_answer_plan,
+        )
+    if before_image or after_image:
+        artifacts["ui_diff_verification"] = build_ui_diff_verification(
+            before_image,
+            after_image,
+            expected_change=expected_change,
+            target_bbox=target_bbox,
+        )
+    return artifacts
+
+
 def _runtime_state(base_url: str, timeout: float) -> dict[str, Any]:
     response = _get_json(base_url, "/state", timeout)
     if response.get("success") is not True:
@@ -277,10 +341,89 @@ def _open_seek_debug(base_url: str, *, url: str, app_name: str, timeout: float) 
             "process_name": executable,
             "title": "SEEK",
             "bind_after_open": True,
-            "wait_seconds": 2.0,
+            "wait_seconds": 2.5,
         },
         timeout,
     )
+
+
+def _bind_seek_debug_window(base_url: str, *, app_name: str, timeout: float) -> dict[str, Any]:
+    app_key = str(app_name or "edge").lower()
+    executable = "chrome.exe" if app_key == "chrome" else "msedge.exe"
+    return _post_json(
+        base_url,
+        "/session/bind_window",
+        {
+            "process_name": executable,
+            "title": "SEEK",
+        },
+        timeout,
+    )
+
+
+def _submit_seek_search_query(
+    base_url: str,
+    *,
+    query: str,
+    x: int,
+    y: int,
+    timeout: float,
+    wait_seconds: float,
+) -> dict[str, Any]:
+    started = time.perf_counter()
+    request = {
+        "text": query,
+        "x": int(x),
+        "y": int(y),
+        "click_before_typing": True,
+        "clear_existing": True,
+        "submit": True,
+        "restore_clipboard": True,
+        "dry_run": False,
+        "metadata": {
+            "contract_version": "seek_search_submit_request_v1",
+            "action_taxonomy": "type_public_search_query",
+            "input_category": "public_search_query",
+            "submit_method": "enter_key",
+            "target_latency_ms": 20000,
+        },
+    }
+    response = _post_json(base_url, "/action/type_text", request, timeout)
+    states: list[dict[str, Any]] = []
+    ready = False
+    deadline = time.perf_counter() + max(0.0, float(wait_seconds))
+    query_key = str(query or "").casefold()
+    while time.perf_counter() < deadline:
+        try:
+            state = _runtime_state(base_url, min(timeout, 5.0))
+        except Exception as exc:
+            states.append({"error": str(exc)})
+            time.sleep(0.4)
+            continue
+        payload = state.get("payload") if isinstance(state.get("payload"), dict) else {}
+        states.append(payload)
+        title = str(payload.get("window_title") or payload.get("title") or "")
+        title_key = title.casefold()
+        if "seek" in title_key and ("job" in title_key or (query_key and query_key in title_key)):
+            ready = True
+            break
+        time.sleep(0.4)
+    elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
+    return {
+        "contract_version": "seek_search_submit_v1",
+        "status": "ok" if response.get("success") is True and ready else "needs_review",
+        "query": query,
+        "input_point": {"x": int(x), "y": int(y)},
+        "submit_method": "type_text_submit_enter",
+        "response": _compact_type_response(response),
+        "page_ready": ready,
+        "elapsed_ms": elapsed_ms,
+        "target_latency_ms": 20000,
+        "within_target_latency": elapsed_ms <= 20000,
+        "state_poll_count": len(states),
+        "last_state": states[-1] if states else None,
+        "trace_paths": _trace_paths(response),
+    }
 
 
 def _seek_window_candidates(apps_response: dict[str, Any]) -> list[dict[str, Any]]:
@@ -371,6 +514,17 @@ def _observe_detail(base_url: str, app_name: str, timeout: float) -> tuple[dict[
 def _detail_container_bbox(detail: dict[str, Any]) -> dict[str, int] | None:
     container = detail.get("detail_container") if isinstance(detail.get("detail_container"), dict) else {}
     bbox = container.get("bbox") if isinstance(container.get("bbox"), dict) else None
+    return _roi_bbox_payload(bbox)
+
+
+def _learned_detail_container_bbox(base_url: str, timeout: float) -> dict[str, int] | None:
+    runtime = _runtime_state(base_url, timeout)["payload"]
+    size = _rect_size(runtime)
+    if not size:
+        return None
+    containers = discover_seek_scroll_containers(window_size=size, app_name="seek")
+    target = get_scroll_container(containers, SEEK_JOB_DETAIL)
+    bbox = target.get("bbox") if isinstance(target, dict) else None
     return _roi_bbox_payload(bbox)
 
 
@@ -524,7 +678,7 @@ def _scroll_progress_recommendation(
         }
     next_wheel_clicks = current_wheel_clicks
     if progress and new_unique_line_hashes < 2:
-        next_wheel_clicks = min(current_wheel_clicks + 2, 10)
+        next_wheel_clicks = min(current_wheel_clicks + 4, 14)
     return {
         "stop_reason": None,
         "next_recommendation": "continue_detail_scroll",
@@ -831,6 +985,29 @@ def _compact_detail_for_state(detail: dict[str, Any] | None) -> dict[str, Any] |
     return compact
 
 
+def _merge_detail_batch_read_into_detail(detail: dict[str, Any], batch: dict[str, Any]) -> dict[str, Any]:
+    merged = merge_read_batch_into_detail_snapshot(detail, batch, section_role="batch_ocr")
+    apply_state = _apply_button_state_from_batch(batch)
+    if apply_state and not isinstance(merged.get("apply_button_state"), dict):
+        merged["apply_button_state"] = apply_state
+    return merged
+
+
+def _apply_button_state_from_batch(batch: dict[str, Any]) -> dict[str, Any] | None:
+    lines = [str(item or "").strip() for item in batch.get("merged_text_lines") or [] if str(item or "").strip()]
+    for line in lines:
+        compact = re.sub(r"\s+", " ", line).strip()
+        lowered = compact.casefold()
+        if len(compact) <= 24 and lowered == "quick apply":
+            return {"visible": True, "label": "Quick apply", "source": "read_detail_batch_ocr"}
+    for line in lines:
+        compact = re.sub(r"\s+", " ", line).strip()
+        lowered = re.sub(r"[^a-z]+", "", compact.casefold())
+        if len(compact) <= 12 and lowered in {"apply", "applyc"}:
+            return {"visible": True, "label": "Apply", "source": "read_detail_batch_ocr"}
+    return None
+
+
 def _uses_precise_detail_drawer(detail: dict[str, Any]) -> bool:
     container = detail.get("detail_container") if isinstance(detail.get("detail_container"), dict) else {}
     sources = container.get("sources") if isinstance(container.get("sources"), list) else []
@@ -1059,7 +1236,7 @@ def _one_detail_scroll(
         "target_container_id": learned_scroll["target_container_id"],
         "container_bbox": _detail_container_bbox(before_detail),
         "direction": "down",
-        "wheel_clicks": _adaptive_wheel_clicks(base=wheel_clicks, repeated_observations=repeated_observations),
+        "wheel_clicks": _adaptive_wheel_clicks(base=wheel_clicks, repeated_observations=repeated_observations, maximum=14),
         "reason": "seek_debug_read_detail_one_scroll",
         "missing_evidence": ["debug_step_more_detail_text_may_be_below_fold"],
         "expected_effect": {
@@ -1095,12 +1272,24 @@ def _one_detail_scroll(
     progress = bool(right_detail_changed or line_progress)
     no_progress_count = 0 if progress else repeated_observations + 1
     target_container_id = scroll_result.get("target_container_id") or request["target_container_id"]
-    wrong_scope = target_container_id != "seek:job_detail"
     left_results_stable = (
         left_stable
         if left_stable is not None
         else (semantic_left_stable if semantic_left_stable is not None else (effect or {}).get("non_target_panes_stable"))
     )
+    scroll_scope_invariant = build_scroll_scope_invariant(
+        target_container_id=target_container_id,
+        target_changed=progress,
+        non_target_changes=[
+            {
+                "container_id": "seek:results_list",
+                "changed": left_results_stable is False,
+                "semantic_stable": semantic_left_stable,
+                "visual_stable": left_stable,
+            }
+        ],
+    )
+    wrong_scope = target_container_id != "seek:job_detail" or scroll_scope_invariant.get("wrong_scope_detected") is True
     recommendation = _scroll_progress_recommendation(
         progress=progress,
         no_progress_count=no_progress_count,
@@ -1129,6 +1318,7 @@ def _one_detail_scroll(
         "new_unique_line_count": len(new_line_hashes),
         "no_progress_count": no_progress_count,
         "wrong_scope": wrong_scope,
+        "scroll_scope_invariant": scroll_scope_invariant,
         "scroll_success": scroll_response.get("success") is True,
         "scroll_effect_validation": effect,
         "next_recommendation": recommendation["next_recommendation"],
@@ -1148,6 +1338,295 @@ def _one_detail_scroll(
         "after_detail": after_detail,
         "validation": validation,
     }
+
+
+def _ocr_region(base_url: str, *, roi: dict[str, Any], timeout: float) -> dict[str, Any]:
+    response = _post_json(
+        base_url,
+        "/vision/ocr_region",
+        {"roi": roi},
+        timeout,
+    )
+    if response.get("success") is not True:
+        raise SeekTraversalError(f"ocr_region failed: {response.get('error') or response.get('message')}")
+    result = _result_payload(response)
+    ocr_result = result.get("ocr_result") if isinstance(result, dict) else {}
+    metadata = ocr_result.get("metadata") if isinstance(ocr_result, dict) and isinstance(ocr_result.get("metadata"), dict) else {}
+    return {
+        "response": response,
+        "result": result,
+        "ocr_result": ocr_result,
+        "image_path": ocr_result.get("image_path") if isinstance(ocr_result, dict) else None,
+        "trace_path": result.get("trace_path") if isinstance(result, dict) else response.get("trace_path"),
+        "roi": metadata.get("roi") or roi,
+    }
+
+
+def _read_detail_batch(
+    base_url: str,
+    *,
+    timeout: float,
+    detail: dict[str, Any],
+    learned_artifact: dict[str, Any] | None,
+    wheel_clicks: int,
+    max_captures: int,
+    stop_after_no_new_content: int,
+) -> dict[str, Any]:
+    bbox = _detail_container_bbox(detail) or _learned_detail_container_bbox(base_url, timeout)
+    if not bbox:
+        raise SeekTraversalError("read_detail_batch requires detail_container bbox or learned seek:job_detail container")
+    learned_scroll = scroll_target_for_action(
+        learned_artifact,
+        "read_detail",
+        default_pane="job_detail",
+        default_container_id="seek:job_detail",
+    )
+    captures: list[dict[str, Any]] = []
+    wrong_scope_detected = False
+    no_new_content_count = 0
+    for index in range(max(1, int(max_captures))):
+        ocr = _ocr_region(base_url, roi=bbox, timeout=timeout)
+        capture_item = {
+            "index": index,
+            "image_path": ocr.get("image_path"),
+            "trace_path": ocr.get("trace_path"),
+            "ocr_result": ocr.get("ocr_result"),
+        }
+        captures.append(capture_item)
+        partial = build_read_region_batch_report(
+            target_container_id=learned_scroll["target_container_id"],
+            target_bbox=bbox,
+            captures=captures,
+            max_captures=max_captures,
+            stop_after_no_new_content=stop_after_no_new_content,
+            wrong_scope_detected=wrong_scope_detected,
+        )
+        if partial.get("stop_reason") in {"no_new_content", "wrong_scope_detected"}:
+            break
+        if index >= max_captures - 1:
+            break
+        last_capture = partial.get("captures", [])[-1] if partial.get("captures") else {}
+        if int(last_capture.get("new_unique_line_count") or 0) == 0:
+            no_new_content_count += 1
+        else:
+            no_new_content_count = 0
+        request = {
+            "contract_version": "scroll_request_v2",
+            "scroll_scope": "container",
+            "target_pane": learned_scroll["target_pane"],
+            "target_container_id": learned_scroll["target_container_id"],
+            "container_bbox": bbox,
+            "direction": "down",
+            "wheel_clicks": _adaptive_wheel_clicks(base=wheel_clicks, repeated_observations=no_new_content_count, maximum=20),
+            "reason": "seek_debug_read_detail_batch",
+            "missing_evidence": ["batch_read_needs_more_detail_text"],
+            "expected_effect": {
+                "target_container_content_should_change": True,
+                "same_semantic_page_should_remain": True,
+                "non_target_panes_should_remain_mostly_stable": True,
+            },
+            "dry_run": False,
+            "enable_verification": True,
+        }
+        scroll_response = _post_json(base_url, "/action/scroll", request, timeout)
+        scroll_result = _result_payload(scroll_response)
+        if scroll_result.get("target_container_id") and scroll_result.get("target_container_id") != "seek:job_detail":
+            wrong_scope_detected = True
+        effect = scroll_result.get("scroll_effect_validation") if isinstance(scroll_result.get("scroll_effect_validation"), dict) else {}
+        capture_item["scroll_trace_path"] = _result_payload(scroll_response).get("trace_path")
+        capture_item["scroll_wheel_clicks"] = request["wheel_clicks"]
+        capture_item["scroll_effect_status"] = effect.get("status")
+        capture_item["scroll_response"] = _compact_action_response(scroll_response)
+        if effect.get("status") == "bottom_reached":
+            break
+    return build_read_region_batch_report(
+        target_container_id=learned_scroll["target_container_id"],
+        target_bbox=bbox,
+        captures=captures,
+        max_captures=max_captures,
+        stop_after_no_new_content=stop_after_no_new_content,
+        wrong_scope_detected=wrong_scope_detected,
+    )
+
+
+def _observe_final_review_until_submit_visible(
+    base_url: str,
+    *,
+    app_name: str,
+    timeout: float,
+    fill_record: dict[str, Any],
+    max_scrolls: int = 3,
+) -> dict[str, Any]:
+    window_size = None
+    try:
+        window_size = _rect_size(_runtime_state(base_url, timeout)["payload"])
+    except Exception:
+        window_size = None
+    attempts: list[dict[str, Any]] = []
+    observations: list[dict[str, Any]] = []
+
+    def observe_once(label: str) -> dict[str, Any]:
+        before = _capture(base_url, timeout)
+        observation = _observe(
+            base_url,
+            app_name=app_name,
+            state_hint=(
+                "SEEK application Review and submit page; extract visible resume, cover letter, employer answers, "
+                "and Submit application blocker without clicking final submit"
+            ),
+            timeout=timeout,
+        )
+        observations.append(observation)
+        flow_state = assess_seek_application_flow_state(observation)
+        extraction = build_seek_final_review_extraction(
+            fill_record,
+            observation=observation,
+            flow_state=flow_state,
+            screenshot_path=before["image_path"],
+        )
+        attempts.append(
+            {
+                "label": label,
+                "image_path": before.get("image_path"),
+                "observe_image": _image_path(observation),
+                "observe_trace": observation.get("trace_path"),
+                "current_step": flow_state.get("current_step"),
+                "submit_application_visible": extraction.get("submit_application_visible"),
+                "status": extraction.get("status"),
+                "review_missing": (extraction.get("review_reconciliation") or {}).get("missing"),
+            }
+        )
+        return {
+            "before": before,
+            "observation": observation,
+            "flow_state": flow_state,
+            "extraction": extraction,
+        }
+
+    latest = observe_once("initial")
+    for index in range(max(0, int(max_scrolls))):
+        if latest["extraction"].get("submit_application_visible") is True:
+            break
+        scroll_response = _post_json(
+            base_url,
+            "/action/scroll",
+            {
+                "contract_version": "scroll_request_v2",
+                "scroll_scope": "window",
+                "direction": "down",
+                "wheel_clicks": _adaptive_wheel_clicks(base=8, repeated_observations=index, maximum=14),
+                "x": int((window_size or {}).get("width") or 1600) // 2,
+                "y": max(420, int(((window_size or {}).get("height") or 1100) * 0.78)),
+                "reason": "seek_final_review_read_until_submit_visible",
+                "missing_evidence": ["submit_application_button_may_be_below_fold"],
+                "expected_effect": {
+                    "same_semantic_page_should_remain": True,
+                    "submit_application_should_become_visible": True,
+                },
+                "dry_run": False,
+                "enable_verification": True,
+            },
+            timeout,
+        )
+        attempts[-1]["scroll_after_attempt"] = _compact_action_response(scroll_response)
+        time.sleep(0.25)
+        latest = observe_once(f"after_scroll_{index + 1}")
+    if latest["extraction"].get("submit_application_visible") is True and _review_missing_core_evidence(latest["extraction"]):
+        for index in range(2):
+            scroll_response = _post_json(
+                base_url,
+                "/action/scroll",
+                {
+                    "contract_version": "scroll_request_v2",
+                    "scroll_scope": "window",
+                    "direction": "up",
+                    "wheel_clicks": _adaptive_wheel_clicks(base=9, repeated_observations=index, maximum=14),
+                    "x": int((window_size or {}).get("width") or 1600) // 2,
+                    "y": max(420, int(((window_size or {}).get("height") or 1100) * 0.55)),
+                    "reason": "seek_final_review_read_top_sections_for_resume_cover_letter",
+                    "missing_evidence": ["resume_or_cover_letter_review_summary_above_current_view"],
+                    "expected_effect": {
+                        "same_semantic_page_should_remain": True,
+                        "resume_or_cover_letter_summary_should_become_visible": True,
+                    },
+                    "dry_run": False,
+                    "enable_verification": True,
+                },
+                timeout,
+            )
+            attempts[-1]["scroll_up_after_attempt"] = _compact_action_response(scroll_response)
+            time.sleep(0.25)
+            latest = observe_once(f"after_scroll_up_{index + 1}")
+            if not _review_missing_core_evidence(latest["extraction"]):
+                break
+    if len(observations) > 1:
+        merged_observation = _merge_review_observations(observations)
+        merged_flow_state = assess_seek_application_flow_state(merged_observation)
+        latest["observation"] = merged_observation
+        latest["flow_state"] = merged_flow_state
+        latest["extraction"] = build_seek_final_review_extraction(
+            fill_record,
+            observation=merged_observation,
+            flow_state=merged_flow_state,
+            screenshot_path=latest["before"]["image_path"],
+        )
+        attempts.append(
+            {
+                "label": "merged_review_observations",
+                "source_observation_count": len(observations),
+                "submit_application_visible": latest["extraction"].get("submit_application_visible"),
+                "status": latest["extraction"].get("status"),
+                "review_missing": (latest["extraction"].get("review_reconciliation") or {}).get("missing"),
+            }
+        )
+    latest["review_read_attempts"] = attempts
+    return latest
+
+
+def _review_missing_core_evidence(extraction: dict[str, Any]) -> bool:
+    reconciliation = extraction.get("review_reconciliation") if isinstance(extraction.get("review_reconciliation"), dict) else {}
+    missing = {str(item) for item in reconciliation.get("missing") or []}
+    return bool({"resume", "cover_letter"} & missing)
+
+
+def _merge_review_observations(observations: list[dict[str, Any]]) -> dict[str, Any]:
+    merged_items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for observation in observations:
+        for item in _collect_visible_items(observation):
+            text = " ".join(str(item.get("text") or item.get("label") or "").split())
+            if not text:
+                continue
+            bbox = item.get("bbox") if isinstance(item.get("bbox"), dict) else None
+            key = json.dumps({"text": text.casefold(), "bbox": bbox}, sort_keys=True)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged_items.append(
+                {
+                    "id": item.get("id") or f"merged_review_text_{len(merged_items)}",
+                    "text": text,
+                    "label": text,
+                    "role": item.get("role") or "text",
+                    "bbox": bbox,
+                    "source": item.get("source") or item.get("collection") or "merged_review_observation",
+                }
+            )
+    latest = observations[-1] if observations else {}
+    merged = dict(latest)
+    merged["contract_version"] = latest.get("contract_version") or "screen_observation_v1"
+    merged["screen_inventory"] = {
+        "contract_version": "screen_inventory_v1",
+        "page_elements": merged_items,
+        "available_actions": [],
+        "cards": [],
+    }
+    merged["merged_review_observation"] = {
+        "contract_version": "merged_review_observation_v1",
+        "source_observation_count": len(observations),
+        "visible_text_count": len(merged_items),
+    }
+    return merged
 
 
 def _write_step_report(
@@ -1192,6 +1671,7 @@ def _write_current_job_archive(run_dir: Path, state: dict[str, Any], step_payloa
         "execute_card",
         "verify_detail",
         "read_detail_scroll",
+        "read_detail_batch",
         "match",
         "dry_run_apply_entry",
         "execute_apply_entry",
@@ -1301,7 +1781,36 @@ def _job_archive_filename(archive: dict[str, Any]) -> str:
     return f"job_debug_{digest}.json"
 
 
-def _continue_click_point_validation(point: dict[str, Any] | None, *, window_size: dict[str, int] | None) -> dict[str, Any]:
+CONTINUE_ALLOWED_LABELS = {"continue", "save and continue", "save & continue"}
+CONTINUE_FORBIDDEN_PROFILE_LABEL_PREFIXES = ("add ", "edit ")
+CONTINUE_FORBIDDEN_PROFILE_LABELS = {"more", "save", "cancel"}
+
+
+def _continue_label_validation(
+    point: dict[str, Any],
+    *,
+    dry_result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(dry_result, dict):
+        return {"allowed": False, "reason": "missing_continue_candidate_evidence"}
+    pre_click = dry_result.get("pre_click_decision")
+    if not isinstance(pre_click, dict):
+        pre_click = (dry_result.get("agent_step_result") or {}).get("pre_click_decision")
+    return validate_action_candidate_target_at_point(
+        point,
+        pre_click_decision=pre_click,
+        allowed_labels=CONTINUE_ALLOWED_LABELS,
+        forbidden_labels=CONTINUE_FORBIDDEN_PROFILE_LABELS,
+        forbidden_label_prefixes=CONTINUE_FORBIDDEN_PROFILE_LABEL_PREFIXES,
+    )
+
+
+def _continue_click_point_validation(
+    point: dict[str, Any] | None,
+    *,
+    window_size: dict[str, int] | None,
+    dry_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     if not isinstance(point, dict):
         return {"allowed": False, "reason": "missing_selected_click_point"}
     try:
@@ -1332,9 +1841,16 @@ def _continue_click_point_validation(point: dict[str, Any] | None, *, window_siz
             "selected_click_point": {"x": int(round(x)), "y": int(round(y))},
             "coordinate_window_size": window_size,
         }
+    label_validation = _continue_label_validation({"x": x, "y": y}, dry_result=dry_result)
+    if label_validation.get("allowed") is not True:
+        return {
+            **label_validation,
+            "selected_click_point": {"x": int(round(x)), "y": int(round(y))},
+            "coordinate_window_size": window_size,
+        }
     return {
+        **label_validation,
         "allowed": True,
-        "reason": "inside_seek_form_action_region",
         "selected_click_point": {"x": int(round(x)), "y": int(round(y))},
         "coordinate_window_size": window_size,
     }
@@ -1415,7 +1931,11 @@ def _safe_continue_after_fill(base_url: str, *, app_name: str, timeout: float, f
         dry_result = _result_payload(dry_response)
         approved_plan_id = dry_result.get("approved_plan_id") or (dry_result.get("agent_step_result") or {}).get("approved_plan_id")
         selected_point = dry_result.get("selected_click_point") or (dry_result.get("agent_step_result") or {}).get("selected_click_point")
-        last_validation = _continue_click_point_validation(selected_point, window_size=window_size)
+        last_validation = _continue_click_point_validation(
+            selected_point,
+            window_size=window_size,
+            dry_result=dry_result,
+        )
         attempt_records.append(
             {
                 "attempt_index": attempt_index,
@@ -1484,6 +2004,86 @@ def _safe_continue_after_fill(base_url: str, *, app_name: str, timeout: float, f
     return result
 
 
+def _application_flow_ready(flow_state: dict[str, Any] | None) -> bool:
+    if not isinstance(flow_state, dict):
+        return False
+    state_type = str(flow_state.get("state_type") or "")
+    current_step = str(flow_state.get("current_step") or "")
+    if current_step in {"choose_documents", "answer_employer_questions", "update_seek_profile", "review_and_submit"}:
+        return True
+    return state_type in {
+        "cover_letter_field_detected",
+        "screening_questions_detected",
+        "risky_application_questions",
+        "final_submit_visible",
+    }
+
+
+def _wait_for_application_flow_after_apply(
+    base_url: str,
+    *,
+    app_name: str,
+    source_job: dict[str, Any] | None,
+    initial_flow_state: dict[str, Any] | None,
+    timeout: float,
+    max_wait_seconds: float,
+    poll_interval_seconds: float = 0.5,
+) -> dict[str, Any]:
+    started_at = time.monotonic()
+    result: dict[str, Any] = {
+        "contract_version": "seek_application_flow_wait_v1",
+        "max_wait_seconds": max(0.0, float(max_wait_seconds or 0.0)),
+        "poll_interval_seconds": max(0.1, float(poll_interval_seconds or 0.5)),
+        "poll_count": 0,
+        "status": "not_requested",
+        "elapsed_seconds": 0.0,
+        "application_flow_state": initial_flow_state if isinstance(initial_flow_state, dict) else None,
+        "trace_path": (initial_flow_state or {}).get("trace_path") if isinstance(initial_flow_state, dict) else None,
+    }
+    if _application_flow_ready(initial_flow_state):
+        result["status"] = "ready_from_apply_entry"
+        return result
+    if result["max_wait_seconds"] <= 0:
+        return result
+
+    max_polls = max(1, int(result["max_wait_seconds"] / result["poll_interval_seconds"]) + 1)
+    observations: list[dict[str, Any]] = []
+    for poll_index in range(max_polls):
+        if poll_index > 0:
+            time.sleep(result["poll_interval_seconds"])
+        observation = _observe(
+            base_url,
+            app_name=app_name,
+            state_hint="SEEK application flow after Apply click; classify the current step and stop before final submit",
+            timeout=timeout,
+        )
+        flow_state = assess_seek_application_flow_state(observation, source_job=source_job)
+        observations.append(
+            {
+                "poll_index": poll_index + 1,
+                "trace_path": observation.get("trace_path"),
+                "image_path": _image_path(observation),
+                "state_type": flow_state.get("state_type"),
+                "current_step": flow_state.get("current_step"),
+                "application_flow_started": flow_state.get("application_flow_started"),
+            }
+        )
+        result["poll_count"] = poll_index + 1
+        result["application_flow_state"] = flow_state
+        result["trace_path"] = observation.get("trace_path")
+        result["image_path"] = _image_path(observation)
+        if _application_flow_ready(flow_state):
+            result["status"] = "ready_from_poll"
+            result["observations"] = observations
+            result["elapsed_seconds"] = round(time.monotonic() - started_at, 3)
+            return result
+
+    result["status"] = "timeout"
+    result["observations"] = observations
+    result["elapsed_seconds"] = round(time.monotonic() - started_at, 3)
+    return result
+
+
 def _safe_employer_question_fill_attempt(
     base_url: str,
     *,
@@ -1512,17 +2112,25 @@ def _safe_employer_question_fill_attempt(
         result["status"] = "no_questions"
         result["stop_reason"] = "no_employer_questions_to_fill"
         return result
-    if answer_preview.get("status") != "ready":
+    allowed_previews = [item for item in previews if item.get("runner_decision") == "allow"]
+    blocked_previews = [item for item in previews if item.get("runner_decision") != "allow"]
+    if answer_preview.get("status") != "ready" and not allowed_previews:
         result["status"] = "blocked_need_user_or_gpt_decision"
         result["stop_reason"] = "employer_question_preview_not_ready"
+        result["blocked_questions"] = [_employer_question_action_preview(item) for item in blocked_previews]
         return result
     if not execute_fill:
         result["status"] = "dry_run_ready"
-        result["stop_reason"] = "employer_question_fill_requires_explicit_flag"
-        result["action_results"] = [_employer_question_action_preview(item) for item in previews]
+        result["stop_reason"] = (
+            "employer_question_partial_fill_requires_explicit_flag"
+            if blocked_previews
+            else "employer_question_fill_requires_explicit_flag"
+        )
+        result["action_results"] = [_employer_question_action_preview(item) for item in allowed_previews]
+        result["blocked_questions"] = [_employer_question_action_preview(item) for item in blocked_previews]
         return result
 
-    for item in previews:
+    for item in allowed_previews:
         action = _execute_one_employer_question_answer(base_url, app_name=app_name, item=item, timeout=timeout)
         result["action_results"].append(action)
         if action.get("status") == "already_selected":
@@ -1533,6 +2141,8 @@ def _safe_employer_question_fill_attempt(
             result["answered_count"] += 1
             if action.get("action_type") == "click":
                 result["clicks"] += 1
+            elif action.get("action_type") == "multi_click":
+                result["clicks"] += int(action.get("clicks") or 0)
             elif action.get("action_type") == "type_text":
                 result["typed_fields"] += 1
             continue
@@ -1540,8 +2150,13 @@ def _safe_employer_question_fill_attempt(
         result["stop_reason"] = action.get("stop_reason") or "employer_question_action_failed"
         return result
 
-    result["status"] = "filled_until_review"
-    result["stop_reason"] = "employer_questions_filled_stop_before_navigation"
+    result["blocked_questions"] = [_employer_question_action_preview(item) for item in blocked_previews]
+    if blocked_previews:
+        result["status"] = "partial_until_review"
+        result["stop_reason"] = "some_employer_questions_need_review"
+    else:
+        result["status"] = "filled_until_review"
+        result["stop_reason"] = "employer_questions_filled_stop_before_navigation"
     return result
 
 
@@ -1589,6 +2204,8 @@ def _execute_one_employer_question_answer(
         return result
     if action_type == "click":
         return _execute_employer_question_click(base_url, app_name=app_name, item=item, timeout=timeout, result=result)
+    if action_type == "multi_click":
+        return _execute_employer_question_multi_click(base_url, app_name=app_name, item=item, timeout=timeout, result=result)
     if action_type == "type_text":
         return _execute_employer_question_type_text(base_url, app_name=app_name, item=item, timeout=timeout, result=result)
     result["stop_reason"] = "unsupported_employer_question_action_type"
@@ -1626,6 +2243,59 @@ def _execute_employer_question_click(
     if result.get("confirmed_execute_response", {}).get("success") is not True:
         result["stop_reason"] = "employer_question_confirmed_click_execute_failed"
         return result
+    result["filled"] = True
+    result["status"] = "clicked"
+    return result
+
+
+def _execute_employer_question_multi_click(
+    base_url: str,
+    *,
+    app_name: str,
+    item: dict[str, Any],
+    timeout: float,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    target = item.get("target") if isinstance(item.get("target"), dict) else {}
+    targets = [entry for entry in target.get("targets") or [] if isinstance(entry, dict)]
+    result["action_results"] = []
+    result["clicks"] = 0
+    if not targets:
+        result["stop_reason"] = "missing_multi_click_targets"
+        return result
+    for index, entry in enumerate(targets):
+        candidate = entry.get("candidate") if isinstance(entry.get("candidate"), dict) else {}
+        bbox = _candidate_bbox(candidate)
+        if not bbox:
+            result["stop_reason"] = "missing_multi_click_candidate_bbox"
+            return result
+        point = _target_click_point(entry, bbox)
+        validation = _candidate_point_validation(point, bbox)
+        action_result: dict[str, Any] = {
+            "index": index,
+            "candidate_id": candidate.get("id"),
+            "label": candidate.get("label"),
+            "target_validation": validation,
+        }
+        if validation.get("allowed") is not True:
+            action_result["stop_reason"] = "employer_question_multi_click_point_outside_candidate_bbox"
+            result["action_results"].append(action_result)
+            result["stop_reason"] = action_result["stop_reason"]
+            return result
+        confirmed = _execute_confirmed_candidate_point(
+            base_url,
+            point=point,
+            bbox=bbox,
+            label=f"SEEK employer question {item.get('question_id')} multi option {candidate.get('label')}",
+            source_trace_path=None,
+            timeout=timeout,
+        )
+        action_result.update(confirmed)
+        result["action_results"].append(action_result)
+        if action_result.get("confirmed_execute_response", {}).get("success") is not True:
+            result["stop_reason"] = "employer_question_multi_click_execute_failed"
+            return result
+        result["clicks"] += 1
     result["filled"] = True
     result["status"] = "clicked"
     return result
@@ -1846,27 +2516,44 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
         if closed:
             time.sleep(0.8)
         open_response = _open_seek_debug(args.base_url, url=args.url, app_name=args.app_name, timeout=args.timeout)
-        resize_response = _resize_bound_window(
-            args.base_url,
-            width=args.window_width,
-            height=args.window_height,
-            timeout=args.timeout,
-        )
-        capture = _capture(args.base_url, args.timeout)
-        state["bound_window"] = (_result_payload(open_response).get("bound_window") or {}).copy() or None
-        state["source_url"] = args.url
-        report = {
-            "status": "ok" if open_response.get("success") is True else "failed",
-            "old_seek_windows_detected": old_windows,
-            "closed_windows": closed,
-            "close_policy": "explicit_allow_close_windows" if args.allow_close_windows else "detect_only",
-            "open_response": open_response,
-            "resize_response": resize_response,
-            "after_image": capture["image_path"],
-            "trace_paths": _trace_paths(open_response, resize_response or {}),
-        }
-        state["next_allowed_steps"] = ["bind_and_resize_verify", "capture", "extract_cards"]
+        opened_bound_window = (_result_payload(open_response).get("bound_window") or {}).copy() or None
+        if open_response.get("success") is not True or not opened_bound_window:
+            state["bound_window"] = None
+            state["source_url"] = args.url
+            report = {
+                "status": "failed",
+                "failure_contract": "seek_debug_open_bind_v1",
+                "failure_reason": "open_did_not_bind_window",
+                "old_seek_windows_detected": old_windows,
+                "closed_windows": closed,
+                "close_policy": "explicit_allow_close_windows" if args.allow_close_windows else "detect_only",
+                "open_response": open_response,
+                "trace_paths": _trace_paths(open_response),
+            }
+            state["next_allowed_steps"] = ["open", "bind_and_resize_verify"]
+        else:
+            resize_response = _resize_bound_window(
+                args.base_url,
+                width=args.window_width,
+                height=args.window_height,
+                timeout=args.timeout,
+            )
+            capture = _capture(args.base_url, args.timeout)
+            state["bound_window"] = opened_bound_window
+            state["source_url"] = args.url
+            report = {
+                "status": "ok",
+                "old_seek_windows_detected": old_windows,
+                "closed_windows": closed,
+                "close_policy": "explicit_allow_close_windows" if args.allow_close_windows else "detect_only",
+                "open_response": open_response,
+                "resize_response": resize_response,
+                "after_image": capture["image_path"],
+                "trace_paths": _trace_paths(open_response, resize_response or {}),
+            }
+            state["next_allowed_steps"] = ["bind_and_resize_verify", "capture", "extract_cards"]
     elif step == "bind_and_resize_verify":
+        bind_response = _bind_seek_debug_window(args.base_url, app_name=args.app_name, timeout=args.timeout)
         before_state = _runtime_state(args.base_url, args.timeout)
         resize_response = _resize_bound_window(
             args.base_url,
@@ -1891,14 +2578,38 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
         state["coordinate_window_size"] = verification.get("coordinate_window_size")
         report = {
             "status": "ok" if verified else "needs_review",
+            "bind_response": bind_response,
             "before_bound_state": before_state["payload"],
             "resize_response": resize_response,
             "after_bound_state": after_state["payload"],
             "bound_window_verification": verification,
             "after_image": capture["image_path"],
-            "trace_paths": _trace_paths(resize_response or {}),
+            "trace_paths": _trace_paths(bind_response, resize_response or {}),
         }
         state["next_allowed_steps"] = ["capture", "extract_cards"] if verified else ["bind_and_resize_verify", "open"]
+    elif step == "search_keyword_submit":
+        before_state = _runtime_state(args.base_url, args.timeout)
+        search_submit = _submit_seek_search_query(
+            args.base_url,
+            query=args.search_query,
+            x=args.search_x,
+            y=args.search_y,
+            timeout=args.timeout,
+            wait_seconds=args.search_wait_seconds,
+        )
+        after_state = _runtime_state(args.base_url, args.timeout)
+        after_capture = _capture(args.base_url, args.timeout) if args.capture_after_search else None
+        state["last_search_submit"] = search_submit
+        state["search_query"] = args.search_query
+        report = {
+            "status": search_submit["status"],
+            "search_submit": search_submit,
+            "before_bound_state": before_state["payload"],
+            "after_bound_state": after_state["payload"],
+            "after_image": after_capture["image_path"] if after_capture else None,
+            "trace_paths": search_submit.get("trace_paths") or [],
+        }
+        state["next_allowed_steps"] = ["extract_cards", "capture"]
     elif step == "capture":
         capture = _capture(args.base_url, args.timeout)
         report = {
@@ -1953,19 +2664,39 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
             execute_clicks=True,
             timeout=args.timeout,
             learned_artifact=learned_artifact,
+            verify_after_click=not bool(args.fast_open_detail),
+            fast_confirmed_card_click=bool(args.fast_open_detail),
         )
         after = _capture(args.base_url, args.timeout)
+        execute_artifacts = _execute_debug_artifacts(
+            before_image=before["image_path"],
+            after_image=after["image_path"],
+            expected_change="detail_opened",
+            target_bbox=job.get("card_bbox") if isinstance(job, dict) else None,
+        )
         state["current_job"] = job
+        new_detail_seed = {
+            key: job.get(key)
+            for key in ("job_id", "title", "company", "location", "work_type", "classification", "salary_text")
+            if isinstance(job, dict) and job.get(key)
+        }
+        if new_detail_seed:
+            put_latest_detail_snapshot(
+                state,
+                with_detail_snapshot(new_detail_seed, source="open_detail_seed", previous=None),
+            )
+        state["ui_diff_verification"] = execute_artifacts.get("ui_diff_verification")
         report = {
             "status": "ok" if action.get("opened") is True else "failed",
             "job_index": args.job_index,
             "job": job,
             "before_image": before["image_path"],
             "after_image": after["image_path"],
+            "ui_diff_verification": execute_artifacts.get("ui_diff_verification"),
             "action": action,
             "trace_paths": _trace_paths(action.get("dry_run_response") or {}, action.get("execute_response") or {}),
         }
-        state["next_allowed_steps"] = ["verify_detail", "read_detail_scroll"]
+        state["next_allowed_steps"] = ["verify_detail", "read_detail_batch"]
     elif step == "verify_detail":
         before = _capture(args.base_url, args.timeout)
         observation, detail = _observe_detail(args.base_url, args.app_name, args.timeout)
@@ -1974,18 +2705,26 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
             after_detail=detail,
             current_job=state.get("current_job") if isinstance(state.get("current_job"), dict) else None,
         )
-        merged_detail = _compact_detail_for_state(merged_detail) or {}
-        state["detail"] = merged_detail
+        merged_detail = _compact_detail_for_state(with_detail_snapshot(merged_detail, source="verify_detail", previous=state.get("detail") if isinstance(state.get("detail"), dict) else None)) or {}
+        put_latest_detail_snapshot(state, merged_detail)
+        execute_artifacts = _execute_debug_artifacts(
+            observation=observation,
+            before_image=before["image_path"],
+            after_image=_image_path(observation),
+            expected_change="detail_observed",
+        )
+        state["execute_observation"] = execute_artifacts.get("execute_observation")
         report = {
             "status": "ok" if merged_detail.get("title") else "needs_review",
             "before_image": before["image_path"],
             "observe_image": _image_path(observation),
             "observe_trace": observation.get("trace_path"),
+            "execute_observation": execute_artifacts.get("execute_observation"),
             "detail": merged_detail,
             "raw_detail": _compact_detail_for_state(detail),
             "trace_paths": _trace_paths(observation),
         }
-        state["next_allowed_steps"] = ["read_detail_scroll", "match"]
+        state["next_allowed_steps"] = ["read_detail_batch", "match"]
     elif step == "read_detail_scroll":
         before = _capture(args.base_url, args.timeout)
         scroll = _one_detail_scroll(
@@ -2003,12 +2742,20 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
             after_detail=scroll["after_detail"],
             current_job=state.get("current_job") if isinstance(state.get("current_job"), dict) else None,
         )
-        merged_detail = _compact_detail_for_state(merged_detail) or {}
-        state["detail"] = merged_detail
+        merged_detail = _compact_detail_for_state(with_detail_snapshot(merged_detail, source="read_detail_scroll", previous=state.get("detail") if isinstance(state.get("detail"), dict) else None)) or {}
+        put_latest_detail_snapshot(state, merged_detail)
+        execute_artifacts = _execute_debug_artifacts(
+            before_image=before["image_path"],
+            after_image=after["image_path"],
+            expected_change="scroll_progress",
+            target_bbox=scroll["scroll_request"].get("container_bbox"),
+        )
+        state["ui_diff_verification"] = execute_artifacts.get("ui_diff_verification")
         state.setdefault("detail_scrolls", []).append(
             {
                 "scroll_request": scroll["scroll_request"],
                 "validation": scroll["validation"],
+                "ui_diff_verification": execute_artifacts.get("ui_diff_verification"),
                 "trace_paths": _trace_paths(scroll["scroll_response"]),
             }
         )
@@ -2022,13 +2769,53 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
             "scroll_request": scroll["scroll_request"],
             "scroll_response": _compact_action_response(scroll["scroll_response"]),
             "right_detail_scroll_validation": scroll["validation"],
+            "ui_diff_verification": execute_artifacts.get("ui_diff_verification"),
             "trace_paths": _trace_paths(scroll["before_observation"], scroll["scroll_response"], scroll["after_observation"]),
         }
         state["next_allowed_steps"] = scroll["validation"].get("next_allowed_steps") or ["read_detail_scroll", "match"]
+    elif step == "read_detail_batch":
+        detail = state.get("detail") if isinstance(state.get("detail"), dict) else {}
+        if not detail and isinstance(state.get("current_job"), dict):
+            current_job = state["current_job"]
+            detail = {
+                key: current_job.get(key)
+                for key in ("job_id", "title", "company", "location", "work_type", "classification", "salary_text")
+                if current_job.get(key)
+            }
+        batch = _read_detail_batch(
+            args.base_url,
+            timeout=args.timeout,
+            detail=detail,
+            learned_artifact=learned_artifact,
+            wheel_clicks=args.wheel_clicks,
+            max_captures=args.batch_max_captures,
+            stop_after_no_new_content=args.batch_stop_after_no_new_content,
+        )
+        state["detail_batch_read"] = batch
+        merged_detail = (
+            _compact_detail_for_state(_merge_detail_batch_read_into_detail(detail, batch))
+            if batch.get("status") == "ok"
+            else None
+        )
+        if merged_detail is not None:
+            put_latest_detail_snapshot(state, merged_detail)
+        report = {
+            "status": batch.get("status"),
+            "read_region_batch": batch,
+            "target_container_id": batch.get("target_container_id"),
+            "target_bbox": batch.get("target_bbox"),
+            "capture_count": batch.get("capture_count"),
+            "unique_line_count": batch.get("unique_line_count"),
+            "stop_reason": batch.get("stop_reason"),
+            "merged_description_section_count": len((merged_detail or {}).get("description_sections") or []),
+            "trace_paths": [item.get("trace_path") for item in batch.get("captures", []) if item.get("trace_path")],
+        }
+        state["next_allowed_steps"] = ["match", "read_detail_batch"] if batch.get("status") == "ok" else ["verify_detail", "capture"]
     elif step == "match":
         profile = load_candidate_profile(args.candidate_profile)
         card = state.get("current_job") if isinstance(state.get("current_job"), dict) else None
         detail = state.get("detail") if isinstance(state.get("detail"), dict) else None
+        require_latest_detail_snapshot(state, detail)
         decision = score_seek_job(profile=profile, card=card, detail=detail, detail_complete=True)
         saved_path = save_suitable_job_record(decision=decision, card=card or {}, detail=detail or {})
         state["match_decision"] = decision
@@ -2061,8 +2848,30 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
             allow_cover_letter_fill=bool(args.allow_cover_letter_fill and execute),
         )
         post_capture_wait_seconds = float(args.post_apply_capture_wait_seconds or 0) if execute else 0.0
-        if post_capture_wait_seconds > 0:
-            time.sleep(post_capture_wait_seconds)
+        post_apply_wait = (
+            _wait_for_application_flow_after_apply(
+                args.base_url,
+                app_name=args.app_name,
+                source_job={**job, **detail},
+                initial_flow_state=apply_attempt.get("application_flow_state") if isinstance(apply_attempt, dict) else None,
+                timeout=args.timeout,
+                max_wait_seconds=post_capture_wait_seconds,
+            )
+            if execute and apply_attempt.get("executed") is True
+            else {
+                "contract_version": "seek_application_flow_wait_v1",
+                "status": "not_requested",
+                "max_wait_seconds": 0.0,
+                "poll_count": 0,
+            }
+        )
+        if execute and isinstance(post_apply_wait.get("application_flow_state"), dict):
+            apply_attempt["application_flow_state"] = post_apply_wait["application_flow_state"]
+            apply_attempt["application_flow_started"] = _application_flow_ready(post_apply_wait["application_flow_state"])
+            refreshed_flow_decision = build_seek_apply_flow_decision(post_apply_wait["application_flow_state"])
+            apply_attempt["apply_flow_decision"] = refreshed_flow_decision
+            apply_attempt["stop_reason"] = refreshed_flow_decision.get("reason") or apply_attempt.get("stop_reason")
+            apply_attempt["final_submit_visible_blocker"] = post_apply_wait["application_flow_state"].get("final_submit_visible_blocker")
         after = _capture(args.base_url, args.timeout) if execute else None
         state["apply_entry_attempt"] = apply_attempt
         report = {
@@ -2070,6 +2879,7 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
             "before_image": before["image_path"],
             "after_image": after["image_path"] if after else None,
             "post_apply_capture_wait_seconds": post_capture_wait_seconds,
+            "post_apply_wait": post_apply_wait,
             "job": job,
             "detail": detail,
             "match_decision": decision,
@@ -2084,7 +2894,7 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
             state["application_flow_state"] = apply_attempt.get("application_flow_state")
             state["application_answer_plan"] = apply_attempt.get("application_answer_plan")
             state["cover_letter_draft"] = apply_attempt.get("cover_letter_draft")
-            state["next_allowed_steps"] = ["match", "capture"]
+            state["next_allowed_steps"] = ["continue_application_flow", "capture"]
         elif execute:
             state["next_allowed_steps"] = ["execute_apply_entry", "match"]
         elif apply_attempt.get("eligible") is not True or apply_attempt.get("status") not in {"dry_run_ready", "ok"}:
@@ -2224,6 +3034,15 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
                 flow_state = continue_after_fill["post_continue_application_flow_state"]
                 flow_decision = build_seek_apply_flow_decision(flow_state)
         after = _capture(args.base_url, args.timeout)
+        execute_artifacts = _execute_debug_artifacts(
+            observation=observation,
+            flow_state=flow_state,
+            employer_question_inventory=employer_question_inventory,
+            application_answer_plan=answer_plan,
+            before_image=before["image_path"],
+            after_image=after["image_path"],
+            expected_change="step_changed" if continue_after_fill.get("executed") else "field_value_changed",
+        )
         state["application_flow_state"] = flow_state
         state["apply_flow_decision"] = flow_decision
         state["cover_letter_draft"] = cover_letter_draft
@@ -2231,6 +3050,9 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
         state["employer_question_inventory"] = employer_question_inventory
         state["employer_question_answer_plan"] = employer_question_answer_plan
         state["employer_question_answer_preview"] = employer_question_answer_preview
+        state["execute_observation"] = execute_artifacts.get("execute_observation")
+        state["form_field_inventory"] = execute_artifacts.get("form_field_inventory")
+        state["ui_diff_verification"] = execute_artifacts.get("ui_diff_verification")
         state["employer_question_fill_attempt"] = employer_question_fill_attempt
         state["safe_form_fill_attempt"] = safe_fill_attempt
         state["continue_after_fill"] = continue_after_fill
@@ -2264,6 +3086,9 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
             "application_answer_plan": answer_plan,
             "employer_question_answer_plan": employer_question_answer_plan,
             "employer_question_answer_preview": employer_question_answer_preview,
+            "execute_observation": execute_artifacts.get("execute_observation"),
+            "form_field_inventory": execute_artifacts.get("form_field_inventory"),
+            "ui_diff_verification": execute_artifacts.get("ui_diff_verification"),
             "employer_question_fill_attempt": employer_question_fill_attempt,
             "safe_form_fill_attempt": safe_fill_attempt,
             "continue_after_fill": continue_after_fill,
@@ -2272,7 +3097,13 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
             "final_submission_performed": False,
             "trace_paths": _trace_paths(observation, continue_after_fill),
         }
-        if flow_decision.get("decision") == "stop":
+        if (
+            continue_after_fill.get("status") == "continued_to_next_step"
+            and continue_after_fill.get("final_submit_visible") is not True
+            and flow_state.get("current_step") != "review_and_submit"
+        ):
+            state["next_allowed_steps"] = ["continue_application_flow", "capture"]
+        elif flow_decision.get("decision") == "stop":
             state["next_allowed_steps"] = ["capture"]
         elif flow_decision.get("decision") == "continue_read_only":
             state["next_allowed_steps"] = ["continue_application_flow", "capture"]
@@ -2284,28 +3115,30 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
         fill_record = _read_json(record_path)
         if not isinstance(fill_record, dict):
             raise SeekTraversalError(f"application fill record not found or invalid: {record_path}")
-        before = _capture(args.base_url, args.timeout)
-        observation = _observe(
+        review_read = _observe_final_review_until_submit_visible(
             args.base_url,
             app_name=args.app_name,
-            state_hint=(
-                "SEEK application Review and submit page; extract visible resume, cover letter, employer answers, "
-                "and Submit application blocker without clicking final submit"
-            ),
             timeout=args.timeout,
+            fill_record=fill_record,
         )
-        flow_state = assess_seek_application_flow_state(observation)
-        extraction = build_seek_final_review_extraction(
-            fill_record,
+        before = review_read["before"]
+        observation = review_read["observation"]
+        flow_state = review_read["flow_state"]
+        extraction = review_read["extraction"]
+        execute_artifacts = _execute_debug_artifacts(
             observation=observation,
             flow_state=flow_state,
-            screenshot_path=before["image_path"],
+            before_image=before["image_path"],
+            after_image=before["image_path"],
+            expected_change="review_extraction",
         )
         extraction_path = run_dir / "final_review_extraction.json"
         _write_json(extraction_path, extraction)
         state["application_flow_state"] = flow_state
         state["final_review_extraction"] = extraction
         state["final_review_extraction_path"] = str(extraction_path)
+        state["execute_observation"] = execute_artifacts.get("execute_observation")
+        state["form_field_inventory"] = execute_artifacts.get("form_field_inventory")
         state["next_allowed_steps"] = ["capture"]
         report = {
             "status": extraction.get("status"),
@@ -2313,8 +3146,11 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
             "observe_image": _image_path(observation),
             "observe_trace": observation.get("trace_path"),
             "application_flow_state": flow_state,
+            "execute_observation": execute_artifacts.get("execute_observation"),
+            "form_field_inventory": execute_artifacts.get("form_field_inventory"),
             "final_review_extraction": extraction,
             "final_review_extraction_path": str(extraction_path),
+            "review_read_attempts": review_read.get("review_read_attempts"),
             "review_reconciliation": extraction.get("review_reconciliation"),
             "submit_clicks": extraction.get("submit_clicks"),
             "final_submissions": extraction.get("final_submissions"),
@@ -2341,12 +3177,14 @@ def build_parser() -> argparse.ArgumentParser:
             "close_old_seek_windows",
             "open",
             "bind_and_resize_verify",
+            "search_keyword_submit",
             "capture",
             "extract_cards",
             "dry_run_card",
             "execute_card",
             "verify_detail",
             "read_detail_scroll",
+            "read_detail_batch",
             "match",
             "dry_run_apply_entry",
             "execute_apply_entry",
@@ -2360,17 +3198,29 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--window-width", type=int, default=2560)
     parser.add_argument("--window-height", type=int, default=1400)
-    parser.add_argument("--wheel-clicks", type=int, default=4)
-    parser.add_argument("--candidate-profile", default="artifacts/seek/candidate_profile_wenqingji_draft.json")
+    parser.add_argument("--wheel-clicks", type=int, default=8)
+    parser.add_argument("--search-query", default="graduate")
+    parser.add_argument("--search-x", type=int, default=840)
+    parser.add_argument("--search-y", type=int, default=207)
+    parser.add_argument("--search-wait-seconds", type=float, default=8.0)
+    parser.add_argument("--capture-after-search", action="store_true")
+    parser.add_argument("--batch-max-captures", type=int, default=5)
+    parser.add_argument("--batch-stop-after-no-new-content", type=int, default=2)
+    parser.add_argument("--candidate-profile", default=str(DEFAULT_CANDIDATE_PROFILE))
     parser.add_argument("--learned-artifact", default="artifacts/seek/learned_seek_mvp_from_5job_smoke_20260617.json")
     parser.add_argument("--application-flow-replay", default=str(DEFAULT_APPLICATION_FLOW_REPLAY))
     parser.add_argument("--application-fill-record", default=None)
     parser.add_argument("--allow-maybe-apply", action="store_true")
     parser.add_argument(
+        "--fast-open-detail",
+        action="store_true",
+        help="Skip the extra full-screen post-card-click verification and let read_detail_batch confirm the opened detail.",
+    )
+    parser.add_argument(
         "--post-apply-capture-wait-seconds",
         type=float,
-        default=6.0,
-        help="Wait after a real Apply Entry click before taking the debug screenshot, so external ATS pages finish loading.",
+        default=3.0,
+        help="Maximum application-flow readiness poll after a real Apply Entry click before taking the debug screenshot.",
     )
     parser.add_argument("--fill-safe-fields", action="store_true")
     parser.add_argument("--max-safe-fields-to-fill", type=int, default=1)

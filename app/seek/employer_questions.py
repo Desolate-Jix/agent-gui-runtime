@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from typing import Any
 
@@ -9,6 +10,24 @@ QUESTION_INVENTORY_CONTRACT = "employer_question_inventory_v1"
 OPTION_SELECTION_CONTRACT = "employer_question_option_selection_v1"
 ANSWER_PLAN_CONTRACT = "employer_question_answer_plan_v1"
 ANSWER_PREVIEW_CONTRACT = "employer_question_answer_preview_v1"
+PROGRAMMING_OPTION_LABELS = {
+    ".net",
+    "c",
+    "c#",
+    "c++",
+    "css",
+    "go",
+    "html",
+    "java",
+    "javascript",
+    "php",
+    "python",
+    "ruby",
+    "scala",
+    "swift",
+    "typescript",
+    "visual basic",
+}
 
 
 def build_employer_question_inventory(
@@ -201,6 +220,18 @@ def _preview_answer(item: dict[str, Any]) -> dict[str, Any]:
             selected_value_match = _selected_value_match(item.get("selected_value_candidates"), item.get("planned_answer"))
             if selected_value_match:
                 base["runner_decision"] = "allow"
+                candidate = selected_value_match.get("candidate") if isinstance(selected_value_match.get("candidate"), dict) else {}
+                if _select_choice_match_should_click(item.get("selected_value_candidates"), candidate):
+                    clickable = _candidate_with_click_point(candidate)
+                    base["requires_post_fill_verification"] = True
+                    base["target"] = {
+                        "action_type": "click",
+                        "candidate": clickable,
+                        "bbox": clickable.get("bbox"),
+                        "click_point": clickable.get("click_point"),
+                        "selection": selected_value_match,
+                    }
+                    return base
                 base["requires_post_fill_verification"] = False
                 base["target"] = {
                     "action_type": "already_selected",
@@ -245,6 +276,33 @@ def _preview_answer(item: dict[str, Any]) -> dict[str, Any]:
             "submit": False,
         }
         return base
+    if answer_type == "checkbox_multi":
+        selections = [entry for entry in item.get("selections") or [] if isinstance(entry, dict)]
+        targets = []
+        for selection in selections:
+            candidate = selection.get("candidate") if isinstance(selection.get("candidate"), dict) else selection
+            clickable = _candidate_with_click_point(candidate)
+            if not clickable.get("bbox") or not _candidate_is_visible(clickable):
+                continue
+            targets.append(
+                {
+                    "candidate": clickable,
+                    "bbox": clickable.get("bbox"),
+                    "click_point": clickable.get("click_point"),
+                    "selection": selection,
+                }
+            )
+        if not targets:
+            base["runner_decision"] = "needs_user_review"
+            base["reject_reason"] = "no_matching_checkbox_option"
+            return base
+        base["runner_decision"] = "allow"
+        base["target"] = {
+            "action_type": "multi_click",
+            "targets": targets,
+            "selected_count": len(targets),
+        }
+        return base
     base["runner_decision"] = "needs_user_review"
     base["reject_reason"] = "unsupported_answer_type"
     return base
@@ -269,19 +327,133 @@ def _plan_answer(question: dict[str, Any], profile: dict[str, Any]) -> dict[str,
         "control_candidates": question.get("control_candidates") or [],
         "selected_value_candidates": question.get("selected_value_candidates") or [],
     }
-    if _contains_any(key, {"salary", "pay rate", "criminal", "conviction", "medical", "health", "disability", "security clearance", "background check"}):
+    if "income range" in key or "compensation range" in key or "salary expectation" in key or "annual base salary" in key:
+        value = _clean(profile.get("salary_expectation")) or "$80k"
+        base.update(
+            status="ready",
+            answer_category="compensation_expectation",
+            planned_answer=value,
+            answer_source="candidate_profile_v1.salary_expectation_or_user_demo_policy",
+            evidence="No fixed salary expectation is recorded in the profile; use the reviewed demo default and stop before final submit.",
+            requires_user_review=False,
+        )
+        return base
+    if _contains_any(key, {"criminal", "conviction", "medical", "health", "disability", "security clearance", "background check"}):
         base.update(status="blocked_sensitive", answer_category="sensitive_or_high_risk", evidence="sensitive question requires user review")
         return base
-    if "right to work" in key or "work in new zealand" in key or "visa" in key:
+    if key == "country" or key.endswith(" country"):
+        base.update(
+            status="ready",
+            answer_category="location_country",
+            planned_answer="New Zealand",
+            answer_source="candidate_profile_v1.work_rights_summary",
+            evidence=_clean(profile.get("work_rights_summary")) or "Candidate profile indicates New Zealand work rights.",
+            requires_user_review=False,
+        )
+        return base
+    if "current location" in key or "where are you currently located" in key:
+        preferences = profile.get("job_search_preferences") if isinstance(profile.get("job_search_preferences"), dict) else {}
+        value = _clean(preferences.get("primary_location")) or "Auckland"
+        base.update(
+            status="ready",
+            answer_category="current_location",
+            planned_answer=value,
+            answer_source="candidate_profile_v1.job_search_preferences.primary_location",
+            evidence=json.dumps(preferences.get("location_priority") or value, ensure_ascii=False),
+            requires_user_review=False,
+        )
+        return base
+    if key == "gender":
+        base.update(
+            status="ready",
+            answer_category="demographic_prefer_not_to_disclose",
+            planned_answer="Do not wish to disclose",
+            answer_source="safe_default_non_disclosure",
+            evidence="Prefer non-disclosure for optional demographic questions unless the user explicitly says otherwise.",
+            requires_user_review=False,
+            selection=select_employer_question_option(question, planned_answer="Do not wish to disclose"),
+        )
+        return base
+    if "english language" in key or "language skills" in key:
+        value = _clean(profile.get("english_language_level")) or _clean(profile.get("english")) or "Professional working proficiency"
+        base.update(
+            status="ready",
+            answer_category="language_proficiency",
+            planned_answer=value,
+            answer_source="candidate_profile_v1.english_language_level_or_demo_policy",
+            evidence="Use professional working proficiency for the no-submit demo unless the profile records a different level.",
+            requires_user_review=False,
+            selection=select_employer_question_option(question, planned_answer=value) if answer_type in {"radio_choice", "radio_yes_no"} else None,
+        )
+        return base
+    if "know anybody" in key and "sandfield" in key:
+        base.update(
+            status="ready",
+            answer_category="company_connection",
+            planned_answer="No",
+            answer_source="candidate_profile_v1.no_known_company_connection",
+            evidence="No Sandfield employee connection is recorded in the candidate profile.",
+            requires_user_review=False,
+            selection=select_employer_question_option(question, planned_answer="No") if answer_type == "radio_yes_no" else None,
+        )
+        return base
+    if "what appeals to you" in key and "sandfield" in key:
+        evidence = _profile_evidence(profile, ["skills", "experience_summary"])
+        answer = (
+            "Sandfield appeals to me because the role combines full-stack web development, "
+            "real business problem solving, direct collaboration with clients, and the use of AI tools to build practical software. "
+            "That fits my background in JavaScript, React, APIs, AI-assisted development, and evidence-driven debugging."
+        )
+        base.update(
+            status="ready",
+            answer_category="role_motivation",
+            planned_answer=answer,
+            answer_source="candidate_profile_v1.skills_and_job_detail_evidence",
+            evidence=evidence or "Job detail mentions full-stack development, real business problems, client interaction, and AI tools.",
+            requires_user_review=False,
+        )
+        return base
+    if "currently living in new zealand" in key or "currently live in new zealand" in key:
         value = _clean(profile.get("work_rights_summary"))
-        if value:
+        base.update(
+            status="ready",
+            answer_category="current_residence",
+            planned_answer="Yes",
+            answer_source="candidate_profile_v1.work_rights_summary",
+            evidence=value or "Candidate profile is for New Zealand SEEK applications.",
+            requires_user_review=False,
+            selection=select_employer_question_option(question, planned_answer="Yes") if answer_type == "radio_yes_no" else None,
+        )
+        return base
+    if "right to work" in key or "work rights" in key or "work in new zealand" in key or "visa" in key:
+        value = _clean(profile.get("work_rights_summary"))
+        if answer_type == "radio_yes_no" and (
+            "without the need for employer sponsorship" in key or "without employer sponsorship" in key
+        ):
             base.update(
                 status="ready",
                 answer_category="work_rights",
-                planned_answer=_work_rights_option(value),
-                answer_source="candidate_profile_v1.work_rights_summary",
-                evidence=value,
+                planned_answer="Yes",
+                answer_source="candidate_profile_v1.work_rights_summary" if value else "seek_no_submit_demo_policy.work_rights",
+                evidence=value or "No work-rights summary was loaded; no-submit demo uses Yes only for sponsorship-style eligibility questions.",
                 requires_user_review=False,
+                selection=select_employer_question_option(question, planned_answer="Yes"),
+            )
+            return base
+        planned = _visible_work_rights_profile_option(question, value) if value else _visible_work_rights_demo_option(question)
+        if not planned and value:
+            planned = _work_rights_option(value)
+        if planned:
+            base.update(
+                status="ready",
+                answer_category="work_rights",
+                planned_answer=planned,
+                answer_source="candidate_profile_v1.work_rights_summary" if value else "seek_no_submit_demo_policy.visible_work_rights_option",
+                evidence=value or "No work-rights summary was loaded; no-submit demo selects the visible Current NZ Work Visa option and stops before final submit.",
+                requires_user_review=False,
+                selection=select_employer_question_option(question, planned_answer=planned)
+                if answer_type in {"radio_choice", "radio_yes_no"}
+                else None,
             )
         else:
             base.update(status="blocked_sensitive", answer_category="work_rights", evidence="profile work_rights_summary missing")
@@ -297,6 +469,31 @@ def _plan_answer(question: dict[str, Any], profile: dict[str, Any]) -> dict[str,
                 evidence=evidence,
                 requires_user_review=False,
                 selection=select_employer_question_option(question, planned_answer="Yes") if answer_type == "radio_yes_no" else None,
+            )
+        return base
+    if answer_type == "checkbox_multi" and _contains_any(
+        key,
+        {
+            "programming language",
+            "programming languages",
+            "technologies",
+            "frameworks",
+            "tools",
+            "experienced in",
+            "experience with",
+        },
+    ):
+        selections = _select_profile_skill_options(question, profile)
+        evidence = _profile_evidence(profile, ["skills", "experience_summary"])
+        if selections:
+            base.update(
+                status="ready",
+                answer_category="skill_checkbox_multi",
+                planned_answer=[item.get("label") for item in selections],
+                answer_source="candidate_profile_v1.skills",
+                evidence=evidence,
+                requires_user_review=False,
+                selections=selections,
             )
         return base
     if _contains_any(key, {"java", "angularjs", "react", "vue", "mysql", "solutions"}):
@@ -326,6 +523,18 @@ def _plan_answer(question: dict[str, Any], profile: dict[str, Any]) -> dict[str,
             requires_user_review=False,
         )
         return base
+    if "notice" in key and "employer" in key:
+        value = _clean(profile.get("notice_period")) or "None, I'm ready to go now"
+        evidence = _profile_evidence(profile, ["notice_period", "availability", "work_rights_summary"])
+        base.update(
+            status="ready",
+            answer_category="notice_period",
+            planned_answer=value,
+            answer_source="candidate_profile_v1.notice_period_or_demo_policy",
+            evidence=evidence or "No current employer notice period is recorded; use the no-submit demo default.",
+            requires_user_review=False,
+        )
+        return base
     return base
 
 
@@ -337,6 +546,31 @@ def _first_type_text_candidate(candidates: Any) -> dict[str, Any] | None:
         if role in {"textbox", "text_input"} or any(term in role for term in ("textarea", "text area", "edit", "input")):
             return candidate
     return None
+
+
+def _select_choice_match_should_click(candidates: Any, candidate: dict[str, Any]) -> bool:
+    if not isinstance(candidate, dict):
+        return False
+    if candidate.get("source") == "synthetic_work_rights_dropdown_value_region":
+        return False
+    visible_candidates = [item for item in candidates or [] if isinstance(item, dict) and isinstance(item.get("bbox"), dict)]
+    return len(visible_candidates) > 1
+
+
+def _candidate_with_click_point(candidate: dict[str, Any]) -> dict[str, Any]:
+    bbox = _bbox(candidate.get("bbox"))
+    if "click_point" in candidate:
+        return candidate
+    return {
+        **candidate,
+        "bbox": bbox,
+        "click_point": {"x": _bbox_x(bbox) + int(_bbox_w(bbox) / 2), "y": _bbox_y(bbox) + int(_bbox_h(bbox) / 2)},
+    }
+
+
+def _candidate_is_visible(candidate: dict[str, Any]) -> bool:
+    bbox = _bbox(candidate.get("bbox"))
+    return _bbox_x(bbox) >= 0 and _bbox_y(bbox) >= 0 and _bbox_w(bbox) > 1 and _bbox_h(bbox) > 1
 
 
 def _build_question_group(
@@ -399,6 +633,17 @@ def _synthetic_textbox_candidate(question: dict[str, Any], *, bottom_y: int) -> 
     if not _question_expects_text_input(question.get("question_text")):
         return None
     qbox = _bbox(question.get("question_bbox"))
+    if "input field" in _clean(question.get("question_text")).casefold():
+        return {
+            "id": f"{(question.get('question_id') or 'question')}_source_input_bbox",
+            "label": "",
+            "role": "textbox",
+            "bbox": qbox,
+            "click_point": {"x": _bbox_x(qbox) + int(_bbox_w(qbox) / 2), "y": _bbox_y(qbox) + int(_bbox_h(qbox) / 2)},
+            "source": "source_input_field_bbox",
+            "association_match": False,
+            "inference_reason": "question_label_is_input_field_bbox",
+        }
     y = _bbox_bottom(qbox) + 14
     available_h = max(0, int(bottom_y) - y - 12)
     if available_h < 48:
@@ -438,7 +683,24 @@ def _synthetic_work_rights_selected_value_candidate(question: dict[str, Any], *,
 
 def _question_expects_text_input(question_text: Any) -> bool:
     text = _clean(question_text).casefold()
-    if any(term in text for term in ("start immediately", "within 1-2 weeks", "available to start", "availability", "tell us", "explain")):
+    if any(
+        term in text
+        for term in (
+            "country",
+            "current location",
+            "income range",
+            "compensation range",
+            "salary expectation",
+            "know anybody",
+            "what appeals",
+            "start immediately",
+            "within 1-2 weeks",
+            "available to start",
+            "availability",
+            "tell us",
+            "explain",
+        )
+    ):
         return True
     return bool(re.search(r"\bdescribe\b", text))
 
@@ -552,6 +814,8 @@ def _uia_role(control: dict[str, Any]) -> str:
     control_type = _clean(control.get("control_type")).casefold()
     if control_type == "radiobutton":
         return "radio"
+    if control_type == "checkbox":
+        return "checkbox"
     if control_type == "combobox":
         return "combobox"
     if control_type in {"edit", "document"}:
@@ -641,14 +905,32 @@ def _looks_like_question(item: dict[str, Any]) -> bool:
         return False
     text = _clean(item.get("text") or item.get("label"))
     lowered = text.casefold()
+    known_short_labels = {
+        "country",
+        "current location",
+        "gender",
+        "income range input field",
+    }
+    if lowered in known_short_labels:
+        return True
     if not text or len(text) < 12:
         return False
-    if "://" in lowered or lowered.startswith(("http://", "https://")):
+    url_key = re.sub(r"\s+", "", lowered)
+    if (
+        "://" in lowered
+        or lowered.startswith(("http://", "https://", "http/", "https/"))
+        or "seek.com/job/" in url_key
+        or "nz.seek.com/job" in url_key
+    ):
         return False
     if "employer questions" in lowered or lowered in {"answer employer questions", "review and submit"}:
         return False
     compact = re.sub(r"[^a-z0-9?]+", "", lowered)
-    return "?" in text or lowered.startswith(("do you ", "are you ", "can you ", "which of ")) or compact.startswith(("doyou", "areyou", "canyou", "whichof"))
+    return (
+        "?" in text
+        or lowered.startswith(("do you ", "are you ", "can you ", "which of ", "what income range ", "what appeals "))
+        or compact.startswith(("doyou", "areyou", "canyou", "whichof", "whatincomerange", "whatappeals"))
+    )
 
 
 def _dedupe_questions(questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -690,6 +972,10 @@ def _same_question_key(left: str, right: str) -> bool:
         return False
     if left == right or left in right or right in left:
         return True
+    left_compact = re.sub(r"\s+", "", left)
+    right_compact = re.sub(r"\s+", "", right)
+    if left_compact == right_compact or left_compact in right_compact or right_compact in left_compact:
+        return True
     left_tokens = [token for token in left.split() if len(token) > 2]
     right_tokens = [token for token in right.split() if len(token) > 2]
     if not left_tokens or not right_tokens:
@@ -704,9 +990,10 @@ def _is_control_candidate(item: dict[str, Any]) -> bool:
     label = _clean(item.get("text") or item.get("label")).casefold()
     if label in {"continue", "back", "review and submit", "submit", "submit application", "send application", "complete application"}:
         return False
-    if role in {"radio", "radiobutton", "button", "option", "combobox", "textbox", "text_input"}:
+    if role in {"radio", "radiobutton", "checkbox", "button", "option", "combobox", "textbox", "text_input"}:
         return True
-    return label in {"yes", "no"} or role in {"text", "input"} and label in {"yes", "no"}
+    text_option_labels = {"yes", "no", "male", "female", "other", "do not wish to disclose"}
+    return label in text_option_labels or role in {"text", "input"} and (label in text_option_labels or label in PROGRAMMING_OPTION_LABELS)
 
 
 def _control_candidate(item: dict[str, Any]) -> dict[str, Any]:
@@ -731,6 +1018,7 @@ def _is_selected_value_evidence_candidate(item: dict[str, Any]) -> bool:
     if not label or len(label) < 3:
         return False
     lowered = label.casefold()
+    navigation_key = re.sub(r"[^0-9a-z]+", "", lowered)
     if lowered in {
         "choose documents",
         "answer employer questions",
@@ -738,7 +1026,7 @@ def _is_selected_value_evidence_candidate(item: dict[str, Any]) -> bool:
         "review and submit",
         "continue",
         "back",
-    }:
+    } or navigation_key in {"continue", "back", "submit", "submitapplication"}:
         return False
     return True
 
@@ -768,17 +1056,28 @@ def _answer_type(
 ) -> str:
     labels = {_clean(item.get("label")).casefold() for item in candidates}
     roles = {_clean(item.get("role")).casefold() for item in candidates}
+    question_key = _clean(question_text).casefold()
+    if any(role == "combobox" for role in roles):
+        return "select_choice"
     if {"yes", "no"}.issubset(labels):
         return "radio_yes_no"
+    if selected_value_candidates and _contains_any(
+        question_key,
+        {"right to work", "work in new zealand", "visa", "salary", "base salary", "income range", "notice"},
+    ):
+        return "select_choice"
+    if _question_expects_text_input(question_text):
+        return "text_input"
+    if {"male", "female", "other", "do not wish to disclose"} & labels:
+        return "radio_choice"
     if any(role in {"textbox", "text_input"} for role in roles):
         return "text_input"
     if any(role in {"radio", "radiobutton", "option"} for role in roles):
         return "radio_choice"
-    if any(role == "combobox" for role in roles):
-        return "select_choice"
-    question_key = _clean(question_text).casefold()
-    if selected_value_candidates and ("right to work" in question_key or "work in new zealand" in question_key or "visa" in question_key):
-        return "select_choice"
+    if any(role == "checkbox" for role in roles):
+        return "checkbox_multi"
+    if _contains_any(question_key, {"programming language", "programming languages"}) and labels & PROGRAMMING_OPTION_LABELS:
+        return "checkbox_multi"
     return "unknown"
 
 
@@ -941,8 +1240,109 @@ def _profile_evidence(profile: dict[str, Any], keys: list[str]) -> str:
     return "; ".join(values[:12])
 
 
+def _select_profile_skill_options(question: dict[str, Any], profile: dict[str, Any]) -> list[dict[str, Any]]:
+    profile_tokens = _profile_skill_tokens(profile)
+    if not profile_tokens:
+        return []
+    selected: list[dict[str, Any]] = []
+    seen_labels: set[str] = set()
+    for candidate in question.get("control_candidates") or []:
+        if not isinstance(candidate, dict):
+            continue
+        label = _clean(candidate.get("label") or candidate.get("text"))
+        label_key = label.casefold()
+        if not label_key or label_key in seen_labels:
+            continue
+        if label_key in {"other", "none", "n/a", "not applicable"}:
+            continue
+        label_tokens = _skill_label_tokens(label_key)
+        if not label_tokens:
+            continue
+        if profile_tokens & label_tokens or label_key in profile_tokens:
+            selected.append(
+                {
+                    "candidate": candidate,
+                    "label": label,
+                    "match_type": "profile_skill_token",
+                    "matched_tokens": sorted(profile_tokens & label_tokens),
+                }
+            )
+            seen_labels.add(label_key)
+    return selected
+
+
+def _profile_skill_tokens(profile: dict[str, Any]) -> set[str]:
+    evidence = _profile_evidence(profile, ["skills", "experience_summary"])
+    tokens = _semantic_tokens(evidence)
+    aliases = {
+        ".net": {"net", "dotnet"},
+        "c#": {"csharp", "sharp"},
+        "javascript": {"javascript", "js"},
+        "typescript": {"typescript", "ts"},
+    }
+    lowered = evidence.casefold()
+    for literal, mapped in aliases.items():
+        if literal in lowered:
+            tokens.update(mapped)
+    return tokens
+
+
+def _skill_label_tokens(value: str) -> set[str]:
+    tokens = _semantic_tokens(value)
+    if "c#" in value:
+        tokens.update({"csharp", "sharp"})
+    if ".net" in value:
+        tokens.update({"net", "dotnet"})
+    if value == "js":
+        tokens.add("javascript")
+    if value == "ts":
+        tokens.add("typescript")
+    return tokens
+
+
 def _work_rights_option(summary: str) -> str:
     lowered = summary.casefold()
     if "post study" in lowered or "post-study" in lowered or "graduate temporary" in lowered:
         return "I have a graduate temporary work visa (e.g. post study work visa - open)"
     return summary
+
+
+def _visible_work_rights_demo_option(question: dict[str, Any]) -> str | None:
+    labels = [
+        _clean(item.get("label") or item.get("text"))
+        for item in [
+            *(question.get("control_candidates") or []),
+            *(question.get("selected_value_candidates") or []),
+        ]
+        if isinstance(item, dict)
+    ]
+    preferred = ("Current NZ Work Visa", "NZ Resident", "NZ Citizen")
+    for option in preferred:
+        if any(_clean(label).casefold() == option.casefold() for label in labels):
+            return option
+    return None
+
+
+def _visible_work_rights_profile_option(question: dict[str, Any], summary: str) -> str | None:
+    lowered = _clean(summary).casefold()
+    if "post study" in lowered or "post-study" in lowered or "work visa" in lowered or "open work" in lowered:
+        visible = _visible_work_rights_demo_option(question)
+        if visible == "Current NZ Work Visa":
+            return visible
+    if "resident" in lowered and _visible_work_rights_label_exists(question, "NZ Resident"):
+        return "NZ Resident"
+    if "citizen" in lowered and _visible_work_rights_label_exists(question, "NZ Citizen"):
+        return "NZ Citizen"
+    return None
+
+
+def _visible_work_rights_label_exists(question: dict[str, Any], label: str) -> bool:
+    labels = [
+        _clean(item.get("label") or item.get("text")).casefold()
+        for item in [
+            *(question.get("control_candidates") or []),
+            *(question.get("selected_value_candidates") or []),
+        ]
+        if isinstance(item, dict)
+    ]
+    return label.casefold() in labels

@@ -2,11 +2,90 @@
 
 [中文](README.md) | [English](README.en.md)
 
+## Contract-first SEEK policy (2026-06-24)
+
+Recent live SEEK failures are now handled as reusable runtime contracts instead of one-off site patches. Before any full SEEK apply run, keep the common regression set green for latest detail dataflow, candidate freshness, action taxonomy, scoped final-submit detection, scroll-scope validation, contextual OCR normalization, SEEK extraction, SEEK runners, and path-graph execution.
+
+The next live order is intentionally staged: one job read/match/Apply dry-run first, then a 3-5 job no-apply smoke, and only then a station-internal application flow that stops at the final Review boundary. `Apply` / `Quick Apply` is an `open_apply_flow` action, not a final submit; `Submit` / `Send` / `Confirm` / payment remains hard-blocked inside the active form or modal scope.
+
+Latest staged evidence: `logs\smoke\seek_no_apply_contract_smoke_3jobs_profile_after_dedupe_20260624.json` passed with `jobs_opened=3`, `jobs_fully_read=3`, `strong_apply=2`, `maybe_apply=1`, `wrong_scope_scroll_count=0`, and `final_submissions=0`. `logs\smoke\seek_apply_entry_contract_smoke_after_route_fix_20260624.json` proved Apply Entry can open a same-site SEEK `/apply` route without filling or submitting. A bare `/apply` route now produces `wait_for_form_readiness`; `seek_application_form_readiness_wait_v1` must observe real fields or a clear blocker before cover-letter, answer-plan, or safe-fill stages run. Direct apply URL observe evidence at `logs\smoke\seek_direct_apply_form_readiness_20260624.json` reached `cover_letter_field_detected` with `final_submit_visible=false`. The latest station-internal form debug run at `logs\smoke\seek_apply_92822270_contract_debug_20260624` reached `Review and submit`, filled the cover letter, answered 4/4 employer questions, kept profile mutation blocked, passed final-review extraction, and stayed at `submit_clicks=0` / `final_submissions=0`. Continue target validation is now a common action-candidate contract, with SEEK providing only label policy. The run is frozen as non-authorizing Learn evidence at `artifacts\seek\learned_seek_application_flow_92822270_20260624_contract_debug.json`; its replay and checkpoint both pass without authorizing clicks or final submit. A fresh learned-artifact live replay at `logs\smoke\seek_artifact_live_replay_92822270_20260624` followed the artifact-assisted path through cover-letter fill, 4/4 employer questions, profile review, and final Review extraction, again with `submit_clicks=0` and `final_submissions=0`; it is now exported as `artifacts\seek\learned_seek_application_flow_92822270_20260624_live_replay.json`, with replay/checkpoint passing.
+
+Post-incident final-submit rule: a final `Submit application` click is no longer authorized by thread-level intent, a stale goal, or ad-hoc metadata such as `explicit_user_authorized_final_submit=true`. When the selected target matches final-submit language, `POST /action/execute_recognition_plan` requires a structured `final_submit_decision_v1` / `pre_submit_suitability_audit_v1` in request metadata. That decision must prove the current job was reviewed, the live match decision is `strong_apply` or an explicit reviewed override exists, GPT/user review has not requested `need_user_review`, and no unsupported employer-question `Yes` answers or hard risk flags remain. SEEK can build this metadata through `app.seek.pre_submit_audit.build_seek_final_submit_decision()`. The accidental 2026-06-24 submit is preserved as incident evidence, not as a reusable authorization pattern: `logs\smoke\seek_final_submit_completion_20260624.json` records `submitted=true`, `submit_clicks=1`, `final_submissions=1`, and confirmation screenshot `artifacts\screenshots\application-sent-seek-microsoft-edge__capture__full-window__20260624-055231-928897.png`.
+
+Quality pass now also requires `title_extraction_from_body_count=0`. If a post-click detail header is reconstructed from a scrolled body fragment, `seek_mvp_accuracy_summary_v1.status` becomes `needs_review` even when clicks, reads, and zero-submit safety counters otherwise look clean.
+
 ## Runtime cleanup and trace budget update (2026-06-20)
 
 Runtime traces now go through a bounded `write_trace` path. Normal small traces keep their original JSON shape, while very large strings, recursive scroll histories, binary/base64-like fields, and over-budget payloads are truncated or summarized with explicit `trace_truncated` metadata. This prevents `/action/scroll` and other long debug loops from writing multi-hundred-MB or GB JSON traces again.
 
 The first cleanup pass moved old generated traces and visual artifacts out of the workspace into `D:\agent-gui-runtime_cleanup_quarantine_20260620`, deleted the regenerable `.uv-cache`, and kept models, `.venv`, `tools`, source code, tests, SEEK milestone JSON artifacts, templates, and skills in place. Manifests are recorded under `logs\cleanup\cleanup_manifest_20260620_v2.json` and `logs\cleanup\cleanup_manifest_20260620_v3.json`.
+
+## Agent onboarding docs (2026-06-20)
+
+Give other agents `AGENT_ONBOARDING.md` first. It links the minimum required docs for using the framework safely:
+
+- `AGENT_API_WORKFLOW.md`
+- `docs\AGENT_EXECUTION_PROTOCOL.md`
+- `docs\AGENT_LEARN_MODE_TUTORIAL.md`
+- `docs\VISUAL_ASSET_LEARNING_MODE.zh-CN.md`
+- `docs\AGENT_TRACE_DEBUG_GUIDE.md`
+- `docs\AGENT_PROMPT_TEMPLATE.zh-CN.md`
+
+For SEEK-specific tasks, also give the agent `skills\seek-high-precision\SKILL.md`.
+
+`POST /apps/open` now defaults `maximize_after_open=true` when it opens and binds a target window. External agents should keep that default for browser/SEEK tests so screenshots include the full list/detail layout before Observe or Execute.
+
+For VISTA-backed Execute Mode, external agents should pass a reviewed card/result bbox as `metadata.seeded_candidate_v1` whenever it is available. The runtime now uses that seed as the primary compressed grounding path, crops a compact single-candidate ROI, and records `vista_roi_policy`, `vista_roi_source`, processed size, and fallback tier in the trace. Multi-candidate union crops and full-screen VISTA direct grounding are fallback paths.
+
+For SEEK debug/application runs, step reports now expose lightweight machine-readable helpers before an agent needs to inspect raw screenshots: `execute_observation_v1` for current page state and safety blockers, `form_field_inventory_v1` for stable fill targets, `ui_diff_verification_v1` for before/after screenshot-change evidence, and `read_region_batch_v1` for multi-capture OCR reading of long detail panes. The same contracts are available through lightweight Execute APIs: `POST /execute/observe`, `POST /execute/form_inventory`, `POST /execute/verify_diff`, and `POST /execute/read_region_batch`. Detail reading can now use `scripts\seek_debug_step_runner.py --step read_detail_batch` so long-read pages do not advance by tiny one-scroll loops.
+
+Apply Entry step reports also include `seek_application_flow_wait_v1`. The debug runner reuses the application-flow state already produced by Apply Entry when available and only polls whole-screen Observe up to the configured maximum when that state is unclear; the default maximum is 3 seconds, not a fixed sleep.
+
+SEEK demo readiness can be checked without reading every trace manually:
+
+```powershell
+uv run python scripts\seek_demo_readiness_report.py --run-dir logs\smoke\seek_debug_step_run_latest --out logs\smoke\seek_demo_readiness_report.json
+```
+
+The report checks the operator demo goals: job/detail evidence, batch or scroll detail read evidence, station-internal application start, `Review and submit` reached, `final_submissions=0`, screenshot/trace evidence, and the configured time budget. The default budget is 5 minutes.
+
+Latest fresh speed evidence: `logs\smoke\seek_speed_demo_20260623_fresh7_absolute` passed in `212048.417ms` with `within_budget=true`, `final_review_status=pass`, `submit_clicks=0`, and `final_submissions=0`. The live runner path now prefilters obvious unsuitable cards, adaptively increases result-list scroll strength when card fingerprints do not change, keeps the application-flow detector strict enough to reject generic search-page forms, and passes final-review extraction into the readiness report.
+
+For the original 35-minute-demo optimization goal, run the stricter completion audit:
+
+```powershell
+uv run python scripts\seek_demo_goal_completion_audit.py `
+  --run-dir logs\smoke\seek_speed_demo_20260623_fresh7_absolute `
+  --fail-on-error
+```
+
+It emits `seek_demo_goal_completion_audit_v1` and checks the six evidence points tied to the user-reported bottlenecks: adaptive result scrolling, multi-capture batch reading, execute-scoped screen understanding after page changes, visual form inventory plus scroll/post-fill verification, `ui_diff_verification_v1`, and the 5-minute Review-before-submit boundary.
+
+Reproduce the current 5-minute SEEK demo checkpoint with a reviewed SEEK search/job seed:
+
+```powershell
+uv run python scripts\seek_speed_demo_runner.py `
+  --run-dir logs\smoke\seek_speed_demo_latest `
+  --close-old-windows `
+  --url "https://nz.seek.com/software-engineer-jobs/in-All-Auckland?jobId=92847815&type=standard" `
+  --max-jobs 5 `
+  --visible-jobs-per-page 4 `
+  --max-result-scrolls 3 `
+  --batch-max-captures 3 `
+  --batch-stop-after-no-new-content 1 `
+  --wheel-clicks 9 `
+  --results-scroll-wheel-clicks 9 `
+  --post-apply-capture-wait-seconds 0.5 `
+  --time-budget-ms 300000
+```
+
+When another agent needs to inspect a trace, do not paste the full JSON into its prompt. First generate a compact handoff:
+
+```powershell
+uv run python scripts\agent_trace_digest.py "logs\traces\vision\TRACE.json" --format text
+```
+
+Use `--format json` when the receiving agent needs machine-readable `agent_trace_digest_v1` evidence.
 
 ## SEEK MVP execution update (2026-06-17)
 
@@ -56,6 +135,8 @@ The SEEK traversal runner now writes two artifacts: the compact `seek_mvp_run_re
 
 CLI traversal runs also write per-job `seek_job_archive_v1` files by default beside the `--out` report, for example `logs\smoke\seek_mvp_traversal_report_job_archives\job_*.json`. Each archive stores the source card, click trace paths, detail-read result, scroll segments, match decision, optional Apply Entry summary, and final-submit safety state. Use `--job-archives-dir <dir>` to choose a different archive directory.
 
+CLI traversal runs also write a compact `seek_clear_path_graph_v1` beside the report, named like `seek_path_verify_report_clear_path_graph.json`. This is the preferred handoff for agents that cannot read long traces: it lists stable SEEK regions (`results_list`, `job_card`, `job_detail`, `detail_header`, `detail_body`), reusable actions (`open_job_card`, `read_detail`, `load_more_results`), per-job click/read nodes, trace paths, and safety counters. The 2026-06-24 validation at `logs\smoke\seek_path_verify_fixed_20260624_001102\seek_path_verify_report_clear_path_graph.json` opened 1/1 job, fully read 1/1 detail, kept `wrong_scope_scroll_count=0`, and did not click Apply or Submit.
+
 One-step debug runs write the same archive shape under `<run-dir>\job_archives\`. Each debug step appends its `step_report.json`, before/after/observe screenshot paths, and trace paths into the current job archive, so the operator can inspect the whole card-click/detail-scroll/match/apply-entry trail after running bounded commands such as `--step execute_card`, `--step read_detail_scroll`, and `--step match`.
 
 Audit a SEEK run before continuing to riskier steps:
@@ -78,12 +159,15 @@ uv run python scripts\seek_export_learn_artifacts.py `
   --path-graph-out artifacts\seek\path_graph_seed_seek_mvp_20260617.json `
   --runtime-graph-out artifacts\seek\runtime_path_graph_seek_mvp_20260617.json `
   --learned-skills-out artifacts\seek\learned_skills_seek_mvp_20260617.json `
-  --visual-assets-out artifacts\seek\visual_assets_seek_mvp_20260617.json
+  --visual-assets-out artifacts\seek\visual_assets_seek_mvp_20260617.json `
+  --interface-map-out artifacts\seek\learned_interface_map_seek_mvp_20260617.json
 ```
 
 `learned_app_profile_v1` records SEEK page type, scroll containers, entity patterns, action templates, verification rules, and safety policy. `path_graph_seed_v1` seeds the learned page structure as `top_search_area`, `results_list`, `job_detail`, `job_card`, `detail_header`, and `detail_body`. The SEEK runner may use `--learned-artifact` to prefer these learned rules, but real clicks still go through the existing gated Execute path.
 
-The same export now also produces the first generic path-graph-mode artifacts. `runtime_path_graph_v1` upgrades the SEEK seed into states, regions, scroll containers, entities, transitions, action templates, coordinate evidence, visual asset refs, learned skill refs, safety policy, and `path_patterns`. The SEEK graph currently exports `list_detail_path_pattern_v1`, a reusable split-list/detail pattern with list/detail container ids, card-to-detail identity mapping, adaptive detail-read scrolling, wrong-scope stability checks, and detail-pane cleanup before the next card click. `learned_skill_v1` extracts reusable skills such as opening a card from a list, scrolling one container until new content appears, reading a detail pane, validating a seeded click point, resetting a detail pane to its header, and blocking final submit. `visual_asset_v1` records SEEK visual evidence slots such as Apply, Quick Apply, Save, job-card shape, selected-card highlight, and results/detail scrollbars. When a source screenshot is supplied, `visual_asset_crop_export_v1` can crop and hash representative learned shapes such as the SEEK job-card body. These artifacts are guidance only; they do not authorize clicks.
+The same export now also produces the first generic path-graph-mode artifacts. `runtime_path_graph_v1` upgrades the SEEK seed into states, regions, scroll containers, entities, transitions, action templates, coordinate evidence, visual asset refs, learned skill refs, safety policy, and `path_patterns`. The SEEK graph currently exports `list_detail_path_pattern_v1`, a reusable split-list/detail pattern with list/detail container ids, card-to-detail identity mapping, adaptive detail-read scrolling, wrong-scope stability checks, and detail-pane cleanup before the next card click. `learned_skill_v1` extracts reusable skills such as opening a card from a list, scrolling one container until new content appears, reading a detail pane, validating a seeded click point, resetting a detail pane to its header, and blocking final submit. `visual_asset_v1` records SEEK visual evidence slots such as Apply, Quick Apply, Save, job-card shape, selected-card highlight, and results/detail scrollbars. `learned_interface_map_v1` combines the runtime graph and visual assets into a panel-friendly state/region map with fixed visual assets, dynamic ROI areas, danger zones, and editor policy. When observed Apply / Quick Apply bbox evidence is present, `visual_asset_crop_export_v1` can crop and hash those fixed buttons as well as representative learned shapes such as the SEEK job-card body. These artifacts are guidance only; they do not authorize clicks. Use `uv run python scripts\visual_asset_local_smoke.py --out-dir artifacts\visual-match-smoke\local_seek_buttons` for a no-mouse local screenshot smoke of the learned button-crop path, then use `uv run python scripts\visual_asset_calibration_report.py --interface-map <map.json> --target-image <screenshot.png> --out <report.json>` to calibrate the same learned visual assets against another current screenshot.
+
+When `POST /vision/observe_screen` recognizes the learned SEEK search-results surface, the default SEEK `runtime_path_graph_v1` now becomes the primary `screen_map` structure: regions are emitted as `top_search_area`, `results_list`, `job_detail`, `job_card`, `detail_header`, and `detail_body`, and `learned_path_graph_available_actions` exposes graph actions such as `open_job_card`, `read_detail`, and `load_more_results`. Model/OCR output remains supplemental current evidence; the artifact still does not authorize clicks. SEEK application-form states such as `Choose documents` / `Review and submit` are explicitly not matched to the search-results graph.
 
 The first path-graph-assisted Execute API slice is also available:
 
@@ -586,6 +670,9 @@ PROJECT_STRUCTURE.md
 - OCR anchors
 - local/API 视觉 provider 抽象
 - `observe_screen` 整屏理解接口
+- Learn Mode 自动从 `screen_map.candidates` 裁剪固定按钮/图标视觉资产，输出 `visual_asset_learning_v1`
+- Execute recognition plan 会先尝试 `visual_asset_recall_v1`，把当前截图里的已学固定按钮匹配成 fresh `seeded_candidate_v1`；低风险按钮可跳过慢模型，高危提交类按钮仍只作为证据并强制过 Gate。匹配 trace 会记录当前 ROI、当前匹配 crop、灰度/边缘匹配方法、top candidates、score gap 和耗时
+- Learn Replay 面板可以加载并编辑 `learned_interface_map_v1`，按区域展示固定视觉按钮、动态 ROI 区和危险区。`merge_visual_asset_match_evidence()` 会把当前截图匹配证据回填到固定按钮资产；点击 Inspect 可查看 source crop、current ROI、current match、bbox/click point、scope、match policy、semantic action、danger level、fast-lane eligibility 和 raw JSON，并通过 `/panel/save_interface_map` 保存编辑后的学习产物和 `learned_interface_map_edit_trace_v1`。本地 no-mouse smoke 同时覆盖低风险 `Quick apply` 和高风险 `Submit application`：前者可成为 fast-lane 候选，后者即使命中也保持 `final_submit_fast_lane_count=0` / `final_submissions=0`
 - `locate_target` 精准定位接口
 - no-click recognition plan
 - pre-click decision gate
@@ -638,6 +725,7 @@ node --check app\web_panel\panel.js
 - `API_FIELD_REFERENCE.zh-CN.md`：每个 API 的字段级中文设计参考
 - `PROJECT_STRUCTURE.md`：文件结构、配置、产物位置
 - `docs/PANEL_LEARN_EXECUTE_WORKFLOW.zh-CN.md`：测试面板 Learn / Execute 两套工作区的按钮级操作流程
+- `docs/VISUAL_ASSET_LEARNING_MODE.zh-CN.md`：学习模式如何沉淀固定按钮/图标截图资产，执行模式如何用当前截图重新匹配并继续走 Gate
 - `PROJECT_SUMMARY.md`：项目摘要
 - `CURRENT_STATE.md`：当前状态
 - `NEXT_STEPS.md`：下一步计划

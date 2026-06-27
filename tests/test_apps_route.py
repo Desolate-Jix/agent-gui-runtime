@@ -47,6 +47,7 @@ def test_open_app_launches_catalog_entry_and_binds(monkeypatch) -> None:
         is_active=True,
     )
     monkeypatch.setattr(apps_api.window_manager, "bind_window", lambda process_name, title: bound)
+    monkeypatch.setattr(apps_api.window_manager, "maximize_bound_window", lambda: bound)
     monkeypatch.setattr(apps_api, "write_trace", lambda **_kwargs: "trace.json")
 
     response = apps_api.open_app(OpenAppRequest(app_id="demo"))
@@ -54,6 +55,8 @@ def test_open_app_launches_catalog_entry_and_binds(monkeypatch) -> None:
     assert response.success is True
     assert response.data["command"] == ["demo.exe"]
     assert response.data["bound_window"]["process_name"] == "demo.exe"
+    assert response.data["maximize_after_open"] is True
+    assert response.data["maximize_error"] is None
     assert response.data["timings"]["contract_version"] == "runtime_timing_v1"
     assert [step["name"] for step in response.data["timings"]["steps"]] == [
         "load_app_catalog",
@@ -64,6 +67,7 @@ def test_open_app_launches_catalog_entry_and_binds(monkeypatch) -> None:
         "wait_after_open",
         "list_visible_windows",
         "bind_window",
+        "maximize_bound_window",
     ]
 
 
@@ -179,6 +183,7 @@ def test_open_app_retries_catalog_title_bind_by_process(monkeypatch) -> None:
         return bound
 
     monkeypatch.setattr(apps_api.window_manager, "bind_window", fake_bind)
+    monkeypatch.setattr(apps_api.window_manager, "maximize_bound_window", lambda: bound)
     monkeypatch.setattr(apps_api, "write_trace", lambda **_kwargs: "trace.json")
 
     response = apps_api.open_app(OpenAppRequest(app_id="edge", url="https://news.google.com"))
@@ -248,6 +253,7 @@ def test_open_app_prefers_new_window_handle_over_existing_title_match(monkeypatc
     monkeypatch.setattr(apps_api.window_manager, "list_visible_windows", fake_list_visible_windows)
     monkeypatch.setattr(apps_api.window_manager, "bind_window_by_handle", lambda handle: handle_calls.append(handle) or bound)
     monkeypatch.setattr(apps_api.window_manager, "bind_window", lambda process_name, title: bind_calls.append((process_name, title)) or bound)
+    monkeypatch.setattr(apps_api.window_manager, "maximize_bound_window", lambda: bound)
     monkeypatch.setattr(apps_api, "write_trace", lambda **_kwargs: "trace.json")
 
     response = apps_api.open_app(OpenAppRequest(app_id="edge", url="https://nz.seek.com/", title="SEEK"))
@@ -257,3 +263,42 @@ def test_open_app_prefers_new_window_handle_over_existing_title_match(monkeypatc
     assert handle_calls == [20]
     assert bind_calls == []
     assert response.data["windows_before_open"][0]["handle"] == 10
+
+
+def test_open_app_can_skip_default_maximize(monkeypatch) -> None:
+    monkeypatch.setattr(
+        apps_api,
+        "_load_app_catalog",
+        lambda: {
+            "contract_version": "app_catalog_v1",
+            "apps": [
+                {
+                    "app_id": "demo",
+                    "launch_command": ["demo.exe"],
+                    "process_name": "demo.exe",
+                    "title_hint": "Demo",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(apps_api.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(apps_api.subprocess, "Popen", lambda command: SimpleNamespace(pid=1234, command=command))
+    monkeypatch.setattr(apps_api.window_manager, "list_visible_windows", lambda: [{"title": "Demo"}])
+    bound = SimpleNamespace(
+        handle=1,
+        title="Demo",
+        process_id=1234,
+        process_name="demo.exe",
+        rect=SimpleNamespace(left=0, top=0, right=100, bottom=100),
+        is_active=True,
+    )
+    maximize_calls: list[bool] = []
+    monkeypatch.setattr(apps_api.window_manager, "bind_window", lambda process_name, title: bound)
+    monkeypatch.setattr(apps_api.window_manager, "maximize_bound_window", lambda: maximize_calls.append(True) or bound)
+    monkeypatch.setattr(apps_api, "write_trace", lambda **_kwargs: "trace.json")
+
+    response = apps_api.open_app(OpenAppRequest(app_id="demo", maximize_after_open=False))
+
+    assert response.success is True
+    assert response.data["maximize_after_open"] is False
+    assert maximize_calls == []

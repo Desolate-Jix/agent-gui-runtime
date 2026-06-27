@@ -1,0 +1,320 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_6bfe1e559971",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.91,
+    "job_id": "seek_job_6bfe1e559971",
+    "title": "Intermediate Software Engineer",
+    "company": "Vista Group",
+    "fit_summary": "strong_apply with score 0.910. positive: matched_skills: SQL, AI, API, Backend; matched_target_roles: Software Engineer; location_matches: Auckland CBD, Auckland (Hybrid).",
+    "recommended_next_action": "open_apply_entry_and_prepare_safe_fields",
+    "positive_evidence": [
+      "matched_skills: SQL, AI, API, Backend",
+      "matched_target_roles: Software Engineer",
+      "location_matches: Auckland CBD, Auckland (Hybrid)"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_e3677dfc3423",
+    "title": "Intermediate Software Engineer",
+    "company": "Vista Group",
+    "location": "Auckland CBD, Auckland (Hybrid)",
+    "posted_at_text": null,
+    "work_type": "Full time",
+    "salary_text": null,
+    "classification": "Intermediate Software Engineer",
+    "card_bbox": {
+      "x": 652,
+      "y": 474,
+      "w": 424,
+      "h": 245
+    },
+    "click_point": {
+      "x": 802,
+      "y": 489
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_2",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_22_intermediate-software-engineer",
+      "page_text_24_vista-group",
+      "page_text_27_full-time",
+      "page_text_29_auckland-cbd-auckland-hybrid",
+      "page_text_30_excellent-work-life-balance-including-a-4-day-wo",
+      "page_text_32_strong-mentoring-career-development-focus",
+      "page_text_34_volunteer-day-enhanced-paid-parental-leave-and-w",
+      "page_text_35_13h-ago"
+    ],
+    "evidence": {
+      "texts": [
+        "Intermediate Software Engineer",
+        "Vista Group",
+        "Full time",
+        "Auckland CBD, Auckland (Hybrid)",
+        "· Excellent work/life balance including a 4 % day working week",
+        "Strong mentoring & career development focus",
+        "Volunteer day, enhanced paid parental leave and wellness benefits",
+        "13h ago"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": true,
+        "has_salary": false
+      }
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_6bfe1e559971",
+    "title": "Intermediate Software Engineer",
+    "company": "Vista Group",
+    "location": "Auckland CBD, Auckland (Hybrid)",
+    "work_type": "Hybrid",
+    "classification": "IntermediateSoftwareEngineer",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "出日☆"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "IntermediateSoftwareEngineer"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "Vista Group View all jobs"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "Auckland CBD,Auckland (Hybrid)"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "Engineering-Software(Information& Communication Technology)"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "①Fulltime"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Posted 13h ago · Medium application volume"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Quick apply"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "2 skills and credentials match your profile"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "√ Pipelines"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "√ SQL Query Language"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "Show allv"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "This Intermediate Software Engineer role sits within one of our Enterprise Stream engineering"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "squads, contributing to Horizon, Vista's cloud-hosted data platform used by cinemas worldwide."
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "You'll work on the backend services, data pipelines, and SQL-backed systems that enable Horizon"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "to onboard customers, process large volumes of data, and operate reliably in production. This role"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "focuses on improving and evolving an existing platform where understanding data, performance,"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "The role"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "You'll contribute to services and data flows that sit at the core of Horizon's platform. Working"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "alongside experienced engineers, you'll build and improve backend services, APls, and SQL-driven"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "components that support how data is ingested, transformed, and served."
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "This is a hands-on role where you'll develop your ability to work with production systems,"
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "investigate issues, and improve performance over time."
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "You will:"
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "· Build and maintain backend services and APls using C# and.NET"
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "· Write, optimise, and troubleshoot SQL queries that support data pipelines and APls"
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "· Contribute to data pipelines and workflows that process large datasets"
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "· Investigate and improve system performance, including slow queries, data bottlenecks, and"
+      }
+    ],
+    "requirements": [
+      "2 skills and credentials match your profile",
+      "alongside experienced engineers, you'll build and improve backend services, APls, and SQL-driven"
+    ],
+    "responsibilities": [
+      "This Intermediate Software Engineer role sits within one of our Enterprise Stream engineering",
+      "to onboard customers, process large volumes of data, and operate reliably in production. This role",
+      "The role",
+      "This is a hands-on role where you'll develop your ability to work with production systems,",
+      "You will:"
+    ],
+    "benefits": [
+      "Auckland CBD,Auckland (Hybrid)"
+    ],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply",
+      "bbox": {
+        "x": 1699,
+        "y": 548,
+        "w": 106,
+        "h": 32
+      },
+      "click_point": {
+        "x": 1752,
+        "y": 564
+      }
+    },
+    "save_button_state": {
+      "visible": false,
+      "label": null,
+      "bbox": null
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 1597,
+        "y": 113,
+        "w": 947,
+        "h": 1271
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_detail_drawer_anchor_bbox"
+      ],
+      "evidence": {
+        "layout": "right_detail_drawer",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false,
+        "content_left": 530,
+        "content_width": 1500,
+        "source": "seek_detail_drawer_anchor_bbox"
+      },
+      "safe_points": [
+        {
+          "x": 2070,
+          "y": 748,
+          "reason": "inside_seek_detail_drawer_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 1597,
+      "y": 0,
+      "w": 947,
+      "h": 1384
+    },
+    "detail_bottom_reached": false,
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260623-024319-982681__observe-screen__edge.json"
+    ]
+  }
+}

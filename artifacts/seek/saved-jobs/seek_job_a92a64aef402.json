@@ -1,0 +1,587 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_a92a64aef402",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.78,
+    "job_id": "seek_job_a92a64aef402",
+    "title": "Graduate Software Engineer- Integration",
+    "company": "e 1ed 00006$-00059$",
+    "fit_summary": "strong_apply with score 0.780. positive: matched_skills: React, AI; matched_target_roles: Software Engineer, Full Stack Developer, AI Engineer, Graduate Software Engineer; location_matches: Auckland CBD, Auckland.",
+    "recommended_next_action": "open_apply_entry_and_prepare_safe_fields",
+    "positive_evidence": [
+      "matched_skills: React, AI",
+      "matched_target_roles: Software Engineer, Full Stack Developer, AI Engineer, Graduate Software Engineer",
+      "location_matches: Auckland CBD, Auckland",
+      "matched_preferred_work_modes: hybrid"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_a92a64aef402",
+    "title": "Graduate Software Engineer- Integration",
+    "company": "e 1ed 00006$-00059$",
+    "location": "Auckland CBD, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": "Graduate Software Engineer-",
+    "card_bbox": {
+      "x": 649,
+      "y": 710,
+      "w": 386,
+      "h": 247
+    },
+    "click_point": {
+      "x": 776,
+      "y": 721
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_12",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_45_graduate-software-engineer",
+      "page_text_47_integration",
+      "page_text_49_heartland-bank",
+      "page_text_51_auckland-cbd-auckland",
+      "page_text_56_e-1ed-00006-00059",
+      "page_text_60_grow-your-career",
+      "page_text_62_supportive-leadership",
+      "page_text_63_fast-paced-environment",
+      "page_text_65_we-re-looking-for-graduates-who-are-passionate-a"
+    ],
+    "evidence": {
+      "texts": [
+        "Graduate Software Engineer-",
+        "Integration",
+        "Heartland Bank",
+        "Auckland CBD, Auckland",
+        "e 1ed 00006$-00059$",
+        "Grow your career!",
+        "· Supportive leadership",
+        "·Fast paced environment",
+        "We're looking for graduates who are passionate about"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": false,
+        "has_salary": false
+      }
+    },
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260626-013927-460914__observe-screen__edge.json",
+      "viewport_size": {
+        "width": 2560,
+        "height": 1400
+      },
+      "source": "seek_job_card_extraction",
+      "freshness": "current_capture"
+    }
+  },
+  "detail": {
+    "job_id": "seek_job_a92a64aef402",
+    "title": "Graduate Software Engineer- Integration",
+    "company": "e 1ed 00006$-00059$",
+    "location": "Auckland CBD, Auckland",
+    "classification": "Graduate Software Engineer-",
+    "runtime_detail_snapshot": {
+      "contract_version": "runtime_detail_snapshot_v1",
+      "source": "read_region_batch",
+      "revision": 2,
+      "previous_snapshot_id": "c7f11aa33eaa03a8",
+      "snapshot_id": "e0e61e48cdb18904"
+    },
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "batch_ocr",
+        "text": "anumber?"
+      },
+      {
+        "index": 1,
+        "role": "batch_ocr",
+        "text": "..Jump In!"
+      },
+      {
+        "index": 2,
+        "role": "batch_ocr",
+        "text": "ANDO"
+      },
+      {
+        "index": 3,
+        "role": "batch_ocr",
+        "text": "SeniorFullStackSoftwareEngineer"
+      },
+      {
+        "index": 4,
+        "role": "batch_ocr",
+        "text": "Ando View all jobs"
+      },
+      {
+        "index": 5,
+        "role": "batch_ocr",
+        "text": "Auckland CBD,Auckland (Hybrid)"
+      },
+      {
+        "index": 6,
+        "role": "batch_ocr",
+        "text": "Engineering-Software(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 7,
+        "role": "batch_ocr",
+        "text": "?"
+      },
+      {
+        "index": 8,
+        "role": "batch_ocr",
+        "text": "Full time"
+      },
+      {
+        "index": 9,
+        "role": "batch_ocr",
+        "text": "Attractive salary +bonus +insurance perks"
+      },
+      {
+        "index": 10,
+        "role": "batch_ocr",
+        "text": "Posted14hago·Medium applicationvolume"
+      },
+      {
+        "index": 11,
+        "role": "batch_ocr",
+        "text": "Quick apply"
+      },
+      {
+        "index": 12,
+        "role": "batch_ocr",
+        "text": "Save"
+      },
+      {
+        "index": 13,
+        "role": "batch_ocr",
+        "text": "Helpusbuild thefutureof insurancetechnology."
+      },
+      {
+        "index": 14,
+        "role": "batch_ocr",
+        "text": "At Ando, we're doing insurance differently."
+      },
+      {
+        "index": 15,
+        "role": "batch_ocr",
+        "text": "Founded in 2015, we set out to challenge the status quo by combining smart technology,"
+      },
+      {
+        "index": 16,
+        "role": "batch_ocr",
+        "text": "brokers andcustomersalike."
+      },
+      {
+        "index": 17,
+        "role": "batch_ocr",
+        "text": "Technology plays a huge role in how we simplify complexity, improve decision-making,"
+      },
+      {
+        "index": 18,
+        "role": "batch_ocr",
+        "text": "and deliver great outcomes.As we continue to grow,we're looking fora SeniorSoftware"
+      },
+      {
+        "index": 19,
+        "role": "batch_ocr",
+        "text": "Engineer(Full Stack) to help shape the platforms and solutions that power our business."
+      },
+      {
+        "index": 20,
+        "role": "batch_ocr",
+        "text": "Theopportunity:"
+      },
+      {
+        "index": 21,
+        "role": "batch_ocr",
+        "text": "This newly created position willplaya key role in designing,building,and delivering high-"
+      },
+      {
+        "index": 22,
+        "role": "batch_ocr",
+        "text": "quality full stack solutions for Project Luma, one of Ando's key strategic initiatives. The"
+      },
+      {
+        "index": 23,
+        "role": "batch_ocr",
+        "text": "project is focused on developing and rolling out intuitive,user-friendly portals that"
+      },
+      {
+        "index": 24,
+        "role": "batch_ocr",
+        "text": "enhancehowweconnect and workwithourbrokerpartners."
+      },
+      {
+        "index": 25,
+        "role": "batch_ocr",
+        "text": "Thisisa"
+      },
+      {
+        "index": 26,
+        "role": "batch_ocr",
+        "text": "qualityfullstacksolutionsforProjectLuma,oneofAndo'skeystrategicinitiatives.The"
+      },
+      {
+        "index": 27,
+        "role": "batch_ocr",
+        "text": "project is focused on developing and rolling out intuitive, user-friendly portals that"
+      },
+      {
+        "index": 28,
+        "role": "batch_ocr",
+        "text": "enhancehowwe connect and workwithourbrokerpartners."
+      },
+      {
+        "index": 29,
+        "role": "batch_ocr",
+        "text": "This is a true full stack role spanning both front-end and back-end development. However,"
+      },
+      {
+        "index": 30,
+        "role": "batch_ocr",
+        "text": "candidateswhobringdeeperfront-endexperienceandexpertise."
+      },
+      {
+        "index": 31,
+        "role": "batch_ocr",
+        "text": "What you'll be doing:"
+      },
+      {
+        "index": 32,
+        "role": "batch_ocr",
+        "text": "·Working across modern front-end and back-end technologies including Java, React"
+      },
+      {
+        "index": 33,
+        "role": "batch_ocr",
+        "text": "andSpringBoot"
+      },
+      {
+        "index": 34,
+        "role": "batch_ocr",
+        "text": "·Contributingtoarchitectureand technicaldesigndecisions"
+      },
+      {
+        "index": 35,
+        "role": "batch_ocr",
+        "text": "·Reviewing codeandsupporting engineeringbestpractices"
+      },
+      {
+        "index": 36,
+        "role": "batch_ocr",
+        "text": "·Mentoring and coaching otherengineers"
+      },
+      {
+        "index": 37,
+        "role": "batch_ocr",
+        "text": "·Driving theresponsibleadoption of Al-assisted development toolstoimprove"
+      },
+      {
+        "index": 38,
+        "role": "batch_ocr",
+        "text": "productivity and delivery outcomes"
+      },
+      {
+        "index": 39,
+        "role": "batch_ocr",
+        "text": "What you'll need to succeed:"
+      },
+      {
+        "index": 40,
+        "role": "batch_ocr",
+        "text": "You'llhavesignificantexperienceasaSoftwareEngineerorFullStackDeveloper,with"
+      },
+      {
+        "index": 41,
+        "role": "batch_ocr",
+        "text": "strongJavadevelopmentexpertise and aprovenabilitytodelivercomplexsoftware"
+      },
+      {
+        "index": 42,
+        "role": "batch_ocr",
+        "text": "solutions."
+      },
+      {
+        "index": 43,
+        "role": "batch_ocr",
+        "text": "ExperiencewithReact and SpringBoot wouldbe abonus,but we're open toengineers"
+      },
+      {
+        "index": 44,
+        "role": "batch_ocr",
+        "text": "who bring transferable skills and a willingness to learn."
+      },
+      {
+        "index": 45,
+        "role": "batch_ocr",
+        "text": "delivery, and continuous improvement. Experience in insurance or financial services"
+      },
+      {
+        "index": 46,
+        "role": "batch_ocr",
+        "text": "wouldbeadvantageousbutisn'tessential."
+      },
+      {
+        "index": 47,
+        "role": "batch_ocr",
+        "text": "WhyAndo?"
+      },
+      {
+        "index": 48,
+        "role": "batch_ocr",
+        "text": "growth and career progression,while stillbeing small enough that your contribution is"
+      },
+      {
+        "index": 49,
+        "role": "batch_ocr",
+        "text": "visible, valued, and recognised."
+      },
+      {
+        "index": 50,
+        "role": "batch_ocr",
+        "text": "Alongside impactful work and a great team culture, we offera range of benefits including:"
+      },
+      {
+        "index": 51,
+        "role": "batch_ocr",
+        "text": "·Life andIncomeProtectionInsurance"
+      },
+      {
+        "index": 52,
+        "role": "batch_ocr",
+        "text": "·$5o0 annual wellbeing allowance"
+      },
+      {
+        "index": 53,
+        "role": "batch_ocr",
+        "text": "·Hybridworking,with2-3daysperweekinourAucklandoffice"
+      },
+      {
+        "index": 54,
+        "role": "batch_ocr",
+        "text": "·Brand newWynyardQuarterofficescoming soon,featuringaccess toa gym,sauna,"
+      },
+      {
+        "index": 55,
+        "role": "batch_ocr",
+        "text": "Pilates studio,and evena golf simulator"
+      },
+      {
+        "index": 56,
+        "role": "batch_ocr",
+        "text": "·Generousparentalleave,sickleave,accesstoEAP"
+      },
+      {
+        "index": 57,
+        "role": "batch_ocr",
+        "text": "Ifyou're excited bytheopportunity tobuild great technology,influence technical"
+      },
+      {
+        "index": 58,
+        "role": "batch_ocr",
+        "text": "direction, and help us challenge the status quo, we'd love to hear from you."
+      },
+      {
+        "index": 59,
+        "role": "batch_ocr",
+        "text": "If you're excited by the opportunity to build great technology, influence technical"
+      },
+      {
+        "index": 60,
+        "role": "batch_ocr",
+        "text": "direction,andhelpuschallenge thestatusquo,we'd lovetohearfromyou."
+      },
+      {
+        "index": 61,
+        "role": "batch_ocr",
+        "text": "LifeatAndo inTechRoles"
+      },
+      {
+        "index": 62,
+        "role": "batch_ocr",
+        "text": "前往平台观看："
+      },
+      {
+        "index": 63,
+        "role": "batch_ocr",
+        "text": "YouTube"
+      },
+      {
+        "index": 64,
+        "role": "batch_ocr",
+        "text": "Employerquestions"
+      },
+      {
+        "index": 65,
+        "role": "batch_ocr",
+        "text": "Your applicationwill include thefollowing questions:"
+      },
+      {
+        "index": 66,
+        "role": "batch_ocr",
+        "text": "·What areyourwork rights inNewZealand?"
+      },
+      {
+        "index": 67,
+        "role": "batch_ocr",
+        "text": "·What are your salary expectations for this position?"
+      },
+      {
+        "index": 68,
+        "role": "batch_ocr",
+        "text": "Be careful"
+      },
+      {
+        "index": 69,
+        "role": "batch_ocr",
+        "text": "Don't provide yourbank or credit card details when applying forjobs."
+      },
+      {
+        "index": 70,
+        "role": "batch_ocr",
+        "text": "Learnhowtoprotectyourself"
+      },
+      {
+        "index": 71,
+        "role": "batch_ocr",
+        "text": "Report this jobad"
+      },
+      {
+        "index": 72,
+        "role": "batch_ocr",
+        "text": "Featured job"
+      },
+      {
+        "index": 73,
+        "role": "batch_ocr",
+        "text": "Employer questions"
+      },
+      {
+        "index": 74,
+        "role": "batch_ocr",
+        "text": "Your application will include the following questions:"
+      },
+      {
+        "index": 75,
+        "role": "batch_ocr",
+        "text": "WhatareyourworkrightsinNewZealand?"
+      },
+      {
+        "index": 76,
+        "role": "batch_ocr",
+        "text": ".What are your salary expectations for this position?"
+      },
+      {
+        "index": 77,
+        "role": "batch_ocr",
+        "text": "Don't provideyourbankor credit card detailswhen applyingfor jobs."
+      },
+      {
+        "index": 78,
+        "role": "batch_ocr",
+        "text": "Report this job ad"
+      },
+      {
+        "index": 79,
+        "role": "batch_ocr",
+        "text": "口"
+      },
+      {
+        "index": 80,
+        "role": "batch_ocr",
+        "text": "TaxLab"
+      },
+      {
+        "index": 81,
+        "role": "batch_ocr",
+        "text": "SeniorFull-StackEngineer"
+      },
+      {
+        "index": 82,
+        "role": "batch_ocr",
+        "text": "Taxlab Limited"
+      },
+      {
+        "index": 83,
+        "role": "batch_ocr",
+        "text": "Hobsonville,Auckland, NZ"
+      },
+      {
+        "index": 84,
+        "role": "batch_ocr",
+        "text": "obep6"
+      },
+      {
+        "index": 85,
+        "role": "batch_ocr",
+        "text": "Career Advice"
+      },
+      {
+        "index": 86,
+        "role": "batch_ocr",
+        "text": "Researchingcareers?Find alltheinformationandtipsyouneedoncareeradvice."
+      },
+      {
+        "index": 87,
+        "role": "batch_ocr",
+        "text": "·Role descriptions"
+      },
+      {
+        "index": 88,
+        "role": "batch_ocr",
+        "text": "· Salary insights"
+      },
+      {
+        "index": 89,
+        "role": "batch_ocr",
+        "text": "· Tools to help you prepare for jobs"
+      },
+      {
+        "index": 90,
+        "role": "batch_ocr",
+        "text": "ExploreCareerAdvice→"
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260626-013951-537703__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260626-013955-570394__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260626-013959-517624__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260626-014003-008967__ocr-region__ocr-region.json"
+    ],
+    "detail_batch_status": "ok",
+    "detail_batch_stop_reason": "max_captures",
+    "detail_bottom_reached": false,
+    "detail_batch_unique_line_count": 91,
+    "runtime_detail_dataflow": {
+      "contract_version": "runtime_detail_dataflow_v1",
+      "source_batch_contract": "read_region_batch_v1",
+      "source_batch_status": "ok",
+      "merged_text_line_count": 91,
+      "description_section_count": 91
+    },
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply",
+      "source": "read_detail_batch_ocr"
+    }
+  }
+}

@@ -265,6 +265,25 @@ def test_inventory_infers_selected_work_rights_select_without_control_bbox() -> 
     assert inventory["questions"][0]["selected_value_candidates"][0]["id"] == "q1_value"
 
 
+def test_inventory_ignores_back_button_as_work_rights_selected_value() -> None:
+    state = {
+        "application_form_inventory": {
+            "fields": [
+                _item("q1a", "Which of the following statements best describes your right to work in New", "text", 600, 527, 767, 30),
+                _item("q1b", "Zealand?", "text", 602, 559, 96, 26),
+                _item("back", "\u2190Back", "button", 604, 1097, 84, 28),
+            ]
+        }
+    }
+
+    inventory = build_employer_question_inventory(state)
+
+    q1 = inventory["questions"][0]
+    assert q1["answer_type"] == "select_choice"
+    assert all(item["id"] != "back" for item in q1["selected_value_candidates"])
+    assert q1["selected_value_candidates"][0]["source"] == "synthetic_work_rights_dropdown_value_region"
+
+
 def test_inventory_does_not_treat_url_query_as_question() -> None:
     state = {
         "application_form_inventory": {
@@ -278,6 +297,101 @@ def test_inventory_does_not_treat_url_query_as_question() -> None:
     inventory = build_employer_question_inventory(state)
 
     assert inventory["question_count"] == 0
+
+
+def test_inventory_does_not_treat_seek_apply_url_text_as_question() -> None:
+    state = {
+        "application_form_inventory": {
+            "fields": [
+                _item(
+                    "url",
+                    "https/nz.seek.com/job/92903017/apply/role-requirements?sol=a1cc9e8ee7e96a75",
+                    "text",
+                    120,
+                    48,
+                    780,
+                    24,
+                )
+            ]
+        }
+    }
+
+    inventory = build_employer_question_inventory(state)
+
+    assert inventory["question_count"] == 0
+
+
+def test_inventory_merges_questions_when_ocr_drops_inner_spaces() -> None:
+    state = {
+        "application_form_inventory": {
+            "fields": [
+                _item("bad", "What areyoursalary expectationsforthisposition?", "text", 720, 620, 380, 24),
+                _item("good", "What are your salary expectations for this position?", "text", 720, 650, 430, 24),
+                _item("salary", "", "textbox", 720, 690, 380, 44),
+            ]
+        }
+    }
+
+    inventory = build_employer_question_inventory(state)
+    plan = build_employer_question_answer_plan(inventory, profile={})
+    preview = build_employer_question_answer_preview(plan)
+
+    assert inventory["question_count"] == 1
+    assert inventory["questions"][0]["question_text"] == "What are your salary expectations for this position?"
+    assert preview["status"] == "ready"
+    assert preview["previews"][0]["runner_decision"] == "allow"
+
+
+def test_work_rights_visible_option_can_fill_no_submit_demo_without_profile_summary() -> None:
+    state = {
+        "application_form_inventory": {
+            "fields": [
+                _item("q1", "What are your work rights in New Zealand?", "text", 760, 420, 440, 28),
+                _item("nz_citizen", "NZ Citizen", "radio", 792, 445, 45, 45),
+                _item("nz_resident", "NZ Resident", "radio", 792, 485, 45, 45),
+                _item("current_visa", "Current NZ Work Visa", "radio", 792, 525, 45, 45),
+                _item("sponsor", "Visa ready/Sponsorship required", "radio", 792, 565, 45, 45),
+            ]
+        }
+    }
+
+    inventory = build_employer_question_inventory(state)
+    plan = build_employer_question_answer_plan(inventory, profile={})
+    preview = build_employer_question_answer_preview(plan)
+
+    assert plan["status"] == "ready"
+    answer = plan["answers"][0]
+    assert answer["planned_answer"] == "Current NZ Work Visa"
+    assert answer["answer_source"] == "seek_no_submit_demo_policy.visible_work_rights_option"
+    assert answer["selection"]["runner_decision"] == "allow"
+    assert preview["status"] == "ready"
+    assert preview["previews"][0]["target"]["candidate"]["id"] == "current_visa"
+
+
+def test_work_rights_profile_summary_maps_to_visible_current_work_visa_option() -> None:
+    state = {
+        "application_form_inventory": {
+            "fields": [
+                _item("q1", "What are your work rights in New Zealand?", "text", 760, 420, 440, 28),
+                _item("nz_citizen", "NZ Citizen", "radio", 792, 445, 45, 45),
+                _item("nz_resident", "NZ Resident", "radio", 792, 485, 45, 45),
+                _item("current_visa", "Current NZ Work Visa", "radio", 792, 525, 45, 45),
+                _item("sponsor", "Visa ready/Sponsorship required", "radio", 792, 565, 45, 45),
+            ]
+        }
+    }
+
+    inventory = build_employer_question_inventory(state)
+    plan = build_employer_question_answer_plan(
+        inventory,
+        profile={"work_rights_summary": "Post-study Open Work Visa valid 2026-04-25 to 2029-04-25."},
+    )
+    preview = build_employer_question_answer_preview(plan)
+
+    assert plan["status"] == "ready"
+    assert plan["answers"][0]["planned_answer"] == "Current NZ Work Visa"
+    assert preview["status"] == "ready"
+    assert preview["previews"][0]["target"]["candidate"]["id"] == "current_visa"
 
 
 def test_inventory_merges_wrapped_questions_and_infers_empty_textarea() -> None:
@@ -321,6 +435,78 @@ def test_inventory_merges_wrapped_questions_and_infers_empty_textarea() -> None:
     assert preview["ready_count"] == 3
     assert preview["previews"][0]["target"]["action_type"] == "already_selected"
     assert preview["previews"][0]["target"]["selected_value_evidence"]["match_type"] == "visible_dropdown_value_ocr_unreliable_work_rights"
+
+
+def test_inventory_maps_seek_text_labels_before_radio_question() -> None:
+    state = {
+        "application_form_inventory": {
+            "fields": [
+                _item("q1", "Country", "input", 800, 420, 80, 28),
+                _item("q2", "What income range are you looking for?", "text", 800, 590, 420, 28),
+                _item("q3", "Current Location", "input", 800, 760, 160, 28),
+                _item("q4", "Do you know anybody that works at Sandfield?", "text", 800, 940, 390, 28),
+                _item("q5", "What appeals to you about Sandfield?", "text", 800, 1110, 330, 28),
+                _item("q6", "Are you currently living in New Zealand?", "text", 800, 1300, 420, 28),
+                _item("q6_yes", "Yes", "radio", 804, 1340, 62, 32),
+                _item("q6_no", "No", "radio", 804, 1380, 62, 32),
+            ],
+            "actions": [],
+        }
+    }
+
+    inventory = build_employer_question_inventory(state)
+    profile = {
+        "contract_version": "candidate_profile_v1",
+        "work_rights_summary": "Post-study Open Work Visa valid until 2029; may undertake any work anywhere in New Zealand.",
+        "skills": ["JavaScript", "React", "AI", "Frontend"],
+        "experience_summary": "Built frontend applications and AI-assisted workflows.",
+        "job_search_preferences": {"primary_location": "Auckland", "location_priority": ["Auckland first"]},
+    }
+    plan = build_employer_question_answer_plan(inventory, profile=profile)
+    preview = build_employer_question_answer_preview(plan)
+
+    assert [q["question_text"] for q in inventory["questions"]] == [
+        "Country",
+        "What income range are you looking for?",
+        "Current Location",
+        "Do you know anybody that works at Sandfield?",
+        "What appeals to you about Sandfield?",
+        "Are you currently living in New Zealand?",
+    ]
+    assert [q["answer_type"] for q in inventory["questions"][:5]] == ["text_input"] * 5
+    assert inventory["questions"][5]["answer_type"] == "radio_yes_no"
+    assert plan["status"] == "ready"
+    assert [answer["planned_answer"] for answer in plan["answers"][:5]] == [
+        "New Zealand",
+        "$80k",
+        "Auckland",
+        "No",
+        "Sandfield appeals to me because the role combines full-stack web development, real business problem solving, direct collaboration with clients, and the use of AI tools to build practical software. That fits my background in JavaScript, React, APIs, AI-assisted development, and evidence-driven debugging.",
+    ]
+    assert preview["status"] == "ready"
+    assert all(item["runner_decision"] == "allow" for item in preview["previews"])
+
+
+def test_inventory_uses_input_field_bbox_as_text_target() -> None:
+    state = {
+        "application_form_inventory": {
+            "fields": [
+                _item("q1", "Income range input field", "input", 628, 900, 516, 136),
+                _item("q2", "Do you know anybody that works at Sandfield?", "text", 800, 941, 385, 25),
+            ],
+            "actions": [],
+        }
+    }
+
+    inventory = build_employer_question_inventory(state)
+    plan = build_employer_question_answer_plan(inventory, profile={"contract_version": "candidate_profile_v1"})
+    preview = build_employer_question_answer_preview(plan)
+
+    assert inventory["questions"][0]["answer_type"] == "text_input"
+    target = preview["previews"][0]["target"]
+    assert target["action_type"] == "type_text"
+    assert target["candidate"]["source"] == "source_input_field_bbox"
+    assert target["bbox"] == {"x": 628, "y": 900, "w": 516, "h": 136}
 
 
 def test_inventory_handles_missing_work_rights_value_and_glued_question_text() -> None:
@@ -467,6 +653,154 @@ def test_employer_question_answer_preview_builds_click_and_type_targets() -> Non
     assert type_preview["target"]["submit"] is False
 
 
+def test_programming_language_checkboxes_plan_profile_skill_multi_click() -> None:
+    state = {
+        "application_form_inventory": {
+            "fields": [
+                _item("q1", "Which programming languages are you experienced in?", "text", 800, 520, 560, 26),
+                _item("q1_js", "JavaScript", "checkbox", 800, 570, 190, 36),
+                _item("q1_html", "HTML", "checkbox", 800, 612, 150, 36),
+                _item("q1_css", "CSS", "checkbox", 800, 654, 140, 36),
+                _item("q1_python", "Python", "checkbox", 800, 696, 160, 36),
+                _item("q1_cpp", "C++", "checkbox", 800, 738, 140, 36),
+                _item("q1_dotnet", ".NET", "checkbox", 800, 780, 140, 36),
+                _item("q1_other", "Other", "checkbox", 800, 822, 140, 36),
+            ]
+        }
+    }
+    inventory = build_employer_question_inventory(state)
+    plan = build_employer_question_answer_plan(
+        inventory,
+        profile={
+            "contract_version": "candidate_profile_v1",
+            "skills": ["JavaScript", "HTML", "CSS", "Python", ".NET"],
+            "experience_summary": "Built web applications with JavaScript, CSS, Python and .NET APIs.",
+        },
+    )
+    preview = build_employer_question_answer_preview(plan)
+
+    assert inventory["questions"][0]["answer_type"] == "checkbox_multi"
+    answer = plan["answers"][0]
+    assert answer["status"] == "ready"
+    assert answer["answer_category"] == "skill_checkbox_multi"
+    assert answer["planned_answer"] == ["JavaScript", "HTML", "CSS", "Python", ".NET"]
+    assert preview["status"] == "ready"
+    target = preview["previews"][0]["target"]
+    assert target["action_type"] == "multi_click"
+    assert target["selected_count"] == 5
+    assert [item["candidate"]["id"] for item in target["targets"]] == [
+        "q1_js",
+        "q1_html",
+        "q1_css",
+        "q1_python",
+        "q1_dotnet",
+    ]
+
+
+def test_programming_language_text_options_are_treated_as_checkbox_multi() -> None:
+    state = {
+        "application_form_inventory": {
+            "fields": [
+                _item("q1", "Which of the following programming languages are you experienced in?", "text", 800, 520, 650, 26),
+                _item("q1_csharp", "C#", "text", 830, 570, 42, 24),
+                _item("q1_python", "Python", "text", 830, 612, 90, 24),
+                _item("q1_cpp", "C++", "text", 830, 654, 58, 24),
+                _item("q1_dotnet", ".NET", "text", 830, 696, 70, 24),
+                _item("q1_visual_basic", "Visual Basic", "text", 830, 738, 140, 24),
+                _item("q1_none", "None of these", "text", 830, 780, 160, 24),
+            ]
+        }
+    }
+    inventory = build_employer_question_inventory(state)
+    plan = build_employer_question_answer_plan(
+        inventory,
+        profile={
+            "contract_version": "candidate_profile_v1",
+            "skills": ["Python", ".NET"],
+            "experience_summary": "Built Python automation and .NET API integrations.",
+        },
+    )
+    preview = build_employer_question_answer_preview(plan)
+
+    assert inventory["questions"][0]["answer_type"] == "checkbox_multi"
+    assert plan["answers"][0]["planned_answer"] == ["Python", ".NET"]
+    assert preview["status"] == "ready"
+    assert [item["candidate"]["id"] for item in preview["previews"][0]["target"]["targets"]] == ["q1_python", "q1_dotnet"]
+
+
+def test_invisible_programming_checkbox_targets_require_review_instead_of_click() -> None:
+    answer_plan = {
+        "contract_version": "employer_question_answer_plan_v1",
+        "answers": [
+            {
+                "question_id": "q1",
+                "question_text": "Which programming languages are you experienced in?",
+                "question_text_hash": "hash",
+                "answer_type": "checkbox_multi",
+                "status": "ready",
+                "answer_category": "skill_checkbox_multi",
+                "planned_answer": ["JavaScript"],
+                "answer_source": "candidate_profile_v1.skills",
+                "requires_user_review": False,
+                "selections": [
+                    {
+                        "candidate": {
+                            "id": "q1_js",
+                            "label": "JavaScript",
+                            "role": "checkbox",
+                            "bbox": {"x": 792, "y": -93, "w": 45, "h": 45},
+                        },
+                        "label": "JavaScript",
+                        "match_type": "profile_skill_token",
+                    }
+                ],
+            }
+        ],
+    }
+
+    preview = build_employer_question_answer_preview(answer_plan)
+
+    assert preview["status"] == "needs_user_review"
+    assert preview["previews"][0]["reject_reason"] == "no_matching_checkbox_option"
+
+
+def test_common_seek_application_selects_plan_without_extra_gate() -> None:
+    state = {
+        "application_form_inventory": {
+            "fields": [
+                _item("q1", "How would you rate your English language skills?", "text", 800, 520, 460, 26),
+                _item("q1_limited", "Limited proficiency", "radio", 830, 570, 210, 36),
+                _item("q1_professional", "Professional working proficiency", "radio", 830, 612, 330, 36),
+                _item("q1_native", "Native or Bilingual proficiency", "radio", 830, 654, 330, 36),
+                _item("q2", "What's your expected annual base salary?", "text", 800, 720, 460, 26),
+                _item("q2_selected", "$80k", "text", 830, 770, 120, 24),
+                _item("q3", "How much notice are you required to give your current employer?", "text", 800, 850, 620, 26),
+                _item("q3_selected", "None, I'm ready to go now", "text", 830, 900, 310, 24),
+            ]
+        }
+    }
+    inventory = build_employer_question_inventory(state)
+    plan = build_employer_question_answer_plan(
+        inventory,
+        profile={
+            "contract_version": "candidate_profile_v1",
+            "work_rights_summary": "Post-study Open Work Visa.",
+        },
+    )
+    preview = build_employer_question_answer_preview(plan)
+
+    assert [answer["planned_answer"] for answer in plan["answers"]] == [
+        "Professional working proficiency",
+        "$80k",
+        "None, I'm ready to go now",
+    ]
+    assert plan["status"] == "ready"
+    assert preview["status"] == "ready"
+    assert preview["previews"][0]["target"]["candidate"]["id"] == "q1_professional"
+    assert preview["previews"][1]["target"]["action_type"] == "already_selected"
+    assert preview["previews"][2]["target"]["action_type"] == "already_selected"
+
+
 def test_employer_question_answer_preview_requires_review_for_unmapped_select_choice() -> None:
     answer_plan = {
         "contract_version": "employer_question_answer_plan_v1",
@@ -529,3 +863,118 @@ def test_employer_question_answer_preview_marks_selected_select_choice_done() ->
     assert preview["previews"][0]["requires_post_fill_verification"] is False
     assert preview["previews"][0]["target"]["action_type"] == "already_selected"
     assert preview["previews"][0]["target"]["selected_value_evidence"]["candidate"]["id"] == "q1_value"
+
+
+def test_work_rights_without_sponsorship_radio_plans_yes() -> None:
+    state = {
+        "application_form_inventory": {
+            "fields": [
+                _item(
+                    "q1",
+                    "Do you have an existing right to work in New Zealand without the need for employer sponsorship?",
+                    "text",
+                    799,
+                    641,
+                    604,
+                    53,
+                ),
+                _item("q1_yes", "Yes", "text", 830, 701, 41, 25),
+                _item("q1_no", "No", "text", 830, 741, 37, 23),
+            ]
+        }
+    }
+    inventory = build_employer_question_inventory(state)
+    plan = build_employer_question_answer_plan(
+        inventory,
+        profile={
+            "contract_version": "candidate_profile_v1",
+            "work_rights_summary": "Holds an Immigration New Zealand Post-study Open Work Visa.",
+        },
+    )
+    preview = build_employer_question_answer_preview(plan)
+
+    answer = plan["answers"][0]
+    assert answer["status"] == "ready"
+    assert answer["planned_answer"] == "Yes"
+    assert answer["selection"]["runner_decision"] == "allow"
+    assert answer["selection"]["selected_candidate"]["id"] == "q1_yes"
+    assert preview["status"] == "ready"
+    assert preview["previews"][0]["target"]["action_type"] == "click"
+
+
+def test_gender_short_question_plans_non_disclosure_option() -> None:
+    state = {
+        "application_form_inventory": {
+            "fields": [
+                _item("gender", "Gender", "text", 800, 520, 80, 24),
+                _item("gender_male", "Male", "text", 830, 560, 60, 24),
+                _item("gender_female", "Female", "text", 830, 600, 80, 24),
+                _item("gender_other", "Other", "text", 830, 640, 70, 24),
+                _item("gender_skip", "Do not wish to disclose", "text", 830, 680, 230, 24),
+            ]
+        }
+    }
+    inventory = build_employer_question_inventory(state)
+    plan = build_employer_question_answer_plan(inventory, profile={"contract_version": "candidate_profile_v1"})
+    preview = build_employer_question_answer_preview(plan)
+
+    assert inventory["question_count"] == 1
+    answer = plan["answers"][0]
+    assert answer["status"] == "ready"
+    assert answer["planned_answer"] == "Do not wish to disclose"
+    assert answer["selection"]["runner_decision"] == "allow"
+    assert answer["selection"]["selected_candidate"]["id"] == "gender_skip"
+    assert preview["status"] == "ready"
+    assert preview["previews"][0]["target"]["candidate"]["id"] == "gender_skip"
+
+
+def test_select_choice_visible_option_list_clicks_matching_work_rights_option() -> None:
+    answer_plan = {
+        "contract_version": "employer_question_answer_plan_v1",
+        "answers": [
+            {
+                "question_id": "q1",
+                "question_text": "Which of the following statements best describes your right to work in New Zealand?",
+                "question_text_hash": "hash",
+                "answer_type": "select_choice",
+                "status": "ready",
+                "answer_category": "work_rights",
+                "planned_answer": "I have a graduate temporary work visa (e.g. post study work visa - open)",
+                "answer_source": "candidate_profile_v1.work_rights_summary",
+                "requires_user_review": False,
+                "selection": None,
+                "selected_value_candidates": [
+                    {
+                        "id": "residence",
+                        "label": "I have a NZ Residence Visa",
+                        "role": "text",
+                        "bbox": {"x": 831, "y": 907, "w": 223, "h": 22},
+                        "source": "ocr_fallback",
+                    },
+                    {
+                        "id": "work_visa",
+                        "label": "I have a valid Nz Work Visa (please clarify which visa type in your cover letter)",
+                        "role": "text",
+                        "bbox": {"x": 832, "y": 946, "w": 623, "h": 26},
+                        "source": "ocr_fallback",
+                    },
+                    {
+                        "id": "no_rights",
+                        "label": "I do not have the right to work in NZ",
+                        "role": "text",
+                        "bbox": {"x": 822, "y": 984, "w": 308, "h": 27},
+                        "source": "ocr_fallback",
+                    },
+                ],
+            }
+        ],
+    }
+
+    preview = build_employer_question_answer_preview(answer_plan)
+
+    assert preview["status"] == "ready"
+    target = preview["previews"][0]["target"]
+    assert target["action_type"] == "click"
+    assert target["candidate"]["id"] == "work_visa"
+    assert target["click_point"] == {"x": 1143, "y": 959}
+    assert preview["previews"][0]["requires_post_fill_verification"] is True

@@ -1,0 +1,1085 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_2883553cd219",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 1.0,
+    "job_id": "seek_job_2883553cd219",
+    "title": "SeniorData Engineer",
+    "company": "Plexure Limited",
+    "fit_summary": "strong_apply with score 1.000. positive: matched_skills: Python, JavaScript, AI, API, Automation, Git; matched_target_roles: Software Engineer, AI Engineer, Automation Engineer; location_matches: Auckland CBD, Auckland (Hybrid).",
+    "recommended_next_action": "open_apply_entry_and_prepare_safe_fields",
+    "positive_evidence": [
+      "matched_skills: Python, JavaScript, AI, API, Automation, Git",
+      "matched_target_roles: Software Engineer, AI Engineer, Automation Engineer",
+      "location_matches: Auckland CBD, Auckland (Hybrid)",
+      "matched_preferred_work_modes: hybrid"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_09b3d86a3dbe",
+    "title": "Senior&IntermediateTest Engineers",
+    "company": "Plexure Limited",
+    "location": "Auckland CBD, Auckland (Hybrid)",
+    "posted_at_text": null,
+    "work_type": "Hybrid",
+    "salary_text": "2k training budgot, insurance, meal",
+    "classification": null,
+    "card_bbox": {
+      "x": 652,
+      "y": 279,
+      "w": 414,
+      "h": 252
+    },
+    "click_point": {
+      "x": 804,
+      "y": 293
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_0",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_17_senior-intermediatetest-engineers",
+      "page_text_18_plexure-limited",
+      "page_text_21_auckland-cbd-auckland-hybrid",
+      "page_text_22_2k-training-budgot-insurance-meal",
+      "page_text_23_vouchers-wfh",
+      "page_text_24_join-a-global-growing-saas-company-with-over-300",
+      "page_text_25_users",
+      "page_text_26_enjoy-a-2k-training-budget-paid-wellness-days-su"
+    ],
+    "evidence": {
+      "texts": [
+        "Senior&IntermediateTest Engineers",
+        "Plexure Limited",
+        "Auckland CBD, Auckland (Hybrid)",
+        "2k training budgot, insurance, meal",
+        "vouchers, WFH+",
+        "Join a global, growing SaaS company with over 300M",
+        "users",
+        "Enjoy a 2k training budget, paid wellness days, summer"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": true,
+        "has_salary": true
+      }
+    },
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-232018-075144__observe-screen__edge.json",
+      "viewport_size": {
+        "width": 2560,
+        "height": 1400
+      },
+      "source": "seek_job_card_extraction",
+      "freshness": "current_capture"
+    }
+  },
+  "detail": {
+    "job_id": "seek_job_2883553cd219",
+    "title": "SeniorData Engineer",
+    "company": "Plexure Limited",
+    "location": "Auckland CBD, Auckland (Hybrid)",
+    "work_type": "Hybrid",
+    "salary_text": "2k training budget, insurance, meal",
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "batch_ocr",
+        "text": "Everyday"
+      },
+      {
+        "index": 1,
+        "role": "batch_ocr",
+        "text": "回"
+      },
+      {
+        "index": 2,
+        "role": "batch_ocr",
+        "text": "6"
+      },
+      {
+        "index": 3,
+        "role": "batch_ocr",
+        "text": "plexure"
+      },
+      {
+        "index": 4,
+        "role": "batch_ocr",
+        "text": "SeniorDataEngineer"
+      },
+      {
+        "index": 5,
+        "role": "batch_ocr",
+        "text": "Plexure Limited"
+      },
+      {
+        "index": 6,
+        "role": "batch_ocr",
+        "text": "Viewalljobs"
+      },
+      {
+        "index": 7,
+        "role": "batch_ocr",
+        "text": "Auckland CBD,Auckland (Hybrid)"
+      },
+      {
+        "index": 8,
+        "role": "batch_ocr",
+        "text": "Engineering - Software (Information & Communication Technology)"
+      },
+      {
+        "index": 9,
+        "role": "batch_ocr",
+        "text": "Full time"
+      },
+      {
+        "index": 10,
+        "role": "batch_ocr",
+        "text": "2k training budget,insurance,meal vouchers,WFH+"
+      },
+      {
+        "index": 11,
+        "role": "batch_ocr",
+        "text": "Posted30d+ago·Medium applicationvolume"
+      },
+      {
+        "index": 12,
+        "role": "batch_ocr",
+        "text": "Quickapply"
+      },
+      {
+        "index": 13,
+        "role": "batch_ocr",
+        "text": "Save"
+      },
+      {
+        "index": 14,
+        "role": "batch_ocr",
+        "text": "How you match ①"
+      },
+      {
+        "index": 15,
+        "role": "batch_ocr",
+        "text": "2 skills and credentialsmatch yourprofile"
+      },
+      {
+        "index": 16,
+        "role": "batch_ocr",
+        "text": "Pipelines"
+      },
+      {
+        "index": 17,
+        "role": "batch_ocr",
+        "text": "√AWS"
+      },
+      {
+        "index": 18,
+        "role": "batch_ocr",
+        "text": "Showall"
+      },
+      {
+        "index": 19,
+        "role": "batch_ocr",
+        "text": "√"
+      },
+      {
+        "index": 20,
+        "role": "batch_ocr",
+        "text": "Plexure Culture Video"
+      },
+      {
+        "index": 21,
+        "role": "batch_ocr",
+        "text": "Senior Data Engineer"
+      },
+      {
+        "index": 22,
+        "role": "batch_ocr",
+        "text": "Quick apply"
+      },
+      {
+        "index": 23,
+        "role": "batch_ocr",
+        "text": "前往平台观看："
+      },
+      {
+        "index": 24,
+        "role": "batch_ocr",
+        "text": "ButIthinkPlexuredoesthings"
+      },
+      {
+        "index": 25,
+        "role": "batch_ocr",
+        "text": "YouTube"
+      },
+      {
+        "index": 26,
+        "role": "batch_ocr",
+        "text": "We're looking fora Senior Data Engineer to join our growing data team!You'll become"
+      },
+      {
+        "index": 27,
+        "role": "batch_ocr",
+        "text": "part of a global,growingSaaS company at an excitingpoint inourgrowth journey.Based"
+      },
+      {
+        "index": 28,
+        "role": "batch_ocr",
+        "text": "in Auckland CBD,you'll enjoyWFH days + lots of lovely benefits(more on those below)."
+      },
+      {
+        "index": 29,
+        "role": "batch_ocr",
+        "text": "Whoarewe?"
+      },
+      {
+        "index": 30,
+        "role": "batch_ocr",
+        "text": "·Plexure redefines the customer experience and drives results through personalized"
+      },
+      {
+        "index": 31,
+        "role": "batch_ocr",
+        "text": "mobile marketing and next-generation loyalty programs for household names such"
+      },
+      {
+        "index": 32,
+        "role": "batch_ocr",
+        "text": "asMcDonald's."
+      },
+      {
+        "index": 33,
+        "role": "batch_ocr",
+        "text": "·Ourindustry-leading customerengagement platform hasover300millionusers in65"
+      },
+      {
+        "index": 34,
+        "role": "batch_ocr",
+        "text": "countries around theglobe."
+      },
+      {
+        "index": 35,
+        "role": "batch_ocr",
+        "text": "Whatwill youdo?"
+      },
+      {
+        "index": 36,
+        "role": "batch_ocr",
+        "text": "·Workacross multiple activeprojects that evolve ourdataplatform and enablebetter"
+      },
+      {
+        "index": 37,
+        "role": "batch_ocr",
+        "text": "product and customer outcomes."
+      },
+      {
+        "index": 38,
+        "role": "batch_ocr",
+        "text": "·Design, build and improve scalable data pipelines,platform capabilities and data"
+      },
+      {
+        "index": 39,
+        "role": "batch_ocr",
+        "text": "modelsthatsupportbothanalytics andwiderplatformusecases."
+      },
+      {
+        "index": 40,
+        "role": "batch_ocr",
+        "text": "·Lead thetechnical delivery of complexwork,contributing tosolutiondesign,"
+      },
+      {
+        "index": 41,
+        "role": "batch_ocr",
+        "text": "engineering standards and decisions that improve performance,reliability and quality."
+      },
+      {
+        "index": 42,
+        "role": "batch_ocr",
+        "text": "·Collaborate closelywith teams across thebusiness to shapepractical solutions,deliver"
+      },
+      {
+        "index": 43,
+        "role": "batch_ocr",
+        "text": "·Helpupliftteamcapabilitythroughmentorship,whilealsocontributingtohowthe"
+      },
+      {
+        "index": 44,
+        "role": "batch_ocr",
+        "text": "teamcontinuestoadoptAl-enabled developmenttools."
+      },
+      {
+        "index": 45,
+        "role": "batch_ocr",
+        "text": "·Our tech stack: Python, Databricks, AWS, Terraform, Spark, Azure DevOps, GitHub."
+      },
+      {
+        "index": 46,
+        "role": "batch_ocr",
+        "text": "Whatarewelookingfor?"
+      },
+      {
+        "index": 47,
+        "role": "batch_ocr",
+        "text": "·A background in either software or data engineering, with strong Python capability."
+      },
+      {
+        "index": 48,
+        "role": "batch_ocr",
+        "text": "·Experienceworking with cloud-based platforms(andmodern data tooling would bea"
+      },
+      {
+        "index": 49,
+        "role": "batch_ocr",
+        "text": "plus!)."
+      },
+      {
+        "index": 50,
+        "role": "batch_ocr",
+        "text": "·Hands-on experience with Infrastructure as Code."
+      },
+      {
+        "index": 51,
+        "role": "batch_ocr",
+        "text": "·Proven abilitytolead complexwork,guide technical directionandcontributeto"
+      },
+      {
+        "index": 52,
+        "role": "batch_ocr",
+        "text": "solution design."
+      },
+      {
+        "index": 53,
+        "role": "batch_ocr",
+        "text": "·Strong stakeholder engagement and prioritisation skills."
+      },
+      {
+        "index": 54,
+        "role": "batch_ocr",
+        "text": "·A collaborative approach,with aninterest inmentoring others,mproving team"
+      },
+      {
+        "index": 55,
+        "role": "batch_ocr",
+        "text": "practices and championing Al-enabled ways of working."
+      },
+      {
+        "index": 56,
+        "role": "batch_ocr",
+        "text": "What's in it foryou?"
+      },
+      {
+        "index": 57,
+        "role": "batch_ocr",
+        "text": "·Paid wellness days! You'll get 4 each year+ a paid day off in the month of your"
+      },
+      {
+        "index": 58,
+        "role": "batch_ocr",
+        "text": "birthday."
+      },
+      {
+        "index": 59,
+        "role": "batch_ocr",
+        "text": "·Ongoing careerdevelopment and support-Receive ongoing coaching fromyour"
+      },
+      {
+        "index": 60,
+        "role": "batch_ocr",
+        "text": "manager, the Data Engineering Team Lead, and a $2,0o0 yearly training budget to use"
+      },
+      {
+        "index": 61,
+        "role": "batch_ocr",
+        "text": "towards upskilling yourself!"
+      },
+      {
+        "index": 62,
+        "role": "batch_ocr",
+        "text": "·Work from home allowance - we'll give you a one off payment of $1,ooo tohelp you"
+      },
+      {
+        "index": 63,
+        "role": "batch_ocr",
+        "text": "dollars gofurther."
+      },
+      {
+        "index": 64,
+        "role": "batch_ocr",
+        "text": "·Fully paid health insurance for yourself and discounts for family members (Southern"
+      },
+      {
+        "index": 65,
+        "role": "batch_ocr",
+        "text": "Cross - Wellbeing 2)."
+      },
+      {
+        "index": 66,
+        "role": "batch_ocr",
+        "text": "·We've got you covered with life insurance and illness or injury incomeprotection too."
+      },
+      {
+        "index": 67,
+        "role": "batch_ocr",
+        "text": "ayear!)+you'llhaveamonthlycreditatTANK."
+      },
+      {
+        "index": 68,
+        "role": "batch_ocr",
+        "text": "·Summer hours! If there's nothing pressing left to do on a Friday arvo,finish up at"
+      },
+      {
+        "index": 69,
+        "role": "batch_ocr",
+        "text": "1:0Opm(December-February)."
+      },
+      {
+        "index": 70,
+        "role": "batch_ocr",
+        "text": "·FreeUdemysubscription-choosefrommore than20o,0o0 availablecoursesonline!"
+      },
+      {
+        "index": 71,
+        "role": "batch_ocr",
+        "text": "WorkplaceOptions."
+      },
+      {
+        "index": 72,
+        "role": "batch_ocr",
+        "text": "·Subsidized parking in the garage of our office building."
+      },
+      {
+        "index": 73,
+        "role": "batch_ocr",
+        "text": "·A brand new office and an active social club that organizes events each month."
+      },
+      {
+        "index": 74,
+        "role": "batch_ocr",
+        "text": "Why do ouremployees loveworking forPlexure:"
+      },
+      {
+        "index": 75,
+        "role": "batch_ocr",
+        "text": "·\"l collaborate with a lot of teams across the business and have gained a lot"
+      },
+      {
+        "index": 76,
+        "role": "batch_ocr",
+        "text": "ofexposuretodifferent areas.\""
+      },
+      {
+        "index": 77,
+        "role": "batch_ocr",
+        "text": "ofexposuretodifferentareas.\""
+      },
+      {
+        "index": 78,
+        "role": "batch_ocr",
+        "text": "·\"We use state of the art cutting edge technology. It is great to work with different"
+      },
+      {
+        "index": 79,
+        "role": "batch_ocr",
+        "text": "technologies.\""
+      },
+      {
+        "index": 80,
+        "role": "batch_ocr",
+        "text": "·\"You get appreciation for the work you do.I receive recognition from my leadership,"
+      },
+      {
+        "index": 81,
+        "role": "batch_ocr",
+        "text": "peers and clients.Ifeel valued.\""
+      },
+      {
+        "index": 82,
+        "role": "batch_ocr",
+        "text": "but also like tohave fun.\""
+      },
+      {
+        "index": 83,
+        "role": "batch_ocr",
+        "text": "Company profile"
+      },
+      {
+        "index": 84,
+        "role": "batch_ocr",
+        "text": "Information Technology Services"
+      },
+      {
+        "index": 85,
+        "role": "batch_ocr",
+        "text": "101-1,000 employees"
+      },
+      {
+        "index": 86,
+        "role": "batch_ocr",
+        "text": "Plexure's industry-leading customer engagement data platform captures,"
+      },
+      {
+        "index": 87,
+        "role": "batch_ocr",
+        "text": "analyzes,and understandscustomerpurchasingbehavior.Thisfoundationsets"
+      },
+      {
+        "index": 88,
+        "role": "batch_ocr",
+        "text": "thestageforPlexure's deeppersonalization capabilities,centralized content..."
+      },
+      {
+        "index": 89,
+        "role": "batch_ocr",
+        "text": "Showmore"
+      },
+      {
+        "index": 90,
+        "role": "batch_ocr",
+        "text": "Perks and benefits"
+      },
+      {
+        "index": 91,
+        "role": "batch_ocr",
+        "text": "·CareerDevelopment·Wellness·Hospitality·Insurance"
+      },
+      {
+        "index": 92,
+        "role": "batch_ocr",
+        "text": "·WFHFlexibility"
+      },
+      {
+        "index": 93,
+        "role": "batch_ocr",
+        "text": "·Community·Summer Hours·Parking"
+      },
+      {
+        "index": 94,
+        "role": "batch_ocr",
+        "text": "More about this company→"
+      },
+      {
+        "index": 95,
+        "role": "batch_ocr",
+        "text": "Be careful"
+      },
+      {
+        "index": 96,
+        "role": "batch_ocr",
+        "text": "Don't provide your bank or credit card details when applying for jobs."
+      },
+      {
+        "index": 97,
+        "role": "batch_ocr",
+        "text": "Learnhowtoprotectyourself"
+      },
+      {
+        "index": 98,
+        "role": "batch_ocr",
+        "text": "Senior&IntermediateTestEngineers"
+      },
+      {
+        "index": 99,
+        "role": "batch_ocr",
+        "text": "Plexure Limited View all jobs"
+      },
+      {
+        "index": 100,
+        "role": "batch_ocr",
+        "text": "Testing & Quality Assurance (Information &Communication Technology)"
+      },
+      {
+        "index": 101,
+        "role": "batch_ocr",
+        "text": "2k training budget, insurance, meal vouchers, WFH+"
+      },
+      {
+        "index": 102,
+        "role": "batch_ocr",
+        "text": "Posted 1d ago·Medium application volume"
+      },
+      {
+        "index": 103,
+        "role": "batch_ocr",
+        "text": "How you match"
+      },
+      {
+        "index": 104,
+        "role": "batch_ocr",
+        "text": "2 skills and credentials match your profile"
+      },
+      {
+        "index": 105,
+        "role": "batch_ocr",
+        "text": "√API"
+      },
+      {
+        "index": 106,
+        "role": "batch_ocr",
+        "text": "√Pipelines"
+      },
+      {
+        "index": 107,
+        "role": "batch_ocr",
+        "text": "Show all"
+      },
+      {
+        "index": 108,
+        "role": "batch_ocr",
+        "text": "前往平台观看：（"
+      },
+      {
+        "index": 109,
+        "role": "batch_ocr",
+        "text": "We'relookingfor2 Intermediate orSeniorTestEngineers tojoin thePlexureteam!You'll"
+      },
+      {
+        "index": 110,
+        "role": "batch_ocr",
+        "text": "become part of a global, growing SaaS company at an exciting point in our growth"
+      },
+      {
+        "index": 111,
+        "role": "batch_ocr",
+        "text": "journey.BasedinAucklandCBD,you'llenjoyWFHdays+lotsoflovelybenefits(moreon"
+      },
+      {
+        "index": 112,
+        "role": "batch_ocr",
+        "text": "those below)."
+      },
+      {
+        "index": 113,
+        "role": "batch_ocr",
+        "text": "Who arewe?"
+      },
+      {
+        "index": 114,
+        "role": "batch_ocr",
+        "text": "·Plexureredefines thecustomerexperienceand drivesresults throughpersonalized"
+      },
+      {
+        "index": 115,
+        "role": "batch_ocr",
+        "text": "asMcDonald's"
+      },
+      {
+        "index": 116,
+        "role": "batch_ocr",
+        "text": "·Our industry-leading customer engagement data platform has over 300 million users"
+      },
+      {
+        "index": 117,
+        "role": "batch_ocr",
+        "text": "in65countriesaroundtheglobe"
+      },
+      {
+        "index": 118,
+        "role": "batch_ocr",
+        "text": "What will you do?"
+      },
+      {
+        "index": 119,
+        "role": "batch_ocr",
+        "text": "·AspartofourConsumerPillar,you'lljoinforceswithyourcross-functionalsquad to"
+      },
+      {
+        "index": 120,
+        "role": "batch_ocr",
+        "text": "tackle challenges acrossidentity,security,consent,and consumer data platforms"
+      },
+      {
+        "index": 121,
+        "role": "batch_ocr",
+        "text": "·Theseroles sit withina cloud-native engineering environment that isheavilyAPl-"
+      },
+      {
+        "index": 122,
+        "role": "batch_ocr",
+        "text": "driven, automation-focused, and increasingly Al-assisted.You'll help shape how"
+      },
+      {
+        "index": 123,
+        "role": "batch_ocr",
+        "text": "quality engineering evolves in anenvironment whereAl isgenerating muchof the"
+      },
+      {
+        "index": 124,
+        "role": "batch_ocr",
+        "text": "applicationandtestcode,requiring deeperthinking around coveragequality,intent"
+      },
+      {
+        "index": 125,
+        "role": "batch_ocr",
+        "text": "validation, and system reliability."
+      },
+      {
+        "index": 126,
+        "role": "batch_ocr",
+        "text": "·Dependingonthesquad,yourworkmayinclude:"
+      },
+      {
+        "index": 127,
+        "role": "batch_ocr",
+        "text": "Testingmodernidentity and authenticationplatforms,includingloginflows,"
+      },
+      {
+        "index": 128,
+        "role": "batch_ocr",
+        "text": "authorisation services,fraud prevention,and third-partysecurityintegrations"
+      },
+      {
+        "index": 129,
+        "role": "batch_ocr",
+        "text": "·Supporting consent management and consumer privacy initiatives across global"
+      },
+      {
+        "index": 130,
+        "role": "batch_ocr",
+        "text": "markets"
+      },
+      {
+        "index": 131,
+        "role": "batch_ocr",
+        "text": "·Designing,reviewing,andimproving automated test coverage acrossAPl,"
+      },
+      {
+        "index": 132,
+        "role": "batch_ocr",
+        "text": "integration,regression,E2E,smoke,performance,andsecuritytesting"
+      },
+      {
+        "index": 133,
+        "role": "batch_ocr",
+        "text": "·Critically reviewing Al-generated code and tests to ensure they are meaningful,"
+      },
+      {
+        "index": 134,
+        "role": "batch_ocr",
+        "text": "robust,and aligned to system intent"
+      },
+      {
+        "index": 135,
+        "role": "batch_ocr",
+        "text": "·Performing white-boxand black-boxtesting across distributed cloud-native"
+      },
+      {
+        "index": 136,
+        "role": "batch_ocr",
+        "text": "systems"
+      },
+      {
+        "index": 137,
+        "role": "batch_ocr",
+        "text": "robust,and alignedtosystemintent"
+      },
+      {
+        "index": 138,
+        "role": "batch_ocr",
+        "text": "·Performingwhite-boxandblack-boxtestingacrossdistributedcloud-native"
+      },
+      {
+        "index": 139,
+        "role": "batch_ocr",
+        "text": "·Contributing to performance, chaos,privacy,and security-focused testing"
+      },
+      {
+        "index": 140,
+        "role": "batch_ocr",
+        "text": "practices"
+      },
+      {
+        "index": 141,
+        "role": "batch_ocr",
+        "text": "·CollaboratingcloselywithengineersinamodernCl/CDenvironmenttoimprove"
+      },
+      {
+        "index": 142,
+        "role": "batch_ocr",
+        "text": "quality,reliability,and platform resilience"
+      },
+      {
+        "index": 143,
+        "role": "batch_ocr",
+        "text": "·UsingAltoolingaspartofday-to-dayengineering andtestingworkflows"
+      },
+      {
+        "index": 144,
+        "role": "batch_ocr",
+        "text": "·Our tech stack includes C#,.NET,JavaScript,Azure,Playwright,Postman,k6,and"
+      },
+      {
+        "index": 145,
+        "role": "batch_ocr",
+        "text": "JMeter"
+      },
+      {
+        "index": 146,
+        "role": "batch_ocr",
+        "text": "·Experience across APl,automation,integration,and E2Etesting (performance testing"
+      },
+      {
+        "index": 147,
+        "role": "batch_ocr",
+        "text": "(snideagpinom"
+      },
+      {
+        "index": 148,
+        "role": "batch_ocr",
+        "text": "·AgenuineQAmindset,withstrong curiosity,critical thinking,and the abilityto"
+      },
+      {
+        "index": 149,
+        "role": "batch_ocr",
+        "text": "challengeassumptions,edgecases,andcoveragequality"
+      },
+      {
+        "index": 150,
+        "role": "batch_ocr",
+        "text": "·The ability to review,challenge,and improve Al-generated code,tests,PRs, and"
+      },
+      {
+        "index": 151,
+        "role": "batch_ocr",
+        "text": "explanations."
+      },
+      {
+        "index": 152,
+        "role": "batch_ocr",
+        "text": "·Enough coding capability to understand and question implementations in an object-"
+      },
+      {
+        "index": 153,
+        "role": "batch_ocr",
+        "text": "orientedprogramminglanguage"
+      },
+      {
+        "index": 154,
+        "role": "batch_ocr",
+        "text": "·Experience working in cloud-native environments, distributed systems, and modern"
+      },
+      {
+        "index": 155,
+        "role": "batch_ocr",
+        "text": "CI/CD pipelines."
+      },
+      {
+        "index": 156,
+        "role": "batch_ocr",
+        "text": "What's init foryou?"
+      },
+      {
+        "index": 157,
+        "role": "batch_ocr",
+        "text": "edge technologies."
+      },
+      {
+        "index": 158,
+        "role": "batch_ocr",
+        "text": "·Paid wellness days!You'll get 4each year+a paid day off in the month of your"
+      },
+      {
+        "index": 159,
+        "role": "batch_ocr",
+        "text": "·Ongoing career development and support- Receive ongoing coaching from your"
+      },
+      {
+        "index": 160,
+        "role": "batch_ocr",
+        "text": "Engineering Team Lead and a $2,oooyearly training budget to use towards upskilling"
+      },
+      {
+        "index": 161,
+        "role": "batch_ocr",
+        "text": "yourself!"
+      },
+      {
+        "index": 162,
+        "role": "batch_ocr",
+        "text": "·Work from home allowance - we'll give you a one off payment of $1,ooo to help you"
+      },
+      {
+        "index": 163,
+        "role": "batch_ocr",
+        "text": "get set up at home.Plus,youll have access to staff discounts at PB Tech to helpyour"
+      },
+      {
+        "index": 164,
+        "role": "batch_ocr",
+        "text": "dollars go further."
+      },
+      {
+        "index": 165,
+        "role": "batch_ocr",
+        "text": "·Fully paid healthinsurance foryourself and discountsforfamilymembers(Southern"
+      },
+      {
+        "index": 166,
+        "role": "batch_ocr",
+        "text": "Cross -Wellbeing 2)."
+      },
+      {
+        "index": 167,
+        "role": "batch_ocr",
+        "text": "·We've got you covered with life insurance and illness or injury income protection too."
+      },
+      {
+        "index": 168,
+        "role": "batch_ocr",
+        "text": "·Hospitalitybenefits-grabafreelunchordinnerinoneofSkyCity'srestaurants(twice"
+      },
+      {
+        "index": 169,
+        "role": "batch_ocr",
+        "text": "a year!) + you'll have a monthly credit at TANK."
+      },
+      {
+        "index": 170,
+        "role": "batch_ocr",
+        "text": "·Summerhours!If there'snothingpressingleft todoonaFridayarvo,finishupat"
+      },
+      {
+        "index": 171,
+        "role": "batch_ocr",
+        "text": "·Hospitalitybenefits-grab afreelunch ordinnerinoneof Sky City'srestaurants(twice"
+      },
+      {
+        "index": 172,
+        "role": "batch_ocr",
+        "text": "a year!)+ you'll have a monthly credit at TANK."
+      },
+      {
+        "index": 173,
+        "role": "batch_ocr",
+        "text": "·Summer hours!If there's nothing pressing left to do on a Friday arvo,finishup at"
+      },
+      {
+        "index": 174,
+        "role": "batch_ocr",
+        "text": "1:OOpm(December-February)."
+      },
+      {
+        "index": 175,
+        "role": "batch_ocr",
+        "text": "·FreeUdemy subscription-choose frommore than200,0o0availablecourses online!"
+      },
+      {
+        "index": 176,
+        "role": "batch_ocr",
+        "text": "·Mental wellbeing support such as EAPservicesthroughWorkplace Options."
+      },
+      {
+        "index": 177,
+        "role": "batch_ocr",
+        "text": "·We arrange a company-wide volunteering day once a year (paid of course)."
+      },
+      {
+        "index": 178,
+        "role": "batch_ocr",
+        "text": "·Abrandnewofficeandanactivesocialclubthatorganizeseventseachmonth."
+      },
+      {
+        "index": 179,
+        "role": "batch_ocr",
+        "text": "WhydoouremployeesloveworkingforPlexure:"
+      },
+      {
+        "index": 180,
+        "role": "batch_ocr",
+        "text": "·\"l collaboratewithalot of teams across thebusiness and have gaineda lot"
+      },
+      {
+        "index": 181,
+        "role": "batch_ocr",
+        "text": "ofexposure to differentareas.\""
+      },
+      {
+        "index": 182,
+        "role": "batch_ocr",
+        "text": "·\"Weuse state of the art cutting edge technology.lt is great to work with different"
+      },
+      {
+        "index": 183,
+        "role": "batch_ocr",
+        "text": "·\"We are a very diverse team -we have people from all over the world! We work hard"
+      },
+      {
+        "index": 184,
+        "role": "batch_ocr",
+        "text": "InformationTechnology Services"
+      },
+      {
+        "index": 185,
+        "role": "batch_ocr",
+        "text": "22 101-1,000 employees"
+      },
+      {
+        "index": 186,
+        "role": "batch_ocr",
+        "text": "Plexure's industry-leading customerengagement data platform captures,"
+      },
+      {
+        "index": 187,
+        "role": "batch_ocr",
+        "text": "analyzes,andunderstandscustomerpurchasingbehavior.Thisfoundationsets"
+      },
+      {
+        "index": 188,
+        "role": "batch_ocr",
+        "text": "thestageforPlexure'sdeeppersonalizationcapabilities,centralizedcontent..."
+      },
+      {
+        "index": 189,
+        "role": "batch_ocr",
+        "text": "·WFH Flexibility"
+      },
+      {
+        "index": 190,
+        "role": "batch_ocr",
+        "text": "y·Community·Summer Hours·Parking"
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-231848-989740__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-231854-355295__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-231900-616982__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-231905-974963__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-232043-477667__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-232050-348921__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-232056-462168__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-232102-571639__ocr-region__ocr-region.json"
+    ],
+    "detail_batch_status": "ok",
+    "detail_batch_stop_reason": "max_captures",
+    "detail_bottom_reached": false,
+    "detail_batch_unique_line_count": 112,
+    "runtime_detail_dataflow": {
+      "contract_version": "runtime_detail_dataflow_v1",
+      "source_batch_contract": "read_region_batch_v1",
+      "source_batch_status": "ok",
+      "merged_text_line_count": 112,
+      "description_section_count": 191
+    },
+    "runtime_detail_snapshot": {
+      "contract_version": "runtime_detail_snapshot_v1",
+      "source": "read_region_batch",
+      "revision": 2,
+      "previous_snapshot_id": "5602ab6a7ad04a7e",
+      "snapshot_id": "12aead9b8c986dfc"
+    }
+  }
+}

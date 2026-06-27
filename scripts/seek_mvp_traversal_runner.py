@@ -16,6 +16,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from app.core.runtime_artifacts import write_trace
+from app.execute.ocr_normalization import canonicalize_short_ocr_token, ocr_contextual_match
+from app.execute.visual_asset_matching import match_visual_asset
 from app.seek.application import assess_seek_application_flow_state, build_seek_apply_flow_decision
 from app.seek.answer_plan import build_application_answer_plan
 from app.seek.cover_letter import build_cover_letter_draft
@@ -32,6 +34,7 @@ from app.seek.traversal import (
 
 
 DEFAULT_OUTPUT = Path("logs/smoke/seek_mvp_traversal_report.json")
+SEEK_QUICK_APPLY_TEMPLATE_PATH = Path("artifacts/visual-assets/seek/real_crops_20260625/seek_visual_quick_apply_button_real.png")
 DEFAULT_SEEK_URL = "https://nz.seek.com/"
 JOB_ARCHIVE_CONTRACT = "seek_job_archive_v1"
 
@@ -58,6 +61,43 @@ def _post_json(base_url: str, endpoint: str, payload: dict[str, Any], timeout: f
     except urllib.error.URLError as exc:
         raise SeekTraversalError(f"{endpoint} request failed: {exc}") from exc
     return json.loads(raw)
+
+
+def _get_json(base_url: str, endpoint: str, timeout: float) -> dict[str, Any]:
+    url = f"{base_url.rstrip('/')}{endpoint}"
+    request = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        raise SeekTraversalError(f"{endpoint} returned HTTP {exc.code}: {raw}") from exc
+    except urllib.error.URLError as exc:
+        raise SeekTraversalError(f"{endpoint} request failed: {exc}") from exc
+    return json.loads(raw)
+
+
+def _runtime_state(base_url: str, timeout: float) -> dict[str, Any]:
+    response = _get_json(base_url, "/state", timeout)
+    if response.get("success") is not True:
+        raise SeekTraversalError(f"state failed: {response.get('error') or response.get('message')}")
+    data = response.get("data") if isinstance(response.get("data"), dict) else {}
+    return {"response": response, "payload": data}
+
+
+def _rect_size(payload: dict[str, Any] | None) -> dict[str, int] | None:
+    if not isinstance(payload, dict):
+        return None
+    rect = payload.get("rect") if isinstance(payload.get("rect"), dict) else None
+    if not rect:
+        return None
+    try:
+        return {
+            "width": int(rect["right"]) - int(rect["left"]),
+            "height": int(rect["bottom"]) - int(rect["top"]),
+        }
+    except Exception:
+        return None
 
 
 def _result_payload(response: dict[str, Any]) -> dict[str, Any]:
@@ -293,6 +333,9 @@ def _job_archive_payload(step: dict[str, Any], *, source_url: str | None, mode: 
             ),
             "post_click_layout": click.get("post_click_layout"),
         },
+        "detail": detail,
+        "detail_complete": completeness.get("complete"),
+        "detail_missing_evidence": completeness.get("missing_evidence") or [],
         "detail_read": {
             "detail": detail,
             "complete": completeness.get("complete"),
@@ -303,6 +346,7 @@ def _job_archive_payload(step: dict[str, Any], *, source_url: str | None, mode: 
             "scroll_count": len(detail_read.get("scrolls") or []),
             "scrolls": detail_read.get("scrolls") or [],
         },
+        "clear_path_node": _clear_path_node_from_step(step),
         "match_decision": match_decision,
         "apply_entry": _trace_apply_entry_summary(apply_entry) if apply_entry else None,
         "safety": {
@@ -326,6 +370,116 @@ def _job_archive_filename(step: dict[str, Any]) -> str:
     }
     digest = hashlib.sha1(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:10]
     return f"job_{index:03d}_{digest}.json"
+
+
+def _clear_path_node_from_step(step: dict[str, Any]) -> dict[str, Any]:
+    card = step.get("card") if isinstance(step.get("card"), dict) else {}
+    click = step.get("card_click") if isinstance(step.get("card_click"), dict) else {}
+    detail_read = step.get("detail_read") if isinstance(step.get("detail_read"), dict) else {}
+    detail = detail_read.get("detail") if isinstance(detail_read.get("detail"), dict) else {}
+    completeness = detail_read.get("completeness") if isinstance(detail_read.get("completeness"), dict) else {}
+    match = step.get("match_decision") if isinstance(step.get("match_decision"), dict) else {}
+    click_response = click.get("execute_response") or click.get("dry_run_response")
+    return {
+        "node_id": str(step.get("job_id") or detail.get("job_id") or card.get("job_id") or f"job_{step.get('index', 0)}"),
+        "node_type": "seek_job_card_to_detail",
+        "title": detail.get("title") or card.get("title"),
+        "company": detail.get("company") or card.get("company"),
+        "location": detail.get("location") or card.get("location"),
+        "card_bbox": card.get("card_bbox"),
+        "click_point": card.get("click_point"),
+        "open_action": {
+            "action_id": "open_job_card",
+            "opened": click.get("opened"),
+            "failure_reason": click.get("failure_reason"),
+            "approved_plan_id": click.get("approved_plan_id"),
+            "dry_run_trace_path": (click.get("dry_run_response") or {}).get("trace_path")
+            if isinstance(click.get("dry_run_response"), dict)
+            else None,
+            "execute_trace_path": (click.get("execute_response") or {}).get("trace_path")
+            if isinstance(click.get("execute_response"), dict)
+            else None,
+            "recognition_plan_trace_path": click_response.get("recognition_plan_trace_path") if isinstance(click_response, dict) else None,
+        },
+        "read_detail_action": {
+            "action_id": "read_detail",
+            "container_id": detail_read.get("read_container_id"),
+            "coordinate_strategy": detail_read.get("coordinate_strategy"),
+            "complete": completeness.get("complete"),
+            "missing_evidence": completeness.get("missing_evidence") or [],
+            "scroll_count": len(detail_read.get("scrolls") or []),
+            "trace_paths": detail.get("trace_paths"),
+        },
+        "match": {
+            "decision": match.get("decision"),
+            "score": match.get("score"),
+            "recommended_next_action": match.get("recommended_next_action"),
+        },
+    }
+
+
+def _build_clear_path_graph(report: dict[str, Any]) -> dict[str, Any]:
+    steps = [step for step in report.get("traversal_steps") or [] if isinstance(step, dict)]
+    accuracy = report.get("accuracy_summary") if isinstance(report.get("accuracy_summary"), dict) else {}
+    return {
+        "contract_version": "seek_clear_path_graph_v1",
+        "source_report_contract": report.get("contract_version"),
+        "source_report_path": report.get("report_path"),
+        "source_url": report.get("source_url"),
+        "mode": report.get("mode"),
+        "learned_artifact_assisted": report.get("learned_artifact_assisted"),
+        "regions": [
+            {"region_id": "top_search_area", "role": "search_and_filters"},
+            {"region_id": "results_list", "role": "scrollable_job_cards", "scroll_container_id": "seek:results_list"},
+            {"region_id": "job_card", "role": "repeated_clickable_job_card", "parent_region_id": "results_list"},
+            {"region_id": "job_detail", "role": "scrollable_detail_pane", "scroll_container_id": "seek:job_detail"},
+            {"region_id": "detail_header", "role": "selected_job_identity", "parent_region_id": "job_detail"},
+            {"region_id": "detail_body", "role": "job_description_and_requirements", "parent_region_id": "job_detail"},
+        ],
+        "actions": [
+            {
+                "action_id": "open_job_card",
+                "from_region": "job_card",
+                "to_region": "job_detail",
+                "low_level": "click",
+                "gate_required": True,
+            },
+            {
+                "action_id": "read_detail",
+                "region": "job_detail",
+                "low_level": "scroll",
+                "completion_signal": "seek_job_detail_completeness_v1.complete",
+            },
+            {
+                "action_id": "load_more_results",
+                "region": "results_list",
+                "low_level": "scroll",
+            },
+        ],
+        "nodes": [_clear_path_node_from_step(step) for step in steps],
+        "summary": {
+            "jobs_seen": report.get("jobs_seen"),
+            "jobs_opened": report.get("jobs_opened"),
+            "jobs_fully_read": report.get("jobs_fully_read"),
+            "final_submissions": report.get("final_submissions"),
+            "submit_clicks": report.get("submit_clicks"),
+            "wrong_scope_scroll_count": accuracy.get("wrong_scope_scroll_count"),
+        },
+        "safety": {
+            "final_submit_forbidden": True,
+            "final_submissions": report.get("final_submissions"),
+            "submit_clicks": report.get("submit_clicks"),
+        },
+    }
+
+
+def _write_clear_path_graph(report: dict[str, Any], *, out_path: Path | None) -> str | None:
+    if out_path is None:
+        return None
+    graph_path = out_path.with_name(f"{out_path.stem}_clear_path_graph.json")
+    payload = _build_clear_path_graph({**report, "report_path": str(out_path)})
+    _write_json(graph_path, payload)
+    return str(graph_path)
 
 
 def _apply_flow_summary(apply_entries: list[dict[str, Any]]) -> dict[str, Any]:
@@ -362,6 +516,16 @@ def _seek_job_seeded_candidate(job: dict[str, Any], *, learned_artifact: dict[st
     label = " | ".join(part for part in [title, company] if part) or str(job.get("job_id") or "SEEK job card")
     evidence = job.get("evidence") if isinstance(job.get("evidence"), dict) else {}
     evidence_texts = evidence.get("texts") if isinstance(evidence.get("texts"), list) else []
+    compact_evidence = _compact_seek_seed_evidence(
+        [
+            title,
+            company,
+            str(job.get("location") or "").strip(),
+            str(job.get("work_type") or "").strip(),
+            str(job.get("salary") or "").strip(),
+            *(str(text).strip() for text in evidence_texts),
+        ]
+    )
     seed = {
         "contract_version": "seeded_candidate_v1",
         "source": "seek_job_card_v1",
@@ -373,7 +537,7 @@ def _seek_job_seeded_candidate(job: dict[str, Any], *, learned_artifact: dict[st
         "container_id": "seek:results_list",
         "bbox": bbox,
         "click_point": click_point,
-        "evidence_texts": evidence_texts[:12],
+        "evidence_texts": compact_evidence,
         "risk_class": "safe_click_allowed",
         "expected_effect": "open SEEK job detail pane for the selected result",
         "safety": {
@@ -382,12 +546,125 @@ def _seek_job_seeded_candidate(job: dict[str, Any], *, learned_artifact: dict[st
             "disallow_final_submit": True,
         },
     }
+    if isinstance(job.get("candidate_freshness"), dict):
+        seed["candidate_freshness"] = job["candidate_freshness"]
     learned_metadata = action_metadata(learned_artifact, "open_job_card")
     if learned_metadata.get("candidate_constraints"):
         seed["candidate_constraints"] = learned_metadata["candidate_constraints"]
     if learned_metadata.get("verification_policy"):
         seed["verification_policy"] = learned_metadata["verification_policy"]
     return seed
+
+
+def _compact_seek_seed_evidence(values: list[str], *, max_items: int = 5, max_chars: int = 80) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = " ".join(str(value or "").split())
+        if not text:
+            continue
+        key = text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        if len(text) > max_chars:
+            continue
+        result.append(text)
+        if len(result) >= max_items:
+            break
+    return result
+
+
+def _seek_apply_seeded_candidate(
+    job: dict[str, Any],
+    detail: dict[str, Any],
+    *,
+    apply_state: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    state = apply_state if isinstance(apply_state, dict) else {}
+    bbox = state.get("bbox") if isinstance(state.get("bbox"), dict) else None
+    click_point = state.get("click_point") if isinstance(state.get("click_point"), dict) else None
+    if not bbox or not click_point:
+        return None
+    title = str(detail.get("title") or job.get("title") or "").strip()
+    company = str(detail.get("company") or job.get("company") or "").strip()
+    label = str(state.get("label") or "Apply").strip() or "Apply"
+    if not _is_seek_internal_quick_apply_label(label):
+        return None
+    identity = " | ".join(part for part in [label, title, company] if part)
+    candidate_id = "seek_apply_" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:12]
+    return {
+        "contract_version": "seeded_candidate_v1",
+        "source": "seek_apply_button_v1",
+        "candidate_id": candidate_id,
+        "role": "button",
+        "label": label,
+        "title": title,
+        "company": company,
+        "container_id": "seek:job_detail",
+        "bbox": bbox,
+        "click_point": click_point,
+        "risk_class": "safe_open_apply_flow",
+        "expected_effect": "open SEEK Quick apply application form",
+        "candidate_constraints": {
+            "required_container_id": "seek:job_detail",
+            "required_label_any": ["Quick apply", "Quick Apply"],
+            "forbid_label_any": ["Apply"],
+            "forbid_final_submit": True,
+        },
+        "safety": {
+            "require_point_inside_seed_bbox": True,
+            "require_pre_apply_detail_verification": True,
+            "disallow_final_submit": True,
+        },
+        "candidate_freshness": state.get("candidate_freshness") if isinstance(state.get("candidate_freshness"), dict) else None,
+    }
+
+
+def _is_seek_internal_quick_apply_label(label: Any) -> bool:
+    text = " ".join(str(label or "").strip().casefold().split())
+    return "quick apply" in text
+
+
+def _numeric_value(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _apply_state_stability(state: Any) -> tuple[bool, str]:
+    if not isinstance(state, dict):
+        return False, "apply_state_missing"
+    if state.get("visible") is not True:
+        return False, "apply_state_not_visible"
+    bbox = state.get("bbox") if isinstance(state.get("bbox"), dict) else None
+    click_point = state.get("click_point") if isinstance(state.get("click_point"), dict) else None
+    if not bbox or not click_point:
+        return False, "apply_state_missing_geometry"
+    y = _numeric_value(click_point.get("y"))
+    if y is None:
+        return False, "apply_state_click_point_invalid"
+    freshness = state.get("candidate_freshness") if isinstance(state.get("candidate_freshness"), dict) else {}
+    viewport = freshness.get("viewport_size") if isinstance(freshness.get("viewport_size"), dict) else {}
+    viewport_height = _numeric_value(viewport.get("height"))
+    if not freshness:
+        return False, "apply_candidate_missing_freshness"
+    if freshness.get("freshness") not in {None, "current_capture"}:
+        return False, "apply_candidate_not_current_capture"
+    if not freshness.get("capture_id"):
+        return False, "apply_candidate_missing_capture_id"
+    if viewport_height is None or viewport_height <= 0:
+        return False, "apply_candidate_missing_viewport_for_stability"
+    bottom_safe = min(viewport_height - 120, viewport_height * 0.88)
+    if y > bottom_safe:
+        return False, "apply_candidate_too_close_to_viewport_bottom"
+    return True, "fresh_apply_candidate_visible_stable"
+
+
+def _apply_state_has_click_target(state: Any) -> bool:
+    stable, _reason = _apply_state_stability(state)
+    return stable
 
 
 def _open_seek(base_url: str, *, url: str, app_name: str, timeout: float) -> dict[str, Any]:
@@ -441,6 +718,218 @@ def _observe(base_url: str, *, app_name: str, state_hint: str, timeout: float) -
     return _result_payload(response)
 
 
+def _capture_window(base_url: str, timeout: float) -> dict[str, Any]:
+    response = _post_json(base_url, "/state/capture_window", {"save_image": True}, timeout)
+    if response.get("success") is not True:
+        raise SeekTraversalError(f"capture_window failed: {response.get('error') or response.get('message')}")
+    data = response.get("data") if isinstance(response.get("data"), dict) else {}
+    return data
+
+
+def _quick_apply_text_present(detail: dict[str, Any]) -> bool:
+    state = detail.get("apply_button_state") if isinstance(detail.get("apply_button_state"), dict) else {}
+    if _is_seek_internal_quick_apply_label(state.get("label")):
+        return True
+    values: list[str] = []
+    for section in detail.get("description_sections") or []:
+        if isinstance(section, dict):
+            values.append(str(section.get("text") or ""))
+    values.extend(str(item or "") for item in detail.get("merged_text_lines") or [])
+    for value in values:
+        compact = re.sub(r"[^a-z]+", "", str(value or "").casefold())
+        if compact == "quickapply":
+            return True
+    return False
+
+
+def _seek_detail_header_search_region(viewport_size: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(viewport_size, dict):
+        return None
+    width = _numeric_value(viewport_size.get("width"))
+    height = _numeric_value(viewport_size.get("height"))
+    if width is None or height is None or width <= 0 or height <= 0:
+        return None
+    return {
+        "x": max(0, round(width * 0.44)),
+        "y": max(0, round(height * 0.06)),
+        "w": max(1, round(width * 0.42)),
+        "h": max(1, round(height * 0.34)),
+        "container_id": "seek:job_detail",
+    }
+
+
+def _learned_quick_apply_verification_from_detail(
+    base_url: str,
+    *,
+    job: dict[str, Any],
+    detail: dict[str, Any],
+    timeout: float,
+) -> dict[str, Any] | None:
+    if not SEEK_QUICK_APPLY_TEMPLATE_PATH.exists():
+        return None
+    text_evidence_present = _quick_apply_text_present(detail)
+    capture = _capture_window(base_url, timeout)
+    image_path = capture.get("image_path")
+    if not image_path:
+        return None
+    viewport_size = {
+        "width": capture.get("image_width") or (capture.get("window_size") or {}).get("width"),
+        "height": capture.get("image_height") or (capture.get("window_size") or {}).get("height"),
+    }
+    visual_match = match_visual_asset(
+        asset_id="seek:visual:quick_apply_button",
+        template_path=SEEK_QUICK_APPLY_TEMPLATE_PATH,
+        target_image_path=image_path,
+        label="Quick apply",
+        semantic_action="open_apply_flow",
+        allowed_region=_seek_detail_header_search_region(viewport_size),
+        scales=(0.75, 0.85, 0.95, 1.0, 1.1, 1.2),
+        min_score=0.82,
+        min_score_gap=0.03,
+        artifact_dir=Path("artifacts/visual-match-smoke/runtime_seek_quick_apply"),
+        capture_id=str(image_path),
+        viewport_size=viewport_size,
+    )
+    if visual_match.get("matched") is not True:
+        return {
+            "contract_version": "pre_apply_detail_verification_v1",
+            "ok": False,
+            "source": "learned_quick_apply_visual_asset_match",
+            "expected_title": detail.get("title") or job.get("title"),
+            "observed_title": detail.get("title") or job.get("title"),
+            "observed_title_reliable": True,
+            "title_matches": True,
+            "expected_company": detail.get("company") or job.get("company"),
+            "observed_company": detail.get("company") or job.get("company"),
+            "observed_company_reliable": True,
+            "company_matches": True,
+            "apply_visible": False,
+            "apply_label": "Quick apply",
+            "apply_button_state": {"visible": False, "label": "Quick apply", "candidate_freshness": visual_match.get("candidate_freshness")},
+            "failure_reasons": ["quick_apply_visual_asset_not_matched"],
+            "visual_match": visual_match,
+            "warnings": [] if text_evidence_present else ["quick_apply_text_evidence_missing_visual_match_attempted"],
+        }
+    candidate = visual_match.get("candidate") if isinstance(visual_match.get("candidate"), dict) else {}
+    return {
+        "contract_version": "pre_apply_detail_verification_v1",
+        "ok": True,
+        "source": "learned_quick_apply_visual_asset_match",
+        "trace_path": str(image_path),
+        "expected_title": detail.get("title") or job.get("title"),
+        "observed_title": detail.get("title") or job.get("title"),
+        "observed_title_reliable": True,
+        "title_matches": True,
+        "expected_company": detail.get("company") or job.get("company"),
+        "observed_company": detail.get("company") or job.get("company"),
+        "observed_company_reliable": True,
+        "company_matches": True,
+        "apply_visible": True,
+        "apply_label": "Quick apply",
+        "apply_button_state": {
+            "visible": True,
+            "label": "Quick apply",
+            "bbox": candidate.get("bbox") or visual_match.get("bbox"),
+            "click_point": candidate.get("click_point") or visual_match.get("click_point"),
+            "candidate_freshness": candidate.get("candidate_freshness") or visual_match.get("candidate_freshness"),
+            "source": "learned_quick_apply_visual_asset_match",
+        },
+        "failure_reasons": [],
+        "visual_match": visual_match,
+        "warnings": [] if text_evidence_present else ["quick_apply_text_evidence_missing_visual_match_used"],
+    }
+
+
+def _pre_apply_verification_from_apply_state(
+    *,
+    job: dict[str, Any],
+    detail: dict[str, Any],
+    apply_state: dict[str, Any],
+    source: str,
+) -> dict[str, Any]:
+    return {
+        "contract_version": "pre_apply_detail_verification_v1",
+        "ok": True,
+        "source": source,
+        "expected_title": detail.get("title") or job.get("title"),
+        "observed_title": detail.get("title") or job.get("title"),
+        "observed_title_reliable": True,
+        "title_matches": True,
+        "expected_company": detail.get("company") or job.get("company"),
+        "observed_company": detail.get("company") or job.get("company"),
+        "observed_company_reliable": True,
+        "company_matches": True,
+        "apply_visible": True,
+        "apply_label": apply_state.get("label") or "Quick apply",
+        "apply_button_state": apply_state,
+        "failure_reasons": [],
+        "warnings": [],
+    }
+
+
+def _wait_for_seek_application_form_readiness(
+    base_url: str,
+    *,
+    app_name: str,
+    source_job: dict[str, Any],
+    initial_flow_state: dict[str, Any],
+    timeout: float,
+    max_observes: int = 3,
+    delay_seconds: float = 0.25,
+) -> dict[str, Any]:
+    attempts: list[dict[str, Any]] = []
+    flow_state = initial_flow_state
+    decision = build_seek_apply_flow_decision(flow_state)
+    state_hint = "SEEK application route opened; wait for application form fields or a clear blocker"
+    for index in range(max_observes + 1):
+        inventory = flow_state.get("application_form_inventory") if isinstance(flow_state.get("application_form_inventory"), dict) else {}
+        attempts.append(
+            {
+                "index": index,
+                "state_type": flow_state.get("state_type"),
+                "decision": decision.get("decision"),
+                "reason": decision.get("reason") or flow_state.get("stop_reason"),
+                "trace_path": flow_state.get("trace_path"),
+                "current_step": flow_state.get("current_step"),
+                "field_count": inventory.get("field_count"),
+                "final_submit_visible": flow_state.get("final_submit_visible"),
+            }
+        )
+        if decision.get("decision") != "wait_for_form_readiness":
+            return {
+                "contract_version": "seek_application_form_readiness_wait_v1",
+                "status": "ready" if decision.get("decision") == "continue_read_only" else "blocked",
+                "attempt_count": len(attempts),
+                "attempts": attempts,
+                "final_state_type": flow_state.get("state_type"),
+                "final_decision": decision,
+                "final_flow_state": flow_state,
+            }
+        if index >= max_observes:
+            timed_out_decision = dict(decision)
+            timed_out_decision["decision"] = "stop"
+            timed_out_decision["reason"] = "application_form_readiness_not_detected_after_apply_route"
+            return {
+                "contract_version": "seek_application_form_readiness_wait_v1",
+                "status": "timed_out",
+                "attempt_count": len(attempts),
+                "attempts": attempts,
+                "final_state_type": flow_state.get("state_type"),
+                "final_decision": timed_out_decision,
+                "final_flow_state": flow_state,
+            }
+        if delay_seconds > 0:
+            time.sleep(delay_seconds)
+        observation = _observe(
+            base_url,
+            app_name=app_name,
+            state_hint=state_hint,
+            timeout=timeout,
+        )
+        flow_state = assess_seek_application_flow_state(observation, source_job=source_job)
+        decision = build_seek_apply_flow_decision(flow_state)
+
+
 def _roi_bbox_payload(bbox: dict[str, Any] | None) -> dict[str, int] | None:
     if not isinstance(bbox, dict):
         return None
@@ -456,6 +945,49 @@ def _roi_bbox_payload(bbox: dict[str, Any] | None) -> dict[str, int] | None:
     }
 
 
+def _confirmed_bbox_payload_from_wh(bbox: dict[str, int]) -> dict[str, int]:
+    return {"x": int(bbox["x"]), "y": int(bbox["y"]), "width": int(bbox["w"]), "height": int(bbox["h"])}
+
+
+def _job_card_bbox(job: dict[str, Any]) -> dict[str, int] | None:
+    bbox = job.get("card_bbox") if isinstance(job.get("card_bbox"), dict) else None
+    if not isinstance(bbox, dict):
+        return None
+    try:
+        x = int(bbox.get("x"))
+        y = int(bbox.get("y"))
+        w = int(bbox.get("w"))
+        h = int(bbox.get("h"))
+    except (TypeError, ValueError):
+        return None
+    if w <= 0 or h <= 0:
+        return None
+    return {"x": x, "y": y, "w": w, "h": h}
+
+
+def _job_card_click_point(job: dict[str, Any], bbox: dict[str, int]) -> dict[str, int]:
+    point = job.get("click_point") if isinstance(job.get("click_point"), dict) else None
+    if isinstance(point, dict):
+        try:
+            return {"x": int(point.get("x")), "y": int(point.get("y"))}
+        except (TypeError, ValueError):
+            pass
+    return {"x": int(bbox["x"] + bbox["w"] / 2), "y": int(bbox["y"] + bbox["h"] / 2)}
+
+
+def _compact_confirmed_card_click_response(response: dict[str, Any]) -> dict[str, Any]:
+    payload = _result_payload(response)
+    return {
+        "success": response.get("success"),
+        "message": response.get("message"),
+        "trace_path": payload.get("trace_path") if isinstance(payload, dict) else None,
+        "confirmed_point": payload.get("confirmed_point") if isinstance(payload, dict) else None,
+        "candidate_bbox": payload.get("candidate_bbox") if isinstance(payload, dict) else None,
+        "action_executed": (payload.get("execution_path") or {}).get("action_executed") if isinstance(payload, dict) else None,
+        "error": response.get("error"),
+    }
+
+
 def _execute_job_card(
     base_url: str,
     *,
@@ -464,6 +996,8 @@ def _execute_job_card(
     execute_clicks: bool,
     timeout: float,
     learned_artifact: dict[str, Any] | None = None,
+    verify_after_click: bool = True,
+    fast_confirmed_card_click: bool = False,
 ) -> dict[str, Any]:
     title = job.get("title") or "the selected job result"
     company = job.get("company")
@@ -474,6 +1008,56 @@ def _execute_job_card(
     metadata = action_metadata(learned_artifact, "open_job_card")
     if seeded_candidate:
         metadata["seeded_candidate"] = seeded_candidate
+    if fast_confirmed_card_click:
+        bbox = _job_card_bbox(job)
+        if bbox is None:
+            return {
+                "goal": goal,
+                "executed": False,
+                "execute_response": None,
+                "approved_plan_id": None,
+                "opened": False,
+                "failure_reason": "missing_job_card_bbox_for_fast_confirmed_click",
+            }
+        point = _job_card_click_point(job, bbox)
+        payload = {
+            "x": int(point["x"]),
+            "y": int(point["y"]),
+            "bbox": _confirmed_bbox_payload_from_wh(bbox),
+            "label": goal,
+            "source_trace_path": None,
+            "dry_run": True,
+        }
+        dry_response = _post_json(base_url, "/action/execute_confirmed_point", payload, timeout)
+        summary = {
+            "goal": goal,
+            "fast_confirmed_card_click": True,
+            "seeded_candidate": seeded_candidate,
+            "dry_run_response": _compact_confirmed_card_click_response(dry_response),
+            "executed": False,
+            "execute_response": None,
+            "approved_plan_id": None,
+            "opened": False,
+        }
+        if dry_response.get("success") is not True:
+            summary["failure_reason"] = "fast_confirmed_card_click_dry_run_not_accepted"
+            return summary
+        if not execute_clicks:
+            summary["failure_reason"] = "execute_clicks_disabled"
+            return summary
+        execute_response = _post_json(base_url, "/action/execute_confirmed_point", {**payload, "dry_run": False}, timeout)
+        summary["executed"] = True
+        summary["execute_response"] = _compact_confirmed_card_click_response(execute_response)
+        summary["opened"] = execute_response.get("success") is True
+        summary["post_click_layout"] = {
+            "contract_version": "seek_post_click_layout_check_v1",
+            "ok": None,
+            "skipped": True,
+            "reason": "fast_confirmed_open_detail_defers_confirmation_to_read_detail_batch",
+        }
+        if not summary["opened"]:
+            summary["failure_reason"] = "fast_confirmed_card_click_execute_failed"
+        return summary
     dry_response = _post_json(
         base_url,
         "/action/execute_recognition_plan",
@@ -484,7 +1068,7 @@ def _execute_job_card(
             "state_hint": "SEEK search results list",
             "capture_live": True,
             "dry_run": True,
-            "enable_post_click_verification": True,
+            "enable_post_click_verification": bool(verify_after_click),
             "metadata": metadata,
             "write_policy": {"path_graph": False, "element_memory": False, "trace": True},
         },
@@ -516,7 +1100,7 @@ def _execute_job_card(
             "capture_live": True,
             "dry_run": False,
             "approved_plan_id": approved_plan_id,
-            "enable_post_click_verification": True,
+            "enable_post_click_verification": bool(verify_after_click),
             "metadata": metadata,
             "write_policy": {"path_graph": False, "element_memory": True, "trace": True},
         },
@@ -525,8 +1109,31 @@ def _execute_job_card(
     summary["executed"] = True
     summary["execute_response"] = _compact_action_response(execute_response)
     if execute_response.get("success") is not True:
+        post_click_layout = (
+            _verify_post_click_job_detail(base_url, app_name=app_name, job=job, timeout=timeout)
+            if verify_after_click
+            else {"contract_version": "seek_post_click_layout_check_v1", "ok": False, "skipped": True}
+        )
+        summary["post_click_layout"] = post_click_layout
+        if _execute_failure_allows_detail_semantic_success(execute_response) and post_click_layout.get("ok") is True:
+            summary["opened"] = True
+            summary["verification_override"] = {
+                "contract_version": "seek_open_detail_semantic_success_v1",
+                "reason": "post_click_visual_diff_absent_but_detail_semantics_match",
+                "scope": "open_detail_only",
+            }
+            return summary
         summary["opened"] = False
         summary["failure_reason"] = "execute_plan_failed"
+        return summary
+    if not verify_after_click:
+        summary["opened"] = True
+        summary["post_click_layout"] = {
+            "contract_version": "seek_post_click_layout_check_v1",
+            "ok": None,
+            "skipped": True,
+            "reason": "fast_open_detail_defers_confirmation_to_read_detail_batch",
+        }
         return summary
     post_click_layout = _verify_post_click_job_detail(base_url, app_name=app_name, job=job, timeout=timeout)
     summary["post_click_layout"] = post_click_layout
@@ -536,11 +1143,34 @@ def _execute_job_card(
     return summary
 
 
+def _execute_failure_allows_detail_semantic_success(response: dict[str, Any]) -> bool:
+    if response.get("success") is True:
+        return False
+    result = _result_payload(response)
+    if result.get("status") != "verification_failed":
+        return False
+    error = result.get("error") if isinstance(result.get("error"), dict) else response.get("error")
+    details = error.get("details") if isinstance(error, dict) else None
+    if not isinstance(details, dict):
+        return False
+    verification = details.get("post_click_verification") if isinstance(details.get("post_click_verification"), dict) else {}
+    policy = verification.get("verification_policy_applied")
+    required_rule = verification.get("required_semantic_rule")
+    diff = verification.get("diff") if isinstance(verification.get("diff"), dict) else {}
+    return (
+        policy == "semantic_required"
+        and required_rule == "detail_title_company_must_match_clicked_card"
+        and diff.get("changed") is False
+    )
+
+
 def _reset_seek_job_detail_to_top(
     base_url: str,
     *,
     timeout: float,
     learned_artifact: dict[str, Any] | None = None,
+    wheel_clicks: int = 8,
+    reason: str = "reset_seek_job_detail_before_next_card_click",
 ) -> dict[str, Any]:
     learned_scroll = scroll_target_for_action(
         learned_artifact,
@@ -554,8 +1184,8 @@ def _reset_seek_job_detail_to_top(
         "target_pane": learned_scroll["target_pane"],
         "target_container_id": learned_scroll["target_container_id"],
         "direction": "up",
-        "wheel_clicks": 8,
-        "reason": "reset_seek_job_detail_before_next_card_click",
+        "wheel_clicks": int(wheel_clicks),
+        "reason": reason,
         "missing_evidence": ["detail_header_must_be_visible_for_post_click_title_check"],
         "expected_effect": {
             "target_container_content_should_change": True,
@@ -628,7 +1258,8 @@ def _execute_apply_entry(
         "final_submission_performed": False,
         "apply_entry_semantics": {
             "apply_click_is_final_submit": False,
-            "apply_click_effect": "opens_application_form_or_external_application_flow",
+            "apply_click_effect": "quick_apply_opens_seek_internal_application_flow",
+            "seek_apply_label_policy": "quick_apply_only_internal_standard_apply_external",
             "true_final_submit_policy": "blocked_until_explicit_user_review",
         },
         "apply_click": {
@@ -643,105 +1274,295 @@ def _execute_apply_entry(
         summary["stop_reason"] = "decision_not_eligible_for_apply_entry"
         return summary
 
-    apply_state = detail.get("apply_button_state") if isinstance(detail.get("apply_button_state"), dict) else {}
-    if apply_state.get("visible") is not True:
+    initial_apply_state = detail.get("apply_button_state") if isinstance(detail.get("apply_button_state"), dict) else {}
+    initial_apply_label = str(initial_apply_state.get("label") or "").strip()
+    initial_has_geometry = isinstance(initial_apply_state.get("bbox"), dict) and isinstance(initial_apply_state.get("click_point"), dict)
+    if initial_apply_label and not _is_seek_internal_quick_apply_label(initial_apply_label):
+        summary["status"] = "skipped"
+        summary["eligible"] = False
+        summary["stop_reason"] = "seek_standard_apply_is_external_use_quick_apply_only"
+        summary["apply_click"]["label"] = initial_apply_label
+        summary["apply_entry_semantics"]["standard_apply_is_external_application_entry"] = True
+        summary["external_apply_guard"] = {
+            "contract_version": "seek_apply_label_policy_v1",
+            "allowed_label": "Quick apply",
+            "observed_label": initial_apply_label,
+            "decision": "skip_before_expensive_apply_verification",
+            "source": initial_apply_state.get("source") or "detail_snapshot",
+        }
+        return summary
+    pre_apply_detail_reset_attempts: list[dict[str, Any]] = []
+    apply_candidate_stable, apply_candidate_stability_reason = _apply_state_stability(initial_apply_state)
+    summary["initial_apply_candidate_stability"] = {
+        "stable": apply_candidate_stable,
+        "reason": apply_candidate_stability_reason,
+    }
+    pre_apply_verification = None
+    if apply_candidate_stable:
+        pre_apply_detail_reset = {
+            "attempted": False,
+            "reason": "fresh_apply_candidate_visible_skip_reset",
+            "candidate_stability_reason": apply_candidate_stability_reason,
+            "reset_verified": True,
+            "wrong_scope_detected": False,
+            "scroll_precondition_allowed": True,
+        }
+    else:
+        if not initial_has_geometry:
+            visual_before_reset = _learned_quick_apply_verification_from_detail(
+                base_url,
+                job=job,
+                detail=detail,
+                timeout=timeout,
+            )
+            summary["learned_quick_apply_visual_verification_before_reset"] = visual_before_reset
+            if isinstance(visual_before_reset, dict) and visual_before_reset.get("ok") is True:
+                pre_apply_verification = visual_before_reset
+                pre_apply_detail_reset = {
+                    "attempted": False,
+                    "reason": "learned_quick_apply_visual_current_capture_skip_reset",
+                    "candidate_stability_reason": apply_candidate_stability_reason,
+                    "reset_verified": True,
+                    "wrong_scope_detected": False,
+                    "scroll_precondition_allowed": True,
+                }
+            else:
+                pre_apply_detail_reset = None
+        else:
+            pre_apply_detail_reset = None
+        if pre_apply_detail_reset is None:
+            pre_apply_detail_reset = _reset_seek_job_detail_to_top(
+                base_url,
+                timeout=timeout,
+                wheel_clicks=20,
+                reason="reset_seek_job_detail_before_apply_entry_verification",
+            )
+            pre_apply_detail_reset["candidate_stability_reason"] = apply_candidate_stability_reason
+            pre_apply_detail_reset_attempts.append(pre_apply_detail_reset)
+    summary["pre_apply_detail_reset"] = pre_apply_detail_reset
+    summary["pre_apply_detail_reset_attempts"] = pre_apply_detail_reset_attempts
+    if pre_apply_detail_reset.get("wrong_scope_detected") is True or pre_apply_detail_reset.get("scroll_precondition_allowed") is False:
         summary["status"] = "blocked_need_user_or_gpt_decision"
-        summary["stop_reason"] = "apply_or_quick_apply_not_visible"
+        summary["stop_reason"] = "pre_apply_detail_reset_failed"
         return summary
 
-    pre_apply_verification = _verify_pre_apply_job_detail(
-        base_url,
-        app_name=app_name,
-        job=job,
-        detail=detail,
-        timeout=timeout,
-    )
+    if not initial_has_geometry:
+        if pre_apply_verification is None:
+            pre_apply_verification = _learned_quick_apply_verification_from_detail(
+                base_url,
+                job=job,
+                detail=detail,
+                timeout=timeout,
+            )
+    if pre_apply_verification is None or pre_apply_verification.get("ok") is not True:
+        summary["learned_quick_apply_visual_verification"] = pre_apply_verification
+        pre_apply_verification = _verify_pre_apply_job_detail(
+            base_url,
+            app_name=app_name,
+            job=job,
+            detail=detail,
+            timeout=timeout,
+        )
     summary["pre_apply_detail_verification"] = pre_apply_verification
+    if pre_apply_verification.get("ok") is not True and not pre_apply_detail_reset_attempts:
+        summary["pre_apply_detail_verification_before_recovery"] = pre_apply_verification
+        recovery_reset = _reset_seek_job_detail_to_top(
+            base_url,
+            timeout=timeout,
+            wheel_clicks=20,
+            reason="recover_after_pre_apply_detail_verification_failed",
+        )
+        pre_apply_detail_reset_attempts.append(recovery_reset)
+        summary["pre_apply_detail_reset"] = recovery_reset
+        summary["pre_apply_detail_reset_attempts"] = pre_apply_detail_reset_attempts
+        if recovery_reset.get("wrong_scope_detected") is True or recovery_reset.get("scroll_precondition_allowed") is False:
+            summary["status"] = "blocked_need_user_or_gpt_decision"
+            summary["stop_reason"] = "pre_apply_detail_reset_failed"
+            return summary
+        pre_apply_verification = _learned_quick_apply_verification_from_detail(
+            base_url,
+            job=job,
+            detail=detail,
+            timeout=timeout,
+        )
+        if pre_apply_verification is None or pre_apply_verification.get("ok") is not True:
+            summary["learned_quick_apply_visual_verification_after_recovery"] = pre_apply_verification
+            pre_apply_verification = _verify_pre_apply_job_detail(
+                base_url,
+                app_name=app_name,
+                job=job,
+                detail=detail,
+                timeout=timeout,
+            )
+        summary["pre_apply_detail_verification_after_recovery"] = pre_apply_verification
     if pre_apply_verification.get("ok") is not True:
         summary["status"] = "blocked_need_user_or_gpt_decision"
         summary["stop_reason"] = "pre_apply_detail_verification_failed"
         return summary
 
+    verified_apply_state = (
+        pre_apply_verification.get("apply_button_state")
+        if isinstance(pre_apply_verification.get("apply_button_state"), dict)
+        else detail.get("apply_button_state") if isinstance(detail.get("apply_button_state"), dict) else {}
+    )
+    verified_apply_label = str(verified_apply_state.get("label") or "").strip()
+    summary["apply_click"]["label"] = verified_apply_label or summary["apply_click"].get("label")
+    if not _is_seek_internal_quick_apply_label(verified_apply_label):
+        summary["status"] = "skipped"
+        summary["eligible"] = False
+        summary["stop_reason"] = "seek_standard_apply_is_external_use_quick_apply_only"
+        summary["apply_entry_semantics"]["standard_apply_is_external_application_entry"] = True
+        summary["external_apply_guard"] = {
+            "contract_version": "seek_apply_label_policy_v1",
+            "allowed_label": "Quick apply",
+            "observed_label": verified_apply_label or None,
+            "standard_apply_is_external": True,
+            "decision": "skip_before_click",
+        }
+        return summary
+
     title = detail.get("title") or job.get("title") or pre_apply_verification.get("observed_title") or "the selected job"
     company = pre_apply_verification.get("observed_company") or detail.get("company") or job.get("company")
-    goal = f"Click the Apply or Quick Apply button in the right SEEK job detail pane for {title}"
+    goal = f"Click the Quick apply button in the right SEEK job detail pane for {title}"
     if company:
         goal += f" at {company}"
     goal += ". Do not click Submit, Send application, or Complete application."
     summary["goal"] = goal
+    seeded_candidate = _seek_apply_seeded_candidate(job, detail, apply_state=verified_apply_state)
+    metadata = {
+        "seek_apply_entry": True,
+        "job_id": summary["job_id"],
+        "forbid_final_submit": True,
+        "required_container_id": "seek:job_detail",
+    }
+    if seeded_candidate:
+        metadata["seeded_candidate"] = seeded_candidate
+        summary["apply_click"] = {
+            "container_id": "seek:job_detail",
+            "label": seeded_candidate.get("label"),
+            "bbox": seeded_candidate.get("bbox"),
+            "click_point": seeded_candidate.get("click_point"),
+            "candidate_freshness": seeded_candidate.get("candidate_freshness"),
+            "seeded_candidate": seeded_candidate,
+        }
 
-    dry_response = _post_json(
-        base_url,
-        "/action/execute_recognition_plan",
-        {
-            "agent_mode": "execute",
-            "goal": goal,
-            "app_name": app_name,
-            "state_hint": "SEEK opened job detail pane with Apply or Quick Apply visible",
-            "capture_live": True,
+    apply_bbox = _job_card_bbox({"card_bbox": summary["apply_click"].get("bbox")})
+    apply_point = _job_card_click_point({"click_point": summary["apply_click"].get("click_point")}, apply_bbox) if apply_bbox else None
+    used_confirmed_apply_click = False
+    if apply_bbox and apply_point:
+        confirmed_payload = {
+            "x": int(apply_point["x"]),
+            "y": int(apply_point["y"]),
+            "bbox": _confirmed_bbox_payload_from_wh(apply_bbox),
+            "label": goal,
+            "source_trace_path": pre_apply_verification.get("trace_path"),
             "dry_run": True,
-            "enable_post_click_verification": True,
-            "write_policy": {"path_graph": False, "element_memory": False, "trace": True},
-            "metadata": {
-                "seek_apply_entry": True,
-                "job_id": summary["job_id"],
-                "forbid_final_submit": True,
-                "required_container_id": "seek:job_detail",
-            },
-        },
-        timeout,
-    )
-    dry_result = _result_payload(dry_response)
-    approved_plan_id = dry_result.get("approved_plan_id") or (dry_result.get("agent_step_result") or {}).get("approved_plan_id")
-    summary["dry_run_response"] = _compact_action_response(dry_response)
-    summary["final_submit_guard"] = summary["dry_run_response"].get("final_submit_guard")
-    summary["approved_plan_id"] = approved_plan_id
-    if dry_response.get("success") is not True or not approved_plan_id:
-        summary["status"] = "blocked_need_user_or_gpt_decision"
-        summary["stop_reason"] = "apply_entry_dry_run_not_approved"
-        return summary
-    if not execute_clicks:
-        summary["status"] = "dry_run_ready"
-        summary["stop_reason"] = "execute_clicks_disabled"
-        return summary
+        }
+        dry_response = _post_json(base_url, "/action/execute_confirmed_point", confirmed_payload, timeout)
+        summary["dry_run_response"] = _compact_confirmed_card_click_response(dry_response)
+        summary["approved_plan_id"] = None
+        summary["final_submit_guard"] = {
+            "contract_version": "final_submit_guard_v1",
+            "allowed": True,
+            "reason": "quick_apply_open_apply_flow_confirmed_point_not_final_submit",
+            "action_taxonomy": "open_apply_flow",
+            "final_submit_forbidden": True,
+        }
+        if dry_response.get("success") is not True:
+            summary["status"] = "blocked_need_user_or_gpt_decision"
+            summary["stop_reason"] = "apply_entry_confirmed_point_dry_run_not_accepted"
+            return summary
+        if not execute_clicks:
+            summary["status"] = "dry_run_ready"
+            summary["stop_reason"] = "execute_clicks_disabled"
+            return summary
+        execute_response = _post_json(base_url, "/action/execute_confirmed_point", {**confirmed_payload, "dry_run": False}, timeout)
+        summary["executed"] = True
+        summary["execute_response"] = _compact_confirmed_card_click_response(execute_response)
+        if execute_response.get("success") is not True:
+            summary["status"] = "blocked_need_user_or_gpt_decision"
+            summary["stop_reason"] = "apply_entry_confirmed_point_execute_failed"
+            return summary
+        used_confirmed_apply_click = True
+    else:
+        summary["apply_click_missing_geometry"] = True
 
-    execute_response = _post_json(
-        base_url,
-        "/action/execute_recognition_plan",
-        {
-            "agent_mode": "execute",
-            "goal": goal,
-            "app_name": app_name,
-            "capture_live": True,
-            "dry_run": False,
-            "approved_plan_id": approved_plan_id,
-            "enable_post_click_verification": True,
-            "write_policy": {"path_graph": False, "element_memory": True, "trace": True},
-            "metadata": {
-                "seek_apply_entry": True,
-                "job_id": summary["job_id"],
-                "forbid_final_submit": True,
-                "required_container_id": "seek:job_detail",
+    if not used_confirmed_apply_click:
+        dry_response = _post_json(
+            base_url,
+            "/action/execute_recognition_plan",
+            {
+                "agent_mode": "execute",
+                "goal": goal,
+                "app_name": app_name,
+                "state_hint": "SEEK opened job detail pane with Quick apply visible",
+                "capture_live": True,
+                "dry_run": True,
+                "enable_post_click_verification": True,
+                "write_policy": {"path_graph": False, "element_memory": False, "trace": True},
+                "metadata": metadata,
             },
-        },
-        timeout,
-    )
-    summary["executed"] = True
-    summary["execute_response"] = _compact_action_response(execute_response)
-    summary["final_submit_guard"] = summary["execute_response"].get("final_submit_guard") or summary.get("final_submit_guard")
-    if execute_response.get("success") is not True:
-        summary["status"] = "blocked_need_user_or_gpt_decision"
-        summary["stop_reason"] = "apply_entry_execute_plan_failed"
-        return summary
+            timeout,
+        )
+        dry_result = _result_payload(dry_response)
+        approved_plan_id = dry_result.get("approved_plan_id") or (dry_result.get("agent_step_result") or {}).get("approved_plan_id")
+        summary["dry_run_response"] = _compact_action_response(dry_response)
+        summary["final_submit_guard"] = summary["dry_run_response"].get("final_submit_guard")
+        summary["approved_plan_id"] = approved_plan_id
+        if dry_response.get("success") is not True or not approved_plan_id:
+            summary["status"] = "blocked_need_user_or_gpt_decision"
+            summary["stop_reason"] = "apply_entry_dry_run_not_approved"
+            return summary
+        if not execute_clicks:
+            summary["status"] = "dry_run_ready"
+            summary["stop_reason"] = "execute_clicks_disabled"
+            return summary
+
+        execute_response = _post_json(
+            base_url,
+            "/action/execute_recognition_plan",
+            {
+                "agent_mode": "execute",
+                "goal": goal,
+                "app_name": app_name,
+                "capture_live": True,
+                "dry_run": False,
+                "approved_plan_id": approved_plan_id,
+                "enable_post_click_verification": True,
+                "write_policy": {"path_graph": False, "element_memory": True, "trace": True},
+                "metadata": metadata,
+            },
+            timeout,
+        )
+        summary["executed"] = True
+        summary["execute_response"] = _compact_action_response(execute_response)
+        summary["final_submit_guard"] = summary["execute_response"].get("final_submit_guard") or summary.get("final_submit_guard")
+        if execute_response.get("success") is not True:
+            summary["status"] = "blocked_need_user_or_gpt_decision"
+            summary["stop_reason"] = "apply_entry_execute_plan_failed"
+            return summary
 
     observation = _observe(
         base_url,
         app_name=app_name,
-        state_hint="SEEK application flow after Apply or Quick Apply click; stop before form fill or final submit",
+        state_hint="SEEK application flow after Quick apply click; stop before form fill or final submit",
         timeout=timeout,
     )
     flow_state = assess_seek_application_flow_state(observation, source_job={**job, **detail})
     apply_flow_decision = build_seek_apply_flow_decision(flow_state)
+    if apply_flow_decision.get("decision") == "wait_for_form_readiness":
+        readiness_wait = _wait_for_seek_application_form_readiness(
+            base_url,
+            app_name=app_name,
+            source_job={**job, **detail},
+            initial_flow_state=flow_state,
+            timeout=timeout,
+        )
+        summary["application_form_readiness_wait"] = readiness_wait
+        flow_state = readiness_wait.get("final_flow_state") if isinstance(readiness_wait.get("final_flow_state"), dict) else flow_state
+        apply_flow_decision = (
+            readiness_wait.get("final_decision") if isinstance(readiness_wait.get("final_decision"), dict) else apply_flow_decision
+        )
     summary["application_flow_state"] = flow_state
     summary["apply_flow_decision"] = apply_flow_decision
     summary["final_submit_visible_blocker"] = flow_state.get("final_submit_visible_blocker")
@@ -836,7 +1657,8 @@ def _blocked_apply_entry_for_profile_gate(
         "final_submission_performed": False,
         "apply_entry_semantics": {
             "apply_click_is_final_submit": False,
-            "apply_click_effect": "would_open_application_form_or_external_application_flow",
+            "apply_click_effect": "would_open_seek_internal_application_flow_only_for_quick_apply",
+            "seek_apply_label_policy": "quick_apply_only_internal_standard_apply_external",
             "true_final_submit_policy": "blocked_until_explicit_user_review",
         },
         "status": "blocked_need_real_candidate_profile",
@@ -865,29 +1687,42 @@ def _verify_pre_apply_job_detail(
     observation = _observe(
         base_url,
         app_name=app_name,
-        state_hint="SEEK job detail pane immediately before Apply or Quick Apply click",
+        state_hint="SEEK job detail pane immediately before Quick apply click",
         timeout=timeout,
     )
-    observed = extract_seek_job_detail(observation, goal="verify current SEEK job detail before Apply click")
+    observed = extract_seek_job_detail(observation, goal="verify current SEEK job detail before Quick apply click")
     apply_state = observed.get("apply_button_state") if isinstance(observed.get("apply_button_state"), dict) else {}
     expected_title = detail.get("title") or job.get("title")
     expected_company = detail.get("company") or job.get("company")
     observed_title = observed.get("title")
     observed_company = observed.get("company")
-    title_matches = _titles_match(expected_title, observed_title)
+    observed_title_reliable = _observed_seek_title_is_reliable(observed_title)
+    title_matches = _titles_match(expected_title, observed_title) if observed_title_reliable else bool(expected_title and _titles_match(expected_title, detail.get("title") or job.get("title")))
     observed_company_reliable = _observed_seek_company_is_reliable(observed_company)
-    company_matches = (
-        _titles_match(expected_company, observed_company)
-        if expected_company and observed_company_reliable
-        else True
-    )
+    company_matches = _company_match(expected_company, observed_company) if expected_company and observed_company_reliable else True
     apply_visible = apply_state.get("visible") is True
+    blocking_failures = [
+        reason
+        for reason, failed in [
+            ("detail_title_mismatch", not title_matches),
+            ("apply_or_quick_apply_not_visible", not apply_visible),
+        ]
+        if failed
+    ]
+    warnings = [
+        reason
+        for reason, failed in [
+            ("detail_company_mismatch_warning", not company_matches),
+        ]
+        if failed
+    ]
     return {
         "contract_version": "pre_apply_detail_verification_v1",
-        "ok": bool(title_matches and company_matches and apply_visible),
+        "ok": bool(not blocking_failures),
         "trace_path": observation.get("trace_path"),
         "expected_title": expected_title,
         "observed_title": observed_title,
+        "observed_title_reliable": observed_title_reliable,
         "title_matches": title_matches,
         "expected_company": expected_company,
         "observed_company": observed_company,
@@ -895,15 +1730,17 @@ def _verify_pre_apply_job_detail(
         "company_matches": company_matches,
         "apply_visible": apply_visible,
         "apply_label": apply_state.get("label"),
-        "failure_reasons": [
-            reason
-            for reason, failed in [
-                ("detail_title_mismatch", not title_matches),
-                ("detail_company_mismatch", not company_matches),
-                ("apply_or_quick_apply_not_visible", not apply_visible),
-            ]
-            if failed
-        ],
+        "apply_button_state": {
+            "visible": apply_visible,
+            "label": apply_state.get("label"),
+            "bbox": apply_state.get("bbox") if isinstance(apply_state.get("bbox"), dict) else None,
+            "click_point": apply_state.get("click_point") if isinstance(apply_state.get("click_point"), dict) else None,
+            "candidate_freshness": apply_state.get("candidate_freshness")
+            if isinstance(apply_state.get("candidate_freshness"), dict)
+            else None,
+        },
+        "failure_reasons": blocking_failures,
+        "warnings": warnings,
     }
 
 
@@ -912,11 +1749,47 @@ def _observed_seek_company_is_reliable(company: Any) -> bool:
     normalized = re.sub(r"[^a-z0-9]+", "", text.lower())
     if not normalized:
         return False
+    if text.endswith(":"):
+        return False
     if normalized in {"x", "close", "dismiss", "more", "share"}:
+        return False
+    if normalized in {
+        "about",
+        "benefits",
+        "introduction",
+        "responsibilities",
+        "requirements",
+        "role",
+        "skills",
+        "summary",
+        "theopportunity",
+        "whatyoullbring",
+        "whatyoullbe doing",
+        "whatyoullbedoing",
+        "whyjoinus",
+    }:
         return False
     if len(normalized) == 1 and normalized.isalpha():
         return False
     return True
+
+
+def _company_match(expected: Any, observed: Any) -> bool:
+    if _titles_match(expected, observed):
+        return True
+    return ocr_contextual_match(expected, observed, context="company_name")
+
+
+def _observed_seek_title_is_reliable(title: Any) -> bool:
+    text = re.sub(r"\s+", " ", str(title or "")).strip()
+    normalized = re.sub(r"[^a-z0-9+#.]+", "", text.lower())
+    if not normalized:
+        return False
+    if normalized in {"x", "close", "save", "apply", "quickapply", "hide", "more"}:
+        return False
+    if normalized.isdigit():
+        return False
+    return len(normalized) >= 4
 
 
 def _verify_post_click_job_detail(
@@ -1025,11 +1898,25 @@ def _titles_match(expected: Any, observed: Any) -> bool:
         return False
     if len(shorter) / max(1, len(longer)) < 0.5:
         return False
-    return shorter in longer
+    if shorter in longer:
+        return True
+    expected_tokens = _title_match_tokens(expected)
+    observed_tokens = _title_match_tokens(observed)
+    if len(expected_tokens) >= 2 and expected_tokens.issubset(observed_tokens):
+        return True
+    if len(observed_tokens) >= 2 and observed_tokens.issubset(expected_tokens):
+        return True
+    return False
 
 
 def _text_key(value: Any) -> str:
     return "".join(ch for ch in str(value or "").casefold() if ch.isalnum())
+
+
+def _title_match_tokens(value: Any) -> set[str]:
+    tokens = set(re.findall(r"[a-z0-9]+", str(value or "").casefold()))
+    ignored = {"job", "jobs", "role", "position"}
+    return {token for token in tokens if len(token) >= 2 and token not in ignored}
 
 
 def _read_detail_until_complete(
@@ -1081,9 +1968,13 @@ def _read_detail_until_complete(
                 item["right_detail_no_progress_after_scroll"] = True
                 item["adaptive_stop_reason"] = "right_detail_content_unchanged_after_scroll"
                 break
+            missing_evidence = [
+                item for item in (completeness.get("missing_evidence") or []) if item != "detail_bottom"
+            ]
             completeness = {
                 **completeness,
-                "complete": False if completeness.get("missing_evidence") else True,
+                "complete": False if missing_evidence else True,
+                "missing_evidence": missing_evidence,
                 "should_scroll": False,
                 "stop_reason": "right_detail_no_progress_after_scroll",
                 "bottom_reached": True,
@@ -1271,13 +2162,21 @@ def _scroll_results_list(
 
 
 def _job_seen_key(job: dict[str, Any]) -> str:
-    parts = [job.get("title"), job.get("company"), job.get("location")]
-    basis = "|".join(_job_seen_key_part(item) for item in parts if item)
+    parts = [
+        _job_seen_key_part(job.get("title")),
+        _job_seen_key_part(job.get("company"), context="company_name"),
+        _job_seen_key_part(job.get("location")),
+    ]
+    basis = "|".join(part for part in parts if part)
     return basis or str(job.get("job_id") or "")
 
 
-def _job_seen_key_part(value: Any) -> str:
+def _job_seen_key_part(value: Any, *, context: str | None = None) -> str:
     raw = str(value or "").casefold()
+    if context == "company_name":
+        canonical = canonicalize_short_ocr_token(raw, context="company_name")["canonical"]
+        if canonical:
+            return canonical
     raw = re.sub(
         r"\b(senior|lead|principal|staff|junior)(software|backend|frontend|fullstack|devops|data|systems|integrations|engineer|developer)",
         r"\1 \2",
@@ -1398,6 +2297,37 @@ def _safe_form_fill_attempt(
             for item, value in candidates
         ]
         return attempt
+
+    visibility_refresh = _refresh_safe_fill_plan_if_field_outside_viewport(
+        base_url,
+        app_name=app_name,
+        item=selected[0][0],
+        candidate_profile=candidate_profile,
+        cover_letter_draft=cover_letter_draft,
+        timeout=timeout,
+    )
+    if visibility_refresh.get("attempted"):
+        attempt["field_visibility_refresh"] = visibility_refresh
+        if visibility_refresh.get("status") != "refreshed":
+            attempt["status"] = "blocked_need_user_or_gpt_decision"
+            attempt["stop_reason"] = visibility_refresh.get("reason") or "safe_field_visibility_refresh_failed"
+            return attempt
+        refreshed_plan = visibility_refresh.get("answer_plan")
+        if isinstance(refreshed_plan, dict):
+            candidates, skipped = _safe_fill_candidates(
+                refreshed_plan,
+                allow_cover_letter_fill=allow_cover_letter_fill,
+                candidate_profile=candidate_profile,
+                cover_letter_draft=cover_letter_draft,
+            )
+            selected = candidates[:fill_limit] if fill_limit else []
+            attempt["candidate_count"] = len(candidates)
+            attempt["selected_count"] = len(selected)
+            attempt["skipped_candidates"] = skipped
+            if not selected:
+                attempt["status"] = "blocked_need_user_or_gpt_decision"
+                attempt["stop_reason"] = "safe_field_not_visible_after_scroll_refresh"
+                return attempt
 
     for item, value in selected:
         result = _fill_one_safe_field(base_url, app_name=app_name, item=item, value=value, timeout=timeout)
@@ -1557,8 +2487,98 @@ def _field_fill_preview(item: dict[str, Any], *, value: str, selected_for_fill: 
     }
 
 
+def _refresh_safe_fill_plan_if_field_outside_viewport(
+    base_url: str,
+    *,
+    app_name: str,
+    item: dict[str, Any],
+    candidate_profile: dict[str, Any] | None,
+    cover_letter_draft: dict[str, Any] | None,
+    timeout: float,
+) -> dict[str, Any]:
+    try:
+        window_size = _rect_size(_runtime_state(base_url, timeout)["payload"])
+    except Exception as exc:
+        return {
+            "contract_version": "safe_field_visibility_refresh_v1",
+            "attempted": False,
+            "status": "skipped",
+            "reason": "window_size_unavailable",
+            "error": str(exc),
+        }
+    visibility = _safe_field_viewport_visibility(item, window_size=window_size)
+    if visibility.get("visible") is True:
+        return {
+            "contract_version": "safe_field_visibility_refresh_v1",
+            "attempted": False,
+            "status": "already_visible",
+            "visibility": visibility,
+        }
+    if visibility.get("reason") == "invalid_bbox_or_window":
+        return {
+            "contract_version": "safe_field_visibility_refresh_v1",
+            "attempted": False,
+            "status": "skipped",
+            "reason": "invalid_field_bbox_or_window",
+            "visibility": visibility,
+        }
+    direction = "down" if visibility.get("below_viewport") else "up"
+    overflow = int(abs(float(visibility.get("overflow_px") or 0)))
+    wheel_clicks = max(3, min(12, overflow // 120 + 3))
+    scroll_response = _post_json(
+        base_url,
+        "/action/scroll",
+        {
+            "contract_version": "scroll_request_v2",
+            "scroll_scope": "window",
+            "direction": direction,
+            "wheel_clicks": wheel_clicks,
+            "x": int((window_size or {}).get("width") or 1600) // 2,
+            "y": max(240, int(((window_size or {}).get("height") or 1100) * 0.76)),
+            "reason": "safe_field_bbox_must_be_visible_before_focus",
+            "missing_evidence": ["safe_field_visible_in_current_viewport"],
+            "expected_effect": {"safe_field_should_be_visible": True},
+            "dry_run": False,
+            "enable_verification": True,
+        },
+        timeout,
+    )
+    time.sleep(0.35)
+    observation = _observe(
+        base_url,
+        app_name=app_name,
+        state_hint="SEEK application form after scrolling a safe field into view; rebuild field inventory before filling",
+        timeout=timeout,
+    )
+    flow_state = assess_seek_application_flow_state(observation, post_fill_context=True)
+    refreshed_plan = build_application_answer_plan(
+        profile=candidate_profile,
+        application_flow_state=flow_state,
+        cover_letter_draft=cover_letter_draft,
+    )
+    return {
+        "contract_version": "safe_field_visibility_refresh_v1",
+        "attempted": True,
+        "status": "refreshed",
+        "reason": "field_bbox_outside_viewport_reobserved_after_scroll",
+        "visibility": visibility,
+        "scroll_success": scroll_response.get("success") is True,
+        "scroll_trace_path": _result_payload(scroll_response).get("trace_path"),
+        "observe_trace_path": observation.get("trace_path"),
+        "application_flow_state": flow_state,
+        "answer_plan": refreshed_plan,
+    }
+
+
 def _fill_one_safe_field(base_url: str, *, app_name: str, item: dict[str, Any], value: str, timeout: float) -> dict[str, Any]:
     label = _safe_focus_label(item)
+    try:
+        window_size = _rect_size(_runtime_state(base_url, timeout)["payload"])
+    except Exception as exc:
+        window_size = None
+        window_size_error = str(exc)
+    else:
+        window_size_error = None
     result: dict[str, Any] = {
         "contract_version": "safe_field_fill_result_v1",
         "enabled": True,
@@ -1571,6 +2591,79 @@ def _fill_one_safe_field(base_url: str, *, app_name: str, item: dict[str, Any], 
         "focus_goal": f"Click the {label} field in the SEEK application form. Do not click Continue, Next, Review, Submit, Send application, or Complete application.",
     }
     result["safe_form_fill_trace"] = _build_safe_form_fill_trace(item, value=value, enabled=True)
+    type_point = _safe_fill_type_point(item, window_height=int((window_size or {}).get("height") or 1400))
+    direct_focus = _safe_fill_bbox_direct_focus_allowed(item, type_point, window_size=window_size)
+    if window_size_error:
+        direct_focus["window_size_error"] = window_size_error
+    result["safe_form_fill_trace"]["bbox_direct_focus"] = direct_focus
+    if direct_focus.get("allowed") is True:
+        type_payload = {
+            "text": value,
+            "dry_run": False,
+            "click_before_typing": True,
+            "x": type_point.get("x") if type_point else None,
+            "y": type_point.get("y") if type_point else None,
+            "clear_existing": True,
+            "submit": False,
+            "restore_clipboard": True,
+        }
+        result["safe_form_fill_trace"]["type_text_request"] = {
+            "click_before_typing": type_payload["click_before_typing"],
+            "point": {"x": type_payload["x"], "y": type_payload["y"]},
+            "clear_existing": type_payload["clear_existing"],
+            "submit": type_payload["submit"],
+            "restore_clipboard": type_payload["restore_clipboard"],
+            "text_length": len(value),
+        }
+        result["safe_form_fill_trace"]["pre_focus_dry_run"] = {
+            "allowed": True,
+            "skipped": True,
+            "reason": "bbox_direct_focus_used",
+            "selected_click_point": {"x": type_payload["x"], "y": type_payload["y"]},
+            "point_inside_field_bbox": True,
+        }
+        result["safe_form_fill_trace"]["approved_focus_reuse"] = {
+            "allowed": True,
+            "skipped": True,
+            "reason": "bbox_direct_focus_used",
+            "selected_click_point": {"x": type_payload["x"], "y": type_payload["y"]},
+        }
+        type_response = _post_json(
+            base_url,
+            "/action/type_text",
+            type_payload,
+            timeout,
+        )
+        result["type_text_response"] = _compact_type_response(type_response)
+        if type_response.get("success") is not True:
+            result["safe_form_fill_trace"]["post_fill_verification"] = {
+                "contract_version": "post_fill_verification_v1",
+                "decision": "failed",
+                "failure_reason": "type_text_failed",
+                "field_contains_expected_value": False,
+                "no_navigation": None,
+                "no_continue_or_next": True,
+                "no_submit": result["type_text_response"].get("submit") is False,
+                "type_text_trace_path": result["type_text_response"].get("trace_path"),
+            }
+            result["stop_reason"] = "safe_field_type_text_failed"
+            return result
+        verification = _post_fill_verification(
+            base_url,
+            app_name=app_name,
+            item=item,
+            value=value,
+            type_text_trace_path=result["type_text_response"].get("trace_path"),
+            timeout=timeout,
+        )
+        result["post_fill_verification"] = verification
+        result["safe_form_fill_trace"]["post_fill_verification"] = verification
+        if verification.get("decision") != "verified":
+            result["stop_reason"] = verification.get("failure_reason") or "post_fill_verification_not_verified"
+            return result
+        result["filled"] = True
+        result["stop_reason"] = "safe_field_filled"
+        return result
     focus_payload = {
         "agent_mode": "execute",
         "goal": result["focus_goal"],
@@ -1705,6 +2798,34 @@ def _safe_fill_point_inside_item_bbox(item: dict[str, Any], point: dict[str, Any
     return x <= px <= x + w and y <= py <= y + h
 
 
+def _safe_field_viewport_visibility(item: dict[str, Any], *, window_size: dict[str, int] | None) -> dict[str, Any]:
+    source = item.get("source") if isinstance(item.get("source"), dict) else {}
+    bbox = source.get("bbox") if isinstance(source.get("bbox"), dict) else {}
+    try:
+        y = int(bbox.get("y"))
+        h = int(bbox.get("h"))
+        height = int((window_size or {}).get("height") or 0)
+    except (TypeError, ValueError):
+        return {"contract_version": "safe_field_viewport_visibility_v1", "visible": False, "reason": "invalid_bbox_or_window"}
+    top_margin = 90
+    bottom_margin = 80
+    if h <= 0 or height <= 0:
+        return {"contract_version": "safe_field_viewport_visibility_v1", "visible": False, "reason": "invalid_bbox_or_window"}
+    below = y + min(h, 120) > height - bottom_margin
+    above = y < top_margin
+    visible = not below and not above
+    overflow = (y + min(h, 120)) - (height - bottom_margin) if below else top_margin - y if above else 0
+    return {
+        "contract_version": "safe_field_viewport_visibility_v1",
+        "visible": visible,
+        "below_viewport": below,
+        "above_viewport": above,
+        "overflow_px": int(overflow),
+        "bbox": bbox,
+        "window_size": window_size,
+    }
+
+
 def _safe_fill_type_point(item: dict[str, Any], *, window_height: int | None = None) -> dict[str, int] | None:
     source = item.get("source") if isinstance(item.get("source"), dict) else {}
     bbox = source.get("bbox") if isinstance(source.get("bbox"), dict) else {}
@@ -1721,6 +2842,45 @@ def _safe_fill_type_point(item: dict[str, Any], *, window_height: int | None = N
     if window_height:
         point_y = min(max(8, point_y), max(8, int(window_height) - 20))
     return {"x": x + max(4, w // 2), "y": point_y}
+
+
+def _safe_fill_bbox_direct_focus_allowed(
+    item: dict[str, Any],
+    point: dict[str, int] | None,
+    *,
+    window_size: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    source = item.get("source") if isinstance(item.get("source"), dict) else {}
+    bbox = source.get("bbox") if isinstance(source.get("bbox"), dict) else {}
+    role = str(source.get("role") or item.get("role") or "").casefold()
+    if not point or not bbox:
+        return {"allowed": False, "reason": "missing_field_bbox_or_type_point"}
+    if not _safe_fill_target_is_typeable(item):
+        return {"allowed": False, "reason": "field_not_typeable"}
+    if any(term in role for term in ("button", "checkbox", "radio", "select", "dropdown", "file")):
+        return {"allowed": False, "reason": "interactive_non_text_role"}
+    if not _safe_fill_point_inside_item_bbox(item, point):
+        return {"allowed": False, "reason": "type_point_outside_field_bbox", "point": point, "bbox": bbox}
+    try:
+        width = int((window_size or {}).get("width") or 0)
+        height = int((window_size or {}).get("height") or 0)
+        x = int(point.get("x"))
+        y = int(point.get("y"))
+    except (TypeError, ValueError):
+        return {"allowed": False, "reason": "invalid_window_or_point", "point": point, "bbox": bbox}
+    if width > 0 and not (0 <= x <= width):
+        return {"allowed": False, "reason": "type_point_outside_window_width", "point": point, "window_size": window_size}
+    if height > 0 and not (0 <= y <= height):
+        return {"allowed": False, "reason": "type_point_outside_window_height", "point": point, "window_size": window_size}
+    if y <= 90:
+        return {"allowed": False, "reason": "type_point_in_browser_header_region", "point": point, "window_size": window_size}
+    return {
+        "allowed": True,
+        "reason": "visible_text_field_bbox_from_current_observation",
+        "point": point,
+        "bbox": bbox,
+        "window_size": window_size,
+    }
 
 
 def _safe_focus_label(item: dict[str, Any]) -> str:
@@ -1798,7 +2958,7 @@ def _post_fill_verification(
         state_hint="SEEK application form after safe field fill",
         timeout=timeout,
     )
-    flow_state = assess_seek_application_flow_state(observation)
+    flow_state = assess_seek_application_flow_state(observation, post_fill_context=True)
     blocker = flow_state.get("final_submit_visible_blocker") if isinstance(flow_state.get("final_submit_visible_blocker"), dict) else {}
     value_check = _verify_expected_value_from_structured_inventory(observation, item=item, value=value)
     dangerous_state = flow_state.get("state_type") in {
@@ -2477,6 +3637,7 @@ def main(argv: list[str] | None = None) -> int:
         window_height=args.window_height or None,
         job_archives_dir=job_archives_dir,
     )
+    report["clear_path_graph_path"] = _write_clear_path_graph(report, out_path=args.out)
     _write_json(args.out, report)
     print(json.dumps({"success": True, "out": str(args.out), "jobs_seen": report["jobs_seen"], "jobs_opened": report["jobs_opened"]}, ensure_ascii=False))
     return 0

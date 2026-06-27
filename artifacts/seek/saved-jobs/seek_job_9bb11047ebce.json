@@ -1,0 +1,1677 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_9bb11047ebce",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 1.0,
+    "job_id": "seek_job_9bb11047ebce",
+    "title": "Senior Integrations Engineer",
+    "company": "Halter",
+    "fit_summary": "strong_apply with score 1.000. positive: matched_skills: React, SQL, AI, API, Backend, Git; matched_target_roles: Software Engineer, Full Stack Developer, AI Engineer; location_matches: Auckland CBD, Auckland.",
+    "recommended_next_action": "open_apply_entry_and_prepare_safe_fields",
+    "positive_evidence": [
+      "matched_skills: React, SQL, AI, API, Backend, Git",
+      "matched_target_roles: Software Engineer, Full Stack Developer, AI Engineer",
+      "location_matches: Auckland CBD, Auckland",
+      "matched_preferred_work_modes: hybrid, remote"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_28f816d50ef9",
+    "title": "Software Engineers",
+    "company": "Plexure Limited",
+    "location": "Auckland CBD, Auckland (Hybrid)",
+    "posted_at_text": null,
+    "work_type": "Hybrid",
+    "salary_text": "2k training budget, insurance,meal",
+    "classification": "Software Engineers",
+    "card_bbox": {
+      "x": 652,
+      "y": 353,
+      "w": 401,
+      "h": 248
+    },
+    "click_point": {
+      "x": 736,
+      "y": 363
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_10",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_28_software-engineers",
+      "page_text_30_plexure-limited",
+      "page_text_34_auckland-cbd-auckland-hybrid",
+      "page_text_35_2k-training-budget-insurance-meal",
+      "page_text_37_vouchers-wfh",
+      "page_text_40_join-a-global-growing-saas-company-with-over-300",
+      "page_text_42_million-users",
+      "page_text_43_enjoy-a-2k-training-budget-paid-wellness-days-di",
+      "page_text_46_vouchers-summer-hours",
+      "page_text_47_become-part-of-a-friendly-team-and-a-company-tha"
+    ],
+    "evidence": {
+      "texts": [
+        "Software Engineers",
+        "Plexure Limited",
+        "Auckland CBD, Auckland (Hybrid)",
+        "2k training budget, insurance,meal",
+        "vouchers, WFH+",
+        "Join a global, growing SaaS company with over 300",
+        "million users",
+        "·Enjoy a 2k training budget, paid wellness days, dinner",
+        "vouchers, summer hours +",
+        "Become part of a friendly team and a company that"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": true,
+        "has_salary": true
+      }
+    },
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-232528-657209__observe-screen__edge.json",
+      "viewport_size": {
+        "width": 2560,
+        "height": 1400
+      },
+      "source": "seek_job_card_extraction",
+      "freshness": "current_capture"
+    }
+  },
+  "detail": {
+    "job_id": "seek_job_9bb11047ebce",
+    "title": "Senior Integrations Engineer",
+    "company": "Halter",
+    "location": "Auckland CBD, Auckland",
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "batch_ocr",
+        "text": "出 Halter"
+      },
+      {
+        "index": 1,
+        "role": "batch_ocr",
+        "text": "Senior Integrations Engineer"
+      },
+      {
+        "index": 2,
+        "role": "batch_ocr",
+        "text": "Halter View all jobs"
+      },
+      {
+        "index": 3,
+        "role": "batch_ocr",
+        "text": "Auckland CBD,Auckland"
+      },
+      {
+        "index": 4,
+        "role": "batch_ocr",
+        "text": "用"
+      },
+      {
+        "index": 5,
+        "role": "batch_ocr",
+        "text": "Engineering-Software(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 6,
+        "role": "batch_ocr",
+        "text": "Fulltime"
+      },
+      {
+        "index": 7,
+        "role": "batch_ocr",
+        "text": "Posted 10d ago"
+      },
+      {
+        "index": 8,
+        "role": "batch_ocr",
+        "text": "Apply"
+      },
+      {
+        "index": 9,
+        "role": "batch_ocr",
+        "text": "Save"
+      },
+      {
+        "index": 10,
+        "role": "batch_ocr",
+        "text": "How youmatch"
+      },
+      {
+        "index": 11,
+        "role": "batch_ocr",
+        "text": "3skills and credentialsmatchyourprofile"
+      },
+      {
+        "index": 12,
+        "role": "batch_ocr",
+        "text": "AmazonWebServices"
+      },
+      {
+        "index": 13,
+        "role": "batch_ocr",
+        "text": "√API"
+      },
+      {
+        "index": 14,
+        "role": "batch_ocr",
+        "text": "DatabaseSystems"
+      },
+      {
+        "index": 15,
+        "role": "batch_ocr",
+        "text": "Show all"
+      },
+      {
+        "index": 16,
+        "role": "batch_ocr",
+        "text": "About Halter"
+      },
+      {
+        "index": 17,
+        "role": "batch_ocr",
+        "text": "At Halter,we're on amission to enable farmers and graziers to run the most productive"
+      },
+      {
+        "index": 18,
+        "role": "batch_ocr",
+        "text": "ApplyC"
+      },
+      {
+        "index": 19,
+        "role": "batch_ocr",
+        "text": "Halter"
+      },
+      {
+        "index": 20,
+        "role": "batch_ocr",
+        "text": "walkcalmly towards their next break?No quad bikes,no dogs,no fences.Just a group of"
+      },
+      {
+        "index": 21,
+        "role": "batch_ocr",
+        "text": "cattle walking at their own pace.People say it looks like magic. Our customers are"
+      },
+      {
+        "index": 22,
+        "role": "batch_ocr",
+        "text": "revolutionizing grazing with Halter.It's changing lives and transforming an industry."
+      },
+      {
+        "index": 23,
+        "role": "batch_ocr",
+        "text": "People join Halter to do meaningful work. By joining us you'llbe solving challenging"
+      },
+      {
+        "index": 24,
+        "role": "batch_ocr",
+        "text": "problemswithinatalentedteamandaculturebuiltforhighperformance.Ourteamout-"
+      },
+      {
+        "index": 25,
+        "role": "batch_ocr",
+        "text": "think,out-workandout-care.We'recommittedtodeliveringreal changeintheworld-"
+      },
+      {
+        "index": 26,
+        "role": "batch_ocr",
+        "text": "this isn't easy,and in truth,we love that it'shard."
+      },
+      {
+        "index": 27,
+        "role": "batch_ocr",
+        "text": "We'rebacked todeliveron amissionthat matters by Tier1investors including Founders"
+      },
+      {
+        "index": 28,
+        "role": "batch_ocr",
+        "text": "Fund,BessemerVenturePartners,BOND,DCVC,Blackbird,PromusVentures,Rocket"
+      },
+      {
+        "index": 29,
+        "role": "batch_ocr",
+        "text": "Lab'sPeterBeckandIcehouseventures."
+      },
+      {
+        "index": 30,
+        "role": "batch_ocr",
+        "text": "We'relookingforanIntegrationEngineertoownthetechnicalpartnershipsthatconnect"
+      },
+      {
+        "index": 31,
+        "role": "batch_ocr",
+        "text": "Haltertothebroaderfarmingecosystem-designing,building,andmaintainingthe"
+      },
+      {
+        "index": 32,
+        "role": "batch_ocr",
+        "text": "integrationsthatletdataflowbetweenHalterandtheplatformsfarmersalreadyrelyon."
+      },
+      {
+        "index": 33,
+        "role": "batch_ocr",
+        "text": "You'llworkcloselywithproduct,backend,anddatateams,butyou'll alsobeoutward-"
+      },
+      {
+        "index": 34,
+        "role": "batch_ocr",
+        "text": "facing:oncallswith partner engineering teams,navigating different data-sharing"
+      },
+      {
+        "index": 35,
+        "role": "batch_ocr",
+        "text": "frameworks across NZ, Australia, and the US, and figuring out how to ship something"
+      },
+      {
+        "index": 36,
+        "role": "batch_ocr",
+        "text": "end-to-end.lIfyou want yourworktomakefarmdatamorevaluable across anentire"
+      },
+      {
+        "index": 37,
+        "role": "batch_ocr",
+        "text": "industry,this is the role foryou."
+      },
+      {
+        "index": 38,
+        "role": "batch_ocr",
+        "text": "Whatyou'llberesponsiblefor"
+      },
+      {
+        "index": 39,
+        "role": "batch_ocr",
+        "text": "·Design,build,andmaintainintegrationswithpartnerplatforms-herd management"
+      },
+      {
+        "index": 40,
+        "role": "batch_ocr",
+        "text": "systems,financialtools,compliancedatabases,on-farmhardware—sodatafrom"
+      },
+      {
+        "index": 41,
+        "role": "batch_ocr",
+        "text": "partners flows reliably into Halter."
+      },
+      {
+        "index": 42,
+        "role": "batch_ocr",
+        "text": "·Work with product to prioritise which integrations unlock the most farmer value—and"
+      },
+      {
+        "index": 43,
+        "role": "batch_ocr",
+        "text": "whichonescreatestrategicleverageforHalter."
+      },
+      {
+        "index": 44,
+        "role": "batch_ocr",
+        "text": "·Be the technical point of contact forintegration partners from discovery through"
+      },
+      {
+        "index": 45,
+        "role": "batch_ocr",
+        "text": "launch andongoingsupport.Youowntherelationship."
+      },
+      {
+        "index": 46,
+        "role": "batch_ocr",
+        "text": "implementationsthatmakeiteasyforpartnerstoship."
+      },
+      {
+        "index": 47,
+        "role": "batch_ocr",
+        "text": "·Navigate the regulatory and data-sharing landscape across Nz, Australia, and the US."
+      },
+      {
+        "index": 48,
+        "role": "batch_ocr",
+        "text": "Eachmarkethasdifferenttraceabilityframeworks,compliancerequirements,and"
+      },
+      {
+        "index": 49,
+        "role": "batch_ocr",
+        "text": "SeniorIntegrationsEngineer"
+      },
+      {
+        "index": 50,
+        "role": "batch_ocr",
+        "text": "somismatchessurfacebeforetheycauseproblemsonfarm."
+      },
+      {
+        "index": 51,
+        "role": "batch_ocr",
+        "text": "·Feed partner insights back into engineering and product.Advocate for platform and"
+      },
+      {
+        "index": 52,
+        "role": "batch_ocr",
+        "text": "data model changes changes that make Halter moreintegration-friendly."
+      },
+      {
+        "index": 53,
+        "role": "batch_ocr",
+        "text": "·Help grow the integrations function as the partner ecosystem expands."
+      },
+      {
+        "index": 54,
+        "role": "batch_ocr",
+        "text": "Whowe'relookingfor"
+      },
+      {
+        "index": 55,
+        "role": "batch_ocr",
+        "text": "·You've built and maintained APl integrations between SaaS platforms. REST, OAuth,"
+      },
+      {
+        "index": 56,
+        "role": "batch_ocr",
+        "text": "webhooks,event-drivenpatterns-you'veworked on theproducing side,the"
+      },
+      {
+        "index": 57,
+        "role": "batch_ocr",
+        "text": "consuming side,orboth."
+      },
+      {
+        "index": 58,
+        "role": "batch_ocr",
+        "text": "·You're confident with data modelling at system boundaries- mapping between"
+      },
+      {
+        "index": 59,
+        "role": "batch_ocr",
+        "text": "schemas,handling inconsistencies,maintainingintegrity acrosssystems thatwere"
+      },
+      {
+        "index": 60,
+        "role": "batch_ocr",
+        "text": "neverdesignedtotalktoeachother."
+      },
+      {
+        "index": 61,
+        "role": "batch_ocr",
+        "text": "·You'refamiliarwithcloud infrastructure,ideallyAwS.WeuseGoonthebackend,"
+      },
+      {
+        "index": 62,
+        "role": "batch_ocr",
+        "text": "deployed asmicroservices,butsimilarstackstranslatewell."
+      },
+      {
+        "index": 63,
+        "role": "batch_ocr",
+        "text": "·You're pragmatic. Some partners have modern APls and dedicated platform teams."
+      },
+      {
+        "index": 64,
+        "role": "batch_ocr",
+        "text": "OthershaveCSVexportsandonedeveloperdoingthreejobs.Youbuild thebridge"
+      },
+      {
+        "index": 65,
+        "role": "batch_ocr",
+        "text": "thatworkstodayanditeratefromthere."
+      },
+      {
+        "index": 66,
+        "role": "batch_ocr",
+        "text": "·You'repatientwithlongcycles.Anintegrationwithafarmer-ownedcooperativeora"
+      },
+      {
+        "index": 67,
+        "role": "batch_ocr",
+        "text": "government compliance body can takemonths of back-and-forthwith teams that have"
+      },
+      {
+        "index": 68,
+        "role": "batch_ocr",
+        "text": "competing priorities and limited bandwidth.You keep momentum going through"
+      },
+      {
+        "index": 69,
+        "role": "batch_ocr",
+        "text": "follow-ups, relationship building, and quiet consistency."
+      },
+      {
+        "index": 70,
+        "role": "batch_ocr",
+        "text": "·Youknow how to influence without authority.You can't controla partner'sroadmap or"
+      },
+      {
+        "index": 71,
+        "role": "batch_ocr",
+        "text": "resourcing. You build champions inside their org, make it easy forthem to say yes, and"
+      },
+      {
+        "index": 72,
+        "role": "batch_ocr",
+        "text": "find ways to unblock things when priorities don't align."
+      },
+      {
+        "index": 73,
+        "role": "batch_ocr",
+        "text": "·You thinkabout integrationsas abusinesslever.Youhaveinstincts aboutwhich ones"
+      },
+      {
+        "index": 74,
+        "role": "batch_ocr",
+        "text": "createstickiness,whichreducechurn,whichopennewmarkets,andwhicharetable"
+      },
+      {
+        "index": 75,
+        "role": "batch_ocr",
+        "text": "stakes-and youbackthose instinctsupwithevidence."
+      },
+      {
+        "index": 76,
+        "role": "batch_ocr",
+        "text": "·You're comfortable as the external face of Halter's engineering-on calls with partner"
+      },
+      {
+        "index": 77,
+        "role": "batch_ocr",
+        "text": "CTOs,at industry events,occasionally on farms.You represent technical credibility"
+      },
+      {
+        "index": 78,
+        "role": "batch_ocr",
+        "text": "whilebeing genuinely approachable."
+      },
+      {
+        "index": 79,
+        "role": "batch_ocr",
+        "text": "·You collaborate well across teams inside Halter too.Integrations touchbackend,data,"
+      },
+      {
+        "index": 80,
+        "role": "batch_ocr",
+        "text": "firmware,andproduct.Younavigatethatwithclearcommunicationandgenerous"
+      },
+      {
+        "index": 81,
+        "role": "batch_ocr",
+        "text": "context sharing."
+      },
+      {
+        "index": 82,
+        "role": "batch_ocr",
+        "text": "messy real-world operations. What matters most is that you get energy from making"
+      },
+      {
+        "index": 83,
+        "role": "batch_ocr",
+        "text": "thingsworkbetweenorganisations,notjustwithinone."
+      },
+      {
+        "index": 84,
+        "role": "batch_ocr",
+        "text": "Our Office First Approach"
+      },
+      {
+        "index": 85,
+        "role": "batch_ocr",
+        "text": "There's a reason you visit your friends in person,live withyour family and don't do dinners"
+      },
+      {
+        "index": 86,
+        "role": "batch_ocr",
+        "text": "overZoom.Humans arewired forconnection.Webelieveaworld-class,in-personoffice"
+      },
+      {
+        "index": 87,
+        "role": "batch_ocr",
+        "text": "cultureisthebestwayforhigh-performingteams."
+      },
+      {
+        "index": 88,
+        "role": "batch_ocr",
+        "text": "Beingofficefirst is acorepillarof ourculture.Webelieve in-personconnections arekeyto"
+      },
+      {
+        "index": 89,
+        "role": "batch_ocr",
+        "text": "relationships.Strong relationships make it easierto disagree,givefeedback,and do"
+      },
+      {
+        "index": 90,
+        "role": "batch_ocr",
+        "text": "meaningful and aligned work.Wedon't likehavingheapsofrulesorpolicies,but this"
+      },
+      {
+        "index": 91,
+        "role": "batch_ocr",
+        "text": "means having strong, trusted relationships is critical."
+      },
+      {
+        "index": 92,
+        "role": "batch_ocr",
+        "text": "We're office first, not office only. This means working from the office everyday is our"
+      },
+      {
+        "index": 93,
+        "role": "batch_ocr",
+        "text": "defaultsetting,butweflexwhenweneed to.Wehaveahigh-trustculture,soeveryone is"
+      },
+      {
+        "index": 94,
+        "role": "batch_ocr",
+        "text": "trusted todowhat'sbestforHalter."
+      },
+      {
+        "index": 95,
+        "role": "batch_ocr",
+        "text": "Ouroffice vibe is something special,it'shard todescribe until you'rehere,but people at"
+      },
+      {
+        "index": 96,
+        "role": "batch_ocr",
+        "text": "back-thehighenergyandspectacularpeople theyarenowsurroundedbyeveryday"
+      },
+      {
+        "index": 97,
+        "role": "batch_ocr",
+        "text": "makesworksoenjoyable.Yourgrowth,yourlearningandyourimpactistrulyunlimited"
+      },
+      {
+        "index": 98,
+        "role": "batch_ocr",
+        "text": "here, and a big part of that comes from being together solving problems, innovating,"
+      },
+      {
+        "index": 99,
+        "role": "batch_ocr",
+        "text": "building context, and constantly learning from each other."
+      },
+      {
+        "index": 100,
+        "role": "batch_ocr",
+        "text": "Join our team"
+      },
+      {
+        "index": 101,
+        "role": "batch_ocr",
+        "text": "Halter is committed topromoting a diverse and inclusive workplace— a place where we"
+      },
+      {
+        "index": 102,
+        "role": "batch_ocr",
+        "text": "caneachbeourselves anddothebestworkofourlives.Researchshowsthatwhilemen"
+      },
+      {
+        "index": 103,
+        "role": "batch_ocr",
+        "text": "apply to jobs when they meet an average of 60% of the requirements, women and under-"
+      },
+      {
+        "index": 104,
+        "role": "batch_ocr",
+        "text": "If you thinkyou have what it takes but don't necessarily tick every requirement on this job"
+      },
+      {
+        "index": 105,
+        "role": "batch_ocr",
+        "text": "description,please still get in touch and apply to Halter.We'd love to chat to see if you'll"
+      },
+      {
+        "index": 106,
+        "role": "batch_ocr",
+        "text": "be an epic fit!"
+      },
+      {
+        "index": 107,
+        "role": "batch_ocr",
+        "text": "If this opportunity sounds like you, please apply below by sending through your cover"
+      },
+      {
+        "index": 108,
+        "role": "batch_ocr",
+        "text": "letterexplaining whyyou'reexcited about thisrole andworking at Halter,along withyour"
+      },
+      {
+        "index": 109,
+        "role": "batch_ocr",
+        "text": "CV,andwe'llbeintouch!"
+      },
+      {
+        "index": 110,
+        "role": "batch_ocr",
+        "text": "partnersflowsreliably intoHalter."
+      },
+      {
+        "index": 111,
+        "role": "batch_ocr",
+        "text": "·Workwithproducttoprioritisewhichintegrationsunlockthemostfarmervalue一and"
+      },
+      {
+        "index": 112,
+        "role": "batch_ocr",
+        "text": "·Be thetechnicalpointof contactforintegrationpartnersfromdiscoverythrough"
+      },
+      {
+        "index": 113,
+        "role": "batch_ocr",
+        "text": "launchandongoingsupport.Youowntherelationship."
+      },
+      {
+        "index": 114,
+        "role": "batch_ocr",
+        "text": "·Builddeveloperdocumentation,sandboxenvironments,andreference"
+      },
+      {
+        "index": 115,
+        "role": "batch_ocr",
+        "text": "·Navigatetheregulatory and data-sharinglandscapeacrossNZ,Australia,and theUS."
+      },
+      {
+        "index": 116,
+        "role": "batch_ocr",
+        "text": "Each market has different traceability frameworks,compliance requirements, and"
+      },
+      {
+        "index": 117,
+        "role": "batch_ocr",
+        "text": "ecosystemplayers."
+      },
+      {
+        "index": 118,
+        "role": "batch_ocr",
+        "text": "·You'vebuilt and maintained APl integrationsbetweenSaaSplatforms.REST,OAuth,"
+      },
+      {
+        "index": 119,
+        "role": "batch_ocr",
+        "text": "webhooks,event-drivenpatterns-you'veworkedontheproducingside,the"
+      },
+      {
+        "index": 120,
+        "role": "batch_ocr",
+        "text": "·You'reconfidentwithdatamodelling atsystemboundaries-mappingbetween"
+      },
+      {
+        "index": 121,
+        "role": "batch_ocr",
+        "text": "schemas,handling inconsistencies,maintainingintegrity acrosssystems that were"
+      },
+      {
+        "index": 122,
+        "role": "batch_ocr",
+        "text": "neverdesigned totalktoeachother."
+      },
+      {
+        "index": 123,
+        "role": "batch_ocr",
+        "text": "·You'repragmatic.Some partnershave modern APls and dedicated platform teams."
+      },
+      {
+        "index": 124,
+        "role": "batch_ocr",
+        "text": "Others have CSV exports and one developer doing three jobs. You build the bridge"
+      },
+      {
+        "index": 125,
+        "role": "batch_ocr",
+        "text": "government compliancebody can take months of back-and-forth with teams that have"
+      },
+      {
+        "index": 126,
+        "role": "batch_ocr",
+        "text": "·You know how to influence without authority. You can't control a partner's roadmap or"
+      },
+      {
+        "index": 127,
+        "role": "batch_ocr",
+        "text": "·You think about integrations as a business lever. You have instincts about which ones"
+      },
+      {
+        "index": 128,
+        "role": "batch_ocr",
+        "text": "stakes-and youback those instincts upwith evidence."
+      },
+      {
+        "index": 129,
+        "role": "batch_ocr",
+        "text": "·You'recomfortable as theexternal faceof Halter'sengineering-oncallswithpartner"
+      },
+      {
+        "index": 130,
+        "role": "batch_ocr",
+        "text": "CTOs,at industry events,occasionally onfarms.You represent technical credibility"
+      },
+      {
+        "index": 131,
+        "role": "batch_ocr",
+        "text": "whilebeinggenuinely approachable."
+      },
+      {
+        "index": 132,
+        "role": "batch_ocr",
+        "text": "·You collaborate well acrossteamsinsideHaltertoo.Integrations touchbackend,data,"
+      },
+      {
+        "index": 133,
+        "role": "batch_ocr",
+        "text": "CTOs,atindustryevents,occasionallyonfarms.Yourepresenttechnicalcredibility"
+      },
+      {
+        "index": 134,
+        "role": "batch_ocr",
+        "text": "·Youcollaboratewellacrossteams insideHaltertoo.Integrationstouchbackend,data,"
+      },
+      {
+        "index": 135,
+        "role": "batch_ocr",
+        "text": "firmware,andproduct.You navigate thatwithclearcommunication and generous"
+      },
+      {
+        "index": 136,
+        "role": "batch_ocr",
+        "text": "contextsharing."
+      },
+      {
+        "index": 137,
+        "role": "batch_ocr",
+        "text": "·Bonus points for ag-tech, loT, or any domain where hardware meets software meets"
+      },
+      {
+        "index": 138,
+        "role": "batch_ocr",
+        "text": "thingsworkbetweenorganisations,not justwithin one."
+      },
+      {
+        "index": 139,
+        "role": "batch_ocr",
+        "text": "Our OfficeFirst Approach"
+      },
+      {
+        "index": 140,
+        "role": "batch_ocr",
+        "text": "There's a reason you visit your friends in person, live with yourfamily and don't do dinners"
+      },
+      {
+        "index": 141,
+        "role": "batch_ocr",
+        "text": "Beingofficefirstisacorepillarofourculture.Webelievein-personconnections arekeyto"
+      },
+      {
+        "index": 142,
+        "role": "batch_ocr",
+        "text": "drivingyourowngrowth,learning,impact,and building genuinelong-lasting"
+      },
+      {
+        "index": 143,
+        "role": "batch_ocr",
+        "text": "relationships.Strongrelationships make it easierto disagree,givefeedback,and do"
+      },
+      {
+        "index": 144,
+        "role": "batch_ocr",
+        "text": "meaningful and alignedwork.We don't likehavingheapsof rules orpolicies,but this"
+      },
+      {
+        "index": 145,
+        "role": "batch_ocr",
+        "text": "meanshaving strong,trusted relationships is critical."
+      },
+      {
+        "index": 146,
+        "role": "batch_ocr",
+        "text": "We'reofficefirst,notofficeonly.This meansworkingfrom theofficeeverydayis our"
+      },
+      {
+        "index": 147,
+        "role": "batch_ocr",
+        "text": "default setting,but we flex when we need to.Wehave a high-trust culture, so everyone is"
+      },
+      {
+        "index": 148,
+        "role": "batch_ocr",
+        "text": "trusted to do what's best for Halter."
+      },
+      {
+        "index": 149,
+        "role": "batch_ocr",
+        "text": "Ouroffice vibe is something special,it'shard to describe until you'rehere,but people at"
+      },
+      {
+        "index": 150,
+        "role": "batch_ocr",
+        "text": "Halter who have come from fully remote or hybrid companies say they could never go"
+      },
+      {
+        "index": 151,
+        "role": "batch_ocr",
+        "text": "back-the high energy and spectacularpeople they arenowsurrounded by everyday"
+      },
+      {
+        "index": 152,
+        "role": "batch_ocr",
+        "text": "makes work so enjoyable.Yourgrowth,yourlearning andyourimpact is truly unlimited"
+      },
+      {
+        "index": 153,
+        "role": "batch_ocr",
+        "text": "building context,and constantlylearning fromeachother."
+      },
+      {
+        "index": 154,
+        "role": "batch_ocr",
+        "text": "Joinourteam"
+      },
+      {
+        "index": 155,
+        "role": "batch_ocr",
+        "text": "Halter is committed to promoting a diverse and inclusive workplace— a place where we"
+      },
+      {
+        "index": 156,
+        "role": "batch_ocr",
+        "text": "represented groups of candidates tend to only apply when they meet every requirement."
+      },
+      {
+        "index": 157,
+        "role": "batch_ocr",
+        "text": "description, please still get in touch and apply to Halter. We'd love to chat to see if you'll"
+      },
+      {
+        "index": 158,
+        "role": "batch_ocr",
+        "text": "beanepicfit!"
+      },
+      {
+        "index": 159,
+        "role": "batch_ocr",
+        "text": "representedgroupsofcandidatestendtoonlyapplywhentheymeeteveryrequirement."
+      },
+      {
+        "index": 160,
+        "role": "batch_ocr",
+        "text": "description,pleasestill get intouch and apply toHalter.We'd love tochat to see if you'll"
+      },
+      {
+        "index": 161,
+        "role": "batch_ocr",
+        "text": "be anepicfit!"
+      },
+      {
+        "index": 162,
+        "role": "batch_ocr",
+        "text": "Ifthisopportunitysoundslikeyou,pleaseapplybelowbysendingthroughyourcover"
+      },
+      {
+        "index": 163,
+        "role": "batch_ocr",
+        "text": "letterexplaining whyyou're excited about this role and working at Halter, along with your"
+      },
+      {
+        "index": 164,
+        "role": "batch_ocr",
+        "text": "CV, and we'll be in touch!"
+      },
+      {
+        "index": 165,
+        "role": "batch_ocr",
+        "text": "WhyourteamlovesworkingatHalter:"
+      },
+      {
+        "index": 166,
+        "role": "batch_ocr",
+        "text": "·Work that genuinely matters. Every now and again a company comes along that"
+      },
+      {
+        "index": 167,
+        "role": "batch_ocr",
+        "text": "transforms an entire industry and leaves the world in a better place. Ourteam gets to"
+      },
+      {
+        "index": 168,
+        "role": "batch_ocr",
+        "text": "bepartofsomethingtrulymeaningful,helpingfarmersimprovetheirlivelihoods,spend"
+      },
+      {
+        "index": 169,
+        "role": "batch_ocr",
+        "text": "more time with their families, and build more sustainable operations."
+      },
+      {
+        "index": 170,
+        "role": "batch_ocr",
+        "text": "·Spectacularpeople solving hardproblems.Ourcultureisdesignedfor talentedpeople"
+      },
+      {
+        "index": 171,
+        "role": "batch_ocr",
+        "text": "todoworkthatchangeslives.Theteam isfilledwithdiverse,kind,anddrivenpeople"
+      },
+      {
+        "index": 172,
+        "role": "batch_ocr",
+        "text": "who push each other to do their best work. You'll be thrown into the deep end, tackling"
+      },
+      {
+        "index": 173,
+        "role": "batch_ocr",
+        "text": "·You'll growhere.Autonomy,mastery, and learning define how we work.You'll have the"
+      },
+      {
+        "index": 174,
+        "role": "batch_ocr",
+        "text": "freedom to work on interesting problems, master new skills, and continuously develop"
+      },
+      {
+        "index": 175,
+        "role": "batch_ocr",
+        "text": "yourself,both throughyourrole and our$1,ooopersonal growthfund."
+      },
+      {
+        "index": 176,
+        "role": "batch_ocr",
+        "text": "·Thisisn'teasy,andwelovethatit'shard.WorkingatHalterwillbethemostrewarding"
+      },
+      {
+        "index": 177,
+        "role": "batch_ocr",
+        "text": "and the most challenging work of your life. We move fast, take bold bets, and work"
+      },
+      {
+        "index": 178,
+        "role": "batch_ocr",
+        "text": "hard toreshapeanentireindustry.Asone teammemberputit:\"JoiningHalterisabit"
+      },
+      {
+        "index": 179,
+        "role": "batch_ocr",
+        "text": "like strapping yourself to a rocket ship,but it's an epic journey to be a part of!"
+      },
+      {
+        "index": 180,
+        "role": "batch_ocr",
+        "text": "Company profile"
+      },
+      {
+        "index": 181,
+        "role": "batch_ocr",
+        "text": "H"
+      },
+      {
+        "index": 182,
+        "role": "batch_ocr",
+        "text": "Agriculture,Forestry&Fishing"
+      },
+      {
+        "index": 183,
+        "role": "batch_ocr",
+        "text": "2 101-1,000 employees"
+      },
+      {
+        "index": 184,
+        "role": "batch_ocr",
+        "text": "AtHalter,we'reonamissiontoenablefarmers andgrazierstorunthemost"
+      },
+      {
+        "index": 185,
+        "role": "batch_ocr",
+        "text": "productive and sustainable operations.Ourcustomers areusing Haltertobreak"
+      },
+      {
+        "index": 186,
+        "role": "batch_ocr",
+        "text": "Agriculture,Forestry & Fishing"
+      },
+      {
+        "index": 187,
+        "role": "batch_ocr",
+        "text": "At Halter,we're on amission to enable farmers and graziers to run the most"
+      },
+      {
+        "index": 188,
+        "role": "batch_ocr",
+        "text": "productive and sustainable operations. Our customers are using Halter to break"
+      },
+      {
+        "index": 189,
+        "role": "batch_ocr",
+        "text": "free from the time-intensive constraints of conventional practices. Imagine..."
+      },
+      {
+        "index": 190,
+        "role": "batch_ocr",
+        "text": "Showmore"
+      },
+      {
+        "index": 191,
+        "role": "batch_ocr",
+        "text": "Perks and benefits"
+      },
+      {
+        "index": 192,
+        "role": "batch_ocr",
+        "text": "·Dog-friendly Offices·Health Insurance"
+      },
+      {
+        "index": 193,
+        "role": "batch_ocr",
+        "text": "·ParentalLeave"
+      },
+      {
+        "index": 194,
+        "role": "batch_ocr",
+        "text": "·Growth Fund"
+      },
+      {
+        "index": 195,
+        "role": "batch_ocr",
+        "text": "·Unlimited Paid Annual Leave·Top of Market Pay"
+      },
+      {
+        "index": 196,
+        "role": "batch_ocr",
+        "text": "More about this company →"
+      },
+      {
+        "index": 197,
+        "role": "batch_ocr",
+        "text": "Becareful"
+      },
+      {
+        "index": 198,
+        "role": "batch_ocr",
+        "text": "Don't provide your bank or credit card details when applying for jobs."
+      },
+      {
+        "index": 199,
+        "role": "batch_ocr",
+        "text": "Learnhowtoprotectyourself"
+      },
+      {
+        "index": 200,
+        "role": "batch_ocr",
+        "text": "Report thisjobad"
+      },
+      {
+        "index": 201,
+        "role": "batch_ocr",
+        "text": "What can I earn as an Integration Engineer"
+      },
+      {
+        "index": 202,
+        "role": "batch_ocr",
+        "text": "See more detailed salary information→"
+      },
+      {
+        "index": 203,
+        "role": "batch_ocr",
+        "text": "6"
+      },
+      {
+        "index": 204,
+        "role": "batch_ocr",
+        "text": "plexure"
+      },
+      {
+        "index": 205,
+        "role": "batch_ocr",
+        "text": "Software Engineers"
+      },
+      {
+        "index": 206,
+        "role": "batch_ocr",
+        "text": "Plexure Limited"
+      },
+      {
+        "index": 207,
+        "role": "batch_ocr",
+        "text": "View alljobs"
+      },
+      {
+        "index": 208,
+        "role": "batch_ocr",
+        "text": "Auckland CBD,Auckland (Hybrid)"
+      },
+      {
+        "index": 209,
+        "role": "batch_ocr",
+        "text": "国"
+      },
+      {
+        "index": 210,
+        "role": "batch_ocr",
+        "text": "?"
+      },
+      {
+        "index": 211,
+        "role": "batch_ocr",
+        "text": "Full time"
+      },
+      {
+        "index": 212,
+        "role": "batch_ocr",
+        "text": "2k training budget,insurance,meal vouchers,WFH+"
+      },
+      {
+        "index": 213,
+        "role": "batch_ocr",
+        "text": "Posted 8d ago·High applicationvolume"
+      },
+      {
+        "index": 214,
+        "role": "batch_ocr",
+        "text": "Quick apply"
+      },
+      {
+        "index": 215,
+        "role": "batch_ocr",
+        "text": "How you match ①"
+      },
+      {
+        "index": 216,
+        "role": "batch_ocr",
+        "text": "1 skill or credential matches your profile"
+      },
+      {
+        "index": 217,
+        "role": "batch_ocr",
+        "text": "√C#Programming"
+      },
+      {
+        "index": 218,
+        "role": "batch_ocr",
+        "text": "Plexure Culture Video"
+      },
+      {
+        "index": 219,
+        "role": "batch_ocr",
+        "text": "前往平台观看："
+      },
+      {
+        "index": 220,
+        "role": "batch_ocr",
+        "text": "YouTube"
+      },
+      {
+        "index": 221,
+        "role": "batch_ocr",
+        "text": "ButIthinkPlexuredoesthings"
+      },
+      {
+        "index": 222,
+        "role": "batch_ocr",
+        "text": "We'relooking fortwoSoftwareEngineers(eitherIntermediate orSenior)tojointhe"
+      },
+      {
+        "index": 223,
+        "role": "batch_ocr",
+        "text": "Plexureteambased inAucklandCBD."
+      },
+      {
+        "index": 224,
+        "role": "batch_ocr",
+        "text": "journey!You'llenjoyWFHdayseachweek+lotsoflovelybenefits(moreonthose"
+      },
+      {
+        "index": 225,
+        "role": "batch_ocr",
+        "text": "below)."
+      },
+      {
+        "index": 226,
+        "role": "batch_ocr",
+        "text": "Whoarewe?"
+      },
+      {
+        "index": 227,
+        "role": "batch_ocr",
+        "text": "·Plexure redefines the customer experience and drives results through personalized"
+      },
+      {
+        "index": 228,
+        "role": "batch_ocr",
+        "text": "mobilemarketing and next-generation loyalty programs for household names such"
+      },
+      {
+        "index": 229,
+        "role": "batch_ocr",
+        "text": "as McDonald's."
+      },
+      {
+        "index": 230,
+        "role": "batch_ocr",
+        "text": "·Our industry-leading customer engagement data platform has over 300 million users"
+      },
+      {
+        "index": 231,
+        "role": "batch_ocr",
+        "text": "in60+countriesaroundtheglobe."
+      },
+      {
+        "index": 232,
+        "role": "batch_ocr",
+        "text": "What will you do?"
+      },
+      {
+        "index": 233,
+        "role": "batch_ocr",
+        "text": "·Reporting to an Engineering Team Lead, youll contribute to the design, development,"
+      },
+      {
+        "index": 234,
+        "role": "batch_ocr",
+        "text": "andtestingofinnovativebackendsolutions:"
+      },
+      {
+        "index": 235,
+        "role": "batch_ocr",
+        "text": "·Contributetodesigndiscussionsthatshapereliable,scalablesystems."
+      },
+      {
+        "index": 236,
+        "role": "batch_ocr",
+        "text": "·Troubleshoot, debug, and optimizebackend systems for performance and reliability."
+      },
+      {
+        "index": 237,
+        "role": "batch_ocr",
+        "text": "·Contribute to Cl/CDpipelines and automated testing tostreamline deployments."
+      },
+      {
+        "index": 238,
+        "role": "batch_ocr",
+        "text": "·Participate in code reviews and provide constructive feedback to peers."
+      },
+      {
+        "index": 239,
+        "role": "batch_ocr",
+        "text": "·Helpwithmonitoring,respondtoalerts,andsupportstabilisationasnew"
+      },
+      {
+        "index": 240,
+        "role": "batch_ocr",
+        "text": "features go live."
+      },
+      {
+        "index": 241,
+        "role": "batch_ocr",
+        "text": "·Work in an Al-enabled engineering environment,using Al tools to help define"
+      },
+      {
+        "index": 242,
+        "role": "batch_ocr",
+        "text": "specifications,accelerate development, validate code,mprove workflows,and"
+      },
+      {
+        "index": 243,
+        "role": "batch_ocr",
+        "text": "support high-quality engineering outcomes."
+      },
+      {
+        "index": 244,
+        "role": "batch_ocr",
+        "text": "·Ourtech stack:C#,.NET,React,Git,SQL,OAuth/OpenlD Connect,AzureDevOps,"
+      },
+      {
+        "index": 245,
+        "role": "batch_ocr",
+        "text": "YAML,Bicep and Azure services."
+      },
+      {
+        "index": 246,
+        "role": "batch_ocr",
+        "text": "·Ourenvironment:Becomepartofafriendly,supportive,and inclusiveteamwithinan"
+      },
+      {
+        "index": 247,
+        "role": "batch_ocr",
+        "text": "·Our tech stack: C#,.NET, React, Git, SQL, OAuth/OpenlD Connect, Azure DevOps,"
+      },
+      {
+        "index": 248,
+        "role": "batch_ocr",
+        "text": "YAML,BicepandAzureservices."
+      },
+      {
+        "index": 249,
+        "role": "batch_ocr",
+        "text": "·Our environment:Become part ofa friendly,supportive,and inclusive team within an"
+      },
+      {
+        "index": 250,
+        "role": "batch_ocr",
+        "text": "Yourteam"
+      },
+      {
+        "index": 251,
+        "role": "batch_ocr",
+        "text": "You'll join one of our backend engineering squads:"
+      },
+      {
+        "index": 252,
+        "role": "batch_ocr",
+        "text": "Rewards Squad"
+      },
+      {
+        "index": 253,
+        "role": "batch_ocr",
+        "text": "customers."
+      },
+      {
+        "index": 254,
+        "role": "batch_ocr",
+        "text": "Projects:"
+      },
+      {
+        "index": 255,
+        "role": "batch_ocr",
+        "text": "·The initial focus willbe working on a Non-RepeatableRewards project, introducing"
+      },
+      {
+        "index": 256,
+        "role": "batch_ocr",
+        "text": "more sophisticated loyalty redemption rules such as redemption limits and time-based"
+      },
+      {
+        "index": 257,
+        "role": "batch_ocr",
+        "text": "restrictions."
+      },
+      {
+        "index": 258,
+        "role": "batch_ocr",
+        "text": "·Following that,you'll contribute toabroader pipeline of loyalty and rewards initiatives,"
+      },
+      {
+        "index": 259,
+        "role": "batch_ocr",
+        "text": "at global scale."
+      },
+      {
+        "index": 260,
+        "role": "batch_ocr",
+        "text": "Identity Squad"
+      },
+      {
+        "index": 261,
+        "role": "batch_ocr",
+        "text": "Thissquadfocusesonbuilding and strengtheningPlexure'sidentity and authentication"
+      },
+      {
+        "index": 262,
+        "role": "batch_ocr",
+        "text": "platform,including authentication,authorisation,fraud detection,andbroaderplatform"
+      },
+      {
+        "index": 263,
+        "role": "batch_ocr",
+        "text": "security."
+      },
+      {
+        "index": 264,
+        "role": "batch_ocr",
+        "text": "·TheinitialfocuswillbeonbuildinganewhighlyavailableIdentityProvider(IDP)"
+      },
+      {
+        "index": 265,
+        "role": "batch_ocr",
+        "text": "platform from the ground up, covering authentication, authorisation, login flows, and"
+      },
+      {
+        "index": 266,
+        "role": "batch_ocr",
+        "text": "identity management."
+      },
+      {
+        "index": 267,
+        "role": "batch_ocr",
+        "text": "·There'll also be opportunities to contribute to related security and platform initiatives,"
+      },
+      {
+        "index": 268,
+        "role": "batch_ocr",
+        "text": "includingsecurityhardening,frauddetection,third-partysecurityintegrations,and"
+      },
+      {
+        "index": 269,
+        "role": "batch_ocr",
+        "text": "cloud-nativeinfrastructureimprovements."
+      },
+      {
+        "index": 270,
+        "role": "batch_ocr",
+        "text": "What arewelooking for?"
+      },
+      {
+        "index": 271,
+        "role": "batch_ocr",
+        "text": "·A passion for back-end development."
+      },
+      {
+        "index": 272,
+        "role": "batch_ocr",
+        "text": "·Experience with C#,.NET."
+      },
+      {
+        "index": 273,
+        "role": "batch_ocr",
+        "text": "·Exposuretocloud-basedenvironments(infrastructureorCi/CDexperiencewouldbe"
+      },
+      {
+        "index": 274,
+        "role": "batch_ocr",
+        "text": "'isnid e"
+      },
+      {
+        "index": 275,
+        "role": "batch_ocr",
+        "text": "·PracticalexperienceusingAldevelopmenttools."
+      },
+      {
+        "index": 276,
+        "role": "batch_ocr",
+        "text": "·Someonecuriouswhoenjoysworkingcollaborativelyandtacklingchallengesaspart"
+      },
+      {
+        "index": 277,
+        "role": "batch_ocr",
+        "text": "ofateam."
+      },
+      {
+        "index": 278,
+        "role": "batch_ocr",
+        "text": "·Motivation to continue learning and developing your skillset."
+      },
+      {
+        "index": 279,
+        "role": "batch_ocr",
+        "text": "ofa team."
+      },
+      {
+        "index": 280,
+        "role": "batch_ocr",
+        "text": "·Motivation to continuelearning and developing your skillset."
+      },
+      {
+        "index": 281,
+        "role": "batch_ocr",
+        "text": "What's in it foryou?"
+      },
+      {
+        "index": 282,
+        "role": "batch_ocr",
+        "text": "·Joining a cloud-first organization where you get the opportunity to work with cutting"
+      },
+      {
+        "index": 283,
+        "role": "batch_ocr",
+        "text": "edgetechnologies."
+      },
+      {
+        "index": 284,
+        "role": "batch_ocr",
+        "text": "·Paidwellnessdays!Youllget4eachyear+apaiddayoff inthemonthofyour"
+      },
+      {
+        "index": 285,
+        "role": "batch_ocr",
+        "text": "birthday."
+      },
+      {
+        "index": 286,
+        "role": "batch_ocr",
+        "text": "·Ongoing career development and support-Receive ongoing coaching from your"
+      },
+      {
+        "index": 287,
+        "role": "batch_ocr",
+        "text": "yourself!"
+      },
+      {
+        "index": 288,
+        "role": "batch_ocr",
+        "text": "·Workfromhome allowance-we'llgive youa oneoff paymentof $ 1,ooo to helpyou"
+      },
+      {
+        "index": 289,
+        "role": "batch_ocr",
+        "text": "get set up at home.Plus, youllhave access to staff discounts at PB Tech to help your"
+      },
+      {
+        "index": 290,
+        "role": "batch_ocr",
+        "text": "dollars go further."
+      },
+      {
+        "index": 291,
+        "role": "batch_ocr",
+        "text": "·Fully paid healthinsurance foryourself and discountsforfamilymembers(Southern"
+      },
+      {
+        "index": 292,
+        "role": "batch_ocr",
+        "text": "Cross-Wellbeing 2)."
+      },
+      {
+        "index": 293,
+        "role": "batch_ocr",
+        "text": "·We've got you covered with life insurance and illness orinjury incomeprotection too."
+      },
+      {
+        "index": 294,
+        "role": "batch_ocr",
+        "text": "ayear!)+you'llhaveamonthlycreditatTANK."
+      },
+      {
+        "index": 295,
+        "role": "batch_ocr",
+        "text": "·Summer hours!If there's nothing pressing left to do on a Friday arvo,finish up at"
+      },
+      {
+        "index": 296,
+        "role": "batch_ocr",
+        "text": "1:00pm (December - February)."
+      },
+      {
+        "index": 297,
+        "role": "batch_ocr",
+        "text": "·Free Udemy subscription- choose from more than 200,000 available courses online!"
+      },
+      {
+        "index": 298,
+        "role": "batch_ocr",
+        "text": "·Mental wellbeing support such as EAPservices throughWorkplace Options."
+      },
+      {
+        "index": 299,
+        "role": "batch_ocr",
+        "text": "Whydoouremployeesloveworking forPlexure:"
+      },
+      {
+        "index": 300,
+        "role": "batch_ocr",
+        "text": "·\"l collaborate with alot of teams across thebusiness and have gained a lot"
+      },
+      {
+        "index": 301,
+        "role": "batch_ocr",
+        "text": "of exposure to different areas.\""
+      },
+      {
+        "index": 302,
+        "role": "batch_ocr",
+        "text": "·\"We use state of the art cutting edge technology. It is great to work with different"
+      },
+      {
+        "index": 303,
+        "role": "batch_ocr",
+        "text": "technologies.\""
+      },
+      {
+        "index": 304,
+        "role": "batch_ocr",
+        "text": "· \"You get appreciation for the work you do.I receive recognition from my leadership,"
+      },
+      {
+        "index": 305,
+        "role": "batch_ocr",
+        "text": "peers and clients.I feel valued.\""
+      },
+      {
+        "index": 306,
+        "role": "batch_ocr",
+        "text": "·\"Weare a very diverse team-wehave people from all over the world!We workhard"
+      },
+      {
+        "index": 307,
+        "role": "batch_ocr",
+        "text": "but also like to have fun.\""
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-232425-388381__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-232432-311549__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-232439-230866__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-232446-385566__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-232601-298173__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-232608-647897__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-232614-756942__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-232619-634115__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-232706-721314__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-232713-010704__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-232718-738442__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-232723-760780__ocr-region__ocr-region.json"
+    ],
+    "detail_batch_status": "ok",
+    "detail_batch_stop_reason": "max_captures",
+    "detail_bottom_reached": false,
+    "detail_batch_unique_line_count": 109,
+    "runtime_detail_dataflow": {
+      "contract_version": "runtime_detail_dataflow_v1",
+      "source_batch_contract": "read_region_batch_v1",
+      "source_batch_status": "ok",
+      "merged_text_line_count": 109,
+      "description_section_count": 308
+    },
+    "runtime_detail_snapshot": {
+      "contract_version": "runtime_detail_snapshot_v1",
+      "source": "read_region_batch",
+      "revision": 3,
+      "previous_snapshot_id": "bf37831b23ff0f24",
+      "snapshot_id": "304c7018c9aa63ed"
+    },
+    "work_type": "Hybrid"
+  }
+}

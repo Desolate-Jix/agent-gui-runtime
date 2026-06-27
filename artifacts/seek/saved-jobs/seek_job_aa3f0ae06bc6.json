@@ -1,0 +1,647 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_aa3f0ae06bc6",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 1.0,
+    "job_id": "seek_job_aa3f0ae06bc6",
+    "title": "Software Engineer",
+    "company": "Absolute IT Limited",
+    "fit_summary": "strong_apply with score 1.000. positive: matched_skills: Python, SQL, AI, API, Git; matched_target_roles: Software Engineer; location_matches: Auckland CBD, Auckland (Hybrid).",
+    "recommended_next_action": "open_apply_entry_and_prepare_safe_fields",
+    "positive_evidence": [
+      "matched_skills: Python, SQL, AI, API, Git",
+      "matched_target_roles: Software Engineer",
+      "location_matches: Auckland CBD, Auckland (Hybrid)",
+      "matched_preferred_work_modes: hybrid, remote"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_aa3f0ae06bc6",
+    "title": "Software Engineer",
+    "company": "Absolute IT Limited",
+    "location": "Auckland CBD, Auckland (Hybrid)",
+    "posted_at_text": null,
+    "work_type": "Hybrid",
+    "salary_text": "up to $105,000 per annum",
+    "classification": "Software Engineer",
+    "card_bbox": {
+      "x": 334,
+      "y": 408,
+      "w": 421,
+      "h": 227
+    },
+    "click_point": {
+      "x": 411,
+      "y": 419
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_5",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_51_software-engineer",
+      "page_text_52_absolute-it-limited",
+      "page_text_55_auckland-cbd-auckland-hybrid",
+      "page_text_58_up-to-105-000-per-annum",
+      "page_text_60_build-scalable-platforms-supporting-network-visi",
+      "page_text_62_performance",
+      "page_text_63_work-across-modern-tech-including-node-js-python",
+      "page_text_64_containers-and-apls",
+      "page_text_66_flexible-hybrid-working-and-a-supportive-team"
+    ],
+    "evidence": {
+      "texts": [
+        "Software Engineer",
+        "Absolute IT Limited",
+        "Auckland CBD, Auckland (Hybrid)",
+        "up to $105,000 per annum",
+        "Build scalable platforms supporting network visibility and",
+        "performance",
+        "Work across modern tech including Node.js, Python,",
+        "containers and APls",
+        "Flexible, Hybrid Working and a Supportive Team"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": true,
+        "has_salary": true
+      }
+    },
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-035836-012206__observe-screen__edge.json",
+      "viewport_size": {
+        "width": 1920,
+        "height": 1080
+      },
+      "source": "seek_job_card_extraction",
+      "freshness": "current_capture"
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_aa3f0ae06bc6",
+    "title": "Software Engineer",
+    "company": "Absolute IT Limited",
+    "location": "Auckland CBD, Auckland (Hybrid)",
+    "work_type": "Remote",
+    "classification": "Software Engineer",
+    "salary_text": "up to $105,000 per annum",
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "SoftwX"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "Softw X"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "TRV T X"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "Softw"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "Type"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "Remote"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "Classification"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Listing time"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "absolute"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Software Engineer"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "Absolute IT Limited View all jobs"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "Auckland CBD, Auckland (Hybrid)"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "Engineering-Software(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "up to $105,000 per annum"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "Posted 1d ago·Mediumapplicationvolume"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "Quick apply"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "3 skills and credentials match your profile"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "目☆)"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "Type v"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "Auckland CBD,Auckland (Hybrid)"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "Engineering -Software (Information& Communication Technology)"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "3 skills and credentials matchyourprofile"
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "MySQL"
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "Pipelines"
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "Database SystemsShow allV"
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "About the Organisation"
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "digital infrastructure at scale.They enable end users to operate safely and efficiently"
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "throughrobustnetworkservices,witha strong emphasisoninnovation,reliability,and"
+      },
+      {
+        "index": 31,
+        "role": "body",
+        "text": "continuous improvement."
+      },
+      {
+        "index": 32,
+        "role": "body",
+        "text": "AbouttheRole"
+      },
+      {
+        "index": 33,
+        "role": "body",
+        "text": "ThisSoftware Engineerrole sits within a technology and securityfunction and focuses on"
+      },
+      {
+        "index": 34,
+        "role": "body",
+        "text": "designing,building,and supporting solutions used for network and device data collection,"
+      },
+      {
+        "index": 35,
+        "role": "body",
+        "text": "complexdataintomeaningfulinsightsthatsupportbothoperationalandproduct"
+      },
+      {
+        "index": 36,
+        "role": "body",
+        "text": "TRVT X"
+      },
+      {
+        "index": 37,
+        "role": "body",
+        "text": "Grad"
+      },
+      {
+        "index": 38,
+        "role": "body",
+        "text": "Liger"
+      },
+      {
+        "index": 39,
+        "role": "body",
+        "text": "Auckl"
+      },
+      {
+        "index": 40,
+        "role": "body",
+        "text": "1d ag"
+      }
+    ],
+    "requirements": [
+      "3 skills and credentials match your profile",
+      "3 skills and credentials matchyourprofile"
+    ],
+    "responsibilities": [
+      "AbouttheRole",
+      "ThisSoftware Engineerrole sits within a technology and securityfunction and focuses on"
+    ],
+    "benefits": [
+      "Remote",
+      "Auckland CBD, Auckland (Hybrid)",
+      "Auckland CBD,Auckland (Hybrid)"
+    ],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply",
+      "bbox": {
+        "x": 872,
+        "y": 864,
+        "w": 102,
+        "h": 30
+      },
+      "click_point": {
+        "x": 923,
+        "y": 879
+      },
+      "candidate_freshness": {
+        "contract_version": "action_candidate_freshness_v1",
+        "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-035856-932006__observe-screen__edge.json",
+        "viewport_size": {
+          "width": 1920,
+          "height": 1080
+        },
+        "source": "seek_apply_button_extraction",
+        "freshness": "current_capture"
+      }
+    },
+    "save_button_state": {
+      "visible": false,
+      "label": null,
+      "bbox": null
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 814,
+        "y": 216,
+        "w": 896,
+        "h": 848
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false,
+        "content_left": 210,
+        "content_width": 1500
+      },
+      "safe_points": [
+        {
+          "x": 1262,
+          "y": 640,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 814,
+      "y": 0,
+      "w": 896,
+      "h": 1064
+    },
+    "detail_bottom_reached": true,
+    "detail_scroll_history": [
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260624-035858-688520__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": true
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": false,
+        "wheel_clicks": 4,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260624-035909-489341__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": false,
+        "wheel_clicks": 8,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260624-035920-325055__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": false,
+        "wheel_clicks": 12,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260624-035930-154557__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": true,
+        "wheel_clicks": 12,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ],
+        "right_detail_no_progress_after_scroll": true,
+        "adaptive_stop_reason": "right_detail_content_unchanged_after_scroll"
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-035856-932006__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-035907-670165__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-035918-555388__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-035928-403077__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-035938-042314__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 56,
+      "action_count": 0,
+      "texts": [
+        "SoftwX",
+        "Softw X",
+        "TRV T X",
+        "Softw",
+        "目☆",
+        "G",
+        "30",
+        "中",
+        "3",
+        "Type",
+        "√",
+        "Remote",
+        "Classification",
+        "Listing time",
+        "absolute",
+        "IT",
+        "Software Engineer",
+        "Absolute IT Limited View all jobs",
+        "Auckland CBD, Auckland (Hybrid)",
+        "国",
+        "Engineering-Software(Information&CommunicationTechnology)",
+        "Full time",
+        "回",
+        "up to $105,000 per annum",
+        "Posted 1d ago·Mediumapplicationvolume",
+        "Quick apply",
+        "Save",
+        "How you match ①",
+        "3 skills and credentials match your profile",
+        "X",
+        "目☆)",
+        "Type v",
+        "Auckland CBD,Auckland (Hybrid)",
+        "Engineering -Software (Information& Communication Technology)",
+        "3 skills and credentials matchyourprofile",
+        "MySQL",
+        "Pipelines",
+        "Database SystemsShow allV",
+        "About the Organisation",
+        "digital infrastructure at scale.They enable end users to operate safely and efficiently",
+        "throughrobustnetworkservices,witha strong emphasisoninnovation,reliability,and",
+        "continuous improvement.",
+        "AbouttheRole",
+        "ThisSoftware Engineerrole sits within a technology and securityfunction and focuses on",
+        "designing,building,and supporting solutions used for network and device data collection,",
+        "complexdataintomeaningfulinsightsthatsupportbothoperationalandproduct",
+        "TRVT X",
+        "口",
+        "聊天",
+        "+A",
+        "四田",
+        "32",
+        "Grad",
+        "Liger",
+        "Auckl",
+        "1d ag"
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

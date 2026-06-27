@@ -1,0 +1,515 @@
+{
+  "contract_version": "visual_asset_calibration_report_v1",
+  "interface_map_path": "artifacts\\visual-match-smoke\\local_seek_buttons\\learned_interface_map.json",
+  "target_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\graduate-software-jobs-in-all-auckland-job-vacancies-jun-2026-seek-micr-06bf33e0__capture__full-window__20260624-231124-047285.png",
+  "artifact_dir": "artifacts\\visual-match-smoke\\live_seek_20260624\\matches",
+  "case_count": 8,
+  "summary": {
+    "case_count": 8,
+    "matched_count": 0,
+    "fast_lane_success_count": 0,
+    "high_risk_match_count": 0,
+    "wrong_match_count": 0,
+    "final_submit_fast_lane_count": 0,
+    "final_submissions": 0,
+    "median_visual_recall_ms": 22.442,
+    "max_visual_recall_ms": 35.029,
+    "status": "pass"
+  },
+  "matches": [
+    {
+      "contract_version": "visual_asset_match_v1",
+      "asset_id": "seek:visual:apply_button",
+      "label": "Apply button",
+      "semantic_action": "external_apply_flow",
+      "matched": false,
+      "skip_reason": "missing_template",
+      "calibration": {
+        "contract_version": "visual_asset_calibration_decision_v1",
+        "matched": false,
+        "semantic_action": "open_apply_flow",
+        "danger_level": "low",
+        "is_high_risk": false,
+        "fast_lane_allowed": false,
+        "requires_review": false,
+        "can_authorize_click": false,
+        "reason": "missing_template"
+      },
+      "danger_level": "external_flow_entry",
+      "review_policy": "external_or_station_apply_entry_gate_required",
+      "template_refs": {
+        "tight_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_apply_button_real.png",
+        "context_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_apply_button_context_real.png",
+        "source_image_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-124648-509765.png"
+      },
+      "source": {
+        "source_image_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-124648-509765.png",
+        "capture_id": "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-124648-509765.png",
+        "coordinate_space": "source_capture_px",
+        "screenshot_size": {
+          "width": 2560,
+          "height": 1400
+        },
+        "bbox": {
+          "x": 1764,
+          "y": 414,
+          "w": 76,
+          "h": 27
+        },
+        "click_point": {
+          "x": 1802,
+          "y": 427
+        }
+      },
+      "crop": {
+        "tight_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_apply_button_real.png",
+        "context_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_apply_button_context_real.png",
+        "source_image_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-124648-509765.png",
+        "tight_bbox": {
+          "x": 1764,
+          "y": 414,
+          "w": 76,
+          "h": 27
+        },
+        "context_bbox": {
+          "x": 1732,
+          "y": 382,
+          "w": 140,
+          "h": 91
+        },
+        "size_px": [
+          144,
+          48
+        ],
+        "hash": "1000000100000000000000000011111000111110001111000000000010000001",
+        "context_hash": "1111111111111111100000011000000110000001100000011111111111111111"
+      },
+      "source_geometry": {
+        "bbox": {
+          "x": 1764,
+          "y": 414,
+          "w": 76,
+          "h": 27
+        },
+        "click_point": {
+          "x": 1802,
+          "y": 427
+        },
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false,
+        "click_point_policy": "learned_relative_point"
+      }
+    },
+    {
+      "contract_version": "visual_asset_match_v1",
+      "asset_id": "seek:visual:quick_apply_button",
+      "label": "Quick Apply button",
+      "semantic_action": "open_apply_flow",
+      "template_path": "artifacts\\visual-match-smoke\\local_seek_buttons\\crops\\seek_visual_quick_apply_button.png",
+      "target_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\graduate-software-jobs-in-all-auckland-job-vacancies-jun-2026-seek-micr-06bf33e0__capture__full-window__20260624-231124-047285.png",
+      "allowed_region": {
+        "x": 616,
+        "y": 136,
+        "w": 218,
+        "h": 104,
+        "container_id": "job_detail"
+      },
+      "current_roi_ref": "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_quick_apply_button.current_roi.png",
+      "current_match_ref": "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_quick_apply_button.current_match.png",
+      "match_score": 0.11779,
+      "min_score": 0.88,
+      "score_gap_to_second": 0.033286,
+      "min_score_gap": 0.05,
+      "threshold_ok": false,
+      "score_gap_ok": false,
+      "scope_ok": true,
+      "matched": false,
+      "ambiguous": false,
+      "bbox": {
+        "x": 634,
+        "y": 144,
+        "w": 153,
+        "h": 50
+      },
+      "click_point": {
+        "x": 710,
+        "y": 169
+      },
+      "scale": 0.9,
+      "match_method": "gray_template",
+      "top_candidates": [
+        {
+          "score": 0.11779,
+          "bbox": {
+            "x": 634,
+            "y": 144,
+            "w": 153,
+            "h": 50
+          },
+          "scale": 0.9,
+          "method": "gray_template"
+        },
+        {
+          "score": 0.084504,
+          "bbox": {
+            "x": 633,
+            "y": 183,
+            "w": 153,
+            "h": 50
+          },
+          "scale": 0.9,
+          "method": "edge_template"
+        }
+      ],
+      "elapsed_ms": 22.442,
+      "can_authorize_click": false,
+      "candidate_freshness": {
+        "contract_version": "action_candidate_freshness_v1",
+        "capture_id": "live-seek-20260624",
+        "viewport_size": {
+          "width": 2560,
+          "height": 1400
+        },
+        "source": "visual_asset_match_v1",
+        "freshness": "current_capture"
+      },
+      "candidate": {
+        "contract_version": "seeded_candidate_v1",
+        "source": "visual_asset_match_v1",
+        "candidate_id": "visual_asset_seek:visual:quick_apply_button",
+        "role": "button",
+        "label": "Quick Apply button",
+        "container_id": "job_detail",
+        "bbox": {
+          "x": 634,
+          "y": 144,
+          "w": 153,
+          "h": 50
+        },
+        "click_point": {
+          "x": 710,
+          "y": 169
+        },
+        "risk_class": "safe_open_apply_flow",
+        "expected_effect": "open_apply_flow",
+        "candidate_freshness": {
+          "contract_version": "action_candidate_freshness_v1",
+          "capture_id": "live-seek-20260624",
+          "viewport_size": {
+            "width": 2560,
+            "height": 1400
+          },
+          "source": "visual_asset_match_v1",
+          "freshness": "current_capture"
+        }
+      },
+      "calibration": {
+        "contract_version": "visual_asset_calibration_decision_v1",
+        "matched": false,
+        "semantic_action": "open_apply_flow",
+        "danger_level": "low",
+        "is_high_risk": false,
+        "fast_lane_allowed": false,
+        "requires_review": false,
+        "can_authorize_click": false,
+        "reason": "not_fast_lane_action"
+      }
+    },
+    {
+      "contract_version": "visual_asset_match_v1",
+      "asset_id": "seek:visual:save_icon",
+      "label": "Save icon",
+      "semantic_action": "save_or_bookmark",
+      "matched": false,
+      "skip_reason": "missing_template",
+      "calibration": {
+        "contract_version": "visual_asset_calibration_decision_v1",
+        "matched": false,
+        "semantic_action": "save_or_bookmark",
+        "danger_level": "low",
+        "is_high_risk": false,
+        "fast_lane_allowed": false,
+        "requires_review": false,
+        "can_authorize_click": false,
+        "reason": "missing_template"
+      }
+    },
+    {
+      "contract_version": "visual_asset_match_v1",
+      "asset_id": "seek:visual:job_card_shape",
+      "label": "Job card shape",
+      "semantic_action": "open_detail",
+      "template_path": "artifacts\\visual-match-smoke\\local_seek_buttons\\crops\\seek_visual_job_card_shape.png",
+      "target_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\graduate-software-jobs-in-all-auckland-job-vacancies-jun-2026-seek-micr-06bf33e0__capture__full-window__20260624-231124-047285.png",
+      "allowed_region": {
+        "x": 6,
+        "y": 106,
+        "w": 428,
+        "h": 438,
+        "container_id": "results_list"
+      },
+      "current_roi_ref": "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_job_card_shape.current_roi.png",
+      "current_match_ref": "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_job_card_shape.current_match.png",
+      "match_score": 0.343516,
+      "min_score": 0.88,
+      "score_gap_to_second": null,
+      "min_score_gap": 0.05,
+      "threshold_ok": false,
+      "score_gap_ok": true,
+      "scope_ok": true,
+      "matched": false,
+      "ambiguous": false,
+      "bbox": {
+        "x": 8,
+        "y": 148,
+        "w": 342,
+        "h": 351
+      },
+      "click_point": {
+        "x": 179,
+        "y": 323
+      },
+      "scale": 0.9,
+      "match_method": "edge_template",
+      "top_candidates": [
+        {
+          "score": 0.343516,
+          "bbox": {
+            "x": 8,
+            "y": 148,
+            "w": 342,
+            "h": 351
+          },
+          "scale": 0.9,
+          "method": "edge_template"
+        }
+      ],
+      "elapsed_ms": 35.029,
+      "can_authorize_click": false,
+      "candidate_freshness": {
+        "contract_version": "action_candidate_freshness_v1",
+        "capture_id": "live-seek-20260624",
+        "viewport_size": {
+          "width": 2560,
+          "height": 1400
+        },
+        "source": "visual_asset_match_v1",
+        "freshness": "current_capture"
+      },
+      "candidate": {
+        "contract_version": "seeded_candidate_v1",
+        "source": "visual_asset_match_v1",
+        "candidate_id": "visual_asset_seek:visual:job_card_shape",
+        "role": "button",
+        "label": "Job card shape",
+        "container_id": "results_list",
+        "bbox": {
+          "x": 8,
+          "y": 148,
+          "w": 342,
+          "h": 351
+        },
+        "click_point": {
+          "x": 179,
+          "y": 323
+        },
+        "risk_class": "safe_click_allowed",
+        "expected_effect": "open_detail",
+        "candidate_freshness": {
+          "contract_version": "action_candidate_freshness_v1",
+          "capture_id": "live-seek-20260624",
+          "viewport_size": {
+            "width": 2560,
+            "height": 1400
+          },
+          "source": "visual_asset_match_v1",
+          "freshness": "current_capture"
+        }
+      },
+      "calibration": {
+        "contract_version": "visual_asset_calibration_decision_v1",
+        "matched": false,
+        "semantic_action": "open_detail",
+        "danger_level": "low",
+        "is_high_risk": false,
+        "fast_lane_allowed": false,
+        "requires_review": false,
+        "can_authorize_click": false,
+        "reason": "not_fast_lane_action"
+      }
+    },
+    {
+      "contract_version": "visual_asset_match_v1",
+      "asset_id": "seek:visual:selected_card_highlight",
+      "label": "Selected card highlight",
+      "semantic_action": "visual_evidence",
+      "matched": false,
+      "skip_reason": "missing_template",
+      "calibration": {
+        "contract_version": "visual_asset_calibration_decision_v1",
+        "matched": false,
+        "semantic_action": "visual_evidence",
+        "danger_level": "low",
+        "is_high_risk": false,
+        "fast_lane_allowed": false,
+        "requires_review": false,
+        "can_authorize_click": false,
+        "reason": "missing_template"
+      }
+    },
+    {
+      "contract_version": "visual_asset_match_v1",
+      "asset_id": "seek:visual:results_scrollbar",
+      "label": "Results list scrollbar",
+      "semantic_action": "scroll_container",
+      "matched": false,
+      "skip_reason": "missing_template",
+      "calibration": {
+        "contract_version": "visual_asset_calibration_decision_v1",
+        "matched": false,
+        "semantic_action": "scroll_container",
+        "danger_level": "low",
+        "is_high_risk": false,
+        "fast_lane_allowed": false,
+        "requires_review": false,
+        "can_authorize_click": false,
+        "reason": "missing_template"
+      }
+    },
+    {
+      "contract_version": "visual_asset_match_v1",
+      "asset_id": "seek:visual:detail_scrollbar",
+      "label": "Job detail scrollbar",
+      "semantic_action": "scroll_container",
+      "matched": false,
+      "skip_reason": "missing_template",
+      "calibration": {
+        "contract_version": "visual_asset_calibration_decision_v1",
+        "matched": false,
+        "semantic_action": "scroll_container",
+        "danger_level": "low",
+        "is_high_risk": false,
+        "fast_lane_allowed": false,
+        "requires_review": false,
+        "can_authorize_click": false,
+        "reason": "missing_template"
+      }
+    },
+    {
+      "contract_version": "visual_asset_match_v1",
+      "asset_id": "seek:visual:submit_application_button",
+      "label": "Submit application",
+      "semantic_action": "final_submit",
+      "template_path": "artifacts\\visual-match-smoke\\local_seek_buttons\\crops\\seek_visual_submit_application_button.png",
+      "target_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\graduate-software-jobs-in-all-auckland-job-vacancies-jun-2026-seek-micr-06bf33e0__capture__full-window__20260624-231124-047285.png",
+      "allowed_region": {
+        "x": 626,
+        "y": 596,
+        "w": 268,
+        "h": 108,
+        "container_id": "application_form"
+      },
+      "current_roi_ref": "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_submit_application_button.current_roi.png",
+      "current_match_ref": "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_submit_application_button.current_match.png",
+      "match_score": 0.056194,
+      "min_score": 0.88,
+      "score_gap_to_second": 0.02405,
+      "min_score_gap": 0.05,
+      "threshold_ok": false,
+      "score_gap_ok": false,
+      "scope_ok": true,
+      "matched": false,
+      "ambiguous": false,
+      "bbox": {
+        "x": 669,
+        "y": 606,
+        "w": 220,
+        "h": 60
+      },
+      "click_point": {
+        "x": 779,
+        "y": 636
+      },
+      "scale": 1.0,
+      "match_method": "edge_template",
+      "top_candidates": [
+        {
+          "score": 0.056194,
+          "bbox": {
+            "x": 669,
+            "y": 606,
+            "w": 220,
+            "h": 60
+          },
+          "scale": 1.0,
+          "method": "edge_template"
+        },
+        {
+          "score": 0.032144,
+          "bbox": {
+            "x": 649,
+            "y": 636,
+            "w": 198,
+            "h": 54
+          },
+          "scale": 0.9,
+          "method": "gray_template"
+        }
+      ],
+      "elapsed_ms": 20.34,
+      "can_authorize_click": false,
+      "candidate_freshness": {
+        "contract_version": "action_candidate_freshness_v1",
+        "capture_id": "live-seek-20260624",
+        "viewport_size": {
+          "width": 2560,
+          "height": 1400
+        },
+        "source": "visual_asset_match_v1",
+        "freshness": "current_capture"
+      },
+      "candidate": {
+        "contract_version": "seeded_candidate_v1",
+        "source": "visual_asset_match_v1",
+        "candidate_id": "visual_asset_seek:visual:submit_application_button",
+        "role": "button",
+        "label": "Submit application",
+        "container_id": "application_form",
+        "bbox": {
+          "x": 669,
+          "y": 606,
+          "w": 220,
+          "h": 60
+        },
+        "click_point": {
+          "x": 779,
+          "y": 636
+        },
+        "risk_class": "potential_side_effect_action",
+        "expected_effect": "final_submit",
+        "candidate_freshness": {
+          "contract_version": "action_candidate_freshness_v1",
+          "capture_id": "live-seek-20260624",
+          "viewport_size": {
+            "width": 2560,
+            "height": 1400
+          },
+          "source": "visual_asset_match_v1",
+          "freshness": "current_capture"
+        }
+      },
+      "calibration": {
+        "contract_version": "visual_asset_calibration_decision_v1",
+        "matched": false,
+        "semantic_action": "final_submit",
+        "danger_level": "final_submit",
+        "is_high_risk": true,
+        "fast_lane_allowed": false,
+        "requires_review": true,
+        "can_authorize_click": false,
+        "reason": "high_risk_evidence_only"
+      }
+    }
+  ],
+  "artifact_is_authorization": false
+}

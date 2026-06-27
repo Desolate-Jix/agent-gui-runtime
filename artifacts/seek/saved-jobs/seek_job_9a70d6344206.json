@@ -1,0 +1,308 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_9a70d6344206",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "maybe_apply",
+    "score": 0.64,
+    "job_id": "seek_job_9a70d6344206",
+    "title": "Software Engineer Specialist - Integration",
+    "company": "opportunities to advance your career",
+    "fit_summary": "maybe_apply with score 0.640. positive: matched_skills: AI; matched_target_roles: Software Engineer; location_matches: Takapuna, Auckland. needs review: preferred work mode not visible in job detail.",
+    "recommended_next_action": "review_then_optionally_open_apply_entry",
+    "positive_evidence": [
+      "matched_skills: AI",
+      "matched_target_roles: Software Engineer",
+      "location_matches: Takapuna, Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [
+      "preferred work mode not visible in job detail"
+    ],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_9a70d6344206",
+    "title": "Software Engineer Specialist - Integration",
+    "company": "opportunities to advance your career",
+    "location": "AIA New Zealand",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": "Software Engineer Specialist - Integration",
+    "card_bbox": {
+      "x": 652,
+      "y": 548,
+      "w": 436,
+      "h": 230
+    },
+    "click_point": {
+      "x": 778,
+      "y": 561
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_3",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_26_software-engineer-specialist",
+      "page_text_27_integration",
+      "page_text_28_aia-new-zealand",
+      "page_text_29_takapuna-auckland",
+      "page_text_30_a-strong-culture-of-innovation-with-health-and-w",
+      "page_text_32_its-heart",
+      "page_text_33_help-us-redefine-how-people-think-about-insuranc",
+      "page_text_34_recharge-days-ala-vitality-membership-and",
+      "page_text_35_opportunities-to-advance-your-career"
+    ],
+    "evidence": {
+      "texts": [
+        "Software Engineer Specialist - Integration",
+        "AIA New Zealand",
+        "Takapuna, Auckland",
+        "A strong culture of innovation with health and wellbeing at",
+        "its heart",
+        "Help us redefine how people think about insurance",
+        "Recharge days, AlA Vitality membership and",
+        "opportunities to advance your career"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": false,
+        "has_salary": false
+      }
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_9a70d6344206",
+    "title": "Software Engineer Specialist - Integration",
+    "company": "opportunities to advance your career",
+    "location": "Takapuna, Auckland",
+    "work_type": "Full time",
+    "classification": "SoftwareEngineerSpecialist-Integration",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "Companies"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "Recruiters"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Employer site"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "All Auckland"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "SEEK"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "HEALTHIER,"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "LONGER,"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "BETTER"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "LIVES"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "PRID"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "gendertick"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "PLEDGE"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "HEALTHIER,LONGER."
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "BETTERLIVES"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "SoftwareEngineerSpecialist-Integration"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "AIA New Zealand"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "★4.97reviews ·View alljobs"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "Takapuna, Auckland"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "Engineering - Software (Information & Communication Technology)"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "Posted 6h ago"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "Apply"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "1 skill or credential matches your profile"
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "C# ProgrammingShow all"
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "Your Role with Us|To Turangakia Matou"
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "AsaSoftwareEngineerSpecialist-Integration inourTechnology team,you'llplay akey"
+      }
+    ],
+    "requirements": [],
+    "responsibilities": [
+      "Your Role with Us|To Turangakia Matou"
+    ],
+    "benefits": [],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Apply",
+      "bbox": {
+        "x": 1204,
+        "y": 1004,
+        "w": 85,
+        "h": 33
+      },
+      "click_point": {
+        "x": 1246,
+        "y": 1020
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save",
+      "bbox": {
+        "x": 1351,
+        "y": 1008,
+        "w": 48,
+        "h": 24
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 1134,
+        "y": 280,
+        "w": 896,
+        "h": 1104
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false,
+        "content_left": 530,
+        "content_width": 1500
+      },
+      "safe_points": [
+        {
+          "x": 1582,
+          "y": 832,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 1134,
+      "y": 60,
+      "w": 896,
+      "h": 1324
+    },
+    "detail_bottom_reached": false,
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260623-222321-030429__observe-screen__edge.json"
+    ]
+  }
+}

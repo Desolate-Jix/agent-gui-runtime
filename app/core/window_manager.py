@@ -176,6 +176,27 @@ class WindowManager:
             raise ValueError("Bound window disappeared after resize")
         return refreshed
 
+    def maximize_bound_window(self, *, focus: bool = True) -> BoundWindow:
+        """Maximize the currently bound window and refresh its bound-window snapshot."""
+        self._ensure_windows_backend()
+        bound = self.get_bound_window()
+        if bound is None:
+            raise ValueError("No bound window available to maximize")
+
+        logger.info("Maximizing bound window: handle={}, title={}", bound.handle, bound.title)
+        try:
+            win32gui.ShowWindow(bound.handle, win32con.SW_MAXIMIZE)  # type: ignore[union-attr]
+        except Exception as exc:
+            raise RuntimeError(f"Failed to maximize bound window: {exc}") from exc
+
+        time.sleep(0.2)
+        if focus:
+            return self.focus_bound_window()
+        refreshed = self.get_bound_window()
+        if refreshed is None:
+            raise ValueError("Bound window disappeared after maximize")
+        return refreshed
+
     def list_visible_windows(self) -> list[dict[str, Optional[int | str]]]:
         """Return visible top-level candidate windows for debugging and matching."""
         self._ensure_windows_backend()

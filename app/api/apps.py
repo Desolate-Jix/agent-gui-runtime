@@ -126,6 +126,7 @@ def open_app(request: OpenAppRequest) -> APIResponse:
             windows = window_manager.list_visible_windows()
         bound_payload = None
         bind_error = None
+        maximize_error = None
         process_name = request.process_name or app.get("process_name")
         title = request.title or app.get("title_hint")
         if request.bind_after_open:
@@ -147,6 +148,13 @@ def open_app(request: OpenAppRequest) -> APIResponse:
                 bound_payload = _bound_window_payload(bound)
             except Exception as exc:
                 bind_error = str(exc)
+            if bound_payload is not None and request.maximize_after_open:
+                try:
+                    with timer.step("maximize_bound_window", handle=bound.handle):
+                        bound = window_manager.maximize_bound_window()
+                    bound_payload = _bound_window_payload(bound)
+                except Exception as exc:
+                    maximize_error = str(exc)
         result = {
             "contract_version": "app_open_result_v1",
             "app": app,
@@ -154,8 +162,10 @@ def open_app(request: OpenAppRequest) -> APIResponse:
             "process_id": process.pid,
             "bind_after_open": request.bind_after_open,
             "prefer_new_window": request.prefer_new_window,
+            "maximize_after_open": request.maximize_after_open,
             "bound_window": bound_payload,
             "bind_error": bind_error,
+            "maximize_error": maximize_error,
             "windows_before_open": before_windows,
             "running_windows": windows,
         }

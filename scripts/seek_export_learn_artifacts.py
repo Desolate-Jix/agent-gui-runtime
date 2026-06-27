@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from app.seek.learn_artifacts import build_seek_learn_artifacts
 from app.learn.path_graph_artifacts import build_seek_runtime_path_graph_export
+from app.learn.interface_map import build_learned_interface_map
 from app.learn.visual_asset_crops import build_visual_asset_crop_export
 
 
@@ -68,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runtime-graph-out", type=Path, default=None, help="Optional runtime_path_graph_v1 output path.")
     parser.add_argument("--learned-skills-out", type=Path, default=None, help="Optional learned_skill_v1 output path.")
     parser.add_argument("--visual-assets-out", type=Path, default=None, help="Optional visual_asset_v1 output path.")
+    parser.add_argument("--interface-map-out", type=Path, default=None, help="Optional learned_interface_map_v1 output path.")
     parser.add_argument("--visual-source-image", type=Path, default=None, help="Optional screenshot used to crop visual assets.")
     parser.add_argument("--visual-crops-dir", type=Path, default=None, help="Optional visual asset crop output directory.")
     parser.add_argument("--visual-crop-export-out", type=Path, default=None, help="Optional visual_asset_crop_export_v1 output path.")
@@ -84,6 +86,7 @@ def main(argv: list[str] | None = None) -> int:
             output_dir=args.visual_crops_dir,
         )
         runtime_export["visual_assets"] = visual_crop_export["visual_assets"]
+    interface_map = build_learned_interface_map(runtime_export["runtime_path_graph"], runtime_export["visual_assets"])
     write_json(args.out, artifact)
     if args.profile_out:
         write_json(args.profile_out, artifact["learned_app_profile"])
@@ -95,6 +98,8 @@ def main(argv: list[str] | None = None) -> int:
         write_json(args.learned_skills_out, runtime_export["learned_skills"])
     if args.visual_assets_out:
         write_json(args.visual_assets_out, runtime_export["visual_assets"])
+    if args.interface_map_out:
+        write_json(args.interface_map_out, interface_map)
     if args.visual_crop_export_out:
         if visual_crop_export is None:
             raise ValueError("--visual-crop-export-out requires --visual-source-image and --visual-crops-dir")
@@ -108,10 +113,12 @@ def main(argv: list[str] | None = None) -> int:
         "runtime_graph_out": str(args.runtime_graph_out) if args.runtime_graph_out else None,
         "learned_skills_out": str(args.learned_skills_out) if args.learned_skills_out else None,
         "visual_assets_out": str(args.visual_assets_out) if args.visual_assets_out else None,
+        "interface_map_out": str(args.interface_map_out) if args.interface_map_out else None,
         "visual_crop_export_out": str(args.visual_crop_export_out) if args.visual_crop_export_out else None,
         "page_type": artifact["learned_app_profile"].get("page_type"),
         "baseline": artifact.get("baseline"),
         "runtime_path_graph_contract": runtime_export["runtime_path_graph"].get("contract_version"),
+        "interface_map_contract": interface_map.get("contract_version"),
         "visual_asset_crop_contract": visual_crop_export.get("contract_version") if visual_crop_export else None,
     }
     print(json.dumps(summary, ensure_ascii=False))

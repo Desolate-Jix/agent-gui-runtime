@@ -86,6 +86,8 @@ def build_path_graph_seed(report: dict[str, Any] | None, *, trace: dict[str, Any
     payload = report if isinstance(report, dict) else {}
     trace_payload = trace if isinstance(trace, dict) else {}
     sample_cards = []
+    sample_visual_controls = []
+    seen_visual_assets: set[str] = set()
     for event in _events(payload, trace_payload):
         card = event.get("card") if isinstance(event.get("card"), dict) else {}
         if card:
@@ -98,6 +100,11 @@ def build_path_graph_seed(report: dict[str, Any] | None, *, trace: dict[str, Any
                     "click_point": card.get("click_point"),
                 }
             )
+        detail = event.get("detail_read") if isinstance(event.get("detail_read"), dict) else {}
+        control = _visual_control_sample_from_apply_state(detail.get("apply_button_state"))
+        if control and control["asset_id"] not in seen_visual_assets:
+            sample_visual_controls.append(control)
+            seen_visual_assets.add(control["asset_id"])
     return {
         "contract_version": PATH_GRAPH_SEED_CONTRACT,
         "seed_id": "seek_search_results_detail_path_seed_v1",
@@ -167,7 +174,10 @@ def build_path_graph_seed(report: dict[str, Any] | None, *, trace: dict[str, Any
                 "scroll_container_id": "seek:results_list",
             },
         },
-        "sample_entities": {"job_cards": sample_cards[:10]},
+        "sample_entities": {
+            "job_cards": sample_cards[:10],
+            "visual_controls": sample_visual_controls[:20],
+        },
         "safety_policy_ref": "seek_final_submit_forbidden_v1",
     }
 
@@ -369,6 +379,41 @@ def _events(report: dict[str, Any], trace: dict[str, Any]) -> list[dict[str, Any
     if trace_events:
         return trace_events
     return [item for item in report.get("traversal_steps") or [] if isinstance(item, dict)]
+
+
+def _visual_control_sample_from_apply_state(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict) or value.get("visible") is not True:
+        return None
+    label = str(value.get("label") or "").strip()
+    bbox = value.get("bbox") if isinstance(value.get("bbox"), dict) else None
+    if not label or not bbox:
+        return None
+    label_key = label.casefold()
+    if any(term in label_key for term in ("submit", "send", "confirm", "payment", "complete application")):
+        semantic_action = "final_submit"
+        danger_level = "final_submit"
+        asset_id = "seek:visual:final_submit_button"
+    elif "quick" in label_key and "apply" in label_key:
+        semantic_action = "open_apply_flow"
+        danger_level = "low"
+        asset_id = "seek:visual:quick_apply_button"
+    elif "apply" in label_key:
+        semantic_action = "external_apply_flow"
+        danger_level = "external_flow_entry"
+        asset_id = "seek:visual:apply_button"
+    else:
+        return None
+    return {
+        "asset_id": asset_id,
+        "label": label,
+        "semantic_action": semantic_action,
+        "danger_level": danger_level,
+        "region_id": "job_detail",
+        "container_id": "seek:job_detail",
+        "bbox": bbox,
+        "click_point": value.get("click_point"),
+        "source": value.get("candidate_freshness", {}).get("source") if isinstance(value.get("candidate_freshness"), dict) else "seek_apply_button_state",
+    }
 
 
 def _baseline(report: dict[str, Any]) -> dict[str, Any]:

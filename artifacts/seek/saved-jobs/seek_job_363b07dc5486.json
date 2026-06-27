@@ -1,0 +1,515 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_363b07dc5486",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.96,
+    "job_id": "seek_job_363b07dc5486",
+    "title": "Junior Configuration Developer",
+    "company": "Foster Moore International Ltd",
+    "fit_summary": "strong_apply with score 0.960. positive: matched_skills: JavaScript, SQL, AI, Git; matched_target_roles: Junior Developer; location_matches: Auckland CBD, Auckland (Hybrid).",
+    "recommended_next_action": "open_apply_entry_and_prepare_safe_fields",
+    "positive_evidence": [
+      "matched_skills: JavaScript, SQL, AI, Git",
+      "matched_target_roles: Junior Developer",
+      "location_matches: Auckland CBD, Auckland (Hybrid)",
+      "matched_preferred_work_modes: hybrid"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_363b07dc5486",
+    "title": "Junior Configuration Developer",
+    "company": "Foster Moore International Ltd",
+    "location": "Auckland CBD, Auckland (Hybrid)",
+    "posted_at_text": null,
+    "work_type": "Hybrid",
+    "salary_text": null,
+    "classification": null,
+    "card_bbox": {
+      "x": 652,
+      "y": 1090,
+      "w": 334,
+      "h": 165
+    },
+    "click_point": {
+      "x": 785,
+      "y": 1103
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_25",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_68_junior-configuration-developer",
+      "page_text_70_foster-moore-international-ltd",
+      "page_text_72_auckland-cbd-auckland-hybrid",
+      "page_text_74_hybrid-working",
+      "page_text_77_excellent-remuneration-and-benefit-package",
+      "page_text_78_global-organisation"
+    ],
+    "evidence": {
+      "texts": [
+        "Junior Configuration Developer",
+        "Foster Moore International Ltd",
+        "Auckland CBD, Auckland (Hybrid)",
+        "·Hybrid working",
+        "· Excellent remuneration and benefit package",
+        "·Global organisation"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": true,
+        "has_salary": false
+      }
+    },
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260627-172738-333430__observe-screen__edge.json",
+      "viewport_size": {
+        "width": 2560,
+        "height": 1400
+      },
+      "source": "seek_job_card_extraction",
+      "freshness": "current_capture"
+    }
+  },
+  "detail": {
+    "job_id": "seek_job_363b07dc5486",
+    "title": "Junior Configuration Developer",
+    "company": "Foster Moore International Ltd",
+    "location": "Auckland CBD, Auckland (Hybrid)",
+    "work_type": "Hybrid",
+    "runtime_detail_snapshot": {
+      "contract_version": "runtime_detail_snapshot_v1",
+      "source": "read_region_batch",
+      "revision": 2,
+      "previous_snapshot_id": "3e57587f68f4171f",
+      "snapshot_id": "bb6e8e51669d566f"
+    },
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "batch_ocr",
+        "text": "Foster"
+      },
+      {
+        "index": 1,
+        "role": "batch_ocr",
+        "text": "Moore"
+      },
+      {
+        "index": 2,
+        "role": "batch_ocr",
+        "text": "A Teranet Company"
+      },
+      {
+        "index": 3,
+        "role": "batch_ocr",
+        "text": "Junior Configuration Developer"
+      },
+      {
+        "index": 4,
+        "role": "batch_ocr",
+        "text": "FosterMooreInternationalLtdViewalljobs"
+      },
+      {
+        "index": 5,
+        "role": "batch_ocr",
+        "text": "Auckland CBD,Auckland (Hybrid)"
+      },
+      {
+        "index": 6,
+        "role": "batch_ocr",
+        "text": "Developers/Programmers (Information&Communication Technology)"
+      },
+      {
+        "index": 7,
+        "role": "batch_ocr",
+        "text": "Full time"
+      },
+      {
+        "index": 8,
+        "role": "batch_ocr",
+        "text": "Posted 3d ago"
+      },
+      {
+        "index": 9,
+        "role": "batch_ocr",
+        "text": "Apply"
+      },
+      {
+        "index": 10,
+        "role": "batch_ocr",
+        "text": "Save"
+      },
+      {
+        "index": 11,
+        "role": "batch_ocr",
+        "text": "Howyoumatch"
+      },
+      {
+        "index": 12,
+        "role": "batch_ocr",
+        "text": "8skills and credentialsmatchyourprofile"
+      },
+      {
+        "index": 13,
+        "role": "batch_ocr",
+        "text": "JavaProgramming"
+      },
+      {
+        "index": 14,
+        "role": "batch_ocr",
+        "text": "√C#Programming"
+      },
+      {
+        "index": 15,
+        "role": "batch_ocr",
+        "text": "√Xml"
+      },
+      {
+        "index": 16,
+        "role": "batch_ocr",
+        "text": "+5more"
+      },
+      {
+        "index": 17,
+        "role": "batch_ocr",
+        "text": "Join OurTeam as a Software Configuration Developer"
+      },
+      {
+        "index": 18,
+        "role": "batch_ocr",
+        "text": "AtFosterMooreInternationalwe'reproudtodevelopworld-classregistrysolutionsfor"
+      },
+      {
+        "index": 19,
+        "role": "batch_ocr",
+        "text": "governments and organisations around the globe. As our global"
+      },
+      {
+        "index": 20,
+        "role": "batch_ocr",
+        "text": "footprint expandswe'relooking fora JuniorSoftwareConfigurationDevelopertojoin our"
+      },
+      {
+        "index": 21,
+        "role": "batch_ocr",
+        "text": "high-performing Application Support Team in Auckland."
+      },
+      {
+        "index": 22,
+        "role": "batch_ocr",
+        "text": "Thisis anexciting opportunitytowork ina collaborative,fast-paced environment where"
+      },
+      {
+        "index": 23,
+        "role": "batch_ocr",
+        "text": "yourcontributions will directly support thesuccess of national and international registries."
+      },
+      {
+        "index": 24,
+        "role": "batch_ocr",
+        "text": "How you match ①"
+      },
+      {
+        "index": 25,
+        "role": "batch_ocr",
+        "text": "8 skills and credentials match your profile"
+      },
+      {
+        "index": 26,
+        "role": "batch_ocr",
+        "text": "Java Programming"
+      },
+      {
+        "index": 27,
+        "role": "batch_ocr",
+        "text": "C#Programming"
+      },
+      {
+        "index": 28,
+        "role": "batch_ocr",
+        "text": "√Xml+5moreV"
+      },
+      {
+        "index": 29,
+        "role": "batch_ocr",
+        "text": "JoinOurTeamasaSoftwareConfigurationDeveloper"
+      },
+      {
+        "index": 30,
+        "role": "batch_ocr",
+        "text": "At Foster Moore International we'reproud to develop world-class registry solutions for"
+      },
+      {
+        "index": 31,
+        "role": "batch_ocr",
+        "text": "governments andorganisations around theglobe.Asourglobal"
+      },
+      {
+        "index": 32,
+        "role": "batch_ocr",
+        "text": "footprintexpandswe'relookingforaJuniorSoftwareConfigurationDevelopertojoinour"
+      },
+      {
+        "index": 33,
+        "role": "batch_ocr",
+        "text": "Thisis anexciting opportunitytoworkina collaborative,fast-paced environment where"
+      },
+      {
+        "index": 34,
+        "role": "batch_ocr",
+        "text": "your contributions will directly support the success of national and international registries."
+      },
+      {
+        "index": 35,
+        "role": "batch_ocr",
+        "text": "AbouttheRole"
+      },
+      {
+        "index": 36,
+        "role": "batch_ocr",
+        "text": "AsaJuniorSoftwareConfigurationDeveloper,youwillworkaspartofadedicated"
+      },
+      {
+        "index": 37,
+        "role": "batch_ocr",
+        "text": "support team to deliver quality production support, configuration and enhancements to"
+      },
+      {
+        "index": 38,
+        "role": "batch_ocr",
+        "text": "our global registry clients.You'll collaborate with a wide range of stakeholders- including"
+      },
+      {
+        "index": 39,
+        "role": "batch_ocr",
+        "text": "clients,business analysts,developers,testers and project managers-to configure,"
+      },
+      {
+        "index": 40,
+        "role": "batch_ocr",
+        "text": "develop and maintain registry applications based on detailed functional and technical"
+      },
+      {
+        "index": 41,
+        "role": "batch_ocr",
+        "text": "specifications."
+      },
+      {
+        "index": 42,
+        "role": "batch_ocr",
+        "text": "Key Responsibilities"
+      },
+      {
+        "index": 43,
+        "role": "batch_ocr",
+        "text": "·Development"
+      },
+      {
+        "index": 44,
+        "role": "batch_ocr",
+        "text": "·Customizesoftwarecomponentsbasedonclientrequirements"
+      },
+      {
+        "index": 45,
+        "role": "batch_ocr",
+        "text": "·Testing"
+      },
+      {
+        "index": 46,
+        "role": "batch_ocr",
+        "text": "·Conductunitandintegrationtestingofconfiguredcomponents"
+      },
+      {
+        "index": 47,
+        "role": "batch_ocr",
+        "text": "·SupportQAteamsduringsystemanduseracceptancetestingphases"
+      },
+      {
+        "index": 48,
+        "role": "batch_ocr",
+        "text": "·Support& Continuous Improvement"
+      },
+      {
+        "index": 49,
+        "role": "batch_ocr",
+        "text": "·Provide ongoing production support for live systems"
+      },
+      {
+        "index": 50,
+        "role": "batch_ocr",
+        "text": "·Identify opportunities for improvement and contribute to enhancing application"
+      },
+      {
+        "index": 51,
+        "role": "batch_ocr",
+        "text": "performance and reliability"
+      },
+      {
+        "index": 52,
+        "role": "batch_ocr",
+        "text": "ourglobalregistryclients.You'llcollaboratewithawiderangeofstakeholders-including"
+      },
+      {
+        "index": 53,
+        "role": "batch_ocr",
+        "text": "developandmaintainregistry applicationsbased ondetailedfunctional and technical"
+      },
+      {
+        "index": 54,
+        "role": "batch_ocr",
+        "text": "·Customize software components based on client requirements"
+      },
+      {
+        "index": 55,
+        "role": "batch_ocr",
+        "text": "·Follow design and specification documentsto ensure consistency and quality"
+      },
+      {
+        "index": 56,
+        "role": "batch_ocr",
+        "text": "·Conduct unit and integration testing of configured components"
+      },
+      {
+        "index": 57,
+        "role": "batch_ocr",
+        "text": "s"
+      },
+      {
+        "index": 58,
+        "role": "batch_ocr",
+        "text": "·Support&ContinuousImprovement"
+      },
+      {
+        "index": 59,
+        "role": "batch_ocr",
+        "text": "·Provideongoingproductionsupportforlivesystems"
+      },
+      {
+        "index": 60,
+        "role": "batch_ocr",
+        "text": "WhatWe'reLookingFor"
+      },
+      {
+        "index": 61,
+        "role": "batch_ocr",
+        "text": "Education&Experience"
+      },
+      {
+        "index": 62,
+        "role": "batch_ocr",
+        "text": "·Minimumof2yearsofexperienceinanITenvironment"
+      },
+      {
+        "index": 63,
+        "role": "batch_ocr",
+        "text": "·At least 1year of hands-on experience in one or more programming languages (e.g."
+      },
+      {
+        "index": 64,
+        "role": "batch_ocr",
+        "text": "Java,Groovy,C#,PHP),withJavapreferred"
+      },
+      {
+        "index": 65,
+        "role": "batch_ocr",
+        "text": "Technical Skills"
+      },
+      {
+        "index": 66,
+        "role": "batch_ocr",
+        "text": "fundamentals"
+      },
+      {
+        "index": 67,
+        "role": "batch_ocr",
+        "text": "·Keen interest in web technologies (XML, HTML, JavaScript, JSON, CSS)"
+      },
+      {
+        "index": 68,
+        "role": "batch_ocr",
+        "text": "·Understanding of common web service technologies (REST or SOAP)"
+      },
+      {
+        "index": 69,
+        "role": "batch_ocr",
+        "text": "·Familiar with software development lifecycle (SDLC);experience with Agile (Scrum or"
+      },
+      {
+        "index": 70,
+        "role": "batch_ocr",
+        "text": "Kanban) is a plus"
+      },
+      {
+        "index": 71,
+        "role": "batch_ocr",
+        "text": "·Practical experience with SDLC tools (e.g.Jira,Jenkins)"
+      },
+      {
+        "index": 72,
+        "role": "batch_ocr",
+        "text": "·WorkingknowledgeofSQLandrelationaldatabases;experiencewithNoSQL"
+      },
+      {
+        "index": 73,
+        "role": "batch_ocr",
+        "text": "databasesis advantageous"
+      },
+      {
+        "index": 74,
+        "role": "batch_ocr",
+        "text": "·Familiar with source control tools and workflows (e.g.Git, SVN)"
+      },
+      {
+        "index": 75,
+        "role": "batch_ocr",
+        "text": "·Knowledge of ITIL and DevOps practices is advantageous"
+      },
+      {
+        "index": 76,
+        "role": "batch_ocr",
+        "text": "·ExposuretoAltoolsisadvantageous"
+      },
+      {
+        "index": 77,
+        "role": "batch_ocr",
+        "text": "Soft Skills"
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260627-172741-963211__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260627-172745-693586__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260627-172749-465269__ocr-region__ocr-region.json"
+    ],
+    "detail_batch_status": "ok",
+    "detail_batch_stop_reason": "max_captures",
+    "detail_bottom_reached": false,
+    "detail_batch_unique_line_count": 78,
+    "runtime_detail_dataflow": {
+      "contract_version": "runtime_detail_dataflow_v1",
+      "source_batch_contract": "read_region_batch_v1",
+      "source_batch_status": "ok",
+      "merged_text_line_count": 78,
+      "description_section_count": 78
+    },
+    "apply_button_state": {
+      "visible": true,
+      "label": "Apply",
+      "source": "read_detail_batch_ocr"
+    }
+  }
+}

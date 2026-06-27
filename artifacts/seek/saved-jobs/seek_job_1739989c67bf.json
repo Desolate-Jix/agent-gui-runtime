@@ -1,0 +1,469 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_1739989c67bf",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "maybe_apply",
+    "score": 0.58,
+    "job_id": "seek_job_1739989c67bf",
+    "title": "Graduate Software Engineer - HEARTLAND Heartland Bank",
+    "company": "Integration",
+    "fit_summary": "maybe_apply with score 0.580. positive: matched_skills: AI, Automation; matched_target_roles: Software Engineer, AI Engineer, Automation Engineer, Graduate Software Engineer. needs review: job location missing; preferred work mode not visible in job detail.",
+    "recommended_next_action": "review_then_optionally_open_apply_entry",
+    "positive_evidence": [
+      "matched_skills: AI, Automation",
+      "matched_target_roles: Software Engineer, AI Engineer, Automation Engineer, Graduate Software Engineer"
+    ],
+    "negative_evidence": [],
+    "unknowns": [
+      "job location missing",
+      "preferred work mode not visible in job detail"
+    ],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_1739989c67bf",
+    "title": "Graduate Software Engineer - HEARTLAND Heartland Bank",
+    "company": "Integration",
+    "location": null,
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": "Graduate Software Engineer - HEARTLAND Heartland Bank",
+    "card_bbox": {
+      "x": 653,
+      "y": 687,
+      "w": 421,
+      "h": 76
+    },
+    "click_point": {
+      "x": 864,
+      "y": 725
+    },
+    "source_url": null,
+    "source_card_id": "card_1_graduate-software-engineer-heartland-heartland-b",
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260626-004654-939287__observe-screen__edge.json",
+      "viewport_size": {
+        "width": 2560,
+        "height": 1400
+      },
+      "source": "seek_job_card_extraction",
+      "freshness": "current_capture"
+    },
+    "primary_action_id": "action_screen_9_graduate-software-engineer-heartland-heartland-b",
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_48_graduate-software-engineer",
+      "page_text_50_integration",
+      "page_text_51_heartland",
+      "page_text_52_heartland-bank"
+    ],
+    "evidence": {
+      "texts": [
+        "Graduate Software Engineer - HEARTLAND Heartland Bank",
+        "Graduate Software Engineer -",
+        "Integration",
+        "HEARTLAND",
+        "Heartland Bank"
+      ],
+      "source_contract": "screen_inventory_v1"
+    }
+  },
+  "detail": {
+    "job_id": "seek_job_1739989c67bf",
+    "title": "Graduate Software Engineer - HEARTLAND Heartland Bank",
+    "company": "Integration",
+    "classification": "Graduate Software Engineer - HEARTLAND Heartland Bank",
+    "runtime_detail_snapshot": {
+      "contract_version": "runtime_detail_snapshot_v1",
+      "source": "read_region_batch",
+      "revision": 2,
+      "previous_snapshot_id": "f58e75fafd080375",
+      "snapshot_id": "4cc747ad86b80814"
+    },
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "batch_ocr",
+        "text": "·Exposure toAPl development,cloud technologies,orsystems integration through"
+      },
+      {
+        "index": 1,
+        "role": "batch_ocr",
+        "text": "study,internships,projects,orpersonalinterests"
+      },
+      {
+        "index": 2,
+        "role": "batch_ocr",
+        "text": "·Strong problem-solving and analytical skills"
+      },
+      {
+        "index": 3,
+        "role": "batch_ocr",
+        "text": "·Excellentcommunication and teamworkskills"
+      },
+      {
+        "index": 4,
+        "role": "batch_ocr",
+        "text": "·A growth mindset and willingness to learn"
+      },
+      {
+        "index": 5,
+        "role": "batch_ocr",
+        "text": "Exposure to any of thefollowing would be a bonus:"
+      },
+      {
+        "index": 6,
+        "role": "batch_ocr",
+        "text": "·Java orSpring Boot"
+      },
+      {
+        "index": 7,
+        "role": "batch_ocr",
+        "text": "·RESTAPls"
+      },
+      {
+        "index": 8,
+        "role": "batch_ocr",
+        "text": "·Azureorcloudtechnologies"
+      },
+      {
+        "index": 9,
+        "role": "batch_ocr",
+        "text": "·Dockerand containerisation"
+      },
+      {
+        "index": 10,
+        "role": "batch_ocr",
+        "text": "·Cl/CD tools and automation"
+      },
+      {
+        "index": 11,
+        "role": "batch_ocr",
+        "text": "·Microservices architecture"
+      },
+      {
+        "index": 12,
+        "role": "batch_ocr",
+        "text": "·Agile ways of working"
+      },
+      {
+        "index": 13,
+        "role": "batch_ocr",
+        "text": "Don'tworryifyouhaven'tworkedwithallof thesetechnologiesyet-we'relookingfor"
+      },
+      {
+        "index": 14,
+        "role": "batch_ocr",
+        "text": "potential, curiosity, and a willingness to learn."
+      },
+      {
+        "index": 15,
+        "role": "batch_ocr",
+        "text": "What you'll learn"
+      },
+      {
+        "index": 16,
+        "role": "batch_ocr",
+        "text": "At Heartland,we'll support your development through:"
+      },
+      {
+        "index": 17,
+        "role": "batch_ocr",
+        "text": "·Mentoring from experienced engineersand architects"
+      },
+      {
+        "index": 18,
+        "role": "batch_ocr",
+        "text": "·Exposure to enterprise-scale systems and modern engineering practices"
+      },
+      {
+        "index": 19,
+        "role": "batch_ocr",
+        "text": "·Learningopportunities acrosscloud,integration,DevOpsandAltechnologies"
+      },
+      {
+        "index": 20,
+        "role": "batch_ocr",
+        "text": "·Hands-on project experience from the start"
+      },
+      {
+        "index": 21,
+        "role": "batch_ocr",
+        "text": "·Regular feedback and development conversations"
+      },
+      {
+        "index": 22,
+        "role": "batch_ocr",
+        "text": "·Aclearpathwayforcareergrowthwithinourtechnologyteams"
+      },
+      {
+        "index": 23,
+        "role": "batch_ocr",
+        "text": "Howwework"
+      },
+      {
+        "index": 24,
+        "role": "batch_ocr",
+        "text": "·Collaborative,high-trust teams whereyour ideas arevalued"
+      },
+      {
+        "index": 25,
+        "role": "batch_ocr",
+        "text": "·Four days in the office to support learning, mentoring and teamwork"
+      },
+      {
+        "index": 26,
+        "role": "batch_ocr",
+        "text": "·AnAl-firstmindset,helpingshapethefutureoffinancialservices"
+      },
+      {
+        "index": 27,
+        "role": "batch_ocr",
+        "text": "·A focus on building simple,modern solutions that createreal customer value"
+      },
+      {
+        "index": 28,
+        "role": "batch_ocr",
+        "text": "Why Heartland?"
+      },
+      {
+        "index": 29,
+        "role": "batch_ocr",
+        "text": "·Collaborative,high-trust teamswhereyourideas arevalued"
+      },
+      {
+        "index": 30,
+        "role": "batch_ocr",
+        "text": "·An Al-first mindset,helping shape the future of financial services"
+      },
+      {
+        "index": 31,
+        "role": "batch_ocr",
+        "text": "·Afocusonbuildingsimple,modernsolutionsthatcreaterealcustomervalue"
+      },
+      {
+        "index": 32,
+        "role": "batch_ocr",
+        "text": "WhyHeartland?"
+      },
+      {
+        "index": 33,
+        "role": "batch_ocr",
+        "text": "Heartland is a NzX/AsX-listed financial services group serving customers across New"
+      },
+      {
+        "index": 34,
+        "role": "batch_ocr",
+        "text": "Zealand and Australia. We're transforming the way banking works through innovation,"
+      },
+      {
+        "index": 35,
+        "role": "batch_ocr",
+        "text": "technology,andcustomer-focusedsolutions."
+      },
+      {
+        "index": 36,
+        "role": "batch_ocr",
+        "text": "You'll find:"
+      },
+      {
+        "index": 37,
+        "role": "batch_ocr",
+        "text": "·Awelcoming and inclusive culture"
+      },
+      {
+        "index": 38,
+        "role": "batch_ocr",
+        "text": "·A strong commitment to wellbeing and development"
+      },
+      {
+        "index": 39,
+        "role": "batch_ocr",
+        "text": "·Activeemployeecommunitiesandnetworks"
+      },
+      {
+        "index": 40,
+        "role": "batch_ocr",
+        "text": "·Opportunities to build meaningful relationships and grow your career"
+      },
+      {
+        "index": 41,
+        "role": "batch_ocr",
+        "text": "·Aworkplacewhereyoucanbringyourwholeselftowork"
+      },
+      {
+        "index": 42,
+        "role": "batch_ocr",
+        "text": "Tick."
+      },
+      {
+        "index": 43,
+        "role": "batch_ocr",
+        "text": "ReadytostartyourcareerwithHeartland?"
+      },
+      {
+        "index": 44,
+        "role": "batch_ocr",
+        "text": "we'd love to hear from you."
+      },
+      {
+        "index": 45,
+        "role": "batch_ocr",
+        "text": "Get a feel for life at Heartland:"
+      },
+      {
+        "index": 46,
+        "role": "batch_ocr",
+        "text": "·Instagram:@heartlandbanknz"
+      },
+      {
+        "index": 47,
+        "role": "batch_ocr",
+        "text": "·Linkedln:linkedin.com/company/heartland-bank-nz"
+      },
+      {
+        "index": 48,
+        "role": "batch_ocr",
+        "text": "YoumustbeeligibletoworkinNewZealand."
+      },
+      {
+        "index": 49,
+        "role": "batch_ocr",
+        "text": "·Linkedln: linkedin.com/company/heartland-bank-nz"
+      },
+      {
+        "index": 50,
+        "role": "batch_ocr",
+        "text": "We'rehappy to provide adjustments and support throughout therecruitment process."
+      },
+      {
+        "index": 51,
+        "role": "batch_ocr",
+        "text": "Be careful"
+      },
+      {
+        "index": 52,
+        "role": "batch_ocr",
+        "text": "Don't provide your bank or credit card details when applying for jobs."
+      },
+      {
+        "index": 53,
+        "role": "batch_ocr",
+        "text": "Learn how toprotect yourself"
+      },
+      {
+        "index": 54,
+        "role": "batch_ocr",
+        "text": "Report this job ad"
+      },
+      {
+        "index": 55,
+        "role": "batch_ocr",
+        "text": "Featured jobs"
+      },
+      {
+        "index": 56,
+        "role": "batch_ocr",
+        "text": "口"
+      },
+      {
+        "index": 57,
+        "role": "batch_ocr",
+        "text": "LIGE"
+      },
+      {
+        "index": 58,
+        "role": "batch_ocr",
+        "text": "JuniorDeveloper"
+      },
+      {
+        "index": 59,
+        "role": "batch_ocr",
+        "text": "Graduate/JuniorTradingMana..."
+      },
+      {
+        "index": 60,
+        "role": "batch_ocr",
+        "text": "Entry"
+      },
+      {
+        "index": 61,
+        "role": "batch_ocr",
+        "text": "Breast Cancer Foundation NZ"
+      },
+      {
+        "index": 62,
+        "role": "batch_ocr",
+        "text": "Liger Trading NZ"
+      },
+      {
+        "index": 63,
+        "role": "batch_ocr",
+        "text": "New"
+      },
+      {
+        "index": 64,
+        "role": "batch_ocr",
+        "text": "Parnell, Auckland, NZ"
+      },
+      {
+        "index": 65,
+        "role": "batch_ocr",
+        "text": "Auckland CBD, Auckland, NZ"
+      },
+      {
+        "index": 66,
+        "role": "batch_ocr",
+        "text": "Hend"
+      },
+      {
+        "index": 67,
+        "role": "batch_ocr",
+        "text": "o6epL"
+      },
+      {
+        "index": 68,
+        "role": "batch_ocr",
+        "text": "obepe"
+      },
+      {
+        "index": 69,
+        "role": "batch_ocr",
+        "text": "3dag"
+      },
+      {
+        "index": 70,
+        "role": "batch_ocr",
+        "text": "What can I earn as a Software Engineer"
+      },
+      {
+        "index": 71,
+        "role": "batch_ocr",
+        "text": "See more detailed salary information →"
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260626-004731-573047__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260626-004735-905711__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260626-004739-355629__ocr-region__ocr-region.json"
+    ],
+    "detail_batch_status": "ok",
+    "detail_batch_stop_reason": "max_captures",
+    "detail_bottom_reached": false,
+    "detail_batch_unique_line_count": 72,
+    "runtime_detail_dataflow": {
+      "contract_version": "runtime_detail_dataflow_v1",
+      "source_batch_contract": "read_region_batch_v1",
+      "source_batch_status": "ok",
+      "merged_text_line_count": 72,
+      "description_section_count": 72
+    }
+  }
+}

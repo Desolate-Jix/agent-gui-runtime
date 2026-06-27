@@ -173,7 +173,8 @@
           "y": 847
         }
       }
-    ]
+    ],
+    "visual_controls": []
   },
   "safety_policy_ref": "seek_final_submit_forbidden_v1"
 }

@@ -1,0 +1,537 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_f61adc2bca79",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.87,
+    "job_id": "seek_job_f61adc2bca79",
+    "title": "Junior Developer",
+    "company": "Breast Cancer Foundation NZ",
+    "fit_summary": "strong_apply with score 0.870. positive: matched_skills: AI, API, Automation; matched_target_roles: Junior Developer; location_matches: Parnell, Auckland (Hybrid).",
+    "recommended_next_action": "open_apply_entry_and_prepare_safe_fields",
+    "positive_evidence": [
+      "matched_skills: AI, API, Automation",
+      "matched_target_roles: Junior Developer",
+      "location_matches: Parnell, Auckland (Hybrid)",
+      "matched_preferred_work_modes: hybrid"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_f61adc2bca79",
+    "title": "Junior Developer",
+    "company": "Breast Cancer Foundation NZ",
+    "location": "Parnell, Auckland (Hybrid)",
+    "posted_at_text": null,
+    "work_type": "Hybrid",
+    "salary_text": "$67,000 -$75,000 per year",
+    "classification": null,
+    "card_bbox": {
+      "x": 652,
+      "y": 986,
+      "w": 433,
+      "h": 245
+    },
+    "click_point": {
+      "x": 726,
+      "y": 998
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_22",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_68_junior-developer",
+      "page_text_70_breast-cancer-foundation-nz",
+      "page_text_73_parnell-auckland-hybrid",
+      "page_text_74_67-000-75-000-per-year",
+      "page_text_77_2-yr-fixed-term-hybrid-great-team-and-location",
+      "page_text_79_help-in-building-maintaining-scalable-software-u",
+      "page_text_81_range-of-tools",
+      "page_text_83_contribute-to-the-modernisation-of-healthcare-da",
+      "page_text_85_supporting-cutting-edge-breast-cancerresearch-an"
+    ],
+    "evidence": {
+      "texts": [
+        "Junior Developer",
+        "Breast Cancer Foundation NZ",
+        "Parnell, Auckland (Hybrid)",
+        "$67,000 -$75,000 per year",
+        "·2-yr fixed-term, hybrid. Great team and location.",
+        "· Help in building/maintaining scalable software using a",
+        "range of tools",
+        "·Contribute to the modernisation of healthcare data",
+        "Supporting cutting-edge breast cancerresearch and national"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": true,
+        "has_salary": true
+      }
+    },
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260627-165744-703819__observe-screen__edge.json",
+      "viewport_size": {
+        "width": 2560,
+        "height": 1400
+      },
+      "source": "seek_job_card_extraction",
+      "freshness": "current_capture"
+    }
+  },
+  "detail": {
+    "job_id": "seek_job_f61adc2bca79",
+    "title": "Junior Developer",
+    "company": "Breast Cancer Foundation NZ",
+    "location": "Parnell, Auckland (Hybrid)",
+    "work_type": "Hybrid",
+    "salary_text": "$67,000 -$75,000 per year",
+    "runtime_detail_snapshot": {
+      "contract_version": "runtime_detail_snapshot_v1",
+      "source": "read_region_batch",
+      "revision": 2,
+      "previous_snapshot_id": "42cd6473e7a2914d",
+      "snapshot_id": "32d4cdf74d48d850"
+    },
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "batch_ocr",
+        "text": "JuniorDeveloper"
+      },
+      {
+        "index": 1,
+        "role": "batch_ocr",
+        "text": "Breast Cancer Foundation NZView all jobs"
+      },
+      {
+        "index": 2,
+        "role": "batch_ocr",
+        "text": "Parnell, Auckland (Hybrid)"
+      },
+      {
+        "index": 3,
+        "role": "batch_ocr",
+        "text": "Developers/Programmers(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 4,
+        "role": "batch_ocr",
+        "text": "Full time"
+      },
+      {
+        "index": 5,
+        "role": "batch_ocr",
+        "text": "$67,000-$75,000peryear"
+      },
+      {
+        "index": 6,
+        "role": "batch_ocr",
+        "text": "Posted 3d ago· High application volume"
+      },
+      {
+        "index": 7,
+        "role": "batch_ocr",
+        "text": "Quickapply"
+      },
+      {
+        "index": 8,
+        "role": "batch_ocr",
+        "text": "Save"
+      },
+      {
+        "index": 9,
+        "role": "batch_ocr",
+        "text": "Howyou match"
+      },
+      {
+        "index": 10,
+        "role": "batch_ocr",
+        "text": "3 skills and credentials match your profile"
+      },
+      {
+        "index": 11,
+        "role": "batch_ocr",
+        "text": "√API"
+      },
+      {
+        "index": 12,
+        "role": "batch_ocr",
+        "text": "√Pipelines"
+      },
+      {
+        "index": 13,
+        "role": "batch_ocr",
+        "text": "Database SystemsShow all√"
+      },
+      {
+        "index": 14,
+        "role": "batch_ocr",
+        "text": "AboutBreastCancerFoundationNZ-"
+      },
+      {
+        "index": 15,
+        "role": "batch_ocr",
+        "text": "Established in 1994,Breast CancerFoundation NZ is a not-for-profit,non-government"
+      },
+      {
+        "index": 16,
+        "role": "batch_ocr",
+        "text": "organisation(NGO)thatprovidesbreastcancereducation and awareness,medical"
+      },
+      {
+        "index": 17,
+        "role": "batch_ocr",
+        "text": "research,training grants,advocacy and supports Kiwis with breast cancer.Ourvision is"
+      },
+      {
+        "index": 18,
+        "role": "batch_ocr",
+        "text": "zerodeathsfrombreastcancer.Currently,over3,6ooKiwisarediagnosedwithbreast"
+      },
+      {
+        "index": 19,
+        "role": "batch_ocr",
+        "text": "cancerand over65Odiefrombreastcancereveryyear.BCFNZ'sprogrammes are"
+      },
+      {
+        "index": 20,
+        "role": "batch_ocr",
+        "text": "are driven tomake a difference in the lives of NewZealanders affected by breast cancer"
+      },
+      {
+        "index": 21,
+        "role": "batch_ocr",
+        "text": "whilepushingfornewfrontiersinearlydetectionandtreatment."
+      },
+      {
+        "index": 22,
+        "role": "batch_ocr",
+        "text": "You'llbe joining a talented, vibrant and supportive team that values diversity and an"
+      },
+      {
+        "index": 23,
+        "role": "batch_ocr",
+        "text": "inclusiveworkplace.WithconvenientlylocatedofficesinParnell,wefosterahealthy,"
+      },
+      {
+        "index": 24,
+        "role": "batch_ocr",
+        "text": "positive,fun and encouragingworkenvironment."
+      },
+      {
+        "index": 25,
+        "role": "batch_ocr",
+        "text": "You'llhaveexposuretoauniqueenvironmentwithitsfingeronthepulseof thelatest"
+      },
+      {
+        "index": 26,
+        "role": "batch_ocr",
+        "text": "research,andrealsatisfactioninknowingthatyourworkcontributesdirectlytothe"
+      },
+      {
+        "index": 27,
+        "role": "batch_ocr",
+        "text": "wellbeing of the people of Aotearoa, New Zealand."
+      },
+      {
+        "index": 28,
+        "role": "batch_ocr",
+        "text": "We arefamily-friendly,withflexibleworking hours and hybridworking arrangements.We"
+      },
+      {
+        "index": 29,
+        "role": "batch_ocr",
+        "text": "everyonewhocanmeettherequirementsoftherole."
+      },
+      {
+        "index": 30,
+        "role": "batch_ocr",
+        "text": "Established in1994,BreastCancerFoundationNZis anot-for-profit,non-government"
+      },
+      {
+        "index": 31,
+        "role": "batch_ocr",
+        "text": "organisation(NGO)that provides breast cancereducation and awareness,medical"
+      },
+      {
+        "index": 32,
+        "role": "batch_ocr",
+        "text": "research, training grants, advocacy and supports Kiwis with breast cancer. Our vision is"
+      },
+      {
+        "index": 33,
+        "role": "batch_ocr",
+        "text": "zerodeathsfrombreastcancer.Currently,over3,6ooKiwis are diagnosed withbreast"
+      },
+      {
+        "index": 34,
+        "role": "batch_ocr",
+        "text": "cancerandover65Odiefrombreastcancereveryyear.BCFNZ'sprogrammes are"
+      },
+      {
+        "index": 35,
+        "role": "batch_ocr",
+        "text": "evidence-basedandoverseenbyitsmedical advisorycommittee.Unitedbyourgoals,we"
+      },
+      {
+        "index": 36,
+        "role": "batch_ocr",
+        "text": "You'llbe joining a talented,vibrant and supportive team thatvalues diversity and an"
+      },
+      {
+        "index": 37,
+        "role": "batch_ocr",
+        "text": "positive,funandencouragingworkenvironment."
+      },
+      {
+        "index": 38,
+        "role": "batch_ocr",
+        "text": "You'll have exposure toa unique environment with itsfinger onthepulseof thelatest"
+      },
+      {
+        "index": 39,
+        "role": "batch_ocr",
+        "text": "research, andreal satisfaction in knowing that your work contributes directly to the"
+      },
+      {
+        "index": 40,
+        "role": "batch_ocr",
+        "text": "wellbeingofthepeopleofAotearoa,NewZealand."
+      },
+      {
+        "index": 41,
+        "role": "batch_ocr",
+        "text": "We are family-friendly, with flexible working hours and hybrid working arrangements. We"
+      },
+      {
+        "index": 42,
+        "role": "batch_ocr",
+        "text": "are committed toequal employmentopportunitiesand welcome applicationsfrom"
+      },
+      {
+        "index": 43,
+        "role": "batch_ocr",
+        "text": "Purposeoftherole(2-yearfixed-term)"
+      },
+      {
+        "index": 44,
+        "role": "batch_ocr",
+        "text": "We're looking fora Junior Developer to contribute to the ongoing build out of a new"
+      },
+      {
+        "index": 45,
+        "role": "batch_ocr",
+        "text": "platformforTeRehitaMateUtaetae-BreastCancerFoundationNationalRegister"
+      },
+      {
+        "index": 46,
+        "role": "batch_ocr",
+        "text": "(Register),which willunlock the value of this taonga(treasure). It is a collection of patient"
+      },
+      {
+        "index": 47,
+        "role": "batch_ocr",
+        "text": "clinical data for use by researchers, clinicians and health planners to improve breast"
+      },
+      {
+        "index": 48,
+        "role": "batch_ocr",
+        "text": "cancerpatient care,outcomes and equity inAotearoaNewZealand."
+      },
+      {
+        "index": 49,
+        "role": "batch_ocr",
+        "text": "You'll play a role in the development and delivery of ongoing and planned projects"
+      },
+      {
+        "index": 50,
+        "role": "batch_ocr",
+        "text": "alongsideourexternaldevelopmentvendor.Thisincludesvalidatingthesystem's"
+      },
+      {
+        "index": 51,
+        "role": "batch_ocr",
+        "text": "provide technical expertise to help manage, customise and optimise this cutting-edge"
+      },
+      {
+        "index": 52,
+        "role": "batch_ocr",
+        "text": "platform."
+      },
+      {
+        "index": 53,
+        "role": "batch_ocr",
+        "text": "This is a hands-on role that sits across both development and DevOps. You'll be writing"
+      },
+      {
+        "index": 54,
+        "role": "batch_ocr",
+        "text": "opportunity for someone early in their careerto build broad, practical skills while doing"
+      },
+      {
+        "index": 55,
+        "role": "batch_ocr",
+        "text": "workthatgenuinelymatters."
+      },
+      {
+        "index": 56,
+        "role": "batch_ocr",
+        "text": "ReportingtotheTechnicalDeliveryManager,Register,thisisapivotalroleintheongoing"
+      },
+      {
+        "index": 57,
+        "role": "batch_ocr",
+        "text": "successoftheRegisteroperations.You'llbeworkingalongsideanexperiencedand"
+      },
+      {
+        "index": 58,
+        "role": "batch_ocr",
+        "text": "Keyresponsibilities"
+      },
+      {
+        "index": 59,
+        "role": "batch_ocr",
+        "text": "(Register),whichwillunlockthevalueofthistaonga(treasure).It is acollectionofpatient"
+      },
+      {
+        "index": 60,
+        "role": "batch_ocr",
+        "text": "clinical data for use byresearchers,clinicians and health planners toimprove breast"
+      },
+      {
+        "index": 61,
+        "role": "batch_ocr",
+        "text": "cancerpatientcare,outcomes and equity inAotearoaNewZealand."
+      },
+      {
+        "index": 62,
+        "role": "batch_ocr",
+        "text": "Youll play a role in the development and delivery of ongoing and planned projects"
+      },
+      {
+        "index": 63,
+        "role": "batch_ocr",
+        "text": "functionality, integrations and data outcomes against our organisation needs. You'll also"
+      },
+      {
+        "index": 64,
+        "role": "batch_ocr",
+        "text": "Thisisahands-onrolethatsitsacrossbothdevelopmentandDevOps.You'llbewriting"
+      },
+      {
+        "index": 65,
+        "role": "batch_ocr",
+        "text": "the day-to-day work that keeps the platform running smoothly and reliably. It's a great"
+      },
+      {
+        "index": 66,
+        "role": "batch_ocr",
+        "text": "opportunity for someone early in their career to build broad, practical skills while doing"
+      },
+      {
+        "index": 67,
+        "role": "batch_ocr",
+        "text": "success of theRegister operations.You'll be working alongside an experienced and"
+      },
+      {
+        "index": 68,
+        "role": "batch_ocr",
+        "text": "Development"
+      },
+      {
+        "index": 69,
+        "role": "batch_ocr",
+        "text": "·Contribute to the ongoing build, customisation and optimisation of the Register"
+      },
+      {
+        "index": 70,
+        "role": "batch_ocr",
+        "text": "platform, working closely with our external development vendor and the internal"
+      },
+      {
+        "index": 71,
+        "role": "batch_ocr",
+        "text": "Registerteam."
+      },
+      {
+        "index": 72,
+        "role": "batch_ocr",
+        "text": "·Write,test and maintain clean,well-documented code"
+      },
+      {
+        "index": 73,
+        "role": "batch_ocr",
+        "text": "·Build,consume and integrate APls to connect the platform with other systems and"
+      },
+      {
+        "index": 74,
+        "role": "batch_ocr",
+        "text": "healthdatasources."
+      },
+      {
+        "index": 75,
+        "role": "batch_ocr",
+        "text": "·Help validate system functionality, integrations and data migration outcomes against"
+      },
+      {
+        "index": 76,
+        "role": "batch_ocr",
+        "text": "business needs."
+      },
+      {
+        "index": 77,
+        "role": "batch_ocr",
+        "text": "Automation&DevOps"
+      },
+      {
+        "index": 78,
+        "role": "batch_ocr",
+        "text": "operations."
+      },
+      {
+        "index": 79,
+        "role": "batch_ocr",
+        "text": "·Support the team's Cl/CD pipelines,helping to streamline how code is tested,"
+      },
+      {
+        "index": 80,
+        "role": "batch_ocr",
+        "text": "deployedandreleased."
+      },
+      {
+        "index": 81,
+        "role": "batch_ocr",
+        "text": "staysreliable."
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260627-165821-027029__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260627-165828-179867__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260627-165834-459304__ocr-region__ocr-region.json"
+    ],
+    "detail_batch_status": "ok",
+    "detail_batch_stop_reason": "max_captures",
+    "detail_bottom_reached": false,
+    "detail_batch_unique_line_count": 82,
+    "runtime_detail_dataflow": {
+      "contract_version": "runtime_detail_dataflow_v1",
+      "source_batch_contract": "read_region_batch_v1",
+      "source_batch_status": "ok",
+      "merged_text_line_count": 82,
+      "description_section_count": 82
+    }
+  }
+}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from difflib import SequenceMatcher
 from typing import Any
@@ -12,6 +13,12 @@ from PIL import Image, ImageDraw, ImageFont
 from app.core.ocr_service import ocr_service
 from app.core.runtime_artifacts import ARTIFACTS_DIR, RuntimeTimer, build_review_overlay_path, write_trace
 from app.core.screenshot import screenshot_service
+from app.execute.candidate_contracts import validate_action_candidate_freshness
+from app.execute.available_actions import build_available_actions
+from app.execute.visual_asset_matching import match_visual_asset
+from app.learn.interface_map import build_learned_interface_map
+from app.learn.path_graph_resolver import resolve_runtime_path_graph
+from app.learn.visual_asset_crops import build_visual_assets_from_screen_map
 from app.models.request import (
     VisionAnalyzeRequestModel,
     VisionLocateTargetRequestModel,
@@ -61,6 +68,10 @@ from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
 router = APIRouter(prefix="/vision", tags=["vision"])
 
 VISTA_DIRECT_IMAGES_DIR = ARTIFACTS_DIR / "vista-direct"
+VISUAL_ASSET_RECALL_CONTRACT = "visual_asset_recall_v1"
+DEFAULT_LEARNED_RUNTIME_PATH_GRAPHS = {
+    "seek": ARTIFACTS_DIR / "seek" / "runtime_path_graph_seek_mvp_20260617.json",
+}
 
 
 def _vision_execution_path(
@@ -561,6 +572,57 @@ def _seeded_candidate_payload(metadata: dict[str, Any] | None) -> dict[str, Any]
     return dict(seeded)
 
 
+def _candidate_freshness_decision_for_trace(
+    seeded: dict[str, Any] | None,
+    *,
+    image_path: Path,
+    image_size: ImageSize,
+    grounding: LocalGroundingResult | None = None,
+) -> dict[str, Any] | None:
+    if not isinstance(seeded, dict):
+        return None
+    current_viewport = image_size.to_dict()
+    decision = validate_action_candidate_freshness(
+        seeded,
+        current_capture_id=str(image_path),
+        current_viewport_size=current_viewport,
+    )
+    if decision.get("allowed") is True:
+        return decision
+    if _seeded_candidate_grounded_in_current_capture(seeded, grounding):
+        return {
+            **decision,
+            "allowed": True,
+            "reasons": [*decision.get("reasons", []), "candidate_refreshed_by_current_grounding"],
+            "freshness": "reviewed_current_capture",
+            "current_capture_id": str(image_path),
+            "current_viewport_size": current_viewport,
+        }
+    return {
+        **decision,
+        "current_capture_id": str(image_path),
+        "current_viewport_size": current_viewport,
+    }
+
+
+def _seeded_candidate_grounded_in_current_capture(
+    seeded: dict[str, Any],
+    grounding: LocalGroundingResult | None,
+) -> bool:
+    if grounding is None:
+        return False
+    seed_id = str(seeded.get("candidate_id") or "")
+    expected_ids = {seed_id, f"seeded_{seed_id}"}
+    for item in grounding.results:
+        if item.status != "grounded":
+            continue
+        if item.candidate_id in expected_ids or item.element_id in expected_ids:
+            return True
+        if "seeded_candidate" in str(item.coordinate_source or ""):
+            return True
+    return False
+
+
 def _recognition_candidate_from_seeded_candidate(item: dict[str, Any], *, rank: int) -> RecognitionCandidate | None:
     bbox = _normalize_map_bbox(item.get("bbox") or item.get("card_bbox"))
     if not bbox:
@@ -575,7 +637,7 @@ def _recognition_candidate_from_seeded_candidate(item: dict[str, Any], *, rank: 
         return None
     role = _first_compact_text(item.get("role"), "button")
     risk_class = str(item.get("risk_class") or "safe_click_allowed")
-    allowed = risk_class == "safe_click_allowed"
+    allowed, policy_reason = _execution_allowed_for_risk_class(label=label, role=role, risk_class=risk_class)
     score = max(0.0, min(1.0, float(item.get("score") or 0.99)))
     seed_id = _first_compact_text(item.get("candidate_id"), hashlib.sha256(label.encode("utf-8")).hexdigest()[:12])
     candidate_id = f"seeded_{seed_id}"[:120]
@@ -586,7 +648,7 @@ def _recognition_candidate_from_seeded_candidate(item: dict[str, Any], *, rank: 
         zone_type="general_action" if allowed else "seeded_candidate_requires_confirmation",
         priority="seeded_candidate",
         ad_risk=0.0,
-        reasons=["seeded_candidate_policy", f"risk_class:{risk_class or 'unknown'}"],
+        reasons=["seeded_candidate_policy", f"risk_class:{risk_class or 'unknown'}", policy_reason],
     )
     element = PageElement(
         element_id=element_id,
@@ -705,13 +767,13 @@ def _recognition_candidate_from_path_recall(item: dict[str, Any], *, rank: int) 
     role = _first_compact_text(item.get("role")) or "button"
     score = max(0.0, min(1.0, float(item.get("score") or 0.0)))
     risk_class = str(item.get("risk_class") or "")
-    allowed = risk_class == "safe_click_allowed"
+    allowed, policy_reason = _execution_allowed_for_risk_class(label=label, role=role, risk_class=risk_class)
     policy = InteractionPolicy(
         allowed=allowed,
         zone_type="general_action" if allowed else "path_graph_requires_confirmation",
         priority="path_graph_recall",
         ad_risk=0.0,
-        reasons=["path_graph_recall_policy", f"risk_class:{risk_class or 'unknown'}"],
+        reasons=["path_graph_recall_policy", f"risk_class:{risk_class or 'unknown'}", policy_reason],
     )
     click_point = _normalize_map_point(item.get("click_point"), bbox) or {"x": bbox["x"] + bbox["w"] // 2, "y": bbox["y"] + bbox["h"] // 2}
     candidate_id = str(item.get("candidate_id") or f"path_recall_{rank}")[:100]
@@ -1092,6 +1154,38 @@ def _select_pathgraph_roi_candidates(candidates: list[RecognitionCandidate], *, 
     if first - second >= score_gap:
         return [candidates[0]], "top1_score_gap"
     return candidates[: max(1, int(top_k or 3))], "union_top_candidates"
+
+
+def _vista_candidate_roi_policy(roi_source: str) -> dict[str, Any]:
+    """Return ROI sizing policy for VISTA point grounding.
+
+    Seeded candidates are already localized by the caller/PathGraph, so the
+    primary path should be a compact single-candidate crop. Wider multi-candidate
+    crops remain an explicit fallback for ambiguous PathGraph recall.
+    """
+    if roi_source == "seeded_candidate_v1":
+        return {
+            "policy": "compact_seed_candidate_roi_primary",
+            "padding": 16,
+            "min_size": 192,
+            "max_edge": 448,
+            "fallback_tier": "primary",
+        }
+    if roi_source in {"top1_only", "top1_score_gap"}:
+        return {
+            "policy": "compact_pathgraph_top1_roi_primary",
+            "padding": 32,
+            "min_size": 224,
+            "max_edge": 512,
+            "fallback_tier": "primary",
+        }
+    return {
+        "policy": "pathgraph_union_roi_fallback",
+        "padding": 48,
+        "min_size": 256,
+        "max_edge": 640,
+        "fallback_tier": "fallback",
+    }
 
 
 def _candidate_bbox(candidate: RecognitionCandidate) -> dict[str, int]:
@@ -1567,6 +1661,15 @@ def _recognition_plan_from_vista_point(
     path_graph_recall: dict[str, Any],
 ) -> APIResponse:
     seeded_candidate = _seeded_candidate_payload(request.metadata)
+    visual_asset_recall = request.metadata.get("visual_asset_recall") if isinstance(request.metadata, dict) else None
+    if not isinstance(visual_asset_recall, dict):
+        visual_asset_recall = {
+            "contract_version": VISUAL_ASSET_RECALL_CONTRACT,
+            "status": "not_requested",
+            "matches": [],
+            "selected_candidate": None,
+            "fast_lane_allowed": False,
+        }
     seed_candidate = _recognition_candidate_from_seeded_candidate(seeded_candidate or {}, rank=1) if seeded_candidate else None
     reviewed_execution = request.metadata.get("reviewed_test_execution") if isinstance(request.metadata, dict) else None
     allow_reviewed_seed_without_model = bool(
@@ -1607,9 +1710,10 @@ def _recognition_plan_from_vista_point(
         else:
             roi_candidates, roi_source = _select_pathgraph_roi_candidates(candidates)
         if selected_candidate is None:
-            roi_padding = 48
-            roi_min_size = 256
-            roi_max_edge = 640
+            roi_policy = _vista_candidate_roi_policy(roi_source)
+            roi_padding = int(roi_policy["padding"])
+            roi_min_size = int(roi_policy["min_size"])
+            roi_max_edge = int(roi_policy["max_edge"])
             pathgraph_roi_preprocess = _prepare_vista_candidate_roi_image(
                 image_path,
                 input_image_size,
@@ -1619,6 +1723,9 @@ def _recognition_plan_from_vista_point(
                 min_size=roi_min_size,
                 roi_source=roi_source,
             )
+            pathgraph_roi_preprocess["roi_policy"] = roi_policy["policy"]
+            pathgraph_roi_preprocess["fallback_tier"] = roi_policy["fallback_tier"]
+            pathgraph_roi_preprocess["full_screen_fallback_available"] = True
             pathgraph_roi_image_path = Path(str(pathgraph_roi_preprocess.get("processed_image_path") or image_path))
             roi_size_raw = pathgraph_roi_preprocess.get("processed_size") if isinstance(pathgraph_roi_preprocess.get("processed_size"), dict) else input_image_size.to_dict()
             pathgraph_roi_image_size = ImageSize(
@@ -1630,6 +1737,8 @@ def _recognition_plan_from_vista_point(
                 candidate_count=len(candidates),
                 roi_candidate_count=len(roi_candidates),
                 roi_source=roi_source,
+                roi_policy=roi_policy["policy"],
+                fallback_tier=roi_policy["fallback_tier"],
                 crop_bounds_original=pathgraph_roi_preprocess.get("crop_bounds_original"),
                 max_edge=roi_max_edge,
             ):
@@ -1679,6 +1788,9 @@ def _recognition_plan_from_vista_point(
                 input_image_size,
                 max_edge=int(direct_options.get("max_edge") or 640),
             )
+            image_preprocess["roi_policy"] = "vista_direct_full_screen_fallback"
+            image_preprocess["fallback_tier"] = "fallback"
+            image_preprocess["fallback_reason"] = vista_error
             inference_image_path = Path(str(image_preprocess.get("processed_image_path") or image_path))
             inference_size_raw = image_preprocess.get("processed_size") if isinstance(image_preprocess.get("processed_size"), dict) else input_image_size.to_dict()
             inference_image_size = ImageSize(
@@ -1876,6 +1988,7 @@ def _recognition_plan_from_vista_point(
     margin = round(float(candidates[0].score) - float(candidates[1].score), 4) if len(candidates) > 1 else round(float(candidates[0].score), 4) if candidates else None
     if selected_candidate is not None:
         margin = max(float(margin or 0.0), 0.2)
+    vista_image_preprocess = vista_payload.get("image_preprocess") if isinstance(vista_payload, dict) and isinstance(vista_payload.get("image_preprocess"), dict) else {}
     candidate_result = CandidateRankResult(
         goal=goal,
         top_k=request.top_k,
@@ -1898,6 +2011,11 @@ def _recognition_plan_from_vista_point(
             "vista_direct_point_grounding_attempted": vista_direct_attempted,
             "screen_inventory_candidate_rank_used": screen_inventory_rank_result is not None,
             "screen_inventory_candidate_count": len(screen_inventory_rank_result.candidates) if screen_inventory_rank_result else 0,
+            "vista_roi_policy": vista_image_preprocess.get("roi_policy"),
+            "vista_roi_source": vista_image_preprocess.get("roi_source"),
+            "vista_roi_fallback_tier": vista_image_preprocess.get("fallback_tier"),
+            "vista_processed_size": vista_image_preprocess.get("processed_size"),
+            "vista_crop_bounds_original": vista_image_preprocess.get("crop_bounds_original"),
         },
     )
     grounding_results: list[LocalGroundingCandidateResult] = []
@@ -1991,6 +2109,9 @@ def _recognition_plan_from_vista_point(
             "vista_point_inside_candidate_bbox": vista_point_inside_selected_bbox,
             "seeded_candidate_primary_point_used": seeded_primary_point_used,
             "vista_direct_point_grounding_used": vista_direct_used,
+            "vista_roi_policy": vista_image_preprocess.get("roi_policy"),
+            "vista_roi_source": vista_image_preprocess.get("roi_source"),
+            "vista_roi_fallback_tier": vista_image_preprocess.get("fallback_tier"),
         },
     )
     allow_low_margin_when_grounded = bool(
@@ -2014,7 +2135,14 @@ def _recognition_plan_from_vista_point(
         "top_k": request.top_k,
         "observe_trace_reuse": {key: value for key, value in observe_reuse.items() if key not in {"ocr_anchors", "screen_map"}},
         "path_graph_recall": path_graph_recall,
+        "visual_asset_recall": visual_asset_recall,
         "seeded_candidate": seeded_candidate,
+        "candidate_freshness_decision": _candidate_freshness_decision_for_trace(
+            seeded_candidate,
+            image_path=image_path,
+            image_size=input_image_size,
+            grounding=narrow_search_result,
+        ),
         "parse_result": {
             "vision_regions": {
                 "contract_version": "vision_regions_v1",
@@ -2070,6 +2198,13 @@ def _recognition_plan_from_vista_point(
             "path_graph_recall_selected_count": len([item for item in candidates if "path_graph_recall" in item.reasons]),
             "seeded_candidate_used": seed_candidate is not None,
             "seeded_candidate_selected": bool((candidate_result.summary or {}).get("seeded_candidate_selected")),
+            "visual_asset_recall_used": visual_asset_recall.get("status") in {"matched", "no_match"},
+            "visual_asset_recall_status": visual_asset_recall.get("status"),
+            "visual_asset_fast_lane_used": bool(
+                visual_asset_recall.get("fast_lane_allowed")
+                and (candidate_result.summary or {}).get("seeded_candidate_selected")
+                and seeded_primary_point_used
+            ),
             "path_graph_candidate_roi_refine_used": bool(vista_payload and isinstance(vista_payload.get("image_preprocess"), dict) and vista_payload["image_preprocess"].get("locate_strategy") == "pathgraph_candidate_roi_refine"),
             "state_match_status": (path_graph_recall.get("state_match") or {}).get("status"),
             "screen_reading_used": False,
@@ -2087,6 +2222,11 @@ def _recognition_plan_from_vista_point(
             "seeded_candidate_primary_point_used": seeded_primary_point_used,
             "vista_direct_point_grounding_used": vista_direct_used,
             "vista_direct_point_grounding_attempted": vista_direct_attempted,
+            "vista_roi_policy": vista_image_preprocess.get("roi_policy"),
+            "vista_roi_source": vista_image_preprocess.get("roi_source"),
+            "vista_roi_fallback_tier": vista_image_preprocess.get("fallback_tier"),
+            "vista_processed_size": vista_image_preprocess.get("processed_size"),
+            "vista_crop_bounds_original": vista_image_preprocess.get("crop_bounds_original"),
             "pre_click_decision_used": True,
             "reviewed_test_execution_used": allow_low_margin_when_grounded,
             "action_executed": False,
@@ -2190,6 +2330,327 @@ def _mode_payload(request: Any, *, fallback_contract: str) -> dict[str, Any]:
         ),
         "write_policy": write_policy.model_dump() if hasattr(write_policy, "model_dump") else dict(write_policy or {}),
     }
+
+
+def _should_learn_visual_assets(request: Any) -> bool:
+    if getattr(request, "agent_mode", None) != "learn":
+        return False
+    metadata = getattr(request, "metadata", None)
+    if isinstance(metadata, dict):
+        visual_assets = metadata.get("visual_assets")
+        if isinstance(visual_assets, dict) and visual_assets.get("enabled") is False:
+            return False
+    return True
+
+
+def _safe_visual_asset_run_name(value: Any) -> str:
+    text = str(value or "screen").strip()
+    safe = "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in text)
+    return safe.strip("_")[:80] or "screen"
+
+
+def _skipped_visual_asset_learning(
+    *,
+    image_path: str,
+    reason: str,
+    app_id: Any,
+    page_type: Any,
+    learn_depth: Any,
+    error_detail: str | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "contract_version": "visual_asset_learning_v1",
+        "status": "skipped",
+        "reason": reason,
+        "source_image_path": str(image_path),
+        "app_id": app_id,
+        "page_type": page_type,
+        "learn_depth": learn_depth,
+        "visual_assets": {
+            "contract_version": "visual_asset_store_v1",
+            "asset_status_default": "skipped",
+            "asset_match_is_evidence_only": True,
+            "asset_can_authorize_click": False,
+            "assets": [],
+        },
+        "summary": {
+            "candidate_count": 0,
+            "asset_count": 0,
+            "skipped_count": 0,
+            "artifact_is_authorization": False,
+        },
+    }
+    if error_detail:
+        payload["error_detail"] = error_detail
+    return payload
+
+
+def _build_visual_asset_recall(
+    *,
+    metadata: dict[str, Any] | None,
+    observe_reuse: dict[str, Any],
+    image_path: Path,
+    image_size: ImageSize,
+    goal: str | None,
+) -> dict[str, Any]:
+    stores = _visual_asset_stores_from_sources(metadata=metadata, observe_reuse=observe_reuse)
+    assets = _visual_asset_items_from_stores(stores)
+    if not assets:
+        return {
+            "contract_version": VISUAL_ASSET_RECALL_CONTRACT,
+            "status": "no_assets",
+            "asset_count": 0,
+            "matches": [],
+            "selected_candidate": None,
+            "fast_lane_allowed": False,
+        }
+
+    matches: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        asset_id = str(asset.get("asset_id") or asset.get("id") or asset.get("candidate_id") or "")
+        label = _first_compact_text(asset.get("label"), asset_id)
+        semantic_action = _first_compact_text(asset.get("semantic_action"), asset.get("action"), "click")
+        template_path = _visual_asset_template_path(asset)
+        if not asset_id or not label or not template_path:
+            skipped.append({"asset_id": asset_id, "reason": "missing_asset_id_label_or_template"})
+            continue
+        if not _visual_asset_relevant_to_goal(asset, goal):
+            skipped.append({"asset_id": asset_id, "label": label, "reason": "not_goal_relevant"})
+            continue
+        min_score = _visual_asset_min_score(asset)
+        allowed_region = _visual_asset_allowed_region(asset, image_size=image_size)
+        match = match_visual_asset(
+            asset_id=asset_id,
+            template_path=template_path,
+            target_image_path=image_path,
+            label=label,
+            semantic_action=semantic_action,
+            allowed_region=allowed_region,
+            scales=tuple(_visual_asset_scales(asset)),
+            min_score=min_score,
+            min_score_gap=_visual_asset_min_score_gap(asset),
+            artifact_dir=ARTIFACTS_DIR / "visual-matches" / _safe_visual_asset_run_name(Path(image_path).stem),
+            capture_id=str(image_path),
+            viewport_size=image_size.to_dict(),
+        )
+        match["asset_summary"] = {
+            "asset_id": asset_id,
+            "label": label,
+            "semantic_action": semantic_action,
+            "danger_level": asset.get("danger_level"),
+            "requires_gate": asset.get("requires_gate"),
+            "review_policy": asset.get("review_policy") if isinstance(asset.get("review_policy"), dict) else None,
+            "source_capture_id": ((asset.get("source") or {}).get("capture_id") if isinstance(asset.get("source"), dict) else None),
+        }
+        matches.append(match)
+
+    matched = [item for item in matches if item.get("matched") is True]
+    matched.sort(key=lambda item: float(item.get("match_score") or 0.0), reverse=True)
+    selected_match = next((item for item in matched if _visual_asset_fast_lane_allowed(item)), None)
+    selected_candidate = selected_match.get("candidate") if isinstance(selected_match, dict) else None
+    status = "matched" if matched else "no_match"
+    return {
+        "contract_version": VISUAL_ASSET_RECALL_CONTRACT,
+        "status": status,
+        "asset_count": len(assets),
+        "matched_count": len(matched),
+        "skipped": skipped[:20],
+        "matches": matches[:20],
+        "selected_asset_id": selected_match.get("asset_id") if isinstance(selected_match, dict) else None,
+        "selected_candidate": selected_candidate,
+        "fast_lane_allowed": bool(selected_candidate and selected_match and _visual_asset_fast_lane_allowed(selected_match)),
+        "fast_lane_reason": "low_risk_visual_asset_current_capture_match"
+        if selected_candidate
+        else "no_low_risk_matched_asset",
+    }
+
+
+def _visual_asset_stores_from_sources(
+    *, metadata: dict[str, Any] | None, observe_reuse: dict[str, Any]
+) -> list[dict[str, Any]]:
+    stores: list[dict[str, Any]] = []
+    if isinstance(metadata, dict):
+        for key in ("visual_assets", "visual_asset_store"):
+            value = metadata.get(key)
+            if isinstance(value, dict):
+                stores.append(value)
+        learning = metadata.get("visual_asset_learning")
+        if isinstance(learning, dict) and isinstance(learning.get("visual_assets"), dict):
+            stores.append(learning["visual_assets"])
+        interface_map = metadata.get("learned_interface_map")
+        interface_store = _visual_asset_store_from_interface_map(interface_map)
+        if interface_store is not None:
+            stores.append(interface_store)
+    observe_result = observe_reuse.get("observe_result") if isinstance(observe_reuse, dict) else None
+    if isinstance(observe_result, dict):
+        learning = observe_result.get("visual_asset_learning")
+        if isinstance(learning, dict) and isinstance(learning.get("visual_assets"), dict):
+            stores.append(learning["visual_assets"])
+        interface_store = _visual_asset_store_from_interface_map(observe_result.get("learned_interface_map"))
+        if interface_store is not None:
+            stores.append(interface_store)
+        screen_map = observe_result.get("screen_map")
+        if isinstance(screen_map, dict) and isinstance(screen_map.get("visual_assets"), dict):
+            stores.append(screen_map["visual_assets"])
+    screen_map = observe_reuse.get("screen_map") if isinstance(observe_reuse, dict) else None
+    if isinstance(screen_map, dict) and isinstance(screen_map.get("visual_assets"), dict):
+        stores.append(screen_map["visual_assets"])
+    return stores
+
+
+def _visual_asset_store_from_interface_map(interface_map: Any) -> dict[str, Any] | None:
+    if not isinstance(interface_map, dict):
+        return None
+    fixed_assets = interface_map.get("fixed_visual_assets")
+    if not isinstance(fixed_assets, list):
+        return None
+    assets = [item for item in fixed_assets if isinstance(item, dict)]
+    if not assets:
+        return None
+    return {
+        "contract_version": "visual_asset_store_v1",
+        "source_contract_version": interface_map.get("contract_version"),
+        "asset_status_default": "from_learned_interface_map",
+        "asset_match_is_evidence_only": True,
+        "asset_can_authorize_click": False,
+        "assets": assets,
+    }
+
+
+def _visual_asset_items_from_stores(stores: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for store in stores:
+        assets = store.get("assets")
+        if not isinstance(assets, list):
+            continue
+        for asset in assets:
+            if not isinstance(asset, dict):
+                continue
+            key = str(asset.get("asset_id") or asset.get("id") or asset.get("candidate_id") or id(asset))
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append(asset)
+    return items
+
+
+def _visual_asset_template_path(asset: dict[str, Any]) -> str | None:
+    crop = asset.get("crop") if isinstance(asset.get("crop"), dict) else {}
+    source = asset.get("source") if isinstance(asset.get("source"), dict) else {}
+    template_refs = asset.get("template_refs") if isinstance(asset.get("template_refs"), dict) else {}
+    for value in (
+        template_refs.get("tight_crop_ref"),
+        template_refs.get("crop_ref"),
+        template_refs.get("template_path"),
+        crop.get("tight_crop_ref"),
+        crop.get("crop_ref"),
+        crop.get("template_path"),
+        source.get("crop_path"),
+    ):
+        if value and Path(str(value)).exists():
+            return str(value)
+    return None
+
+
+def _visual_asset_relevant_to_goal(asset: dict[str, Any], goal: str | None) -> bool:
+    goal_text = str(goal or "").casefold()
+    if not goal_text:
+        return True
+    label = str(asset.get("label") or "").casefold()
+    semantic_action = str(asset.get("semantic_action") or "").casefold()
+    tokens = [token for token in label.replace("/", " ").split() if len(token) >= 3]
+    if any(token in goal_text for token in tokens):
+        return True
+    action_terms = {
+        "open_apply_flow": ("apply", "quick apply", "application", "申请", "快速申请"),
+        "continue_next_step": ("continue", "next", "下一步", "继续"),
+        "final_submit": ("submit", "send", "confirm", "提交", "发送", "确认"),
+        "click": ("click", "press", "点击"),
+    }
+    return any(term in goal_text for term in action_terms.get(semantic_action, (semantic_action,)))
+
+
+def _visual_asset_min_score(asset: dict[str, Any]) -> float:
+    policy = asset.get("match_policy") if isinstance(asset.get("match_policy"), dict) else {}
+    try:
+        return max(0.5, min(0.99, float(policy.get("min_score", 0.9))))
+    except (TypeError, ValueError):
+        return 0.9
+
+
+def _visual_asset_min_score_gap(asset: dict[str, Any]) -> float:
+    policy = asset.get("match_policy") if isinstance(asset.get("match_policy"), dict) else {}
+    try:
+        return max(0.0, min(0.5, float(policy.get("min_score_gap", 0.0))))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _visual_asset_scales(asset: dict[str, Any]) -> list[float]:
+    policy = asset.get("match_policy") if isinstance(asset.get("match_policy"), dict) else {}
+    raw_scales = policy.get("scales") or policy.get("scale_variants")
+    if isinstance(raw_scales, list):
+        result: list[float] = []
+        for value in raw_scales:
+            try:
+                result.append(float(value))
+            except (TypeError, ValueError):
+                continue
+        if result:
+            return result
+    return [0.92, 1.0, 1.08]
+
+
+def _visual_asset_allowed_region(asset: dict[str, Any], *, image_size: ImageSize) -> dict[str, Any] | None:
+    source_geometry = asset.get("source_geometry") if isinstance(asset.get("source_geometry"), dict) else {}
+    bbox = _normalize_map_bbox(source_geometry.get("bbox") or asset.get("bbox"))
+    if not bbox:
+        return None
+    source = asset.get("source") if isinstance(asset.get("source"), dict) else {}
+    source_size = source.get("screenshot_size") if isinstance(source.get("screenshot_size"), dict) else {}
+    same_viewport = (
+        int(source_size.get("width") or image_size.width) == int(image_size.width)
+        and int(source_size.get("height") or image_size.height) == int(image_size.height)
+    )
+    if not same_viewport:
+        return None
+    pad_x = max(80, int(bbox["w"] * 3))
+    pad_y = max(60, int(bbox["h"] * 3))
+    x = max(0, int(bbox["x"]) - pad_x)
+    y = max(0, int(bbox["y"]) - pad_y)
+    right = min(int(image_size.width), int(bbox["x"] + bbox["w"]) + pad_x)
+    bottom = min(int(image_size.height), int(bbox["y"] + bbox["h"]) + pad_y)
+    region = {"x": x, "y": y, "w": max(1, right - x), "h": max(1, bottom - y)}
+    scope = asset.get("scope") if isinstance(asset.get("scope"), dict) else {}
+    container_ids = scope.get("allowed_container_ids") if isinstance(scope.get("allowed_container_ids"), list) else []
+    if not container_ids and isinstance(asset.get("allowed_region_ids"), list):
+        container_ids = asset["allowed_region_ids"]
+    if not container_ids and asset.get("region_id"):
+        container_ids = [asset.get("region_id")]
+    if container_ids:
+        region["container_id"] = str(container_ids[0])
+    return region
+
+
+def _visual_asset_fast_lane_allowed(match: dict[str, Any]) -> bool:
+    if not match.get("matched"):
+        return False
+    summary = match.get("asset_summary") if isinstance(match.get("asset_summary"), dict) else {}
+    semantic_action = str(match.get("semantic_action") or summary.get("semantic_action") or "").casefold()
+    danger_level = str(summary.get("danger_level") or "").casefold()
+    label = str(match.get("label") or "").casefold()
+    review_policy = summary.get("review_policy") if isinstance(summary.get("review_policy"), dict) else {}
+    if review_policy and not review_policy.get("fast_lane_eligible"):
+        return False
+    if semantic_action == "final_submit" or danger_level == "final_submit":
+        return False
+    if _looks_like_final_submit_action_text(" ".join([label, semantic_action, danger_level])):
+        return False
+    return bool(match.get("candidate"))
 
 
 def _trace_enabled(request: Any) -> bool:
@@ -2578,6 +3039,12 @@ def observe_screen(request: VisionObserveScreenRequestModel) -> APIResponse:
         result["live_capture"] = live_capture
         result["suggested_state_hint"] = _suggested_state_hint_from_observation(result)
         result["screen_map"] = _build_screen_map_from_observation(result, request=request, image_path=image_path)
+        result["screen_map"] = _apply_learned_path_graph_to_screen_map(
+            result["screen_map"],
+            result=result,
+            request=request,
+            image_path=image_path,
+        )
         if request.learn_depth == "deep":
             with timer.step("learn_deep_review"):
                 deep_result = _build_learn_deep_review(
@@ -2589,6 +3056,48 @@ def observe_screen(request: VisionObserveScreenRequestModel) -> APIResponse:
             result["path_graph_deep_review"] = deep_result["path_graph_deep_review"]
             result["path_graph_delta"] = deep_result["path_graph_delta"]
             result["element_memory_init_plan"] = deep_result["element_memory_init_plan"]
+        if _should_learn_visual_assets(request):
+            page_type = result["screen_map"].get("page_type") or result.get("state_guess") or request.state_hint
+            if not Path(image_path).exists():
+                visual_asset_learning = _skipped_visual_asset_learning(
+                    image_path=image_path,
+                    reason="missing_source_image",
+                    app_id=request.app_name or result.get("app_name"),
+                    page_type=page_type,
+                    learn_depth=request.learn_depth,
+                )
+            else:
+                try:
+                    with timer.step("learn_visual_assets"):
+                        visual_asset_learning = build_visual_assets_from_screen_map(
+                            result["screen_map"],
+                            source_image_path=image_path,
+                            output_dir=ARTIFACTS_DIR
+                            / "visual-assets"
+                            / _safe_visual_asset_run_name(request.app_name or result.get("app_name") or Path(image_path).stem),
+                            app_id=request.app_name or result.get("app_name"),
+                            page_type=page_type,
+                            capture_id=str(image_path),
+                            learn_depth=request.learn_depth,
+                        )
+                except Exception as exc:
+                    visual_asset_learning = _skipped_visual_asset_learning(
+                        image_path=image_path,
+                        reason="visual_asset_learning_failed",
+                        app_id=request.app_name or result.get("app_name"),
+                        page_type=page_type,
+                        learn_depth=request.learn_depth,
+                        error_detail=str(exc),
+                    )
+            result["visual_asset_learning"] = visual_asset_learning
+            result["screen_map"]["visual_assets"] = visual_asset_learning.get("visual_assets")
+            with timer.step("build_learned_interface_map"):
+                learned_interface_map = build_learned_interface_map(
+                    _runtime_graph_from_screen_map_for_interface_map(result["screen_map"], result=result),
+                    visual_asset_learning.get("visual_assets"),
+                )
+            result["learned_interface_map"] = learned_interface_map
+            result["screen_map"]["learned_interface_map_summary"] = learned_interface_map.get("summary")
         result["agent_next_steps"] = [
             "Read screen_map.candidates to decide what the user likely wants; it is a semantic map, not executable coordinates.",
             "Use screen_map.state_id and suggested_state_hint as the default context for POST /vision/locate_target unless the user overrides it.",
@@ -2831,6 +3340,440 @@ def _build_screen_map_from_observation(result: dict[str, Any], *, request: Visio
             "execute_role": "Verify the selected point and post-click transition through the gated action API.",
         },
     }
+
+
+def _runtime_graph_from_screen_map_for_interface_map(screen_map: dict[str, Any], *, result: dict[str, Any]) -> dict[str, Any]:
+    """把 observe 的 screen_map 转成 Interface Map 所需的最小路径图。"""
+
+    graph = screen_map if isinstance(screen_map, dict) else {}
+    state_id = str(graph.get("state_id") or "observed_state")
+    page_type = str(graph.get("page_type") or graph.get("state_hint") or result.get("state_guess") or "observed_page")
+    regions: list[dict[str, Any]] = []
+    for section in graph.get("sections") or []:
+        if not isinstance(section, dict):
+            continue
+        section_id = str(section.get("section_id") or section.get("region_id") or "").strip()
+        if not section_id:
+            continue
+        regions.append(
+            {
+                "region_id": section_id,
+                "label": section.get("label") or section_id,
+                "role": section.get("role") or section.get("section_type") or "content",
+                "bbox": section.get("bbox") if isinstance(section.get("bbox"), dict) else None,
+                "container_id": section.get("container_id") or section_id,
+                "repeatable": bool(section.get("repeatable")),
+            }
+        )
+    return {
+        "contract_version": "runtime_path_graph_v1",
+        "graph_id": f"{graph.get('app_name') or result.get('app_name') or 'app'}:{page_type}:observe_interface_seed",
+        "app_id": graph.get("app_name") or result.get("app_name"),
+        "page_type": page_type,
+        "states": [
+            {
+                "state_id": state_id,
+                "label": graph.get("state_hint") or result.get("state_guess") or state_id,
+                "state_fingerprint": graph.get("state_signature") if isinstance(graph.get("state_signature"), dict) else {},
+            }
+        ],
+        "regions": regions,
+        "source": {
+            "contract_version": graph.get("contract_version"),
+            "artifact_is_authorization": False,
+            "source": "screen_map_v1",
+        },
+    }
+
+
+def _apply_learned_path_graph_to_screen_map(
+    screen_map: dict[str, Any],
+    *,
+    result: dict[str, Any],
+    request: VisionObserveScreenRequestModel,
+    image_path: str,
+) -> dict[str, Any]:
+    graph_info = _default_learned_runtime_path_graph(result, request=request)
+    graph = graph_info.get("graph") if isinstance(graph_info, dict) else None
+    if not isinstance(graph, dict):
+        return screen_map
+    screen_inventory = _observation_screen_inventory(result)
+    if _observation_looks_like_seek_application_form(result, screen_inventory=screen_inventory):
+        assisted = dict(screen_map)
+        assisted["learned_path_graph_resolution"] = {
+            "contract_version": "learned_path_graph_observe_resolution_v1",
+            "matched": False,
+            "reason": "seek_application_form_not_search_results",
+            "graph_path": graph_info.get("path"),
+        }
+        return assisted
+    resolution = resolve_runtime_path_graph(
+        graph,
+        screen_inventory=screen_inventory,
+        requested_state_id=None,
+        safety={
+            "forbid_final_submit": False,
+            "allow_apply_entry": False,
+            "allow_safe_fill": False,
+        },
+    )
+    if not resolution.get("matched"):
+        assisted = dict(screen_map)
+        assisted["learned_path_graph_resolution"] = {
+            **resolution,
+            "contract_version": "learned_path_graph_observe_resolution_v1",
+            "graph_path": graph_info.get("path"),
+        }
+        return assisted
+    sections = _screen_map_sections_from_runtime_path_graph(
+        graph,
+        result=result,
+        image_path=image_path,
+        fallback_sections=screen_map.get("sections") if isinstance(screen_map.get("sections"), list) else [],
+    )
+    actions = build_available_actions(
+        graph,
+        current_state_id=resolution.get("state_id"),
+        include_guarded_apply=False,
+        path_graph_resolution=resolution,
+    )
+    path_candidates = _screen_map_candidates_from_path_graph_actions(actions, sections=sections)
+    observed_candidates = _resection_observed_candidates_for_path_graph(
+        screen_map.get("candidates") if isinstance(screen_map.get("candidates"), list) else [],
+        sections=sections,
+        graph_app_id=str(graph.get("app_id") or ""),
+    )
+    candidates = _dedupe_screen_map_candidates([*path_candidates, *observed_candidates])
+    assisted = {
+        **screen_map,
+        "state_id": resolution.get("state_id") or screen_map.get("state_id"),
+        "state_hint": graph.get("page_type") or screen_map.get("state_hint"),
+        "sections": sections,
+        "candidates": candidates[:80],
+        "learned_path_graph_resolution": {
+            **resolution,
+            "contract_version": "learned_path_graph_observe_resolution_v1",
+            "graph_path": graph_info.get("path"),
+            "source": "runtime_path_graph_v1",
+            "screen_map_policy": "learned_path_graph_primary_model_supplemental",
+        },
+        "learned_path_graph_available_actions": actions,
+    }
+    summary = dict(assisted.get("summary") if isinstance(assisted.get("summary"), dict) else {})
+    summary.update(
+        {
+            "candidate_count": len(assisted["candidates"]),
+            "safe_candidate_count": len([item for item in assisted["candidates"] if item.get("risk_class") == "safe_click_allowed"]),
+            "blocked_candidate_count": len([item for item in assisted["candidates"] if item.get("risk_class") == "blocked"]),
+            "section_count": len(sections),
+            "learned_path_graph_used": True,
+            "learned_path_graph_id": graph.get("graph_id"),
+        }
+    )
+    assisted["summary"] = summary
+    agent_usage = dict(assisted.get("agent_usage") if isinstance(assisted.get("agent_usage"), dict) else {})
+    agent_usage["observe_role"] = "Use the learned runtime PathGraph as the primary page structure; use model output only as current text/evidence."
+    agent_usage["execute_role"] = "Choose from learned_path_graph_available_actions, then validate coordinates through the gated action API."
+    assisted["agent_usage"] = agent_usage
+    return assisted
+
+
+def _default_learned_runtime_path_graph(result: dict[str, Any], *, request: VisionObserveScreenRequestModel) -> dict[str, Any]:
+    key = _learned_path_graph_key(result, request=request)
+    path = DEFAULT_LEARNED_RUNTIME_PATH_GRAPHS.get(key)
+    if not path or not path.exists():
+        return {}
+    try:
+        graph = json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {}
+    if not isinstance(graph, dict) or graph.get("contract_version") != "runtime_path_graph_v1":
+        return {}
+    return {"key": key, "path": str(path), "graph": graph}
+
+
+def _learned_path_graph_key(result: dict[str, Any], *, request: VisionObserveScreenRequestModel) -> str | None:
+    haystack = " ".join(
+        str(item or "")
+        for item in [
+            request.app_name,
+            request.state_hint,
+            result.get("app_name"),
+            result.get("state_guess"),
+            result.get("screen_summary"),
+            (result.get("screen_reading") or {}).get("screen_summary") if isinstance(result.get("screen_reading"), dict) else "",
+            (result.get("screen_reading") or {}).get("state_guess") if isinstance(result.get("screen_reading"), dict) else "",
+        ]
+    ).casefold()
+    if "seek" in haystack or "nz.seek" in haystack or "job search" in haystack:
+        return "seek"
+    return None
+
+
+def _observation_screen_inventory(result: dict[str, Any]) -> dict[str, Any] | None:
+    if isinstance(result.get("screen_inventory"), dict):
+        return result["screen_inventory"]
+    screen_reading = result.get("screen_reading") if isinstance(result.get("screen_reading"), dict) else {}
+    if isinstance(screen_reading.get("screen_inventory"), dict):
+        return screen_reading["screen_inventory"]
+    parse_result = result.get("parse_result") if isinstance(result.get("parse_result"), dict) else {}
+    nested = parse_result.get("screen_reading") if isinstance(parse_result.get("screen_reading"), dict) else {}
+    if isinstance(nested.get("screen_inventory"), dict):
+        return nested["screen_inventory"]
+    return None
+
+
+def _observation_looks_like_seek_application_form(result: dict[str, Any], *, screen_inventory: dict[str, Any] | None) -> bool:
+    labels = " ".join(_inventory_texts(screen_inventory)).casefold()
+    fields = [
+        result.get("screen_summary"),
+        result.get("state_guess"),
+        (result.get("screen_reading") or {}).get("screen_summary") if isinstance(result.get("screen_reading"), dict) else "",
+        (result.get("screen_reading") or {}).get("state_guess") if isinstance(result.get("screen_reading"), dict) else "",
+        labels,
+    ]
+    text = " ".join(str(item or "") for item in fields).casefold()
+    form_terms = [
+        "choose documents",
+        "answer employer questions",
+        "update seek profile",
+        "review and submit",
+        "application form",
+        "cover letter",
+    ]
+    return any(term in text for term in form_terms)
+
+
+def _screen_map_sections_from_runtime_path_graph(
+    graph: dict[str, Any],
+    *,
+    result: dict[str, Any],
+    image_path: str,
+    fallback_sections: list[Any],
+) -> list[dict[str, Any]]:
+    width, height = _screen_map_image_size(result, image_path=image_path)
+    learned_bboxes = _learned_graph_region_bboxes(graph, width=width, height=height)
+    sections: list[dict[str, Any]] = []
+    fallback_by_id = {str(item.get("section_id") or ""): item for item in fallback_sections if isinstance(item, dict)}
+    for region in graph.get("regions") or []:
+        if not isinstance(region, dict):
+            continue
+        region_id = str(region.get("region_id") or "").strip()
+        if not region_id:
+            continue
+        bbox = learned_bboxes.get(region_id) or _normalize_map_bbox(region.get("bbox")) or _normalize_map_bbox(fallback_by_id.get(region_id, {}).get("bbox"))
+        section = {
+            "contract_version": "screen_map_section_v1",
+            "section_id": region_id,
+            "label": region.get("label") or region_id.replace("_", " ").title(),
+            "role": region.get("role") or "content",
+            "description": "Learned from runtime_path_graph_v1.",
+            "bbox": bbox,
+            "container_id": region.get("container_id"),
+            "parent_section_id": region.get("parent_region_id"),
+            "repeatable": bool(region.get("repeatable")),
+            "contains": region.get("contains") or [],
+            "source": "runtime_path_graph_v1",
+            "text_count": 0,
+            "text_sample": [],
+        }
+        texts = _texts_in_bbox(_screen_map_texts(result), bbox) if bbox else []
+        section["text_count"] = len(texts)
+        section["text_sample"] = [_first_compact_text(item.get("text")) for item in texts[:10] if _first_compact_text(item.get("text"))]
+        sections.append(section)
+    return sections or [item for item in fallback_sections if isinstance(item, dict)]
+
+
+def _screen_map_candidates_from_path_graph_actions(actions: dict[str, Any], *, sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    payload = actions.get("actions") if isinstance(actions, dict) else []
+    candidates: list[dict[str, Any]] = []
+    for index, action in enumerate(payload if isinstance(payload, list) else []):
+        if not isinstance(action, dict):
+            continue
+        action_id = str(action.get("action_template_id") or action.get("action_id") or f"path_action_{index}")
+        section_id = _section_for_path_graph_action(action_id, action)
+        bbox = _section_bbox(sections, section_id)
+        candidates.append(
+            {
+                "contract_version": "screen_map_candidate_v1",
+                "candidate_id": f"path_graph_action_{action_id}",
+                "label": action.get("label") or action.get("goal_template") or action_id.replace("_", " "),
+                "role": action.get("action_kind") or action.get("low_level_action_type") or "action",
+                "goal_hint": action.get("goal_template") or action_id,
+                "expected_effect": action.get("to_state_id") or action.get("transition_id") or "",
+                "risk_class": "safe_click_allowed" if action.get("low_level_action_type") in {"click", "scroll", "input"} else "safe_review_only",
+                "section_id": section_id,
+                "bbox": bbox,
+                "click_point": _bbox_center(bbox),
+                "confidence": 0.92,
+                "source": "runtime_path_graph_v1",
+                "action_template_id": action_id,
+                "low_level_action_type": action.get("low_level_action_type"),
+                "artifact_is_authorization": False,
+            }
+        )
+    return candidates
+
+
+def _resection_observed_candidates_for_path_graph(
+    candidates: list[Any],
+    *,
+    sections: list[dict[str, Any]],
+    graph_app_id: str,
+) -> list[dict[str, Any]]:
+    learned_sections = [item for item in sections if isinstance(item, dict) and item.get("bbox")]
+    results: list[dict[str, Any]] = []
+    for item in candidates:
+        if not isinstance(item, dict):
+            continue
+        candidate = dict(item)
+        bbox = _normalize_map_bbox(candidate.get("bbox"))
+        section_id = _best_section_id_for_bbox(bbox, learned_sections) if bbox else candidate.get("section_id")
+        if section_id:
+            candidate["section_id"] = section_id
+        if graph_app_id == "seek":
+            _apply_seek_path_graph_candidate_policy(candidate)
+        candidate["source_before_path_graph"] = candidate.get("source")
+        candidate["source"] = "model_observation_resectioned_by_runtime_path_graph"
+        results.append(candidate)
+    return results
+
+
+def _apply_seek_path_graph_candidate_policy(candidate: dict[str, Any]) -> None:
+    section_id = str(candidate.get("section_id") or "")
+    role = str(candidate.get("role") or "").casefold()
+    label = str(candidate.get("label") or "")
+    if section_id == "results_list" and role in {"news_card", "card", "menu_item", "menu item", ""}:
+        candidate["role"] = "job_card"
+        candidate["risk_class"] = "safe_click_allowed"
+        candidate["expected_effect"] = "open selected SEEK job in job_detail"
+    elif section_id in {"job_detail", "detail_header", "detail_body"}:
+        if any(term in label.casefold() for term in ("apply", "quick apply")):
+            candidate["role"] = "button"
+            candidate["risk_class"] = "safe_click_allowed"
+            candidate["expected_effect"] = "enter guarded apply flow; final submit remains forbidden"
+        else:
+            candidate["risk_class"] = candidate.get("risk_class") or "safe_review_only"
+
+
+def _screen_map_image_size(result: dict[str, Any], *, image_path: str) -> tuple[int, int]:
+    image_size = result.get("image_size") if isinstance(result.get("image_size"), dict) else {}
+    live_capture = result.get("live_capture") if isinstance(result.get("live_capture"), dict) else {}
+    width = int(_number(image_size.get("width") or live_capture.get("image_width")) or 0)
+    height = int(_number(image_size.get("height") or live_capture.get("image_height")) or 0)
+    if width > 0 and height > 0:
+        return width, height
+    try:
+        with Image.open(image_path) as image:
+            return int(image.width), int(image.height)
+    except Exception:
+        return 1000, 1000
+
+
+def _learned_graph_region_bboxes(graph: dict[str, Any], *, width: int, height: int) -> dict[str, dict[str, int]]:
+    if graph.get("app_id") != "seek":
+        return {}
+    chrome_h = min(height, max(72, round(height * 0.06)))
+    top_h = min(height - chrome_h, max(120, round(height * 0.12)))
+    content_y = chrome_h + top_h
+    content_h = max(1, height - content_y)
+    results_x = round(width * 0.235)
+    results_w = round(width * 0.20)
+    detail_x = round(width * 0.45)
+    detail_w = max(1, width - detail_x - round(width * 0.04))
+    return {
+        "top_search_area": {"x": 0, "y": chrome_h, "w": width, "h": top_h},
+        "results_list": {"x": results_x, "y": content_y, "w": results_w, "h": content_h},
+        "job_detail": {"x": detail_x, "y": content_y, "w": detail_w, "h": content_h},
+        "job_card": {"x": results_x, "y": content_y, "w": results_w, "h": content_h},
+        "detail_header": {"x": detail_x, "y": content_y, "w": detail_w, "h": max(1, round(content_h * 0.30))},
+        "detail_body": {"x": detail_x, "y": content_y + round(content_h * 0.30), "w": detail_w, "h": max(1, round(content_h * 0.70))},
+    }
+
+
+def _section_for_path_graph_action(action_id: str, action: dict[str, Any]) -> str:
+    if action.get("scroll_container_id") == "seek:job_detail" or action_id in {"read_detail", "apply_entry"}:
+        return "job_detail"
+    if action.get("scroll_container_id") == "seek:results_list" or action_id in {"open_job_card", "load_more_results"}:
+        return "results_list"
+    return str(action.get("source_section_id") or action.get("target_section_id") or "main_content")
+
+
+def _section_bbox(sections: list[dict[str, Any]], section_id: str) -> dict[str, int] | None:
+    for section in sections:
+        if section.get("section_id") == section_id and isinstance(section.get("bbox"), dict):
+            return _normalize_map_bbox(section["bbox"])
+    return None
+
+
+def _bbox_center(bbox: dict[str, Any] | None) -> dict[str, int] | None:
+    normalized = _normalize_map_bbox(bbox)
+    if not normalized:
+        return None
+    return {
+        "x": int(round(normalized["x"] + normalized["w"] / 2)),
+        "y": int(round(normalized["y"] + normalized["h"] / 2)),
+    }
+
+
+def _best_section_id_for_bbox(bbox: dict[str, Any] | None, sections: list[dict[str, Any]]) -> str | None:
+    normalized = _normalize_map_bbox(bbox)
+    if not normalized:
+        return None
+    best: tuple[float, str] | None = None
+    for section in sections:
+        section_bbox = _normalize_map_bbox(section.get("bbox"))
+        if not section_bbox:
+            continue
+        overlap = _bbox_intersection_area(normalized, section_bbox)
+        if overlap <= 0:
+            continue
+        score = overlap / max(1.0, float(normalized["w"] * normalized["h"]))
+        section_id = str(section.get("section_id") or "")
+        if best is None or score > best[0]:
+            best = (score, section_id)
+    return best[1] if best and best[0] >= 0.2 else None
+
+
+def _bbox_intersection_area(a: dict[str, Any], b: dict[str, Any]) -> float:
+    ax1, ay1 = float(a["x"]), float(a["y"])
+    ax2, ay2 = ax1 + float(a["w"]), ay1 + float(a["h"])
+    bx1, by1 = float(b["x"]), float(b["y"])
+    bx2, by2 = bx1 + float(b["w"]), by1 + float(b["h"])
+    return max(0.0, min(ax2, bx2) - max(ax1, bx1)) * max(0.0, min(ay2, by2) - max(ay1, by1))
+
+
+def _dedupe_screen_map_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    deduped: list[dict[str, Any]] = []
+    for candidate in candidates:
+        label = str(candidate.get("label") or "")
+        section_id = str(candidate.get("section_id") or "")
+        action_id = str(candidate.get("action_template_id") or "")
+        bbox = _normalize_map_bbox(candidate.get("bbox"))
+        bbox_key = ""
+        if bbox:
+            bbox_key = f"{bbox['x']}:{bbox['y']}:{bbox['w']}:{bbox['h']}"
+        key = f"{action_id}|{label.casefold()}|{section_id}|{bbox_key}"
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(candidate)
+    return deduped
+
+
+def _inventory_texts(screen_inventory: dict[str, Any] | None) -> list[str]:
+    inventory = screen_inventory if isinstance(screen_inventory, dict) else {}
+    labels: list[str] = []
+    for key in ("available_actions", "page_elements", "cards"):
+        for item in inventory.get(key) or []:
+            if not isinstance(item, dict):
+                continue
+            for field in ("label", "text", "title", "name"):
+                value = item.get(field)
+                if value:
+                    labels.append(str(value))
+    return labels
 
 
 def _build_learn_deep_review(
@@ -4329,16 +5272,67 @@ def _interaction_policy_from_item(item: dict[str, Any]) -> dict[str, Any]:
 def _risk_class_for_candidate(*, label: str, role: str, policy: dict[str, Any]) -> tuple[str, list[str]]:
     reasons = [str(item) for item in _as_list(policy.get("reasons")) if str(item or "").strip()]
     risk_text = " ".join([label, role, " ".join(reasons), str(policy.get("zone_type") or "")]).casefold()
-    dangerous_terms = [
-        "delete",
-        "remove",
+    if _looks_like_high_risk_action_text(risk_text):
+        return "requires_user_confirmation", sorted(set([*reasons, "potential_side_effect_action"]))
+    if policy.get("allowed") is False:
+        if _looks_like_low_risk_navigation_candidate(label=label, role=role, extra_text=risk_text):
+            return "safe_click_allowed", sorted(set([*reasons, "low_risk_navigation_policy_relaxed"]))
+        return "blocked", sorted(set(reasons or ["interaction_policy_blocked"]))
+    if policy.get("allowed") is True:
+        return "safe_click_allowed", sorted(set(reasons))
+    if any(token in str(role).casefold() for token in ["input", "textbox", "search"]):
+        return "safe_click_allowed", sorted(set(reasons))
+    return "safe_dry_run_only", sorted(set(reasons or ["requires_precise_location_before_click"]))
+
+
+def _execution_allowed_for_risk_class(*, label: str, role: str, risk_class: str) -> tuple[bool, str]:
+    normalized_risk = str(risk_class or "").strip()
+    risk_text = " ".join([label, role, normalized_risk]).casefold()
+    if normalized_risk == "safe_open_apply_flow" and not _looks_like_final_submit_action_text(risk_text):
+        return True, "risk_class_safe_open_apply_flow"
+    if _looks_like_high_risk_action_text(risk_text):
+        return False, "potential_side_effect_action"
+    if normalized_risk == "safe_click_allowed":
+        return True, "risk_class_safe_click_allowed"
+    if normalized_risk == "safe_dry_run_only" and _looks_like_low_risk_navigation_candidate(
+        label=label,
+        role=role,
+        extra_text=risk_text,
+    ):
+        return True, "low_risk_navigation_policy_relaxed"
+    return False, "requires_confirmation_or_high_risk_policy"
+
+
+def _looks_like_final_submit_action_text(text: str) -> bool:
+    normalized = str(text or "").casefold()
+    final_terms = [
+        "submit application",
+        "send application",
+        "complete application",
+        "confirm application",
+        "final_submit",
         "payment",
-        "pay",
-        "purchase",
-        "send",
-        "submit",
-        "authorize",
-        "permission",
+        "pay now",
+        "提交申请",
+        "发送申请",
+        "确认提交",
+        "付款",
+    ]
+    return any(term in normalized for term in final_terms)
+
+
+def _looks_like_high_risk_action_text(text: str) -> bool:
+    normalized = str(text or "").casefold()
+    dangerous_phrases = [
+        "quick apply",
+        "submit application",
+        "send application",
+        "complete application",
+        "confirm application",
+        "make payment",
+        "pay now",
+        "pay invoice",
+        "save changes",
         "close window",
         "删除",
         "移除",
@@ -4346,18 +5340,46 @@ def _risk_class_for_candidate(*, label: str, role: str, policy: dict[str, Any]) 
         "购买",
         "发送",
         "提交",
+        "申请",
         "授权",
         "关闭窗口",
     ]
-    if any(term in risk_text for term in dangerous_terms):
-        return "requires_user_confirmation", sorted(set([*reasons, "potential_side_effect_action"]))
-    if policy.get("allowed") is False:
-        return "blocked", sorted(set(reasons or ["interaction_policy_blocked"]))
-    if policy.get("allowed") is True:
-        return "safe_click_allowed", sorted(set(reasons))
-    if any(token in str(role).casefold() for token in ["input", "textbox", "search"]):
-        return "safe_click_allowed", sorted(set(reasons))
-    return "safe_dry_run_only", sorted(set(reasons or ["requires_precise_location_before_click"]))
+    if any(term in normalized for term in dangerous_phrases):
+        return True
+    tokens = set(re.findall(r"[a-z0-9]+", normalized))
+    dangerous_tokens = {"delete", "remove", "purchase", "send", "submit", "apply", "authorize", "permission", "upload", "pay", "payment"}
+    return bool(tokens & dangerous_tokens)
+
+
+def _looks_like_low_risk_navigation_candidate(*, label: str, role: str, extra_text: str = "") -> bool:
+    text = " ".join([label, role, extra_text]).casefold()
+    role_tokens = [
+        "card",
+        "news_card",
+        "job_card",
+        "result",
+        "search_result",
+        "link",
+        "title",
+        "row",
+        "list_item",
+        "article",
+        "detail",
+    ]
+    effect_tokens = [
+        "open",
+        "view",
+        "read",
+        "detail",
+        "article",
+        "job",
+        "card",
+        "result",
+        "recommended",
+        "recommendation",
+        "listing",
+    ]
+    return any(token in text for token in role_tokens) or any(token in text for token in effect_tokens)
 
 
 def _expected_effect_from_item(item: dict[str, Any], *, role: str) -> str:
@@ -5729,11 +6751,46 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
                 top_k=request.top_k,
                 image_size=input_image_size,
             )
-        seeded_candidate = _seeded_candidate_payload(request.metadata)
+        with timer.step("visual_asset_recall", observe_reuse_status=observe_reuse.get("status")):
+            visual_asset_recall = _build_visual_asset_recall(
+                metadata=request.metadata,
+                observe_reuse=observe_reuse,
+                image_path=image_path,
+                image_size=input_image_size,
+                goal=goal,
+            )
+        original_seeded_candidate = _seeded_candidate_payload(request.metadata)
+        visual_asset_seeded_candidate = (
+            visual_asset_recall.get("selected_candidate") if isinstance(visual_asset_recall, dict) else None
+        )
+        effective_seeded_candidate = original_seeded_candidate or (
+            visual_asset_seeded_candidate if isinstance(visual_asset_seeded_candidate, dict) else None
+        )
+        recognition_metadata = dict(request.metadata or {})
+        recognition_metadata["visual_asset_recall"] = visual_asset_recall
+        if effective_seeded_candidate is not None and original_seeded_candidate is None:
+            recognition_metadata["seeded_candidate_v1"] = effective_seeded_candidate
+        if (
+            original_seeded_candidate is None
+            and isinstance(visual_asset_seeded_candidate, dict)
+            and visual_asset_recall.get("fast_lane_allowed") is True
+        ):
+            reviewed_execution = dict(recognition_metadata.get("reviewed_test_execution") or {})
+            reviewed_execution.update(
+                {
+                    "allow_seeded_candidate_without_model": True,
+                    "allow_low_margin_when_grounded": True,
+                    "source": "visual_asset_recall_v1",
+                    "reason": "low_risk_visual_asset_current_capture_match",
+                }
+            )
+            recognition_metadata["reviewed_test_execution"] = reviewed_execution
+        effective_request_for_recognition = request.model_copy(update={"metadata": recognition_metadata})
+        seeded_candidate = _seeded_candidate_payload(effective_request_for_recognition.metadata)
         local_config = _selected_local_vision_config(config, request.provider_mode)
         if _uses_vista_point_grounding(local_config):
             return _recognition_plan_from_vista_point(
-                request=request,
+                request=effective_request_for_recognition,
                 timer=timer,
                 config=config,
                 local_config=local_config,
@@ -5743,7 +6800,7 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
                 observe_reuse=observe_reuse,
                 path_graph_recall=path_graph_recall,
             )
-        effective_metadata = dict(request.metadata or {})
+        effective_metadata = dict(effective_request_for_recognition.metadata or {})
         if observe_reuse.get("status") == "ready":
             effective_metadata["reused_ocr_anchors"] = observe_reuse["ocr_anchors"]
             effective_metadata["reused_ocr_source_trace_path"] = observe_reuse["trace_path"]
@@ -5754,7 +6811,7 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
             }
         if path_graph_recall.get("status") in {"ready", "empty"}:
             effective_metadata["path_graph_recall"] = path_graph_recall
-        effective_request = request.model_copy(update={"metadata": effective_metadata})
+        effective_request = effective_request_for_recognition.model_copy(update={"metadata": effective_metadata})
         with timer.step("prepare_ocr_anchors"):
             vision_request, ocr_result, ocr_anchor_payload, ocr_anchor_status = _recognition_vision_request_with_ocr_anchors(
                 effective_request,
@@ -5860,7 +6917,14 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
                 if key not in {"ocr_anchors", "screen_map"}
             },
             "path_graph_recall": path_graph_recall,
+            "visual_asset_recall": visual_asset_recall,
             "seeded_candidate": seeded_candidate,
+            "candidate_freshness_decision": _candidate_freshness_decision_for_trace(
+                seeded_candidate,
+                image_path=image_path,
+                image_size=input_image_size,
+                grounding=narrow_search_result,
+            ),
             "parse_result": {
                 "vision_regions": normalized.to_dict(),
                 "ocr_result": ocr_result.to_dict(),
@@ -5907,6 +6971,12 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
                 "path_graph_recall_selected_count": int((candidate_result.summary or {}).get("path_graph_recall_selected_count") or 0),
                 "seeded_candidate_used": bool((candidate_result.summary or {}).get("seeded_candidate_used")),
                 "seeded_candidate_selected": bool((candidate_result.summary or {}).get("seeded_candidate_selected")),
+                "visual_asset_recall_used": visual_asset_recall.get("status") in {"matched", "no_match"},
+                "visual_asset_recall_status": visual_asset_recall.get("status"),
+                "visual_asset_fast_lane_used": bool(
+                    visual_asset_recall.get("fast_lane_allowed")
+                    and (candidate_result.summary or {}).get("seeded_candidate_selected")
+                ),
                 "state_match_status": (path_graph_recall.get("state_match") or {}).get("status"),
                 "screen_reading_used": True,
                 "screen_reading_rank_evidence_used": True,

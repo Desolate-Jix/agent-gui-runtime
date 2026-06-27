@@ -8,6 +8,10 @@ description: Use for the SEEK automation MVP when accuracy, gated clicks, nested
 This skill keeps SEEK automation as a dedicated high-precision workflow.
 Do not dilute it into a generic web agent path.
 
+Before scoring or applying to any job, read and follow:
+
+- `skills/seek-high-precision/JOB_REQUIREMENTS.md`
+
 ## Scope
 
 Use this workflow for real SEEK search/detail/application pages.
@@ -48,7 +52,7 @@ Reusable foundations live outside the SEEK layer:
 3. Traverse cards with `recognition_plan_v1`, `pre_click_decision_v1`, and post-click verification.
 4. Read details by scrolling only `seek:job_detail`.
 5. Extract `seek_job_card_v1` and `seek_job_detail_v1`.
-6. Score jobs with `candidate_profile_v1`.
+6. Score jobs with `candidate_profile_v1` and `JOB_REQUIREMENTS.md`.
 7. Save `strong_apply` and `maybe_apply` jobs.
 8. Write `seek_mvp_run_report_v1` and `seek_mvp_traversal_trace_v1`.
 9. Run `seek_mvp_run_audit_v1` before Apply Entry or safe-fill.

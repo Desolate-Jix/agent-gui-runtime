@@ -4,11 +4,73 @@ from pathlib import Path
 import json
 
 from fastapi.testclient import TestClient
-from PIL import Image
+from PIL import Image, ImageDraw
 import pytest
 
 from app.main import app
 from app.api import vision as vision_api
+
+
+def test_safe_dry_run_card_risk_can_be_relaxed_for_low_risk_navigation() -> None:
+    allowed, reason = vision_api._execution_allowed_for_risk_class(
+        label="AI Product Engineer",
+        role="news_card",
+        risk_class="safe_dry_run_only",
+    )
+
+    assert allowed is True
+    assert reason == "low_risk_navigation_policy_relaxed"
+
+
+def test_safe_dry_run_apply_or_submit_stays_blocked() -> None:
+    apply_allowed, apply_reason = vision_api._execution_allowed_for_risk_class(
+        label="Quick apply",
+        role="button",
+        risk_class="safe_dry_run_only",
+    )
+    submit_allowed, submit_reason = vision_api._execution_allowed_for_risk_class(
+        label="Submit application",
+        role="button",
+        risk_class="safe_dry_run_only",
+    )
+
+    assert apply_allowed is False
+    assert apply_reason == "potential_side_effect_action"
+    assert submit_allowed is False
+    assert submit_reason == "potential_side_effect_action"
+
+
+def test_payment_word_inside_job_title_does_not_block_safe_open_detail() -> None:
+    allowed, reason = vision_api._execution_allowed_for_risk_class(
+        label="Senior Software Engineer-Cards and Payments | Kiwibank",
+        role="button",
+        risk_class="safe_click_allowed",
+    )
+
+    assert allowed is True
+    assert reason == "risk_class_safe_click_allowed"
+
+
+def test_blocked_policy_low_risk_card_becomes_safe_click_candidate() -> None:
+    risk_class, reasons = vision_api._risk_class_for_candidate(
+        label="AI Product Engineer",
+        role="news_card",
+        policy={"allowed": False, "reasons": ["homepage_recommendation"]},
+    )
+
+    assert risk_class == "safe_click_allowed"
+    assert "low_risk_navigation_policy_relaxed" in reasons
+
+
+def test_blocked_policy_submit_still_requires_confirmation() -> None:
+    risk_class, reasons = vision_api._risk_class_for_candidate(
+        label="Submit application",
+        role="button",
+        policy={"allowed": False, "reasons": ["homepage_recommendation"]},
+    )
+
+    assert risk_class == "requires_user_confirmation"
+    assert "potential_side_effect_action" in reasons
 
 
 def test_vision_analyze_returns_artifact_metadata(tmp_path, monkeypatch) -> None:
@@ -997,17 +1059,21 @@ def test_vision_recognition_plan_uses_path_graph_candidate_roi_for_vista(tmp_pat
     assert len(calls) == 1
     assert calls[0]["image_path"] != image_path
     assert "Candidate bboxes are in processed ROI image pixel coordinates" in calls[0]["prompt"]
-    assert "bbox=[48,106,160,56]" in calls[0]["prompt"]
+    assert "bbox=[32,84,160,56]" in calls[0]["prompt"]
     vista = result["parse_result"]["vista_point_grounding"]
     assert vista["vista_stage"] == "pathgraph_candidate_roi_refine"
     assert vista["image_preprocess"]["locate_strategy"] == "pathgraph_candidate_roi_refine"
     assert vista["image_preprocess"]["roi_source"] == "top1_only"
-    assert vista["image_preprocess"]["crop_bounds_original"] == {"x": 132, "y": 4, "w": 256, "h": 256}
-    assert vista["processed_point"] == {"x": 128, "y": 128}
-    assert vista["point"] == {"x": 260, "y": 132}
+    assert vista["image_preprocess"]["roi_policy"] == "compact_pathgraph_top1_roi_primary"
+    assert vista["image_preprocess"]["fallback_tier"] == "primary"
+    assert vista["image_preprocess"]["crop_bounds_original"] == {"x": 148, "y": 26, "w": 224, "h": 224}
+    assert vista["processed_point"] == {"x": 112, "y": 112}
+    assert vista["point"] == {"x": 260, "y": 138}
     assert result["pre_click_decision"]["allowed"] is True
     assert result["model_io"]["attempt_count"] == 1
     assert result["model_io"]["attempts"][0]["vista_stage"] == "pathgraph_candidate_roi_refine"
+    assert result["execution_path"]["vista_roi_policy"] == "compact_pathgraph_top1_roi_primary"
+    assert result["execution_path"]["vista_roi_fallback_tier"] == "primary"
 
 
 def test_vision_recognition_plan_uses_seeded_candidate_roi_for_vista(tmp_path, monkeypatch) -> None:
@@ -1090,6 +1156,11 @@ def test_vision_recognition_plan_uses_seeded_candidate_roi_for_vista(tmp_path, m
     assert calls
     assert [candidate.candidate_id for candidate in calls[0]["candidates"]] == ["seeded_seek-card-1"]
     assert calls[0]["image_preprocess"]["roi_source"] == "seeded_candidate_v1"
+    assert calls[0]["image_preprocess"]["roi_policy"] == "compact_seed_candidate_roi_primary"
+    assert calls[0]["image_preprocess"]["fallback_tier"] == "primary"
+    assert calls[0]["image_preprocess"]["max_edge"] == 448
+    assert calls[0]["image_preprocess"]["roi_padding_px"] == 16
+    assert calls[0]["image_preprocess"]["crop_bounds_original"] == {"x": 8, "y": 384, "w": 442, "h": 252}
     candidate = result["candidate_result"]["candidates"][0]
     assert candidate["candidate_id"] == "seeded_seek-card-1"
     assert candidate["element"]["sources"] == ["seeded_candidate_v1"]
@@ -1099,6 +1170,121 @@ def test_vision_recognition_plan_uses_seeded_candidate_roi_for_vista(tmp_path, m
     assert result["pre_click_decision"]["selected_click_point"] == {"x": 220, "y": 510}
     assert result["narrow_search_result"]["results"][0]["coordinate_source"] == "seeded_candidate_v1_validated_by_vista_point_v1"
     assert result["parse_result"]["vista_point_grounding"]["image_preprocess"]["roi_source"] == "seeded_candidate_v1"
+    assert result["candidate_result"]["summary"]["vista_roi_policy"] == "compact_seed_candidate_roi_primary"
+    assert result["narrow_search_result"]["summary"]["vista_roi_fallback_tier"] == "primary"
+
+
+def test_vision_recognition_plan_visual_asset_fast_lane_skips_vista(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    template_path = tmp_path / "quick_apply_template.png"
+    image = Image.new("RGB", (900, 760), color=(255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    button_bbox = {"x": 620, "y": 210, "w": 150, "h": 46}
+    draw.rounded_rectangle(
+        (
+            button_bbox["x"],
+            button_bbox["y"],
+            button_bbox["x"] + button_bbox["w"],
+            button_bbox["y"] + button_bbox["h"],
+        ),
+        radius=8,
+        fill=(229, 0, 125),
+    )
+    draw.text((button_bbox["x"] + 28, button_bbox["y"] + 14), "Quick apply", fill="white")
+    image.save(image_path)
+    image.crop(
+        (
+            button_bbox["x"],
+            button_bbox["y"],
+            button_bbox["x"] + button_bbox["w"],
+            button_bbox["y"] + button_bbox["h"],
+        )
+    ).save(template_path)
+
+    monkeypatch.setattr("app.api.vision.VISTA_DIRECT_IMAGES_DIR", tmp_path / "vista-direct")
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr(
+        "app.api.vision._call_vista_point_grounding",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("VISTA should be skipped for visual asset fast lane")),
+    )
+    monkeypatch.setattr(
+        "app.api.vision._execute_fast_inventory_from_uia",
+        lambda **_kwargs: {"contract_version": "execute_fast_inventory_v1", "status": "skipped", "reason": "test"},
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "点击申请",
+            "app_name": "SEEK",
+            "agent_mode": "execute",
+            "top_k": 3,
+            "metadata": {
+                "visual_assets": {
+                    "contract_version": "visual_asset_store_v1",
+                    "assets": [
+                        {
+                            "contract_version": "visual_asset_v1",
+                            "asset_id": "seek.quick_apply.primary",
+                            "label": "Quick apply",
+                            "semantic_action": "open_apply_flow",
+                            "danger_level": "flow_entry",
+                            "requires_gate": True,
+                            "can_authorize_click": False,
+                            "source": {
+                                "capture_id": "learn-capture",
+                                "screenshot_size": {"width": 900, "height": 760},
+                            },
+                            "source_geometry": {
+                                "bbox": button_bbox,
+                                "click_point": {"x": 695, "y": 233},
+                            },
+                            "crop": {"tight_crop_ref": str(template_path)},
+                            "match_policy": {"scale_variants": [1.0], "min_score": 0.9, "min_score_gap": 0.0},
+                            "scope": {"allowed_container_ids": ["seek:job_detail"]},
+                        }
+                    ],
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    assert result["visual_asset_recall"]["status"] == "matched"
+    assert result["visual_asset_recall"]["fast_lane_allowed"] is True
+    assert result["visual_asset_recall"]["matches"][0]["elapsed_ms"] < 1000
+    assert result["visual_asset_recall"]["matches"][0]["current_roi_ref"]
+    assert result["visual_asset_recall"]["matches"][0]["current_match_ref"]
+    assert result["execution_path"]["visual_asset_fast_lane_used"] is True
+    assert result["candidate_result"]["summary"]["seeded_candidate_selected"] is True
+    assert result["candidate_result"]["summary"]["vista_point_grounding_used"] is False
+    assert result["model_io"]["status"] == "skipped"
+    assert result["model_io"]["attempt_count"] == 0
+    assert result["pre_click_decision"]["allowed"] is True
+    assert result["pre_click_decision"]["selected_click_point"] == {"x": 695, "y": 233}
+    assert result["narrow_search_result"]["results"][0]["coordinate_source"] == "seeded_candidate_v1_reviewed_local"
 
 
 def test_seeded_candidate_rejects_point_outside_bbox() -> None:
@@ -1115,6 +1301,22 @@ def test_seeded_candidate_rejects_point_outside_bbox() -> None:
     )
 
     assert candidate is None
+
+
+def test_vista_roi_policy_marks_ambiguous_pathgraph_union_as_fallback() -> None:
+    assert vision_api._vista_candidate_roi_policy("seeded_candidate_v1") == {
+        "policy": "compact_seed_candidate_roi_primary",
+        "padding": 16,
+        "min_size": 192,
+        "max_edge": 448,
+        "fallback_tier": "primary",
+    }
+    assert vision_api._vista_candidate_roi_policy("top1_score_gap")["policy"] == "compact_pathgraph_top1_roi_primary"
+    union_policy = vision_api._vista_candidate_roi_policy("union_top_candidates")
+
+    assert union_policy["policy"] == "pathgraph_union_roi_fallback"
+    assert union_policy["fallback_tier"] == "fallback"
+    assert union_policy["max_edge"] == 640
 
 
 def test_seeded_candidate_uses_seed_point_when_vista_roi_point_disagrees(tmp_path, monkeypatch) -> None:

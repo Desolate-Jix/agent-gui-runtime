@@ -73,6 +73,60 @@ def test_application_flow_state_detects_apply_flow_without_final_submit() -> Non
     assert state["stop_reason"] == "cover_letter_field_detected_stop_before_paste"
 
 
+def test_application_flow_state_detects_seek_apply_route_before_form_text_loads() -> None:
+    observation = {
+        "screen_inventory": {
+            "contract_version": "screen_inventory_v1",
+            "available_actions": [],
+            "page_elements": [
+                {"text": "https://nz.seek.com/job/92882224/apply?sol=abc"},
+                {"text": "SEEK"},
+            ],
+            "cards": [],
+        },
+    }
+
+    state = assess_seek_application_flow_state(observation)
+    decision = build_seek_apply_flow_decision(state)
+
+    assert state["state_type"] == "application_flow_opened"
+    assert state["application_flow_started"] is True
+    assert "seek_apply_route_detected" in state["detected_states"]
+    assert state["final_submit_visible"] is False
+    assert decision["decision"] == "wait_for_form_readiness"
+    assert decision["blocked_downstream"]["cover_letter_draft"] is True
+    assert decision["blocked_downstream"]["answer_plan"] is True
+
+
+def test_application_flow_state_treats_update_profile_step_as_read_only_profile_review() -> None:
+    observation = {
+        "screen_inventory": {
+            "contract_version": "screen_inventory_v1",
+            "available_actions": [{"label": "Continue", "role": "button"}],
+            "page_elements": [
+                {"text": "https://nz.seek.com/job/92822270/apply/profile?sol=abc"},
+                {"text": "Choose documents"},
+                {"text": "Answer employer questions"},
+                {"text": "Update SEEK Profile"},
+                {"text": "Review and submit"},
+                {"text": "Skills"},
+                {"text": "Continue"},
+            ],
+            "cards": [],
+        },
+    }
+
+    state = assess_seek_application_flow_state(observation)
+    decision = build_seek_apply_flow_decision(state)
+
+    assert state["state_type"] == "profile_review_detected"
+    assert state["current_step"] == "update_seek_profile"
+    assert "profile_review_detected" in state["detected_states"]
+    assert state["final_submit_visible"] is False
+    assert decision["decision"] == "continue_read_only"
+    assert decision["blocked_downstream"]["submit"] is True
+
+
 def test_application_flow_state_ignores_progress_steps_on_choose_documents() -> None:
     observation = {
         "screen_inventory": {
@@ -184,7 +238,11 @@ def test_application_flow_state_detects_risky_questions() -> None:
         "screen_inventory": {
             "contract_version": "screen_inventory_v1",
             "available_actions": [],
-            "page_elements": [{"text": "What is your expected salary?"}, {"text": "Do you have the right to work in New Zealand?"}],
+            "page_elements": [
+                {"text": "https://nz.seek.com/job/92822270/apply?sol=abc"},
+                {"text": "What is your expected salary?"},
+                {"text": "Do you have the right to work in New Zealand?"},
+            ],
             "cards": [],
         },
     }
@@ -194,6 +252,62 @@ def test_application_flow_state_detects_risky_questions() -> None:
     assert state["state_type"] == "risky_application_questions"
     assert "risky_questions_present" in state["risk_flags"]
     assert state["final_submission_performed"] is False
+
+
+def test_application_flow_state_does_not_treat_search_results_as_risky_application() -> None:
+    observation = {
+        "screen_inventory": {
+            "contract_version": "screen_inventory_v1",
+            "available_actions": [
+                {"text": "Job search", "role": "input"},
+                {"text": "Location filter", "role": "input"},
+                {"text": "refine by salary range", "role": "button"},
+                {"text": "Apply button", "role": "button"},
+            ],
+            "page_elements": [
+                {"text": "https://nz.seek.com/jobs/in-All-Auckland/graduate?jobId=92884655&type=promoted"},
+                {"text": "Software Engineer Specialist - Integration"},
+                {"text": "Apply"},
+                {"text": "Medium application volume"},
+                {"text": "A strong culture of innovation with health and wellbeing at its heart"},
+                {"text": "Show salary range refinements."},
+                {"text": "Perform a job search"},
+            ],
+            "cards": [],
+        },
+    }
+
+    state = assess_seek_application_flow_state(observation)
+
+    assert state["state_type"] != "risky_application_questions"
+    assert "risky_questions_present" not in state["risk_flags"]
+    assert state["application_flow_started"] is False
+    assert state["final_submit_visible"] is False
+
+
+def test_application_flow_state_treats_job_detail_question_disclosure_as_pre_apply() -> None:
+    observation = {
+        "screen_inventory": {
+            "contract_version": "screen_inventory_v1",
+            "available_actions": [
+                {"text": "Apply button", "role": "button", "bbox": {"x": 1300, "y": 530, "w": 100, "h": 40}},
+            ],
+            "page_elements": [
+                {"text": "https://nz.seek.com/jobs/in-All-Auckland/graduate?jobId=92456514&type=promoted"},
+                {"text": "Employer questions"},
+                {"text": "Your application will include the following questions:"},
+                {"text": "Which of the following statements best describes your right to work in New Zealand?"},
+                {"text": "What's your expected annual base salary?"},
+            ],
+            "cards": [],
+        },
+    }
+
+    state = assess_seek_application_flow_state(observation)
+
+    assert state["state_type"] != "risky_application_questions"
+    assert state["application_flow_started"] is False
+    assert "risky_questions_present" not in state["risk_flags"]
 
 
 def test_application_flow_state_detects_review_and_submit_as_review_step_not_final_submit() -> None:
@@ -212,6 +326,31 @@ def test_application_flow_state_detects_review_and_submit_as_review_step_not_fin
     assert state["stop_reason"] == "review_step_stop_before_final_submit"
     assert state["final_submit_visible_blocker"]["blocked"] is False
     assert "review and submit" not in state["final_submit_visible_blocker"]["matched_terms"]
+
+
+def test_application_flow_state_review_step_overrides_review_summary_fields() -> None:
+    observation = {
+        "screen_inventory": {
+            "contract_version": "screen_inventory_v1",
+            "available_actions": [{"label": "Continue", "role": "button"}],
+            "page_elements": [
+                {"text": "Review and submit | SEEK"},
+                {"text": "https://nz.seek.com/job/92847815/apply/review?sol=abc"},
+                {"text": "Documents included"},
+                {"text": "Cover letter"},
+                {"text": "You wrote a cover letter for this application"},
+                {"text": "Employer questions"},
+                {"text": "You answered 1 out of 1"},
+            ],
+            "cards": [],
+        },
+    }
+
+    state = assess_seek_application_flow_state(observation)
+
+    assert state["current_step"] == "review_and_submit"
+    assert state["state_type"] == "review_step_detected"
+    assert state["stop_reason"] == "review_step_stop_before_final_submit"
 
 
 def test_application_flow_state_does_not_treat_progress_review_label_as_current_step() -> None:
@@ -246,6 +385,34 @@ def test_application_flow_state_does_not_treat_progress_review_label_as_current_
     assert state["final_submit_visible"] is False
 
 
+def test_application_flow_state_tolerates_ocr_noise_on_update_profile_step() -> None:
+    observation = {
+        "screen_inventory": {
+            "contract_version": "screen_inventory_v1",
+            "available_actions": [
+                {"label": "https//nz.seek.com/job/92847815/apply/profil?sol=abc", "role": "input"},
+                {"label": "Review and submit", "role": "button"},
+                {"label": "Continue", "role": "button"},
+            ],
+            "page_elements": [
+                {"text": "Update SEEK Profle | SEEK"},
+                {"text": "Choose documents"},
+                {"text": "Answer employer questions"},
+                {"text": "Update SEEKProfile"},
+                {"text": "Review and submit"},
+                {"text": "Your SEEK Profile is part of your application. Make sure it's up-to-date."},
+            ],
+            "cards": [],
+        },
+    }
+
+    state = assess_seek_application_flow_state(observation)
+
+    assert state["current_step"] == "update_seek_profile"
+    assert state["state_type"] != "review_step_detected"
+    assert state["stop_reason"] != "review_step_stop_before_final_submit"
+
+
 def test_application_flow_state_does_not_treat_negative_instruction_as_submit_button() -> None:
     observation = {
         "screen_inventory": {
@@ -273,6 +440,7 @@ def test_application_flow_state_builds_read_only_form_inventory() -> None:
             "contract_version": "screen_inventory_v1",
             "available_actions": [{"label": "Save draft"}],
             "page_elements": [
+                {"text": "https://nz.seek.com/job/92822270/apply/role-requirements?sol=abc"},
                 {"text": "Screening question"},
                 {"text": "Tell us why you are interested in this role", "role": "textarea"},
             ],

@@ -234,6 +234,14 @@ def _match_expected_text(value: Any, haystack: str, *, allow_short: bool = True)
         return {"matched": False, "reason": "empty_expected_text", "value": text}
     if normalized in haystack:
         return {"matched": True, "reason": "exact_normalized_text_match", "value": text}
+    filename_match = _match_expected_filename_with_ocr_canonicalization(text, haystack)
+    if filename_match:
+        return {
+            "matched": True,
+            "reason": "filename_ocr_canonicalized_match",
+            "value": text,
+            **filename_match,
+        }
     snippets = _text_snippets(text, allow_short=allow_short)
     matched = [snippet for snippet in snippets if _normalize(snippet) in haystack]
     if matched:
@@ -247,6 +255,35 @@ def _contains_submit_application(texts: list[str]) -> bool:
         if normalized in {"submit application", "send application", "complete application"}:
             return True
     return False
+
+
+def _match_expected_filename_with_ocr_canonicalization(text: str, haystack: str) -> dict[str, Any] | None:
+    match = re.search(r"([A-Za-z0-9][A-Za-z0-9 _.-]{2,}\.(?:pdf|docx?|rtf))", str(text or ""), flags=re.IGNORECASE)
+    if not match:
+        return None
+    filename = match.group(1).strip()
+    normalized = _normalize(filename)
+    ext_match = re.match(r"^(.*?)(pdf|docx?|rtf)$", normalized)
+    if not ext_match:
+        return None
+    stem, ext = ext_match.groups()
+    if len(stem) < 4:
+        return None
+    pattern = "".join(_filename_ocr_char_pattern(char) for char in stem)
+    pattern = f"{pattern}[il1]?{re.escape(ext)}"
+    if re.search(pattern, haystack):
+        return {
+            "filename": filename,
+            "normalization_scope": "filename_short_token_ocr",
+            "ocr_equivalence": "I/l/1 within filename plus optional stray I/l/1 before extension",
+        }
+    return None
+
+
+def _filename_ocr_char_pattern(char: str) -> str:
+    if char in {"i", "l", "1"}:
+        return "[il1]"
+    return re.escape(char)
 
 
 def _review_answered_count(haystack: str) -> int | None:

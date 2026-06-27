@@ -630,6 +630,106 @@ def test_extract_seek_job_cards_prefers_complete_uia_card_for_overlapping_same_j
     assert job["primary_action_id"] == "action_uia_complete"
 
 
+def test_extract_seek_job_cards_rejects_sentence_fragment_synthetic_title() -> None:
+    inventory = {
+        "contract_version": "screen_inventory_v1",
+        "image_size": {"width": 2560, "height": 1400},
+        "available_actions": [
+            {
+                "id": "action_aia",
+                "label": "Software Engineer Specialist – Integration",
+                "bbox": {"x": 632, "y": 529, "w": 475, "h": 395},
+                "click_point": {"x": 869, "y": 726},
+            },
+            {
+                "id": "action_garmin",
+                "label": "Embedded Software Engineer",
+                "bbox": {"x": 652, "y": 955, "w": 416, "h": 255},
+                "click_point": {"x": 780, "y": 968},
+            },
+        ],
+        "page_elements": [
+            {"id": "aia_company", "text": "AIA New Zealand", "bbox": {"x": 652, "y": 610, "w": 170, "h": 24}},
+            {"id": "aia_location", "text": "Takapuna, Auckland", "bbox": {"x": 652, "y": 645, "w": 190, "h": 24}},
+            {"id": "garmin_company", "text": "Garmin New Zealand Limited", "bbox": {"x": 652, "y": 1005, "w": 250, "h": 24}},
+            {"id": "garmin_location", "text": "Grey Lynn, Auckland", "bbox": {"x": 652, "y": 1038, "w": 210, "h": 24}},
+            {
+                "id": "garmin_summary_fragment",
+                "text": "skills! Join our team as a Software Engineer and make a",
+                "bbox": {"x": 672, "y": 1180, "w": 390, "h": 24},
+            },
+            {"id": "garmin_work_type", "text": "Featured", "bbox": {"x": 672, "y": 1215, "w": 120, "h": 24}},
+        ],
+        "cards": [
+            {
+                "id": "card_aia",
+                "label": "Software Engineer Specialist – Integration",
+                "bbox": {"x": 632, "y": 529, "w": 475, "h": 395},
+                "primary_action_id": "action_aia",
+                "child_action_ids": ["action_aia"],
+                "child_page_element_ids": ["aia_company", "aia_location"],
+            },
+            {
+                "id": "card_garmin",
+                "label": "Embedded Software Engineer",
+                "bbox": {"x": 652, "y": 955, "w": 416, "h": 255},
+                "primary_action_id": "action_garmin",
+                "child_action_ids": ["action_garmin"],
+                "child_page_element_ids": ["garmin_company", "garmin_location", "garmin_summary_fragment", "garmin_work_type"],
+            },
+        ],
+    }
+
+    result = extract_seek_job_cards({"image_size": {"width": 2560, "height": 1400}, "screen_inventory": inventory})
+
+    titles = [job["title"] for job in result["jobs"]]
+    assert titles == ["Software Engineer Specialist – Integration", "Embedded Software Engineer"]
+    assert all(not title.startswith("skills!") for title in titles)
+
+
+def test_extract_seek_job_cards_prefers_real_title_over_summary_fragment_in_generic_card() -> None:
+    inventory = {
+        "contract_version": "screen_inventory_v1",
+        "image_size": {"width": 2560, "height": 1400},
+        "available_actions": [
+            {
+                "id": "card_action",
+                "label": "Job listing card",
+                "bbox": {"x": 638, "y": 910, "w": 462, "h": 378},
+                "click_point": {"x": 869, "y": 1099},
+            },
+            {"id": "company_action", "label": "Job company name", "bbox": {"x": 638, "y": 966, "w": 462, "h": 42}},
+            {"id": "location_action", "label": "Job location", "bbox": {"x": 638, "y": 994, "w": 462, "h": 42}},
+        ],
+        "page_elements": [
+            {"id": "title", "text": "Embedded Software Engineer", "bbox": {"x": 655, "y": 955, "w": 248, "h": 26}},
+            {"id": "company", "text": "Garmin New Zealand Limited", "bbox": {"x": 655, "y": 1005, "w": 235, "h": 22}},
+            {"id": "location", "text": "Grey Lynn, Auckland", "bbox": {"x": 653, "y": 1037, "w": 152, "h": 28}},
+            {
+                "id": "summary",
+                "text": "skills! Join our team as a Software Engineer and make a",
+                "bbox": {"x": 654, "y": 1240, "w": 387, "h": 22},
+            },
+            {"id": "summary2", "text": "splash with innovative solutions.", "bbox": {"x": 653, "y": 1260, "w": 232, "h": 25}},
+        ],
+        "cards": [
+            {
+                "id": "generic_card",
+                "label": "Job listing card",
+                "bbox": {"x": 638, "y": 910, "w": 462, "h": 378},
+                "primary_action_id": "card_action",
+                "child_action_ids": ["card_action", "company_action", "location_action"],
+                "child_page_element_ids": ["title", "company", "location", "summary", "summary2"],
+            }
+        ],
+    }
+
+    result = extract_seek_job_cards({"image_size": {"width": 2560, "height": 1400}, "screen_inventory": inventory})
+
+    assert [job["title"] for job in result["jobs"]] == ["Embedded Software Engineer"]
+    assert result["jobs"][0]["company"] == "Garmin New Zealand Limited"
+
+
 def test_extract_seek_job_detail_from_right_pane_inventory() -> None:
     detail_bbox = {"x": 490, "y": 210, "w": 650, "h": 900}
     inventory = {
@@ -691,6 +791,8 @@ def test_extract_seek_job_detail_from_right_pane_inventory() -> None:
     assert detail["work_type"] == "Full time"
     assert detail["apply_button_state"]["visible"] is True
     assert detail["apply_button_state"]["click_point"] == {"x": 575, "y": 844}
+    assert detail["apply_button_state"]["candidate_freshness"]["source"] == "seek_apply_button_extraction"
+    assert detail["apply_button_state"]["candidate_freshness"]["viewport_size"] == {"width": 1246, "height": 1194}
     assert detail["save_button_state"]["visible"] is True
     assert detail["detail_container"]["container_id"] == "seek:job_detail"
     assert detail["requirements"] == ["Requirements: C# programming experience and test automation skills."]
@@ -727,6 +829,79 @@ def test_extract_seek_job_detail_uses_apply_text_when_action_bbox_is_outside_det
     assert detail["apply_button_state"]["visible"] is True
     assert detail["apply_button_state"]["label"] == "Apply C"
     assert detail["apply_button_state"]["click_point"] == {"x": 601, "y": 831}
+
+
+def test_extract_seek_job_detail_prefers_ocr_apply_button_when_model_action_bbox_is_wrong() -> None:
+    detail_bbox = {"x": 1140, "y": 170, "w": 760, "h": 1040}
+    inventory = {
+        "contract_version": "screen_inventory_v1",
+        "available_actions": [
+            {
+                "id": "model_apply_wrong_bbox",
+                "label": "Apply",
+                "bbox": {"x": 1300, "y": 270, "w": 100, "h": 40},
+                "click_point": {"x": 1350, "y": 290},
+            }
+        ],
+        "page_elements": [
+            {"id": "title", "text": "Graduate Software Engineer - Integration", "bbox": {"x": 1170, "y": 185, "w": 380, "h": 28}},
+            {"id": "company", "text": "Heartland Bank", "bbox": {"x": 1170, "y": 222, "w": 150, "h": 22}},
+            {"id": "ocr_apply_with_icon", "text": "ApplyC", "bbox": {"x": 1698, "y": 189, "w": 77, "h": 31}},
+        ],
+        "cards": [],
+    }
+    scroll_containers = {
+        "contract_version": "scroll_containers_v1",
+        "containers": [{"container_id": "seek:job_detail", "bbox": detail_bbox}],
+    }
+
+    detail = extract_seek_job_detail(
+        {"image_size": {"width": 2560, "height": 1400}, "screen_inventory": inventory},
+        scroll_containers=scroll_containers,
+    )
+
+    assert detail["apply_button_state"]["label"] == "ApplyC"
+    assert detail["apply_button_state"]["bbox"] == {"x": 1698, "y": 189, "w": 77, "h": 31}
+    assert detail["apply_button_state"]["click_point"] == {"x": 1736, "y": 204}
+
+
+def test_extract_seek_job_cards_include_candidate_freshness_from_capture_context() -> None:
+    inventory = {
+        "trace_path": "logs/traces/observe.json",
+        "image_size": {"width": 2560, "height": 1400},
+        "screen_inventory": {
+            "contract_version": "screen_inventory_v1",
+            "cards": [
+                {
+                    "id": "card1",
+                    "label": "Software Engineer",
+                    "bbox": {"x": 650, "y": 420, "w": 430, "h": 220},
+                    "primary_action_id": "title_action",
+                    "child_page_element_ids": ["title", "company", "location"],
+                }
+            ],
+            "available_actions": [
+                {
+                    "id": "title_action",
+                    "label": "Software Engineer",
+                    "bbox": {"x": 670, "y": 445, "w": 260, "h": 32},
+                    "click_point": {"x": 800, "y": 461},
+                }
+            ],
+            "page_elements": [
+                {"id": "title", "text": "Software Engineer", "bbox": {"x": 670, "y": 445, "w": 260, "h": 32}},
+                {"id": "company", "text": "Example Co", "bbox": {"x": 670, "y": 485, "w": 180, "h": 28}},
+                {"id": "location", "text": "Auckland", "bbox": {"x": 670, "y": 525, "w": 150, "h": 28}},
+            ],
+        },
+    }
+
+    result = extract_seek_job_cards(inventory)
+
+    freshness = result["jobs"][0]["candidate_freshness"]
+    assert freshness["capture_id"] == "logs/traces/observe.json"
+    assert freshness["viewport_size"] == {"width": 2560, "height": 1400}
+    assert freshness["source"] == "seek_job_card_extraction"
 
 
 def test_extract_seek_job_detail_infers_right_drawer_and_excludes_homepage_sidebar() -> None:
@@ -1048,6 +1223,32 @@ def test_extract_seek_job_cards_keeps_plain_title_card_with_cross_pane_child_noi
     assert result["jobs"][0]["title"] == "Software Engineer (Test Systems)"
 
 
+def test_extract_seek_job_cards_rejects_low_confidence_glued_uppercase_title() -> None:
+    inventory = {
+        "contract_version": "screen_inventory_v1",
+        "image_size": {"width": 1920, "height": 1080},
+        "available_actions": [],
+        "page_elements": [
+            {"id": "bad_title", "text": "SOFTWAREENGINEERSUMMER", "bbox": {"x": 340, "y": 520, "w": 280, "h": 30}},
+            {"id": "bad_company", "text": "TRV Trading", "bbox": {"x": 340, "y": 570, "w": 170, "h": 24}},
+            {"id": "bad_location", "text": "New Lynn, Auckland (Hybrid)", "bbox": {"x": 340, "y": 610, "w": 260, "h": 24}},
+            {
+                "id": "good_title",
+                "text": "Software Engineer Summer Internship",
+                "bbox": {"x": 340, "y": 720, "w": 360, "h": 30},
+            },
+            {"id": "good_company", "text": "Example Systems", "bbox": {"x": 340, "y": 760, "w": 180, "h": 24}},
+            {"id": "good_location", "text": "Auckland CBD, Auckland", "bbox": {"x": 340, "y": 800, "w": 240, "h": 24}},
+        ],
+    }
+
+    result = extract_seek_job_cards(inventory)
+
+    titles = [job["title"] for job in result["jobs"]]
+    assert "SOFTWAREENGINEERSUMMER" not in titles
+    assert "Software Engineer Summer Internship" in titles
+
+
 def test_extract_seek_job_cards_rejects_card_label_with_incomplete_title_suffix() -> None:
     inventory = {
         "contract_version": "screen_inventory_v1",
@@ -1127,6 +1328,253 @@ def test_extract_seek_job_cards_keeps_synthetic_card_boundaries_and_ignores_desc
     ]
     assert all("Build scalable" not in job["title"] for job in result["jobs"])
     assert all(not str(job["location"]).startswith("https://") for job in result["jobs"])
+
+
+def test_extract_seek_job_cards_truncates_model_card_before_next_job() -> None:
+    inventory = {
+        "contract_version": "screen_inventory_v1",
+        "available_actions": [
+            {
+                "id": "action_card_1",
+                "label": "job listing",
+                "bbox": {"x": 480, "y": 520, "w": 520, "h": 620},
+                "click_point": {"x": 740, "y": 830},
+            }
+        ],
+        "page_elements": [
+            {"id": "t1a", "text": "Software Engineer Specialist -", "bbox": {"x": 500, "y": 560, "w": 260, "h": 24}},
+            {"id": "t1b", "text": "Integration", "bbox": {"x": 500, "y": 590, "w": 140, "h": 24}},
+            {"id": "c1", "text": "AIA New Zealand", "bbox": {"x": 500, "y": 622, "w": 180, "h": 24}},
+            {"id": "l1", "text": "Takapuna, Auckland", "bbox": {"x": 500, "y": 654, "w": 220, "h": 24}},
+            {"id": "s1", "text": "Help us redefine how people think about insurance", "bbox": {"x": 500, "y": 690, "w": 360, "h": 38}},
+            {"id": "f1", "text": "Featured", "bbox": {"x": 500, "y": 736, "w": 90, "h": 24}},
+            {"id": "t2", "text": "Software Engineer Summer Internship", "bbox": {"x": 500, "y": 790, "w": 360, "h": 24}},
+            {"id": "c2", "text": "TRV Trading", "bbox": {"x": 500, "y": 822, "w": 150, "h": 24}},
+            {"id": "l2", "text": "New Lynn, Auckland (Hybrid)", "bbox": {"x": 500, "y": 854, "w": 260, "h": 24}},
+            {"id": "summary2", "text": "Build nanosecond-level systems processing millions of market events/second", "bbox": {"x": 500, "y": 890, "w": 430, "h": 48}},
+        ],
+        "cards": [
+            {
+                "id": "card_1",
+                "label": "job listing",
+                "bbox": {"x": 480, "y": 520, "w": 520, "h": 620},
+                "primary_action_id": "action_card_1",
+                "child_page_element_ids": ["t1a", "t1b", "c1", "l1", "s1", "f1", "t2", "c2", "l2", "summary2"],
+                "child_action_ids": [],
+            }
+        ],
+    }
+
+    result = extract_seek_job_cards({"image_size": {"width": 2560, "height": 1400}, "screen_inventory": inventory})
+
+    assert result["summary"]["jobs_seen"] == 2
+    job = result["jobs"][0]
+    assert job["company"] == "AIA New Zealand"
+    assert job["location"] == "Takapuna, Auckland"
+    assert "TRV Trading" not in job["evidence"]["texts"]
+    assert "market events/second" not in " ".join(job["evidence"]["texts"])
+    assert job["card_bbox"]["h"] < 260
+    assert job["click_point"]["y"] < 620
+    assert result["jobs"][1]["company"] == "TRV Trading"
+    assert result["jobs"][1]["location"] == "New Lynn, Auckland (Hybrid)"
+
+
+def test_extract_seek_job_cards_reanchors_generic_job_title_link_to_text_bbox() -> None:
+    inventory = {
+        "contract_version": "screen_inventory_v1",
+        "available_actions": [
+            {
+                "id": "action_screen_6_job-title-link",
+                "label": "Job title link",
+                "role": "button",
+                "bbox": {"x": 490, "y": 276, "w": 370, "h": 424},
+                "click_point": {"x": 675, "y": 488},
+            }
+        ],
+        "page_elements": [
+            {"id": "old_title", "text": "Junior Developer", "bbox": {"x": 652, "y": 314, "w": 170, "h": 27}},
+            {"id": "old_company", "text": "Other Company", "bbox": {"x": 652, "y": 340, "w": 160, "h": 24}},
+            {
+                "id": "page_text_37_level-2-full-stack-developer",
+                "text": "Level 2 Full Stack Developer",
+                "bbox": {"x": 653, "y": 547, "w": 236, "h": 27},
+            },
+            {
+                "id": "page_text_39_smartar-services-limited",
+                "text": "smartAR Services Limited",
+                "bbox": {"x": 652, "y": 571, "w": 213, "h": 27},
+            },
+            {
+                "id": "page_text_42_newmarket-auckland-hybrid",
+                "text": "Newmarket, Auckland (Hybrid)",
+                "bbox": {"x": 654, "y": 610, "w": 226, "h": 22},
+            },
+            {
+                "id": "page_text_44_summary",
+                "text": "Build the future of AR tech with smartAR, grow fast",
+                "bbox": {"x": 654, "y": 645, "w": 404, "h": 24},
+            },
+            {
+                "id": "page_text_46_summary",
+                "text": "across the full stack, use AI tools, and make a real impact",
+                "bbox": {"x": 654, "y": 675, "w": 384, "h": 24},
+            },
+        ],
+        "cards": [
+            {
+                "id": "card_0_job-title-link",
+                "label": "Job title link",
+                "bbox": {"x": 490, "y": 276, "w": 370, "h": 424},
+                "primary_action_id": "action_screen_6_job-title-link",
+                "child_page_element_ids": [
+                    "old_title",
+                    "old_company",
+                    "page_text_37_level-2-full-stack-developer",
+                    "page_text_39_smartar-services-limited",
+                    "page_text_42_newmarket-auckland-hybrid",
+                    "page_text_44_summary",
+                    "page_text_46_summary",
+                ],
+                "child_action_ids": [],
+            }
+        ],
+    }
+
+    result = extract_seek_job_cards({"image_size": {"width": 2560, "height": 1400}, "screen_inventory": inventory})
+
+    job = next(job for job in result["jobs"] if job["title"] == "Level 2 Full Stack Developer")
+    assert job["company"] == "smartAR Services Limited"
+    assert "Junior Developer" not in job["evidence"]["texts"]
+    assert job["card_bbox"]["y"] >= 540
+    assert job["card_bbox"]["h"] < 170
+    assert job["click_point"] == {"x": 771, "y": 560}
+
+
+def test_extract_seek_job_cards_rejects_job_listing_suffix_without_company_identity() -> None:
+    inventory = {
+        "contract_version": "screen_inventory_v1",
+        "available_actions": [
+            {
+                "id": "action_screen_8_embedded-software-engineer-job-listing",
+                "label": "Embedded Software Engineer job listing",
+                "role": "button",
+                "bbox": {"x": 496, "y": 720, "w": 364, "h": 440},
+                "click_point": {"x": 678, "y": 940},
+            }
+        ],
+        "page_elements": [
+            {
+                "id": "page_text_47_monitoring",
+                "text": "monitoring technology.Embedded C or C# and flexible",
+                "bbox": {"x": 652, "y": 932, "w": 390, "h": 24},
+            },
+            {
+                "id": "page_text_48_remote",
+                "text": "remote option in Auckland.",
+                "bbox": {"x": 652, "y": 960, "w": 220, "h": 24},
+            },
+            {"id": "page_text_50_viewed", "text": "8h ago ·Viewed", "bbox": {"x": 652, "y": 990, "w": 130, "h": 24}},
+        ],
+        "cards": [
+            {
+                "id": "card_0_embedded-software-engineer-job-listing",
+                "label": "Embedded Software Engineer job listing",
+                "bbox": {"x": 496, "y": 720, "w": 364, "h": 440},
+                "primary_action_id": "action_screen_8_embedded-software-engineer-job-listing",
+                "child_page_element_ids": ["page_text_47_monitoring", "page_text_48_remote", "page_text_50_viewed"],
+                "child_action_ids": [],
+            }
+        ],
+    }
+
+    result = extract_seek_job_cards({"image_size": {"width": 2560, "height": 1400}, "screen_inventory": inventory})
+
+    assert result["jobs"] == []
+
+
+def test_extract_seek_job_cards_keeps_right_detail_content_out_of_results_list() -> None:
+    inventory = {
+        "contract_version": "screen_inventory_v1",
+        "available_actions": [
+            {
+                "id": "action_result",
+                "label": "Job title link",
+                "role": "button",
+                "bbox": {"x": 640, "y": 520, "w": 460, "h": 190},
+                "click_point": {"x": 770, "y": 560},
+            },
+            {
+                "id": "action_detail",
+                "label": "Software Engineer Specialist job card",
+                "role": "button",
+                "bbox": {"x": 910, "y": 240, "w": 570, "h": 480},
+                "click_point": {"x": 1195, "y": 480},
+            }
+        ],
+        "page_elements": [
+            {
+                "id": "detail_title",
+                "text": "Software Engineer Specialist job card",
+                "bbox": {"x": 930, "y": 260, "w": 310, "h": 28},
+            },
+            {
+                "id": "detail_body",
+                "text": "Your Capabilities | OAheinga",
+                "bbox": {"x": 930, "y": 360, "w": 260, "h": 24},
+            },
+            {
+                "id": "detail_apply",
+                "text": "Apply button",
+                "bbox": {"x": 930, "y": 470, "w": 120, "h": 42},
+            },
+            {
+                "id": "detail_pane",
+                "text": "Jobs in All New Zealand | SEEK - Microsoft Edge",
+                "bbox": {"x": 930, "y": 670, "w": 360, "h": 24},
+            },
+            {
+                "id": "result_title",
+                "text": "Level 2 Full Stack Developer",
+                "bbox": {"x": 652, "y": 547, "w": 236, "h": 27},
+            },
+            {
+                "id": "result_company",
+                "text": "smartAR Services Limited",
+                "bbox": {"x": 652, "y": 571, "w": 213, "h": 27},
+            },
+            {
+                "id": "result_location",
+                "text": "Newmarket, Auckland (Hybrid)",
+                "bbox": {"x": 654, "y": 610, "w": 226, "h": 22},
+            },
+        ],
+        "cards": [
+            {
+                "id": "card_result",
+                "label": "Job title link",
+                "bbox": {"x": 640, "y": 520, "w": 460, "h": 190},
+                "primary_action_id": "action_result",
+                "child_page_element_ids": ["result_title", "result_company", "result_location"],
+                "child_action_ids": [],
+            },
+            {
+                "id": "card_detail",
+                "label": "Software Engineer Specialist job card",
+                "bbox": {"x": 910, "y": 240, "w": 570, "h": 480},
+                "primary_action_id": "action_detail",
+                "child_page_element_ids": ["detail_title", "detail_body", "detail_apply", "detail_pane"],
+                "child_action_ids": [],
+            }
+        ],
+    }
+
+    result = extract_seek_job_cards({"image_size": {"width": 2560, "height": 1400}, "screen_inventory": inventory})
+
+    assert result["summary"]["jobs_seen"] == 1
+    assert result["jobs"][0]["title"] == "Level 2 Full Stack Developer"
+    assert all("OAheinga" not in text for text in result["jobs"][0]["evidence"]["texts"])
+    assert result["results_list_container"]["bbox"]["x"] < 700
+    assert result["results_list_container"]["bbox"]["w"] < 720
 
 
 def test_extract_seek_job_cards_does_not_treat_ownership_summary_as_title() -> None:
@@ -1347,7 +1795,7 @@ def test_extract_seek_job_detail_includes_header_above_scroll_body() -> None:
 
     detail = extract_seek_job_detail(inventory, scroll_containers=scroll_containers)
 
-    assert detail["title"] == "Full-StackDevelopers"
+    assert detail["title"] == "Full-Stack Developers"
     assert detail["company"] == "BrightSpark Recruitment"
     assert detail["location"] == "Auckland CBD, Auckland (Hybrid)"
     assert detail["apply_button_state"]["visible"] is True
@@ -1441,6 +1889,39 @@ def test_extract_seek_job_detail_reads_company_after_sticky_header_buttons() -> 
     assert detail["work_type"] is None
 
 
+def test_extract_seek_job_detail_does_not_drop_apply_when_header_has_other_actions() -> None:
+    detail_bbox = {"x": 1134, "y": 280, "w": 896, "h": 1104}
+    inventory = {
+        "contract_version": "screen_inventory_v1",
+        "image_size": {"width": 2560, "height": 1400},
+        "available_actions": [
+            {"id": "save", "label": "Save", "bbox": {"x": 1360, "y": 205, "w": 70, "h": 40}},
+            {
+                "id": "quick_apply",
+                "label": "Quick apply",
+                "bbox": {"x": 1190, "y": 1005, "w": 140, "h": 42},
+                "click_point": {"x": 1260, "y": 1026},
+            },
+        ],
+        "page_elements": [
+            {"id": "title", "text": "Research/Developer Summer Internship", "bbox": {"x": 1168, "y": 188, "w": 520, "h": 30}},
+            {"id": "company", "text": "TRV Trading", "bbox": {"x": 1168, "y": 224, "w": 160, "h": 24}},
+            {"id": "save_text", "text": "Save", "bbox": {"x": 1360, "y": 205, "w": 70, "h": 40}},
+            {"id": "apply_text", "text": "Quick apply", "bbox": {"x": 1190, "y": 1005, "w": 140, "h": 42}},
+        ],
+    }
+    scroll_containers = {
+        "contract_version": "scroll_containers_v1",
+        "containers": [{"container_id": "seek:job_detail", "bbox": detail_bbox}],
+    }
+
+    detail = extract_seek_job_detail(inventory, scroll_containers=scroll_containers)
+
+    assert detail["apply_button_state"]["visible"] is True
+    assert detail["apply_button_state"]["click_point"] == {"x": 1260, "y": 1026}
+    assert detail["save_button_state"]["visible"] is True
+
+
 def test_extract_seek_job_detail_ignores_close_icon_as_company() -> None:
     detail_bbox = {"x": 1134, "y": 280, "w": 896, "h": 1104}
     inventory = {
@@ -1496,3 +1977,124 @@ def test_extract_seek_job_detail_prefers_location_after_title_over_search_filter
     assert detail["title"] == "Senior Android Developer"
     assert detail["company"] == "Fiserv New Zealand Limited"
     assert detail["location"] == "Auckland CBD, Auckland"
+
+
+def test_extract_seek_job_detail_marks_bottom_from_seek_safety_footer() -> None:
+    detail_bbox = {"x": 490, "y": 180, "w": 650, "h": 980}
+    inventory = {
+        "contract_version": "screen_inventory_v1",
+        "available_actions": [],
+        "page_elements": [
+            {"id": "title", "text": "Software Engineer Specialist-Integration", "bbox": {"x": 520, "y": 220, "w": 360, "h": 30}},
+            {"id": "company", "text": "AIA New Zealand", "bbox": {"x": 520, "y": 260, "w": 180, "h": 24}},
+            {"id": "location", "text": "Takapuna, Auckland", "bbox": {"x": 520, "y": 300, "w": 220, "h": 24}},
+            {
+                "id": "body",
+                "text": "Your role with us includes designing and delivering integration solutions.",
+                "bbox": {"x": 520, "y": 620, "w": 560, "h": 48},
+            },
+            {"id": "careful", "text": "Be careful", "bbox": {"x": 520, "y": 980, "w": 120, "h": 24}},
+            {
+                "id": "protect",
+                "text": "Don't provide your bank or credit card details when applying for jobs. Learn how to protect yourself",
+                "bbox": {"x": 520, "y": 1010, "w": 560, "h": 48},
+            },
+            {"id": "report", "text": "Report this job ad", "bbox": {"x": 520, "y": 1070, "w": 180, "h": 24}},
+        ],
+    }
+    scroll_containers = {
+        "contract_version": "scroll_containers_v1",
+        "containers": [{"container_id": "seek:job_detail", "bbox": detail_bbox}],
+    }
+
+    detail = extract_seek_job_detail(inventory, scroll_containers=scroll_containers)
+
+    assert detail["detail_bottom_reached"] is True
+    assert detail["company"] == "AIA New Zealand"
+    assert detail["location"] == "Takapuna, Auckland"
+
+
+def test_extract_seek_job_detail_does_not_use_search_filter_as_title() -> None:
+    detail_bbox = {"x": 1134, "y": 280, "w": 896, "h": 1104}
+    inventory = {
+        "contract_version": "screen_inventory_v1",
+        "image_size": {"width": 2560, "height": 1400},
+        "available_actions": [],
+        "page_elements": [
+            {"id": "filter_type", "text": "Type v", "bbox": {"x": 1160, "y": 120, "w": 100, "h": 24}},
+            {"id": "filter_remote", "text": "Remote v", "bbox": {"x": 1280, "y": 120, "w": 110, "h": 24}},
+            {"id": "filter_classification", "text": "Classification", "bbox": {"x": 1410, "y": 120, "w": 160, "h": 24}},
+            {"id": "filter_listing", "text": "Listing time", "bbox": {"x": 1590, "y": 120, "w": 140, "h": 24}},
+        ],
+    }
+    scroll_containers = {"containers": [{"container_id": "seek:job_detail", "bbox": detail_bbox}]}
+
+    detail = extract_seek_job_detail(inventory, scroll_containers=scroll_containers)
+
+    assert detail["title"] is None
+    assert "Type v" in detail["evidence"]["texts"]
+
+
+def test_extract_seek_job_detail_title_uses_detail_container_not_expanded_read_area() -> None:
+    detail_bbox = {"x": 814, "y": 216, "w": 896, "h": 848}
+    inventory = {
+        "contract_version": "screen_inventory_v1",
+        "image_size": {"width": 1920, "height": 1080},
+        "available_actions": [
+            {"id": "apply", "label": "Apply", "bbox": {"x": 886, "y": 1009, "w": 80, "h": 23}},
+        ],
+        "page_elements": [
+            {
+                "id": "browser_tab_title",
+                "text": "Software Engineer Jobs in All Auck X",
+                "bbox": {"x": 1033, "y": 12, "w": 202, "h": 17},
+            },
+            {
+                "id": "search_location",
+                "text": "All Auckland",
+                "bbox": {"x": 1218, "y": 198, "w": 108, "h": 22},
+            },
+            {
+                "id": "detail_title",
+                "text": "Software Engineer Specialist - Integration",
+                "bbox": {"x": 849, "y": 754, "w": 509, "h": 30},
+            },
+            {
+                "id": "detail_company",
+                "text": "AIA New Zealand",
+                "bbox": {"x": 849, "y": 792, "w": 167, "h": 20},
+            },
+            {
+                "id": "detail_location",
+                "text": "Takapuna, Auckland",
+                "bbox": {"x": 881, "y": 835, "w": 144, "h": 20},
+            },
+        ],
+    }
+    scroll_containers = {"containers": [{"container_id": "seek:job_detail", "bbox": detail_bbox}]}
+
+    detail = extract_seek_job_detail(inventory, scroll_containers=scroll_containers)
+
+    assert detail["title"] == "Software Engineer Specialist - Integration"
+    assert detail["company"] == "AIA New Zealand"
+    assert detail["location"] == "Takapuna, Auckland"
+    assert "Software Engineer Jobs in All Auck X" in detail["evidence"]["texts"]
+
+
+def test_extract_seek_job_detail_ignores_short_symbol_noise_heading() -> None:
+    detail_bbox = {"x": 814, "y": 216, "w": 896, "h": 848}
+    inventory = {
+        "contract_version": "screen_inventory_v1",
+        "image_size": {"width": 1920, "height": 1080},
+        "available_actions": [],
+        "page_elements": [
+            {"id": "noise", "text": "目☆", "bbox": {"x": 850, "y": 300, "w": 42, "h": 24}},
+            {"id": "title", "text": "Software Engineer", "bbox": {"x": 850, "y": 360, "w": 220, "h": 30}},
+            {"id": "company", "text": "Absolute IT Limited", "bbox": {"x": 850, "y": 405, "w": 180, "h": 24}},
+        ],
+    }
+    scroll_containers = {"containers": [{"container_id": "seek:job_detail", "bbox": detail_bbox}]}
+
+    detail = extract_seek_job_detail(inventory, scroll_containers=scroll_containers)
+
+    assert detail["title"] == "Software Engineer"

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.execute.action_kinds import infer_action_kind, infer_low_level_action_type
+from app.execute.action_kinds import classify_action_taxonomy, infer_action_kind, infer_low_level_action_type
 
 
 AVAILABLE_ACTIONS_CONTRACT = "available_actions_v1"
@@ -60,11 +60,13 @@ def _available_action(
     scroll_target = template.get("scroll_target") if isinstance(template.get("scroll_target"), dict) else {}
     low_level_action_type = infer_low_level_action_type(action_id, template)
     action_kind = infer_action_kind(action_id, template)
+    taxonomy = classify_action_taxonomy(action_id, template, label=template.get("label"))
     input_policy = template.get("input_policy") if isinstance(template.get("input_policy"), dict) else {}
     return {
         "action_template_id": action_id,
         "transition_id": transition.get("transition_id"),
         "action_kind": action_kind,
+        "action_taxonomy": taxonomy,
         "low_level_action_type": low_level_action_type,
         "label": _label_for_action(action_id),
         "from_state_id": transition.get("from_state_id"),
@@ -87,6 +89,8 @@ def _available_action(
         "coordinate_policy_ref": graph.get("coordinate_policy", {}).get("coordinate_space"),
         "safety": {
             "final_submit_allowed": False,
+            "final_submit": taxonomy.get("final_submit") is True,
+            "open_apply_flow": taxonomy.get("open_apply_flow") is True,
             "real_action_requires_gate": True,
             "guidance_only": True,
         },

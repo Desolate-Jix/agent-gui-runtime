@@ -33,12 +33,19 @@ const DEFAULT_GITHUB_ISSUES_GRAPH_PATH = "artifacts/github/runtime_path_graph_gi
 const DEFAULT_PYTHON_DOCS_SEARCH_GRAPH_PATH = "artifacts/docs_search/runtime_path_graph_python_docs_search_v1.json";
 const DEFAULT_INPUT_DEMO_GRAPH_PATH = "artifacts/demo/runtime_path_graph_input_demo.json";
 const DEFAULT_TABLE_DIRECTORY_GRAPH_PATH = "artifacts/table_directory/runtime_path_graph_table_directory_v1.json";
+const DEFAULT_SEEK_INTERFACE_MAP_PATH = "artifacts/visual-match-smoke/live_seek_20260624/learned_interface_map_calibrated_real_crops.json";
 const DEFAULT_ARTIFACT_REPLAY_REGRESSION_PATH = "logs/smoke/artifact_replay_regression_20260619.json";
 const DEFAULT_LEARN_SAMPLE_READINESS_PATH = "logs/smoke/learn_sample_readiness_gate_20260620.json";
 const DEFAULT_SEEK_APPLICATION_RECORD_PATH = "logs/smoke/seek_apply_live_92822270_20260620_b/application_fill_record.json";
 const DEFAULT_SEEK_APPLICATION_AUDIT_PATH = "logs/smoke/seek_apply_live_92822270_20260620_b/final_review_audit.json";
 const DEFAULT_SEEK_APPLICATION_ARTIFACT_PATH = "artifacts/seek/learned_seek_application_flow_92822270_20260620.json";
+const DEFAULT_INTERFACE_CALIBRATION_REPORT_PATH = "artifacts/visual-match-smoke/live_seek_20260624/visual_asset_calibration_report.json";
 let replayArtifact = null;
+let replayInterfaceMap = null;
+let replayInterfaceMapPath = "";
+let replayInterfaceCalibrationReport = null;
+let replayInterfaceCalibrationPath = "";
+let selectedInterfaceMapRef = "";
 let replayRegressionReport = null;
 let learnSampleReadinessGate = null;
 let seekApplicationEvidence = null;
@@ -413,23 +420,97 @@ const translations = {
     learn_replay_hint: "加载学习产物，查看路径图结构、动作模板、skill 和安全规则；多步回放只在面板 harness 串联，后端 Execute 仍一次只执行一步。",
     artifact_preset: "产物预设",
     load_artifact: "加载产物",
-    seek_application_evidence: "SEEK 申请证据",
-    seek_application_evidence_hint: "检查站内申请填写记录、最终审核和非授权 application-flow 产物，确认填了什么以及是否停在最终提交前。",
-    application_fill_record_path: "申请填写记录路径",
-    final_review_audit_path: "最终审核路径",
-    application_flow_artifact_path: "申请流程产物路径",
-    load_application_evidence: "加载申请证据",
-    regression_suite: "统一回归门禁",
-    regression_report_path: "回归报告路径",
-    load_regression_report: "加载回归报告",
-    learn_sample_gate: "新学习样本门禁",
-    learn_sample_gate_path: "新样本门禁路径",
-    load_learn_sample_gate: "加载新样本门禁",
+    interface_map_path: "Interface Map 路径",
+    interface_calibration_report_path: "校准报告路径",
+    interface_map_save_name: "编辑后 Interface Map 文件",
+    use_current_app_map: "使用当前应用地图",
+    load_interface_map: "加载界面地图",
+    load_interface_calibration: "加载校准报告",
+    save_interface_map: "保存界面地图",
+    interface_map_title: "学习界面地图",
+    interface_regions: "区域",
+    interface_fixed_assets: "固定按钮截图",
+    interface_dynamic_areas: "变动 ROI 区",
+    interface_danger_zones: "高危区",
+    interface_inspector: "节点详情",
+    interface_editor_hint: "可编辑区域名称/类型，以及固定按钮的动作、危险等级和所属区域；保存时会写 edit trace。",
+    replay_page_summary: "页面摘要",
+    replay_page_summary_hint: "这是页面级节点；点击下方区域、按钮截图或 ROI，右侧节点详情会显示可调用 workflow / skill。",
+    replay_child_states: "子状态",
+    replay_regions: "区域",
+    replay_page_nodes: "页面节点",
+    replay_possible_actions: "可能操作",
+    replay_possible_actions_split: "操作已按页面节点和具体区域拆分。点击当前节点或下方区域、按钮、ROI 后，会在右侧节点详情显示可调用 workflow / skill。",
+    replay_possible_actions_hint: "本页收录了基础控件；点击控件或区域后在右侧节点详情查看具体动作。",
+    replay_possible_actions_empty: "暂无可点击/可输入操作。运行整屏理解后会自动补充。",
+    replay_possible_entries: "可能入口 / 跳转",
+    replay_possible_entries_empty: "暂无推测入口。精准定位或点击验证后会记录跳转关系。",
+    replay_no_interface_map: "先加载 interface map 后，这里会显示节点字段、截图证据和编辑入口。",
+    replay_inspect_hint: "点击左侧区域、按钮截图或 ROI 查看详情。",
+    replay_screen_regions: "界面区域",
+    replay_screen_regions_empty: "当前节点没有绑定区域",
+    replay_screen_regions_empty_hint: "这个路径节点暂时没有写入 region_refs。重新导出学习产物后，这里会显示该页面的区域结构。",
+    replay_main_regions: "主区域",
+    replay_button_screenshots: "按钮截图",
+    replay_dynamic_regions: "动态区域",
+    replay_danger_regions: "高危区域",
+    replay_no_image_evidence: "无图片证据",
+    replay_empty_region_lane: "该区域暂无资产",
+    replay_source_tight_crop: "源按钮截图",
+    replay_source_context_crop: "源上下文截图",
+    replay_current_match: "当前匹配截图",
+    replay_current_roi: "当前 ROI",
+    replay_fast_lane: "快速通道",
+    replay_matched: "已匹配",
+    replay_ambiguous: "有歧义",
+    replay_no_controls_hint: "当前页面还没有收录控件。先运行整屏理解或精准定位后，这里会显示按钮、输入框、可能入口和坐标。",
+    replay_jump_to: "跳转到",
+    replay_unknown_page: "未知页面",
+    replay_inspect: "查看",
+    replay_no_crop: "无截图",
+    replay_scroll_region: "滚动区域",
+    replay_visual_evidence: "视觉证据",
+    replay_evidence_not_authorization: "证据，不是授权",
+    replay_evidence_not_authorization_hint: "来源 bbox / 点击点不能直接执行；只有当前截图匹配出的候选才能进入 Gate。",
+    replay_region_contents: "区域内容",
+    replay_region_structure_only: "这个区域当前只记录结构，没有可直接调用的按钮或 ROI。",
+    replay_visual_calibration: "视觉校准",
+    replay_visual_calibration_hint: "加载校准报告，对比已学习按钮截图和当前截图匹配结果。",
+    replay_state_flow: "软件路径 / state flow",
+    replay_states: "状态",
+    replay_transitions: "跳转",
+    replay_current_child_path: "当前子路径",
+    replay_controls_title: "按钮 / 输入 / 控件",
+    replay_workflow_skill: "Workflow / 可调用 skill",
+    replay_gate_confirm: "需确认",
+    replay_callable: "可调用",
+    replay_region_policy: "编辑区域 / region policy",
+    replay_visual_policy: "编辑节点策略 / visual asset policy",
+    replay_recrop_visual_asset: "重新裁剪按钮截图 / recrop visual asset",
+    replay_source_image_preview: "源截图预览",
+    replay_source_image: "源截图",
+    replay_recrop_button: "重新裁剪按钮截图",
+    replay_no_button_crop: "结构节点 / no button crop",
+    replay_no_button_crop_hint: "这个节点是滚动区域或视觉证据，不是可点击按钮截图；学习地图只保留它的结构和可调用 skill，不提供按钮裁剪。",
+    learn_replay_advanced_tools: "高级诊断（可选）",
+    learn_replay_advanced_tools_hint: "用于开发排查 trace、回归报告和学习样本；日常查看路径图时可以保持收起。",
+    seek_application_evidence: "申请填写检查",
+    seek_application_evidence_hint: "可选：检查填了什么、最终审核看到什么，以及流程是否停在最终提交前。",
+    application_fill_record_path: "填写记录文件",
+    final_review_audit_path: "最终审核文件",
+    application_flow_artifact_path: "申请流程地图",
+    load_application_evidence: "加载填写检查",
+    regression_suite: "回归检查",
+    regression_report_path: "回归报告文件",
+    load_regression_report: "加载回归检查",
+    learn_sample_gate: "新样本检查",
+    learn_sample_gate_path: "样本检查文件",
+    load_learn_sample_gate: "加载样本检查",
     ready_for_new_learn_sample: "可开始新学习样本",
     use_for_safe_validation: "带入安全验证",
     use_for_task_run: "带入任务运行",
-    safe_validation_replay: "安全验证回放",
-    task_run_replay: "任务运行回放",
+    safe_validation_replay: "安全回放结果",
+    task_run_replay: "任务回放结果",
     graph_structure: "路径图结构",
     safety_summary: "安全摘要",
     safety_mode: "安全模式",
@@ -665,23 +746,97 @@ const translations = {
     learn_replay_hint: "Load a learned artifact, inspect PathGraph structure, action templates, skills, and safety rules. Multi-step replay is chained by the panel harness; backend Execute still performs one step at a time.",
     artifact_preset: "Artifact preset",
     load_artifact: "Load artifact",
-    seek_application_evidence: "SEEK Application Evidence",
-    seek_application_evidence_hint: "Inspect station-internal application fill records, final-review audit, and non-authorizing application-flow artifacts before replay.",
-    application_fill_record_path: "Application fill record path",
-    final_review_audit_path: "Final review audit path",
-    application_flow_artifact_path: "Application flow artifact path",
-    load_application_evidence: "Load application evidence",
-    regression_suite: "Regression Suite",
-    regression_report_path: "Regression report path",
-    load_regression_report: "Load regression report",
-    learn_sample_gate: "New Learn Sample Gate",
-    learn_sample_gate_path: "Readiness gate path",
-    load_learn_sample_gate: "Load readiness gate",
+    interface_map_path: "Interface Map path",
+    interface_calibration_report_path: "Calibration report path",
+    interface_map_save_name: "Edited Interface Map file",
+    use_current_app_map: "Use current app map",
+    load_interface_map: "Load interface map",
+    load_interface_calibration: "Load calibration",
+    save_interface_map: "Save interface map",
+    interface_map_title: "Learned Interface Map",
+    interface_regions: "Regions",
+    interface_fixed_assets: "Fixed visual assets",
+    interface_dynamic_areas: "Dynamic ROI areas",
+    interface_danger_zones: "Danger zones",
+    interface_inspector: "Node Inspector",
+    interface_editor_hint: "Edit region labels/types and fixed button action, danger, and region. Saving writes an edit trace.",
+    replay_page_summary: "Page Summary",
+    replay_page_summary_hint: "This is a page-level node. Click a region, button crop, or ROI below to show callable workflow / skill details in the inspector.",
+    replay_child_states: "Child states",
+    replay_regions: "Regions",
+    replay_page_nodes: "Page nodes",
+    replay_possible_actions: "Possible actions",
+    replay_possible_actions_split: "Actions are split by page node and concrete region. Click the current node or a region, button, or ROI below to inspect callable workflow / skill details.",
+    replay_possible_actions_hint: "This page has basic controls. Click a control or region to inspect the concrete action in the node inspector.",
+    replay_possible_actions_empty: "No clickable or input actions yet. Run screen understanding to populate them.",
+    replay_possible_entries: "Possible entries / navigation",
+    replay_possible_entries_empty: "No inferred entries yet. Precise locating or click verification will record navigation links.",
+    replay_no_interface_map: "Load an interface map first. Node fields, screenshot evidence, and edit controls will appear here.",
+    replay_inspect_hint: "Click a region, button crop, or ROI on the left to inspect details.",
+    replay_screen_regions: "Screen regions",
+    replay_screen_regions_empty: "Current node has no bound regions",
+    replay_screen_regions_empty_hint: "This path node has no region_refs yet. Re-export the learned artifact to show this page's region structure.",
+    replay_main_regions: "main regions",
+    replay_button_screenshots: "Button screenshots",
+    replay_dynamic_regions: "Dynamic regions",
+    replay_danger_regions: "Danger regions",
+    replay_no_image_evidence: "No image evidence",
+    replay_empty_region_lane: "Empty region lane",
+    replay_source_tight_crop: "Source tight crop",
+    replay_source_context_crop: "Source context crop",
+    replay_current_match: "Current match",
+    replay_current_roi: "Current ROI",
+    replay_fast_lane: "Fast lane",
+    replay_matched: "Matched",
+    replay_ambiguous: "Ambiguous",
+    replay_no_controls_hint: "This page has no collected controls yet. Run screen understanding or precise locating to show buttons, inputs, possible entries, and coordinates here.",
+    replay_jump_to: "Navigate to",
+    replay_unknown_page: "unknown page",
+    replay_inspect: "Inspect",
+    replay_no_crop: "No crop",
+    replay_scroll_region: "Scroll region",
+    replay_visual_evidence: "Visual evidence",
+    replay_evidence_not_authorization: "Evidence, not authorization",
+    replay_evidence_not_authorization_hint: "Source bbox/click point cannot execute directly; only current-capture match candidates may enter Gate.",
+    replay_region_contents: "Region contents",
+    replay_region_structure_only: "This region currently records structure only; no directly callable button or ROI is available.",
+    replay_visual_calibration: "Visual calibration",
+    replay_visual_calibration_hint: "Load a calibration report to compare learned button crops against a current screenshot.",
+    replay_state_flow: "Software path / state flow",
+    replay_states: "states",
+    replay_transitions: "transitions",
+    replay_current_child_path: "Current child path",
+    replay_controls_title: "Buttons / Inputs / Controls",
+    replay_workflow_skill: "Workflow / callable skill",
+    replay_gate_confirm: "Needs review",
+    replay_callable: "Callable",
+    replay_region_policy: "Edit region / region policy",
+    replay_visual_policy: "Edit node policy / visual asset policy",
+    replay_recrop_visual_asset: "Recrop button screenshot / visual asset",
+    replay_source_image_preview: "Source image preview",
+    replay_source_image: "Source image",
+    replay_recrop_button: "Recrop button screenshot",
+    replay_no_button_crop: "Structure node / no button crop",
+    replay_no_button_crop_hint: "This node is a scroll region or visual evidence, not a clickable button crop. The learned map keeps its structure and callable skill only.",
+    learn_replay_advanced_tools: "Advanced diagnostics",
+    learn_replay_advanced_tools_hint: "Optional trace, regression, and learning-sample debugging tools. Keep this closed for daily map review.",
+    seek_application_evidence: "Application fill check",
+    seek_application_evidence_hint: "Optional: inspect what was filled, what the final review saw, and whether the flow stopped before final submit.",
+    application_fill_record_path: "Filled form record",
+    final_review_audit_path: "Final review file",
+    application_flow_artifact_path: "Application flow map",
+    load_application_evidence: "Load fill check",
+    regression_suite: "Regression check",
+    regression_report_path: "Regression report file",
+    load_regression_report: "Load regression check",
+    learn_sample_gate: "New sample check",
+    learn_sample_gate_path: "Sample check file",
+    load_learn_sample_gate: "Load sample check",
     ready_for_new_learn_sample: "Ready for new Learn sample",
     use_for_safe_validation: "Use for safe validation",
     use_for_task_run: "Use for task run",
-    safe_validation_replay: "Safe validation replay",
-    task_run_replay: "Task run replay",
+    safe_validation_replay: "Safety replay result",
+    task_run_replay: "Task replay result",
     graph_structure: "Graph structure",
     safety_summary: "Safety summary",
     safety_mode: "Safety mode",
@@ -714,6 +869,29 @@ function baseUrl() {
   const baseInput = $("baseUrl");
   const value = baseInput ? baseInput.value.trim() : "";
   return value || window.location.origin;
+}
+
+function panelQueryParams() {
+  try {
+    return new URLSearchParams(window.location.search || "");
+  } catch (error) {
+    return new URLSearchParams();
+  }
+}
+
+function panelQueryFlag(name) {
+  const params = panelQueryParams();
+  if (!params.has(name)) return false;
+  const value = String(params.get(name) || "").trim().toLowerCase();
+  return value === "" || value === "1" || value === "true" || value === "yes";
+}
+
+function initialStageFromQuery() {
+  const params = panelQueryParams();
+  const requested = String(params.get("stage") || params.get("page") || "").trim();
+  if (!requested) return "";
+  const stageButton = Array.from(document.querySelectorAll(".stage")).find((button) => button.dataset.stage === requested);
+  return stageButton ? requested : "";
 }
 
 function t(key) {
@@ -1575,6 +1753,31 @@ function syncAppAndStateFields({ appName = "", stateHint = "" } = {}) {
       const el = $(id);
       if (el) el.value = normalizedStateHint;
     });
+  }
+  syncInterfaceMapPathSuggestion();
+}
+
+function syncInterfaceMapPathSuggestion() {
+  const inferred = inferInterfaceMapPresetForCurrentApp();
+  if (!inferred) return;
+  const mapInput = $("replayInterfaceMapPath");
+  const calibrationInput = $("replayInterfaceCalibrationPath");
+  const replaceableMapPaths = new Set([
+    "",
+    "artifacts/visual-match-smoke/local_seek_buttons/learned_interface_map.json",
+    "artifacts/visual-match-smoke/live_seek_20260624/learned_interface_map_calibrated.json",
+    DEFAULT_SEEK_INTERFACE_MAP_PATH,
+  ]);
+  const replaceableCalibrationPaths = new Set([
+    "",
+    "artifacts/visual-match-smoke/local_seek_buttons/visual_asset_calibration_report_cli.json",
+    DEFAULT_INTERFACE_CALIBRATION_REPORT_PATH,
+  ]);
+  if (mapInput && replaceableMapPaths.has(String(mapInput.value || "").trim())) {
+    mapInput.value = inferred.mapPath;
+  }
+  if (calibrationInput && replaceableCalibrationPaths.has(String(calibrationInput.value || "").trim())) {
+    calibrationInput.value = inferred.calibrationPath;
   }
 }
 
@@ -2726,7 +2929,7 @@ function isTraceImagePath(key, value) {
   if (typeof value !== "string" || !value.trim()) return false;
   const lowerKey = String(key || "").toLowerCase();
   const lowerValue = value.toLowerCase();
-  const imageLikeKey = /(image|screenshot|capture|overlay|crop|frame).*path$|^output_path$/.test(lowerKey);
+  const imageLikeKey = /(image|screenshot|capture|overlay|crop|frame).*(path|ref)$|^output_path$|^(template_path|current_roi_ref|current_match_ref)$/.test(lowerKey);
   const imageLikeValue = /\.(png|jpe?g|webp|bmp)$/i.test(lowerValue);
   return imageLikeKey && imageLikeValue;
 }
@@ -2735,6 +2938,17 @@ function traceImageUrl(path) {
   const text = String(path || "");
   if (/^https?:\/\//i.test(text) || text.startsWith("data:")) return text;
   return `${baseUrl()}/panel/file?path=${encodeURIComponent(text)}`;
+}
+
+function panelImageHtml(path, alt, className = "") {
+  const source = String(path || "");
+  const safeAlt = escapeHtml(alt || "image preview");
+  if (!source) return `<em>no image</em>`;
+  return `
+    <span class="panel-image-frame${className ? ` ${escapeHtml(className)}` : ""}">
+      <img src="${escapeHtml(traceImageUrl(source))}" alt="${safeAlt}" loading="eager" decoding="async" onerror="this.closest('.panel-image-frame').classList.add('image-missing')" />
+      <em>image missing</em>
+    </span>`;
 }
 
 function collectTraceStageVisuals(raw) {
@@ -2991,6 +3205,10 @@ function startPathResizeObserver() {
 const PATH_NODE_R = 20;
 const PATH_GLOW_R = 32;
 const PATH_LABEL_DY = 34;
+const PATH_CARD_W = 174;
+const PATH_CARD_H = 68;
+const PATH_CONTROL_CARD_W = 118;
+const PATH_CONTROL_CARD_H = 46;
 
 let pathCanvas = null;
 let pathCtx = null;
@@ -3156,10 +3374,9 @@ function onPathCanvasMouse(e) {
 
   let found = null;
   for (const pos of pathNodePositions) {
-    const dx = wx - pos.x;
-    const dy = wy - pos.y;
-    const hitRadius = pos.isControl ? 18 : PATH_GLOW_R;
-    if (Math.sqrt(dx * dx + dy * dy) < hitRadius / pathZoom) {
+    const size = pathNodeCardSize(pos);
+    const inCard = wx >= pos.x - size.w / 2 && wx <= pos.x + size.w / 2 && wy >= pos.y - size.h / 2 && wy <= pos.y + size.h / 2;
+    if (inCard) {
       found = pos.id;
       break;
     }
@@ -3198,9 +3415,17 @@ function handlePathNodeClick(nodeId) {
     return;
   }
   if (!navPathNodes.some((n) => n.id === nodeId)) return;
-  expandedPathNodeId = expandedPathNodeId === nodeId ? null : nodeId;
+  expandedPathNodeId = isRuntimeGraphViewActive() ? nodeId : (expandedPathNodeId === nodeId ? null : nodeId);
   currentNavNodeId = nodeId;
+  if (isRuntimeGraphViewActive() && runtimePathGraphView) {
+    runtimePathGraphView.currentStateId = nodeId;
+    setPathGraphBadges({
+      mode: `${runtimePathGraphView.mode || "replay"} graph`,
+      state: nodeId,
+    });
+  }
   showNavNodeDetail(nodeId);
+  renderNavPath();
 }
 
 function layoutPathNodes() {
@@ -3209,7 +3434,7 @@ function layoutPathNodes() {
   if (isRuntimeGraphViewActive()) return layoutRuntimePathGraphNodes(w, h);
   const cx = w / 2;
   const cy = expandedPathNodeId ? h * 0.66 : h / 2;
-  const margin = 60;
+  const margin = 120;
 
   const count = navPathNodes.length + (pendingTransition ? 1 : 0);
   if (!count) return [];
@@ -3337,7 +3562,7 @@ function layoutPathNodes() {
 }
 
 function layoutRuntimePathGraphNodes(w, h) {
-  const marginX = 92;
+  const marginX = 140;
   const marginY = 70;
   const nodes = navPathNodes;
   if (!nodes.length) return [];
@@ -3494,10 +3719,103 @@ function isRuntimeGraphViewActive() {
   return !!runtimePathGraphView?.graph;
 }
 
+function isSeekRuntimePathGraph(graph = {}) {
+  const graphId = String(graph.graph_id || graph.app_id || "").toLowerCase();
+  const stateIds = Array.isArray(graph.states) ? graph.states.map((state) => String(state?.state_id || "")) : [];
+  return graphId.includes("seek") || stateIds.some((stateId) => stateId.startsWith("seek_"));
+}
+
+function seekDisplayStatesFallback() {
+  return [
+    {
+      state_id: "seek_home_page",
+      label: "SEEK 首页 / 搜索与详情页",
+      page_type: "seek_search_results_with_detail",
+      description: "搜索栏、筛选区、岗位卡片列表、右侧岗位详情和详情滚动区域。",
+      region_refs: ["top_search_area", "results_list", "job_detail", "job_card", "detail_header", "detail_body"],
+      child_state_ids: [
+        "seek_search_results_empty_detail",
+        "seek_search_results_with_selected_job",
+        "seek_detail_scrolled",
+        "seek_results_list_scrolled",
+      ],
+    },
+    {
+      state_id: "seek_application_page",
+      label: "SEEK 申请页",
+      page_type: "seek_station_internal_application",
+      description: "站内申请表单、文档选择、雇主问题、资料更新和最终审核提交边界。",
+      region_refs: [
+        "application_progress",
+        "application_form",
+        "application_documents",
+        "application_questions",
+        "application_profile",
+        "application_review",
+      ],
+      child_state_ids: ["seek_apply_entry_form", "seek_external_or_blocked"],
+      safety: { final_submit: "forbidden" },
+    },
+  ];
+}
+
+function seekStateDisplayMapFallback() {
+  return {
+    seek_search_results_empty_detail: "seek_home_page",
+    seek_search_results_with_selected_job: "seek_home_page",
+    seek_detail_scrolled: "seek_home_page",
+    seek_results_list_scrolled: "seek_home_page",
+    seek_apply_entry_form: "seek_application_page",
+    seek_external_or_blocked: "seek_application_page",
+  };
+}
+
+function seekDisplayTransitionsFallback() {
+  return [
+    {
+      transition_id: "seek:display_transition:browse_jobs",
+      action_template_id: "browse_and_read_jobs",
+      from_state_id: "seek_home_page",
+      to_state_id: "seek_home_page",
+      verification_refs: ["open_job_card_detail_match", "read_detail_scroll_scope"],
+    },
+    {
+      transition_id: "seek:display_transition:open_apply_flow",
+      action_template_id: "open_apply_flow",
+      from_state_id: "seek_home_page",
+      to_state_id: "seek_application_page",
+      verification_refs: ["final_submit_forbidden"],
+      default_available: false,
+    },
+  ];
+}
+
+function runtimeGraphDisplayStates(graph = {}) {
+  const displayStates = Array.isArray(graph.display_states) ? graph.display_states.filter((item) => item && typeof item === "object") : [];
+  if (displayStates.length) return displayStates;
+  if (isSeekRuntimePathGraph(graph)) return seekDisplayStatesFallback();
+  return Array.isArray(graph.states) ? graph.states.filter((item) => item && typeof item === "object") : [];
+}
+
+function runtimeGraphDisplayTransitions(graph = {}) {
+  const displayTransitions = Array.isArray(graph.display_transitions) ? graph.display_transitions.filter((item) => item && typeof item === "object") : [];
+  if (displayTransitions.length) return displayTransitions;
+  if (isSeekRuntimePathGraph(graph)) return seekDisplayTransitionsFallback();
+  return Array.isArray(graph.transitions) ? graph.transitions.filter((item) => item && typeof item === "object") : [];
+}
+
+function runtimeGraphDisplayStateId(graph = {}, stateId = "") {
+  const raw = String(stateId || "");
+  if (!raw) return raw;
+  const stateDisplayMap = graph.state_display_map && typeof graph.state_display_map === "object" ? graph.state_display_map : {};
+  const seekFallback = isSeekRuntimePathGraph(graph) ? seekStateDisplayMapFallback() : {};
+  return String(stateDisplayMap[raw] || seekFallback[raw] || raw);
+}
+
 function renderRuntimePathGraph(graph, options = {}) {
   if (!graph || typeof graph !== "object") return;
-  const states = Array.isArray(graph.states) ? graph.states.filter((item) => item && typeof item === "object") : [];
-  const transitions = Array.isArray(graph.transitions) ? graph.transitions.filter((item) => item && typeof item === "object") : [];
+  const states = runtimeGraphDisplayStates(graph);
+  const transitions = runtimeGraphDisplayTransitions(graph);
   const templates = runtimeGraphTemplateMap(graph);
   const stateIds = new Set(states.map((state) => String(state.state_id || "")).filter(Boolean));
   for (const edge of transitions) {
@@ -3512,6 +3830,9 @@ function renderRuntimePathGraph(graph, options = {}) {
     label: runtimeGraphStateLabel(state),
     summary: state.description || state.page_type || graph.page_type || "",
     stateGuess: state.page_type || state.state_id || "",
+    regionRefs: Array.isArray(state.region_refs) ? state.region_refs.map((item) => String(item)).filter(Boolean) : [],
+    requiredRegions: Array.isArray(state.required_regions) ? state.required_regions.map((item) => String(item)).filter(Boolean) : [],
+    childStateIds: Array.isArray(state.child_state_ids) ? state.child_state_ids.map((item) => String(item)).filter(Boolean) : [],
     imagePath: "",
     timestamp: "",
     controls: [],
@@ -3536,7 +3857,7 @@ function renderRuntimePathGraph(graph, options = {}) {
         forbidden: edge.default_available === false || template?.availability_policy?.default_available === false,
       };
     });
-  const firstState = options.currentStateId || graph.initial_state_id || navPathEdges[0]?.from || navPathNodes[0]?.id || null;
+  const firstState = runtimeGraphDisplayStateId(graph, options.currentStateId || graph.initial_state_id || navPathEdges[0]?.from || navPathNodes[0]?.id || null);
   currentNavNodeId = firstState;
   pendingTransition = null;
   expandedPathNodeId = null;
@@ -3551,6 +3872,7 @@ function renderRuntimePathGraph(graph, options = {}) {
     completedTransitionIds: new Set(options.completedTransitionIds || []),
     failedTransitionIds: new Set(options.failedTransitionIds || []),
     forbiddenActionIds: new Set(navPathEdges.filter((edge) => edge.forbidden).map((edge) => edge.actionTemplateId)),
+    stateDisplayMap: graph.state_display_map && typeof graph.state_display_map === "object" ? graph.state_display_map : {},
   };
   updatePathAppLabel();
   setPathGraphBadges({
@@ -3558,6 +3880,11 @@ function renderRuntimePathGraph(graph, options = {}) {
     state: firstState || "no state",
   });
   renderNavPath();
+  if (firstState && navPathNodes.some((node) => node.id === firstState)) {
+    expandedPathNodeId = firstState;
+    currentNavNodeId = firstState;
+    showNavNodeDetail(firstState);
+  }
 }
 
 function updateRuntimePathGraphHighlight({ currentStateId = null, action = null, response = null, success = true } = {}) {
@@ -3578,8 +3905,8 @@ function updateRuntimePathGraphHighlight({ currentStateId = null, action = null,
     (actionId && item.actionTemplateId === actionId && (!currentStateId || item.from === currentStateId)) ||
     (actionId && item.actionTemplateId === actionId)
   );
-  const afterState = runtimeState.after_state_id || action?.to_state_id || edge?.to || currentStateId || runtimePathGraphView.currentStateId;
-  const beforeState = runtimeState.before_state_id || currentStateId || runtimePathGraphView.currentStateId;
+  const afterState = runtimeGraphDisplayStateId(runtimePathGraphView.graph, runtimeState.after_state_id || action?.to_state_id || edge?.to || currentStateId || runtimePathGraphView.currentStateId);
+  const beforeState = runtimeGraphDisplayStateId(runtimePathGraphView.graph, runtimeState.before_state_id || currentStateId || runtimePathGraphView.currentStateId);
   const transitionId = runtimeState.transition_id || edge?.transitionId || null;
   runtimePathGraphView.currentStateId = afterState || beforeState || runtimePathGraphView.currentStateId;
   runtimePathGraphView.currentTransitionId = transitionId;
@@ -3649,20 +3976,22 @@ function drawPathGraphFrame() {
 
   ctx.clearRect(0, 0, w, h);
 
-  // Background
-  ctx.fillStyle = "#0b1120";
+  const bg = ctx.createLinearGradient(0, 0, 0, h);
+  bg.addColorStop(0, "#f7fbff");
+  bg.addColorStop(1, "#eef6ff");
+  ctx.fillStyle = bg;
   ctx.fillRect(0, 0, w, h);
 
   // Dot grid (world-space)
   ctx.save();
   ctx.translate(pathPanX, pathPanY);
   ctx.scale(pathZoom, pathZoom);
-  ctx.fillStyle = "rgba(255, 255, 255, 0.025)";
-  const gs = 24;
+  ctx.fillStyle = "rgba(37, 99, 235, 0.10)";
+  const gs = 28;
   for (let gx = gs; gx < w / pathZoom + gs; gx += gs) {
     for (let gy = gs; gy < h / pathZoom + gs; gy += gs) {
       ctx.beginPath();
-      ctx.arc(gx - pathPanX / pathZoom, gy - pathPanY / pathZoom, 0.7, 0, Math.PI * 2);
+      ctx.arc(gx - pathPanX / pathZoom, gy - pathPanY / pathZoom, 0.8, 0, Math.PI * 2);
       ctx.fill();
     }
   }
@@ -3671,7 +4000,7 @@ function drawPathGraphFrame() {
   const overlay = $("pathEmptyOverlay");
   if (!navPathNodes.length && !pendingTransition) {
     if (overlay) overlay.style.display = "flex";
-    ctx.fillStyle = "rgba(148, 163, 184, 0.4)";
+    ctx.fillStyle = "#64748b";
     ctx.font = `italic 13px ${PATH_CANVAS_FONT}`;
     ctx.textAlign = "center";
     ctx.fillText(t("path_empty_hint") || "", w / 2, h / 2);
@@ -3734,16 +4063,13 @@ function drawPathGraphFrame() {
       const labelYOffset = 52 + ((edge.runtimeEdgeIndex || 0) % 3) * 14;
       ctx.beginPath();
       ctx.arc(from.x - 18, from.y - 18, loopR, Math.PI * 0.15, Math.PI * 1.68);
-      ctx.strokeStyle = isCompleted ? "rgba(34,197,94,0.78)" : isCurrentTransition ? "rgba(250,204,21,0.9)" : "rgba(229,231,235,0.34)";
+      ctx.strokeStyle = isCompleted ? "rgba(22,163,74,0.68)" : isCurrentTransition ? "rgba(37,99,235,0.9)" : "rgba(148,163,184,0.48)";
       ctx.lineWidth = isCurrentTransition ? 2.8 : 2;
       ctx.setLineDash(isForbidden ? [4, 7] : []);
       ctx.stroke();
       ctx.setLineDash([]);
       if (edge.goal) {
-        ctx.fillStyle = "rgba(203,213,225,0.72)";
-        ctx.font = `9px ${PATH_CANVAS_FONT}`;
-        ctx.textAlign = "center";
-        ctx.fillText(`${isForbidden ? "lock " : ""}${truncateCanvasText(ctx, edge.goal, 118)}`, from.x - 46, from.y - labelYOffset);
+        drawPathEdgeLabel(ctx, `${isForbidden ? "lock " : ""}${edge.goal}`, from.x - 46, from.y - labelYOffset, { forbidden: isForbidden, maxWidth: 118 });
       }
       continue;
     }
@@ -3760,17 +4086,17 @@ function drawPathGraphFrame() {
     // Edge
     const grad = ctx.createLinearGradient(from.x, from.y, to.x, to.y);
     if (isFailed) {
-      grad.addColorStop(0, "rgba(248,113,113,0.85)");
-      grad.addColorStop(1, "rgba(127,29,29,0.35)");
+      grad.addColorStop(0, "rgba(239,68,68,0.78)");
+      grad.addColorStop(1, "rgba(252,165,165,0.32)");
     } else if (isCompleted) {
-      grad.addColorStop(0, "rgba(34,197,94,0.85)");
-      grad.addColorStop(1, "rgba(21,128,61,0.32)");
+      grad.addColorStop(0, "rgba(22,163,74,0.72)");
+      grad.addColorStop(1, "rgba(134,239,172,0.32)");
     } else if (isCurrentTransition) {
-      grad.addColorStop(0, "rgba(250,204,21,0.92)");
-      grad.addColorStop(1, "rgba(161,98,7,0.36)");
+      grad.addColorStop(0, "rgba(37,99,235,0.88)");
+      grad.addColorStop(1, "rgba(147,197,253,0.36)");
     } else {
-      grad.addColorStop(0, isChild ? "rgba(209,213,219,0.34)" : isPending ? "rgba(209,213,219,0.42)" : "rgba(229,231,235,0.45)");
-      grad.addColorStop(1, isChild ? "rgba(209,213,219,0.08)" : isPending ? "rgba(209,213,219,0.12)" : "rgba(107,114,128,0.26)");
+      grad.addColorStop(0, isChild ? "rgba(148,163,184,0.34)" : isPending ? "rgba(59,130,246,0.34)" : "rgba(37,99,235,0.38)");
+      grad.addColorStop(1, isChild ? "rgba(148,163,184,0.10)" : isPending ? "rgba(147,197,253,0.18)" : "rgba(147,197,253,0.24)");
     }
     ctx.strokeStyle = grad;
     ctx.lineWidth = isChild ? 1 : isCurrentTransition ? 3 : isCompleted || isFailed ? 2.7 : isPending ? 1.6 : 2;
@@ -3790,21 +4116,17 @@ function drawPathGraphFrame() {
       const py = (1 - t) * (1 - t) * from.y + 2 * (1 - t) * t * cpy + t * t * to.y;
       ctx.beginPath();
       ctx.arc(px, py, 2.5, 0, Math.PI * 2);
-      ctx.fillStyle = isCompleted ? "rgba(34,197,94,0.82)" : isCurrentTransition ? "rgba(250,204,21,0.86)" : isFailed ? "rgba(248,113,113,0.82)" : isPending ? "rgba(209,213,219,0.82)" : "rgba(229,231,235,0.82)";
+      ctx.fillStyle = isCompleted ? "rgba(22,163,74,0.72)" : isCurrentTransition ? "rgba(37,99,235,0.78)" : isFailed ? "rgba(239,68,68,0.72)" : isPending ? "rgba(59,130,246,0.62)" : "rgba(37,99,235,0.52)";
       ctx.fill();
       ctx.beginPath();
       ctx.arc(px, py, 5, 0, Math.PI * 2);
-      ctx.fillStyle = isCompleted ? "rgba(34,197,94,0.1)" : isCurrentTransition ? "rgba(250,204,21,0.1)" : isFailed ? "rgba(248,113,113,0.1)" : isPending ? "rgba(209,213,219,0.1)" : "rgba(229,231,235,0.08)";
+      ctx.fillStyle = isCompleted ? "rgba(22,163,74,0.08)" : isCurrentTransition ? "rgba(37,99,235,0.10)" : isFailed ? "rgba(239,68,68,0.08)" : isPending ? "rgba(59,130,246,0.08)" : "rgba(37,99,235,0.07)";
       ctx.fill();
     }
 
     if (edge.goal) {
-      ctx.fillStyle = "rgba(148,163,184,0.55)";
-      ctx.font = `9px ${PATH_CANVAS_FONT}`;
-      ctx.textAlign = "center";
       const labelOffset = isRuntime ? -12 - ((edge.runtimeEdgeIndex || 0) % 3) * 12 : -10;
-      const label = `${isForbidden ? "lock " : ""}${truncateCanvasText(ctx, edge.goal, isRuntime ? 128 : 84)}`;
-      ctx.fillText(label, mx, my + labelOffset);
+      drawPathEdgeLabel(ctx, `${isForbidden ? "lock " : ""}${edge.goal}`, mx, my + labelOffset, { forbidden: isForbidden, maxWidth: isRuntime ? 128 : 96 });
     }
   }
 
@@ -3813,62 +4135,7 @@ function drawPathGraphFrame() {
   // Nodes
   for (const pos of nodePositions) {
     const node = pos.isPending || pos.isControl ? null : navPathNodes.find((n) => n.id === pos.id);
-    const isHovered = pathHoveredNode === pos.id;
-    const baseR = pos.isControl ? 10 : PATH_NODE_R;
-    const baseGlowR = pos.isControl ? 18 : PATH_GLOW_R;
-    const r = isHovered ? baseR + 3 : baseR;
-    const glowR = isHovered ? baseGlowR + 6 : baseGlowR;
-
-    // Glow
-    const gg = ctx.createRadialGradient(pos.x, pos.y, r * 0.5, pos.x, pos.y, glowR);
-    if (pos.isControl) { gg.addColorStop(0, "rgba(229,231,235,0.36)"); gg.addColorStop(0.55, "rgba(229,231,235,0.12)"); gg.addColorStop(1, "rgba(229,231,235,0)"); }
-    else if (pos.isCurrent) { gg.addColorStop(0, "rgba(255,255,255,0.34)"); gg.addColorStop(0.5, "rgba(255,255,255,0.1)"); gg.addColorStop(1, "rgba(255,255,255,0)"); }
-    else if (pos.isPending) { gg.addColorStop(0, "rgba(209,213,219,0.32)"); gg.addColorStop(0.5, "rgba(209,213,219,0.1)"); gg.addColorStop(1, "rgba(209,213,219,0)"); }
-    else { gg.addColorStop(0, "rgba(148,163,184,0.22)"); gg.addColorStop(1, "rgba(148,163,184,0)"); }
-    ctx.beginPath(); ctx.arc(pos.x, pos.y, glowR, 0, Math.PI * 2); ctx.fillStyle = gg; ctx.fill();
-
-    // Pulse ring
-    if (pos.isCurrent) {
-      const pr = r + 7 + Math.sin(pathAnimT * 3) * 3;
-      ctx.beginPath(); ctx.arc(pos.x, pos.y, pr, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(255,255,255,${0.18 + Math.sin(pathAnimT*3)*0.08})`;
-      ctx.lineWidth = 1.5; ctx.stroke();
-    }
-    if (pos.isPending) {
-      ctx.beginPath(); ctx.arc(pos.x, pos.y, r + 6, 0, Math.PI * 2);
-      ctx.strokeStyle = "rgba(209,213,219,0.28)"; ctx.lineWidth = 1.5;
-      ctx.setLineDash([4, 3]); ctx.lineDashOffset = -pathAnimT * 35; ctx.stroke(); ctx.setLineDash([]);
-    }
-
-    // Body
-    const bg = ctx.createRadialGradient(pos.x - r * 0.3, pos.y - r * 0.3, r * 0.1, pos.x, pos.y, r);
-    if (pos.isControl) { bg.addColorStop(0, "#e5e7eb"); bg.addColorStop(0.65, "#6b7280"); bg.addColorStop(1, "#111827"); }
-    else if (pos.isCurrent) { bg.addColorStop(0, "#fef3c7"); bg.addColorStop(0.6, "#6b7280"); bg.addColorStop(1, "#111827"); }
-    else if (pos.isPending) { bg.addColorStop(0, "#e5e7eb"); bg.addColorStop(0.6, "#9ca3af"); bg.addColorStop(1, "#4b5563"); }
-    else { bg.addColorStop(0, "#94a3b8"); bg.addColorStop(0.6, "#475569"); bg.addColorStop(1, "#1e293b"); }
-    ctx.beginPath(); ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2); ctx.fillStyle = bg; ctx.fill();
-    ctx.strokeStyle = pos.isControl ? "rgba(229,231,235,0.55)" : pos.isCurrent ? "rgba(255,255,255,0.55)" : pos.isPending ? "rgba(209,213,219,0.55)" : "rgba(148,163,184,0.35)";
-    ctx.lineWidth = 1.3; ctx.stroke();
-
-    // Number
-    ctx.fillStyle = "#fff"; ctx.font = `bold ${pos.isControl ? 8 : pos.isPending ? 13 : 12}px ${PATH_CANVAS_FONT}`;
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText(pos.isControl ? String(pos.index + 1) : pos.isPending ? "?" : String(pos.index + 1), pos.x, pos.y);
-
-    // Label
-    const rawLabel = pos.isControl
-      ? String(pos.label || "").slice(0, 14)
-      : pos.isPending ? (pendingTransition?.goal?.slice(0, 22) || "") : (node?.label || "").slice(0, 22);
-    ctx.fillStyle = pos.isControl ? "rgba(229,231,235,0.86)" : pos.isCurrent ? "rgba(255,255,255,0.9)" : "rgba(203,213,225,0.75)";
-    ctx.font = `${pos.isCurrent ? "bold " : ""}${pos.isControl ? 9 : 11}px ${PATH_CANVAS_FONT}`;
-    const lbl = pos.isControl || pos.isRuntime ? truncateCanvasText(ctx, rawLabel, pos.labelMaxWidth || 72) : rawLabel;
-    ctx.fillText(lbl, pos.x, pos.y + (pos.isControl ? 22 : PATH_LABEL_DY));
-
-    if (!pos.isPending && node?.summary) {
-      ctx.fillStyle = "rgba(148,163,184,0.5)";
-      ctx.font = `10px ${PATH_CANVAS_FONT}`;
-      ctx.fillText(String(node.summary).slice(0, 26), pos.x, pos.y + PATH_LABEL_DY + 14);
-    }
+    drawPathWorkflowNode(ctx, pos, node);
   }
 
   ctx.restore();
@@ -3880,16 +4147,16 @@ function drawPathSectionPanels(ctx) {
   ctx.textBaseline = "middle";
   for (const panel of pathSectionLayouts) {
     const gradient = ctx.createLinearGradient(panel.x, panel.y, panel.x + panel.w, panel.y);
-    gradient.addColorStop(0, "rgba(255, 255, 255, 0.08)");
-    gradient.addColorStop(1, "rgba(148, 163, 184, 0.08)");
+    gradient.addColorStop(0, "rgba(239, 246, 255, 0.86)");
+    gradient.addColorStop(1, "rgba(255, 255, 255, 0.92)");
     ctx.fillStyle = gradient;
-    pathRoundRect(ctx, panel.x, panel.y, panel.w, panel.h, 14);
+    pathRoundRect(ctx, panel.x, panel.y, panel.w, panel.h, 18);
     ctx.fill();
-    ctx.strokeStyle = "rgba(229, 231, 235, 0.16)";
+    ctx.strokeStyle = "rgba(147, 197, 253, 0.42)";
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    ctx.fillStyle = "rgba(229, 231, 235, 0.88)";
+    ctx.fillStyle = "#1e3a8a";
     ctx.font = `bold 11px ${PATH_CANVAS_FONT}`;
     ctx.textAlign = "left";
     ctx.fillText(`${panel.label} (${panel.count})`, panel.x + 14, panel.y + 15);
@@ -3909,6 +4176,116 @@ function pathRoundRect(ctx, x, y, w, h, radius) {
   ctx.quadraticCurveTo(x, y + h, x, y + h - r);
   ctx.lineTo(x, y + r);
   ctx.quadraticCurveTo(x, y, x + r, y);
+}
+
+function pathNodeCardSize(pos = {}) {
+  if (pos.isControl) return { w: PATH_CONTROL_CARD_W, h: PATH_CONTROL_CARD_H };
+  if (pos.isRuntime) return { w: Math.max(150, Math.min(210, pos.labelMaxWidth || PATH_CARD_W)), h: PATH_CARD_H };
+  return { w: PATH_CARD_W, h: PATH_CARD_H };
+}
+
+function drawPathEdgeLabel(ctx, text, x, y, options = {}) {
+  const label = truncateCanvasText(ctx, text, options.maxWidth || 132);
+  if (!label) return;
+  ctx.save();
+  ctx.font = `10px ${PATH_CANVAS_FONT}`;
+  const metrics = ctx.measureText(label);
+  const padX = 9;
+  const w = Math.min((options.maxWidth || 132) + padX * 2, metrics.width + padX * 2);
+  const h = 22;
+  pathRoundRect(ctx, x - w / 2, y - h / 2, w, h, 999);
+  ctx.fillStyle = options.forbidden ? "rgba(255, 247, 247, 0.96)" : "rgba(255, 255, 255, 0.94)";
+  ctx.fill();
+  ctx.strokeStyle = options.forbidden ? "rgba(248, 113, 113, 0.42)" : "rgba(147, 197, 253, 0.5)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = options.forbidden ? "#b42318" : "#2563eb";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, x, y + 0.5);
+  ctx.restore();
+}
+
+function drawPathWorkflowNode(ctx, pos, node) {
+  const { w, h } = pathNodeCardSize(pos);
+  const x = pos.x - w / 2;
+  const y = pos.y - h / 2;
+  const isHovered = pathHoveredNode === pos.id;
+  const isCurrent = pos.isCurrent;
+  const isPending = pos.isPending;
+  const isControl = pos.isControl;
+  const radius = isControl ? 13 : 16;
+
+  ctx.save();
+  ctx.shadowColor = isCurrent ? "rgba(37, 99, 235, 0.22)" : "rgba(15, 23, 42, 0.10)";
+  ctx.shadowBlur = isHovered ? 18 : 10;
+  ctx.shadowOffsetY = isHovered ? 8 : 5;
+  pathRoundRect(ctx, x, y, w, h, radius);
+  ctx.fillStyle = isPending ? "#f8fafc" : "#ffffff";
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+  ctx.lineWidth = isCurrent ? 2 : 1;
+  ctx.strokeStyle = isCurrent ? "#2563eb" : isHovered ? "#93c5fd" : "#d8e3f3";
+  ctx.stroke();
+
+  if (isPending) {
+    ctx.setLineDash([5, 4]);
+    ctx.strokeStyle = "#93c5fd";
+    ctx.lineWidth = 1.3;
+    pathRoundRect(ctx, x + 4, y + 4, w - 8, h - 8, radius - 3);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  const badgeR = isControl ? 11 : 14;
+  const badgeX = x + 18;
+  const badgeY = y + 19;
+  ctx.beginPath();
+  ctx.arc(badgeX, badgeY, badgeR, 0, Math.PI * 2);
+  ctx.fillStyle = isCurrent ? "#2563eb" : isPending ? "#bfdbfe" : isControl ? "#e0f2fe" : "#eff6ff";
+  ctx.fill();
+  ctx.strokeStyle = isCurrent ? "#1d4ed8" : "#bfdbfe";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = isCurrent ? "#ffffff" : "#1d4ed8";
+  ctx.font = `700 ${isControl ? 9 : 11}px ${PATH_CANVAS_FONT}`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(pos.isPending ? "?" : String(pos.index + 1), badgeX, badgeY + 0.5);
+
+  const titleX = x + (isControl ? 36 : 42);
+  const titleMax = w - (isControl ? 48 : 54);
+  const rawTitle = isControl
+    ? String(pos.label || "control")
+    : isPending
+      ? (pendingTransition?.goal || "Pending")
+      : (node?.label || pos.id || "State");
+  ctx.fillStyle = "#0f172a";
+  ctx.font = `700 ${isControl ? 10 : 12}px ${PATH_CANVAS_FONT}`;
+  ctx.textAlign = "left";
+  ctx.fillText(truncateCanvasText(ctx, rawTitle, titleMax), titleX, y + (isControl ? 18 : 21));
+
+  const summary = isControl
+    ? String(pos.type || "control")
+    : isPending
+      ? "waiting for next state"
+      : String(node?.summary || pos.stateGuess || "");
+  if (summary) {
+    ctx.fillStyle = "#64748b";
+    ctx.font = `${isControl ? 9 : 10}px ${PATH_CANVAS_FONT}`;
+    ctx.fillText(truncateCanvasText(ctx, summary, titleMax), titleX, y + (isControl ? 33 : 39));
+  }
+
+  if (isCurrent && !isControl) {
+    ctx.fillStyle = "#dbeafe";
+    pathRoundRect(ctx, x + w - 58, y + 10, 44, 20, 999);
+    ctx.fill();
+    ctx.fillStyle = "#1d4ed8";
+    ctx.font = `700 9px ${PATH_CANVAS_FONT}`;
+    ctx.textAlign = "center";
+    ctx.fillText("current", x + w - 36, y + 20.5);
+  }
+  ctx.restore();
 }
 
 /* 鈹€鈹€ Path history 鈹€鈹€ */
@@ -4010,9 +4387,17 @@ function generateFakePathData() {
   renderNavPath();
 }
 
-function showNavNodeDetail(nodeId, focusControlIndex = null) {
+function showNavNodeDetail(nodeId, focusControlIndex = null, options = {}) {
   const node = navPathNodes.find((n) => n.id === nodeId);
   if (!node) return;
+  currentNavNodeId = nodeId;
+  if (isRuntimeGraphViewActive() && runtimePathGraphView) {
+    runtimePathGraphView.currentStateId = nodeId;
+    setPathGraphBadges({
+      mode: `${runtimePathGraphView.mode || "replay"} graph`,
+      state: nodeId,
+    });
+  }
 
   const content = $("pathDetailContent");
   const meta = $("pathDetailMeta");
@@ -4027,33 +4412,43 @@ function showNavNodeDetail(nodeId, focusControlIndex = null) {
     return ctrl.clickPoint || ["button", "icon_button", "tab", "menu", "menuitem", "input", "textbox", "link", "switch", "checkbox", "titlebar-button"].includes(type);
   });
   const possibleEntries = controls.filter((ctrl) => ctrl.possibleNav || ctrl.navigatedToPageId || ctrl.action || ctrl.description);
-  const operationItems = clickableControls.slice(0, 12).map((ctrl) => {
+  const runtimeOperationItems = runtimeNodeOperationItemsHtml(node);
+  const operationItems = node.runtimeGraphNode ? "" : clickableControls.slice(0, 12).map((ctrl) => {
     const action = ctrl.action || (String(ctrl.type || "").includes("input") ? "输入/编辑" : "点击");
     const coords = ctrl.clickPoint ? `(${Math.round(ctrl.clickPoint.x)}, ${Math.round(ctrl.clickPoint.y)})` : "";
     return `<li><strong>${escapeHtml(action)}</strong> ${escapeHtml(ctrl.label)} ${coords ? `<span>${coords}</span>` : ""}</li>`;
   }).join("");
-  const entryItems = possibleEntries.slice(0, 12).map((ctrl) => {
+  const entryItems = node.runtimeGraphNode ? "" : possibleEntries.slice(0, 12).map((ctrl) => {
     const navText = ctrl.navigatedToPageId
-      ? `跳转到 ${(navPathNodes.find((n) => n.id === ctrl.navigatedToPageId) || {}).label || "未知页面"}`
-      : (ctrl.possibleNav || ctrl.description || ctrl.action || "可能入口");
+      ? `${t("replay_jump_to")} ${(navPathNodes.find((n) => n.id === ctrl.navigatedToPageId) || {}).label || t("replay_unknown_page")}`
+      : (ctrl.possibleNav || ctrl.description || ctrl.action || t("replay_possible_entries"));
     return `<li><strong>${escapeHtml(ctrl.label)}</strong><span>${escapeHtml(navText)}</span></li>`;
   }).join("");
 
-  const controlsHtml = controls.length ? renderGroupedControlDetails(controls, focusControlIndex) : `<div class="path-detail-empty">当前页面还没有收录控件。先运行整屏理解或精准定位后，这里会显示按钮、输入框、可能入口和坐标。</div>`;
+  const controlsHtml = controls.length ? renderGroupedControlDetails(controls, focusControlIndex) : `<div class="path-detail-empty">${escapeHtml(t("replay_no_controls_hint"))}</div>`;
+  if (!options.preserveInterfaceSelection) {
+    const stateRef = interfaceStateRefForPathNode(node);
+    if (stateRef) selectedInterfaceMapRef = stateRef;
+  }
+  const screenRegionsHtml = pathDetailScreenRegionsHtml(node);
+  const runtimeNodeHtml = runtimeNodeDetailHtml(node);
+  const interfaceInspector = pathDetailInterfaceInspectorHtml(node);
 
   content.innerHTML = `
     <div class="path-detail-card">
       <h4>${escapeHtml(node.label)}</h4>
       ${node.summary ? `<div class="summary-block">${escapeHtml(node.summary)}</div>` : ""}
+      ${runtimeNodeHtml}
       ${focusedControl ? renderFocusedControlDetail(focusedControl, focusControlIndex) : ""}
       <div class="path-detail-sections">
         <div class="path-detail-section">
-          <h5>可能操作</h5>
-          ${operationItems ? `<ul>${operationItems}</ul>` : `<p>暂无可点击/可输入操作。运行整屏理解后会自动补充。</p>`}
+          <h5>${escapeHtml(t("replay_possible_actions"))}</h5>
+          <p>${node.runtimeGraphNode ? escapeHtml(t("replay_possible_actions_split")) : ((operationItems || runtimeOperationItems) ? escapeHtml(t("replay_possible_actions_hint")) : escapeHtml(t("replay_possible_actions_empty")))}</p>
+          ${runtimeOperationItems ? `<ul>${runtimeOperationItems}</ul>` : ""}
         </div>
         <div class="path-detail-section">
-          <h5>可能入口 / 跳转</h5>
-          ${entryItems ? `<ul>${entryItems}</ul>` : `<p>暂无推测入口。精准定位或点击验证后会记录跳转关系。</p>`}
+          <h5>${escapeHtml(t("replay_possible_entries"))}</h5>
+          ${entryItems ? `<ul>${entryItems}</ul>` : `<p>${escapeHtml(t("replay_possible_entries_empty"))}</p>`}
         </div>
       </div>
       <div class="meta-row">
@@ -4063,11 +4458,316 @@ function showNavNodeDetail(nodeId, focusControlIndex = null) {
         ${node.imagePath ? `<span><strong>${t("path_screenshot") || "Screenshot"}:</strong> ${escapeHtml(basename(node.imagePath))}</span>` : ""}
         <span><strong>${t("path_time") || "Time"}:</strong> ${node.timestamp}</span>
       </div>
+      <div class="path-detail-interface-workbench">
+        <section class="path-detail-interface-regions">
+          ${screenRegionsHtml}
+        </section>
+        <aside class="path-detail-interface-inspector" id="pathDetailInterfaceInspector">
+          ${interfaceInspector}
+        </aside>
+      </div>
       ${controlsHtml}
     </div>
   `;
+  bindPathDetailInterfaceControls(content, nodeId);
 
   if (meta) meta.textContent = `${controls.length} controls | ${navPathNodes.length} pages`;
+}
+
+function bindPathDetailInterfaceControls(content, nodeId) {
+  content.querySelectorAll("[data-path-detail-inspect], [data-interface-inspect]").forEach((control) => {
+    control.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+      selectedInterfaceMapRef = String(control.dataset.pathDetailInspect || control.dataset.interfaceInspect || "");
+      showNavNodeDetail(nodeId, null, { preserveInterfaceSelection: true });
+      $("pathDetailInterfaceInspector")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  });
+  bindInterfaceMapEditor(content);
+}
+
+function interfaceStateRefForPathNode(node = {}) {
+  const map = replayInterfaceMap && typeof replayInterfaceMap === "object" ? replayInterfaceMap : null;
+  if (!map || !Array.isArray(map.states)) return "";
+  const state = interfaceStateForPathNode(node, map.states);
+  const index = map.states.findIndex((item) => item === state || String(item?.state_id || "") === String(state?.state_id || ""));
+  return index >= 0 ? `state:${index}` : "";
+}
+
+function pathDetailInterfaceInspectorHtml(node = {}) {
+  const map = replayInterfaceMap && typeof replayInterfaceMap === "object" ? replayInterfaceMap : null;
+  if (!map) {
+    return `
+      <h5>${escapeHtml(t("interface_inspector"))}</h5>
+      <p class="trace-idle">${escapeHtml(t("replay_no_interface_map"))}</p>`;
+  }
+  const states = Array.isArray(map.states) ? map.states : [];
+  const regions = Array.isArray(map.regions) ? map.regions : [];
+  const state = interfaceStateForPathNode(node, states);
+  const regionIds = interfaceRegionRefsForState(state, regions);
+  const html = interfaceInspectorHtml(map, regionIds);
+  if (!html || html.includes(escapeHtml(t("pending")))) {
+    return `
+      <h5>${escapeHtml(t("interface_inspector"))}</h5>
+      <p class="trace-idle">${escapeHtml(t("replay_inspect_hint"))}</p>`;
+  }
+  return html;
+}
+
+function runtimeNodeOperationItemsHtml(node = {}) {
+  if (!node.runtimeGraphNode || !runtimePathGraphView?.graph) return "";
+  const nodeId = String(node.id || "");
+  const graph = runtimePathGraphView.graph;
+  const graphTransitions = Array.isArray(graph.transitions) ? graph.transitions : [];
+  const templateItems = (Array.isArray(graph.action_templates) ? graph.action_templates : [])
+    .filter((template) => {
+      const actionId = String(template.action_template_id || template.action_id || "");
+      const transition = graphTransitions.find((item) =>
+        String(item.transition_id || "") === String(template.transition_ref || "") ||
+        String(item.action_template_id || "") === actionId ||
+        String(item.action_id || "") === actionId
+      );
+      if (!transition) return nodeId === runtimeGraphDisplayStateId(graph, graph.initial_state_id || nodeId);
+      const from = runtimeGraphDisplayStateId(graph, transition.from_state_id || "");
+      const to = runtimeGraphDisplayStateId(graph, transition.to_state_id || "");
+      return from === nodeId || to === nodeId;
+    })
+    .map((template) => {
+      const actionId = template.action_template_id || template.action_id || "operation";
+      const target = template.scroll_target?.target_container_id || template.candidate_constraints?.required_container_id || template.target_entity || "";
+      const skill = template.learned_skill_ref || template.skill_ref || "";
+      const lowLevel = inferTemplateLowLevel(actionId, template);
+      const available = template.availability_policy?.default_available === false ? t("replay_gate_confirm") : t("replay_callable");
+      return `
+        <li>
+          <strong>${escapeHtml(actionId)}</strong>
+          <span>${escapeHtml([skill, lowLevel, target, available].filter(Boolean).join(" · "))}</span>
+        </li>`;
+    });
+  if (templateItems.length) return templateItems.join("");
+  return navPathEdges
+    .filter((edge) => edge.from === nodeId)
+    .map((edge) => {
+      const action = edge.goal || edge.actionTemplateId || edge.action || "operation";
+      const skill = edge.skillRef ? `skill: ${edge.skillRef}` : "";
+      const lowLevel = edge.lowLevelActionType ? `低层动作: ${edge.lowLevelActionType}` : "";
+      const target = edge.actionTemplateId ? `目标: ${edge.actionTemplateId}` : "";
+      const status = edge.forbidden ? t("replay_gate_confirm") : t("replay_callable");
+      return `
+        <li>
+          <strong>${escapeHtml(action)}</strong>
+          <span>${escapeHtml([skill, lowLevel, target, status].filter(Boolean).join(" · "))}</span>
+        </li>`;
+    })
+    .join("");
+}
+
+function runtimeNodeDetailHtml(node = {}) {
+  if (!node.runtimeGraphNode || !runtimePathGraphView?.graph) return "";
+  const graph = runtimePathGraphView.graph;
+  const nodeId = String(node.id || "");
+  const childIds = Array.isArray(node.childStateIds) ? node.childStateIds : [];
+  const rawStates = Array.isArray(graph.states) ? graph.states : [];
+  const childStateCards = childIds
+    .map((stateId) => rawStates.find((state) => String(state?.state_id || "") === String(stateId)) || { state_id: stateId })
+    .map((state) => `
+      <span>
+        <strong>${escapeHtml(runtimeGraphStateLabel(state))}</strong>
+        <small>${escapeHtml(state.page_type || state.state_id || "")}</small>
+      </span>`)
+    .join("");
+  const regionRefs = [
+    ...(Array.isArray(node.regionRefs) ? node.regionRefs : []),
+    ...(Array.isArray(node.requiredRegions) ? node.requiredRegions : []),
+  ].filter(Boolean);
+  return `
+    <section class="runtime-node-detail">
+      <div>
+        <h5>${escapeHtml(t("replay_page_summary"))}</h5>
+        <p>${escapeHtml(t("replay_page_summary_hint"))}</p>
+      </div>
+      <div class="runtime-node-meta">
+        <span><strong>${childIds.length}</strong><small>${escapeHtml(t("replay_child_states"))}</small></span>
+        <span><strong>${regionRefs.length}</strong><small>${escapeHtml(t("replay_regions"))}</small></span>
+        <span><strong>${navPathNodes.length}</strong><small>${escapeHtml(t("replay_page_nodes"))}</small></span>
+      </div>
+      ${childStateCards ? `<div class="runtime-child-states">${childStateCards}</div>` : ""}
+    </section>`;
+}
+
+function pathDetailScreenRegionsHtml(node = {}) {
+  const map = replayInterfaceMap && typeof replayInterfaceMap === "object" ? replayInterfaceMap : null;
+  if (!map) return "";
+  const states = Array.isArray(map.states) ? map.states : [];
+  const regions = Array.isArray(map.regions) ? map.regions : [];
+  if (!regions.length) return "";
+  const state = interfaceStateForPathNode(node, states);
+  const regionRefs = interfaceRegionRefsForState(state, regions);
+  if (!regionRefs.length) {
+    return `
+      <section class="path-screen-regions">
+        <div class="path-screen-regions-head">
+          <h5>${escapeHtml(t("replay_screen_regions"))}</h5>
+          <span>${escapeHtml(t("replay_screen_regions_empty"))}</span>
+        </div>
+        <p class="path-detail-empty">${escapeHtml(t("replay_screen_regions_empty_hint"))}</p>
+      </section>`;
+  }
+  const regionIds = new Set(regionRefs);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    regions.forEach((region) => {
+      const parentId = String(region.parent_region_id || "");
+      const regionId = String(region.region_id || "");
+      if (parentId && regionId && regionIds.has(parentId) && !regionIds.has(regionId)) {
+        regionIds.add(regionId);
+        changed = true;
+      }
+    });
+  }
+  const stateRegionIds = new Set(regionRefs);
+  const childRegionIds = new Set([...regionIds].filter((regionId) => !stateRegionIds.has(regionId)));
+  const visibleIds = regionIds;
+  const regionEntries = regions
+    .map((region, index) => ({ region, index, regionId: String(region.region_id || "") }))
+    .filter(({ regionId }) => visibleIds.has(regionId));
+  const assets = Array.isArray(map.fixed_visual_assets) ? map.fixed_visual_assets : [];
+  const dynamicAreas = Array.isArray(map.dynamic_areas) ? map.dynamic_areas : [];
+  const dangerZones = Array.isArray(map.danger_zones) ? map.danger_zones : [];
+  const transitions = Array.isArray(map.transitions) ? map.transitions : [];
+  const regionEntriesForLayout = regionEntries.map((entry) => ({ ...entry, id: entry.regionId }));
+  const knownSeekLayout = interfaceKnownSeekRegionLayoutHtml(
+    regionEntriesForLayout,
+    assets,
+    dynamicAreas,
+    dangerZones,
+    states,
+    transitions,
+  );
+  const knownApplicationLayout = knownSeekLayout ? "" : interfaceKnownSeekApplicationRegionLayoutHtml(
+    regionEntriesForLayout,
+    assets,
+    dynamicAreas,
+    dangerZones,
+    states,
+    transitions,
+  );
+  const knownLayout = knownSeekLayout || knownApplicationLayout;
+  const regionCards = knownLayout || regionEntries.map((entry) => pathDetailRegionCardHtml(entry)).join("");
+  return `
+    <section class="path-screen-regions">
+      <div class="path-screen-regions-head">
+        <h5>${escapeHtml(t("replay_screen_regions"))}</h5>
+        <span>${escapeHtml(state?.label || state?.state_id || node.id || "")} · ${regionRefs.length} ${escapeHtml(t("replay_main_regions"))}</span>
+      </div>
+      ${knownLayout ? regionCards : `<div class="path-screen-region-grid">${regionCards}</div>`}
+    </section>`;
+}
+
+function interfaceStateForPathNode(node = {}, states = []) {
+  const nodeId = String(node.id || "");
+  const nodeLabel = String(node.label || "");
+  const nodeType = String(node.stateGuess || "");
+  const displayNodeId = runtimePathGraphView?.graph ? runtimeGraphDisplayStateId(runtimePathGraphView.graph, nodeId) : nodeId;
+  const nodeRegionRefs = [
+    ...(Array.isArray(node.regionRefs) ? node.regionRefs : []),
+    ...(Array.isArray(node.requiredRegions) ? node.requiredRegions : []),
+  ].map((item) => String(item)).filter(Boolean);
+  const exactState = states.find((state) => String(state.state_id || "") === displayNodeId)
+    || states.find((state) => String(state.state_id || "") === nodeId);
+  if (exactState && Array.isArray(exactState.region_refs) && exactState.region_refs.length) return exactState;
+  if (nodeRegionRefs.length) {
+    return {
+      state_id: displayNodeId || nodeId,
+      label: nodeLabel || displayNodeId || nodeId,
+      page_type: nodeType,
+      region_refs: nodeRegionRefs,
+    };
+  }
+  return exactState
+    || states.find((state) => String(state.label || "") === nodeLabel)
+    || states.find((state) => nodeType && String(state.page_type || "") === nodeType)
+    || (states.length === 1 ? states[0] : null);
+}
+
+function interfaceRegionRefsForState(state, regions = []) {
+  const explicit = [
+    ...(Array.isArray(state?.region_refs) ? state.region_refs : []),
+    ...(Array.isArray(state?.required_regions) ? state.required_regions : []),
+  ].map(String).filter(Boolean);
+  if (explicit.length) return explicit;
+  if (!state && regions.length <= 6) {
+    return regions
+      .filter((region) => !region.parent_region_id)
+      .map((region) => String(region.region_id || ""))
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function pathDetailRegionCardHtml(entry = {}) {
+  const region = entry.region || {};
+  const regionId = entry.regionId || String(region.region_id || "");
+  const assets = Array.isArray(replayInterfaceMap?.fixed_visual_assets) ? replayInterfaceMap.fixed_visual_assets : [];
+  const dynamicAreas = Array.isArray(replayInterfaceMap?.dynamic_areas) ? replayInterfaceMap.dynamic_areas : [];
+  const dangerZones = Array.isArray(replayInterfaceMap?.danger_zones) ? replayInterfaceMap.danger_zones : [];
+  const regionAssets = assets
+    .map((asset, assetIndex) => ({ asset, assetIndex }))
+    .filter(({ asset }) => interfaceAssetBelongsToRegion(asset, regionId));
+  const regionDynamics = dynamicAreas
+    .map((area, dynamicIndex) => ({ area, dynamicIndex }))
+    .filter(({ area }) => String(area.region_id || "") === regionId);
+  const regionDangerZones = dangerZones
+    .map((zone, dangerIndex) => ({ zone, dangerIndex }))
+    .filter(({ zone }) => {
+      const asset = assets.find((item) => String(item.asset_id || "") === String(zone.asset_id || ""));
+      return interfaceAssetBelongsToRegion(asset || {}, regionId);
+    });
+  const thumbs = regionAssets.filter(({ asset }) => interfaceAssetShouldShowThumb(asset)).slice(0, 4).map(({ asset }) => {
+    const crop = interfaceAssetImageRefs(asset)[0]?.[1] || "";
+    return crop
+      ? `<img src="${escapeHtml(traceImageUrl(crop))}" alt="${escapeHtml(asset.label || asset.asset_id || "asset")}" loading="lazy" />`
+      : `<span>${escapeHtml(asset.label || asset.asset_id || "asset")}</span>`;
+  }).join("");
+  const assetItems = regionAssets.map(({ asset, assetIndex }) => `
+    <li data-path-detail-inspect="asset:${assetIndex}">
+      <strong>${escapeHtml(asset.label || asset.asset_id || "button")}</strong>
+      <span>${escapeHtml(asset.semantic_action || asset.role || "fixed visual asset")}</span>
+    </li>`).join("");
+  const dynamicItems = regionDynamics.map(({ area, dynamicIndex }) => `
+    <li data-path-detail-inspect="dynamic:${dynamicIndex}">
+      <strong>${escapeHtml(area.label || area.area_id || "dynamic ROI")}</strong>
+      <span>${escapeHtml(area.semantic_role || area.role || area.area_type || "ROI")}</span>
+    </li>`).join("");
+  const dangerItems = regionDangerZones.map(({ zone, dangerIndex }) => `
+    <li data-path-detail-inspect="danger:${dangerIndex}">
+      <strong>${escapeHtml(zone.label || zone.zone_id || "danger")}</strong>
+      <span>${escapeHtml(zone.semantic_action || zone.danger_level || "manual review")}</span>
+    </li>`).join("");
+  return `
+    <details class="path-screen-region-card">
+      <summary data-path-detail-inspect="region:${entry.index}">
+        <div>
+          <strong>${escapeHtml(region.label || regionId)}</strong>
+          <span>${escapeHtml(regionId)} · ${escapeHtml(region.region_type || region.role || "region")}</span>
+        </div>
+      </summary>
+      ${thumbs ? `<div class="path-screen-region-thumbs">${thumbs}</div>` : ""}
+      <div class="path-screen-region-counts">
+        <span>${regionAssets.length} button</span>
+        <span>${regionDynamics.length} ROI</span>
+        <span>${regionDangerZones.length} danger</span>
+      </div>
+      ${(assetItems || dynamicItems || dangerItems) ? `
+        <div class="path-screen-region-detail">
+          ${assetItems ? `<section><h6>${escapeHtml(t("replay_button_screenshots"))}</h6><ul>${assetItems}</ul></section>` : ""}
+          ${dynamicItems ? `<section><h6>${escapeHtml(t("replay_dynamic_regions"))}</h6><ul>${dynamicItems}</ul></section>` : ""}
+          ${dangerItems ? `<section><h6>${escapeHtml(t("replay_danger_regions"))}</h6><ul>${dangerItems}</ul></section>` : ""}
+        </div>` : ""}
+    </details>`;
 }
 
 function renderFocusedControlDetail(ctrl, index) {
@@ -4084,7 +4784,7 @@ function renderFocusedControlDetail(ctrl, index) {
   ].filter(Boolean).join(" | ");
   return `
     <div class="focused-control-card">
-      <h5>当前子路径 #${index + 1}</h5>
+      <h5>${escapeHtml(t("replay_current_child_path"))} #${index + 1}</h5>
       <strong>${escapeHtml(ctrl.label || "control")}</strong>
       ${meta ? `<span>${escapeHtml(meta)}</span>` : ""}
       ${ctrl.description ? `<p>${escapeHtml(ctrl.description)}</p>` : ""}
@@ -4097,7 +4797,7 @@ function renderGroupedControlDetails(controls, focusControlIndex = null) {
   const groups = groupPathControlsBySection(controls);
   return `
     <div class="controls-list">
-      <h4>按钮 / 输入 / 控件 (${controls.length})</h4>
+      <h4>${escapeHtml(t("replay_controls_title"))} (${controls.length})</h4>
       ${groups.map((group) => `
         <section class="control-section">
           <h5>${escapeHtml(group.label)} <span>${group.controls.length}</span></h5>
@@ -4684,6 +5384,67 @@ function replayPresetPath(preset) {
   return DEFAULT_SEEK_GRAPH_PATH;
 }
 
+function replayPresetInterfaceMapPath(preset) {
+  if (preset === "seek") return DEFAULT_SEEK_INTERFACE_MAP_PATH;
+  return "";
+}
+
+function interfaceMapCurrentAppKey() {
+  return [
+    $("appId")?.value,
+    $("observeApp")?.value,
+    $("locateApp")?.value,
+    $("executeApp")?.value,
+    $("executeActionsApp")?.value,
+    $("bindProcess")?.value,
+    $("bindTitle")?.value,
+    $("windowSelect")?.selectedOptions?.[0]?.textContent,
+  ].map((value) => String(value || "").trim()).filter(Boolean).join(" | ");
+}
+
+function inferInterfaceMapPresetForCurrentApp() {
+  const key = interfaceMapCurrentAppKey().toLowerCase();
+  if (/\bseek\b|nz\.seek\.com|seek\.com/.test(key)) {
+    return {
+      preset: "seek",
+      mapPath: DEFAULT_SEEK_INTERFACE_MAP_PATH,
+      calibrationPath: DEFAULT_INTERFACE_CALIBRATION_REPORT_PATH,
+    };
+  }
+  return null;
+}
+
+async function useCurrentAppInterfaceMap() {
+  const inferred = inferInterfaceMapPresetForCurrentApp();
+  if (!inferred) {
+    renderResponse({
+      success: false,
+      message: "No interface map matched current app/window",
+      data: {
+        contract_version: "interface_map_app_match_v1",
+        current_app: interfaceMapCurrentAppKey(),
+      },
+    }, "Interface map");
+    return;
+  }
+  if ($("replayPreset")) $("replayPreset").value = inferred.preset;
+  if ($("replayInterfaceMapPath")) $("replayInterfaceMapPath").value = inferred.mapPath;
+  if ($("replayInterfaceCalibrationPath")) $("replayInterfaceCalibrationPath").value = inferred.calibrationPath;
+  await loadReplayInterfaceMap();
+  await loadReplayInterfaceCalibrationReport();
+  renderResponse({
+    success: true,
+    message: "Interface map selected for current app",
+    data: {
+      contract_version: "interface_map_app_match_v1",
+      current_app: interfaceMapCurrentAppKey(),
+      preset: inferred.preset,
+      interface_map_path: inferred.mapPath,
+      calibration_report_path: inferred.calibrationPath,
+    },
+  }, "Interface map");
+}
+
 function replayPresetTemplate(preset) {
   if (preset === "wikipedia") return "read_article_page";
   if (preset === "github_issues") return "read_issue_thread";
@@ -4705,6 +5466,7 @@ function replayPresetStateId(preset) {
 function applyReplayPreset() {
   const preset = $("replayPreset")?.value || "seek";
   if ($("replayGraphPath")) $("replayGraphPath").value = replayPresetPath(preset);
+  if ($("replayInterfaceMapPath")) $("replayInterfaceMapPath").value = replayPresetInterfaceMapPath(preset);
   if ($("replayTaskTemplate")) $("replayTaskTemplate").value = replayPresetTemplate(preset);
   if ($("replayStateId")) $("replayStateId").value = replayPresetStateId(preset);
 }
@@ -4791,6 +5553,1545 @@ function renderReplayGraph(graph, path) {
         </div>`).join("")}
     </div>`;
   renderActionTable("replayGraphActions", actionRowsFromGraph(graph));
+}
+
+function renderInterfaceMap(map, path) {
+  const panel = $("replayInterfaceMapPanel");
+  if (!panel) return;
+  if (!map) {
+    panel.innerHTML = `<p class="trace-idle">${t("no_response")}</p>`;
+    return;
+  }
+  const regions = Array.isArray(map.regions) ? map.regions : [];
+  const assets = Array.isArray(map.fixed_visual_assets) ? map.fixed_visual_assets : [];
+  const dynamicAreas = Array.isArray(map.dynamic_areas) ? map.dynamic_areas : [];
+  const dangerZones = Array.isArray(map.danger_zones) ? map.danger_zones : [];
+  const states = Array.isArray(map.states) ? map.states : [];
+  const transitions = Array.isArray(map.transitions) ? map.transitions : [];
+  const calibration = replayInterfaceCalibrationReport && typeof replayInterfaceCalibrationReport === "object" ? replayInterfaceCalibrationReport : null;
+  const summary = map.summary && typeof map.summary === "object" ? map.summary : {};
+  const regionIds = regions.map((region) => String(region.region_id || "")).filter(Boolean);
+  if (!selectedInterfaceMapRef) {
+    selectedInterfaceMapRef = assets.length ? "asset:0" : (regions.length ? "region:0" : "");
+  }
+  const appKey = interfaceMapCurrentAppKey();
+  panel.innerHTML = `
+    <div class="interface-map-heading">
+      <div>
+        <h4>${escapeHtml(t("interface_map_title"))}</h4>
+        <p class="form-help">${escapeHtml(t("interface_editor_hint"))}</p>
+      </div>
+      <div class="interface-safety-note">
+        <strong>Current match required</strong>
+        <span>source bbox is learning evidence only</span>
+      </div>
+    </div>
+    <div class="summary-grid summary-grid-pairs">
+      ${[
+        ["path", path || ""],
+        ["contract", map.contract_version || ""],
+        ["app_id", map.app_id || ""],
+        ["current_app", appKey || ""],
+        ["page_type", map.page_type || ""],
+        ["states", summary.state_count ?? states.length],
+        ["regions", summary.region_count ?? regions.length],
+        ["fixed_assets", summary.fixed_visual_asset_count ?? assets.length],
+        ["dynamic_areas", summary.dynamic_area_count ?? dynamicAreas.length],
+        ["danger_zones", summary.danger_zone_count ?? dangerZones.length],
+      ].map(([label, value]) => `
+        <div class="summary-item${label === "path" ? " summary-item-wide" : ""}">
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(String(value ?? ""))}</strong>
+        </div>`).join("")}
+    </div>
+    ${interfaceStateFlowHtml(states, transitions)}
+    <div class="interface-workbench interface-workbench-summary-only">
+      <section class="interface-canvas" aria-label="learned interface map canvas">
+        ${interfaceCalibrationSummaryHtml(calibration)}
+        ${interfaceRegionsMovedToPathDetailHtml(states, regions)}
+      </section>
+    </div>`;
+  bindInterfaceMapEditor(panel);
+}
+
+function interfaceRegionsMovedToPathDetailHtml(states = [], regions = []) {
+  return `
+    <div class="interface-regions-moved-note">
+      <strong>${escapeHtml(t("replay_screen_regions"))}</strong>
+      <span>${escapeHtml(t("replay_page_summary_hint"))}</span>
+      <div>
+        <i>${escapeHtml(String(states.length))} ${escapeHtml(t("replay_page_nodes"))}</i>
+        <i>${escapeHtml(String(regions.length))} ${escapeHtml(t("replay_regions"))}</i>
+      </div>
+    </div>`;
+}
+
+function interfaceCalibrationSummaryHtml(report) {
+  if (!report) {
+    return `
+      <div class="interface-calibration-summary interface-calibration-empty">
+        <strong>${escapeHtml(t("replay_visual_calibration"))}</strong>
+        <span>${escapeHtml(t("replay_visual_calibration_hint"))}</span>
+      </div>`;
+  }
+  const summary = report.summary && typeof report.summary === "object" ? report.summary : {};
+  const status = String(summary.status || "unknown");
+  return `
+    <div class="interface-calibration-summary">
+      <div>
+        <strong>${escapeHtml(t("replay_visual_calibration"))}</strong>
+        <span>${escapeHtml(replayInterfaceCalibrationPath || report.target_image_path || "")}</span>
+      </div>
+      <div class="interface-calibration-metrics">
+        ${[
+          ["status", status],
+          ["matched", `${summary.matched_count ?? 0}/${summary.case_count ?? report.case_count ?? 0}`],
+          ["fast lane", summary.fast_lane_success_count ?? 0],
+          ["high risk", summary.high_risk_match_count ?? 0],
+          ["final submit fast", summary.final_submit_fast_lane_count ?? 0],
+          ["median ms", summary.median_visual_recall_ms ?? ""],
+        ].map(([label, value]) => `<span class="${label === "status" ? (status === "pass" ? "ok" : "blocked") : ""}"><b>${escapeHtml(label)}</b>${escapeHtml(String(value))}</span>`).join("")}
+      </div>
+    </div>`;
+}
+
+function interfaceStateFlowHtml(states = [], transitions = []) {
+  if (!states.length) return `<div class="interface-state-flow interface-state-flow-empty"><p class="trace-idle">${t("no_response")}</p></div>`;
+  const transitionLabels = new Map();
+  transitions.forEach((transition) => {
+    if (!transition || typeof transition !== "object") return;
+    const from = String(transition.from_state_id || "");
+    const label = String(transition.action_template_id || transition.transition_id || "");
+    if (!from || !label) return;
+    const labels = transitionLabels.get(from) || [];
+    labels.push(label);
+    transitionLabels.set(from, labels);
+  });
+  return `
+    <div class="interface-state-flow">
+      <div class="interface-flow-title">
+        <strong>${escapeHtml(t("replay_state_flow"))}</strong>
+        <span>${states.length} ${escapeHtml(t("replay_states"))}, ${transitions.length} ${escapeHtml(t("replay_transitions"))}</span>
+      </div>
+      <div class="interface-state-track">
+        ${states.map((state, index) => {
+          const ref = `state:${index}`;
+          const labels = transitionLabels.get(String(state.state_id || "")) || [];
+          return `
+            <button class="interface-state-node${selectedInterfaceMapRef === ref ? " interface-selected" : ""}" type="button" data-interface-inspect="${ref}">
+              <strong>${escapeHtml(state.label || state.state_id || "")}</strong>
+              <span>${escapeHtml(state.page_type || "")}</span>
+              ${labels.length ? `<em>${escapeHtml(labels.slice(0, 2).join(" / "))}</em>` : ""}
+            </button>`;
+        }).join("")}
+      </div>
+    </div>`;
+}
+
+function interfaceRegionMapHtml(regions = [], assets = [], dynamicAreas = [], dangerZones = [], states = [], transitions = []) {
+  if (!regions.length) return `<p class="trace-idle">${t("no_response")}</p>`;
+  const regionEntries = regions.map((region, index) => ({ region, index, id: String(region.region_id || "") }));
+  const indexById = new Map(regionEntries.map((entry) => [entry.id, entry]));
+  const knownRegionIds = new Set(regionEntries.map((entry) => entry.id).filter(Boolean));
+  const unmappedAssets = assets
+    .map((asset, assetIndex) => ({ asset, assetIndex }))
+    .filter(({ asset }) => {
+      const ids = new Set([String(asset.region_id || ""), ...(Array.isArray(asset.allowed_region_ids) ? asset.allowed_region_ids.map(String) : [])].filter(Boolean));
+      return !ids.size || !Array.from(ids).some((id) => knownRegionIds.has(id));
+    });
+  const childrenByParent = new Map();
+  regionEntries.forEach((entry) => {
+    const parentId = String(entry.region.parent_region_id || "");
+    if (!parentId || !indexById.has(parentId)) return;
+    const children = childrenByParent.get(parentId) || [];
+    children.push(entry);
+    childrenByParent.set(parentId, children);
+  });
+  const roots = regionEntries.filter((entry) => {
+    const parentId = String(entry.region.parent_region_id || "");
+    return !parentId || !indexById.has(parentId);
+  });
+  return `
+    <div class="interface-region-map">
+      <div class="interface-map-title">
+        <strong>${escapeHtml(t("replay_screen_regions"))}</strong>
+        <span>${escapeHtml(t("replay_possible_actions_split"))}</span>
+      </div>
+      <div class="interface-region-tree">
+        ${interfaceKnownSeekRegionLayoutHtml(regionEntries, assets, dynamicAreas, dangerZones, states, transitions) || interfaceSpatialRegionMapHtml(regionEntries, assets, dynamicAreas, dangerZones) || roots.map((entry) => interfaceRegionCardHtml(entry, childrenByParent, assets, dynamicAreas, dangerZones, 0)).join("")}
+      </div>
+      ${unmappedAssets.length ? `
+        <div class="interface-unmapped-assets">
+          <h6>${escapeHtml(t("replay_screen_regions_empty"))}</h6>
+          <p>${escapeHtml(t("replay_screen_regions_empty_hint"))}</p>
+          <div class="interface-node-row">
+            ${unmappedAssets.map(({ asset, assetIndex }) => interfaceVisualNodeHtml(asset, assetIndex)).join("")}
+          </div>
+        </div>` : ""}
+    </div>`;
+}
+
+function interfaceKnownSeekRegionLayoutHtml(regionEntries = [], assets = [], dynamicAreas = [], dangerZones = [], states = [], transitions = []) {
+  const byId = new Map(regionEntries.map((entry) => [entry.id, entry]));
+  const required = ["top_search_area", "results_list", "job_detail"];
+  if (!required.every((id) => byId.has(id))) return "";
+  const regionPanel = (regionId, className = "", childRegionIds = []) => {
+    const entry = byId.get(regionId);
+    if (!entry) return "";
+    const childEntries = childRegionIds.map((id) => byId.get(id)).filter(Boolean);
+    return interfaceLayoutRegionPanelHtml(entry, assets, dynamicAreas, dangerZones, className, childEntries, states, transitions);
+  };
+  return `
+    <div class="interface-known-layout interface-known-layout-seek">
+      <div class="interface-known-region top">${regionPanel("top_search_area")}</div>
+      <div class="interface-known-region left">
+        ${regionPanel("results_list", "", ["job_card"])}
+      </div>
+      <div class="interface-known-region right">
+        ${regionPanel("job_detail", "", ["detail_header", "detail_body"])}
+      </div>
+    </div>`;
+}
+
+function interfaceKnownSeekApplicationRegionLayoutHtml(regionEntries = [], assets = [], dynamicAreas = [], dangerZones = [], states = [], transitions = []) {
+  const byId = new Map(regionEntries.map((entry) => [entry.id, entry]));
+  if (!byId.has("application_form")) return "";
+  const nestedEntry = (regionId, childRegionIds = []) => {
+    const entry = byId.get(regionId);
+    if (!entry) return null;
+    return {
+      ...entry,
+      childEntries: childRegionIds.map((id) => nestedEntry(id)).filter(Boolean),
+    };
+  };
+  const regionPanel = (regionId, className = "", childRegionIds = []) => {
+    const entry = byId.get(regionId);
+    if (!entry) return "";
+    const childEntries = childRegionIds.map((id) => {
+      if (id === "application_review_step") return nestedEntry(id, ["application_review"]);
+      return nestedEntry(id);
+    }).filter(Boolean);
+    return interfaceLayoutRegionPanelHtml(entry, assets, dynamicAreas, dangerZones, className, childEntries, states, transitions);
+  };
+  return `
+    <div class="interface-known-layout interface-known-layout-seek-application">
+      <div class="interface-known-region app-shell">
+        ${regionPanel("application_form", "application-shell", [
+          "application_progress",
+          "application_documents",
+          "application_questions",
+          "application_profile",
+          "application_review_step",
+        ])}
+      </div>
+    </div>`;
+}
+
+function interfaceWorkflowActionsForRegion(regionId = "") {
+  const graph = runtimePathGraphView?.graph || replayArtifact || {};
+  const templates = Array.isArray(graph.action_templates) ? graph.action_templates : [];
+  const normalizedRegion = String(regionId || "");
+  const graphActions = templates
+    .filter((template) => interfaceActionTemplateTargetsRegion(template, normalizedRegion))
+    .map((template) => {
+      const actionId = String(template.action_template_id || template.action_id || "action");
+      const lowLevel = inferTemplateLowLevel(actionId, template);
+      const skill = String(template.learned_skill_ref || template.skill_ref || "");
+      const target = String(template.scroll_target?.target_container_id || template.candidate_constraints?.required_container_id || template.target_entity || "");
+      const gated = template.availability_policy?.default_available === false || actionId.includes("apply");
+      return { actionId, lowLevel, skill, target, gated };
+    });
+  const fallbackActions = interfaceKnownRegionWorkflowActions(normalizedRegion);
+  fallbackActions.forEach((action) => {
+    if (!graphActions.some((existing) => existing.actionId === action.actionId && existing.target === action.target)) {
+      graphActions.push(action);
+    }
+  });
+  return graphActions;
+}
+
+function interfaceActionTemplateTargetsRegion(template = {}, regionId = "") {
+  const actionId = String(template.action_template_id || template.action_id || "").toLowerCase();
+  const targetEntity = String(template.target_entity || "").toLowerCase();
+  const targetPane = String(template.scroll_target?.target_pane || "").toLowerCase();
+  const targetContainer = String(template.scroll_target?.target_container_id || template.candidate_constraints?.required_container_id || "").toLowerCase();
+  const id = String(regionId || "").toLowerCase();
+  if (!id) return false;
+  if (id === "job_card") return actionId.includes("open_job_card") || targetEntity === "job_card";
+  if (id === "results_list") return targetContainer.includes("results_list") || targetPane === "results_list";
+  if (id === "job_detail") return targetContainer.includes("job_detail") || targetPane === "job_detail";
+  if (id === "detail_header") return targetEntity.includes("apply") || actionId.includes("apply");
+  if (id === "detail_body") return actionId.includes("read_detail") || targetEntity.includes("detail");
+  return targetEntity === id || targetPane === id || targetContainer.endsWith(`:${id}`);
+}
+
+function interfaceKnownRegionWorkflowActions(regionId = "") {
+  const id = String(regionId || "").toLowerCase();
+  const known = {
+    top_search_area: [
+      { actionId: "search_keyword_submit", lowLevel: "input", skill: "skill.search_by_keyboard_submit", target: "seek:top_search_area", gated: false },
+    ],
+    application_progress: [
+      { actionId: "detect_application_step", lowLevel: "read", skill: "skill.read_application_progress", target: "seek:application_progress", gated: false },
+    ],
+    application_documents: [
+      { actionId: "keep_default_resume", lowLevel: "review", skill: "skill.keep_existing_document", target: "seek:application_documents", gated: false },
+      { actionId: "continue_next_step", lowLevel: "click", skill: "skill.continue_application_flow", target: "seek:application_documents", gated: true },
+    ],
+      application_questions: [
+        { actionId: "fill_employer_questions", lowLevel: "input", skill: "skill.answer_employer_questions_from_profile", target: "seek:application_questions", gated: true },
+        { actionId: "continue_next_step", lowLevel: "click", skill: "skill.continue_application_flow", target: "seek:application_questions", gated: true },
+      ],
+      application_profile: [
+        { actionId: "continue_without_profile_mutation", lowLevel: "click", skill: "skill.skip_profile_mutation", target: "seek:application_profile", gated: true },
+      ],
+      application_review_step: [
+        { actionId: "extract_final_review", lowLevel: "read", skill: "skill.review_before_submit_reconciliation", target: "seek:application_review", gated: true },
+      ],
+      application_review: [
+        { actionId: "extract_final_review", lowLevel: "read", skill: "skill.review_before_submit_reconciliation", target: "seek:application_review", gated: true },
+        { actionId: "final_submit", lowLevel: "blocked", skill: "skill.block_final_submit", target: "seek:application_review", gated: true },
+      ],
+    application_form: [
+      { actionId: "read_application_flow", lowLevel: "read", skill: "skill.read_current_application_step", target: "seek:application_form", gated: false },
+    ],
+  };
+  return known[id] ? known[id].map((item) => ({ ...item })) : [];
+}
+
+function interfaceRegionSummaryText(region = {}, assets = [], dynamicAreas = [], dangerZones = []) {
+  const id = String(region.region_id || "").toLowerCase();
+  const summariesByLanguage = {
+    "zh-CN": {
+      top_search_area: "搜索关键词、地点和筛选条件所在区域，通常用于快速进入岗位结果页。",
+      results_list: "左侧滚动岗位列表。这里会不断出现岗位卡片，适合使用 open_job_card 打开卡片，或用 load_more_results 加载更多结果。",
+      job_card: "单个岗位卡片模板区域。卡片内容会变化，但标题、公司、地点和摘要通常在这里出现，点击后会更新右侧详情。",
+      job_detail: "右侧岗位详情容器。这里包含岗位标题、申请入口、详情正文和独立滚动条。",
+      detail_header: "岗位标题、公司、保存按钮和 Apply / Quick Apply 入口所在区域。Apply 只是进入申请流程，不等于最终提交。",
+      detail_body: "岗位正文阅读区域。这里适合批量截图/OCR 读取详情，直到到达正文底部。",
+      application_form: "SEEK 站内申请流程容器，包含步骤进度、文档、问题、Profile 和最终审核页。",
+      application_progress: "申请步骤进度条，用来判断当前处于 Choose documents、Questions、Profile 还是 Review。",
+      application_documents: "选择简历和求职信的步骤。默认简历通常保留，求职信可按岗位改写。",
+      application_questions: "雇主问题填写区域。这里需要从个人 profile 和岗位详情生成回答，并在继续前复核。",
+      application_profile: "SEEK Profile 更新步骤。默认策略是避免修改长期 profile，只继续到下一步。",
+      application_review_step: "Review and submit 步骤。这里读取申请摘要并准备最终审核，但不授权提交。",
+      application_review: "最终 Review and submit 边界。这里可以读取最终审核信息，但 Submit application 必须强制阻断。",
+    },
+    "en-US": {
+      top_search_area: "Search keyword, location, and filter controls. This area usually drives the transition into job results.",
+      results_list: "Left scrolling job-results list. Job cards appear here; use open_job_card to open a card or load_more_results to reveal more results.",
+      job_card: "Repeatable job-card template. The content changes, but title, company, location, and summary usually appear here and update the detail pane when clicked.",
+      job_detail: "Right job-detail container. It includes job title, application entry, body text, and its own scrollbar.",
+      detail_header: "Header area for job title, company, save control, and Apply / Quick Apply entry. Apply opens a flow; it is not final submit.",
+      detail_body: "Job-description reading area. Batch screenshots/OCR should read this region until the body reaches the bottom.",
+      application_form: "SEEK internal application-flow container with progress, documents, questions, profile, and final review steps.",
+      application_progress: "Application progress tracker used to decide whether the flow is on documents, questions, profile, or review.",
+      application_documents: "Resume and cover-letter step. The default resume is usually kept; the cover letter can be rewritten for the job.",
+      application_questions: "Employer question area. Answers should come from the personal profile plus job detail, then be reviewed before continuing.",
+      application_profile: "SEEK Profile update step. The default policy avoids mutating the long-lived profile and continues to the next step.",
+      application_review_step: "Review and submit step. Read the application summary and prepare final review without authorizing submission.",
+      application_review: "Final Review and submit boundary. The agent may read the final review, but Submit application remains hard-blocked.",
+    },
+  };
+  const summaries = summariesByLanguage[currentLanguage] || summariesByLanguage["en-US"];
+  if (summaries[id]) return summaries[id];
+  const pieces = [];
+  if (assets.length) pieces.push(`${assets.length} ${t("replay_button_screenshots")}`);
+  if (dynamicAreas.length) pieces.push(`${dynamicAreas.length} ${t("replay_dynamic_regions")}`);
+  if (dangerZones.length) pieces.push(`${dangerZones.length} ${t("replay_danger_regions")}`);
+  if (pieces.length) return currentLanguage === "zh-CN" ? `该区域包含 ${pieces.join("、")}。` : `This region contains ${pieces.join(", ")}.`;
+  return String(region.description || region.summary || "");
+}
+
+function interfaceLayoutRegionPanelHtml(entry, assets = [], dynamicAreas = [], dangerZones = [], className = "", childEntries = [], states = [], transitions = []) {
+  const region = entry.region || {};
+  const regionId = entry.id || String(region.region_id || "");
+  const ref = `region:${entry.index}`;
+  const regionAssets = assets
+    .map((asset, assetIndex) => ({ asset, assetIndex }))
+    .filter(({ asset }) => interfaceAssetBelongsToRegion(asset, regionId));
+  const regionDynamics = dynamicAreas
+    .map((area, dynamicIndex) => ({ area, dynamicIndex }))
+    .filter(({ area }) => String(area.region_id || "") === regionId);
+  const regionDangerZones = dangerZones
+    .map((zone, dangerIndex) => ({ zone, dangerIndex }))
+    .filter(({ zone }) => {
+      const asset = assets.find((item) => String(item.asset_id || "") === String(zone.asset_id || ""));
+      return interfaceAssetBelongsToRegion(asset || {}, regionId);
+    });
+  const summary = interfaceRegionSummaryText(region, regionAssets, regionDynamics, regionDangerZones);
+  return `
+    <article class="interface-layout-region ${escapeHtml(className)}${selectedInterfaceMapRef === ref ? " interface-selected" : ""}" data-region-id="${escapeHtml(regionId)}">
+      <header>
+        <button type="button" data-interface-inspect="${ref}">
+          <strong>${escapeHtml(region.label || regionId)}</strong>
+          <span>${escapeHtml(regionId)} · ${escapeHtml(region.region_type || region.role || "region")}</span>
+        </button>
+      </header>
+      ${summary ? `<p class="interface-region-summary">${escapeHtml(summary)}</p>` : ""}
+      ${childEntries.length ? `
+        <div class="interface-layout-children">
+          ${childEntries.map((childEntry) => interfaceLayoutChildRegionHtml(childEntry, assets, dynamicAreas, dangerZones, states, transitions, childEntry.childEntries || [])).join("")}
+        </div>` : ""}
+      <div class="interface-layout-assets">
+        ${interfaceRegionContentNodesHtml(regionAssets, regionDynamics, regionDangerZones)}
+      </div>
+    </article>`;
+}
+
+function interfaceLayoutChildRegionHtml(entry, assets = [], dynamicAreas = [], dangerZones = [], states = [], transitions = [], childEntries = []) {
+  const region = entry.region || {};
+  const regionId = entry.id || String(region.region_id || "");
+  const ref = `region:${entry.index}`;
+  const regionAssets = assets
+    .map((asset, assetIndex) => ({ asset, assetIndex }))
+    .filter(({ asset }) => interfaceAssetBelongsToRegion(asset, regionId));
+  const regionDynamics = dynamicAreas
+    .map((area, dynamicIndex) => ({ area, dynamicIndex }))
+    .filter(({ area }) => String(area.region_id || "") === regionId);
+  const regionDangerZones = dangerZones
+    .map((zone, dangerIndex) => ({ zone, dangerIndex }))
+    .filter(({ zone }) => {
+      const asset = assets.find((item) => String(item.asset_id || "") === String(zone.asset_id || ""));
+      return interfaceAssetBelongsToRegion(asset || {}, regionId);
+    });
+  const summary = interfaceRegionSummaryText(region, regionAssets, regionDynamics, regionDangerZones);
+  const content = `
+    ${summary ? `<p class="interface-region-summary">${escapeHtml(summary)}</p>` : ""}
+    ${childEntries.length ? `
+      <div class="interface-layout-children">
+        ${childEntries.map((childEntry) => interfaceLayoutChildRegionHtml(childEntry, assets, dynamicAreas, dangerZones, states, transitions, childEntry.childEntries || [])).join("")}
+      </div>` : ""}
+    <div class="interface-layout-assets">
+      ${interfaceRegionContentNodesHtml(regionAssets, regionDynamics, regionDangerZones)}
+      ${!regionAssets.length && !regionDynamics.length && !regionDangerZones.length ? `<p class="trace-idle">empty child region</p>` : ""}
+    </div>`;
+  return `
+    <details class="interface-child-region${selectedInterfaceMapRef === ref ? " interface-selected" : ""}" data-region-id="${escapeHtml(regionId)}"${childEntries.length ? " open" : ""}>
+      <summary>
+        <button type="button" data-interface-inspect="${ref}">
+          <strong>${escapeHtml(region.label || regionId)}</strong>
+          <span>${escapeHtml(regionId)} · ${escapeHtml(region.region_type || region.role || "region")}</span>
+        </button>
+      </summary>
+      ${content}
+    </details>`;
+}
+
+function interfaceRegionContentNodesHtml(regionAssets = [], regionDynamics = [], regionDangerZones = []) {
+  const visualAssets = [...regionAssets].sort(({ asset: left }, { asset: right }) => {
+    const leftHasThumb = interfaceAssetShouldShowThumb(left);
+    const rightHasThumb = interfaceAssetShouldShowThumb(right);
+    if (leftHasThumb !== rightHasThumb) return leftHasThumb ? -1 : 1;
+    return String(left?.label || left?.asset_id || "").localeCompare(String(right?.label || right?.asset_id || ""));
+  });
+  return `
+    ${regionDynamics.map(({ area, dynamicIndex }) => interfaceDynamicNodeHtml(area, dynamicIndex)).join("")}
+    ${visualAssets.map(({ asset, assetIndex }) => interfaceVisualNodeHtml(asset, assetIndex)).join("")}
+    ${regionDangerZones.map(({ zone, dangerIndex }) => interfaceDangerNodeHtml(zone, dangerIndex)).join("")}`;
+}
+
+function interfaceStateRefsForRegion(regionId = "", states = []) {
+  if (!regionId) return [];
+  return states
+    .filter((state) => Array.isArray(state.region_refs) && state.region_refs.map(String).includes(regionId))
+    .map((state) => ({
+      stateId: String(state.state_id || ""),
+      label: String(state.label || state.state_id || ""),
+    }))
+    .filter((state) => state.stateId || state.label);
+}
+
+function interfaceTransitionActionKeysForItem(item = {}, regionId = "") {
+  const semantic = String(item.semantic_action || item.action || "");
+  const role = String(item.role || item.entity_type || "");
+  const keys = new Set();
+  if (semantic === "open_apply_flow") keys.add("apply_entry");
+  if (semantic === "open_detail" || role === "job_card" || String(item.area_id || "").includes("job_card")) keys.add("open_job_card");
+  if (semantic === "scroll_container" && regionId === "results_list") keys.add("load_more_results");
+  if (semantic === "scroll_container" && ["job_detail", "detail_body"].includes(regionId)) keys.add("read_detail");
+  if (String(item.entity_type || "") === "detail_content") keys.add("read_detail");
+  if (semantic === "final_submit") keys.add("final_submit");
+  return Array.from(keys);
+}
+
+function interfaceTransitionsForActionKeys(actionKeys = [], transitions = []) {
+  const keys = new Set(actionKeys.filter(Boolean).map(String));
+  if (!keys.size) return [];
+  return transitions
+    .filter((transition) => keys.has(String(transition.action_template_id || "")))
+    .map((transition) => ({
+      action: String(transition.action_template_id || ""),
+      from: String(transition.from_state_id || ""),
+      to: String(transition.to_state_id || ""),
+      transitionId: String(transition.transition_id || ""),
+    }));
+}
+
+function interfaceTransitionsForAsset(asset = {}, regionId = "", transitions = []) {
+  return interfaceTransitionsForActionKeys(interfaceTransitionActionKeysForItem(asset, regionId), transitions);
+}
+
+function interfaceTransitionsForDynamicArea(area = {}, regionId = "", transitions = []) {
+  return interfaceTransitionsForActionKeys(interfaceTransitionActionKeysForItem(area, regionId), transitions);
+}
+
+function interfaceTransitionsForRegion(regionId = "", assets = [], dynamicAreas = [], transitions = []) {
+  const actionKeys = new Set();
+  assets.forEach((asset) => interfaceTransitionActionKeysForItem(asset, regionId).forEach((key) => actionKeys.add(key)));
+  dynamicAreas.forEach((area) => interfaceTransitionActionKeysForItem(area, regionId).forEach((key) => actionKeys.add(key)));
+  return interfaceTransitionsForActionKeys(Array.from(actionKeys), transitions);
+}
+
+function interfaceRegionStateLinksHtml(stateRefs = [], transitions = []) {
+  const stateText = stateRefs.length
+    ? `<span class="interface-state-link">state: ${escapeHtml(stateRefs.slice(0, 2).map((state) => state.label || state.stateId).join(" / "))}${stateRefs.length > 2 ? ` +${stateRefs.length - 2}` : ""}</span>`
+    : "";
+  const transitionText = transitions.length
+    ? transitions.slice(0, 3).map((transition) => `
+        <span class="interface-transition-link">
+          ${escapeHtml(transition.action || "action")} → ${escapeHtml(transition.to || "next_state")}
+        </span>`).join("")
+    : "";
+  return `<div class="interface-state-links">${stateText}${transitionText}</div>`;
+}
+
+function interfaceNodeTransitionsHtml(transitions = []) {
+  if (!transitions.length) return "";
+  return `
+    <span class="interface-node-transitions">
+      ${transitions.slice(0, 2).map((transition) => `
+        <i>${escapeHtml(transition.action || "action")} → ${escapeHtml(transition.to || "next")}</i>
+      `).join("")}
+    </span>`;
+}
+
+function interfaceRegionBbox(region = {}) {
+  const bbox = region.bbox_hint?.bbox || region.bbox || null;
+  if (!bbox || typeof bbox !== "object") return null;
+  const x = Number(bbox.x);
+  const y = Number(bbox.y);
+  const w = Number(bbox.w ?? bbox.width);
+  const h = Number(bbox.h ?? bbox.height);
+  if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) return null;
+  return { x, y, w, h };
+}
+
+function interfaceSpatialRegionMapHtml(regionEntries = [], assets = [], dynamicAreas = [], dangerZones = []) {
+  const entries = regionEntries
+    .map((entry) => ({ ...entry, bbox: interfaceRegionBbox(entry.region) }))
+    .filter((entry) => entry.bbox);
+  if (entries.length < 2) return "";
+  const minX = Math.min(...entries.map((entry) => entry.bbox.x));
+  const minY = Math.min(...entries.map((entry) => entry.bbox.y));
+  const maxX = Math.max(...entries.map((entry) => entry.bbox.x + entry.bbox.w));
+  const maxY = Math.max(...entries.map((entry) => entry.bbox.y + entry.bbox.h));
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+  const sorted = entries.sort((a, b) => {
+    const areaA = a.bbox.w * a.bbox.h;
+    const areaB = b.bbox.w * b.bbox.h;
+    return areaB - areaA;
+  });
+  return `
+    <div class="interface-spatial-canvas" style="aspect-ratio: ${width} / ${height};">
+      ${sorted.map((entry, order) => interfaceSpatialRegionCardHtml(entry, assets, dynamicAreas, dangerZones, {
+        minX,
+        minY,
+        width,
+        height,
+        order,
+      })).join("")}
+    </div>`;
+}
+
+function interfaceSpatialRegionCardHtml(entry, assets = [], dynamicAreas = [], dangerZones = [], layout = {}) {
+  const region = entry.region || {};
+  const bbox = entry.bbox;
+  const regionId = entry.id || String(region.region_id || "");
+  const ref = `region:${entry.index}`;
+  const left = ((bbox.x - layout.minX) / layout.width) * 100;
+  const top = ((bbox.y - layout.minY) / layout.height) * 100;
+  const width = (bbox.w / layout.width) * 100;
+  const height = (bbox.h / layout.height) * 100;
+  const regionAssets = assets
+    .map((asset, assetIndex) => ({ asset, assetIndex }))
+    .filter(({ asset }) => interfaceAssetBelongsToRegion(asset, regionId));
+  const regionDynamics = dynamicAreas
+    .map((area, dynamicIndex) => ({ area, dynamicIndex }))
+    .filter(({ area }) => String(area.region_id || "") === regionId);
+  const regionDangerZones = dangerZones
+    .map((zone, dangerIndex) => ({ zone, dangerIndex }))
+    .filter(({ zone }) => {
+      const asset = assets.find((item) => String(item.asset_id || "") === String(zone.asset_id || ""));
+      return interfaceAssetBelongsToRegion(asset || {}, regionId);
+    });
+  return `
+    <article class="interface-spatial-region${selectedInterfaceMapRef === ref ? " interface-selected" : ""}" style="left:${left.toFixed(3)}%;top:${top.toFixed(3)}%;width:${width.toFixed(3)}%;height:${height.toFixed(3)}%;z-index:${10 + layout.order};">
+      <header>
+        <button type="button" data-interface-inspect="${ref}">
+          <strong>${escapeHtml(region.label || regionId)}</strong>
+          <span>${escapeHtml(regionId)}</span>
+        </button>
+      </header>
+      <div class="interface-spatial-assets">
+        ${regionAssets.slice(0, 4).map(({ asset, assetIndex }) => interfaceVisualNodeHtml(asset, assetIndex)).join("")}
+        ${regionDynamics.slice(0, 2).map(({ area, dynamicIndex }) => interfaceDynamicNodeHtml(area, dynamicIndex)).join("")}
+        ${regionDangerZones.slice(0, 2).map(({ zone, dangerIndex }) => interfaceDangerNodeHtml(zone, dangerIndex)).join("")}
+      </div>
+    </article>`;
+}
+
+function interfaceRegionCardHtml(entry, childrenByParent, assets = [], dynamicAreas = [], dangerZones = [], depth = 0) {
+  const region = entry.region || {};
+  const regionId = entry.id || String(region.region_id || "");
+  const ref = `region:${entry.index}`;
+  const children = childrenByParent.get(regionId) || [];
+  const regionAssets = assets
+    .map((asset, assetIndex) => ({ asset, assetIndex }))
+    .filter(({ asset }) => interfaceAssetBelongsToRegion(asset, regionId));
+  const regionDynamics = dynamicAreas
+    .map((area, dynamicIndex) => ({ area, dynamicIndex }))
+    .filter(({ area }) => String(area.region_id || "") === regionId);
+  const regionDangerZones = dangerZones
+    .map((zone, dangerIndex) => ({ zone, dangerIndex }))
+    .filter(({ zone }) => {
+      const asset = assets.find((item) => String(item.asset_id || "") === String(zone.asset_id || ""));
+      return interfaceAssetBelongsToRegion(asset || {}, regionId);
+    });
+  return `
+    <article class="interface-region-card depth-${Math.min(depth, 3)}${selectedInterfaceMapRef === ref ? " interface-selected" : ""}">
+      <header class="interface-region-header">
+        <button class="interface-lane-title" type="button" data-interface-inspect="${ref}">
+          <strong>${escapeHtml(region.label || regionId)}</strong>
+          <span>${escapeHtml(regionId)} · ${escapeHtml(region.region_type || region.role || "region")}</span>
+        </button>
+        <div class="interface-lane-meta">
+          ${region.container_id ? `<span>${escapeHtml(region.container_id)}</span>` : ""}
+          <span>${region.visual_policy?.fixed_assets_use_template_match ? "template match" : "ROI model"}</span>
+          ${region.default_collapsed ? "<span>子路径默认隐藏</span>" : ""}
+        </div>
+      </header>
+      <div class="interface-region-layout">
+        <span>${escapeHtml(interfaceRegionLayoutSummary(region))}</span>
+      </div>
+      ${regionAssets.length ? `
+        <div class="interface-node-group">
+          <h6>截图按钮 / fixed visual assets</h6>
+          <div class="interface-node-row">
+            ${regionAssets.map(({ asset, assetIndex }) => interfaceVisualNodeHtml(asset, assetIndex)).join("")}
+          </div>
+        </div>` : ""}
+      ${regionDynamics.length ? `
+        <div class="interface-node-group">
+          <h6>变动区 / dynamic ROI</h6>
+          <div class="interface-node-row">
+            ${regionDynamics.map(({ area, dynamicIndex }) => interfaceDynamicNodeHtml(area, dynamicIndex)).join("")}
+          </div>
+        </div>` : ""}
+      ${regionDangerZones.length ? `
+        <div class="interface-node-group">
+          <h6>${escapeHtml(t("replay_danger_regions"))}</h6>
+          <div class="interface-node-row">
+            ${regionDangerZones.map(({ zone, dangerIndex }) => interfaceDangerNodeHtml(zone, dangerIndex)).join("")}
+          </div>
+        </div>` : ""}
+      ${children.length ? `
+        <details class="interface-child-regions"${region.default_collapsed ? "" : " open"}>
+          <summary>子区域 / child regions (${children.length})</summary>
+          <div class="interface-region-children">
+            ${children.map((child) => interfaceRegionCardHtml(child, childrenByParent, assets, dynamicAreas, dangerZones, depth + 1)).join("")}
+          </div>
+        </details>` : ""}
+      ${!regionAssets.length && !regionDynamics.length && !regionDangerZones.length && !children.length ? `<p class="trace-idle">empty region</p>` : ""}
+    </article>`;
+}
+
+function interfaceRegionLayoutSummary(region = {}) {
+  const bbox = region.bbox_hint?.bbox || region.bbox || null;
+  if (bbox && typeof bbox === "object") {
+    const width = bbox.w ?? bbox.width ?? "";
+    const height = bbox.h ?? bbox.height ?? "";
+    return `布局: bbox x=${bbox.x ?? ""}, y=${bbox.y ?? ""}, w=${width}, h=${height}`;
+  }
+  return "布局: learned region hint，执行前需要当前截图 re-observe";
+}
+
+function interfaceRegionLaneHtml(region = {}, index = 0, assets = [], dynamicAreas = [], dangerZones = []) {
+  const regionId = String(region.region_id || "");
+  const ref = `region:${index}`;
+  const regionAssets = assets
+    .map((asset, assetIndex) => ({ asset, assetIndex }))
+    .filter(({ asset }) => interfaceAssetBelongsToRegion(asset, regionId));
+  const regionDynamics = dynamicAreas
+    .map((area, dynamicIndex) => ({ area, dynamicIndex }))
+    .filter(({ area }) => String(area.region_id || "") === regionId);
+  const regionDangerZones = dangerZones
+    .map((zone, dangerIndex) => ({ zone, dangerIndex }))
+    .filter(({ zone }) => {
+      const asset = assets.find((item) => String(item.asset_id || "") === String(zone.asset_id || ""));
+      return interfaceAssetBelongsToRegion(asset || {}, regionId);
+    });
+  return `
+    <article class="interface-lane interface-lane-${escapeHtml(String(region.region_type || "region").replace(/[^a-z0-9_-]/gi, "-"))}${selectedInterfaceMapRef === ref ? " interface-selected" : ""}">
+      <header class="interface-lane-header">
+        <button class="interface-lane-title" type="button" data-interface-inspect="${ref}">
+          <strong>${escapeHtml(region.label || regionId)}</strong>
+          <span>${escapeHtml(region.region_type || region.role || "")}</span>
+        </button>
+        <div class="interface-lane-meta">
+          ${region.container_id ? `<span>${escapeHtml(region.container_id)}</span>` : ""}
+          <span>${region.visual_policy?.fixed_assets_use_template_match ? "template match" : "ROI model"}</span>
+          ${region.default_collapsed ? "<span>collapsed by default</span>" : ""}
+        </div>
+      </header>
+      <div class="interface-lane-body">
+        ${regionAssets.length ? `
+          <div class="interface-node-group">
+            <h6>固定按钮 / visual assets</h6>
+            <div class="interface-node-row">
+              ${regionAssets.map(({ asset, assetIndex }) => interfaceVisualNodeHtml(asset, assetIndex)).join("")}
+            </div>
+          </div>` : ""}
+        ${regionDynamics.length ? `
+          <div class="interface-node-group">
+            <h6>变动区 / dynamic ROI</h6>
+            <div class="interface-node-row">
+              ${regionDynamics.map(({ area, dynamicIndex }) => interfaceDynamicNodeHtml(area, dynamicIndex)).join("")}
+            </div>
+          </div>` : ""}
+        ${regionDangerZones.length ? `
+          <div class="interface-node-group">
+            <h6>${escapeHtml(t("replay_danger_regions"))}</h6>
+            <div class="interface-node-row">
+              ${regionDangerZones.map(({ zone, dangerIndex }) => interfaceDangerNodeHtml(zone, dangerIndex)).join("")}
+            </div>
+          </div>` : ""}
+        ${!regionAssets.length && !regionDynamics.length && !regionDangerZones.length ? `<p class="trace-idle">${escapeHtml(t("replay_empty_region_lane"))}</p>` : ""}
+      </div>
+    </article>`;
+}
+
+function interfaceAssetBelongsToRegion(asset = {}, regionId = "") {
+  if (!regionId) return false;
+  if (String(asset.region_id || "") === regionId) return true;
+  return Array.isArray(asset.allowed_region_ids) && asset.allowed_region_ids.map(String).includes(regionId);
+}
+
+function interfaceAssetImageRefs(asset = {}) {
+  const refs = asset.template_refs && typeof asset.template_refs === "object" ? asset.template_refs : {};
+  const evidence = asset.last_match_evidence && typeof asset.last_match_evidence === "object" ? asset.last_match_evidence : {};
+  const calibrationMatch = interfaceCalibrationMatchForAsset(asset.asset_id);
+  return [
+    [t("replay_source_tight_crop"), refs.tight_crop_ref],
+    [t("replay_source_context_crop"), refs.context_crop_ref],
+    [t("replay_current_match"), calibrationMatch?.current_match_ref || refs.current_match_ref || evidence.current_match_ref],
+    [t("replay_current_roi"), calibrationMatch?.current_roi_ref || refs.current_roi_ref || evidence.current_roi_ref],
+    [t("replay_source_image"), refs.source_image_path],
+  ].filter(([, path]) => path);
+}
+
+function interfaceVisualNodeHtml(asset = {}, index = 0) {
+  const evidence = asset.last_match_evidence && typeof asset.last_match_evidence === "object" ? asset.last_match_evidence : {};
+  const calibrationMatch = interfaceCalibrationMatchForAsset(asset.asset_id);
+  const calibrationDecision = calibrationMatch?.calibration && typeof calibrationMatch.calibration === "object" ? calibrationMatch.calibration : {};
+  const policyMeta = interfaceClickPermissionMeta(asset);
+  const highRisk = policyMeta.level === "blocked";
+  const decisionBadge = interfaceDecisionBadgeMeta(policyMeta);
+  const matched = calibrationMatch ? calibrationMatch.matched === true : evidence.matched === true;
+  const ambiguous = calibrationMatch ? calibrationMatch.ambiguous === true : evidence.ambiguous === true;
+  const fast = policyMeta.fastLaneEligible && (calibrationDecision.fast_lane_allowed === true || asset.fast_lane_allowed === true || asset.fast_lane_eligible === true) && !highRisk && !ambiguous;
+  const showThumb = interfaceAssetShouldShowThumb(asset);
+  const imageRef = showThumb ? interfaceAssetImageRefs(asset)[0] : null;
+  const crop = imageRef?.[1] || "";
+  const compact = !showThumb && !crop;
+  const ref = `asset:${index}`;
+  return `
+    <button class="interface-visual-node${compact ? " interface-visual-node-compact" : ""}${highRisk ? " interface-node-danger" : ""}${matched ? " interface-node-matched" : ""}${ambiguous ? " interface-node-ambiguous" : ""}${selectedInterfaceMapRef === ref ? " interface-selected" : ""}" type="button" data-interface-inspect="${ref}">
+      ${compact ? "" : `
+        <span class="interface-node-thumb">
+          ${crop ? panelImageHtml(crop, asset.label || asset.asset_id || "visual asset") : `<em>${escapeHtml(interfaceAssetPlaceholderLabel(asset))}</em>`}
+        </span>`}
+      <strong>${escapeHtml(asset.label || asset.asset_id || "")}</strong>
+      <small>${escapeHtml(asset.semantic_action || "visual_evidence")}</small>
+      ${imageRef ? `<small class="interface-image-source">${escapeHtml(imageRef[0])}</small>` : ""}
+      <span class="interface-node-badges">
+        <i class="${escapeHtml(decisionBadge.className)}">${escapeHtml(decisionBadge.label)}</i>
+        ${matched ? `<i class="ok">${escapeHtml(t("replay_matched"))}</i>` : ""}
+        ${ambiguous ? `<i class="blocked">${escapeHtml(t("replay_ambiguous"))}</i>` : ""}
+        ${(calibrationMatch?.match_score ?? evidence.match_score) !== undefined ? `<i>score ${escapeHtml(String(calibrationMatch?.match_score ?? evidence.match_score))}</i>` : ""}
+      </span>
+    </button>`;
+}
+
+function interfaceAssetShouldShowThumb(asset = {}) {
+  const action = String(asset.semantic_action || "").toLowerCase();
+  const role = String(asset.role || "").toLowerCase();
+  const label = String(asset.label || asset.asset_id || "").toLowerCase();
+  if (action === "scroll_container" || role.includes("scrollbar") || label.includes("scrollbar")) return false;
+  if (action === "visual_evidence" || role === "visual_evidence") return false;
+  return true;
+}
+
+function interfaceAssetPlaceholderLabel(asset = {}) {
+  const action = String(asset.semantic_action || "").toLowerCase();
+  const role = String(asset.role || "").toLowerCase();
+  if (action === "scroll_container" || role.includes("scrollbar")) return t("replay_scroll_region");
+  if (action === "visual_evidence" || role === "visual_evidence") return t("replay_visual_evidence");
+  return t("replay_no_crop");
+}
+
+function interfaceCalibrationMatchForAsset(assetId) {
+  const matches = Array.isArray(replayInterfaceCalibrationReport?.matches) ? replayInterfaceCalibrationReport.matches : [];
+  return matches.find((match) => String(match?.asset_id || "") === String(assetId || "")) || null;
+}
+
+function interfaceDynamicNodeHtml(area = {}, index = 0) {
+  const ref = `dynamic:${index}`;
+  const summary = interfaceDynamicAreaSummary(area);
+  return `
+    <button class="interface-dynamic-node${selectedInterfaceMapRef === ref ? " interface-selected" : ""}" type="button" data-interface-inspect="${ref}">
+      <strong>${escapeHtml(area.area_id || "")}</strong>
+      <span>${escapeHtml(area.entity_type || "dynamic_area")}</span>
+      ${summary ? `<small class="interface-dynamic-summary">${escapeHtml(summary)}</small>` : ""}
+      <small>${area.model_budget?.avoid_full_screen_grounding ? "ROI-only first" : "model assisted"}</small>
+    </button>`;
+}
+
+function interfaceDynamicAreaSummary(area = {}) {
+  const areaId = String(area.area_id || "").toLowerCase();
+  const regionId = String(area.region_id || "").toLowerCase();
+  const entityType = String(area.entity_type || "").toLowerCase();
+  if (entityType === "job_card" || areaId.includes("job_cards")) {
+    return "这里会出现岗位卡片；点击卡片后更新右侧岗位详情。";
+  }
+  if (entityType === "detail_content" || regionId === "detail_body") {
+    return "这里是详情正文变动区；执行时按 ROI 批量截图/阅读。";
+  }
+  if (areaId.includes("cover_letter")) {
+    return "这里是求职信编辑区；填写前需要结合岗位详情生成内容。";
+  }
+  if (areaId.includes("question")) {
+    return "这里会出现雇主问题；需要读取题目后逐项回答。";
+  }
+  if (areaId.includes("profile")) {
+    return "这里是 SEEK Profile 复核区；默认避免修改长期资料。";
+  }
+  if (areaId.includes("final_review")) {
+    return "这里是最终审核摘要；只能读取，最终提交必须阻断。";
+  }
+  return String(area.description || area.label || "");
+}
+
+function interfaceDangerNodeHtml(zone = {}, index = 0) {
+  const ref = `danger:${index}`;
+  const policyMeta = interfaceClickPermissionMeta(zone);
+  return `
+    <button class="interface-danger-node${selectedInterfaceMapRef === ref ? " interface-selected" : ""}" type="button" data-interface-inspect="${ref}">
+      <strong>${escapeHtml(zone.label || zone.zone_id || "")}</strong>
+      <span>${escapeHtml(zone.semantic_action || "")}</span>
+      <small>${escapeHtml(policyMeta.actionLabel)}</small>
+    </button>`;
+}
+
+function interfaceReviewPolicyForAsset(item = {}) {
+  if (item.review_policy && typeof item.review_policy === "object") return item.review_policy;
+  const action = String(item.semantic_action || "").toLowerCase();
+  const danger = String(item.danger_level || "").toLowerCase();
+  const text = `${action} ${danger} ${item.label || ""}`.toLowerCase();
+  if (/(final_submit|submit|send|confirm|payment|complete application)/.test(text)) {
+    return {
+      contract_version: "visual_asset_review_policy_v1",
+      risk_tier: "high",
+      click_permission: "manual_review_required",
+      requires_manual_review_before_click: true,
+      requires_structured_authorization: true,
+      fast_lane_eligible: false,
+      reason: "high_risk_visual_asset",
+    };
+  }
+  if (danger === "flow_entry" || danger === "continue_step" || action === "open_apply_flow" || action === "continue_next_step") {
+    return {
+      contract_version: "visual_asset_review_policy_v1",
+      risk_tier: "medium",
+      click_permission: "gate_required",
+      requires_manual_review_before_click: false,
+      requires_structured_authorization: false,
+      fast_lane_eligible: false,
+      reason: `${danger || action}_requires_scope_and_gate`,
+    };
+  }
+  return {
+    contract_version: "visual_asset_review_policy_v1",
+    risk_tier: "low",
+    click_permission: "low_risk_fast_lane_eligible",
+    requires_manual_review_before_click: false,
+    requires_structured_authorization: false,
+    fast_lane_eligible: true,
+    reason: "safe_fixed_control",
+  };
+}
+
+function interfaceClickPermissionMeta(item = {}) {
+  const policy = interfaceReviewPolicyForAsset(item);
+  const permission = String(item.click_permission || policy.click_permission || "");
+  if (permission === "manual_review_required") {
+    return {
+      permission,
+      level: "blocked",
+      className: "blocked",
+      shortLabel: "manual review",
+      actionLabel: "review required",
+      fastLaneEligible: false,
+      policy,
+    };
+  }
+  if (permission === "gate_required") {
+    return {
+      permission,
+      level: "warn",
+      className: "warn",
+      shortLabel: "gate required",
+      actionLabel: "gate",
+      fastLaneEligible: false,
+      policy,
+    };
+  }
+  return {
+    permission: permission || "low_risk_fast_lane_eligible",
+    level: "ok",
+    className: "ok",
+    shortLabel: "low risk",
+    actionLabel: "fast lane",
+    fastLaneEligible: policy.fast_lane_eligible !== false,
+    policy,
+  };
+}
+
+function interfaceDecisionBadgeMeta(policyMeta = {}) {
+  if (policyMeta.level === "blocked") {
+    return { className: "blocked", label: "禁止" };
+  }
+  if (policyMeta.level === "warn") {
+    return { className: "warn", label: "需确认" };
+  }
+  return { className: "ok", label: "可调用" };
+}
+
+function interfaceSelectOptions(options, selected) {
+  return options.map((option) => {
+    const value = typeof option === "string" ? option : option.value;
+    const label = typeof option === "string" ? option : option.label;
+    return `<option value="${escapeHtml(value)}"${String(value) === String(selected || "") ? " selected" : ""}>${escapeHtml(label)}</option>`;
+  }).join("");
+}
+
+function interfaceRegionHtml(region = {}, index = 0) {
+  const type = region.region_type || region.role || "";
+  const ref = `region:${index}`;
+  return `
+    <article class="interface-chip${selectedInterfaceMapRef === ref ? " interface-selected" : ""}">
+      <button class="interface-inspect-btn" type="button" data-interface-inspect="${ref}">${escapeHtml(t("replay_inspect"))}</button>
+      <strong>${escapeHtml(region.region_id || "")}</strong>
+      <label>
+        <span>label</span>
+        <input data-interface-edit="region.label" data-index="${index}" value="${escapeHtml(region.label || region.region_id || "")}" />
+      </label>
+      <label>
+        <span>type</span>
+        <select data-interface-edit="region.region_type" data-index="${index}">
+          ${interfaceSelectOptions(["navigation", "fixed_controls", "dynamic_collection", "detail_content", "form_flow", "danger_zone"], type)}
+        </select>
+      </label>
+      <span>${escapeHtml(region.region_id || "")}</span>
+      ${region.container_id ? `<span>${escapeHtml(region.container_id)}</span>` : ""}
+    </article>`;
+}
+
+function interfaceDynamicAreaHtml(area = {}, index = 0) {
+  const ref = `dynamic:${index}`;
+  return `
+    <article class="interface-chip${selectedInterfaceMapRef === ref ? " interface-selected" : ""}">
+      <button class="interface-inspect-btn" type="button" data-interface-inspect="${ref}">${escapeHtml(t("replay_inspect"))}</button>
+      <strong>${escapeHtml(area.area_id || "")}</strong>
+      <span>${escapeHtml(area.region_id || "")}</span>
+      <span>${escapeHtml(area.entity_type || "")}</span>
+      <span>${area.model_budget?.avoid_full_screen_grounding ? "ROI model" : "model"}</span>
+    </article>`;
+}
+
+function interfaceDangerZoneHtml(zone = {}, index = 0) {
+  const ref = `danger:${index}`;
+  return `
+    <article class="interface-chip interface-chip-danger${selectedInterfaceMapRef === ref ? " interface-selected" : ""}">
+      <button class="interface-inspect-btn" type="button" data-interface-inspect="${ref}">${escapeHtml(t("replay_inspect"))}</button>
+      <strong>${escapeHtml(zone.label || zone.zone_id || "")}</strong>
+      <span>${escapeHtml(zone.semantic_action || "")}</span>
+      <span>${escapeHtml(zone.danger_level || "")}</span>
+      <span>${zone.fast_lane_allowed ? "fast" : "blocked"}</span>
+    </article>`;
+}
+
+function interfaceAssetHtml(asset = {}, index = 0, regionIds = []) {
+  const refs = asset.template_refs && typeof asset.template_refs === "object" ? asset.template_refs : {};
+  const crop = refs.tight_crop_ref || refs.context_crop_ref || refs.source_image_path || "";
+  const highRisk = asset.is_high_risk || String(asset.danger_level || "").toLowerCase().includes("submit");
+  const region = Array.isArray(asset.allowed_region_ids) && asset.allowed_region_ids.length ? asset.allowed_region_ids[0] : (asset.region_id || "");
+  const regionOptions = regionIds.length ? regionIds : [region].filter(Boolean);
+  const ref = `asset:${index}`;
+  return `
+    <article class="interface-asset${highRisk ? " interface-asset-danger" : ""}${selectedInterfaceMapRef === ref ? " interface-selected" : ""}">
+      <button class="interface-inspect-btn" type="button" data-interface-inspect="${ref}">${escapeHtml(t("replay_inspect"))}</button>
+      <div class="interface-asset-thumb">
+        ${crop ? `<img src="${escapeHtml(traceImageUrl(crop))}" alt="${escapeHtml(asset.label || asset.asset_id || "visual asset")}" loading="lazy" />` : `<span>${escapeHtml(t("replay_no_crop"))}</span>`}
+      </div>
+      <div class="interface-asset-body">
+        <strong>${escapeHtml(asset.label || asset.asset_id || "")}</strong>
+        <span>${escapeHtml(asset.asset_id || "")}</span>
+        <span class="run-badge ${highRisk ? "blocked" : "ok"}">${escapeHtml(asset.danger_level || "low")}</span>
+        <div class="interface-edit-grid">
+          <label>
+            <span>action</span>
+            <select data-interface-edit="asset.semantic_action" data-index="${index}">
+              ${interfaceSelectOptions(["safe_navigation", "open_detail", "open_apply_flow", "external_apply_flow", "fill_field", "continue_next_step", "scroll_container", "scroll", "input", "read", "visual_evidence", "final_submit"], asset.semantic_action || "")}
+            </select>
+          </label>
+          <label>
+            <span>danger</span>
+            <select data-interface-edit="asset.danger_level" data-index="${index}">
+              ${interfaceSelectOptions(["low", "medium", "high", "flow_entry", "external_flow_entry", "final_submit"], asset.danger_level || "low")}
+            </select>
+          </label>
+          <label>
+            <span>region</span>
+            <select data-interface-edit="asset.region_id" data-index="${index}">
+              ${interfaceSelectOptions(regionOptions, region)}
+            </select>
+          </label>
+        </div>
+      </div>
+    </article>`;
+}
+
+function bindInterfaceMapEditor(panel) {
+  panel.querySelectorAll("[data-interface-inspect]").forEach((control) => {
+    control.addEventListener("click", () => {
+      selectedInterfaceMapRef = String(control.dataset.interfaceInspect || "");
+      const pathNodeId = interfacePathNodeIdForStateRef(selectedInterfaceMapRef);
+      if (pathNodeId) {
+        showNavNodeDetail(pathNodeId, null, { preserveInterfaceSelection: true });
+      }
+      renderInterfaceMap(replayInterfaceMap, replayInterfaceMapPath);
+    });
+  });
+  panel.querySelectorAll("[data-interface-edit]").forEach((control) => {
+    control.addEventListener("change", () => {
+      applyInterfaceMapEdit(control.dataset.interfaceEdit, Number(control.dataset.index || 0), control.value);
+    });
+  });
+  panel.querySelectorAll("[data-interface-recrops-asset]").forEach((control) => {
+    control.addEventListener("click", () => {
+      recropInterfaceAsset(Number(control.dataset.interfaceRecropsAsset || 0));
+    });
+  });
+}
+
+function interfaceMapSelectedItem(map, ref) {
+  const [kind, indexText] = String(ref || "").split(":");
+  const index = Number(indexText || 0);
+  if (kind === "state") return { kind, index, item: map.states?.[index], title: "State" };
+  if (kind === "region") return { kind, item: map.regions?.[index], title: "Region" };
+  if (kind === "asset") return { kind, item: map.fixed_visual_assets?.[index], title: "Fixed visual asset" };
+  if (kind === "dynamic") return { kind, item: map.dynamic_areas?.[index], title: "Dynamic ROI area" };
+  if (kind === "danger") return { kind, item: map.danger_zones?.[index], title: "Danger zone" };
+  return { kind: "", item: null, title: "" };
+}
+
+function interfacePathNodeIdForStateRef(ref = "") {
+  const selected = interfaceMapSelectedItem(replayInterfaceMap || {}, ref);
+  if (selected.kind !== "state" || !selected.item) return "";
+  const stateId = String(selected.item.state_id || "");
+  if (!stateId || !Array.isArray(navPathNodes)) return "";
+  const direct = navPathNodes.find((node) => String(node.id || "") === stateId);
+  if (direct) return String(direct.id || "");
+  const byStateGuess = navPathNodes.find((node) => String(node.stateGuess || "") === stateId);
+  return byStateGuess ? String(byStateGuess.id || "") : "";
+}
+
+function interfaceInspectorHtml(map, regionIds = []) {
+  const selected = interfaceMapSelectedItem(map, selectedInterfaceMapRef);
+  const item = selected.item;
+  if (!item) return `<p class="trace-idle">${escapeHtml(t("pending"))}</p>`;
+  const refs = item.template_refs && typeof item.template_refs === "object" ? item.template_refs : {};
+  const geometry = item.source_geometry && typeof item.source_geometry === "object" ? item.source_geometry : {};
+  const matchPolicy = item.match_policy && typeof item.match_policy === "object" ? item.match_policy : {};
+  const lastMatch = item.last_match_evidence && typeof item.last_match_evidence === "object" ? item.last_match_evidence : {};
+  const calibrationMatch = selected.kind === "asset" ? interfaceCalibrationMatchForAsset(item.asset_id) : null;
+  const calibrationDecision = calibrationMatch?.calibration && typeof calibrationMatch.calibration === "object" ? calibrationMatch.calibration : {};
+  const policyMeta = interfaceClickPermissionMeta(item);
+  const reviewPolicy = policyMeta.policy || {};
+  const imageRefs = selected.kind === "asset" ? (interfaceAssetShouldShowThumb(item) ? interfaceAssetImageRefs(item) : []) : [
+    [t("replay_source_image"), refs.source_image_path],
+    [t("replay_current_roi"), calibrationMatch?.current_roi_ref || refs.current_roi_ref || lastMatch.current_roi_ref],
+    [t("replay_current_match"), calibrationMatch?.current_match_ref || refs.current_match_ref || lastMatch.current_match_ref],
+  ].filter(([, path]) => path);
+  const regionContentsHtml = selected.kind === "region" ? interfaceInspectorRegionContentsHtml(map, item) : "";
+  const selectedRegion = selected.kind === "region"
+    ? item
+    : (Array.isArray(map.regions) ? map.regions.find((region) => String(region.region_id || "") === String(item.region_id || "")) : null);
+  const selectedRegionSummary = selectedRegion ? interfaceRegionSummaryText(
+    selectedRegion,
+    (Array.isArray(map.fixed_visual_assets) ? map.fixed_visual_assets : []).filter((asset) => interfaceAssetBelongsToRegion(asset, String(selectedRegion.region_id || ""))),
+    (Array.isArray(map.dynamic_areas) ? map.dynamic_areas : []).filter((area) => String(area.region_id || "") === String(selectedRegion.region_id || "")),
+    (Array.isArray(map.danger_zones) ? map.danger_zones : []).filter((zone) => String(zone.region_id || "") === String(selectedRegion.region_id || "")),
+  ) : "";
+  const stateWorkflowHtml = selected.kind === "state"
+    ? interfaceInspectorStateWorkflowHtml(item, map)
+    : "";
+  const stateRegionsHtml = selected.kind === "state"
+    ? interfaceInspectorStateRegionsHtml(item, map)
+    : "";
+  const regionWorkflowHtml = selected.kind === "region"
+    ? interfaceInspectorRegionWorkflowHtml(String(item.region_id || ""))
+    : "";
+  const pairs = [
+    ["kind", selected.title],
+    ["id", item.asset_id || item.region_id || item.area_id || item.zone_id || ""],
+    ["label", item.label || ""],
+    ["role", item.role || item.region_type || ""],
+    ["semantic_action", item.semantic_action || ""],
+    ["danger_level", item.danger_level || ""],
+    ["click_permission", item.click_permission || reviewPolicy.click_permission || ""],
+    ["review_policy", policyMeta.shortLabel],
+    ["review_reason", reviewPolicy.reason || ""],
+    ["requires_manual_review", String(reviewPolicy.requires_manual_review_before_click === true)],
+    ["requires_structured_authorization", String(reviewPolicy.requires_structured_authorization === true)],
+    ["fast_lane_eligible", String(policyMeta.fastLaneEligible === true)],
+    ["fast_lane_allowed", String(calibrationDecision.fast_lane_allowed ?? item.fast_lane_allowed ?? policyMeta.fastLaneEligible)],
+    ["calibration_matched", calibrationMatch ? String(calibrationMatch.matched === true) : ""],
+    ["calibration_ambiguous", calibrationMatch ? String(calibrationMatch.ambiguous === true) : ""],
+    ["calibration_reason", calibrationDecision.reason || ""],
+    ["requires_gate", String(item.requires_gate ?? true)],
+    ["can_authorize_click", String(item.can_authorize_click === true)],
+    ["region", item.region_id || (Array.isArray(item.allowed_region_ids) ? item.allowed_region_ids.join(", ") : "")],
+    ["bbox", JSON.stringify(geometry.bbox || item.bbox_hint || item.bbox || "")],
+    ["click_point", JSON.stringify(geometry.click_point || item.click_point || "")],
+    ["current_bbox", JSON.stringify(calibrationMatch?.bbox || lastMatch.bbox || "")],
+    ["current_click_point", JSON.stringify(calibrationMatch?.click_point || lastMatch.click_point || "")],
+    ["match_score", calibrationMatch?.match_score ?? item.match_score ?? item.score ?? lastMatch.match_score ?? ""],
+    ["score_gap_to_second", calibrationMatch?.score_gap_to_second ?? item.score_gap_to_second ?? matchPolicy.score_gap_to_second ?? lastMatch.score_gap_to_second ?? ""],
+    ["elapsed_ms", calibrationMatch?.elapsed_ms ?? lastMatch.elapsed_ms ?? ""],
+    ["match_method", calibrationMatch?.match_method || item.match_method || matchPolicy.match_method || lastMatch.match_method || ""],
+    ["scale_used", calibrationMatch?.scale ?? item.scale_used ?? matchPolicy.scale_used ?? lastMatch.scale_used ?? ""],
+    ["freshness", calibrationMatch?.candidate_freshness?.freshness || lastMatch.candidate_freshness?.freshness || ""],
+    ["min_similarity", matchPolicy.minimum_similarity ?? ""],
+    ["scope", JSON.stringify(item.allowed_region_ids || item.scope || item.container_id || "")],
+  ];
+  return `
+    <h5>${escapeHtml(t("interface_inspector"))}</h5>
+    <div class="interface-inspector-warning">
+      <strong>${escapeHtml(t("replay_evidence_not_authorization"))}</strong>
+      <span>${escapeHtml(t("replay_evidence_not_authorization_hint"))}</span>
+    </div>
+    ${selectedRegionSummary ? `<div class="interface-inspector-summary">${escapeHtml(selectedRegionSummary)}</div>` : ""}
+    ${stateRegionsHtml}
+    ${stateWorkflowHtml}
+    ${regionWorkflowHtml}
+    ${regionContentsHtml}
+    ${interfaceInspectorEditorHtml(selected, regionIds)}
+    <div class="summary-grid summary-grid-pairs">
+      ${pairs.map(([label, value]) => `
+        <div class="summary-item">
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(String(value ?? ""))}</strong>
+        </div>`).join("")}
+    </div>
+    ${imageRefs.length ? `
+        <div class="interface-evidence-grid">
+        ${imageRefs.map(([label, path]) => `
+          <figure>
+            <figcaption>${escapeHtml(label)}</figcaption>
+            ${panelImageHtml(path, label)}
+            <code>${escapeHtml(String(path))}</code>
+          </figure>`).join("")}
+      </div>` : `<p class="trace-idle">${escapeHtml(t("replay_no_image_evidence"))}</p>`}
+    <pre class="interface-json">${escapeHtml(JSON.stringify(item, null, 2))}</pre>`;
+}
+
+function interfaceInspectorStateRegionsHtml(state = {}, map = {}) {
+  const regions = Array.isArray(map.regions) ? map.regions : [];
+  const assets = Array.isArray(map.fixed_visual_assets) ? map.fixed_visual_assets : [];
+  const dynamicAreas = Array.isArray(map.dynamic_areas) ? map.dynamic_areas : [];
+  const dangerZones = Array.isArray(map.danger_zones) ? map.danger_zones : [];
+  const regionIds = interfaceRegionRefsForState(state, regions);
+  if (!regionIds.length) return "";
+  const regionCards = regionIds.map((regionId) => {
+    const region = regions.find((item) => String(item.region_id || "") === String(regionId));
+    if (!region) return "";
+    const regionAssets = assets.filter((asset) => interfaceAssetBelongsToRegion(asset, regionId));
+    const regionDynamics = dynamicAreas.filter((area) => String(area.region_id || "") === String(regionId));
+    const regionDangerZones = dangerZones.filter((zone) => {
+      const asset = assets.find((item) => String(item.asset_id || "") === String(zone.asset_id || ""));
+      return String(zone.region_id || "") === String(regionId) || interfaceAssetBelongsToRegion(asset || {}, regionId);
+    });
+    const workflowActions = interfaceWorkflowActionsForRegion(regionId);
+    const summary = interfaceRegionSummaryText(region, regionAssets, regionDynamics, regionDangerZones);
+    return `
+      <li>
+        <button type="button" data-interface-inspect="region:${regions.indexOf(region)}">
+          <strong>${escapeHtml(region.label || regionId)}</strong>
+          <span>${escapeHtml(summary || region.description || region.region_type || "")}</span>
+        </button>
+        <small>
+          ${regionAssets.length} ${escapeHtml(t("replay_button_screenshots"))} ·
+          ${regionDynamics.length} ${escapeHtml(t("replay_dynamic_regions"))} ·
+          ${workflowActions.length} ${escapeHtml(t("replay_workflow_skill"))}
+        </small>
+      </li>`;
+  }).filter(Boolean).join("");
+  if (!regionCards) return "";
+  return `
+    <div class="interface-inspector-page-regions">
+      <strong>${escapeHtml(t("replay_screen_regions"))}</strong>
+      <ul>${regionCards}</ul>
+    </div>`;
+}
+
+function interfaceInspectorStateWorkflowHtml(state = {}, map = {}) {
+  const regions = Array.isArray(map.regions) ? map.regions : [];
+  const regionIds = interfaceRegionRefsForState(state, regions);
+  if (!regionIds.length) return "";
+  const labelByRegion = new Map(regions.map((region) => [
+    String(region.region_id || ""),
+    String(region.label || region.region_id || ""),
+  ]));
+  const roleByRegion = new Map(regions.map((region) => [
+    String(region.region_id || ""),
+    String(region.region_type || region.role || "region"),
+  ]));
+  const seen = new Set();
+  const actionGroups = regionIds.map((regionId) => {
+    const actionItems = interfaceWorkflowActionsForRegion(regionId).map((action) => {
+      const actionId = action.actionId || "action";
+      const target = action.target || regionId;
+      const key = `${regionId}:${actionId}:${target}`;
+      if (seen.has(key)) return "";
+      seen.add(key);
+      const detail = [action.skill, action.lowLevel, target, action.gated ? t("replay_gate_confirm") : t("replay_callable")].filter(Boolean).join(" · ");
+      return `
+        <li>
+          <strong>${escapeHtml(actionId)}</strong>
+          <span>${escapeHtml(detail)}</span>
+        </li>`;
+    }).filter(Boolean).join("");
+    if (!actionItems) return "";
+    const regionLabel = labelByRegion.get(regionId) || regionId;
+    const regionRole = roleByRegion.get(regionId) || "region";
+    return `
+      <li class="interface-inspector-region-action-group">
+        <strong>${escapeHtml(regionLabel)}</strong>
+        <span>${escapeHtml(regionId)} · ${escapeHtml(regionRole)}</span>
+        <ul>${actionItems}</ul>
+      </li>`;
+  }).filter(Boolean).join("");
+  if (!actionGroups) return "";
+  return `
+    <div class="interface-inspector-workflow">
+      <strong>${escapeHtml(t("replay_workflow_skill"))}</strong>
+      <ul>${actionGroups}</ul>
+    </div>`;
+}
+
+function interfaceInspectorRegionWorkflowHtml(regionId = "") {
+  const workflowActions = interfaceWorkflowActionsForRegion(regionId);
+  if (!workflowActions.length) return "";
+  const actionItems = workflowActions.map((action) => {
+    const actionId = action.actionId || "action";
+    const detail = [action.skill, action.lowLevel, action.target, action.gated ? t("replay_gate_confirm") : t("replay_callable")].filter(Boolean).join(" · ");
+    return `
+      <li>
+        <strong>${escapeHtml(actionId)}</strong>
+        <span>${escapeHtml(detail)}</span>
+      </li>`;
+  }).join("");
+  return `
+    <div class="interface-inspector-workflow">
+      <strong>${escapeHtml(t("replay_workflow_skill"))}</strong>
+      <ul>${actionItems}</ul>
+    </div>`;
+}
+
+function interfaceInspectorEditorHtml(selected, regionIds = []) {
+  const item = selected.item || {};
+  if (selected.kind === "region") {
+    const regionIndex = Number(String(selectedInterfaceMapRef || "").split(":")[1] || 0);
+    return `
+      <div class="interface-policy-editor">
+        <h6>${escapeHtml(t("replay_region_policy"))}</h6>
+        <label>
+          <span>label</span>
+          <input data-interface-edit="region.label" data-index="${regionIndex}" value="${escapeHtml(item.label || item.region_id || "")}" />
+        </label>
+        <label>
+          <span>type</span>
+          <select data-interface-edit="region.region_type" data-index="${regionIndex}">
+            ${interfaceSelectOptions(["navigation", "fixed_controls", "dynamic_collection", "detail_content", "form_flow", "danger_zone"], item.region_type || item.role || "")}
+          </select>
+        </label>
+      </div>`;
+  }
+  if (selected.kind === "asset") {
+    const assetIndex = Number(String(selectedInterfaceMapRef || "").split(":")[1] || 0);
+    const region = Array.isArray(item.allowed_region_ids) && item.allowed_region_ids.length ? item.allowed_region_ids[0] : (item.region_id || "");
+    const regionOptions = regionIds.length ? regionIds : [region].filter(Boolean);
+    const refs = item.template_refs && typeof item.template_refs === "object" ? item.template_refs : {};
+    const source = item.source && typeof item.source === "object" ? item.source : {};
+    const geometry = item.source_geometry && typeof item.source_geometry === "object" ? item.source_geometry : {};
+    const bbox = geometry.bbox && typeof geometry.bbox === "object" ? geometry.bbox : {};
+    const sourceImage = refs.source_image_path || source.source_image_path || geometry.source_image_path || "";
+    const canRecrop = interfaceAssetShouldShowThumb(item);
+    return `
+      <div class="interface-policy-editor">
+        <h6>${escapeHtml(t("replay_visual_policy"))}</h6>
+        <label>
+          <span>action</span>
+          <select data-interface-edit="asset.semantic_action" data-index="${assetIndex}">
+            ${interfaceSelectOptions(["safe_navigation", "open_detail", "open_apply_flow", "external_apply_flow", "fill_field", "continue_next_step", "scroll_container", "scroll", "input", "read", "visual_evidence", "final_submit"], item.semantic_action || "")}
+          </select>
+        </label>
+        <label>
+          <span>danger</span>
+          <select data-interface-edit="asset.danger_level" data-index="${assetIndex}">
+            ${interfaceSelectOptions(["low", "medium", "high", "flow_entry", "external_flow_entry", "final_submit"], item.danger_level || "low")}
+          </select>
+        </label>
+        <label>
+          <span>region</span>
+          <select data-interface-edit="asset.region_id" data-index="${assetIndex}">
+            ${interfaceSelectOptions(regionOptions, region)}
+          </select>
+        </label>
+      </div>
+      ${canRecrop ? `<div class="interface-crop-editor">
+        <h6>${escapeHtml(t("replay_recrop_visual_asset"))}</h6>
+        ${sourceImage ? `
+          <figure class="interface-crop-source-preview">
+            <figcaption>${escapeHtml(t("replay_source_image_preview"))}</figcaption>
+            ${panelImageHtml(sourceImage, t("replay_source_image_preview"))}
+          </figure>` : ""}
+        <label class="wide-control">
+          <span>${escapeHtml(t("replay_source_image"))}</span>
+          <input data-interface-crop="source_image_path" data-index="${assetIndex}" value="${escapeHtml(sourceImage)}" />
+        </label>
+        <label><span>x</span><input type="number" data-interface-crop="x" data-index="${assetIndex}" value="${escapeHtml(String(bbox.x ?? 0))}" /></label>
+        <label><span>y</span><input type="number" data-interface-crop="y" data-index="${assetIndex}" value="${escapeHtml(String(bbox.y ?? 0))}" /></label>
+        <label><span>w</span><input type="number" data-interface-crop="w" data-index="${assetIndex}" value="${escapeHtml(String(bbox.w ?? bbox.width ?? 1))}" /></label>
+        <label><span>h</span><input type="number" data-interface-crop="h" data-index="${assetIndex}" value="${escapeHtml(String(bbox.h ?? bbox.height ?? 1))}" /></label>
+        <button type="button" data-interface-recrops-asset="${assetIndex}">${escapeHtml(t("replay_recrop_button"))}</button>
+      </div>` : `
+      <div class="interface-crop-editor interface-crop-disabled">
+        <h6>${escapeHtml(t("replay_no_button_crop"))}</h6>
+        <p>${escapeHtml(t("replay_no_button_crop_hint"))}</p>
+      </div>`}`;
+  }
+  return "";
+}
+
+function interfaceInspectorRegionContentsHtml(map = {}, region = {}) {
+  const regionId = String(region.region_id || "");
+  if (!regionId) return "";
+  const assets = Array.isArray(map.fixed_visual_assets) ? map.fixed_visual_assets : [];
+  const dynamicAreas = Array.isArray(map.dynamic_areas) ? map.dynamic_areas : [];
+  const dangerZones = Array.isArray(map.danger_zones) ? map.danger_zones : [];
+  const regionAssets = assets
+    .map((asset, assetIndex) => ({ asset, assetIndex }))
+    .filter(({ asset }) => interfaceAssetBelongsToRegion(asset, regionId));
+  const regionDynamics = dynamicAreas
+    .map((area, dynamicIndex) => ({ area, dynamicIndex }))
+    .filter(({ area }) => String(area.region_id || "") === regionId);
+  const regionDangerZones = dangerZones
+    .map((zone, dangerIndex) => ({ zone, dangerIndex }))
+    .filter(({ zone }) => {
+      const asset = assets.find((item) => String(item.asset_id || "") === String(zone.asset_id || ""));
+      return interfaceAssetBelongsToRegion(asset || {}, regionId);
+    });
+  const assetItems = regionAssets.map(({ asset, assetIndex }) => `
+    <li data-path-detail-inspect="asset:${assetIndex}">
+      <strong>${escapeHtml(asset.label || asset.asset_id || "button")}</strong>
+      <span>${escapeHtml(asset.semantic_action || asset.role || "fixed visual asset")}</span>
+    </li>`).join("");
+  const dynamicItems = regionDynamics.map(({ area, dynamicIndex }) => `
+    <li data-path-detail-inspect="dynamic:${dynamicIndex}">
+      <strong>${escapeHtml(area.label || area.area_id || "dynamic ROI")}</strong>
+      <span>${escapeHtml(area.semantic_role || area.role || area.area_type || "ROI")}</span>
+    </li>`).join("");
+  const dangerItems = regionDangerZones.map(({ zone, dangerIndex }) => `
+    <li data-path-detail-inspect="danger:${dangerIndex}">
+      <strong>${escapeHtml(zone.label || zone.zone_id || "danger")}</strong>
+      <span>${escapeHtml(zone.semantic_action || zone.danger_level || "manual review")}</span>
+    </li>`).join("");
+  return `
+    <div class="interface-inspector-contents">
+      <h6>${escapeHtml(t("replay_region_contents"))}</h6>
+      ${assetItems ? `<section><strong>${escapeHtml(t("replay_button_screenshots"))}</strong><ul>${assetItems}</ul></section>` : ""}
+      ${dynamicItems ? `<section><strong>${escapeHtml(t("replay_dynamic_regions"))}</strong><ul>${dynamicItems}</ul></section>` : ""}
+      ${dangerItems ? `<section><strong>${escapeHtml(t("replay_danger_regions"))}</strong><ul>${dangerItems}</ul></section>` : ""}
+      ${(!assetItems && !dynamicItems && !dangerItems) ? `<p class="trace-idle">${escapeHtml(t("replay_region_structure_only"))}</p>` : ""}
+    </div>`;
+}
+
+function applyInterfaceMapEdit(field, index, value) {
+  if (!replayInterfaceMap || !field) return;
+  if (field.startsWith("region.")) {
+    const key = field.split(".")[1];
+    const region = replayInterfaceMap.regions?.[index];
+    if (!region) return;
+    region[key] = value;
+    if (key === "region_type") region.role = value;
+  } else if (field.startsWith("asset.")) {
+    const key = field.split(".")[1];
+    const asset = replayInterfaceMap.fixed_visual_assets?.[index];
+    if (!asset) return;
+    if (key === "region_id") {
+      asset.region_id = value;
+      asset.allowed_region_ids = value ? [value] : [];
+    } else {
+      asset[key] = value;
+    }
+    refreshInterfaceAssetReviewPolicy(asset);
+    syncInterfaceMapDangerZones(replayInterfaceMap);
+  }
+  renderInterfaceMap(replayInterfaceMap, replayInterfaceMapPath);
+}
+
+function refreshInterfaceAssetReviewPolicy(asset = {}) {
+  const danger = String(asset.danger_level || "").toLowerCase();
+  const action = String(asset.semantic_action || "").toLowerCase();
+  if (action === "final_submit" || danger.includes("submit") || danger === "final_submit") {
+    asset.semantic_action = "final_submit";
+    asset.danger_level = "final_submit";
+  }
+  asset.review_policy = interfaceReviewPolicyForAsset({ ...asset, review_policy: null });
+  asset.click_permission = asset.review_policy.click_permission;
+  asset.fast_lane_eligible = asset.review_policy.fast_lane_eligible === true;
+  asset.is_high_risk = asset.click_permission === "manual_review_required";
+  asset.fast_lane_allowed = asset.fast_lane_eligible === true ? asset.fast_lane_allowed === true : false;
+  asset.requires_gate = true;
+  asset.can_authorize_click = false;
+}
+
+function ensureInterfaceAssetReviewPolicy(asset = {}) {
+  const policy = interfaceReviewPolicyForAsset(asset);
+  asset.review_policy = policy;
+  asset.click_permission = policy.click_permission;
+  asset.fast_lane_eligible = policy.fast_lane_eligible === true;
+  asset.is_high_risk = policy.click_permission === "manual_review_required";
+  asset.fast_lane_allowed = asset.fast_lane_eligible === true ? asset.fast_lane_allowed === true : false;
+  asset.requires_gate = true;
+  asset.can_authorize_click = false;
+}
+
+function normalizeInterfaceMapReviewPolicies(map = {}) {
+  if (!map || typeof map !== "object") return map;
+  if (Array.isArray(map.fixed_visual_assets)) {
+    map.fixed_visual_assets.forEach((asset) => {
+      if (!asset || typeof asset !== "object") return;
+      ensureInterfaceAssetReviewPolicy(asset);
+    });
+  }
+  syncInterfaceMapDangerZones(map);
+  return map;
+}
+
+function syncInterfaceMapDangerZones(map = {}) {
+  const assets = Array.isArray(map.fixed_visual_assets) ? map.fixed_visual_assets : [];
+  map.danger_zones = assets
+    .filter((asset) => asset && typeof asset === "object" && asset.is_high_risk)
+    .map((asset) => ({
+      zone_id: `danger:${asset.asset_id || asset.label || "asset"}`,
+      asset_id: asset.asset_id,
+      label: asset.label,
+      semantic_action: asset.semantic_action,
+      danger_level: asset.danger_level,
+      review_policy: asset.review_policy,
+      click_permission: asset.click_permission,
+      review_required: true,
+      fast_lane_allowed: false,
+    }));
+  map.summary = map.summary && typeof map.summary === "object" ? map.summary : {};
+  map.summary.danger_zone_count = map.danger_zones.length;
+}
+
+async function recropInterfaceAsset(index) {
+  const asset = replayInterfaceMap?.fixed_visual_assets?.[index];
+  if (!asset) {
+    renderResponse({ success: false, message: "No visual asset selected for recrop" }, "Interface asset crop");
+    return null;
+  }
+  const panel = $("replayInterfaceMapPanel");
+  const readCropValue = (name) => panel?.querySelector(`[data-interface-crop="${name}"][data-index="${index}"]`)?.value || "";
+  const request = {
+    source_image_path: String(readCropValue("source_image_path") || asset.template_refs?.source_image_path || ""),
+    asset_id: String(asset.asset_id || `asset_${index}`),
+    label: String(asset.label || ""),
+    x: Number(readCropValue("x") || 0),
+    y: Number(readCropValue("y") || 0),
+    width: Number(readCropValue("w") || 1),
+    height: Number(readCropValue("h") || 1),
+    padding_px: 6,
+    context_padding_px: 16,
+  };
+  if (!request.source_image_path) {
+    renderResponse({ success: false, message: "source_image_path is required for recrop" }, "Interface asset crop");
+    return null;
+  }
+  const response = await api("POST", "/panel/crop_interface_asset", request, { summary: "crop interface asset" });
+  if (!response?.success || !response.data) {
+    renderResponse(response, "Interface asset crop");
+    return response;
+  }
+  asset.template_refs = asset.template_refs && typeof asset.template_refs === "object" ? asset.template_refs : {};
+  asset.template_refs.tight_crop_ref = response.data.tight_crop_ref;
+  asset.template_refs.context_crop_ref = response.data.context_crop_ref;
+  asset.template_refs.source_image_path = response.data.source_image_path;
+  asset.template_refs.current_roi_ref = null;
+  asset.template_refs.current_match_ref = null;
+  asset.source_geometry = asset.source_geometry && typeof asset.source_geometry === "object" ? asset.source_geometry : {};
+  asset.source_geometry.bbox = response.data.bbox;
+  asset.source_geometry.click_point = response.data.click_point;
+  asset.source_geometry.coordinate_space = "source_capture_px";
+  asset.source_geometry.source_is_authorization = false;
+  asset.last_match_evidence = null;
+  asset.fast_lane_allowed = false;
+  asset.can_authorize_click = false;
+  asset.requires_gate = true;
+  renderInterfaceMap(replayInterfaceMap, replayInterfaceMapPath);
+  renderResponse({
+    success: true,
+    message: "Interface asset recropped",
+    data: {
+      contract_version: "interface_map_panel_recrop_v1",
+      asset_id: asset.asset_id,
+      tight_crop_ref: response.data.tight_crop_ref,
+      context_crop_ref: response.data.context_crop_ref,
+      trace_path: response.data.trace_path,
+      can_authorize_click: false,
+    },
+  }, "Interface asset crop");
+  return response;
+}
+
+function interfaceMapEditSummary(map) {
+  const assets = Array.isArray(map?.fixed_visual_assets) ? map.fixed_visual_assets : [];
+  const highRisk = assets.filter((asset) => asset.is_high_risk || asset.semantic_action === "final_submit" || String(asset.danger_level || "").includes("submit"));
+  return {
+    contract_version: "learned_interface_map_panel_edit_summary_v1",
+    region_count: Array.isArray(map?.regions) ? map.regions.length : 0,
+    fixed_visual_asset_count: assets.length,
+    high_risk_asset_count: highRisk.length,
+    edited_in_panel: true,
+    authorization_changed: false,
+  };
 }
 
 function firstDefined(...values) {
@@ -5093,6 +7394,7 @@ async function loadReplayArtifact() {
   }
   try {
     replayArtifact = await readArtifactJson(path);
+    const interfaceMapLoad = await ensureReplayInterfaceMapForRuntimeGraph(replayArtifact, path);
     renderReplayGraph(replayArtifact, path);
     renderRuntimePathGraph(replayArtifact, {
       path,
@@ -5107,6 +7409,8 @@ async function loadReplayArtifact() {
         path,
         graph_id: replayArtifact.graph_id,
         app_id: replayArtifact.app_id,
+        interface_map_path: interfaceMapLoad.path || "",
+        interface_map_loaded: interfaceMapLoad.loaded === true,
         action_template_count: Array.isArray(replayArtifact.action_templates) ? replayArtifact.action_templates.length : 0,
       },
     }, "Artifact replay");
@@ -5114,6 +7418,169 @@ async function loadReplayArtifact() {
   } catch (error) {
     renderReplayGraph(null, path);
     renderResponse({ success: false, message: "Artifact load failed", error: String(error.message || error) }, "Artifact replay");
+    return null;
+  }
+}
+
+async function ensureReplayInterfaceMapForRuntimeGraph(graph = {}, graphPath = "") {
+  const result = { loaded: false, path: replayInterfaceMapPath || "" };
+  if (!graph || typeof graph !== "object") return result;
+  const inferred = inferInterfaceMapPresetForGraph(graph, graphPath);
+  if (!inferred?.mapPath) return result;
+  const currentPath = String(replayInterfaceMapPath || "").trim();
+  const currentMatches = currentPath && currentPath === inferred.mapPath && replayInterfaceMap;
+  if (currentMatches) return { loaded: true, path: currentPath };
+  try {
+    const interfaceMap = await readArtifactJson(inferred.mapPath);
+    replayInterfaceMap = JSON.parse(JSON.stringify(interfaceMap));
+    normalizeInterfaceMapReviewPolicies(replayInterfaceMap);
+    replayInterfaceMapPath = inferred.mapPath;
+    selectedInterfaceMapRef = "";
+    if ($("replayInterfaceMapPath")) $("replayInterfaceMapPath").value = inferred.mapPath;
+    if ($("replayInterfaceCalibrationPath") && inferred.calibrationPath) {
+      $("replayInterfaceCalibrationPath").value = inferred.calibrationPath;
+    }
+    renderInterfaceMap(replayInterfaceMap, replayInterfaceMapPath);
+    return { loaded: true, path: replayInterfaceMapPath };
+  } catch (error) {
+    console.warn("interface map auto-load failed", error);
+    return { loaded: false, path: inferred.mapPath, error: String(error.message || error) };
+  }
+}
+
+function inferInterfaceMapPresetForGraph(graph = {}, graphPath = "") {
+  if (isSeekRuntimePathGraph(graph) || String(graphPath || "").toLowerCase().includes("seek")) {
+    return {
+      mapPath: DEFAULT_SEEK_INTERFACE_MAP_PATH,
+      calibrationPath: DEFAULT_INTERFACE_CALIBRATION_REPORT_PATH,
+    };
+  }
+  return null;
+}
+
+async function loadReplayInterfaceMap() {
+  const path = String($("replayInterfaceMapPath")?.value || "").trim();
+  if (!path) {
+    renderResponse({ success: false, message: "interface_map_path is required" }, "Interface map");
+    return null;
+  }
+  try {
+    const interfaceMap = await readArtifactJson(path);
+    replayInterfaceMap = JSON.parse(JSON.stringify(interfaceMap));
+    normalizeInterfaceMapReviewPolicies(replayInterfaceMap);
+    replayInterfaceMapPath = path;
+    selectedInterfaceMapRef = "";
+    renderInterfaceMap(replayInterfaceMap, path);
+    if (runtimePathGraphView?.graph) {
+      renderRuntimePathGraph(runtimePathGraphView.graph, {
+        path: runtimePathGraphView.path,
+        mode: runtimePathGraphView.mode,
+        currentStateId: runtimePathGraphView.currentStateId,
+        currentTransitionId: runtimePathGraphView.currentTransitionId,
+        completedTransitionIds: Array.from(runtimePathGraphView.completedTransitionIds || []),
+        failedTransitionIds: Array.from(runtimePathGraphView.failedTransitionIds || []),
+      });
+    }
+    renderResponse({
+      success: true,
+      message: "Interface map loaded",
+      data: {
+        contract_version: "interface_map_panel_load_v1",
+        path,
+        map_contract: replayInterfaceMap.contract_version,
+        region_count: Array.isArray(replayInterfaceMap.regions) ? replayInterfaceMap.regions.length : 0,
+        fixed_visual_asset_count: Array.isArray(replayInterfaceMap.fixed_visual_assets) ? replayInterfaceMap.fixed_visual_assets.length : 0,
+        dynamic_area_count: Array.isArray(replayInterfaceMap.dynamic_areas) ? replayInterfaceMap.dynamic_areas.length : 0,
+      },
+    }, "Interface map");
+    return replayInterfaceMap;
+  } catch (error) {
+    replayInterfaceMap = null;
+    replayInterfaceMapPath = path;
+    renderInterfaceMap(null, path);
+    renderResponse({ success: false, message: "Interface map load failed", error: String(error.message || error) }, "Interface map");
+    return null;
+  }
+}
+
+async function loadReplayInterfaceCalibrationReport() {
+  const path = String($("replayInterfaceCalibrationPath")?.value || DEFAULT_INTERFACE_CALIBRATION_REPORT_PATH).trim();
+  if (!path) {
+    renderResponse({ success: false, message: "interface_calibration_report_path is required" }, "Interface calibration");
+    return null;
+  }
+  try {
+    const report = await readArtifactJson(path);
+    replayInterfaceCalibrationReport = report && typeof report === "object" ? report : null;
+    replayInterfaceCalibrationPath = path;
+    if (replayInterfaceMap) {
+      renderInterfaceMap(replayInterfaceMap, replayInterfaceMapPath);
+    }
+    const summary = replayInterfaceCalibrationReport?.summary || {};
+    renderResponse({
+      success: true,
+      message: "Interface calibration loaded",
+      data: {
+        contract_version: "interface_map_calibration_panel_load_v1",
+        path,
+        report_contract: replayInterfaceCalibrationReport?.contract_version,
+        status: summary.status,
+        case_count: summary.case_count ?? replayInterfaceCalibrationReport?.case_count ?? 0,
+        matched_count: summary.matched_count ?? 0,
+        fast_lane_success_count: summary.fast_lane_success_count ?? 0,
+        high_risk_match_count: summary.high_risk_match_count ?? 0,
+        final_submit_fast_lane_count: summary.final_submit_fast_lane_count ?? 0,
+      },
+    }, "Interface calibration");
+    return replayInterfaceCalibrationReport;
+  } catch (error) {
+    replayInterfaceCalibrationReport = null;
+    replayInterfaceCalibrationPath = path;
+    if (replayInterfaceMap) {
+      renderInterfaceMap(replayInterfaceMap, replayInterfaceMapPath);
+    }
+    renderResponse({ success: false, message: "Interface calibration load failed", error: String(error.message || error) }, "Interface calibration");
+    return null;
+  }
+}
+
+async function saveReplayInterfaceMap() {
+  if (!replayInterfaceMap) {
+    renderResponse({ success: false, message: "Load an interface map before saving" }, "Interface map");
+    return null;
+  }
+  const fileName = String($("replayInterfaceMapSaveName")?.value || "learned_interface_map_edited.json").trim() || "learned_interface_map_edited.json";
+  const payload = JSON.parse(JSON.stringify(replayInterfaceMap));
+  normalizeInterfaceMapReviewPolicies(payload);
+  payload.editor_policy = payload.editor_policy && typeof payload.editor_policy === "object" ? payload.editor_policy : {};
+  payload.editor_policy.manual_edits_write_trace = true;
+  payload.editor_policy.artifact_is_authorization = false;
+  payload.summary = payload.summary && typeof payload.summary === "object" ? payload.summary : {};
+  payload.summary.fixed_visual_asset_count = Array.isArray(payload.fixed_visual_assets) ? payload.fixed_visual_assets.length : 0;
+  payload.summary.region_count = Array.isArray(payload.regions) ? payload.regions.length : 0;
+  payload.summary.dynamic_area_count = Array.isArray(payload.dynamic_areas) ? payload.dynamic_areas.length : 0;
+  payload.summary.danger_zone_count = Array.isArray(payload.danger_zones) ? payload.danger_zones.length : 0;
+  if (Array.isArray(payload.fixed_visual_assets)) {
+    payload.fixed_visual_assets.forEach((asset) => {
+      if (!asset || typeof asset !== "object") return;
+      ensureInterfaceAssetReviewPolicy(asset);
+    });
+  }
+  try {
+    const response = await api("POST", "/panel/save_interface_map", {
+      file_name: fileName,
+      source_path: replayInterfaceMapPath,
+      payload,
+      edit_summary: interfaceMapEditSummary(payload),
+    }, { summary: "save interface map" });
+    if (response?.data?.path && $("replayInterfaceMapPath")) {
+      $("replayInterfaceMapPath").value = response.data.path;
+      replayInterfaceMapPath = response.data.path;
+    }
+    renderResponse(response, "Interface map saved");
+    return response;
+  } catch (error) {
+    renderResponse({ success: false, message: "Interface map save failed", error: String(error.message || error) }, "Interface map saved");
     return null;
   }
 }
@@ -5714,6 +8181,10 @@ function bindEvents() {
   on("learnValidationResetBtn", "click", resetLearnValidation);
   on("replayPreset", "change", applyReplayPreset);
   on("replayLoadBtn", "click", loadReplayArtifact);
+  on("replayUseCurrentAppMapBtn", "click", useCurrentAppInterfaceMap);
+  on("replayInterfaceMapLoadBtn", "click", loadReplayInterfaceMap);
+  on("replayInterfaceCalibrationLoadBtn", "click", loadReplayInterfaceCalibrationReport);
+  on("replayInterfaceMapSaveBtn", "click", saveReplayInterfaceMap);
   on("seekApplicationEvidenceLoadBtn", "click", loadSeekApplicationEvidence);
   on("replayRegressionLoadBtn", "click", loadReplayRegressionReport);
   on("learnSampleGateLoadBtn", "click", loadLearnSampleReadinessGate);
@@ -5909,6 +8380,12 @@ function callConfirmedPoint(dryRun) {
 
 async function boot() {
   bindEvents();
+  const initialStage = initialStageFromQuery();
+  if (initialStage) {
+    document.querySelectorAll(".stage").forEach((button) => {
+      button.classList.toggle("active", button.dataset.stage === initialStage);
+    });
+  }
   applySavedCardOrder();
   refreshDraggableCards();
   resetLearnValidation();
@@ -5929,6 +8406,9 @@ async function boot() {
   if ($("seekApplicationArtifactPath") && !String($("seekApplicationArtifactPath").value || "").trim()) {
     $("seekApplicationArtifactPath").value = DEFAULT_SEEK_APPLICATION_ARTIFACT_PATH;
   }
+  if ($("replayInterfaceCalibrationPath") && !String($("replayInterfaceCalibrationPath").value || "").trim()) {
+    $("replayInterfaceCalibrationPath").value = DEFAULT_INTERFACE_CALIBRATION_REPORT_PATH;
+  }
   renderReplayGraph(null, "");
   renderReplayRegressionReport(null, "");
   renderLearnSampleReadinessGate(null, "");
@@ -5948,7 +8428,9 @@ async function boot() {
   startPathResizeObserver();
   const response = await api("GET", "/health", null, { summary: "GET /health" });
   setRuntimeState(response.success ? "runtime_ready" : "runtime_unavailable", response.success);
-  await refreshModels();
+  if (!panelQueryFlag("skip_boot_models")) {
+    await refreshModels();
+  }
 }
 
 boot();

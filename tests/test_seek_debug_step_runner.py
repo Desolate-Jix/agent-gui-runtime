@@ -15,6 +15,57 @@ runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
 
+def test_top_level_observe_texts_feed_employer_question_inventory() -> None:
+    observation = {
+        "contract_version": "screen_observation_v1",
+        "texts": [
+            {
+                "id": "text_q2",
+                "text": "Do you have at least 1-2 years of experience in web application development?",
+                "bbox": {"x": 737, "y": 570, "w": 629, "h": 25},
+            },
+            {
+                "id": "text_q3",
+                "text": "Are you comfortable reading, altering and designing solutions with some of the following: Java, AngularJS, React, Vue, MySQL?",
+                "bbox": {"x": 737, "y": 710, "w": 640, "h": 46},
+            },
+            {
+                "id": "text_q4",
+                "text": "Can you start immediately or within 1-2 weeks?",
+                "bbox": {"x": 737, "y": 874, "w": 383, "h": 26},
+            },
+        ],
+    }
+
+    screen_reading = runner._screen_reading_from_observation(observation)
+    inventory = runner.build_employer_question_inventory(
+        {
+            "contract_version": "seek_application_flow_state_v1",
+            "current_step": "answer_employer_questions",
+            "application_form_inventory": {
+                "contract_version": "application_form_inventory_v1",
+                "fields": [],
+                "actions": [
+                    {"id": "q2_yes", "text": "Yes", "role": "radio", "bbox": {"x": 738, "y": 616, "w": 38, "h": 38}},
+                    {"id": "q2_no", "text": "No", "role": "radio", "bbox": {"x": 738, "y": 660, "w": 38, "h": 38}},
+                    {"id": "q3_yes", "text": "Yes", "role": "radio", "bbox": {"x": 738, "y": 770, "w": 38, "h": 38}},
+                    {"id": "q3_no", "text": "No", "role": "radio", "bbox": {"x": 738, "y": 814, "w": 38, "h": 38}},
+                    {"id": "q4_input", "text": "", "role": "textbox", "bbox": {"x": 738, "y": 909, "w": 661, "h": 98}},
+                ],
+            },
+        },
+        screen_reading=screen_reading,
+    )
+
+    assert screen_reading is observation
+    assert inventory["question_count"] == 3
+    assert [item["answer_type"] for item in inventory["questions"]] == [
+        "radio_yes_no",
+        "radio_yes_no",
+        "text_input",
+    ]
+
+
 def _args(tmp_path: Path, step: str) -> argparse.Namespace:
     return argparse.Namespace(
         base_url="http://runtime.test",
@@ -27,17 +78,90 @@ def _args(tmp_path: Path, step: str) -> argparse.Namespace:
         window_width=2560,
         window_height=1400,
         wheel_clicks=4,
+        search_query="graduate",
+        search_x=840,
+        search_y=207,
+        search_wait_seconds=0.1,
+        capture_after_search=False,
+        batch_max_captures=4,
+        batch_stop_after_no_new_content=1,
         candidate_profile=None,
         learned_artifact=None,
         application_flow_replay=None,
         application_fill_record=None,
         allow_close_windows=False,
+        fast_open_detail=False,
         allow_maybe_apply=False,
         post_apply_capture_wait_seconds=0.0,
         fill_safe_fields=False,
         max_safe_fields_to_fill=1,
         allow_cover_letter_fill=False,
     )
+
+
+def test_search_keyword_submit_uses_type_text_submit_not_button_locate(monkeypatch, tmp_path: Path) -> None:
+    calls: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(runner, "_read_json", lambda _path: None)
+
+    def fake_runtime_state(_base_url, _timeout):
+        return {
+            "response": {"success": True},
+            "payload": {
+                "bound": True,
+                "window_title": "Graduate Jobs in All New Zealand - SEEK",
+                "process_name": "msedge.exe",
+            },
+        }
+
+    def fake_post_json(_base_url, endpoint, payload, _timeout):
+        calls.append((endpoint, payload))
+        assert endpoint == "/action/type_text"
+        return {
+            "success": True,
+            "message": "Text input dispatched",
+            "data": {
+                "result": {
+                    "contract_version": "type_text_result_v1",
+                    "trace_path": "logs/traces/actions/type-text.json",
+                    "submit": payload["submit"],
+                }
+            },
+            "error": None,
+        }
+
+    monkeypatch.setattr(runner, "_runtime_state", fake_runtime_state)
+    monkeypatch.setattr(runner, "_post_json", fake_post_json)
+
+    payload = runner.run_step(_args(tmp_path, "search_keyword_submit"))
+
+    assert payload["status"] == "ok"
+    assert calls == [
+        (
+            "/action/type_text",
+            {
+                "text": "graduate",
+                "x": 840,
+                "y": 207,
+                "click_before_typing": True,
+                "clear_existing": True,
+                "submit": True,
+                "restore_clipboard": True,
+                "dry_run": False,
+                "metadata": {
+                    "contract_version": "seek_search_submit_request_v1",
+                    "action_taxonomy": "type_public_search_query",
+                    "input_category": "public_search_query",
+                    "submit_method": "enter_key",
+                    "target_latency_ms": 20000,
+                },
+            },
+        )
+    ]
+    assert payload["search_submit"]["submit_method"] == "type_text_submit_enter"
+    assert payload["search_submit"]["within_target_latency"] is True
+    state = json.loads((tmp_path / "seek_debug" / "state.json").read_text(encoding="utf-8"))
+    assert state["next_allowed_steps"] == ["extract_cards", "capture"]
 
 
 def _detail(title: str, requirement: str, *, y: int = 210) -> dict:
@@ -547,6 +671,8 @@ def test_verify_detail_preserves_header_fields_when_current_view_lacks_them(monk
     assert payload["raw_detail"]["location"] is None
     assert payload["detail"]["location"] == "Auckland CBD, Auckland (Hybrid)"
     assert payload["detail"]["requirements"] == ["AWS", "Kubernetes"]
+    state_after = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert state_after["next_allowed_steps"] == ["read_detail_batch", "match"]
 
 
 def test_verify_detail_precise_drawer_does_not_merge_stale_body(monkeypatch, tmp_path: Path) -> None:
@@ -593,6 +719,268 @@ def test_verify_detail_precise_drawer_does_not_merge_stale_body(monkeypatch, tmp
 
     assert payload["detail"]["requirements"] == ["C# Programming"]
     assert payload["detail"]["description_sections"] == [{"index": 0, "role": "body", "text": "The step up that actually matters"}]
+
+
+def test_read_detail_batch_updates_state_detail_for_match(monkeypatch, tmp_path: Path) -> None:
+    args = _args(tmp_path, "read_detail_batch")
+    run_dir = Path(args.run_dir)
+    run_dir.mkdir(parents=True)
+    state = {
+        "contract_version": runner.STATE_CONTRACT,
+        "run_id": "seek_debug",
+        "run_dir": str(run_dir),
+        "phase": "verify_detail",
+        "step_index": 4,
+        "current_job": {"title": "Software Engineer", "company": "Example Ltd"},
+        "detail": {
+            "title": "Software Engineer",
+            "company": "Example Ltd",
+            "description_sections": [{"index": 0, "role": "body", "text": "Header text"}],
+            "detail_container": {"bbox": {"x": 100, "y": 100, "w": 800, "h": 900}},
+        },
+        "steps": [],
+        "safety": runner._default_safety(),
+    }
+    (run_dir / "state.json").write_text(json.dumps(state), encoding="utf-8")
+    batch = {
+        "status": "ok",
+        "target_container_id": "seek:job_detail",
+        "target_bbox": {"x": 100, "y": 100, "w": 800, "h": 900},
+        "capture_count": 2,
+        "unique_line_count": 2,
+        "stop_reason": "no_new_content",
+        "merged_text_lines": [
+            "Apply",
+            "Header text",
+            "You bring strong experience in integration or C# .NET development.",
+        ],
+        "captures": [{"trace_path": "ocr_trace.json"}],
+    }
+
+    monkeypatch.setattr(runner, "_read_json", lambda _path: None)
+    monkeypatch.setattr(runner, "_read_detail_batch", lambda *_args, **_kwargs: batch)
+
+    payload = runner.run_step(args)
+
+    state_after = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    texts = [item["text"] for item in state_after["detail"]["description_sections"]]
+    assert payload["merged_description_section_count"] == 3
+    assert "You bring strong experience in integration or C# .NET development." in texts
+    assert state_after["detail"]["detail_bottom_reached"] is True
+    assert state_after["detail"]["trace_paths"] == ["ocr_trace.json"]
+    assert state_after["detail"]["apply_button_state"]["label"] == "Apply"
+    assert state_after["detail"]["apply_button_state"]["source"] == "read_detail_batch_ocr"
+
+
+def test_execute_card_resets_stale_detail_snapshot(monkeypatch, tmp_path: Path) -> None:
+    args = _args(tmp_path, "execute_card")
+    args.fast_open_detail = True
+    run_dir = Path(args.run_dir)
+    run_dir.mkdir(parents=True)
+    state = {
+        "contract_version": runner.STATE_CONTRACT,
+        "run_id": "seek_debug",
+        "run_dir": str(run_dir),
+        "phase": "extract_cards",
+        "step_index": 3,
+        "cards_payload": {
+            "jobs": [
+                {
+                    "job_id": "new_job",
+                    "title": "Graduate Software Engineer",
+                    "company": "Local Co",
+                    "location": "Auckland",
+                    "card_bbox": {"x": 100, "y": 200, "w": 300, "h": 140},
+                }
+            ]
+        },
+        "detail": {
+            "job_id": "old_job",
+            "title": "Software Engineer Specialist - Integration",
+            "company": "AIA New Zealand",
+            "description_sections": [{"index": 0, "role": "batch_ocr", "text": "Old detail"}],
+        },
+        "steps": [],
+        "safety": runner._default_safety(),
+    }
+    (run_dir / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+    monkeypatch.setattr(runner, "_read_json", lambda _path: None)
+    monkeypatch.setattr(
+        runner,
+        "_capture",
+        lambda *_args, **_kwargs: {"image_path": "capture.png", "payload": {"image_width": 2560, "image_height": 1400}},
+    )
+    monkeypatch.setattr(
+        runner,
+        "_execute_job_card",
+        lambda *_args, **_kwargs: {"opened": True, "execute_response": {"success": True}},
+    )
+    monkeypatch.setattr(runner, "_execute_debug_artifacts", lambda **_kwargs: {"ui_diff_verification": {"status": "skipped"}})
+
+    payload = runner.run_step(args)
+
+    state_after = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert payload["status"] == "ok"
+    assert state_after["current_job"]["job_id"] == "new_job"
+    assert state_after["detail"]["job_id"] == "new_job"
+    assert state_after["detail"]["title"] == "Graduate Software Engineer"
+    assert state_after["detail"]["runtime_detail_snapshot"]["source"] == "open_detail_seed"
+
+
+def test_execute_apply_entry_skipped_does_not_wait_for_application_flow(monkeypatch, tmp_path: Path) -> None:
+    args = _args(tmp_path, "execute_apply_entry")
+    run_dir = Path(args.run_dir)
+    run_dir.mkdir(parents=True)
+    state = {
+        "contract_version": runner.STATE_CONTRACT,
+        "run_id": "seek_debug",
+        "run_dir": str(run_dir),
+        "phase": "match",
+        "step_index": 8,
+        "current_job": {"job_id": "job1", "title": "Engineering Manager", "company": "Halter"},
+        "detail": {
+            "job_id": "job1",
+            "title": "Engineering Manager",
+            "company": "Halter",
+            "apply_button_state": {"visible": True, "label": "Apply", "source": "read_detail_batch_ocr"},
+        },
+        "match_decision": {"decision": "strong_apply", "job_id": "job1"},
+        "steps": [],
+        "safety": runner._default_safety(),
+    }
+    (run_dir / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+    monkeypatch.setattr(runner, "_read_json", lambda _path: None)
+    monkeypatch.setattr(runner, "load_candidate_profile", lambda _path: None)
+    monkeypatch.setattr(
+        runner,
+        "_capture",
+        lambda *_args, **_kwargs: {"image_path": "capture.png", "payload": {"image_width": 2560, "image_height": 1400}},
+    )
+    monkeypatch.setattr(
+        runner,
+        "_execute_apply_entry",
+        lambda *_args, **_kwargs: {
+            "status": "skipped",
+            "eligible": False,
+            "executed": False,
+            "application_flow_started": False,
+            "stop_reason": "seek_standard_apply_is_external_use_quick_apply_only",
+        },
+    )
+
+    def fail_wait(*_args, **_kwargs):
+        raise AssertionError("skipped Apply Entry must not wait for application flow")
+
+    monkeypatch.setattr(runner, "_wait_for_application_flow_after_apply", fail_wait)
+
+    payload = runner.run_step(args)
+
+    assert payload["status"] == "skipped"
+    assert payload["post_apply_wait"]["status"] == "not_requested"
+    assert payload["apply_entry"]["stop_reason"] == "seek_standard_apply_is_external_use_quick_apply_only"
+
+
+def test_read_detail_batch_can_start_from_learned_region_without_verify(monkeypatch, tmp_path: Path) -> None:
+    args = _args(tmp_path, "read_detail_batch")
+    args.batch_max_captures = 1
+    run_dir = Path(args.run_dir)
+    run_dir.mkdir(parents=True)
+    state = {
+        "contract_version": runner.STATE_CONTRACT,
+        "run_id": "seek_debug",
+        "run_dir": str(run_dir),
+        "phase": "execute_card",
+        "step_index": 3,
+        "current_job": {
+            "title": "Graduate Software Engineer",
+            "company": "Example Ltd",
+            "location": "Auckland",
+        },
+        "steps": [],
+        "safety": runner._default_safety(),
+    }
+    (run_dir / "state.json").write_text(json.dumps(state), encoding="utf-8")
+    ocr_calls: list[dict] = []
+
+    monkeypatch.setattr(runner, "_read_json", lambda _path: None)
+    monkeypatch.setattr(
+        runner,
+        "_runtime_state",
+        lambda _base_url, _timeout: {
+            "payload": {"rect": {"left": 0, "top": 0, "right": 2560, "bottom": 1400}},
+            "response": {"success": True},
+        },
+    )
+
+    def fake_ocr(_base_url, *, roi, _timeout=None, timeout=None):
+        ocr_calls.append(roi)
+        return {
+            "image_path": f"roi-{len(ocr_calls)}.png",
+            "trace_path": f"ocr-{len(ocr_calls)}.json",
+            "ocr_result": {"items": [{"text": "Graduate Software Engineer"}, {"text": "C# and API integration"}]},
+        }
+
+    monkeypatch.setattr(runner, "_ocr_region", fake_ocr)
+
+    payload = runner.run_step(args)
+
+    assert payload["status"] == "ok"
+    assert payload["target_container_id"] == "seek:job_detail"
+    assert payload["target_bbox"]["w"] > 500
+    assert ocr_calls[0]["width"] == payload["target_bbox"]["w"]
+    state_after = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert state_after["detail"]["title"] == "Graduate Software Engineer"
+    assert any("C# and API integration" in item["text"] for item in state_after["detail"]["description_sections"])
+    assert state_after["next_allowed_steps"] == ["match", "read_detail_batch"]
+
+
+def test_read_detail_batch_confirms_no_effect_before_bottom(monkeypatch) -> None:
+    ocr_index = 0
+    scroll_calls: list[dict] = []
+
+    def fake_ocr(_base_url, *, roi, timeout):
+        nonlocal ocr_index
+        ocr_index += 1
+        return {
+            "image_path": f"roi-{ocr_index}.png",
+            "trace_path": f"ocr-{ocr_index}.json",
+            "ocr_result": {"items": [{"text": "Same visible line"}]},
+        }
+
+    def fake_post(_base_url, endpoint, payload, _timeout):
+        scroll_calls.append(payload)
+        assert endpoint == "/action/scroll"
+        return {
+            "success": True,
+            "data": {
+                "result": {
+                    "trace_path": f"scroll-{len(scroll_calls)}.json",
+                    "target_container_id": "seek:job_detail",
+                    "scroll_effect_validation": {"status": "no_effect", "non_target_panes_stable": True},
+                }
+            },
+        }
+
+    monkeypatch.setattr(runner, "_ocr_region", fake_ocr)
+    monkeypatch.setattr(runner, "_post_json", fake_post)
+
+    batch = runner._read_detail_batch(
+        "http://runtime.test",
+        timeout=5.0,
+        detail={"detail_container": {"bbox": {"x": 10, "y": 20, "w": 300, "h": 500}}},
+        learned_artifact=None,
+        wheel_clicks=9,
+        max_captures=3,
+        stop_after_no_new_content=2,
+    )
+
+    assert batch["stop_reason"] == "no_new_content"
+    assert batch["capture_count"] == 3
+    assert len(scroll_calls) == 2
+    assert scroll_calls[0]["wheel_clicks"] == 9
+    assert scroll_calls[1]["wheel_clicks"] > scroll_calls[0]["wheel_clicks"]
 
 
 def test_close_old_seek_windows_detect_only_does_not_close(monkeypatch, tmp_path: Path) -> None:
@@ -698,14 +1086,22 @@ def test_bind_and_resize_verify_records_coordinate_space(monkeypatch, tmp_path: 
         calls.append(("/session/resize_bound_window", {"width": width, "height": height, "timeout": timeout}))
         return {"success": True, "data": {"result": {"trace_path": "resize.json"}}}
 
+    def fake_bind(_base_url, *, app_name, timeout):
+        calls.append(("/session/bind_window", {"app_name": app_name, "timeout": timeout}))
+        return {"success": True, "data": {"result": {"trace_path": "bind.json"}}}
+
     monkeypatch.setattr(runner, "_read_json", lambda _path: None)
+    monkeypatch.setattr(runner, "_bind_seek_debug_window", fake_bind)
     monkeypatch.setattr(runner, "_runtime_state", fake_runtime_state)
     monkeypatch.setattr(runner, "_resize_bound_window", fake_resize)
     monkeypatch.setattr(runner, "_capture", lambda _base_url, _timeout: {"image_path": "after.png", "payload": {}})
 
     payload = runner.run_step(args)
 
-    assert calls == [("/session/resize_bound_window", {"width": 1400, "height": 950, "timeout": 5.0})]
+    assert calls == [
+        ("/session/bind_window", {"app_name": "edge", "timeout": 5.0}),
+        ("/session/resize_bound_window", {"width": 1400, "height": 950, "timeout": 5.0}),
+    ]
     assert payload["status"] == "ok"
     verification = payload["bound_window_verification"]
     assert verification["process_is_external_browser"] is True
@@ -1097,7 +1493,7 @@ def test_execute_apply_entry_requires_allow_maybe_for_maybe_decision(monkeypatch
     assert payload["apply_entry"]["stop_reason"] == "decision_not_eligible_for_apply_entry"
 
 
-def test_execute_apply_entry_waits_before_after_capture(monkeypatch, tmp_path: Path) -> None:
+def test_execute_apply_entry_reuses_apply_flow_state_without_fixed_sleep(monkeypatch, tmp_path: Path) -> None:
     args = _args(tmp_path, "execute_apply_entry")
     args.allow_maybe_apply = True
     args.post_apply_capture_wait_seconds = 2.5
@@ -1146,16 +1542,154 @@ def test_execute_apply_entry_waits_before_after_capture(monkeypatch, tmp_path: P
             "eligible": True,
             "executed": True,
             "application_flow_started": True,
-            "application_flow_state": {"state_type": "third_party_ats"},
+            "application_flow_state": {
+                "contract_version": "seek_application_flow_state_v1",
+                "state_type": "cover_letter_field_detected",
+                "current_step": "choose_documents",
+            },
         },
     )
 
     payload = runner.run_step(args)
 
-    assert sleeps == [2.5]
+    assert sleeps == []
     assert captures == ["before.png", "after.png"]
     assert payload["after_image"] == "after.png"
     assert payload["post_apply_capture_wait_seconds"] == 2.5
+    assert payload["post_apply_wait"]["status"] == "ready_from_apply_entry"
+    assert payload["post_apply_wait"]["poll_count"] == 0
+    saved_state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert saved_state["next_allowed_steps"] == ["continue_application_flow", "capture"]
+
+
+def test_execute_apply_entry_recomputes_decision_from_post_wait_state(monkeypatch, tmp_path: Path) -> None:
+    args = _args(tmp_path, "execute_apply_entry")
+    args.allow_maybe_apply = True
+    args.post_apply_capture_wait_seconds = 2.5
+    run_dir = Path(args.run_dir)
+    run_dir.mkdir(parents=True)
+    state = {
+        "contract_version": runner.STATE_CONTRACT,
+        "run_id": "seek_debug",
+        "run_dir": str(run_dir),
+        "phase": "match",
+        "step_index": 0,
+        "current_job": {"job_id": "job1", "title": "Software Engineer", "company": "AIA New Zealand"},
+        "detail": {"job_id": "job1", "title": "Software Engineer", "company": "AIA New Zealand"},
+        "match_decision": {"decision": "strong_apply", "job_id": "job1"},
+        "steps": [],
+        "safety": runner._default_safety(),
+        "next_allowed_steps": ["execute_apply_entry"],
+    }
+    (run_dir / "state.json").write_text(json.dumps(state), encoding="utf-8")
+    captures: list[str] = []
+
+    def fake_capture(_base_url, _timeout):
+        image = "before.png" if not captures else "after.png"
+        captures.append(image)
+        return {"image_path": image, "payload": {}}
+
+    monkeypatch.setattr(runner, "load_candidate_profile", lambda _path: {"contract_version": "candidate_profile_v1"})
+    monkeypatch.setattr(runner, "_capture", fake_capture)
+    monkeypatch.setattr(
+        runner,
+        "_execute_apply_entry",
+        lambda *_args, **_kwargs: {
+            "contract_version": "seek_apply_entry_attempt_v1",
+            "status": "blocked_need_user_or_gpt_decision",
+            "eligible": True,
+            "executed": True,
+            "application_flow_started": True,
+            "stop_reason": "unknown_after_apply_blocked",
+            "application_flow_state": {
+                "contract_version": "seek_application_flow_state_v1",
+                "state_type": "unknown_after_apply",
+                "current_step": "unknown",
+                "application_flow_started": True,
+            },
+            "apply_flow_decision": {
+                "contract_version": "seek_apply_flow_decision_v1",
+                "source_state_type": "unknown_after_apply",
+                "reason": "unknown_application_state_blocked",
+            },
+        },
+    )
+
+    post_wait_state = {
+        "contract_version": "seek_application_flow_state_v1",
+        "state_type": "third_party_ats",
+        "current_step": None,
+        "application_flow_started": True,
+        "final_submit_visible_blocker": {"contract_version": "final_submit_visible_blocker_v1", "blocked": False},
+    }
+    monkeypatch.setattr(
+        runner,
+        "_wait_for_application_flow_after_apply",
+        lambda *_args, **_kwargs: {
+            "contract_version": "seek_application_flow_wait_v1",
+            "status": "ready_from_poll",
+            "poll_count": 1,
+            "application_flow_state": post_wait_state,
+        },
+    )
+
+    payload = runner.run_step(args)
+
+    assert payload["apply_entry"]["application_flow_state"]["state_type"] == "third_party_ats"
+    assert payload["apply_entry"]["apply_flow_decision"]["source_state_type"] == "third_party_ats"
+    assert payload["apply_entry"]["apply_flow_decision"]["reason"] == "third_party_ats_deferred"
+    assert payload["apply_entry"]["stop_reason"] == "third_party_ats_deferred"
+    saved_state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert saved_state["next_allowed_steps"] == ["execute_apply_entry", "match"]
+
+
+def test_wait_for_application_flow_after_apply_polls_until_ready(monkeypatch) -> None:
+    sleeps: list[float] = []
+    observations = [
+        {"trace_path": "trace-1.json", "image_path": "shot-1.png"},
+        {"trace_path": "trace-2.json", "image_path": "shot-2.png"},
+    ]
+    flow_states = [
+        {
+            "contract_version": "seek_application_flow_state_v1",
+            "state_type": "unknown_after_apply",
+            "current_step": "unknown",
+            "application_flow_started": False,
+        },
+        {
+            "contract_version": "seek_application_flow_state_v1",
+            "state_type": "application_form_detected",
+            "current_step": "choose_documents",
+            "application_flow_started": True,
+        },
+    ]
+
+    def fake_observe(*_args, **_kwargs):
+        return observations.pop(0)
+
+    def fake_assess(_observation, *, source_job=None):
+        assert source_job == {"title": "Engineer"}
+        return flow_states.pop(0)
+
+    monkeypatch.setattr(runner, "_observe", fake_observe)
+    monkeypatch.setattr(runner, "assess_seek_application_flow_state", fake_assess)
+    monkeypatch.setattr(runner.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    result = runner._wait_for_application_flow_after_apply(
+        "http://runtime.test",
+        app_name="edge",
+        source_job={"title": "Engineer"},
+        initial_flow_state=None,
+        timeout=5.0,
+        max_wait_seconds=3.0,
+        poll_interval_seconds=0.5,
+    )
+
+    assert result["status"] == "ready_from_poll"
+    assert result["poll_count"] == 2
+    assert result["trace_path"] == "trace-2.json"
+    assert result["image_path"] == "shot-2.png"
+    assert sleeps == [0.5]
 
 
 def test_continue_application_flow_generates_plan_without_reclicking_apply(monkeypatch, tmp_path: Path) -> None:
@@ -1502,6 +2036,85 @@ def test_safe_employer_question_fill_answers_mapped_questions_without_submit(mon
     )
 
 
+def test_safe_employer_question_fill_partial_ready_questions_without_submit(monkeypatch) -> None:
+    calls: list[tuple[str, dict]] = []
+    preview = {
+        "contract_version": "employer_question_answer_preview_v1",
+        "status": "needs_user_review",
+        "previews": [
+            {
+                "question_id": "q1",
+                "question_text": "Which programming languages are you experienced in?",
+                "planned_answer": ["JavaScript", "Python"],
+                "runner_decision": "allow",
+                "target": {
+                    "action_type": "multi_click",
+                    "targets": [
+                        {
+                            "candidate": {"id": "q1_js", "label": "JavaScript", "bbox": {"x": 100, "y": 200, "w": 160, "h": 36}},
+                            "bbox": {"x": 100, "y": 200, "w": 160, "h": 36},
+                        },
+                        {
+                            "candidate": {"id": "q1_py", "label": "Python", "bbox": {"x": 100, "y": 244, "w": 150, "h": 36}},
+                            "bbox": {"x": 100, "y": 244, "w": 150, "h": 36},
+                        },
+                    ],
+                },
+            },
+            {
+                "question_id": "q2",
+                "question_text": "What salary are you targeting?",
+                "planned_answer": None,
+                "runner_decision": "needs_user_review",
+                "reject_reason": "blocked_sensitive",
+                "target": None,
+            },
+        ],
+    }
+
+    def fake_post_json(_base_url, endpoint, payload, _timeout):
+        calls.append((endpoint, payload))
+        assert endpoint == "/action/execute_confirmed_point"
+        return {
+            "success": True,
+            "message": "ok",
+            "data": {
+                "result": {
+                    "trace_path": "confirmed.json",
+                    "confirmed_point": {"x": payload["x"], "y": payload["y"]},
+                    "candidate_bbox": payload["bbox"],
+                    "execution_path": {"dry_run": payload["dry_run"], "action_executed": not payload["dry_run"]},
+                }
+            },
+            "error": None,
+        }
+
+    monkeypatch.setattr(runner, "_post_json", fake_post_json)
+
+    result = runner._safe_employer_question_fill_attempt(
+        "http://runtime.test",
+        app_name="edge",
+        answer_preview=preview,
+        execute_fill=True,
+        timeout=5.0,
+    )
+
+    assert result["status"] == "partial_until_review"
+    assert result["stop_reason"] == "some_employer_questions_need_review"
+    assert result["answered_count"] == 1
+    assert result["clicks"] == 2
+    assert result["typed_fields"] == 0
+    assert result["submit_clicks"] == 0
+    assert result["final_submissions"] == 0
+    assert result["blocked_questions"][0]["question_id"] == "q2"
+    assert [endpoint for endpoint, _payload in calls] == [
+        "/action/execute_confirmed_point",
+        "/action/execute_confirmed_point",
+        "/action/execute_confirmed_point",
+        "/action/execute_confirmed_point",
+    ]
+
+
 def test_safe_continue_rejects_right_edge_floating_widget(monkeypatch) -> None:
     calls: list[tuple[str, dict]] = []
 
@@ -1534,6 +2147,147 @@ def test_safe_continue_rejects_right_edge_floating_widget(monkeypatch) -> None:
     assert result["target_validation"]["reason"] == "right_floating_control_region"
     assert [endpoint for endpoint, _payload in calls].count("/action/execute_recognition_plan") == 4
     assert all(payload.get("dry_run") is True for endpoint, payload in calls if endpoint == "/action/execute_recognition_plan")
+
+
+def test_safe_continue_rejects_prompt_candidate_over_profile_mutation_button(monkeypatch) -> None:
+    calls: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(runner, "_runtime_state", lambda *_args, **_kwargs: {"payload": {"rect": {"left": 0, "top": 0, "right": 1920, "bottom": 1080}}})
+    monkeypatch.setattr(runner.time, "sleep", lambda *_args, **_kwargs: None)
+
+    def fake_post_json(_base_url, endpoint, payload, _timeout):
+        calls.append((endpoint, payload))
+        if endpoint == "/action/scroll":
+            return {"success": True, "data": {"result": {"trace_path": "scroll.json"}}}
+        assert endpoint == "/action/execute_recognition_plan"
+        assert payload["dry_run"] is True
+        return {
+            "success": True,
+            "data": {
+                "result": {
+                    "approved_plan_id": "plan-profile-mutation",
+                    "selected_click_point": {"x": 542, "y": 129},
+                    "trace_path": "dry.json",
+                    "pre_click_decision": {
+                        "selected_candidate_id": "vista_direct_prompt",
+                        "candidate_decisions": [
+                            {
+                                "candidate_id": "vista_direct_prompt",
+                                "allowed": True,
+                                "resolved_click_point": {
+                                    "target_text": "Click only the visible SEEK application form Continue or Save and continue button",
+                                    "target_role": "button",
+                                    "bbox": {"x": 518, "y": 105, "w": 48, "h": 48},
+                                },
+                            },
+                            {
+                                "candidate_id": "candidate_add_role",
+                                "allowed": False,
+                                "resolved_click_point": {
+                                    "target_text": "Add role",
+                                    "target_role": "button",
+                                    "bbox": {"x": 482, "y": 104, "w": 118, "h": 49},
+                                },
+                            },
+                        ],
+                    },
+                }
+            },
+        }
+
+    monkeypatch.setattr(runner, "_post_json", fake_post_json)
+
+    result = runner._safe_continue_after_fill("http://runtime.test", app_name="edge", timeout=5.0, from_step="update_seek_profile")
+
+    assert result["status"] == "continue_target_rejected"
+    assert result["target_validation"]["reason"] == "profile_mutation_candidate_at_click_point"
+    assert result["target_validation"]["selected_candidate_label"].startswith("click only the visible seek")
+    assert all(payload.get("dry_run") is True for endpoint, payload in calls if endpoint == "/action/execute_recognition_plan")
+
+
+def test_safe_continue_allows_prompt_candidate_when_visible_continue_overlaps(monkeypatch) -> None:
+    calls: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(runner, "_runtime_state", lambda *_args, **_kwargs: {"payload": {"rect": {"left": 0, "top": 0, "right": 1920, "bottom": 1080}}})
+    monkeypatch.setattr(runner.time, "sleep", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        runner,
+        "_observe",
+        lambda *_args, **_kwargs: {
+            "trace_path": "observe.json",
+            "screen_inventory": {"page_elements": [{"text": "Review and submit"}], "available_actions": []},
+        },
+    )
+    monkeypatch.setattr(
+        runner,
+        "assess_seek_application_flow_state",
+        lambda _observation: {
+            "contract_version": "seek_application_flow_state_v1",
+            "current_step": "review_and_submit",
+            "state_type": "final_submit_visible",
+            "final_submit_visible_blocker": {"blocked": True},
+            "stop_reason": "final_submit_visible_stop_before_submission",
+        },
+    )
+
+    def fake_post_json(_base_url, endpoint, payload, _timeout):
+        calls.append((endpoint, payload))
+        if endpoint == "/action/scroll":
+            return {"success": True, "data": {"result": {"trace_path": "scroll.json"}}}
+        assert endpoint == "/action/execute_recognition_plan"
+        if payload["dry_run"] is True:
+            return {
+                "success": True,
+                "data": {
+                    "result": {
+                        "approved_plan_id": "plan-continue",
+                        "selected_click_point": {"x": 1072, "y": 900},
+                        "trace_path": "dry.json",
+                        "pre_click_decision": {
+                            "selected_candidate_id": "vista_direct_prompt",
+                            "candidate_decisions": [
+                                {
+                                    "candidate_id": "vista_direct_prompt",
+                                    "allowed": True,
+                                    "resolved_click_point": {
+                                        "target_text": "Click only the visible SEEK application form Continue or Save and continue button",
+                                        "target_role": "button",
+                                        "bbox": {"x": 1048, "y": 876, "w": 48, "h": 48},
+                                    },
+                                },
+                                {
+                                    "candidate_id": "candidate_continue",
+                                    "allowed": False,
+                                    "resolved_click_point": {
+                                        "target_text": "Continue",
+                                        "target_role": "button",
+                                        "bbox": {"x": 1000, "y": 876, "w": 144, "h": 48},
+                                    },
+                                },
+                            ],
+                        },
+                    }
+                },
+            }
+        return {
+            "success": True,
+            "data": {
+                "result": {
+                    "approved_plan_id": payload["approved_plan_id"],
+                    "selected_click_point": {"x": 1072, "y": 900},
+                    "trace_path": "execute.json",
+                }
+            },
+        }
+
+    monkeypatch.setattr(runner, "_post_json", fake_post_json)
+
+    result = runner._safe_continue_after_fill("http://runtime.test", app_name="edge", timeout=5.0, from_step="update_seek_profile")
+
+    assert result["status"] == "stopped_at_final_submit_visible"
+    assert result["target_validation"]["reason"] == "visible_continue_candidate_at_click_point"
+    assert result["continue_clicks"] == 1
+    assert any(payload.get("dry_run") is False for endpoint, payload in calls if endpoint == "/action/execute_recognition_plan")
 
 
 def test_safe_continue_reports_no_navigation_when_step_does_not_change(monkeypatch) -> None:
@@ -1574,6 +2328,20 @@ def test_safe_continue_reports_no_navigation_when_step_does_not_change(monkeypat
                         "approved_plan_id": "plan-form-continue",
                         "selected_click_point": {"x": 1300, "y": 1160},
                         "trace_path": "dry.json",
+                        "pre_click_decision": {
+                            "selected_candidate_id": "continue_button",
+                            "candidate_decisions": [
+                                {
+                                    "candidate_id": "continue_button",
+                                    "allowed": True,
+                                    "resolved_click_point": {
+                                        "target_text": "Continue",
+                                        "target_role": "button",
+                                        "bbox": {"x": 1240, "y": 1130, "w": 120, "h": 60},
+                                    },
+                                }
+                            ],
+                        },
                     }
                 },
             }
@@ -1714,3 +2482,29 @@ def test_left_results_visual_stability_detects_left_results_scroll(tmp_path: Pat
 
     assert stability["stable"] is False
     assert stability["changed_pixel_ratio"] > stability["thresholds"]["changed_pixel_ratio_max"]
+
+
+def test_application_flow_ready_rejects_generic_search_page_form_detection() -> None:
+    assert (
+        runner._application_flow_ready(
+            {
+                "application_flow_started": True,
+                "state_type": "application_form_detected",
+                "current_step": None,
+            }
+        )
+        is False
+    )
+
+
+def test_application_flow_ready_accepts_explicit_seek_application_step() -> None:
+    assert (
+        runner._application_flow_ready(
+            {
+                "application_flow_started": True,
+                "state_type": "application_form_detected",
+                "current_step": "update_seek_profile",
+            }
+        )
+        is True
+    )

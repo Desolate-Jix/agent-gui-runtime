@@ -1,0 +1,769 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_35aa1eee78f4",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.87,
+    "job_id": "seek_job_35aa1eee78f4",
+    "title": "RESEARCH/DEVELOPERSUMMER",
+    "company": "INTERNSHIP/ GRADUATE",
+    "fit_summary": "strong_apply with score 0.870. positive: matched_skills: Python, AI, OCR; matched_target_roles: Software Engineer; location_matches: New Lynn, Auckland (Hybrid).",
+    "recommended_next_action": "open_apply_entry_and_prepare_safe_fields",
+    "positive_evidence": [
+      "matched_skills: Python, AI, OCR",
+      "matched_target_roles: Software Engineer",
+      "location_matches: New Lynn, Auckland (Hybrid)",
+      "matched_preferred_work_modes: hybrid"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_35aa1eee78f4",
+    "title": "RESEARCH/DEVELOPERSUMMER",
+    "company": "INTERNSHIP/ GRADUATE",
+    "location": "New Lynn, Auckland (Hybrid)",
+    "posted_at_text": null,
+    "work_type": "Hybrid",
+    "salary_text": "$62,500 + performance and profit share",
+    "classification": null,
+    "card_bbox": {
+      "x": 496,
+      "y": 656,
+      "w": 364,
+      "h": 544
+    },
+    "click_point": {
+      "x": 678,
+      "y": 928
+    },
+    "source_url": null,
+    "source_card_id": "card_1_job-listing-1",
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-193142-582149__observe-screen__edge.json",
+      "viewport_size": {
+        "width": 2560,
+        "height": 1400
+      },
+      "source": "seek_job_card_extraction",
+      "freshness": "current_capture"
+    },
+    "primary_action_id": "action_screen_8_job-listing-1",
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_37_research-developersummer",
+      "page_text_39_internship-graduate",
+      "page_text_40_trv-trading",
+      "page_text_41_strong-applicant",
+      "page_text_42_new-lynn-auckland-hybrid",
+      "page_text_43_62-500-performance-and-profit-share",
+      "page_text_44_bonusos",
+      "page_text_45_mine-terabytes-of-market-data-to-discover-profit",
+      "page_text_46_trading-patterns"
+    ],
+    "evidence": {
+      "texts": [
+        "Job listing 1",
+        "RESEARCH/DEVELOPERSUMMER",
+        "INTERNSHIP/ GRADUATE",
+        "TRV Trading",
+        "Strong applicant",
+        "New Lynn, Auckland (Hybrid)",
+        "$62,500 + performance and profit share",
+        "bonusos",
+        "Mine terabytes of market data to discover profitable",
+        "trading patterns"
+      ],
+      "source_contract": "screen_inventory_v1"
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_35aa1eee78f4",
+    "title": "RESEARCH/DEVELOPERSUMMER",
+    "company": "INTERNSHIP/ GRADUATE",
+    "location": "New Lynn, Auckland (Hybrid)",
+    "work_type": "Hybrid",
+    "classification": "Mathematics,Statistics&Information Sciences(Science&Technology)",
+    "salary_text": "$62,5oO +performance and profit share bonuses",
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "Enter suburb, town or city"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "SEEK"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "PROPRIETARYTRADING"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "AOTEAROA"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "RAING"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "RVAING"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "Strong applicant"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "QUANTTRADINGRESEARCH/DEVELOPERSUMMER"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "INTERNSHIP/GRADUATE"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "TRV Trading View alliobs"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "New Lynn, Auckland (Hybrid)"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "Mathematics,Statistics&Information Sciences(Science&Technology)"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "$62,5oO +performance and profit share bonuses"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "Posted 2d ago ● Medium application volume"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "Quickapply"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "1 skill or credential matches your profile"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "Java ProgrammingShow all"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "THEOPPORTUNITY"
+      },
+      {
+        "index": 21,
+        "role": "batch_ocr",
+        "text": "IN"
+      },
+      {
+        "index": 22,
+        "role": "batch_ocr",
+        "text": "RV ERAING"
+      },
+      {
+        "index": 23,
+        "role": "batch_ocr",
+        "text": "RVRAING"
+      },
+      {
+        "index": 24,
+        "role": "batch_ocr",
+        "text": "TRV Trading View all jobs"
+      },
+      {
+        "index": 25,
+        "role": "batch_ocr",
+        "text": "Mathematics, Statistics & Information Sciences (Science & Technology)"
+      },
+      {
+        "index": 26,
+        "role": "batch_ocr",
+        "text": "?"
+      },
+      {
+        "index": 27,
+        "role": "batch_ocr",
+        "text": "回"
+      },
+      {
+        "index": 28,
+        "role": "batch_ocr",
+        "text": "$62,500+performance and profit share bonuses"
+      },
+      {
+        "index": 29,
+        "role": "batch_ocr",
+        "text": "Posted 2d ago·Medium applicationvolume"
+      },
+      {
+        "index": 30,
+        "role": "batch_ocr",
+        "text": "Quick apply"
+      },
+      {
+        "index": 31,
+        "role": "batch_ocr",
+        "text": "QUANTTRADINGRESEARCH/DEVELOPERSUMMERIN..."
+      },
+      {
+        "index": 32,
+        "role": "batch_ocr",
+        "text": "TRV Trading"
+      },
+      {
+        "index": 33,
+        "role": "batch_ocr",
+        "text": "IIILVIIO"
+      },
+      {
+        "index": 34,
+        "role": "batch_ocr",
+        "text": "OurQuantTradingResearcherinternshipisyourchancetoworkonmeaningfulprojects"
+      },
+      {
+        "index": 35,
+        "role": "batch_ocr",
+        "text": "that directly affect TRV's (www.trvtradinggroup.com) world-class high frequency trading"
+      },
+      {
+        "index": 36,
+        "role": "batch_ocr",
+        "text": "systems and have a real impact on thebusiness.Turn statistical insights intoprofitable"
+      },
+      {
+        "index": 37,
+        "role": "batch_ocr",
+        "text": "tradingstrategieswhileworkingdirectlywithourseniorquantsandtraders."
+      },
+      {
+        "index": 38,
+        "role": "batch_ocr",
+        "text": "You'lldiscover howyoucan analyse and applystatistical techniquestohigh-frequency"
+      },
+      {
+        "index": 39,
+        "role": "batch_ocr",
+        "text": "financial data, train algorithms to learn new patterns and translate signals into profitable"
+      },
+      {
+        "index": 40,
+        "role": "batch_ocr",
+        "text": "trading strategies.You'll have all the support you need to succeed: hands-on training, and"
+      },
+      {
+        "index": 41,
+        "role": "batch_ocr",
+        "text": "a mentorwho'll oversee your work and professional development.Where you go from"
+      },
+      {
+        "index": 42,
+        "role": "batch_ocr",
+        "text": "here is up to you- the right candidates secure a graduate position at the end of the"
+      },
+      {
+        "index": 43,
+        "role": "batch_ocr",
+        "text": "programme."
+      },
+      {
+        "index": 44,
+        "role": "batch_ocr",
+        "text": "WHATYOU'LLDO"
+      },
+      {
+        "index": 45,
+        "role": "batch_ocr",
+        "text": "·Build andbacktesttradingmodelsthatexecutemillionsofdollarsintradesdaily"
+      },
+      {
+        "index": 46,
+        "role": "batch_ocr",
+        "text": "·Collaborate closely with our software engineers to build and refine our state-of-the-art"
+      },
+      {
+        "index": 47,
+        "role": "batch_ocr",
+        "text": "tradinginfrastructure"
+      },
+      {
+        "index": 48,
+        "role": "batch_ocr",
+        "text": "·Mineterabytesofmarketdatausing advancedstatisticalmethodstodiscoveralpha"
+      },
+      {
+        "index": 49,
+        "role": "batch_ocr",
+        "text": "generating patterns"
+      },
+      {
+        "index": 50,
+        "role": "batch_ocr",
+        "text": "·Research market microstructure effects, develop signal processing techniques,"
+      },
+      {
+        "index": 51,
+        "role": "batch_ocr",
+        "text": "optimizeportfolioconstruction"
+      },
+      {
+        "index": 52,
+        "role": "batch_ocr",
+        "text": "WHYCHOOSETRV"
+      },
+      {
+        "index": 53,
+        "role": "batch_ocr",
+        "text": "·You thrive working on meaningful and challenging projects"
+      },
+      {
+        "index": 54,
+        "role": "batch_ocr",
+        "text": "·You want to work at a place where creativity, teamwork and innovation are recognised"
+      },
+      {
+        "index": 55,
+        "role": "batch_ocr",
+        "text": "andrewarded"
+      },
+      {
+        "index": 56,
+        "role": "batch_ocr",
+        "text": "·You want to work in a small team where your work directlyimpacts trading profits"
+      },
+      {
+        "index": 57,
+        "role": "batch_ocr",
+        "text": "·Graduate role guaranteed fortopperformers"
+      },
+      {
+        "index": 58,
+        "role": "batch_ocr",
+        "text": "·Youwanttheoptiontoworkfromhometwodaysaweek."
+      },
+      {
+        "index": 59,
+        "role": "batch_ocr",
+        "text": "WHATWELOOKFOR"
+      },
+      {
+        "index": 60,
+        "role": "batch_ocr",
+        "text": "ComputerScience,Statistics,PhysicsorMathematics)"
+      },
+      {
+        "index": 61,
+        "role": "batch_ocr",
+        "text": "·Exceptional drive and resilience whenbattling complexproblems."
+      },
+      {
+        "index": 62,
+        "role": "batch_ocr",
+        "text": "·Ability to abstract away complexity and deal with the parts of the problem that matter."
+      },
+      {
+        "index": 63,
+        "role": "batch_ocr",
+        "text": "· Outstanding analytical skills"
+      },
+      {
+        "index": 64,
+        "role": "batch_ocr",
+        "text": "·Proficient experience in a programming language (e.g. C/C++, Java, Python)"
+      },
+      {
+        "index": 65,
+        "role": "batch_ocr",
+        "text": "·Genuineinterestinfinancialmarkets,thoughnopriorknowledgeorexperienceis"
+      },
+      {
+        "index": 66,
+        "role": "batch_ocr",
+        "text": "required"
+      },
+      {
+        "index": 67,
+        "role": "batch_ocr",
+        "text": "·As this is afull time internshipyouwouldbe availableduring the summerbreak."
+      },
+      {
+        "index": 68,
+        "role": "batch_ocr",
+        "text": "APPLICATIONPROCESS"
+      },
+      {
+        "index": 69,
+        "role": "batch_ocr",
+        "text": "team and ourassessmentsreflect that standard.Here are the stepsyou can expect aspart"
+      },
+      {
+        "index": 70,
+        "role": "batch_ocr",
+        "text": "of your application and interview process."
+      },
+      {
+        "index": 71,
+        "role": "batch_ocr",
+        "text": "1.Submit your application here on Seek.Send us your CV and university transcript.Tell us"
+      },
+      {
+        "index": 72,
+        "role": "batch_ocr",
+        "text": "about yourself, what you're good and bad at, what's special about you, and why you"
+      },
+      {
+        "index": 73,
+        "role": "batch_ocr",
+        "text": "might be the right candidateforthis opportunity."
+      },
+      {
+        "index": 74,
+        "role": "batch_ocr",
+        "text": "2.Come get toknowus at theUniversity ofAuckland's Internship and GraduateCareer"
+      },
+      {
+        "index": 75,
+        "role": "batch_ocr",
+        "text": "Expo(Tuesday29thJuly),if you can make it."
+      },
+      {
+        "index": 76,
+        "role": "batch_ocr",
+        "text": "3.Tackle our technical challenge suite.A suite of tests concluding with custom problems"
+      },
+      {
+        "index": 77,
+        "role": "batch_ocr",
+        "text": "designed by our Quant team that mirrorthereal data science and algorithmic trading"
+      },
+      {
+        "index": 78,
+        "role": "batch_ocr",
+        "text": "work you'll do at TRV."
+      },
+      {
+        "index": 79,
+        "role": "batch_ocr",
+        "text": "4.Inpersontechnical,analyticalandbehavioural interviews"
+      },
+      {
+        "index": 80,
+        "role": "batch_ocr",
+        "text": "5.Receive anoffer"
+      },
+      {
+        "index": 81,
+        "role": "batch_ocr",
+        "text": "6.Join usinNovemberwhenyourexamsfinish.The internshipfinishesat thestartof the"
+      },
+      {
+        "index": 82,
+        "role": "batch_ocr",
+        "text": "next university year."
+      },
+      {
+        "index": 83,
+        "role": "batch_ocr",
+        "text": "Employer questions"
+      },
+      {
+        "index": 84,
+        "role": "batch_ocr",
+        "text": "Your application will include the following questions:"
+      },
+      {
+        "index": 85,
+        "role": "batch_ocr",
+        "text": "·Which of the following statements best describes your right to work in New Zealand?"
+      },
+      {
+        "index": 86,
+        "role": "batch_ocr",
+        "text": "Company profile"
+      },
+      {
+        "index": 87,
+        "role": "batch_ocr",
+        "text": "Financial InvestmentServices"
+      },
+      {
+        "index": 88,
+        "role": "batch_ocr",
+        "text": "Not specified"
+      },
+      {
+        "index": 89,
+        "role": "batch_ocr",
+        "text": "Your applicationwill includethefollowingquestions:"
+      },
+      {
+        "index": 90,
+        "role": "batch_ocr",
+        "text": "?ITRAING"
+      },
+      {
+        "index": 91,
+        "role": "batch_ocr",
+        "text": "Based in Auckland, New Zealand, TRV Trading employs a team of highly skilled"
+      },
+      {
+        "index": 92,
+        "role": "batch_ocr",
+        "text": "traders,quants,and techiestocreateinnovativetrading strategies and new"
+      },
+      {
+        "index": 93,
+        "role": "batch_ocr",
+        "text": "implementations of our risk management philosophy..."
+      },
+      {
+        "index": 94,
+        "role": "batch_ocr",
+        "text": "Showmore"
+      },
+      {
+        "index": 95,
+        "role": "batch_ocr",
+        "text": "More about this company"
+      },
+      {
+        "index": 96,
+        "role": "batch_ocr",
+        "text": "Be careful"
+      },
+      {
+        "index": 97,
+        "role": "batch_ocr",
+        "text": "Don't provide your bank or credit card details when applying for jobs."
+      },
+      {
+        "index": 98,
+        "role": "batch_ocr",
+        "text": "Learnhowtoprotectyourself"
+      },
+      {
+        "index": 99,
+        "role": "batch_ocr",
+        "text": "Report this job ad"
+      },
+      {
+        "index": 100,
+        "role": "batch_ocr",
+        "text": "Your applicationwill include thefollowingquestions:"
+      },
+      {
+        "index": 101,
+        "role": "batch_ocr",
+        "text": "Which of the following statementsbest describes your right to work inNewZealand?"
+      },
+      {
+        "index": 102,
+        "role": "batch_ocr",
+        "text": "?I TAINg"
+      },
+      {
+        "index": 103,
+        "role": "batch_ocr",
+        "text": "Financial Investment Services"
+      },
+      {
+        "index": 104,
+        "role": "batch_ocr",
+        "text": "2 Not specified"
+      },
+      {
+        "index": 105,
+        "role": "batch_ocr",
+        "text": "traders,quants,and techies to create innovative trading strategies and new"
+      },
+      {
+        "index": 106,
+        "role": "batch_ocr",
+        "text": "implementations of our riskmanagement philosophy..."
+      },
+      {
+        "index": 107,
+        "role": "batch_ocr",
+        "text": "More about this company→"
+      },
+      {
+        "index": 108,
+        "role": "batch_ocr",
+        "text": "Becareful"
+      },
+      {
+        "index": 109,
+        "role": "batch_ocr",
+        "text": "Don't provide yourbank or credit card details when applying for jobs."
+      },
+      {
+        "index": 110,
+        "role": "batch_ocr",
+        "text": "Reportthisjobad"
+      },
+      {
+        "index": 111,
+        "role": "batch_ocr",
+        "text": "What can I earn as a Developer"
+      },
+      {
+        "index": 112,
+        "role": "batch_ocr",
+        "text": "See more detailed salary information→"
+      }
+    ],
+    "requirements": [],
+    "responsibilities": [],
+    "benefits": [
+      "New Lynn, Auckland (Hybrid)"
+    ],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply button",
+      "bbox": {
+        "x": 1178,
+        "y": 1022,
+        "w": 140,
+        "h": 42
+      },
+      "click_point": {
+        "x": 1248,
+        "y": 1043
+      },
+      "candidate_freshness": {
+        "contract_version": "action_candidate_freshness_v1",
+        "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-193259-014296__observe-screen__edge.json",
+        "viewport_size": {
+          "width": 2560,
+          "height": 1400
+        },
+        "source": "seek_apply_button_extraction",
+        "freshness": "current_capture"
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save",
+      "bbox": {
+        "x": 1352,
+        "y": 1032,
+        "w": 48,
+        "h": 23
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 1134,
+        "y": 280,
+        "w": 896,
+        "h": 1104
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false,
+        "content_left": 530,
+        "content_width": 1500
+      },
+      "safe_points": [
+        {
+          "x": 1582,
+          "y": 832,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 1134,
+      "y": 60,
+      "w": 896,
+      "h": 1324
+    },
+    "detail_bottom_reached": false,
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-193259-014296__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-193302-257997__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-193309-800549__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-193315-759946__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-193320-349320__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-193324-751442__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-193328-189591__ocr-region__ocr-region.json"
+    ],
+    "runtime_detail_snapshot": {
+      "contract_version": "runtime_detail_snapshot_v1",
+      "source": "read_region_batch",
+      "revision": 2,
+      "previous_snapshot_id": "65374dfc40829401",
+      "snapshot_id": "474cd14af1465af3"
+    },
+    "detail_batch_status": "ok",
+    "detail_batch_stop_reason": "max_captures",
+    "detail_batch_unique_line_count": 104,
+    "runtime_detail_dataflow": {
+      "contract_version": "runtime_detail_dataflow_v1",
+      "source_batch_contract": "read_region_batch_v1",
+      "source_batch_status": "ok",
+      "merged_text_line_count": 104,
+      "description_section_count": 113
+    }
+  }
+}

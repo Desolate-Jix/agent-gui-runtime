@@ -4,7 +4,7 @@
   "app_id": "seek",
   "domain": "job_search",
   "page_type": "seek_search_results_with_detail",
-  "created_at": "2026-06-19T15:23:10.115622+00:00",
+  "created_at": "2026-06-24T17:50:00.218985+00:00",
   "source": {
     "learn_mode": "manual_seeded_from_successful_seek_mvp_run",
     "source_contract": "seek_learn_artifact_export_v1",
@@ -93,6 +93,48 @@
       "terminal": true
     }
   ],
+  "display_states": [
+    {
+      "state_id": "seek_home_page",
+      "label": "SEEK home/search page",
+      "page_type": "seek_search_results_with_detail",
+      "description": "Search results, selected job detail pane, job cards, filters, and detail reading regions.",
+      "region_refs": [
+        "top_search_area",
+        "results_list",
+        "job_detail"
+      ],
+      "child_state_ids": [
+        "seek_search_results_empty_detail",
+        "seek_search_results_with_selected_job",
+        "seek_detail_scrolled",
+        "seek_results_list_scrolled"
+      ]
+    },
+    {
+      "state_id": "seek_application_page",
+      "label": "SEEK application page",
+      "page_type": "seek_station_internal_application",
+      "description": "Station-internal application flow, safe form filling, review boundary, and final submit guard.",
+      "region_refs": [
+        "application_form"
+      ],
+      "child_state_ids": [
+        "seek_apply_entry_form"
+      ],
+      "safety": {
+        "final_submit": "forbidden"
+      }
+    }
+  ],
+  "state_display_map": {
+    "seek_search_results_empty_detail": "seek_home_page",
+    "seek_search_results_with_selected_job": "seek_home_page",
+    "seek_detail_scrolled": "seek_home_page",
+    "seek_results_list_scrolled": "seek_home_page",
+    "seek_apply_entry_form": "seek_application_page",
+    "seek_external_or_blocked": "seek_application_page"
+  },
   "regions": [
     {
       "region_id": "top_search_area",
@@ -183,6 +225,155 @@
       "contains": [],
       "bbox_policy": {
         "source": "learned_layout_seed",
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      }
+    },
+    {
+      "region_id": "application_form",
+      "role": "form_flow",
+      "label": "SEEK application form",
+      "parent_region_id": null,
+      "container_id": "seek:application_form",
+      "repeatable": false,
+      "contains": [
+        "application_progress",
+        "application_documents",
+        "application_questions",
+        "application_profile",
+        "application_review_step"
+      ],
+      "bbox_policy": {
+        "source": "learned_application_flow_seed",
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      },
+      "child_region_ids": [
+        "application_progress",
+        "application_documents",
+        "application_questions",
+        "application_profile",
+        "application_review_step"
+      ],
+      "children": {
+        "region_refs": [
+          "application_progress",
+          "application_documents",
+          "application_questions",
+          "application_profile",
+          "application_review_step"
+        ]
+      }
+    },
+    {
+      "region_id": "application_progress",
+      "role": "navigation",
+      "label": "Application step progress",
+      "parent_region_id": "application_form",
+      "container_id": "seek:application_form",
+      "repeatable": false,
+      "contains": [
+        "choose_documents",
+        "answer_questions",
+        "update_profile",
+        "review_and_submit"
+      ],
+      "bbox_policy": {
+        "source": "learned_application_flow_seed",
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      }
+    },
+    {
+      "region_id": "application_documents",
+      "role": "form_step",
+      "label": "Choose documents step",
+      "parent_region_id": "application_form",
+      "container_id": "seek:application_form",
+      "repeatable": false,
+      "contains": [
+        "resume",
+        "cover_letter",
+        "continue_next_step"
+      ],
+      "bbox_policy": {
+        "source": "learned_application_flow_seed",
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      }
+    },
+    {
+      "region_id": "application_questions",
+      "role": "form_step",
+      "label": "Employer questions step",
+      "parent_region_id": "application_form",
+      "container_id": "seek:application_form",
+      "repeatable": true,
+      "contains": [
+        "question_label",
+        "answer_field",
+        "continue_next_step"
+      ],
+      "bbox_policy": {
+        "source": "learned_application_flow_seed",
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      }
+    },
+    {
+      "region_id": "application_profile",
+      "role": "form_step",
+      "label": "Update SEEK profile step",
+      "parent_region_id": "application_form",
+      "container_id": "seek:application_form",
+      "repeatable": false,
+      "contains": [
+        "profile_fields",
+        "continue_without_profile_mutation"
+      ],
+      "bbox_policy": {
+        "source": "learned_application_flow_seed",
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      }
+    },
+    {
+      "region_id": "application_review_step",
+      "role": "form_step",
+      "label": "Review and submit step",
+      "parent_region_id": "application_form",
+      "container_id": "seek:application_form",
+      "repeatable": false,
+      "contains": [
+        "application_review"
+      ],
+      "bbox_policy": {
+        "source": "learned_application_flow_seed",
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      },
+      "child_region_ids": [
+        "application_review"
+      ],
+      "children": {
+        "region_refs": [
+          "application_review"
+        ]
+      }
+    },
+    {
+      "region_id": "application_review",
+      "role": "final_review_boundary",
+      "label": "Review and submit boundary",
+      "parent_region_id": "application_review_step",
+      "container_id": "seek:application_form",
+      "repeatable": false,
+      "contains": [
+        "review_summary",
+        "final_submit_forbidden"
+      ],
+      "bbox_policy": {
+        "source": "learned_application_flow_seed",
         "requires_current_reobserve": true,
         "no_overlap_except_containment": true
       }
@@ -493,6 +684,15 @@
       ]
     },
     {
+      "transition_id": "seek:transition:switch_open_job_card",
+      "action_template_id": "open_job_card",
+      "from_state_id": "seek_search_results_with_selected_job",
+      "to_state_id": "seek_search_results_with_selected_job",
+      "verification_refs": [
+        "open_job_card_detail_match"
+      ]
+    },
+    {
       "transition_id": "seek:transition:read_detail",
       "action_template_id": "read_detail",
       "from_state_id": "seek_search_results_with_selected_job",
@@ -519,6 +719,28 @@
         "final_submit_forbidden"
       ],
       "default_available": false
+    }
+  ],
+  "display_transitions": [
+    {
+      "transition_id": "seek:display_transition:open_apply_flow",
+      "action_template_id": "apply_entry",
+      "from_state_id": "seek_home_page",
+      "to_state_id": "seek_application_page",
+      "verification_refs": [
+        "final_submit_forbidden"
+      ],
+      "default_available": false
+    },
+    {
+      "transition_id": "seek:display_transition:stay_on_search_page",
+      "action_template_id": "browse_and_read_jobs",
+      "from_state_id": "seek_home_page",
+      "to_state_id": "seek_home_page",
+      "verification_refs": [
+        "open_job_card_detail_match",
+        "read_detail_scroll_scope"
+      ]
     }
   ],
   "action_templates": [
@@ -622,8 +844,142 @@
         "requires_explicit_user_approval": true,
         "final_submit_remains_forbidden": true
       }
+    },
+    {
+      "action_template_id": "read_application_flow",
+      "learned_skill_ref": "skill.read_current_application_step",
+      "low_level_action_type": "read",
+      "target_entity": "seek:application_form",
+      "candidate_constraints": {
+        "required_container_id": "seek:application_form"
+      },
+      "availability_policy": {
+        "default_available": true
+      },
+      "safety_policy": {
+        "final_submit_forbidden": true
+      }
+    },
+    {
+      "action_template_id": "detect_application_step",
+      "learned_skill_ref": "skill.read_application_progress",
+      "low_level_action_type": "read",
+      "target_entity": "seek:application_progress",
+      "candidate_constraints": {
+        "required_region_id": "application_progress",
+        "required_container_id": "seek:application_form"
+      },
+      "availability_policy": {
+        "default_available": true
+      },
+      "safety_policy": {
+        "final_submit_forbidden": true
+      }
+    },
+    {
+      "action_template_id": "keep_default_resume",
+      "learned_skill_ref": "skill.keep_existing_document",
+      "low_level_action_type": "review",
+      "target_entity": "seek:application_documents",
+      "candidate_constraints": {
+        "required_region_id": "application_documents",
+        "required_container_id": "seek:application_form"
+      },
+      "availability_policy": {
+        "default_available": true
+      },
+      "safety_policy": {
+        "mutates_profile": false,
+        "final_submit_forbidden": true
+      }
+    },
+    {
+      "action_template_id": "fill_employer_questions",
+      "learned_skill_ref": "skill.answer_employer_questions_from_profile",
+      "low_level_action_type": "input",
+      "target_entity": "seek:application_questions",
+      "candidate_constraints": {
+        "required_region_id": "application_questions",
+        "required_container_id": "seek:application_form"
+      },
+      "availability_policy": {
+        "default_available": false,
+        "requires_user_or_gpt_decision": true
+      },
+      "safety_policy": {
+        "final_submit_forbidden": true
+      }
+    },
+    {
+      "action_template_id": "continue_application_next_step",
+      "learned_skill_ref": "skill.continue_application_flow",
+      "low_level_action_type": "click",
+      "target_entity": "seek:application_form",
+      "candidate_constraints": {
+        "required_container_id": "seek:application_form"
+      },
+      "availability_policy": {
+        "default_available": false,
+        "requires_gate": true
+      },
+      "safety_policy": {
+        "final_submit_forbidden": true
+      }
+    },
+    {
+      "action_template_id": "continue_without_profile_mutation",
+      "learned_skill_ref": "skill.skip_profile_mutation",
+      "low_level_action_type": "click",
+      "target_entity": "seek:application_profile",
+      "candidate_constraints": {
+        "required_region_id": "application_profile",
+        "required_container_id": "seek:application_form"
+      },
+      "availability_policy": {
+        "default_available": false,
+        "requires_gate": true
+      },
+      "safety_policy": {
+        "mutates_profile": false,
+        "final_submit_forbidden": true
+      }
+    },
+    {
+      "action_template_id": "extract_final_review",
+      "learned_skill_ref": "skill.review_before_submit_reconciliation",
+      "low_level_action_type": "read",
+      "target_entity": "seek:application_review",
+      "candidate_constraints": {
+        "required_region_id": "application_review",
+        "required_container_id": "seek:application_form"
+      },
+      "availability_policy": {
+        "default_available": false,
+        "requires_user_review": true
+      },
+      "safety_policy": {
+        "final_submit_forbidden": true
+      }
+    },
+    {
+      "action_template_id": "final_submit",
+      "learned_skill_ref": "skill.block_final_submit",
+      "low_level_action_type": "blocked",
+      "target_entity": "seek:application_review",
+      "candidate_constraints": {
+        "required_region_id": "application_review",
+        "required_container_id": "seek:application_form"
+      },
+      "availability_policy": {
+        "default_available": false
+      },
+      "safety_policy": {
+        "final_submit_forbidden": true,
+        "hard_block": true
+      }
     }
   ],
+  "visual_asset_samples": [],
   "verification_rules": [
     {
       "rule_id": "open_job_card_detail_match",
@@ -724,6 +1080,7 @@
     "submit_clicks": 0,
     "accuracy_status": "pass",
     "sample_entity_count": 5,
+    "visual_asset_sample_count": 0,
     "artifact_is_authorization": false
   }
 }

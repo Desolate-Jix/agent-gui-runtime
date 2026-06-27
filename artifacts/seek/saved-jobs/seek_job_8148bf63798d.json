@@ -1,0 +1,858 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_8148bf63798d",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 1.0,
+    "job_id": "seek_job_8148bf63798d",
+    "title": "Senior Software Engineer",
+    "company": "Stuff Digital Limited",
+    "fit_summary": "strong_apply with score 1.000. positive: matched_skills: JavaScript, React, AI, API, Git, OCR; matched_target_roles: Software Engineer, AI Engineer; location_matches: Auckland CBD, Auckland.",
+    "recommended_next_action": "open_apply_entry_and_prepare_safe_fields",
+    "positive_evidence": [
+      "matched_skills: JavaScript, React, AI, API, Git, OCR",
+      "matched_target_roles: Software Engineer, AI Engineer",
+      "location_matches: Auckland CBD, Auckland",
+      "matched_preferred_work_modes: remote"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_8148bf63798d",
+    "title": "Senior Software Engineer",
+    "company": "Stuff Digital Limited",
+    "location": "Auckland CBD, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": "Senior Software Engineer",
+    "card_bbox": {
+      "x": 333,
+      "y": 386,
+      "w": 424,
+      "h": 226
+    },
+    "click_point": {
+      "x": 438,
+      "y": 399
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_4",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_49_senior-software-engineer",
+      "page_text_52_stuff-digital-limited",
+      "page_text_53_auckland-cbd-auckland",
+      "page_text_55_building-modern-web-applications-apls-and-cloud-",
+      "page_text_58_solutions",
+      "page_text_61_technologies-such-as-java-javascript-typescript-",
+      "page_text_62_spring-php-or-similar",
+      "page_text_63_interest-in-al-and-how-it-can-enhance-software",
+      "page_text_64_development"
+    ],
+    "evidence": {
+      "texts": [
+        "Senior Software Engineer",
+        "Stuff Digital Limited",
+        "Auckland CBD, Auckland",
+        "building modern web applications, APls and cloud-based",
+        "solutions",
+        "technologies such as Java, JavaScript, TypeScript, React,",
+        "Spring, PHP or similar",
+        "Interest in Al and how it can enhance software",
+        "development"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": false,
+        "has_salary": false
+      }
+    },
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-040924-547507__observe-screen__edge.json",
+      "viewport_size": {
+        "width": 1920,
+        "height": 1080
+      },
+      "source": "seek_job_card_extraction",
+      "freshness": "current_capture"
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_8148bf63798d",
+    "title": "Senior Software Engineer",
+    "company": "Stuff Digital Limited",
+    "location": "Auckland CBD, Auckland",
+    "work_type": "Remote",
+    "classification": "Senior Software Engineer",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "Softwar"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "TRV Trac"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Careers"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "出目☆"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "Type v"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "Remote"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "Classification"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "Listing time"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "Stuff"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Senior Software Engineer"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "Stuff Digital Limited View all jobs"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "Auckland CBD, Auckland"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "Engineering-Software (Information&Communication Technology)"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "Fulltime"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "Posted 13h ago"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "Apply"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "① Visited employer's application site on 23 Jun 2026"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "5skillsand credentialsmatchyourprofile"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "Sof X"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "Auckland CBD,Auckland"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "Engineering-Software(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "①Visited employer's application site on 23 Jun 2026"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "5 skills and credentials match your profile"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "√ JavaProgramming"
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "√API"
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "√JavaScriptProgramming+2more"
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "Workatscale.Buildwhatmatters."
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "StuffDigital'sproductsreach more thantwomillionNewZealanders everymonth,across"
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "and more."
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "We're lookingfora SeniorSoftwareEngineertooperate asa genuine technical 2lC,"
+      },
+      {
+        "index": 31,
+        "role": "body",
+        "text": "working alongsideourTechLeadstoshape architecture,raise thequalitybar and helpthe"
+      },
+      {
+        "index": 32,
+        "role": "body",
+        "text": "engineersaroundyougetbetterattheircraft."
+      },
+      {
+        "index": 33,
+        "role": "body",
+        "text": "What vou'll do"
+      },
+      {
+        "index": 34,
+        "role": "body",
+        "text": "TRV Tra("
+      },
+      {
+        "index": 35,
+        "role": "body",
+        "text": "出目☆)"
+      },
+      {
+        "index": 36,
+        "role": "body",
+        "text": "ApplyC"
+      },
+      {
+        "index": 37,
+        "role": "body",
+        "text": "Stuff Digital Limited"
+      },
+      {
+        "index": 38,
+        "role": "body",
+        "text": "·Design and build scalable,secure and high-performing applications"
+      },
+      {
+        "index": 39,
+        "role": "body",
+        "text": "·Influencearchitectureandtechnicaldirection"
+      },
+      {
+        "index": 40,
+        "role": "body",
+        "text": "·Mentorengineersand championengineeringbestpractice"
+      },
+      {
+        "index": 41,
+        "role": "body",
+        "text": "·CollaboratewithProduct,DesignandDatateamstodelivercustomervalue"
+      },
+      {
+        "index": 42,
+        "role": "body",
+        "text": "·Improveperformance,accessibility and platform reliability"
+      },
+      {
+        "index": 43,
+        "role": "body",
+        "text": "·ContributetoAgiledelivery andcontinuousimprovement"
+      },
+      {
+        "index": 44,
+        "role": "body",
+        "text": "What you'll bring"
+      },
+      {
+        "index": 45,
+        "role": "body",
+        "text": "·Strong softwareengineering experience and technical leadershipcapability"
+      },
+      {
+        "index": 46,
+        "role": "body",
+        "text": "·Experiencebuilding modernweb applications,APlsand cloud-based solutions"
+      },
+      {
+        "index": 47,
+        "role": "body",
+        "text": "·Knowledge of technologies such as Java,JavaScript,TypeScript,React,Spring,PHP or"
+      },
+      {
+        "index": 48,
+        "role": "body",
+        "text": "similar"
+      },
+      {
+        "index": 49,
+        "role": "body",
+        "text": "·Experience withAWS,Kubernetes,CI/CDand modernDevOpspractices"
+      },
+      {
+        "index": 50,
+        "role": "body",
+        "text": "·A passionformentoring,collaboration and continuous learning"
+      },
+      {
+        "index": 51,
+        "role": "body",
+        "text": "·InterestinAlandhowitcanenhancesoftwaredevelopmentandcustomerexperiences"
+      },
+      {
+        "index": 52,
+        "role": "body",
+        "text": "Why join Stuff?"
+      },
+      {
+        "index": 53,
+        "role": "body",
+        "text": "Few engineering roles inNewZealand giveyou this combination:genuine scale,a broad"
+      },
+      {
+        "index": 54,
+        "role": "body",
+        "text": "stack, and the direct line between what you ship and what two million people read, watch"
+      },
+      {
+        "index": 55,
+        "role": "body",
+        "text": "and listen to every day."
+      },
+      {
+        "index": 56,
+        "role": "body",
+        "text": "You'll workonbothsides of Al using the latestcoding toolstomovefaster,and building"
+      },
+      {
+        "index": 57,
+        "role": "body",
+        "text": "customer-facingproductsthatputAltoworkforouraudiences.Ifyouwantbreadth,"
+      },
+      {
+        "index": 58,
+        "role": "body",
+        "text": "reach and real technical influence,we'd love to hearfrom you."
+      },
+      {
+        "index": 59,
+        "role": "body",
+        "text": "Think you can do the job? Then apply now and start your journey with Stufftoday."
+      },
+      {
+        "index": 60,
+        "role": "body",
+        "text": "Ka otiraneiiakoetenei mahi?Kati,tonomai inaianei kiatimata aitohaerengameStuff i"
+      },
+      {
+        "index": 61,
+        "role": "body",
+        "text": "tenei ra."
+      },
+      {
+        "index": 62,
+        "role": "body",
+        "text": "Apply C"
+      },
+      {
+        "index": 63,
+        "role": "body",
+        "text": "Aswearecommittedtocreatingaworkplacethatretlectsthediversecommunitiesin"
+      },
+      {
+        "index": 64,
+        "role": "body",
+        "text": "NewZealand,we will always invite and encourage applications from people of all genders,"
+      },
+      {
+        "index": 65,
+        "role": "body",
+        "text": "ethnicities,disabilities and ages.We arecommitted toprovidingequal employment"
+      },
+      {
+        "index": 66,
+        "role": "body",
+        "text": "opportunities for all."
+      },
+      {
+        "index": 67,
+        "role": "body",
+        "text": "Na rungaita matou uki tetahi taiao mahie whakaatu anaite kanorau onga haporii"
+      },
+      {
+        "index": 68,
+        "role": "body",
+        "text": "Aotearoa,ite ao,i te po,ka pohiringia,ka akina ano nga tono mahia te marea whanui,"
+      },
+      {
+        "index": 69,
+        "role": "body",
+        "text": "haunga te ira, te iwi,te hauatanga, te pakeke ranei. E u nei matou ki te whai kia watea ai a"
+      },
+      {
+        "index": 70,
+        "role": "body",
+        "text": "matou arawhai mahi kitekatoairungaitemana taurite."
+      },
+      {
+        "index": 71,
+        "role": "body",
+        "text": "Disclaimer:Stuff doesnot acceptunsolicited agencyresumes.Stuff isnotresponsiblefor"
+      },
+      {
+        "index": 72,
+        "role": "body",
+        "text": "anyfeesrelated tounsolicitedresumes."
+      },
+      {
+        "index": 73,
+        "role": "body",
+        "text": "Be careful"
+      },
+      {
+        "index": 74,
+        "role": "body",
+        "text": "Don't provide your bank or credit card details when applying for jobs."
+      },
+      {
+        "index": 75,
+        "role": "body",
+        "text": "Learnhowtoprotectyourself"
+      },
+      {
+        "index": 76,
+        "role": "body",
+        "text": "Report thisjob ad"
+      }
+    ],
+    "requirements": [
+      "5skillsand credentialsmatchyourprofile",
+      "5 skills and credentials match your profile",
+      "·Strong softwareengineering experience and technical leadershipcapability",
+      "·Experiencebuilding modernweb applications,APlsand cloud-based solutions",
+      "·Experience withAWS,Kubernetes,CI/CDand modernDevOpspractices",
+      "·InterestinAlandhowitcanenhancesoftwaredevelopmentandcustomerexperiences"
+    ],
+    "responsibilities": [
+      "Few engineering roles inNewZealand giveyou this combination:genuine scale,a broad"
+    ],
+    "benefits": [
+      "Remote"
+    ],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Apply",
+      "bbox": {
+        "x": 885,
+        "y": 831,
+        "w": 82,
+        "h": 27
+      },
+      "click_point": {
+        "x": 926,
+        "y": 844
+      },
+      "candidate_freshness": {
+        "contract_version": "action_candidate_freshness_v1",
+        "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-040945-444809__observe-screen__edge.json",
+        "viewport_size": {
+          "width": 1920,
+          "height": 1080
+        },
+        "source": "seek_apply_button_extraction",
+        "freshness": "current_capture"
+      }
+    },
+    "save_button_state": {
+      "visible": false,
+      "label": null,
+      "bbox": null
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 814,
+        "y": 216,
+        "w": 896,
+        "h": 848
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false,
+        "content_left": 210,
+        "content_width": 1500
+      },
+      "safe_points": [
+        {
+          "x": 1262,
+          "y": 640,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 814,
+      "y": 0,
+      "w": 896,
+      "h": 1064
+    },
+    "detail_bottom_reached": true,
+    "detail_scroll_history": [
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260624-040947-193317__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": true
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": false,
+        "wheel_clicks": 4,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260624-040958-350159__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": false,
+        "wheel_clicks": 8,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260624-041009-452396__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": false,
+        "wheel_clicks": 12,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260624-041019-116533__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": true,
+        "wheel_clicks": 12,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ],
+        "right_detail_no_progress_after_scroll": true,
+        "adaptive_stop_reason": "right_detail_content_unchanged_after_scroll"
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-040945-444809__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-040956-603503__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-041007-693612__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-041017-374480__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260624-041027-322905__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 86,
+      "action_count": 0,
+      "texts": [
+        "Softwar",
+        "TRV Trac",
+        "B",
+        "Careers",
+        "出目☆",
+        "G",
+        "30",
+        "3",
+        "Type v",
+        "Remote",
+        "Classification",
+        "Listing time",
+        "Stuff",
+        "Senior Software Engineer",
+        "Stuff Digital Limited View all jobs",
+        "Auckland CBD, Auckland",
+        "国",
+        "Engineering-Software (Information&Communication Technology)",
+        "Fulltime",
+        "Posted 13h ago",
+        "Apply",
+        "① Visited employer's application site on 23 Jun 2026",
+        "How you match ①",
+        "5skillsand credentialsmatchyourprofile",
+        "Sof X",
+        "目☆",
+        "中",
+        "Auckland CBD,Auckland",
+        "Engineering-Software(Information&CommunicationTechnology)",
+        "①Visited employer's application site on 23 Jun 2026",
+        "5 skills and credentials match your profile",
+        "√ JavaProgramming",
+        "√API",
+        "√JavaScriptProgramming+2more",
+        "Workatscale.Buildwhatmatters.",
+        "StuffDigital'sproductsreach more thantwomillionNewZealanders everymonth,across",
+        "and more.",
+        "We're lookingfora SeniorSoftwareEngineertooperate asa genuine technical 2lC,",
+        "working alongsideourTechLeadstoshape architecture,raise thequalitybar and helpthe",
+        "engineersaroundyougetbetterattheircraft.",
+        "What vou'll do",
+        "TRV Tra(",
+        "出目☆)",
+        "ApplyC",
+        "Stuff Digital Limited",
+        "·Design and build scalable,secure and high-performing applications",
+        "·Influencearchitectureandtechnicaldirection",
+        "·Mentorengineersand championengineeringbestpractice",
+        "·CollaboratewithProduct,DesignandDatateamstodelivercustomervalue",
+        "·Improveperformance,accessibility and platform reliability",
+        "·ContributetoAgiledelivery andcontinuousimprovement",
+        "What you'll bring",
+        "·Strong softwareengineering experience and technical leadershipcapability",
+        "·Experiencebuilding modernweb applications,APlsand cloud-based solutions",
+        "·Knowledge of technologies such as Java,JavaScript,TypeScript,React,Spring,PHP or",
+        "similar",
+        "·Experience withAWS,Kubernetes,CI/CDand modernDevOpspractices",
+        "·A passionformentoring,collaboration and continuous learning",
+        "·InterestinAlandhowitcanenhancesoftwaredevelopmentandcustomerexperiences",
+        "Why join Stuff?",
+        "Few engineering roles inNewZealand giveyou this combination:genuine scale,a broad",
+        "stack, and the direct line between what you ship and what two million people read, watch",
+        "and listen to every day.",
+        "You'll workonbothsides of Al using the latestcoding toolstomovefaster,and building",
+        "customer-facingproductsthatputAltoworkforouraudiences.Ifyouwantbreadth,",
+        "reach and real technical influence,we'd love to hearfrom you.",
+        "Think you can do the job? Then apply now and start your journey with Stufftoday.",
+        "Ka otiraneiiakoetenei mahi?Kati,tonomai inaianei kiatimata aitohaerengameStuff i",
+        "tenei ra.",
+        "四田",
+        "32",
+        "Apply C",
+        "Aswearecommittedtocreatingaworkplacethatretlectsthediversecommunitiesin",
+        "NewZealand,we will always invite and encourage applications from people of all genders,",
+        "ethnicities,disabilities and ages.We arecommitted toprovidingequal employment",
+        "opportunities for all.",
+        "Na rungaita matou uki tetahi taiao mahie whakaatu anaite kanorau onga haporii",
+        "Aotearoa,ite ao,i te po,ka pohiringia,ka akina ano nga tono mahia te marea whanui,",
+        "haunga te ira, te iwi,te hauatanga, te pakeke ranei. E u nei matou ki te whai kia watea ai a",
+        "matou arawhai mahi kitekatoairungaitemana taurite.",
+        "Disclaimer:Stuff doesnot acceptunsolicited agencyresumes.Stuff isnotresponsiblefor",
+        "anyfeesrelated tounsolicitedresumes.",
+        "Be careful",
+        "Don't provide your bank or credit card details when applying for jobs.",
+        "Learnhowtoprotectyourself",
+        "Report thisjob ad"
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

@@ -1,0 +1,904 @@
+{
+  "contract_version": "learned_interface_map_v1",
+  "map_id": "seek:seek_search_results_with_detail:interface_map_v1",
+  "app_id": "seek",
+  "page_type": "seek_search_results_with_detail",
+  "generated_at": "2026-06-24T10:51:46.701349+00:00",
+  "source": {
+    "runtime_path_graph_contract": "runtime_path_graph_v1",
+    "visual_assets_contract": "visual_asset_v1",
+    "artifact_is_authorization": false
+  },
+  "states": [
+    {
+      "state_id": "seek_search_results_empty_detail",
+      "label": "seek_search_results_empty_detail",
+      "page_type": "seek_search_results_with_detail",
+      "state_fingerprint": {},
+      "default_collapsed": false,
+      "region_refs": [
+        "top_search_area",
+        "results_list",
+        "job_detail",
+        "job_card",
+        "detail_header",
+        "detail_body"
+      ]
+    },
+    {
+      "state_id": "seek_search_results_with_selected_job",
+      "label": "seek_search_results_with_selected_job",
+      "page_type": "seek_search_results_with_detail",
+      "state_fingerprint": {},
+      "default_collapsed": false,
+      "region_refs": [
+        "top_search_area",
+        "results_list",
+        "job_detail",
+        "job_card",
+        "detail_header",
+        "detail_body"
+      ]
+    },
+    {
+      "state_id": "seek_detail_scrolled",
+      "label": "seek_detail_scrolled",
+      "page_type": "seek_search_results_with_detail",
+      "state_fingerprint": {},
+      "default_collapsed": false,
+      "region_refs": [
+        "top_search_area",
+        "results_list",
+        "job_detail",
+        "job_card",
+        "detail_header",
+        "detail_body"
+      ]
+    },
+    {
+      "state_id": "seek_results_list_scrolled",
+      "label": "seek_results_list_scrolled",
+      "page_type": "seek_search_results_with_detail",
+      "state_fingerprint": {},
+      "default_collapsed": false,
+      "region_refs": [
+        "top_search_area",
+        "results_list",
+        "job_detail",
+        "job_card",
+        "detail_header",
+        "detail_body"
+      ]
+    },
+    {
+      "state_id": "seek_apply_entry_form",
+      "label": "seek_apply_entry_form",
+      "page_type": "seek_search_results_with_detail",
+      "state_fingerprint": {},
+      "default_collapsed": false,
+      "region_refs": [
+        "top_search_area",
+        "results_list",
+        "job_detail",
+        "job_card",
+        "detail_header",
+        "detail_body"
+      ]
+    },
+    {
+      "state_id": "seek_external_or_blocked",
+      "label": "seek_external_or_blocked",
+      "page_type": "seek_search_results_with_detail",
+      "state_fingerprint": {},
+      "default_collapsed": false,
+      "region_refs": [
+        "top_search_area",
+        "results_list",
+        "job_detail",
+        "job_card",
+        "detail_header",
+        "detail_body"
+      ]
+    }
+  ],
+  "regions": [
+    {
+      "region_id": "top_search_area",
+      "label": "SEEK top search and filters area",
+      "role": "search_controls",
+      "region_type": "navigation",
+      "parent_region_id": null,
+      "container_id": null,
+      "repeatable": false,
+      "default_collapsed": false,
+      "bbox_hint": {
+        "source": "learned_region_hint",
+        "bbox": null,
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      },
+      "visual_policy": {
+        "fixed_assets_use_template_match": true,
+        "dynamic_content_uses_roi_model": false,
+        "full_screen_model_fallback_only": true
+      },
+      "children": {
+        "fixed_visual_asset_refs": [],
+        "dynamic_area_refs": []
+      }
+    },
+    {
+      "region_id": "results_list",
+      "label": "SEEK left job results list",
+      "role": "list",
+      "region_type": "dynamic_collection",
+      "parent_region_id": null,
+      "container_id": "seek:results_list",
+      "repeatable": false,
+      "default_collapsed": true,
+      "bbox_hint": {
+        "source": "learned_region_hint",
+        "bbox": null,
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      },
+      "visual_policy": {
+        "fixed_assets_use_template_match": false,
+        "dynamic_content_uses_roi_model": true,
+        "full_screen_model_fallback_only": true
+      },
+      "children": {
+        "fixed_visual_asset_refs": [],
+        "dynamic_area_refs": []
+      }
+    },
+    {
+      "region_id": "job_detail",
+      "label": "SEEK right job detail pane",
+      "role": "detail",
+      "region_type": "detail_content",
+      "parent_region_id": null,
+      "container_id": "seek:job_detail",
+      "repeatable": false,
+      "default_collapsed": true,
+      "bbox_hint": {
+        "source": "learned_region_hint",
+        "bbox": null,
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      },
+      "visual_policy": {
+        "fixed_assets_use_template_match": false,
+        "dynamic_content_uses_roi_model": true,
+        "full_screen_model_fallback_only": true
+      },
+      "children": {
+        "fixed_visual_asset_refs": [],
+        "dynamic_area_refs": []
+      }
+    },
+    {
+      "region_id": "job_card",
+      "label": "Job result card",
+      "role": "entity_card",
+      "region_type": "dynamic_collection",
+      "parent_region_id": "results_list",
+      "container_id": null,
+      "repeatable": true,
+      "default_collapsed": true,
+      "bbox_hint": {
+        "source": "learned_region_hint",
+        "bbox": null,
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      },
+      "visual_policy": {
+        "fixed_assets_use_template_match": false,
+        "dynamic_content_uses_roi_model": true,
+        "full_screen_model_fallback_only": true
+      },
+      "children": {
+        "fixed_visual_asset_refs": [],
+        "dynamic_area_refs": []
+      }
+    },
+    {
+      "region_id": "detail_header",
+      "label": "Opened job title/company/apply area",
+      "role": "detail_header",
+      "region_type": "fixed_controls",
+      "parent_region_id": "job_detail",
+      "container_id": null,
+      "repeatable": false,
+      "default_collapsed": false,
+      "bbox_hint": {
+        "source": "learned_region_hint",
+        "bbox": null,
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      },
+      "visual_policy": {
+        "fixed_assets_use_template_match": true,
+        "dynamic_content_uses_roi_model": false,
+        "full_screen_model_fallback_only": true
+      },
+      "children": {
+        "fixed_visual_asset_refs": [],
+        "dynamic_area_refs": []
+      }
+    },
+    {
+      "region_id": "detail_body",
+      "label": "Opened job description body",
+      "role": "detail_body",
+      "region_type": "detail_content",
+      "parent_region_id": "job_detail",
+      "container_id": null,
+      "repeatable": false,
+      "default_collapsed": true,
+      "bbox_hint": {
+        "source": "learned_region_hint",
+        "bbox": null,
+        "requires_current_reobserve": true,
+        "no_overlap_except_containment": true
+      },
+      "visual_policy": {
+        "fixed_assets_use_template_match": false,
+        "dynamic_content_uses_roi_model": true,
+        "full_screen_model_fallback_only": true
+      },
+      "children": {
+        "fixed_visual_asset_refs": [],
+        "dynamic_area_refs": []
+      }
+    }
+  ],
+  "fixed_visual_assets": [
+    {
+      "asset_id": "seek:visual:apply_button",
+      "label": "Apply button",
+      "role": "button",
+      "region_id": "detail_header",
+      "semantic_action": "external_apply_flow",
+      "danger_level": "external_flow_entry",
+      "is_high_risk": false,
+      "can_authorize_click": false,
+      "requires_gate": true,
+      "allowed_region_ids": [
+        "job_detail"
+      ],
+      "expected_text": [
+        "Apply"
+      ],
+      "negative_text": [
+        "Submit",
+        "Send application",
+        "Complete application"
+      ],
+      "template_refs": {
+        "tight_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_apply_button_real.png",
+        "context_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_apply_button_context_real.png",
+        "source_image_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-124648-509765.png",
+        "current_roi_ref": null,
+        "current_match_ref": null
+      },
+      "source_geometry": {
+        "bbox": {
+          "x": 1764,
+          "y": 414,
+          "w": 76,
+          "h": 27
+        },
+        "click_point": {
+          "x": 1802,
+          "y": 427
+        },
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false,
+        "click_point_policy": "learned_relative_point"
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      },
+      "review_policy": "external_or_station_apply_entry_gate_required",
+      "source": {
+        "source_image_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-124648-509765.png",
+        "capture_id": "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-124648-509765.png",
+        "coordinate_space": "source_capture_px",
+        "screenshot_size": {
+          "width": 2560,
+          "height": 1400
+        },
+        "bbox": {
+          "x": 1764,
+          "y": 414,
+          "w": 76,
+          "h": 27
+        },
+        "click_point": {
+          "x": 1802,
+          "y": 427
+        }
+      },
+      "crop": {
+        "tight_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_apply_button_real.png",
+        "context_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_apply_button_context_real.png",
+        "source_image_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-124648-509765.png",
+        "tight_bbox": {
+          "x": 1764,
+          "y": 414,
+          "w": 76,
+          "h": 27
+        },
+        "context_bbox": {
+          "x": 1732,
+          "y": 382,
+          "w": 140,
+          "h": 91
+        },
+        "size_px": [
+          144,
+          48
+        ],
+        "hash": "1000000100000000000000000011111000111110001111000000000010000001",
+        "context_hash": "1111111111111111100000011000000110000001100000011111111111111111"
+      }
+    },
+    {
+      "asset_id": "seek:visual:quick_apply_button",
+      "label": "Quick Apply button",
+      "role": "button",
+      "region_id": "job_detail",
+      "semantic_action": "open_apply_flow",
+      "danger_level": "low",
+      "is_high_risk": false,
+      "can_authorize_click": false,
+      "requires_gate": true,
+      "allowed_region_ids": [
+        "job_detail"
+      ],
+      "expected_text": [
+        "Quick Apply"
+      ],
+      "negative_text": [
+        "Submit",
+        "Send application",
+        "Complete application"
+      ],
+      "template_refs": {
+        "tight_crop_ref": "artifacts\\visual-match-smoke\\local_seek_buttons\\crops\\seek_visual_quick_apply_button.png",
+        "context_crop_ref": null,
+        "source_image_path": "artifacts\\visual-match-smoke\\local_seek_buttons\\seek_detail_local_screenshot.png",
+        "current_roi_ref": "artifacts\\visual-match-smoke\\local_seek_buttons\\matches\\seek_visual_quick_apply_button.current_roi.png",
+        "current_match_ref": "artifacts\\visual-match-smoke\\local_seek_buttons\\matches\\seek_visual_quick_apply_button.current_match.png"
+      },
+      "source_geometry": {
+        "bbox": {
+          "x": 640,
+          "y": 160,
+          "w": 170,
+          "h": 56
+        },
+        "click_point": {
+          "x": 725,
+          "y": 188
+        },
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      },
+      "last_match_evidence": {
+        "contract_version": "visual_asset_match_evidence_v1",
+        "matched": true,
+        "match_score": 1.0,
+        "score_gap_to_second": null,
+        "elapsed_ms": 9.088,
+        "match_method": "gray_template",
+        "scale_used": null,
+        "risk_class": "safe_open_apply_flow",
+        "bbox": {
+          "x": 640,
+          "y": 160,
+          "w": 170,
+          "h": 56
+        },
+        "click_point": {
+          "x": 725,
+          "y": 188
+        },
+        "candidate_freshness": {
+          "contract_version": "action_candidate_freshness_v1",
+          "capture_id": "local_visual_asset_smoke_capture",
+          "viewport_size": {
+            "width": 1000,
+            "height": 760
+          },
+          "source": "visual_asset_match_v1",
+          "freshness": "current_capture"
+        },
+        "current_roi_ref": "artifacts\\visual-match-smoke\\local_seek_buttons\\matches\\seek_visual_quick_apply_button.current_roi.png",
+        "current_match_ref": "artifacts\\visual-match-smoke\\local_seek_buttons\\matches\\seek_visual_quick_apply_button.current_match.png",
+        "artifact_is_authorization": false
+      },
+      "fast_lane_allowed": true
+    },
+    {
+      "asset_id": "seek:visual:save_icon",
+      "label": "Save icon",
+      "role": "icon_button",
+      "region_id": "job_detail",
+      "semantic_action": "save_or_bookmark",
+      "danger_level": "low",
+      "is_high_risk": false,
+      "can_authorize_click": false,
+      "requires_gate": true,
+      "allowed_region_ids": [
+        "job_detail"
+      ],
+      "expected_text": [
+        "Save",
+        "bookmark"
+      ],
+      "negative_text": [
+        "Submit",
+        "Send application",
+        "Complete application"
+      ],
+      "template_refs": {
+        "tight_crop_ref": null,
+        "context_crop_ref": null,
+        "source_image_path": null,
+        "current_roi_ref": null,
+        "current_match_ref": null
+      },
+      "source_geometry": {
+        "bbox": null,
+        "click_point": null,
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      }
+    },
+    {
+      "asset_id": "seek:visual:job_card_shape",
+      "label": "Job card shape",
+      "role": "card",
+      "region_id": "results_list",
+      "semantic_action": "open_detail",
+      "danger_level": "low",
+      "is_high_risk": false,
+      "can_authorize_click": false,
+      "requires_gate": true,
+      "allowed_region_ids": [
+        "results_list"
+      ],
+      "expected_text": [
+        "title",
+        "company",
+        "location"
+      ],
+      "negative_text": [
+        "Submit",
+        "Send application",
+        "Complete application"
+      ],
+      "template_refs": {
+        "tight_crop_ref": "artifacts\\visual-match-smoke\\local_seek_buttons\\crops\\seek_visual_job_card_shape.png",
+        "context_crop_ref": null,
+        "source_image_path": "artifacts\\visual-match-smoke\\local_seek_buttons\\seek_detail_local_screenshot.png",
+        "current_roi_ref": "artifacts\\visual-match-smoke\\local_seek_buttons\\matches\\seek_visual_job_card_shape.current_roi.png",
+        "current_match_ref": "artifacts\\visual-match-smoke\\local_seek_buttons\\matches\\seek_visual_job_card_shape.current_match.png"
+      },
+      "source_geometry": {
+        "bbox": {
+          "x": 30,
+          "y": 130,
+          "w": 380,
+          "h": 390
+        },
+        "click_point": {
+          "x": 220,
+          "y": 320
+        },
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      },
+      "last_match_evidence": {
+        "contract_version": "visual_asset_match_evidence_v1",
+        "matched": true,
+        "match_score": 1.0,
+        "score_gap_to_second": null,
+        "elapsed_ms": 33.541,
+        "match_method": "gray_template",
+        "scale_used": null,
+        "risk_class": "safe_click_allowed",
+        "bbox": {
+          "x": 30,
+          "y": 130,
+          "w": 380,
+          "h": 390
+        },
+        "click_point": {
+          "x": 220,
+          "y": 325
+        },
+        "candidate_freshness": {
+          "contract_version": "action_candidate_freshness_v1",
+          "capture_id": "local_visual_asset_smoke_capture",
+          "viewport_size": {
+            "width": 1000,
+            "height": 760
+          },
+          "source": "visual_asset_match_v1",
+          "freshness": "current_capture"
+        },
+        "current_roi_ref": "artifacts\\visual-match-smoke\\local_seek_buttons\\matches\\seek_visual_job_card_shape.current_roi.png",
+        "current_match_ref": "artifacts\\visual-match-smoke\\local_seek_buttons\\matches\\seek_visual_job_card_shape.current_match.png",
+        "artifact_is_authorization": false
+      },
+      "fast_lane_allowed": true
+    },
+    {
+      "asset_id": "seek:visual:selected_card_highlight",
+      "label": "Selected card highlight",
+      "role": "selection_state",
+      "region_id": "results_list",
+      "semantic_action": "visual_evidence",
+      "danger_level": "low",
+      "is_high_risk": false,
+      "can_authorize_click": false,
+      "requires_gate": true,
+      "allowed_region_ids": [
+        "results_list"
+      ],
+      "expected_text": [
+        "selected border"
+      ],
+      "negative_text": [
+        "Submit",
+        "Send application",
+        "Complete application"
+      ],
+      "template_refs": {
+        "tight_crop_ref": null,
+        "context_crop_ref": null,
+        "source_image_path": null,
+        "current_roi_ref": null,
+        "current_match_ref": null
+      },
+      "source_geometry": {
+        "bbox": null,
+        "click_point": null,
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      }
+    },
+    {
+      "asset_id": "seek:visual:results_scrollbar",
+      "label": "Results list scrollbar",
+      "role": "scrollbar",
+      "region_id": "results_list",
+      "semantic_action": "scroll_container",
+      "danger_level": "low",
+      "is_high_risk": false,
+      "can_authorize_click": false,
+      "requires_gate": true,
+      "allowed_region_ids": [
+        "results_list"
+      ],
+      "expected_text": [
+        "left list scrollbar"
+      ],
+      "negative_text": [
+        "Submit",
+        "Send application",
+        "Complete application"
+      ],
+      "template_refs": {
+        "tight_crop_ref": null,
+        "context_crop_ref": null,
+        "source_image_path": null,
+        "current_roi_ref": null,
+        "current_match_ref": null
+      },
+      "source_geometry": {
+        "bbox": null,
+        "click_point": null,
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      }
+    },
+    {
+      "asset_id": "seek:visual:detail_scrollbar",
+      "label": "Job detail scrollbar",
+      "role": "scrollbar",
+      "region_id": "job_detail",
+      "semantic_action": "scroll_container",
+      "danger_level": "low",
+      "is_high_risk": false,
+      "can_authorize_click": false,
+      "requires_gate": true,
+      "allowed_region_ids": [
+        "job_detail"
+      ],
+      "expected_text": [
+        "right detail scrollbar"
+      ],
+      "negative_text": [
+        "Submit",
+        "Send application",
+        "Complete application"
+      ],
+      "template_refs": {
+        "tight_crop_ref": null,
+        "context_crop_ref": null,
+        "source_image_path": null,
+        "current_roi_ref": null,
+        "current_match_ref": null
+      },
+      "source_geometry": {
+        "bbox": null,
+        "click_point": null,
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true,
+        "requires_current_validation": true
+      }
+    },
+    {
+      "asset_id": "seek:visual:submit_application_button",
+      "label": "Submit application",
+      "role": "button",
+      "region_id": "application_form",
+      "semantic_action": "final_submit",
+      "danger_level": "final_submit",
+      "is_high_risk": true,
+      "can_authorize_click": false,
+      "requires_gate": true,
+      "allowed_region_ids": [
+        "application_form"
+      ],
+      "expected_text": [
+        "Submit application"
+      ],
+      "negative_text": [
+        "Quick apply",
+        "Apply"
+      ],
+      "template_refs": {
+        "tight_crop_ref": "artifacts\\visual-match-smoke\\local_seek_buttons\\crops\\seek_visual_submit_application_button.png",
+        "context_crop_ref": null,
+        "source_image_path": "artifacts\\visual-match-smoke\\local_seek_buttons\\seek_detail_local_screenshot.png",
+        "current_roi_ref": "artifacts\\visual-match-smoke\\local_seek_buttons\\matches\\seek_visual_submit_application_button.current_roi.png",
+        "current_match_ref": "artifacts\\visual-match-smoke\\local_seek_buttons\\matches\\seek_visual_submit_application_button.current_match.png"
+      },
+      "source_geometry": {
+        "bbox": {
+          "x": 650,
+          "y": 620,
+          "w": 220,
+          "h": 60
+        },
+        "click_point": {
+          "x": 760,
+          "y": 650
+        },
+        "coordinate_space": "source_capture_px",
+        "source_is_authorization": false
+      },
+      "match_policy": {
+        "minimum_similarity": 0.82,
+        "requires_region_match": true
+      },
+      "last_match_evidence": {
+        "contract_version": "visual_asset_match_evidence_v1",
+        "matched": true,
+        "match_score": 1.0,
+        "score_gap_to_second": 0.961066,
+        "elapsed_ms": 10.366,
+        "match_method": "gray_template",
+        "scale_used": null,
+        "risk_class": "potential_side_effect_action",
+        "bbox": {
+          "x": 650,
+          "y": 620,
+          "w": 220,
+          "h": 60
+        },
+        "click_point": {
+          "x": 760,
+          "y": 650
+        },
+        "candidate_freshness": {
+          "contract_version": "action_candidate_freshness_v1",
+          "capture_id": "local_visual_asset_smoke_capture",
+          "viewport_size": {
+            "width": 1000,
+            "height": 760
+          },
+          "source": "visual_asset_match_v1",
+          "freshness": "current_capture"
+        },
+        "current_roi_ref": "artifacts\\visual-match-smoke\\local_seek_buttons\\matches\\seek_visual_submit_application_button.current_roi.png",
+        "current_match_ref": "artifacts\\visual-match-smoke\\local_seek_buttons\\matches\\seek_visual_submit_application_button.current_match.png",
+        "artifact_is_authorization": false
+      },
+      "fast_lane_allowed": false
+    }
+  ],
+  "dynamic_areas": [
+    {
+      "area_id": "seek:job_cards",
+      "region_id": "results_list",
+      "container_id": "seek:results_list",
+      "entity_type": "job_card",
+      "roi_policy": {
+        "source": "region_bbox_hint_then_current_detection",
+        "send_roi_to_model": true,
+        "full_screen_fallback": true
+      },
+      "model_budget": {
+        "preferred_scope": "region_roi",
+        "avoid_full_screen_grounding": true
+      },
+      "scroll_policy": {
+        "load_more_action_template_id": "load_more_results",
+        "wrong_scope_detection_required": true
+      },
+      "label": "Job cards list",
+      "description": "Repeatable job result cards inside the left results list. Each card usually contains title, company, location, summary, and opens the right job-detail pane.",
+      "role": "ROI",
+      "semantic_role": "repeatable_job_cards"
+    },
+    {
+      "area_id": "job_detail:content_roi",
+      "region_id": "job_detail",
+      "container_id": "seek:job_detail",
+      "entity_type": "detail_content",
+      "roi_policy": {
+        "source": "region_bbox_hint",
+        "send_roi_to_model": true,
+        "full_screen_fallback": true
+      },
+      "model_budget": {
+        "preferred_scope": "region_roi",
+        "avoid_full_screen_grounding": true
+      },
+      "scroll_policy": {
+        "wrong_scope_detection_required": true
+      },
+      "label": "Job detail pane content",
+      "description": "Scrollable right detail pane content. Use this as the broad ROI when reading the selected job.",
+      "role": "ROI",
+      "semantic_role": "detail_pane_reading_roi"
+    },
+    {
+      "area_id": "detail_body:content_roi",
+      "region_id": "detail_body",
+      "container_id": null,
+      "entity_type": "detail_content",
+      "roi_policy": {
+        "source": "region_bbox_hint",
+        "send_roi_to_model": true,
+        "full_screen_fallback": true
+      },
+      "model_budget": {
+        "preferred_scope": "region_roi",
+        "avoid_full_screen_grounding": true
+      },
+      "scroll_policy": {
+        "wrong_scope_detection_required": true
+      },
+      "label": "Job description body text",
+      "description": "Job description body text ROI. Batch screenshots/OCR should read this until the body reaches bottom.",
+      "role": "ROI",
+      "semantic_role": "detail_body_text_roi"
+    }
+  ],
+  "danger_zones": [
+    {
+      "zone_id": "danger:seek:visual:submit_application_button",
+      "asset_id": "seek:visual:submit_application_button",
+      "label": "Submit application",
+      "semantic_action": "final_submit",
+      "danger_level": "final_submit",
+      "review_required": true,
+      "fast_lane_allowed": false
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "seek:transition:open_job_card",
+      "from_state_id": "seek_search_results_empty_detail",
+      "to_state_id": "seek_search_results_with_selected_job",
+      "action_template_id": "open_job_card",
+      "verification_refs": [
+        "open_job_card_detail_match"
+      ]
+    },
+    {
+      "transition_id": "seek:transition:switch_open_job_card",
+      "from_state_id": "seek_search_results_with_selected_job",
+      "to_state_id": "seek_search_results_with_selected_job",
+      "action_template_id": "open_job_card",
+      "verification_refs": [
+        "open_job_card_detail_match"
+      ]
+    },
+    {
+      "transition_id": "seek:transition:read_detail",
+      "from_state_id": "seek_search_results_with_selected_job",
+      "to_state_id": "seek_detail_scrolled",
+      "action_template_id": "read_detail",
+      "verification_refs": [
+        "read_detail_scroll_scope"
+      ]
+    },
+    {
+      "transition_id": "seek:transition:load_more_results",
+      "from_state_id": "seek_search_results_with_selected_job",
+      "to_state_id": "seek_results_list_scrolled",
+      "action_template_id": "load_more_results",
+      "verification_refs": [
+        "load_more_results_scroll_scope"
+      ]
+    },
+    {
+      "transition_id": "seek:transition:apply_entry_guarded",
+      "from_state_id": "seek_search_results_with_selected_job",
+      "to_state_id": "seek_apply_entry_form",
+      "action_template_id": "apply_entry",
+      "verification_refs": [
+        "final_submit_forbidden"
+      ]
+    }
+  ],
+  "editor_policy": {
+    "manual_edits_write_trace": true,
+    "editable_fields": [
+      "region.label",
+      "region.role",
+      "region.bbox_hint",
+      "visual_asset.semantic_action",
+      "visual_asset.danger_level",
+      "visual_asset.allowed_region_ids"
+    ],
+    "dangerous_actions_require_review": true,
+    "artifact_authorizes_click": false
+  },
+  "summary": {
+    "state_count": 6,
+    "region_count": 6,
+    "fixed_visual_asset_count": 8,
+    "dynamic_area_count": 3,
+    "danger_zone_count": 1
+  }
+}

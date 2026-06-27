@@ -1,0 +1,53 @@
+{
+  "contract_version": "visual_asset_match_smoke_v1",
+  "learn_image": "D:\\agent-gui-runtime\\artifacts\\screenshots\\review-and-submit-seek-1-microsoft-edge__capture__full-window__20260624-194413-619351.png",
+  "target_image": "D:\\agent-gui-runtime\\artifacts\\screenshots\\review-and-submit-seek-1-microsoft-edge__capture__full-window__20260624-194441-035021.png",
+  "detected_learn_button_bbox": {
+    "x": 1375,
+    "y": 696,
+    "w": 88,
+    "h": 88,
+    "area": 5346,
+    "cx": 1422.1515151515152,
+    "cy": 743.1537598204264
+  },
+  "template_path": "artifacts\\visual-match-smoke\\seek_submit_application_template.png",
+  "full_match": {
+    "elapsed_ms": 413.371,
+    "best": {
+      "score": 1.0,
+      "x": 1367,
+      "y": 760,
+      "w": 104,
+      "h": 104,
+      "scale": 1.0,
+      "click_point": {
+        "x": 1419,
+        "y": 812
+      }
+    }
+  },
+  "roi": {
+    "x": 1400,
+    "y": 900,
+    "w": 700,
+    "h": 420
+  },
+  "roi_match": {
+    "elapsed_ms": 37.03,
+    "best": {
+      "score": 0.10469508916139603,
+      "x": 1400,
+      "y": 1133,
+      "w": 99,
+      "h": 99,
+      "scale": 0.95,
+      "click_point": {
+        "x": 1449,
+        "y": 1182
+      }
+    }
+  },
+  "overlay_path": "artifacts\\visual-match-smoke\\seek_submit_application_visual_match_overlay.png",
+  "interpretation": "template matching can recall a stable learned SEEK pink button in the same page family; it must remain evidence-only and feed gated candidates."
+}

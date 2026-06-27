@@ -1,0 +1,432 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_fd73bb08b75b",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.78,
+    "job_id": "seek_job_fd73bb08b75b",
+    "title": "Embedded Software Engineer| Al-Driven",
+    "company": "Enterprise Technology Recruitment Ltd",
+    "fit_summary": "strong_apply with score 0.780. positive: matched_skills: Machine Learning, AI; matched_target_roles: Software Engineer, AI Engineer; location_matches: Waitakere & West Auckland, Auckland (Remote).",
+    "recommended_next_action": "open_apply_entry_and_prepare_safe_fields",
+    "positive_evidence": [
+      "matched_skills: Machine Learning, AI",
+      "matched_target_roles: Software Engineer, AI Engineer",
+      "location_matches: Waitakere & West Auckland, Auckland (Remote)",
+      "matched_preferred_work_modes: remote"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_fd73bb08b75b",
+    "title": "Embedded Software Engineer| Al-Driven",
+    "company": "Enterprise Technology Recruitment Ltd",
+    "location": "Waitakere & West Auckland, Auckland (Remote)",
+    "posted_at_text": null,
+    "work_type": "Remote",
+    "salary_text": "$120,000 -$140,000 per year",
+    "classification": "Embedded Software Engineer| Al-Driven",
+    "card_bbox": {
+      "x": 652,
+      "y": 349,
+      "w": 397,
+      "h": 249
+    },
+    "click_point": {
+      "x": 825,
+      "y": 360
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_1",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_26_embedded-software-engineer-al-driven",
+      "page_text_28_environmental-technology",
+      "page_text_30_enterprise-technology-recruitment-ltd",
+      "page_text_33_waitakere-west-auckland-auckland-remote",
+      "page_text_34_120-000-140-000-per-year",
+      "page_text_37_build-al-enabled-embedded-software-for-globally-",
+      "page_text_39_monitoring-technology-embedded-c-or-c-and-flexib",
+      "page_text_40_remote-option-in-auckland",
+      "page_text_41_2d-ago-viewed"
+    ],
+    "evidence": {
+      "texts": [
+        "Embedded Software Engineer| Al-Driven",
+        "Environmental Technology",
+        "Enterprise Technology Recruitment Ltd",
+        "Waitakere & West Auckland, Auckland (Remote)",
+        "$120,000 -$140,000 per year",
+        "Build Al-enabled embedded software for globally used",
+        "monitoring technology. Embedded C or C## and flexible",
+        "remote option in Auckland.",
+        "2d ago ·Viewed"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": true,
+        "has_salary": true
+      }
+    },
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260627-164511-020399__observe-screen__edge.json",
+      "viewport_size": {
+        "width": 2560,
+        "height": 1400
+      },
+      "source": "seek_job_card_extraction",
+      "freshness": "current_capture"
+    }
+  },
+  "detail": {
+    "job_id": "seek_job_fd73bb08b75b",
+    "title": "Embedded Software Engineer| Al-Driven",
+    "company": "Enterprise Technology Recruitment Ltd",
+    "location": "Waitakere & West Auckland, Auckland (Remote)",
+    "work_type": "Remote",
+    "classification": "Embedded Software Engineer| Al-Driven",
+    "salary_text": "$120,000 -$140,000 per year",
+    "runtime_detail_snapshot": {
+      "contract_version": "runtime_detail_snapshot_v1",
+      "source": "read_region_batch",
+      "revision": 2,
+      "previous_snapshot_id": "78a8a650e05cb135",
+      "snapshot_id": "33c835e1b840a351"
+    },
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "batch_ocr",
+        "text": "Waitakere&WestAuckland,Auckland(Remote)"
+      },
+      {
+        "index": 1,
+        "role": "batch_ocr",
+        "text": "Engineering-Software(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 2,
+        "role": "batch_ocr",
+        "text": "Full time"
+      },
+      {
+        "index": 3,
+        "role": "batch_ocr",
+        "text": "$120,000-$140,000 per year"
+      },
+      {
+        "index": 4,
+        "role": "batch_ocr",
+        "text": "Posted 2d ago·Medium application volume"
+      },
+      {
+        "index": 5,
+        "role": "batch_ocr",
+        "text": "Quick apply"
+      },
+      {
+        "index": 6,
+        "role": "batch_ocr",
+        "text": "Save"
+      },
+      {
+        "index": 7,
+        "role": "batch_ocr",
+        "text": "Howyou match"
+      },
+      {
+        "index": 8,
+        "role": "batch_ocr",
+        "text": "1 skill or credential matches your profile"
+      },
+      {
+        "index": 9,
+        "role": "batch_ocr",
+        "text": "√AmazonWebServicesShowall"
+      },
+      {
+        "index": 10,
+        "role": "batch_ocr",
+        "text": "Join an innovativeNewZealand technology company developing advanced monitoring"
+      },
+      {
+        "index": 11,
+        "role": "batch_ocr",
+        "text": "solutions usedby customers around theworld.Theirproducts combine embedded"
+      },
+      {
+        "index": 12,
+        "role": "batch_ocr",
+        "text": "systems, cloud technologies, and Al-powered analytics to turn real-time sensor data into"
+      },
+      {
+        "index": 13,
+        "role": "batch_ocr",
+        "text": "actionable insights that support healthier communities and smarter environmental"
+      },
+      {
+        "index": 14,
+        "role": "batch_ocr",
+        "text": "decision-making."
+      },
+      {
+        "index": 15,
+        "role": "batch_ocr",
+        "text": "Thisis an outstanding opportunity toworkonpurpose-driven technology inahighly"
+      },
+      {
+        "index": 16,
+        "role": "batch_ocr",
+        "text": "collaborative engineering environment where technical excellence, innovation,and"
+      },
+      {
+        "index": 17,
+        "role": "batch_ocr",
+        "text": "continuous learning are strongly valued."
+      },
+      {
+        "index": 18,
+        "role": "batch_ocr",
+        "text": "WhyThisOpportunityStandsOut"
+      },
+      {
+        "index": 19,
+        "role": "batch_ocr",
+        "text": "usingreal-timeenvironmentaldata."
+      },
+      {
+        "index": 20,
+        "role": "batch_ocr",
+        "text": "loT,and emerging Al technologies."
+      },
+      {
+        "index": 21,
+        "role": "batch_ocr",
+        "text": "StrongEngineeringCulture-JoinateamthatembracesAgile,cleanarchitecture,"
+      },
+      {
+        "index": 22,
+        "role": "batch_ocr",
+        "text": "automatedtesting,Ci/CD,andpeerreview."
+      },
+      {
+        "index": 23,
+        "role": "batch_ocr",
+        "text": "Career Development -Expand your expertise across embedded systems, cloud"
+      },
+      {
+        "index": 24,
+        "role": "batch_ocr",
+        "text": "integration,dataanalytics,andAl."
+      },
+      {
+        "index": 25,
+        "role": "batch_ocr",
+        "text": "FlexibleWorking-Enjoyasupportiveculturewithflexibleworking arrangementsand"
+      },
+      {
+        "index": 26,
+        "role": "batch_ocr",
+        "text": "genuineopportunitiesforgrowth."
+      },
+      {
+        "index": 27,
+        "role": "batch_ocr",
+        "text": "AsanEmbeddedSoftwareEngineer,youwilldesignanddevelopsoftwarefor"
+      },
+      {
+        "index": 28,
+        "role": "batch_ocr",
+        "text": "sophisticated connected devices.You will collaborate with hardware,firmware, cloud, and"
+      },
+      {
+        "index": 29,
+        "role": "batch_ocr",
+        "text": "product teamstodeliverrobust,scalablesolutions and contributetoAl-drivencapabilities"
+      },
+      {
+        "index": 30,
+        "role": "batch_ocr",
+        "text": "thatenhancethevalueofsensordata."
+      },
+      {
+        "index": 31,
+        "role": "batch_ocr",
+        "text": "KeyResponsibilities"
+      },
+      {
+        "index": 32,
+        "role": "batch_ocr",
+        "text": "·Design, develop, and maintain embedded software solutions"
+      },
+      {
+        "index": 33,
+        "role": "batch_ocr",
+        "text": "·Collaboratewithmultidisciplinaryteamstodelivernewfeaturesandproduct"
+      },
+      {
+        "index": 34,
+        "role": "batch_ocr",
+        "text": "enhancements"
+      },
+      {
+        "index": 35,
+        "role": "batch_ocr",
+        "text": "·Writeclean,efficient,andmaintainablecode"
+      },
+      {
+        "index": 36,
+        "role": "batch_ocr",
+        "text": "·Participate in codereviews and contribute to engineeringbest practices"
+      },
+      {
+        "index": 37,
+        "role": "batch_ocr",
+        "text": "·SupportAgileplanning anddeliveryactivities"
+      },
+      {
+        "index": 38,
+        "role": "batch_ocr",
+        "text": "·Assist with Al and data-driven initiatives that improve product intelligence and"
+      },
+      {
+        "index": 39,
+        "role": "batch_ocr",
+        "text": "predictiveinsights"
+      },
+      {
+        "index": 40,
+        "role": "batch_ocr",
+        "text": "·Keep up to date with advances in embedded systems, loT, and Al technologies"
+      },
+      {
+        "index": 41,
+        "role": "batch_ocr",
+        "text": "AboutYou"
+      },
+      {
+        "index": 42,
+        "role": "batch_ocr",
+        "text": "Essential Skills"
+      },
+      {
+        "index": 43,
+        "role": "batch_ocr",
+        "text": "·3+yearsofexperienceinEmbeddedC/C++developmentand/orC#software"
+      },
+      {
+        "index": 44,
+        "role": "batch_ocr",
+        "text": "development"
+      },
+      {
+        "index": 45,
+        "role": "batch_ocr",
+        "text": "·Strong analytical and problem-solving skills"
+      },
+      {
+        "index": 46,
+        "role": "batch_ocr",
+        "text": "·Passion for technology and continuous learning"
+      },
+      {
+        "index": 47,
+        "role": "batch_ocr",
+        "text": "·Excellentcollaborationandcommunicationskills"
+      },
+      {
+        "index": 48,
+        "role": "batch_ocr",
+        "text": "DesirableExperience"
+      },
+      {
+        "index": 49,
+        "role": "batch_ocr",
+        "text": "·loT and cloud integration"
+      },
+      {
+        "index": 50,
+        "role": "batch_ocr",
+        "text": "·Sensorinterfacing and data acquisition"
+      },
+      {
+        "index": 51,
+        "role": "batch_ocr",
+        "text": "·AWSandDocker"
+      },
+      {
+        "index": 52,
+        "role": "batch_ocr",
+        "text": "·CI/CD and DevOps practices"
+      },
+      {
+        "index": 53,
+        "role": "batch_ocr",
+        "text": "·Exposure to Al, machine learning, or advanced analytics"
+      },
+      {
+        "index": 54,
+        "role": "batch_ocr",
+        "text": "What'son Offer"
+      },
+      {
+        "index": 55,
+        "role": "batch_ocr",
+        "text": "·Competitivesalaryandbenefits"
+      },
+      {
+        "index": 56,
+        "role": "batch_ocr",
+        "text": "·Purpose-driventechnologywithglobalreach"
+      },
+      {
+        "index": 57,
+        "role": "batch_ocr",
+        "text": "·Modern engineering practices and tools"
+      },
+      {
+        "index": 58,
+        "role": "batch_ocr",
+        "text": "·Strongopportunitiesfortechnicalandcareerprogression"
+      },
+      {
+        "index": 59,
+        "role": "batch_ocr",
+        "text": "Apply Now"
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260627-164514-916763__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260627-164518-619916__ocr-region__ocr-region.json"
+    ],
+    "detail_batch_status": "ok",
+    "detail_batch_stop_reason": "max_captures",
+    "detail_bottom_reached": false,
+    "detail_batch_unique_line_count": 60,
+    "runtime_detail_dataflow": {
+      "contract_version": "runtime_detail_dataflow_v1",
+      "source_batch_contract": "read_region_batch_v1",
+      "source_batch_status": "ok",
+      "merged_text_line_count": 60,
+      "description_section_count": 60
+    },
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply",
+      "source": "read_detail_batch_ocr"
+    }
+  }
+}

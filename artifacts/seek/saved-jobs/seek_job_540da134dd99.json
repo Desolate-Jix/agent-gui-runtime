@@ -1,0 +1,546 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_540da134dd99",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.91,
+    "job_id": "seek_job_540da134dd99",
+    "title": "Engineering Manager-Software",
+    "company": "Halter",
+    "fit_summary": "strong_apply with score 0.910. positive: matched_skills: AI, API, Frontend, Backend; matched_target_roles: Software Engineer; location_matches: Auckland CBD, Auckland. needs review: preferred work mode not visible in job detail.",
+    "recommended_next_action": "open_apply_entry_and_prepare_safe_fields",
+    "positive_evidence": [
+      "matched_skills: AI, API, Frontend, Backend",
+      "matched_target_roles: Software Engineer",
+      "location_matches: Auckland CBD, Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [
+      "preferred work mode not visible in job detail"
+    ],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_540da134dd99",
+    "title": "Engineering Manager-Software",
+    "company": "Halter",
+    "location": "Auckland CBD, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": "Engineering Manager-Software",
+    "card_bbox": {
+      "x": 650,
+      "y": 955,
+      "w": 424,
+      "h": 180
+    },
+    "click_point": {
+      "x": 789,
+      "y": 968
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_0",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_40_engineering-manager-software",
+      "page_text_41_halter",
+      "page_text_42_auckland-cbd-auckland",
+      "page_text_43_we-re-looking-fora-software-engineering-manager-",
+      "page_text_44_team-of-engineers-frontend-and-backend",
+      "page_text_45_featured"
+    ],
+    "evidence": {
+      "texts": [
+        "Engineering Manager-Software",
+        "Halter",
+        "Auckland CBD, Auckland",
+        "We're looking fora Software Engineering Manager to lead a",
+        "team of engineers - frontend and backend!",
+        "Featured"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": false,
+        "has_salary": false
+      }
+    },
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260626-004622-001518__observe-screen__edge.json",
+      "viewport_size": {
+        "width": 2560,
+        "height": 1400
+      },
+      "source": "seek_job_card_extraction",
+      "freshness": "current_capture"
+    }
+  },
+  "detail": {
+    "job_id": "seek_job_540da134dd99",
+    "title": "Engineering Manager-Software",
+    "company": "Halter",
+    "location": "Auckland CBD, Auckland",
+    "classification": "Engineering Manager-Software",
+    "runtime_detail_snapshot": {
+      "contract_version": "runtime_detail_snapshot_v1",
+      "source": "read_region_batch",
+      "revision": 2,
+      "previous_snapshot_id": "8f280d17087c25fd",
+      "snapshot_id": "41cb405b2523b58c"
+    },
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "batch_ocr",
+        "text": "出 Halter."
+      },
+      {
+        "index": 1,
+        "role": "batch_ocr",
+        "text": "EngineeringManager-Software"
+      },
+      {
+        "index": 2,
+        "role": "batch_ocr",
+        "text": "Halter View all jobs"
+      },
+      {
+        "index": 3,
+        "role": "batch_ocr",
+        "text": "Auckland CBD, Auckland"
+      },
+      {
+        "index": 4,
+        "role": "batch_ocr",
+        "text": "国"
+      },
+      {
+        "index": 5,
+        "role": "batch_ocr",
+        "text": "Management(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 6,
+        "role": "batch_ocr",
+        "text": "Fulltime"
+      },
+      {
+        "index": 7,
+        "role": "batch_ocr",
+        "text": "Posted 10d ago"
+      },
+      {
+        "index": 8,
+        "role": "batch_ocr",
+        "text": "Apply"
+      },
+      {
+        "index": 9,
+        "role": "batch_ocr",
+        "text": "Save"
+      },
+      {
+        "index": 10,
+        "role": "batch_ocr",
+        "text": "AboutHalter"
+      },
+      {
+        "index": 11,
+        "role": "batch_ocr",
+        "text": "At Halter,we're on a mission to enable farmers and graziers to run the most productive"
+      },
+      {
+        "index": 12,
+        "role": "batch_ocr",
+        "text": "and sustainable operations.Ourcustomers areusing Haltertobreakfreefrom the time-"
+      },
+      {
+        "index": 13,
+        "role": "batch_ocr",
+        "text": "intensive constraints of conventionalpractices.Imaginewatching 5oO cattle standup and"
+      },
+      {
+        "index": 14,
+        "role": "batch_ocr",
+        "text": "walk calmly towards their next break?No quad bikes, no dogs, no fences. Just a group of"
+      },
+      {
+        "index": 15,
+        "role": "batch_ocr",
+        "text": "cattle walking at their own pace.People say it looks like magic. Our customers are"
+      },
+      {
+        "index": 16,
+        "role": "batch_ocr",
+        "text": "revolutionizing grazing with Halter. It's changing lives and transforming an industry."
+      },
+      {
+        "index": 17,
+        "role": "batch_ocr",
+        "text": "problems within a talented team and a culturebuilt for highperformance.Ourteam out-"
+      },
+      {
+        "index": 18,
+        "role": "batch_ocr",
+        "text": "think, out-work and out-care. We're committed to delivering real change in the world -"
+      },
+      {
+        "index": 19,
+        "role": "batch_ocr",
+        "text": "this isn'teasy,and in truth,welove that it'shard."
+      },
+      {
+        "index": 20,
+        "role": "batch_ocr",
+        "text": "Engineering Manager - Software"
+      },
+      {
+        "index": 21,
+        "role": "batch_ocr",
+        "text": "ApplyC"
+      },
+      {
+        "index": 22,
+        "role": "batch_ocr",
+        "text": "Halter"
+      },
+      {
+        "index": 23,
+        "role": "batch_ocr",
+        "text": "1nn luna Ina 'anuouauad ubu ioi na sinna o nun uoa nauaini o uuna caianid"
+      },
+      {
+        "index": 24,
+        "role": "batch_ocr",
+        "text": "this isn't easy,and in truth,welove that it'shard."
+      },
+      {
+        "index": 25,
+        "role": "batch_ocr",
+        "text": "We're backed to deliver on a mission that matters by Tier1investors including Founders"
+      },
+      {
+        "index": 26,
+        "role": "batch_ocr",
+        "text": "Fund,BessemerVenturePartners,BOND,DCVC,Blackbird,PromusVentures,Rocket"
+      },
+      {
+        "index": 27,
+        "role": "batch_ocr",
+        "text": "Lab'sPeterBeckandIcehouseventures."
+      },
+      {
+        "index": 28,
+        "role": "batch_ocr",
+        "text": "Abouttherole"
+      },
+      {
+        "index": 29,
+        "role": "batch_ocr",
+        "text": "We're looking fora Software Engineering Manager who builds and elevates their team,"
+      },
+      {
+        "index": 30,
+        "role": "batch_ocr",
+        "text": "drives strong technical solutions, and goes deep on hard,real-world problems.This isn't a"
+      },
+      {
+        "index": 31,
+        "role": "batch_ocr",
+        "text": "pure delivery orpure people role.You'llbe in thework,shaping technical direction,"
+      },
+      {
+        "index": 32,
+        "role": "batch_ocr",
+        "text": "collaborating closely with design and product, and helping your team do the best work of"
+      },
+      {
+        "index": 33,
+        "role": "batch_ocr",
+        "text": "their careers. Don't worry, you'll also be hands-on."
+      },
+      {
+        "index": 34,
+        "role": "batch_ocr",
+        "text": "You'll need to hold the technical bar high while creating the space for others to grow."
+      },
+      {
+        "index": 35,
+        "role": "batch_ocr",
+        "text": "We're solvingproblems that haven't beensolved before,and you'll becrucialtofiguring"
+      },
+      {
+        "index": 36,
+        "role": "batch_ocr",
+        "text": "them out. It's a role that demands absolute ownership, someone who can take a blurry"
+      },
+      {
+        "index": 37,
+        "role": "batch_ocr",
+        "text": "problem,createclarity,andleadateamtonailit."
+      },
+      {
+        "index": 38,
+        "role": "batch_ocr",
+        "text": "Thekindofproblemsourteamssolve"
+      },
+      {
+        "index": 39,
+        "role": "batch_ocr",
+        "text": "Halter is one system: hardware, software, and Al,running live on real farms. Our"
+      },
+      {
+        "index": 40,
+        "role": "batch_ocr",
+        "text": "engineeringteamsowndifferentslicesofthatsystem,buttheproblemsallrhyme:"
+      },
+      {
+        "index": 41,
+        "role": "batch_ocr",
+        "text": "·Turning thousands of collars and billions of sensor events into a single, calm decision in"
+      },
+      {
+        "index": 42,
+        "role": "batch_ocr",
+        "text": "afarmer'shand."
+      },
+      {
+        "index": 43,
+        "role": "batch_ocr",
+        "text": "·Modelling the physical world(animals,pasture,terrain) accurately enough to act on in"
+      },
+      {
+        "index": 44,
+        "role": "batch_ocr",
+        "text": "real time."
+      },
+      {
+        "index": 45,
+        "role": "batch_ocr",
+        "text": "·Building mobile and web experiences that hold up at 5am whilst out in a paddock in"
+      },
+      {
+        "index": 46,
+        "role": "batch_ocr",
+        "text": "the rain."
+      },
+      {
+        "index": 47,
+        "role": "batch_ocr",
+        "text": "·Designing platforms and pipelines that scale with our incredible pace of growth"
+      },
+      {
+        "index": 48,
+        "role": "batch_ocr",
+        "text": "withouttheseamsshowing."
+      },
+      {
+        "index": 49,
+        "role": "batch_ocr",
+        "text": "·Engineering against constrained hardware,flakyrural connectivity,and themessiness"
+      },
+      {
+        "index": 50,
+        "role": "batch_ocr",
+        "text": "Everyteamhereshipssoftware thathastoworkinapaddock,not justabrowsertab.As"
+      },
+      {
+        "index": 51,
+        "role": "batch_ocr",
+        "text": "an engineering manager at Halter, you're in the work, not above it: coaching engineers,"
+      },
+      {
+        "index": 52,
+        "role": "batch_ocr",
+        "text": "Engineering Manager-Software"
+      },
+      {
+        "index": 53,
+        "role": "batch_ocr",
+        "text": "Apply C"
+      },
+      {
+        "index": 54,
+        "role": "batch_ocr",
+        "text": "Every team here ships software that has to work in a paddock,not just a browser tab.As"
+      },
+      {
+        "index": 55,
+        "role": "batch_ocr",
+        "text": "anengineeringmanageratHalter,you'reinthework,not aboveit:coaching engineers,"
+      },
+      {
+        "index": 56,
+        "role": "batch_ocr",
+        "text": "shaping thetechnicalbets,andwritingcode."
+      },
+      {
+        "index": 57,
+        "role": "batch_ocr",
+        "text": "Whatyou'll do"
+      },
+      {
+        "index": 58,
+        "role": "batch_ocr",
+        "text": "·Lead a team of engineers - frontend and backend - supporting their growth, giving"
+      },
+      {
+        "index": 59,
+        "role": "batch_ocr",
+        "text": "great feedback,and helping them focus on what matters."
+      },
+      {
+        "index": 60,
+        "role": "batch_ocr",
+        "text": "·Own the technical direction and delivery of your team's work - making sure it's reliable,"
+      },
+      {
+        "index": 61,
+        "role": "batch_ocr",
+        "text": "maintainable, and impactful. Help define the structure, shape, and scope of our work -"
+      },
+      {
+        "index": 62,
+        "role": "batch_ocr",
+        "text": "andensureit landswell withfarmers andranchers."
+      },
+      {
+        "index": 63,
+        "role": "batch_ocr",
+        "text": "·Stay close to the technical details - across services, data, and system design - and"
+      },
+      {
+        "index": 64,
+        "role": "batch_ocr",
+        "text": "bring a strong point of view."
+      },
+      {
+        "index": 65,
+        "role": "batch_ocr",
+        "text": "·You'll be backing engineering-led initiatives and getting ahead of scale."
+      },
+      {
+        "index": 66,
+        "role": "batch_ocr",
+        "text": "·Work closely with product and design to shape what we build, not just how. You'll be in"
+      },
+      {
+        "index": 67,
+        "role": "batch_ocr",
+        "text": "theroom whenrequirements arefuzzy and you'll helpmake them clear."
+      },
+      {
+        "index": 68,
+        "role": "batch_ocr",
+        "text": "·Back engineering-led initiatives and lookforopportunities touse Al tools to accelerate"
+      },
+      {
+        "index": 69,
+        "role": "batch_ocr",
+        "text": "development or unlock entirely new ways of working."
+      },
+      {
+        "index": 70,
+        "role": "batch_ocr",
+        "text": "·Get out onfarm.Deep domainknowledgematters and you'llbe expected to develop"
+      },
+      {
+        "index": 71,
+        "role": "batch_ocr",
+        "text": "it."
+      },
+      {
+        "index": 72,
+        "role": "batch_ocr",
+        "text": "·Contribute to the broader engineering culture and practices that make Haltera great"
+      },
+      {
+        "index": 73,
+        "role": "batch_ocr",
+        "text": "place to build."
+      },
+      {
+        "index": 74,
+        "role": "batch_ocr",
+        "text": "You'll be great if you"
+      },
+      {
+        "index": 75,
+        "role": "batch_ocr",
+        "text": "·Think like aproductengineer.Youcare aboutwhatgetsbuilt and the impact it has on"
+      },
+      {
+        "index": 76,
+        "role": "batch_ocr",
+        "text": "theperson holding thephonein thepaddock."
+      },
+      {
+        "index": 77,
+        "role": "batch_ocr",
+        "text": "·Have a strong intuition for UX, performance, and product polish.You know what good"
+      },
+      {
+        "index": 78,
+        "role": "batch_ocr",
+        "text": "feels like and you push forit."
+      },
+      {
+        "index": 79,
+        "role": "batch_ocr",
+        "text": "·Know how to shape and structure work without being overlyprescriptive,and balance"
+      },
+      {
+        "index": 80,
+        "role": "batch_ocr",
+        "text": "speed with quality."
+      },
+      {
+        "index": 81,
+        "role": "batch_ocr",
+        "text": "complexwork."
+      },
+      {
+        "index": 82,
+        "role": "batch_ocr",
+        "text": "·You've worked in fast-moving startups, seen growth, and tackled ambiguous problem"
+      },
+      {
+        "index": 83,
+        "role": "batch_ocr",
+        "text": "spaces."
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260626-004628-122208__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260626-004632-032446__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260626-004635-973751__ocr-region__ocr-region.json"
+    ],
+    "detail_batch_status": "ok",
+    "detail_batch_stop_reason": "max_captures",
+    "detail_bottom_reached": false,
+    "detail_batch_unique_line_count": 84,
+    "runtime_detail_dataflow": {
+      "contract_version": "runtime_detail_dataflow_v1",
+      "source_batch_contract": "read_region_batch_v1",
+      "source_batch_status": "ok",
+      "merged_text_line_count": 84,
+      "description_section_count": 84
+    },
+    "apply_button_state": {
+      "visible": true,
+      "label": "Apply",
+      "source": "read_detail_batch_ocr"
+    }
+  }
+}

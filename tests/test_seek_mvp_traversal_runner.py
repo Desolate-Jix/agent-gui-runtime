@@ -124,6 +124,7 @@ def _detail_observation(
     include_responsibilities: bool,
     include_requirements: bool = True,
     detail_bottom_reached: bool = True,
+    apply_label: str = "Quick apply",
 ) -> dict:
     page_elements = [
         {"id": "title", "text": "Software Engineer (Test Systems)", "bbox": {"x": 520, "y": 440, "w": 380, "h": 34}},
@@ -156,7 +157,7 @@ def _detail_observation(
             "available_actions": [
                 {
                     "id": "apply",
-                    "label": "Apply",
+                    "label": apply_label,
                     "bbox": {"x": 520, "y": 820, "w": 110, "h": 48},
                     "click_point": {"x": 575, "y": 844},
                 },
@@ -247,6 +248,23 @@ def _apply_flow_observation() -> dict:
     }
 
 
+def _apply_route_only_observation() -> dict:
+    return {
+        "contract_version": "screen_observation_v1",
+        "trace_path": "logs/traces/vision/apply-route-loading.json",
+        "image_size": {"width": 1200, "height": 1000},
+        "screen_inventory": {
+            "contract_version": "screen_inventory_v1",
+            "available_actions": [],
+            "page_elements": [
+                {"id": "url", "text": "https://nz.seek.com/job/92882224/apply?sol=abc"},
+                {"id": "brand", "text": "SEEK"},
+            ],
+            "cards": [],
+        },
+    }
+
+
 def _third_party_ats_observation() -> dict:
     payload = _apply_flow_observation()
     payload["trace_path"] = "logs/traces/vision/workday-apply-flow.json"
@@ -257,6 +275,36 @@ def _third_party_ats_observation() -> dict:
         {"id": "company", "text": "Fiserv careers", "bbox": {"x": 520, "y": 300, "w": 220, "h": 28}},
     ]
     return payload
+
+
+def test_wait_for_seek_application_form_readiness_times_out_without_fields(monkeypatch) -> None:
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+    observations = [_apply_route_only_observation(), _apply_route_only_observation()]
+
+    def fake_observe(*_args, **_kwargs):
+        return observations.pop(0)
+
+    monkeypatch.setattr(runner, "_observe", fake_observe)
+    initial_state = runner.assess_seek_application_flow_state(_apply_route_only_observation())
+
+    wait = runner._wait_for_seek_application_form_readiness(
+        "http://runtime",
+        app_name="edge",
+        source_job={"job_id": "job1", "title": "Software Engineer"},
+        initial_flow_state=initial_state,
+        timeout=5,
+        max_observes=2,
+    )
+
+    assert wait["contract_version"] == "seek_application_form_readiness_wait_v1"
+    assert wait["status"] == "timed_out"
+    assert wait["final_decision"]["decision"] == "stop"
+    assert wait["final_decision"]["reason"] == "application_form_readiness_not_detected_after_apply_route"
+    assert [attempt["state_type"] for attempt in wait["attempts"]] == [
+        "application_flow_opened",
+        "application_flow_opened",
+        "application_flow_opened",
+    ]
 
 
 def _final_submit_guard(*, enabled: bool) -> dict:
@@ -345,7 +393,16 @@ def test_execute_job_card_sends_seeded_candidate_metadata(monkeypatch) -> None:
             "company": "Example Co",
             "card_bbox": {"x": 24, "y": 400, "w": 410, "h": 220},
             "click_point": {"x": 220, "y": 510},
-            "evidence": {"texts": ["Software Engineer", "Example Co", "Auckland"]},
+            "location": "Auckland",
+            "evidence": {
+                "texts": [
+                    "Software Engineer",
+                    "Example Co",
+                    "Auckland",
+                    "This long summary should stay out of the compact model seed because it is not needed for locating the card.",
+                    "Another long description line that belongs in detail state, not the locator prompt.",
+                ]
+            },
         },
         execute_clicks=True,
         timeout=5,
@@ -364,7 +421,129 @@ def test_execute_job_card_sends_seeded_candidate_metadata(monkeypatch) -> None:
         assert seed["container_id"] == "seek:results_list"
         assert seed["bbox"] == {"x": 24, "y": 400, "w": 410, "h": 220}
         assert seed["click_point"] == {"x": 220, "y": 510}
+        assert seed["evidence_texts"] == ["Software Engineer", "Example Co", "Auckland"]
         assert seed["safety"]["require_point_inside_seed_bbox"] is True
+
+
+def test_execute_job_card_fast_confirmed_click_uses_seed_bbox_without_vision(monkeypatch) -> None:
+    calls: list[tuple[str, dict]] = []
+
+    def fake_post_json(_base_url, endpoint, payload, _timeout):
+        calls.append((endpoint, payload))
+        assert endpoint == "/action/execute_confirmed_point"
+        return _response(
+            {
+                "contract_version": "execute_confirmed_point_v1",
+                "trace_path": "logs/traces/actions/confirmed.json",
+                "confirmed_point": {"x": payload["x"], "y": payload["y"]},
+                "candidate_bbox": payload["bbox"],
+                "execution_path": {"action_executed": payload.get("dry_run") is False},
+            }
+        )
+
+    monkeypatch.setattr(runner, "_post_json", fake_post_json)
+
+    result = runner._execute_job_card(
+        "http://127.0.0.1:8000",
+        app_name="msedge",
+        job={
+            "job_id": "job-1",
+            "title": "Graduate Software Engineer",
+            "company": "Example Co",
+            "card_bbox": {"x": 24, "y": 400, "w": 410, "h": 220},
+            "click_point": {"x": 220, "y": 510},
+        },
+        execute_clicks=True,
+        timeout=5,
+        fast_confirmed_card_click=True,
+        verify_after_click=False,
+    )
+
+    assert result["opened"] is True
+    assert result["fast_confirmed_card_click"] is True
+    assert [endpoint for endpoint, _payload in calls] == [
+        "/action/execute_confirmed_point",
+        "/action/execute_confirmed_point",
+    ]
+    assert calls[0][1]["bbox"] == {"x": 24, "y": 400, "width": 410, "height": 220}
+    assert calls[0][1]["x"] == 220
+    assert calls[0][1]["y"] == 510
+
+
+def test_execute_job_card_accepts_no_diff_when_detail_semantics_already_match(monkeypatch) -> None:
+    calls: list[tuple[str, dict]] = []
+
+    def no_diff_execute_response() -> dict:
+        return {
+            "success": False,
+            "message": "Recognition-plan click executed but post-click verification failed",
+            "data": {
+                "result": {
+                    "status": "verification_failed",
+                    "error": {
+                        "code": "post_click_verification_failed",
+                        "details": {
+                            "post_click_verification": {
+                                "verified": False,
+                                "required_semantic_rule": "detail_title_company_must_match_clicked_card",
+                                "verification_policy_applied": "semantic_required",
+                                "diff": {"available": True, "changed": False, "count": 0},
+                            }
+                        },
+                    },
+                }
+            },
+            "error": {
+                "code": "post_click_verification_failed",
+                "details": {
+                    "post_click_verification": {
+                        "required_semantic_rule": "detail_title_company_must_match_clicked_card",
+                        "verification_policy_applied": "semantic_required",
+                        "diff": {"available": True, "changed": False, "count": 0},
+                    }
+                },
+            },
+        }
+
+    def fake_post_json(_base_url, endpoint, payload, _timeout):
+        calls.append((endpoint, payload))
+        if endpoint == "/action/execute_recognition_plan" and payload.get("dry_run") is True:
+            return _dry_response()
+        if endpoint == "/action/execute_recognition_plan" and payload.get("dry_run") is False:
+            return no_diff_execute_response()
+        raise AssertionError(endpoint)
+
+    monkeypatch.setattr(runner, "_post_json", fake_post_json)
+    monkeypatch.setattr(
+        runner,
+        "_verify_post_click_job_detail",
+        lambda base_url, *, app_name, job, timeout: {
+            "ok": True,
+            "detail_title": job["title"],
+            "title_matches": True,
+        },
+    )
+
+    result = runner._execute_job_card(
+        "http://127.0.0.1:8000",
+        app_name="msedge",
+        job={
+            "job_id": "job-1",
+            "title": "Full Stack Developer",
+            "company": "BrightSpark Recruitment",
+            "card_bbox": {"x": 652, "y": 722, "w": 432, "h": 166},
+            "click_point": {"x": 740, "y": 736},
+        },
+        execute_clicks=True,
+        timeout=5,
+    )
+
+    assert result["opened"] is True
+    assert result["verification_override"]["reason"] == "post_click_visual_diff_absent_but_detail_semantics_match"
+    assert _non_resize_endpoints(calls) == [
+        "/action/execute_recognition_plan",
+        "/action/execute_recognition_plan",
+    ]
 
 
 def test_execute_job_card_uses_learned_artifact_constraints(monkeypatch) -> None:
@@ -507,9 +686,13 @@ def test_runner_opens_card_scrolls_detail_and_writes_report(tmp_path, monkeypatc
     assert archive["contract_version"] == "seek_job_archive_v1"
     assert archive["title"] == "Software Engineer (Test Systems)"
     assert archive["card"]["title"] == "Software Engineer (Test Systems)"
+    assert archive["detail"]["title"] == "Software Engineer (Test Systems)"
+    assert archive["detail_complete"] is True
     assert archive["detail_read"]["complete"] is True
     assert archive["detail_read"]["read_container_id"] == "seek:job_detail"
     assert archive["detail_read"]["scroll_count"] == 1
+    assert archive["clear_path_node"]["open_action"]["action_id"] == "open_job_card"
+    assert archive["clear_path_node"]["read_detail_action"]["container_id"] == "seek:job_detail"
     assert archive["match_decision"]["decision"] == "need_user_review"
     assert archive["safety"]["final_submission_performed"] is False
     assert report["candidate_profile_readiness"]["contract_version"] == "candidate_profile_readiness_v1"
@@ -530,6 +713,13 @@ def test_runner_opens_card_scrolls_detail_and_writes_report(tmp_path, monkeypatc
     assert step["match_decision"]["recommended_next_action"] == "ask_user_or_gpt_for_review"
     assert report["need_user_review"] == 1
     assert report["candidate_profile_loaded"] is False
+    graph_path = Path(report["clear_path_graph_path"])
+    assert graph_path.exists()
+    graph = json.loads(graph_path.read_text(encoding="utf-8"))
+    assert graph["contract_version"] == "seek_clear_path_graph_v1"
+    assert graph["nodes"][0]["open_action"]["action_id"] == "open_job_card"
+    assert graph["nodes"][0]["read_detail_action"]["container_id"] == "seek:job_detail"
+    assert graph["summary"]["jobs_opened"] == 1
 
 
 def test_runner_stops_when_initial_observation_has_no_job_cards(monkeypatch) -> None:
@@ -705,7 +895,8 @@ def test_runner_scrolls_results_list_to_collect_more_jobs(monkeypatch) -> None:
     assert report["accuracy_summary"]["contract_version"] == "seek_mvp_accuracy_summary_v1"
     assert report["accuracy_summary"]["results_list_scroll_count"] == 1
     assert report["accuracy_summary"]["wrong_scope_scroll_count"] == 0
-    assert report["accuracy_summary"]["status"] == "pass"
+    assert report["accuracy_summary"]["status"] == "needs_review"
+    assert report["accuracy_summary"]["quality_invariants"]["opened_jobs_fully_read"] is False
     assert [step["card"]["title"] for step in report["traversal_steps"]] == [
         "Software Engineer (Test Systems)",
         "Senior Backend Developer",
@@ -867,6 +1058,57 @@ def test_detail_scroll_stops_when_right_detail_does_not_change(monkeypatch) -> N
     assert result["scrolls"][0]["adaptive_stop_reason"] == "right_detail_content_unchanged_after_scroll"
     assert result["completeness"]["should_scroll"] is False
     assert result["completeness"]["stop_reason"] == "right_detail_no_progress_after_scroll"
+    assert "detail_bottom" not in result["completeness"]["missing_evidence"]
+
+
+def test_detail_scroll_no_progress_clears_detail_bottom_when_other_evidence_present(monkeypatch) -> None:
+    calls: list[tuple[str, dict]] = []
+    observations = [
+        _detail_observation(include_responsibilities=True, include_requirements=True, detail_bottom_reached=False),
+        _detail_observation(include_responsibilities=True, include_requirements=True, detail_bottom_reached=False),
+    ]
+
+    def fake_post(base_url, endpoint, payload, timeout):
+        calls.append((endpoint, payload))
+        if endpoint == "/vision/observe_screen":
+            return _response(observations.pop(0))
+        if endpoint == "/action/scroll":
+            return _scroll_response()
+        raise AssertionError(endpoint)
+
+    monkeypatch.setattr(runner, "_post_json", fake_post)
+
+    result = runner._read_detail_until_complete(
+        "http://runtime",
+        app_name="edge",
+        max_scrolls=2,
+        timeout=10,
+    )
+
+    assert result["detail"]["detail_bottom_reached"] is True
+    assert result["completeness"]["complete"] is True
+    assert result["completeness"]["missing_evidence"] == []
+    assert result["completeness"]["stop_reason"] == "right_detail_no_progress_after_scroll"
+
+
+def test_titles_match_accepts_inserted_modifier_for_same_role() -> None:
+    assert runner._titles_match("Senior Software Engineer", "Senior Web Software Engineer") is True
+    assert runner._titles_match("Software Engineer", "Graduate / Junior Trading Manager-AI, Data & Financial") is False
+
+
+def test_job_seen_key_canonicalizes_company_ocr_acronym() -> None:
+    first = {
+        "title": "Software Engineer Specialist-Integration",
+        "company": "AlA New Zealand",
+        "location": "Takapuna, Auckland",
+    }
+    second = {
+        "title": "Software Engineer Specialist - Integration",
+        "company": "AIA New Zealand",
+        "location": "Takapuna, Auckland",
+    }
+
+    assert runner._job_seen_key(first) == runner._job_seen_key(second)
 
 
 def test_runner_scores_profile_and_saves_suitable_job(tmp_path, monkeypatch) -> None:
@@ -909,6 +1151,20 @@ def test_runner_scores_profile_and_saves_suitable_job(tmp_path, monkeypatch) -> 
             return _dry_response(final_submit_guard_enabled=bool((payload.get("metadata") or {}).get("seek_apply_entry")))
         if endpoint == "/action/execute_recognition_plan" and payload.get("dry_run") is False:
             return _execute_response(final_submit_guard_enabled=bool((payload.get("metadata") or {}).get("seek_apply_entry")))
+        if endpoint == "/action/execute_confirmed_point":
+            return _response(
+                {
+                    "contract_version": "execute_confirmed_point_v1",
+                    "trace_path": "logs/traces/actions/confirmed.json",
+                    "confirmed_point": {"x": payload["x"], "y": payload["y"]},
+                    "candidate_bbox": payload["bbox"],
+                    "execution_path": {"action_executed": payload.get("dry_run") is False},
+                }
+            )
+        if endpoint == "/action/scroll":
+            assert payload["direction"] == "up"
+            assert payload["target_container_id"] == "seek:job_detail"
+            return _scroll_response()
         raise AssertionError(f"unexpected endpoint {endpoint}")
 
     monkeypatch.setattr(runner, "_post_json", fake_post)
@@ -1060,11 +1316,14 @@ def test_runner_apply_entry_for_strong_apply_starts_flow_and_stops(tmp_path, mon
         encoding="utf-8",
     )
     calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(runner, "_learned_quick_apply_verification_from_detail", lambda *_args, **_kwargs: None)
     observations = [
         _cards_observation(),
         _detail_observation(include_responsibilities=True),
         _detail_observation(include_responsibilities=True),
         _detail_observation(include_responsibilities=True),
+        _apply_route_only_observation(),
         _apply_flow_observation(),
     ]
 
@@ -1080,6 +1339,20 @@ def test_runner_apply_entry_for_strong_apply_starts_flow_and_stops(tmp_path, mon
             return _dry_response(final_submit_guard_enabled=bool((payload.get("metadata") or {}).get("seek_apply_entry")))
         if endpoint == "/action/execute_recognition_plan" and payload.get("dry_run") is False:
             return _execute_response(final_submit_guard_enabled=bool((payload.get("metadata") or {}).get("seek_apply_entry")))
+        if endpoint == "/action/execute_confirmed_point":
+            return _response(
+                {
+                    "contract_version": "execute_confirmed_point_v1",
+                    "trace_path": "logs/traces/actions/confirmed-apply.json",
+                    "confirmed_point": {"x": payload["x"], "y": payload["y"]},
+                    "candidate_bbox": payload["bbox"],
+                    "execution_path": {"action_executed": payload.get("dry_run") is False},
+                }
+            )
+        if endpoint == "/action/scroll":
+            assert payload["direction"] == "up"
+            assert payload["target_container_id"] == "seek:job_detail"
+            return _scroll_response()
         raise AssertionError(f"unexpected endpoint {endpoint}")
 
     monkeypatch.setattr(runner, "_post_json", fake_post)
@@ -1110,16 +1383,16 @@ def test_runner_apply_entry_for_strong_apply_starts_flow_and_stops(tmp_path, mon
         "/vision/observe_screen",
         "/vision/observe_screen",
         "/vision/observe_screen",
-        "/action/execute_recognition_plan",
-        "/action/execute_recognition_plan",
+        "/action/execute_confirmed_point",
+        "/action/execute_confirmed_point",
+        "/vision/observe_screen",
         "/vision/observe_screen",
     ]
     apply_dry_payload = _non_resize_calls(calls)[7][1]
     assert apply_dry_payload["dry_run"] is True
-    assert apply_dry_payload["metadata"]["forbid_final_submit"] is True
-    assert apply_dry_payload["metadata"]["required_container_id"] == "seek:job_detail"
-    assert "Do not click Submit" in apply_dry_payload["goal"]
-    assert "SeniorAndroid" not in apply_dry_payload["goal"]
+    assert apply_dry_payload["bbox"] == {"x": 520, "y": 820, "width": 110, "height": 48}
+    assert "Do not click Submit" in apply_dry_payload["label"]
+    assert "SeniorAndroid" not in apply_dry_payload["label"]
 
     report = json.loads(out_path.read_text(encoding="utf-8"))
     assert report["mode"] == "apply_entry_traversal"
@@ -1147,11 +1420,18 @@ def test_runner_apply_entry_for_strong_apply_starts_flow_and_stops(tmp_path, mon
     assert trace["safety"]["final_submissions"] == 0
     entry = report["apply_entries"][0]
     assert entry["status"] == "blocked_need_user_or_gpt_decision"
+    assert entry["pre_apply_detail_reset"]["attempted"] is False
+    assert entry["pre_apply_detail_reset"]["reason"] == "fresh_apply_candidate_visible_skip_reset"
     assert entry["pre_apply_detail_verification"]["contract_version"] == "pre_apply_detail_verification_v1"
     assert entry["pre_apply_detail_verification"]["ok"] is True
     assert entry["pre_apply_detail_verification"]["title_matches"] is True
     assert entry["pre_apply_detail_verification"]["company_matches"] is True
     assert entry["application_flow_started"] is True
+    assert entry["application_form_readiness_wait"]["status"] == "ready"
+    assert [attempt["state_type"] for attempt in entry["application_form_readiness_wait"]["attempts"]] == [
+        "application_flow_opened",
+        "cover_letter_field_detected",
+    ]
     assert entry["application_flow_state"]["state_type"] == "cover_letter_field_detected"
     assert entry["application_flow_state"]["application_form_inventory"]["cover_letter_field_detected"] is True
     assert entry["final_submit_visible_blocker"]["blocked"] is False
@@ -1163,6 +1443,7 @@ def test_runner_apply_entry_for_strong_apply_starts_flow_and_stops(tmp_path, mon
     assert entry["safe_form_fill_attempt"]["enabled"] is False
     assert entry["safe_form_fill_attempt"]["filled"] is False
     assert entry["apply_click"]["container_id"] == "seek:job_detail"
+    assert entry["apply_click"]["candidate_freshness"]["freshness"] == "current_capture"
     assert entry["continue_clicks"] == 0
     assert entry["submit_clicks"] == 0
     assert entry["form_fields_filled"] == 0
@@ -1170,8 +1451,9 @@ def test_runner_apply_entry_for_strong_apply_starts_flow_and_stops(tmp_path, mon
     assert entry["apply_entry_semantics"]["apply_click_is_final_submit"] is False
     assert entry["apply_entry_semantics"]["true_final_submit_policy"] == "blocked_until_explicit_user_review"
     assert entry["final_submit_guard"]["contract_version"] == "final_submit_guard_v1"
-    assert entry["final_submit_guard"]["enabled"] is True
     assert entry["final_submit_guard"]["allowed"] is True
+    assert entry["final_submit_guard"]["action_taxonomy"] == "open_apply_flow"
+    assert entry["final_submit_guard"]["final_submit_forbidden"] is True
 
 
 def test_runner_apply_entry_defers_third_party_ats_without_downstream_plans(tmp_path, monkeypatch) -> None:
@@ -1197,6 +1479,7 @@ def test_runner_apply_entry_defers_third_party_ats_without_downstream_plans(tmp_
         encoding="utf-8",
     )
     calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(runner, "_learned_quick_apply_verification_from_detail", lambda *_args, **_kwargs: None)
     observations = [
         _cards_observation(),
         _detail_observation(include_responsibilities=True),
@@ -1217,6 +1500,20 @@ def test_runner_apply_entry_defers_third_party_ats_without_downstream_plans(tmp_
             return _dry_response(final_submit_guard_enabled=bool((payload.get("metadata") or {}).get("seek_apply_entry")))
         if endpoint == "/action/execute_recognition_plan" and payload.get("dry_run") is False:
             return _execute_response(final_submit_guard_enabled=bool((payload.get("metadata") or {}).get("seek_apply_entry")))
+        if endpoint == "/action/execute_confirmed_point":
+            return _response(
+                {
+                    "contract_version": "execute_confirmed_point_v1",
+                    "trace_path": "logs/traces/actions/confirmed.json",
+                    "confirmed_point": {"x": payload["x"], "y": payload["y"]},
+                    "candidate_bbox": payload["bbox"],
+                    "execution_path": {"action_executed": payload.get("dry_run") is False},
+                }
+            )
+        if endpoint == "/action/scroll":
+            assert payload["direction"] == "up"
+            assert payload["target_container_id"] == "seek:job_detail"
+            return _scroll_response()
         raise AssertionError(f"unexpected endpoint {endpoint}")
 
     monkeypatch.setattr(runner, "_post_json", fake_post)
@@ -1265,6 +1562,7 @@ def test_runner_apply_entry_defers_third_party_ats_without_downstream_plans(tmp_
 
 def test_execute_apply_entry_goal_prefers_merged_card_title_over_observed_ocr(monkeypatch) -> None:
     calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(runner, "_learned_quick_apply_verification_from_detail", lambda *_args, **_kwargs: None)
 
     monkeypatch.setattr(
         runner,
@@ -1282,6 +1580,9 @@ def test_execute_apply_entry_goal_prefers_merged_card_title_over_observed_ocr(mo
 
     def fake_post(base_url, endpoint, payload, timeout):
         calls.append((endpoint, payload))
+        if endpoint == "/action/scroll":
+            assert payload["reason"] == "reset_seek_job_detail_before_apply_entry_verification"
+            return _scroll_response()
         assert endpoint == "/action/execute_recognition_plan"
         return _dry_response(final_submit_guard_enabled=True)
 
@@ -1295,7 +1596,7 @@ def test_execute_apply_entry_goal_prefers_merged_card_title_over_observed_ocr(mo
             "job_id": "job1",
             "title": "SeniorAndroid Developer",
             "company": "Fiserv",
-            "apply_button_state": {"visible": True, "label": "Apply", "click_point": {"x": 1, "y": 2}},
+            "apply_button_state": {"visible": True, "label": "Quick apply", "click_point": {"x": 1, "y": 2}},
         },
         match_decision={"decision": "maybe_apply", "job_id": "job1"},
         candidate_profile=None,
@@ -1305,8 +1606,396 @@ def test_execute_apply_entry_goal_prefers_merged_card_title_over_observed_ocr(mo
     )
 
     assert attempt["status"] == "dry_run_ready"
-    assert "Senior Android Developer" in calls[0][1]["goal"]
-    assert "SeniorAndroid" not in calls[0][1]["goal"]
+    apply_call = [payload for endpoint, payload in calls if endpoint == "/action/execute_recognition_plan"][0]
+    assert "Senior Android Developer" in apply_call["goal"]
+    assert "SeniorAndroid" not in apply_call["goal"]
+
+
+def test_execute_apply_entry_sends_verified_apply_seeded_candidate(monkeypatch) -> None:
+    calls: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(
+        runner,
+        "_verify_pre_apply_job_detail",
+        lambda *_args, **_kwargs: {
+            "contract_version": "pre_apply_detail_verification_v1",
+            "ok": True,
+            "observed_title": "Software Engineer",
+            "observed_company": "AIA",
+            "title_matches": True,
+            "company_matches": True,
+            "apply_visible": True,
+            "apply_button_state": {
+                "visible": True,
+                "label": "Quick apply",
+                "bbox": {"x": 1200, "y": 830, "w": 90, "h": 42},
+                "click_point": {"x": 1245, "y": 851},
+                "candidate_freshness": {
+                    "contract_version": "action_candidate_freshness_v1",
+                    "capture_id": "pre-apply-capture",
+                    "viewport_size": {"width": 1920, "height": 1080},
+                    "source": "seek_apply_button_extraction",
+                    "freshness": "current_capture",
+                },
+            },
+        },
+    )
+
+    def fake_post(base_url, endpoint, payload, timeout):
+        calls.append((endpoint, payload))
+        if endpoint == "/action/scroll":
+            return _scroll_response()
+        assert endpoint == "/action/execute_confirmed_point"
+        return _response(
+            {
+                "contract_version": "execute_confirmed_point_v1",
+                "trace_path": "logs/traces/actions/confirmed.json",
+                "confirmed_point": {"x": payload["x"], "y": payload["y"]},
+                "candidate_bbox": payload["bbox"],
+                "execution_path": {"action_executed": payload.get("dry_run") is False},
+            }
+        )
+
+    monkeypatch.setattr(runner, "_post_json", fake_post)
+
+    attempt = runner._execute_apply_entry(
+        "http://runtime",
+        app_name="edge",
+        job={"job_id": "job1", "title": "Software Engineer", "company": "AIA"},
+        detail={
+            "job_id": "job1",
+            "title": "Software Engineer",
+            "company": "AIA",
+            "apply_button_state": {
+                "visible": True,
+                "label": "Quick apply",
+                "bbox": {"x": 1, "y": 2, "w": 80, "h": 30},
+                "click_point": {"x": 40, "y": 17},
+                "candidate_freshness": {
+                    "contract_version": "action_candidate_freshness_v1",
+                    "capture_id": "initial-current-apply",
+                    "viewport_size": {"width": 1920, "height": 1080},
+                    "source": "seek_apply_button_extraction",
+                    "freshness": "current_capture",
+                },
+            },
+        },
+        match_decision={"decision": "strong_apply", "job_id": "job1"},
+        candidate_profile=None,
+        execute_clicks=False,
+        timeout=5,
+    )
+
+    assert attempt["status"] == "dry_run_ready"
+    assert all(endpoint != "/action/scroll" for endpoint, _payload in calls)
+    assert attempt["pre_apply_detail_reset"]["attempted"] is False
+    assert attempt["pre_apply_detail_reset"]["reason"] == "fresh_apply_candidate_visible_skip_reset"
+    apply_call = [payload for endpoint, payload in calls if endpoint == "/action/execute_confirmed_point"][0]
+    seed = attempt["apply_click"]["seeded_candidate"]
+    assert seed["contract_version"] == "seeded_candidate_v1"
+    assert seed["source"] == "seek_apply_button_v1"
+    assert seed["container_id"] == "seek:job_detail"
+    assert seed["label"] == "Quick apply"
+    assert seed["candidate_constraints"]["required_label_any"] == ["Quick apply", "Quick Apply"]
+    assert seed["candidate_constraints"]["forbid_label_any"] == ["Apply"]
+    assert seed["bbox"] == {"x": 1200, "y": 830, "w": 90, "h": 42}
+    assert seed["click_point"] == {"x": 1245, "y": 851}
+    assert seed["candidate_freshness"]["capture_id"] == "pre-apply-capture"
+    assert seed["safety"]["disallow_final_submit"] is True
+    assert apply_call["bbox"] == {"x": 1200, "y": 830, "width": 90, "height": 42}
+
+
+def test_execute_apply_entry_uses_learned_quick_apply_visual_when_snapshot_lacks_geometry(monkeypatch) -> None:
+    calls: list[tuple[str, dict]] = []
+
+    def fail_pre_apply_verify(*_args, **_kwargs):
+        raise AssertionError("learned visual Quick apply path should not call observe verification")
+
+    monkeypatch.setattr(runner, "_verify_pre_apply_job_detail", fail_pre_apply_verify)
+    monkeypatch.setattr(
+        runner,
+        "_learned_quick_apply_verification_from_detail",
+        lambda *_args, **_kwargs: {
+            "contract_version": "pre_apply_detail_verification_v1",
+            "ok": True,
+            "trace_path": "logs/traces/actions/learned-visual-quick-apply.json",
+            "source": "learned_visual_asset_match",
+            "observed_title": "Software Engineer",
+            "observed_company": "AIA",
+            "title_matches": True,
+            "company_matches": True,
+            "apply_visible": True,
+            "apply_label": "Quick apply",
+            "apply_button_state": {
+                "visible": True,
+                "label": "Quick apply",
+                "bbox": {"x": 1200, "y": 830, "w": 90, "h": 42},
+                "click_point": {"x": 1245, "y": 851},
+                "candidate_freshness": {
+                    "contract_version": "action_candidate_freshness_v1",
+                    "capture_id": "runtime-capture-1",
+                    "viewport_size": {"width": 1920, "height": 1080},
+                    "source": "learned_visual_asset_match",
+                    "freshness": "current_capture",
+                },
+            },
+        },
+    )
+
+    def fake_post(base_url, endpoint, payload, timeout):
+        calls.append((endpoint, payload))
+        assert endpoint == "/action/execute_confirmed_point"
+        return _response(
+            {
+                "contract_version": "execute_confirmed_point_v1",
+                "trace_path": "logs/traces/actions/confirmed.json",
+                "confirmed_point": {"x": payload["x"], "y": payload["y"]},
+                "candidate_bbox": payload["bbox"],
+                "execution_path": {"action_executed": payload.get("dry_run") is False},
+            }
+        )
+
+    monkeypatch.setattr(runner, "_post_json", fake_post)
+
+    attempt = runner._execute_apply_entry(
+        "http://runtime",
+        app_name="edge",
+        job={"job_id": "job1", "title": "Software Engineer", "company": "AIA"},
+        detail={
+            "job_id": "job1",
+            "title": "Software Engineer",
+            "company": "AIA",
+            "apply_button_state": {
+                "visible": True,
+                "label": "Quick apply",
+                "source": "read_detail_batch_ocr",
+            },
+            "merged_text_lines": ["Software Engineer", "AIA", "Quick apply"],
+        },
+        match_decision={"decision": "strong_apply", "job_id": "job1"},
+        candidate_profile=None,
+        execute_clicks=False,
+        timeout=5,
+    )
+
+    assert attempt["status"] == "dry_run_ready"
+    assert [endpoint for endpoint, _payload in calls] == ["/action/execute_confirmed_point"]
+    assert attempt["pre_apply_detail_verification"]["source"] == "learned_visual_asset_match"
+    assert attempt["learned_quick_apply_visual_verification_before_reset"]["ok"] is True
+    seed = attempt["apply_click"]["seeded_candidate"]
+    assert seed["source"] == "seek_apply_button_v1"
+    assert seed["bbox"] == {"x": 1200, "y": 830, "w": 90, "h": 42}
+    assert seed["candidate_freshness"]["source"] == "learned_visual_asset_match"
+    assert calls[0][1]["bbox"] == {"x": 1200, "y": 830, "width": 90, "height": 42}
+
+
+def test_learned_quick_apply_visual_match_does_not_require_prior_text_evidence(tmp_path, monkeypatch) -> None:
+    template = tmp_path / "quick_apply.png"
+    template.write_bytes(b"fake")
+    monkeypatch.setattr(runner, "SEEK_QUICK_APPLY_TEMPLATE_PATH", template)
+    monkeypatch.setattr(
+        runner,
+        "_capture_window",
+        lambda *_args, **_kwargs: {
+            "image_path": "artifacts/screenshots/current.png",
+            "image_width": 1920,
+            "image_height": 1080,
+        },
+    )
+    monkeypatch.setattr(
+        runner,
+        "match_visual_asset",
+        lambda **_kwargs: {
+            "matched": True,
+            "candidate": {
+                "bbox": {"x": 1200, "y": 830, "w": 90, "h": 42},
+                "click_point": {"x": 1245, "y": 851},
+                "candidate_freshness": {
+                    "contract_version": "action_candidate_freshness_v1",
+                    "capture_id": "artifacts/screenshots/current.png",
+                    "viewport_size": {"width": 1920, "height": 1080},
+                    "source": "learned_visual_asset_match",
+                    "freshness": "current_capture",
+                },
+            },
+        },
+    )
+
+    verification = runner._learned_quick_apply_verification_from_detail(
+        "http://runtime",
+        job={"title": "Software Developer", "company": "PageProof"},
+        detail={"title": "Software Developer", "company": "PageProof", "merged_text_lines": ["React", "API"]},
+        timeout=5,
+    )
+
+    assert verification is not None
+    assert verification["ok"] is True
+    assert verification["apply_button_state"]["label"] == "Quick apply"
+    assert verification["apply_button_state"]["bbox"] == {"x": 1200, "y": 830, "w": 90, "h": 42}
+    assert "quick_apply_text_evidence_missing_visual_match_used" in verification["warnings"]
+
+
+def test_execute_apply_entry_blocks_standard_apply_before_click(monkeypatch) -> None:
+    calls: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(
+        runner,
+        "_verify_pre_apply_job_detail",
+        lambda *_args, **_kwargs: {
+            "contract_version": "pre_apply_detail_verification_v1",
+            "ok": True,
+            "observed_title": "Software Engineer",
+            "observed_company": "AIA",
+            "title_matches": True,
+            "company_matches": True,
+            "apply_visible": True,
+            "apply_button_state": {
+                "visible": True,
+                "label": "Apply",
+                "bbox": {"x": 1200, "y": 830, "w": 90, "h": 42},
+                "click_point": {"x": 1245, "y": 851},
+                "candidate_freshness": {
+                    "contract_version": "action_candidate_freshness_v1",
+                    "capture_id": "pre-apply-capture",
+                    "viewport_size": {"width": 1920, "height": 1080},
+                    "source": "seek_apply_button_extraction",
+                    "freshness": "current_capture",
+                },
+            },
+        },
+    )
+
+    def fake_post(base_url, endpoint, payload, timeout):
+        calls.append((endpoint, payload))
+        if endpoint == "/action/scroll":
+            return _scroll_response()
+        raise AssertionError(f"standard Apply must not create an action plan: {endpoint}")
+
+    monkeypatch.setattr(runner, "_post_json", fake_post)
+
+    attempt = runner._execute_apply_entry(
+        "http://runtime",
+        app_name="edge",
+        job={"job_id": "job1", "title": "Software Engineer", "company": "AIA"},
+        detail={
+            "job_id": "job1",
+            "title": "Software Engineer",
+            "company": "AIA",
+            "apply_button_state": {
+                "visible": True,
+                "label": "Apply",
+                "bbox": {"x": 1, "y": 2, "w": 80, "h": 30},
+                "click_point": {"x": 40, "y": 17},
+                "candidate_freshness": {
+                    "contract_version": "action_candidate_freshness_v1",
+                    "capture_id": "initial-current-apply",
+                    "viewport_size": {"width": 1920, "height": 1080},
+                    "source": "seek_apply_button_extraction",
+                    "freshness": "current_capture",
+                },
+            },
+        },
+        match_decision={"decision": "strong_apply", "job_id": "job1"},
+        candidate_profile=None,
+        execute_clicks=True,
+        timeout=5,
+    )
+
+    assert attempt["status"] == "skipped"
+    assert attempt["executed"] is False
+    assert attempt["application_flow_started"] is False
+    assert attempt["stop_reason"] == "seek_standard_apply_is_external_use_quick_apply_only"
+    assert attempt["external_apply_guard"]["decision"] == "skip_before_expensive_apply_verification"
+    assert attempt["external_apply_guard"]["observed_label"] == "Apply"
+    assert calls == []
+    assert all(endpoint != "/action/execute_recognition_plan" for endpoint, _payload in calls)
+
+
+def test_execute_apply_entry_resets_when_apply_candidate_is_bottom_stale(monkeypatch) -> None:
+    calls: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(
+        runner,
+        "_verify_pre_apply_job_detail",
+        lambda *_args, **_kwargs: {
+            "contract_version": "pre_apply_detail_verification_v1",
+            "ok": True,
+            "observed_title": "Software Engineer",
+            "observed_company": "AIA",
+            "title_matches": True,
+            "company_matches": True,
+            "apply_visible": True,
+            "apply_button_state": {
+                "visible": True,
+                "label": "Quick apply",
+                "bbox": {"x": 1200, "y": 830, "w": 90, "h": 42},
+                "click_point": {"x": 1245, "y": 851},
+                "candidate_freshness": {
+                    "contract_version": "action_candidate_freshness_v1",
+                    "capture_id": "pre-apply-capture",
+                    "viewport_size": {"width": 1920, "height": 1080},
+                    "source": "seek_apply_button_extraction",
+                    "freshness": "current_capture",
+                },
+            },
+        },
+    )
+
+    def fake_post(base_url, endpoint, payload, timeout):
+        calls.append((endpoint, payload))
+        if endpoint == "/action/scroll":
+            assert payload["target_container_id"] == "seek:job_detail"
+            assert payload["direction"] == "up"
+            return _scroll_response()
+        assert endpoint == "/action/execute_confirmed_point"
+        return _response(
+            {
+                "contract_version": "execute_confirmed_point_v1",
+                "trace_path": "logs/traces/actions/confirmed.json",
+                "confirmed_point": {"x": payload["x"], "y": payload["y"]},
+                "candidate_bbox": payload["bbox"],
+                "execution_path": {"action_executed": payload.get("dry_run") is False},
+            }
+        )
+
+    monkeypatch.setattr(runner, "_post_json", fake_post)
+
+    attempt = runner._execute_apply_entry(
+        "http://runtime",
+        app_name="edge",
+        job={"job_id": "job1", "title": "Software Engineer", "company": "AIA"},
+        detail={
+            "job_id": "job1",
+            "title": "Software Engineer",
+            "company": "AIA",
+            "apply_button_state": {
+                "visible": True,
+                "label": "Quick apply",
+                "bbox": {"x": 1180, "y": 990, "w": 120, "h": 50},
+                "click_point": {"x": 1240, "y": 1015},
+                "candidate_freshness": {
+                    "contract_version": "action_candidate_freshness_v1",
+                    "capture_id": "bottom-old-apply",
+                    "viewport_size": {"width": 1920, "height": 1080},
+                    "source": "seek_apply_button_extraction",
+                    "freshness": "current_capture",
+                },
+            },
+        },
+        match_decision={"decision": "strong_apply", "job_id": "job1"},
+        candidate_profile=None,
+        execute_clicks=False,
+        timeout=5,
+    )
+
+    assert attempt["status"] == "dry_run_ready"
+    assert attempt["initial_apply_candidate_stability"] == {
+        "stable": False,
+        "reason": "apply_candidate_too_close_to_viewport_bottom",
+    }
+    assert attempt["pre_apply_detail_reset"]["attempted"] is True
+    assert attempt["pre_apply_detail_reset"]["candidate_stability_reason"] == "apply_candidate_too_close_to_viewport_bottom"
+    assert [endpoint for endpoint, _payload in calls] == ["/action/scroll", "/action/execute_confirmed_point"]
 
 
 def test_execute_apply_entry_blocks_need_user_review_before_click(monkeypatch) -> None:
@@ -1339,6 +2028,77 @@ def test_execute_apply_entry_blocks_need_user_review_before_click(monkeypatch) -
     assert calls == []
 
 
+def test_pre_apply_verification_accepts_short_company_acronym_ocr_confusion(monkeypatch) -> None:
+    monkeypatch.setattr(runner, "_observe", lambda *_args, **_kwargs: {"trace_path": "trace.json"})
+    monkeypatch.setattr(
+        runner,
+        "extract_seek_job_detail",
+        lambda *_args, **_kwargs: {
+            "title": "Software Engineer Specialist-Integration",
+            "company": "AlA New Zealand",
+            "apply_button_state": {
+                "visible": True,
+                "label": "Apply",
+                "bbox": {"x": 1200, "y": 830, "w": 90, "h": 42},
+                "click_point": {"x": 1245, "y": 851},
+                "candidate_freshness": {
+                    "contract_version": "action_candidate_freshness_v1",
+                    "capture_id": "verify-capture",
+                    "viewport_size": {"width": 1920, "height": 1080},
+                    "source": "seek_apply_button_extraction",
+                    "freshness": "current_capture",
+                },
+            },
+        },
+    )
+
+    verification = runner._verify_pre_apply_job_detail(
+        "http://127.0.0.1:8000",
+        app_name="seek",
+        job={"title": "Software Engineer Specialist - Integration", "company": "AIA New Zealand"},
+        detail={"title": "Software Engineer Specialist - Integration", "company": "AIA New Zealand"},
+        timeout=1,
+    )
+
+    assert verification["ok"] is True
+    assert verification["company_matches"] is True
+    assert verification["apply_button_state"]["click_point"] == {"x": 1245, "y": 851}
+    assert verification["apply_button_state"]["candidate_freshness"]["capture_id"] == "verify-capture"
+    assert "detail_company_mismatch" not in verification["failure_reasons"]
+
+
+def test_pre_apply_verification_warns_but_allows_recruiter_company_mismatch(monkeypatch) -> None:
+    monkeypatch.setattr(runner, "_observe", lambda *_args, **_kwargs: {"trace_path": "trace.json"})
+    monkeypatch.setattr(
+        runner,
+        "extract_seek_job_detail",
+        lambda *_args, **_kwargs: {
+            "title": "Embedded Software Engineer|Al-Driven",
+            "company": "Environmental Technology",
+            "apply_button_state": {
+                "visible": True,
+                "label": "Quick apply",
+                "bbox": {"x": 1191, "y": 506, "w": 103, "h": 31},
+                "click_point": {"x": 1242, "y": 521},
+            },
+        },
+    )
+
+    verification = runner._verify_pre_apply_job_detail(
+        "http://127.0.0.1:8000",
+        app_name="seek",
+        job={"title": "Embedded Software Engineer| Al-Driven", "company": "Enterprise Technology Recruitment Ltd"},
+        detail={"title": "Embedded Software Engineer| Al-Driven", "company": "Enterprise Technology Recruitment Ltd"},
+        timeout=1,
+    )
+
+    assert verification["ok"] is True
+    assert verification["title_matches"] is True
+    assert verification["company_matches"] is False
+    assert verification["failure_reasons"] == []
+    assert verification["warnings"] == ["detail_company_mismatch_warning"]
+
+
 def test_runner_apply_entry_blocks_when_current_detail_no_longer_matches(tmp_path, monkeypatch) -> None:
     out_path = tmp_path / "seek-report.json"
     profile_path = tmp_path / "candidate.json"
@@ -1361,10 +2121,12 @@ def test_runner_apply_entry_blocks_when_current_detail_no_longer_matches(tmp_pat
         encoding="utf-8",
     )
     calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(runner, "_learned_quick_apply_verification_from_detail", lambda *_args, **_kwargs: None)
     observations = [
         _cards_observation(),
         _detail_observation(include_responsibilities=True),
         _detail_observation(include_responsibilities=True),
+        _second_detail_observation(),
         _second_detail_observation(),
     ]
 
@@ -1380,6 +2142,10 @@ def test_runner_apply_entry_blocks_when_current_detail_no_longer_matches(tmp_pat
             return _dry_response(final_submit_guard_enabled=bool((payload.get("metadata") or {}).get("seek_apply_entry")))
         if endpoint == "/action/execute_recognition_plan" and payload.get("dry_run") is False:
             return _execute_response(final_submit_guard_enabled=bool((payload.get("metadata") or {}).get("seek_apply_entry")))
+        if endpoint == "/action/scroll":
+            assert payload["direction"] == "up"
+            assert payload["target_container_id"] == "seek:job_detail"
+            return _scroll_response()
         raise AssertionError(f"unexpected endpoint {endpoint}")
 
     monkeypatch.setattr(runner, "_post_json", fake_post)
@@ -1408,13 +2174,20 @@ def test_runner_apply_entry_blocks_when_current_detail_no_longer_matches(tmp_pat
         "/vision/observe_screen",
         "/vision/observe_screen",
         "/vision/observe_screen",
+        "/action/scroll",
+        "/vision/observe_screen",
     ]
     report = json.loads(out_path.read_text(encoding="utf-8"))
     entry = report["apply_entries"][0]
     assert entry["status"] == "blocked_need_user_or_gpt_decision"
     assert entry["stop_reason"] == "pre_apply_detail_verification_failed"
+    assert entry["pre_apply_detail_reset"]["attempted"] is True
+    assert entry["pre_apply_detail_reset"]["reason"] == "recover_after_pre_apply_detail_verification_failed"
     assert entry["executed"] is False
     assert entry["application_flow_started"] is False
+    before_recovery = entry["pre_apply_detail_verification_before_recovery"]
+    assert before_recovery["ok"] is False
+    assert before_recovery["title_matches"] is False
     verification = entry["pre_apply_detail_verification"]
     assert verification["ok"] is False
     assert verification["title_matches"] is False
@@ -1449,6 +2222,73 @@ def test_pre_apply_verification_ignores_unreliable_close_icon_company(monkeypatc
     assert verification["observed_company_reliable"] is False
     assert verification["company_matches"] is True
     assert "detail_company_mismatch" not in verification["failure_reasons"]
+
+
+def test_pre_apply_verification_ignores_section_heading_as_company(monkeypatch) -> None:
+    monkeypatch.setattr(runner, "_observe", lambda *_args, **_kwargs: {"trace_path": "trace.json"})
+    monkeypatch.setattr(
+        runner,
+        "extract_seek_job_detail",
+        lambda *_args, **_kwargs: {
+            "title": "Embedded Software Engineer(C/C++)",
+            "company": "Introduction:",
+            "apply_button_state": {
+                "visible": True,
+                "label": "Quick apply",
+                "bbox": {"x": 1188, "y": 539, "w": 109, "h": 32},
+                "click_point": {"x": 1242, "y": 555},
+                "candidate_freshness": {
+                    "contract_version": "action_candidate_freshness_v1",
+                    "capture_id": "verify-after-reset",
+                    "viewport_size": {"width": 2560, "height": 1400},
+                    "source": "seek_apply_button_extraction",
+                    "freshness": "current_capture",
+                },
+            },
+        },
+    )
+
+    verification = runner._verify_pre_apply_job_detail(
+        "http://127.0.0.1:8000",
+        app_name="seek",
+        job={"title": "Embedded Software Engineer", "company": "Garmin New Zealand Limited"},
+        detail={"title": "Embedded Software Engineer", "company": "Garmin New Zealand Limited"},
+        timeout=1,
+    )
+
+    assert verification["ok"] is True
+    assert verification["title_matches"] is True
+    assert verification["observed_company"] == "Introduction:"
+    assert verification["observed_company_reliable"] is False
+    assert verification["company_matches"] is True
+    assert "detail_company_mismatch" not in verification["failure_reasons"]
+
+
+def test_pre_apply_verification_ignores_unreliable_numeric_title(monkeypatch) -> None:
+    monkeypatch.setattr(runner, "_observe", lambda *_args, **_kwargs: {"trace_path": "trace.json"})
+    monkeypatch.setattr(
+        runner,
+        "extract_seek_job_detail",
+        lambda *_args, **_kwargs: {
+            "title": "3",
+            "company": None,
+            "apply_button_state": {"visible": True, "label": "Quick apply"},
+        },
+    )
+
+    verification = runner._verify_pre_apply_job_detail(
+        "http://127.0.0.1:8000",
+        app_name="seek",
+        job={"title": "Intermediate Software Engineer", "company": "Vista Group"},
+        detail={"title": "IntermediateSoftwareEngineer", "company": "Vista Group"},
+        timeout=1,
+    )
+
+    assert verification["ok"] is True
+    assert verification["observed_title"] == "3"
+    assert verification["observed_title_reliable"] is False
+    assert verification["title_matches"] is True
+    assert "detail_title_mismatch" not in verification["failure_reasons"]
 
 
 def test_runner_apply_entry_blocks_when_profile_not_live_ready(tmp_path, monkeypatch) -> None:
@@ -1533,7 +2373,7 @@ def test_runner_apply_entry_blocks_when_profile_not_live_ready(tmp_path, monkeyp
     assert entry["profile_gate"]["missing_requirements"]
 
 
-def test_safe_form_fill_attempt_uses_gated_focus_then_type_text(monkeypatch) -> None:
+def test_safe_form_fill_attempt_uses_visible_bbox_before_model_focus(monkeypatch) -> None:
     calls: list[tuple[str, dict]] = []
     answer_plan = {
         "contract_version": "application_answer_plan_v1",
@@ -1610,17 +2450,10 @@ def test_safe_form_fill_attempt_uses_gated_focus_then_type_text(monkeypatch) -> 
     )
 
     assert _non_resize_endpoints(calls) == [
-        "/action/execute_recognition_plan",
-        "/action/execute_recognition_plan",
         "/action/type_text",
         "/vision/observe_screen",
     ]
-    dry_payload = calls[0][1]
-    execute_payload = calls[1][1]
-    type_payload = calls[2][1]
-    assert dry_payload["metadata"]["forbid_final_submit"] is True
-    assert "Do not click Continue" in dry_payload["goal"]
-    assert execute_payload["approved_plan_id"]
+    type_payload = calls[0][1]
     assert "app_name" not in type_payload
     assert type_payload["click_before_typing"] is True
     assert type_payload["x"] == 310
@@ -1636,9 +2469,13 @@ def test_safe_form_fill_attempt_uses_gated_focus_then_type_text(monkeypatch) -> 
     assert trace["value_preview"] == "<redacted:profile_value:len=9>"
     assert trace["value_length"] == len("Alex Chen")
     assert len(trace["value_hash"]) == 64
+    assert trace["bbox_direct_focus"]["allowed"] is True
+    assert trace["bbox_direct_focus"]["reason"] == "visible_text_field_bbox_from_current_observation"
     assert trace["pre_focus_dry_run"]["allowed"] is True
+    assert trace["pre_focus_dry_run"]["skipped"] is True
     assert trace["pre_focus_dry_run"]["point_inside_field_bbox"] is True
     assert trace["approved_focus_reuse"]["allowed"] is True
+    assert trace["approved_focus_reuse"]["skipped"] is True
     assert trace["type_text_request"]["click_before_typing"] is True
     assert trace["type_text_request"]["point"] == {"x": 310, "y": 324}
     assert trace["type_text_request"]["submit"] is False
@@ -1657,6 +2494,119 @@ def test_safe_form_fill_attempt_uses_gated_focus_then_type_text(monkeypatch) -> 
     assert attempt["final_submissions"] == 0
 
 
+def test_safe_form_fill_attempt_scrolls_and_rebuilds_when_field_below_viewport(monkeypatch) -> None:
+    calls: list[tuple[str, dict]] = []
+    offscreen_plan = {
+        "contract_version": "application_answer_plan_v1",
+        "status": "planned_only_not_filled",
+        "planned_answers": [
+            {
+                "category": "auto_safe_known",
+                "label": "Cover letter body",
+                "reason": "cover_letter_draft_available_but_not_pasted",
+                "source": {
+                    "collection": "page_elements",
+                    "id": "cover-letter-field",
+                    "role": "textarea",
+                    "bbox": {"x": 734, "y": 1181, "w": 760, "h": 360},
+                },
+                "answer_source": "cover_letter_draft_v1.draft",
+                "value_preview": "Dear hiring team",
+            }
+        ],
+    }
+    visible_plan = {
+        **offscreen_plan,
+        "planned_answers": [
+            {
+                **offscreen_plan["planned_answers"][0],
+                "source": {
+                    **offscreen_plan["planned_answers"][0]["source"],
+                    "bbox": {"x": 734, "y": 520, "w": 760, "h": 360},
+                },
+            }
+        ],
+    }
+
+    def fake_post(base_url, endpoint, payload, timeout):
+        calls.append((endpoint, payload))
+        if endpoint == "/action/scroll":
+            return _response({"contract_version": "scroll_action_v2", "trace_path": "logs/traces/actions/scroll.json"})
+        if endpoint == "/action/type_text":
+            return _response(
+                {
+                    "contract_version": "type_text_result_v1",
+                    "dry_run": False,
+                    "text_length": len(payload["text"]),
+                    "click_before_typing": payload["click_before_typing"],
+                    "submit": payload["submit"],
+                    "trace_path": "logs/traces/actions/type-text.json",
+                }
+            )
+        raise AssertionError(f"unexpected endpoint {endpoint}")
+
+    def fake_observe(*_args, **_kwargs):
+        return {
+            "trace_path": "logs/traces/vision/post-fill.json",
+            "screen_inventory": {
+                "contract_version": "screen_inventory_v1",
+                "page_elements": [
+                    {
+                        "id": "cover-letter-field",
+                        "text": "Cover letter body",
+                        "role": "textarea",
+                        "value": "Dear hiring team",
+                        "bbox": {"x": 734, "y": 520, "w": 760, "h": 360},
+                    }
+                ],
+                "available_actions": [],
+                "cards": [],
+            },
+        }
+
+    monkeypatch.setattr(runner, "_post_json", fake_post)
+    monkeypatch.setattr(runner, "_observe", fake_observe)
+    monkeypatch.setattr(
+        runner,
+        "_runtime_state",
+        lambda *_args, **_kwargs: {"payload": {"rect": {"left": 0, "top": 0, "right": 2432, "bottom": 1100}}},
+    )
+    monkeypatch.setattr(
+        runner,
+        "build_application_answer_plan",
+        lambda **_kwargs: visible_plan,
+    )
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+
+    attempt = runner._safe_form_fill_attempt(
+        "http://runtime",
+        app_name="edge",
+        answer_plan=offscreen_plan,
+        cover_letter_draft={"draft": "Dear hiring team"},
+        execute_fill=True,
+        allow_cover_letter_fill=True,
+        timeout=10,
+    )
+
+    assert _non_resize_endpoints(calls) == [
+        "/action/scroll",
+        "/action/type_text",
+    ]
+    assert attempt["field_visibility_refresh"]["status"] == "refreshed"
+    assert attempt["field_visibility_refresh"]["visibility"]["below_viewport"] is True
+    type_payload = calls[1][1]
+    assert type_payload["click_before_typing"] is True
+    assert type_payload["x"] == 1114
+    assert type_payload["y"] == 700
+    assert type_payload["submit"] is False
+    trace = attempt["field_results"][0]["safe_form_fill_trace"]
+    assert trace["bbox_direct_focus"]["allowed"] is True
+    assert trace["bbox_direct_focus"]["bbox"]["y"] == 520
+    assert attempt["status"] == "filled_until_review"
+    assert attempt["fields_filled"] == 1
+    assert attempt["final_submissions"] == 0
+
+
 def test_safe_form_fill_attempt_stops_before_focus_execute_when_dry_point_outside_field(monkeypatch) -> None:
     calls: list[tuple[str, dict]] = []
     answer_plan = {
@@ -1671,7 +2621,7 @@ def test_safe_form_fill_attempt_stops_before_focus_execute_when_dry_point_outsid
                     "collection": "page_elements",
                     "id": "full-name-field",
                     "role": "input",
-                    "bbox": {"x": 100, "y": 300, "w": 420, "h": 48},
+                    "bbox": {"x": 100, "y": 40, "w": 420, "h": 48},
                 },
                 "answer_source": "candidate_profile_v1",
                 "value_preview": "Alex Chen",
@@ -1700,6 +2650,8 @@ def test_safe_form_fill_attempt_stops_before_focus_execute_when_dry_point_outsid
     field_result = attempt["field_results"][0]
     trace = field_result["safe_form_fill_trace"]
     assert field_result["stop_reason"] == "safe_field_focus_point_outside_field_bbox"
+    assert trace["bbox_direct_focus"]["allowed"] is False
+    assert trace["bbox_direct_focus"]["reason"] == "type_point_in_browser_header_region"
     assert trace["pre_focus_dry_run"]["allowed"] is True
     assert trace["pre_focus_dry_run"]["selected_click_point"] == {"x": 220, "y": 510}
     assert trace["pre_focus_dry_run"]["point_inside_field_bbox"] is False

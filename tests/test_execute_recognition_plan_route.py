@@ -91,6 +91,51 @@ def _blocked_plan(*, goal: str = "Click Learn more link") -> dict:
     return plan
 
 
+def _visual_fast_lane_plan(*, goal: str = "Click Job search") -> dict:
+    plan = _allowed_plan(goal=goal, point={"x": 866, "y": 116})
+    plan["recommended_target"].update(
+        {
+            "candidate_id": "seek_job_search_tab",
+            "label": "Job search",
+            "text": "Job search",
+            "risk_class": "safe_click_allowed",
+            "source": "visual_asset_match_v1",
+            "freshness": "current_capture",
+        }
+    )
+    plan["candidate_result"]["candidates"][0].update(
+        {
+            "candidate_id": "seek_job_search_tab",
+            "label": "Job search",
+            "risk_class": "safe_click_allowed",
+            "source": "visual_asset_match_v1",
+            "freshness": "current_capture",
+        }
+    )
+    plan["narrow_search_result"]["results"][0].update(
+        {
+            "candidate_id": "seek_job_search_tab",
+            "matched_text": "Job search",
+            "coordinate_source": "visual_asset_match_v1",
+        }
+    )
+    plan["pre_click_decision"].update(
+        {
+            "selected_candidate_id": "seek_job_search_tab",
+            "selected_click_point": {"x": 866, "y": 116},
+        }
+    )
+    plan["execution_path"].update(
+        {
+            "vision_model_used": False,
+            "visual_asset_fast_lane_used": True,
+            "vista_point_grounding_used": False,
+            "vista_direct_point_grounding_used": False,
+        }
+    )
+    return plan
+
+
 def test_metadata_post_click_policy_rejects_focus_only_for_search_results() -> None:
     request = ExecuteRecognitionPlanRequest(
         goal="Click search",
@@ -284,6 +329,98 @@ def test_execute_mode_reuses_approved_plan_for_next_call(monkeypatch, tmp_path) 
     assert written_operations == ["execute_mode_plan_preview", "execute_mode_click"]
 
 
+def test_execute_mode_low_risk_visual_fast_lane_skips_real_overlay_and_uses_fast_click(monkeypatch) -> None:
+    clicked: dict[str, int] = {}
+    overlay_calls = {"count": 0}
+    monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: _bound_window(title="SEEK - Microsoft Edge"))
+    monkeypatch.setattr(action_api.screenshot_service, "capture_window", lambda **kwargs: _capture())
+    monkeypatch.setattr(
+        action_api,
+        "_run_recognition_plan_for_execution",
+        lambda request: APIResponse(success=True, message="ok", data=VisionResultData(result=_visual_fast_lane_plan(goal=request.goal)).model_dump(), error=None),
+    )
+
+    def render_overlay(trace_path):
+        overlay_calls["count"] += 1
+        return {"output_path": "overlay.png"}
+
+    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", render_overlay)
+    monkeypatch.setattr(
+        action_api.input_controller,
+        "click_point",
+        lambda x, y, **kwargs: clicked.update(
+            {
+                "x": x,
+                "y": y,
+                "settle_ms": kwargs.get("settle_ms"),
+                "hold_ms": kwargs.get("hold_ms"),
+            }
+        )
+        or {"clicked": True},
+    )
+    monkeypatch.setattr(action_api.transition_memory, "save", lambda record: "transition.json")
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: f"logs/traces/actions/{kwargs['operation']}.json")
+
+    response = action_api.execute_recognition_plan(
+        ExecuteRecognitionPlanRequest(
+            goal="Click Job search",
+            app_name="seek",
+            dry_run=False,
+            enable_post_click_verification=False,
+            metadata={"forbid_final_submit": True},
+        )
+    )
+
+    assert response.success is True
+    result = response.data["result"]
+    assert clicked == {"x": 866, "y": 116, "settle_ms": 20, "hold_ms": 20}
+    assert overlay_calls["count"] == 0
+    assert result["recognition_plan_overlay"] is None
+    assert result["effective_execution_options"]["click_timing"] == {
+        "contract_version": "click_timing_options_v1",
+        "settle_ms": 20,
+        "hold_ms": 20,
+        "reason": "low_risk_visual_asset_fast_lane",
+    }
+    fast_lane = result["execution_path"]["low_risk_visual_fast_lane"]
+    assert fast_lane["allowed"] is True
+    assert result["execution_path"]["recognition_plan_overlay_rendered"] is False
+
+
+def test_execute_mode_low_risk_visual_fast_lane_keeps_dry_run_overlay(monkeypatch) -> None:
+    overlay_calls = {"count": 0}
+    monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: _bound_window(title="SEEK - Microsoft Edge"))
+    monkeypatch.setattr(action_api.screenshot_service, "capture_window", lambda **kwargs: _capture())
+    monkeypatch.setattr(
+        action_api,
+        "_run_recognition_plan_for_execution",
+        lambda request: APIResponse(success=True, message="ok", data=VisionResultData(result=_visual_fast_lane_plan(goal=request.goal)).model_dump(), error=None),
+    )
+
+    def render_overlay(trace_path):
+        overlay_calls["count"] += 1
+        return {"output_path": "overlay.png"}
+
+    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", render_overlay)
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: f"logs/traces/actions/{kwargs['operation']}.json")
+
+    response = action_api.execute_recognition_plan(
+        ExecuteRecognitionPlanRequest(
+            goal="Click Job search",
+            app_name="seek",
+            dry_run=True,
+            metadata={"forbid_final_submit": True},
+        )
+    )
+
+    assert response.success is True
+    result = response.data["result"]
+    assert overlay_calls["count"] == 1
+    assert result["recognition_plan_overlay"]["output_path"] == "overlay.png"
+    assert result["execution_path"]["low_risk_visual_fast_lane"]["allowed"] is True
+    assert result["execution_path"]["recognition_plan_overlay_rendered"] is True
+
+
 def test_execute_mode_final_submit_guard_blocks_before_click(monkeypatch) -> None:
     click_called = {"value": False}
     monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: _bound_window())
@@ -321,6 +458,98 @@ def test_execute_mode_final_submit_guard_blocks_before_click(monkeypatch) -> Non
     assert guard["allowed"] is False
     assert "submit application" in guard["matched_terms"]
     assert response.data["agent_step_result"]["final_submit_guard"]["allowed"] is False
+
+
+def test_execute_mode_final_submit_requires_structured_authorization(monkeypatch) -> None:
+    click_called = {"value": False}
+    monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: _bound_window())
+    monkeypatch.setattr(action_api.screenshot_service, "capture_window", lambda **kwargs: _capture())
+    monkeypatch.setattr(
+        action_api,
+        "_run_recognition_plan_for_execution",
+        lambda request: APIResponse(success=True, message="ok", data=VisionResultData(result=_final_submit_plan(goal=request.goal)).model_dump(), error=None),
+    )
+    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", lambda trace_path: {"output_path": "overlay.png"})
+
+    def fail_click(*args, **kwargs):
+        click_called["value"] = True
+        raise AssertionError("unstructured final submit metadata must not click")
+
+    monkeypatch.setattr(action_api.input_controller, "click_point", fail_click)
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: f"logs/traces/actions/{kwargs['operation']}.json")
+
+    response = action_api.execute_recognition_plan(
+        ExecuteRecognitionPlanRequest(
+            goal="Click Submit application",
+            app_name="edge",
+            dry_run=False,
+            metadata={
+                "forbid_final_submit": False,
+                "explicit_user_authorized_final_submit": True,
+                "authorization_source": "stale_or_thread_level_claim",
+            },
+        )
+    )
+
+    assert response.success is False
+    assert response.error is not None
+    assert response.error.code == "final_submit_guard_rejected"
+    assert click_called["value"] is False
+    guard = response.data["final_submit_guard"]
+    assert guard["allowed"] is False
+    assert guard["reason"] == "final_submit_requires_structured_authorization"
+    assert guard["authorization_check"]["errors"] == ["missing_final_submit_decision_v1"]
+
+
+def test_final_submit_authorization_accepts_reviewed_strong_apply() -> None:
+    request = ExecuteRecognitionPlanRequest(
+        goal="Click Submit application",
+        metadata={
+            "final_submit_decision": {
+                "contract_version": "final_submit_decision_v1",
+                "allow_final_submit": True,
+                "user_reviewed_current_job": True,
+                "match_decision": "strong_apply",
+                "risk_flags": [],
+                "unsupported_answer_risks": [],
+            }
+        },
+    )
+
+    guard = action_api._final_submit_guard_decision(
+        request=request,
+        plan=_final_submit_plan(goal=request.goal),
+        pre_click=_final_submit_plan(goal=request.goal)["pre_click_decision"],
+    )
+
+    assert guard["allowed"] is True
+    assert guard["reason"] == "structured_final_submit_authorization_accepted"
+    assert guard["authorization_check"]["valid"] is True
+
+
+def test_final_submit_authorization_blocks_unsupported_yes_answers() -> None:
+    request = ExecuteRecognitionPlanRequest(
+        goal="Click Submit application",
+        metadata={
+            "final_submit_decision": {
+                "contract_version": "final_submit_decision_v1",
+                "allow_final_submit": True,
+                "user_reviewed_current_job": True,
+                "match_decision": "strong_apply",
+                "unsupported_answer_risks": ["answered Yes to Java/Angular/Vue/MySQL without profile evidence"],
+            }
+        },
+    )
+
+    guard = action_api._final_submit_guard_decision(
+        request=request,
+        plan=_final_submit_plan(goal=request.goal),
+        pre_click=_final_submit_plan(goal=request.goal)["pre_click_decision"],
+    )
+
+    assert guard["allowed"] is False
+    assert guard["authorization_check"]["valid"] is False
+    assert "unsupported_answer_or_hard_risk_present" in guard["authorization_check"]["errors"]
 
 
 def test_execute_mode_final_submit_guard_ignores_negative_goal_constraint(monkeypatch) -> None:

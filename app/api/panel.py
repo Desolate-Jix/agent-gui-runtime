@@ -44,6 +44,18 @@ class PanelManualBoxRequest(BaseModel):
     label: Optional[str] = None
 
 
+class PanelInterfaceAssetCropRequest(BaseModel):
+    source_image_path: str = Field(min_length=1)
+    asset_id: str = Field(min_length=1)
+    label: Optional[str] = None
+    x: int = Field(ge=0)
+    y: int = Field(ge=0)
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+    padding_px: int = Field(default=6, ge=0, le=80)
+    context_padding_px: int = Field(default=16, ge=0, le=160)
+
+
 class PanelApplyModelProfileRequest(BaseModel):
     stage: str = Field(pattern="^(observe|locate)$")
     profile_id: str = Field(min_length=1)
@@ -80,7 +92,10 @@ def panel_file(path: str) -> Response:
         return PlainTextResponse("Not found", status_code=404)
     if not resolved.exists() or not resolved.is_file():
         return PlainTextResponse("Not found", status_code=404)
-    return FileResponse(resolved)
+    response = FileResponse(resolved)
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
 @router.get("/panel/list_traces", include_in_schema=False)
@@ -299,6 +314,19 @@ def inspect_trace(path: str) -> APIResponse:
                 state_match = path_graph_recall.get("state_match") if isinstance(path_graph_recall.get("state_match"), dict) else {}
                 parsed["path_graph_recall_state"] = state_match.get("state_id") or ""
                 parsed["sections"]["path_recall"] = path_graph_recall
+            visual_asset_recall = trace.get("visual_asset_recall") or plan.get("visual_asset_recall")
+            if isinstance(visual_asset_recall, dict):
+                parsed["visual_asset_recall_status"] = visual_asset_recall.get("status") or ""
+                parsed["visual_asset_fast_lane_used"] = bool(
+                    visual_asset_recall.get("fast_lane_allowed")
+                    or (trace.get("execution_path") or {}).get("visual_asset_fast_lane_used")
+                    or (plan.get("execution_path") or {}).get("visual_asset_fast_lane_used")
+                )
+                parsed["visual_asset_matched_count"] = int(
+                    visual_asset_recall.get("matched_count")
+                    or len([item for item in visual_asset_recall.get("matches") or [] if isinstance(item, dict) and item.get("matched")])
+                )
+                parsed["sections"]["visual_asset_recall"] = visual_asset_recall
             fallback_plan = trace.get("fallback_plan")
             if isinstance(fallback_plan, dict):
                 parsed["fallback_status"] = fallback_plan.get("status") or ""
@@ -513,6 +541,76 @@ def render_manual_box(request: PanelManualBoxRequest) -> APIResponse:
             message="Manual candidate box failed",
             data=None,
             error=ErrorModel(code="panel_manual_box_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/crop_interface_asset", response_model=APIResponse)
+def crop_interface_asset(request: PanelInterfaceAssetCropRequest) -> APIResponse:
+    try:
+        source_path = _resolve_allowed_artifact(request.source_image_path)
+        crop_dir = INTERFACE_MAP_DIR / "crops"
+        crop_dir.mkdir(parents=True, exist_ok=True)
+        safe_asset = _safe_file_stem(request.asset_id)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        with Image.open(source_path) as image:
+            width, height = image.size
+            bbox = _clip_xywh(request.x, request.y, request.width, request.height, width, height)
+            if bbox is None:
+                raise ValueError("crop bbox is outside source image")
+            tight_box = _expand_box(bbox, width, height, request.padding_px)
+            context_box = _expand_box(bbox, width, height, request.context_padding_px)
+            tight_crop = image.crop(tight_box)
+            context_crop = image.crop(context_box)
+            tight_path = crop_dir / f"{safe_asset}-{stamp}.tight.png"
+            context_path = crop_dir / f"{safe_asset}-{stamp}.context.png"
+            tight_crop.save(tight_path)
+            context_crop.save(context_path)
+        tight_ref = str(tight_path.resolve())
+        context_ref = str(context_path.resolve())
+        bbox_payload = _box_to_xywh(bbox)
+        click_point = {"x": bbox_payload["x"] + bbox_payload["w"] // 2, "y": bbox_payload["y"] + bbox_payload["h"] // 2}
+        trace_payload = {
+            "contract_version": "learned_interface_map_asset_crop_trace_v1",
+            "asset_id": request.asset_id,
+            "label": request.label or "",
+            "source_image_path": str(source_path),
+            "tight_crop_ref": tight_ref,
+            "context_crop_ref": context_ref,
+            "bbox": bbox_payload,
+            "click_point": click_point,
+            "padding_px": request.padding_px,
+            "context_padding_px": request.context_padding_px,
+            "artifact_is_authorization": False,
+            "can_authorize_click": False,
+        }
+        trace_path = write_trace(category="panel", operation="crop-interface-asset", payload=trace_payload, name_hint=safe_asset)
+        return APIResponse(
+            success=True,
+            message="Interface asset cropped",
+            data={
+                "contract_version": "learned_interface_map_asset_crop_v1",
+                "asset_id": request.asset_id,
+                "source_image_path": str(source_path),
+                "tight_crop_ref": tight_ref,
+                "context_crop_ref": context_ref,
+                "tight_crop_url": f"/panel/file?path={tight_ref}",
+                "context_crop_url": f"/panel/file?path={context_ref}",
+                "bbox": bbox_payload,
+                "click_point": click_point,
+                "padding_px": request.padding_px,
+                "context_padding_px": request.context_padding_px,
+                "trace_path": trace_path,
+                "artifact_is_authorization": False,
+                "can_authorize_click": False,
+            },
+            error=None,
+        )
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Interface asset crop failed",
+            data=None,
+            error=ErrorModel(code="interface_asset_crop_failed", details=str(exc)),
         )
 
 
@@ -734,6 +832,7 @@ def panel_model_test(request: PanelModelTestRequest) -> APIResponse:
 
 
 PATH_GRAPH_DIR = ROOT_DIR / "artifacts" / "path-graphs"
+INTERFACE_MAP_DIR = ROOT_DIR / "artifacts" / "interface-maps"
 
 
 @router.post("/panel/open_trace_folder", include_in_schema=False)
@@ -794,6 +893,45 @@ def save_path_graph_to_disk(request: dict) -> APIResponse:
         return APIResponse(success=False, message="Save failed", data=None, error=ErrorModel(code="path_graph_save_failed", details=str(exc)))
 
 
+@router.post("/panel/save_interface_map", include_in_schema=False)
+def save_interface_map_to_disk(request: dict) -> APIResponse:
+    try:
+        INTERFACE_MAP_DIR.mkdir(parents=True, exist_ok=True)
+        file_name = str(request.get("file_name") or "learned_interface_map.json")
+        payload = request.get("payload")
+        if not isinstance(payload, dict):
+            return APIResponse(
+                success=False,
+                message="Save failed",
+                data=None,
+                error=ErrorModel(code="invalid_interface_map_payload", details="payload must be an object"),
+            )
+        safe_name = "".join(c if c.isalnum() or c in "_.-" else "_" for c in file_name)
+        if not safe_name.endswith(".json"):
+            safe_name += ".json"
+        filepath = INTERFACE_MAP_DIR / safe_name
+        filepath.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        trace_payload = {
+            "contract_version": "learned_interface_map_edit_trace_v1",
+            "source_path": request.get("source_path") or "",
+            "saved_path": str(filepath.resolve()),
+            "edited_at": time.time(),
+            "edit_summary": request.get("edit_summary") or {},
+            "payload_summary": {
+                "contract_version": payload.get("contract_version"),
+                "app_id": payload.get("app_id"),
+                "region_count": len(payload.get("regions") or []),
+                "fixed_visual_asset_count": len(payload.get("fixed_visual_assets") or []),
+                "dynamic_area_count": len(payload.get("dynamic_areas") or []),
+                "danger_zone_count": len(payload.get("danger_zones") or []),
+            },
+        }
+        trace_path = write_trace(category="panel", operation="save-interface-map", payload=trace_payload, name_hint=safe_name)
+        return APIResponse(success=True, message=f"Saved to {filepath.name}", data={"path": str(filepath), "trace_path": trace_path}, error=None)
+    except Exception as exc:
+        return APIResponse(success=False, message="Save failed", data=None, error=ErrorModel(code="interface_map_save_failed", details=str(exc)))
+
+
 def _load_json(path: Path, default: dict) -> dict:
     if not path.exists():
         return dict(default)
@@ -827,6 +965,37 @@ def _image_content_type(path: Path) -> str:
     if suffix == ".bmp":
         return "image/bmp"
     return "image/png"
+
+
+def _safe_file_stem(value: str) -> str:
+    safe = "".join(char if char.isalnum() or char in {"-", "_", "."} else "_" for char in str(value))
+    return safe.strip("._")[:96] or "interface_asset"
+
+
+def _clip_xywh(x: int, y: int, width: int, height: int, image_width: int, image_height: int) -> tuple[int, int, int, int] | None:
+    left = max(0, min(int(x), image_width))
+    top = max(0, min(int(y), image_height))
+    right = max(0, min(int(x) + int(width), image_width))
+    bottom = max(0, min(int(y) + int(height), image_height))
+    if right <= left or bottom <= top:
+        return None
+    return left, top, right, bottom
+
+
+def _expand_box(box: tuple[int, int, int, int], image_width: int, image_height: int, padding: int) -> tuple[int, int, int, int]:
+    left, top, right, bottom = box
+    pad = max(0, int(padding))
+    return (
+        max(0, left - pad),
+        max(0, top - pad),
+        min(image_width, right + pad),
+        min(image_height, bottom + pad),
+    )
+
+
+def _box_to_xywh(box: tuple[int, int, int, int]) -> dict[str, int]:
+    left, top, right, bottom = box
+    return {"x": int(left), "y": int(top), "w": int(right - left), "h": int(bottom - top)}
 
 
 def _extract_chat_content(payload: dict[str, Any]) -> str:
@@ -925,6 +1094,7 @@ def _trace_flow_stages(parsed: dict[str, Any]) -> list[dict[str, Any]]:
         add("path_map", "Path Map", _path_map_label(sections.get("path_map"))),
         add("path_deep", "Path Deep", _path_deep_label(sections.get("path_deep"))),
         add("path_recall", "Path Recall", _path_recall_label(sections.get("path_recall"))),
+        add("visual_asset_recall", "Visual Assets", _visual_asset_recall_label(sections.get("visual_asset_recall"))),
         add("path_review", "Path Review", _path_review_label(sections.get("path_review"))),
         add("candidates", "Candidates", f"{parsed.get('candidates') or 0} returned"),
         add("coordinate_preview", "Coordinate Preview", _coordinate_preview_label(sections.get("coordinate_preview"))),
@@ -1076,6 +1246,27 @@ def _path_recall_label(raw: Any) -> str:
     return ", ".join(parts)
 
 
+def _visual_asset_recall_label(raw: Any) -> str:
+    if not isinstance(raw, dict):
+        return ""
+    status = str(raw.get("status") or "")
+    matched = raw.get("matched_count")
+    if matched is None and isinstance(raw.get("matches"), list):
+        matched = len([item for item in raw["matches"] if isinstance(item, dict) and item.get("matched")])
+    fast_lane = raw.get("fast_lane_allowed")
+    selected = raw.get("selected_asset_id") or raw.get("selected_candidate_id")
+    parts = []
+    if status:
+        parts.append(status)
+    if matched is not None:
+        parts.append(f"{matched} matched")
+    if fast_lane is not None:
+        parts.append("fast lane" if fast_lane else "gate only")
+    if selected:
+        parts.append(str(selected)[:32])
+    return ", ".join(parts)
+
+
 def _path_deep_label(raw: Any) -> str:
     if not isinstance(raw, dict):
         return ""
@@ -1191,6 +1382,12 @@ def _stage_summary(stage_id: str, parsed: dict[str, Any]) -> str:
         state_id = parsed.get("path_graph_recall_state") or ""
         suffix = f"; state: {state_id}" if state_id else ""
         return f"Path recall {status}: {count} candidate(s){suffix}".strip()
+    if stage_id == "visual_asset_recall":
+        status = parsed.get("visual_asset_recall_status") or ""
+        matched = parsed.get("visual_asset_matched_count") or 0
+        fast_lane = parsed.get("visual_asset_fast_lane_used")
+        lane = "; fast lane" if fast_lane else ""
+        return f"Visual asset recall {status}: {matched} matched asset(s){lane}".strip()
     if stage_id == "path_deep":
         status = parsed.get("path_graph_deep_status") or ""
         output_count = parsed.get("path_graph_deep_output_count") or 0

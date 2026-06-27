@@ -4,6 +4,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from app.execute.danger_scope import scoped_final_submit_visible_blocker
+
 
 FINAL_SUBMIT_TERMS = {
     "submit application",
@@ -70,12 +72,22 @@ APPLICATION_FLOW_TERMS = {
     "cv",
     "screening question",
 }
+APPLICATION_FLOW_START_TERMS = {
+    "apply with seek",
+    "choose documents",
+    "answer employer questions",
+    "update seek profile",
+    "review and submit",
+    "cover letter",
+    "resume",
+    "cv",
+}
 
 SEEK_INTERNAL_PLAN_STATES = {
     "cover_letter_field_detected",
     "application_form_detected",
+    "profile_review_detected",
     "screening_questions_detected",
-    "application_flow_opened",
 }
 SEEK_INTERNAL_BLOCKED_STATES = {
     "final_submit_visible",
@@ -94,6 +106,7 @@ def assess_seek_application_flow_state(
     observation: dict[str, Any] | None,
     *,
     source_job: dict[str, Any] | None = None,
+    post_fill_context: bool = False,
 ) -> dict[str, Any]:
     """Classify the page reached immediately after clicking SEEK Apply / Quick Apply."""
 
@@ -105,9 +118,20 @@ def assess_seek_application_flow_state(
     detected_states: list[str] = []
     state_type = "unknown_after_apply"
     stop_reason = "apply_entry_state_unclear_stop_before_form_fill"
-    final_submit_blocker = _final_submit_visible_blocker(items)
     form_inventory = _application_form_inventory(items)
     current_step = _current_seek_application_step(items)
+    seek_apply_route_visible = "seek.com/job/" in haystack and "/apply" in haystack
+    active_flow_started = (
+        bool(post_fill_context)
+        or
+        bool(current_step)
+        or seek_apply_route_visible
+        or _contains_any(
+            haystack,
+            APPLICATION_FLOW_START_TERMS | REVIEW_STEP_TERMS | COVER_LETTER_TERMS,
+        )
+    )
+    final_submit_blocker = _final_submit_visible_blocker(items, active_flow_started=active_flow_started)
 
     if final_submit_blocker["blocked"]:
         state_type = "final_submit_visible"
@@ -134,16 +158,20 @@ def assess_seek_application_flow_state(
         stop_reason = "resume_or_attachment_upload_requires_user_review"
         flags.append("resume_upload_required")
         detected_states.append("resume_upload_required")
-    elif _form_fields_contain_any(form_inventory, RISKY_FORM_TERMS):
+    elif current_step == "review_and_submit":
+        state_type = "review_step_detected"
+        stop_reason = "review_step_stop_before_final_submit"
+        detected_states.append("review_step_detected")
+    elif active_flow_started and _form_fields_contain_any(form_inventory, RISKY_FORM_TERMS):
         state_type = "risky_application_questions"
         stop_reason = "risky_application_questions_require_user_or_gpt_decision"
         flags.append("risky_questions_present")
         detected_states.append("risky_application_questions")
-    elif form_inventory["screening_questions_detected"]:
+    elif active_flow_started and form_inventory["screening_questions_detected"]:
         state_type = "screening_questions_detected"
         stop_reason = "screening_questions_stop_before_form_fill"
         detected_states.append("screening_questions_detected")
-    elif form_inventory["cover_letter_field_detected"]:
+    elif active_flow_started and form_inventory["cover_letter_field_detected"]:
         state_type = "cover_letter_field_detected"
         stop_reason = "cover_letter_field_detected_stop_before_paste"
         detected_states.append("cover_letter_field_detected")
@@ -151,11 +179,19 @@ def assess_seek_application_flow_state(
         state_type = "review_step_detected"
         stop_reason = "review_step_stop_before_final_submit"
         detected_states.append("review_step_detected")
-    elif form_inventory["application_form_detected"]:
+    elif current_step == "update_seek_profile":
+        state_type = "profile_review_detected"
+        stop_reason = "profile_review_detected_continue_without_profile_mutation"
+        detected_states.append("profile_review_detected")
+    elif active_flow_started and form_inventory["application_form_detected"]:
         state_type = "application_form_detected"
         stop_reason = "application_form_detected_stop_before_form_fill"
         detected_states.append("application_form_detected")
-    elif _contains_any(haystack, APPLICATION_FLOW_TERMS):
+    elif seek_apply_route_visible:
+        state_type = "application_flow_opened"
+        stop_reason = "seek_apply_route_opened_wait_for_form_or_user_review"
+        detected_states.append("seek_apply_route_detected")
+    elif _contains_any(haystack, APPLICATION_FLOW_START_TERMS):
         state_type = "application_flow_opened"
         stop_reason = "application_flow_opened_stop_before_form_fill"
         detected_states.append("application_flow_opened")
@@ -181,6 +217,9 @@ def assess_seek_application_flow_state(
             "job_id": (source_job or {}).get("job_id"),
             "title": (source_job or {}).get("title"),
             "company": (source_job or {}).get("company"),
+        },
+        "context": {
+            "post_fill_context": bool(post_fill_context),
         },
         "evidence": {
             "texts": texts[:120],
@@ -219,6 +258,17 @@ def build_seek_apply_flow_decision(application_flow_state: dict[str, Any] | None
             "cover_letter_draft": False,
             "answer_plan": False,
             "safe_fill": False,
+            "submit": True,
+        }
+    elif source_state_type == "application_flow_opened":
+        state_type = "seek_internal_application_flow_opened_waiting_for_form"
+        decision = "wait_for_form_readiness"
+        reason = "seek_apply_route_opened_wait_for_form_or_user_review"
+        allowed_next_steps = ["observe_application_form", "capture", "back_to_seek", "match"]
+        blocked_downstream = {
+            "cover_letter_draft": True,
+            "answer_plan": True,
+            "safe_fill": True,
             "submit": True,
         }
     elif source_state_type in SEEK_INTERNAL_BLOCKED_STATES:
@@ -393,7 +443,14 @@ def _current_seek_application_step(items: list[dict[str, Any]]) -> str | None:
         key = _clean_text(str(item.get("text") or "")).casefold()
         if not key:
             continue
-        if "/apply/profile" in key or key.startswith("update seek profile | seek"):
+        compact_key = re.sub(r"[^0-9a-z]+", "", key)
+        if (
+            "/apply/profile" in key
+            or "/apply/profil" in key
+            or key.startswith("update seek profile | seek")
+            or compact_key.startswith("updateseekprofile")
+            or compact_key.startswith("updateseekprofle")
+        ):
             return "update_seek_profile"
         if "/apply/role-requirements" in key or key.startswith("answer employer questions | seek"):
             return "answer_employer_questions"
@@ -474,38 +531,12 @@ def _collect_visible_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return items
 
 
-def _final_submit_visible_blocker(items: list[dict[str, Any]]) -> dict[str, Any]:
-    matched_terms: list[str] = []
-    matched_items: list[dict[str, Any]] = []
-    for item in items:
-        text = str(item.get("text") or "")
-        item_terms = _final_submit_terms_in_text(text)
-        if not item_terms:
-            continue
-        if _is_generic_generated_submit_label(item, text):
-            continue
-        if _is_negative_or_instructional_submit_text(text):
-            continue
-        if not _is_final_submit_action_like(item, text):
-            continue
-        matched_terms.extend(item_terms)
-        matched_items.append(
-            {
-                "collection": item.get("collection"),
-                "id": item.get("id"),
-                "text": text,
-                "role": item.get("role"),
-                "bbox": item.get("bbox"),
-                "matched_terms": item_terms,
-            }
-        )
+def _final_submit_visible_blocker(items: list[dict[str, Any]], *, active_flow_started: bool = True) -> dict[str, Any]:
+    scoped = scoped_final_submit_visible_blocker(items, active_flow_started=active_flow_started)
     return {
+        **scoped,
         "contract_version": "final_submit_visible_blocker_v1",
-        "enabled": True,
-        "blocked": bool(matched_items),
-        "matched_terms": sorted(set(matched_terms)),
-        "matched_items": matched_items[:20],
-        "reason": "final_submit_visible_stop_before_submission" if matched_items else "no_final_submit_visible",
+        "reason": "final_submit_visible_stop_before_submission" if scoped.get("blocked") else "no_final_submit_visible",
     }
 
 

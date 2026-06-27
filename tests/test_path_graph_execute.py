@@ -132,6 +132,7 @@ def test_execute_step_plan_builds_scroll_and_click_contexts() -> None:
 
     assert scroll_plan["contract_version"] == "execute_step_response_v1"
     assert scroll_plan["low_level_action_type"] == "scroll"
+    assert scroll_plan["action_taxonomy"]["kind"] == "read"
     assert scroll_plan["low_level_request"]["target_container_id"] == "seek:job_detail"
     assert scroll_plan["path_graph_action_context"]["contract_version"] == "path_graph_action_context_v1"
     assert scroll_plan["path_graph_action_context"]["artifact_is_authorization"] is False
@@ -139,6 +140,7 @@ def test_execute_step_plan_builds_scroll_and_click_contexts() -> None:
     assert scroll_plan["path_graph_runtime_state_v1"]["before_state_id"] == "seek_search_results_with_selected_job"
     assert scroll_plan["path_graph_runtime_state_v1"]["action_template_id"] == "read_detail"
     assert click_plan["low_level_action_type"] == "click"
+    assert click_plan["action_taxonomy"]["kind"] == "open_detail"
     assert click_plan["low_level_request"]["metadata"]["path_graph_action_context"]["requires_gate"] is True
     assert click_plan["low_level_request"]["metadata"]["artifact_is_authorization"] is False
 
@@ -173,6 +175,8 @@ def test_execute_available_actions_and_step_api() -> None:
     assert selected_action["transition_id"] == "seek:transition:read_detail"
     assert selected_action["from_state_id"] == "seek_search_results_with_selected_job"
     assert selected_action["to_state_id"] == "seek_detail_scrolled"
+    assert selected_action["action_taxonomy"]["kind"] == "read"
+    assert selected_action["safety"]["final_submit"] is False
     step_response = client.post(
         "/execute/step",
         json={

@@ -1,0 +1,1050 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_fafdf87f9055",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.82,
+    "job_id": "seek_job_fafdf87f9055",
+    "title": "Embedded Software Engineer",
+    "company": "Garmin New Zealand Limited",
+    "fit_summary": "strong_apply with score 0.820. positive: matched_skills: AI, API, Git; matched_target_roles: Software Engineer; location_matches: Grey Lynn,Auckland. needs review: preferred work mode not visible in job detail.",
+    "recommended_next_action": "open_apply_entry_and_prepare_safe_fields",
+    "positive_evidence": [
+      "matched_skills: AI, API, Git",
+      "matched_target_roles: Software Engineer",
+      "location_matches: Grey Lynn,Auckland"
+    ],
+    "negative_evidence": [],
+    "unknowns": [
+      "preferred work mode not visible in job detail"
+    ],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_fafdf87f9055",
+    "title": "Embedded Software Engineer",
+    "company": "Garmin New Zealand Limited",
+    "location": "Grey Lynn,Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": "Embedded Software Engineer",
+    "card_bbox": {
+      "x": 653,
+      "y": 1000,
+      "w": 415,
+      "h": 234
+    },
+    "click_point": {
+      "x": 778,
+      "y": 1013
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_15",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_47_embedded-software-engineer",
+      "page_text_48_c-c",
+      "page_text_50_garmin-new-zealand-limited",
+      "page_text_51_grey-lynn-auckland",
+      "page_text_52_elevate-your-career-with-a-globalleader-and-join",
+      "page_text_53_supportive-team",
+      "page_text_54_join-a-collaborative-innovative-workplace-where-",
+      "page_text_55_ideas-matter",
+      "page_text_56_great-culture-excellent-benefits-and-real-career"
+    ],
+    "evidence": {
+      "texts": [
+        "Embedded Software Engineer",
+        "(C/C++)",
+        "Garmin New Zealand Limited",
+        "Grey Lynn,Auckland",
+        "Elevate your career with a globalleader and join a very",
+        "supportive team",
+        "Join a collaborative, innovative workplace where your",
+        "ideas matter",
+        "Great culture, excellent benefits, and real career growth"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": false,
+        "has_salary": false
+      }
+    },
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-124550-991693__observe-screen__edge.json",
+      "viewport_size": {
+        "width": 2560,
+        "height": 1400
+      },
+      "source": "seek_job_card_extraction",
+      "freshness": "current_capture"
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_fafdf87f9055",
+    "title": "Embedded Software Engineer",
+    "company": "Garmin New Zealand Limited",
+    "location": "Grey Lynn,Auckland",
+    "work_type": "Fulltime",
+    "classification": "Embedded SoftwareEngineer(C/C++)",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "Companies"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "Recruiters"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Employer site"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "All Auckland"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "SEEK"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "HEALTHIER,"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "LONGER,"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "BETTER"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "LIVES"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "AccessibilityTick"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "LPRI"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "gendertik"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "HEALTHIER,LONGER."
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "BETTERLIVES"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "SoftwareEngineerSpecialist-Integration"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "AlA New Zealand ★ 4.97reviews·View alljobs"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "Takapuna, Auckland"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "Engineering -Software (Information&Communication Technology)"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "Full time"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "Posted 1d ago"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "Apply"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "① Visited employer's application site on 24 Jun 2026"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "1 skill or credential matches your profile"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "C#ProgrammingShow all"
+      },
+      {
+        "index": 25,
+        "role": "batch_ocr",
+        "text": "ting time"
+      },
+      {
+        "index": 26,
+        "role": "batch_ocr",
+        "text": "VERINE"
+      },
+      {
+        "index": 27,
+        "role": "batch_ocr",
+        "text": "PBDE"
+      },
+      {
+        "index": 28,
+        "role": "batch_ocr",
+        "text": "TOITO"
+      },
+      {
+        "index": 29,
+        "role": "batch_ocr",
+        "text": "gendertick"
+      },
+      {
+        "index": 30,
+        "role": "batch_ocr",
+        "text": "PLEDGE"
+      },
+      {
+        "index": 31,
+        "role": "batch_ocr",
+        "text": "HEALTHIER,LONGER,"
+      },
+      {
+        "index": 32,
+        "role": "batch_ocr",
+        "text": "Software Engineer Specialist- Integration"
+      },
+      {
+        "index": 33,
+        "role": "batch_ocr",
+        "text": "AlA NewZealand"
+      },
+      {
+        "index": 34,
+        "role": "batch_ocr",
+        "text": "★4.97reviews·View alljobs"
+      },
+      {
+        "index": 35,
+        "role": "batch_ocr",
+        "text": "Takapuna,Auckland"
+      },
+      {
+        "index": 36,
+        "role": "batch_ocr",
+        "text": "Engineering - Software (Information & Communication Technology)"
+      },
+      {
+        "index": 37,
+        "role": "batch_ocr",
+        "text": "ApplyC"
+      },
+      {
+        "index": 38,
+        "role": "batch_ocr",
+        "text": "①Visitedemployer's application site on 24Jun 2026"
+      },
+      {
+        "index": 39,
+        "role": "batch_ocr",
+        "text": "1 skill orcredentialmatchesyourprofile"
+      },
+      {
+        "index": 40,
+        "role": "batch_ocr",
+        "text": "C#Programming"
+      },
+      {
+        "index": 41,
+        "role": "batch_ocr",
+        "text": "Show all"
+      },
+      {
+        "index": 42,
+        "role": "batch_ocr",
+        "text": "Software Engineer Specialist - Integration"
+      },
+      {
+        "index": 43,
+        "role": "batch_ocr",
+        "text": "AIA New Zealand"
+      },
+      {
+        "index": 44,
+        "role": "batch_ocr",
+        "text": "YourRolewithUsToTurangakiaMatou"
+      },
+      {
+        "index": 45,
+        "role": "batch_ocr",
+        "text": "As aSoftware EngineerSpecialist-Integration in ourTechnology team,you'll play a key"
+      },
+      {
+        "index": 46,
+        "role": "batch_ocr",
+        "text": "roleindesigning anddeliveringintegrationsolutionsthatkeepoursystemsconnected,"
+      },
+      {
+        "index": 47,
+        "role": "batch_ocr",
+        "text": "secure,and running smoothly.You'll collaborate with architects,engineers,and business"
+      },
+      {
+        "index": 48,
+        "role": "batch_ocr",
+        "text": "stakeholderstobuildrobust,scalableplatformsthatsupportbothstrategicinitiativesand"
+      },
+      {
+        "index": 49,
+        "role": "batch_ocr",
+        "text": "day-to-day operations. This is an exciting opportunity to grow your technical expertise,"
+      },
+      {
+        "index": 50,
+        "role": "batch_ocr",
+        "text": "strengthenyourinfluence acrossteams,and contributeto continuous improvement as"
+      },
+      {
+        "index": 51,
+        "role": "batch_ocr",
+        "text": "Your Impact|To Panga"
+      },
+      {
+        "index": 52,
+        "role": "batch_ocr",
+        "text": "·Designanddeliverintegrationsolutionsthatenablereliable,secureconnectivityand"
+      },
+      {
+        "index": 53,
+        "role": "batch_ocr",
+        "text": "supportbusinessoutcomesacrosstheorganisation."
+      },
+      {
+        "index": 54,
+        "role": "batch_ocr",
+        "text": "·Develop and enhance integration components that meet quality standards,improving"
+      },
+      {
+        "index": 55,
+        "role": "batch_ocr",
+        "text": "system performance and maintainability."
+      },
+      {
+        "index": 56,
+        "role": "batch_ocr",
+        "text": "·Resolve incidents and strengthen reliability, contributing to improved system stability"
+      },
+      {
+        "index": 57,
+        "role": "batch_ocr",
+        "text": "and seamless operations."
+      },
+      {
+        "index": 58,
+        "role": "batch_ocr",
+        "text": "·Collaboratewithstakeholderstoclarifyrequirementsanddeliversolutionsthatalign"
+      },
+      {
+        "index": 59,
+        "role": "batch_ocr",
+        "text": "withbusinessneeds and expectations."
+      },
+      {
+        "index": 60,
+        "role": "batch_ocr",
+        "text": "·Drivecontinuousimprovement bycontributing toplatformroadmaps and evolving"
+      },
+      {
+        "index": 61,
+        "role": "batch_ocr",
+        "text": "integrationpracticesforlong-termsuccess."
+      },
+      {
+        "index": 62,
+        "role": "batch_ocr",
+        "text": "Your Capabilities|O Aheinga"
+      },
+      {
+        "index": 63,
+        "role": "batch_ocr",
+        "text": "·You bring strong experience in integration orC#.NET development, with the ability to"
+      },
+      {
+        "index": 64,
+        "role": "batch_ocr",
+        "text": "deliver solutions in complex environments."
+      },
+      {
+        "index": 65,
+        "role": "batch_ocr",
+        "text": "thatunderpinsyourtechnical expertise."
+      },
+      {
+        "index": 66,
+        "role": "batch_ocr",
+        "text": "·You communicate clearly and build effective relationships, enabling collaboration with"
+      },
+      {
+        "index": 67,
+        "role": "batch_ocr",
+        "text": "bothtechnical andnon-technicalstakeholders."
+      },
+      {
+        "index": 68,
+        "role": "batch_ocr",
+        "text": "·You applyanalyticalthinking andsoundjudgement,balancingquality,risk,and"
+      },
+      {
+        "index": 69,
+        "role": "batch_ocr",
+        "text": "deliveryoutcomestosolveproblemseffectively."
+      },
+      {
+        "index": 70,
+        "role": "batch_ocr",
+        "text": "Youtakeownershipandcontributetoteamsuccess,managingprioritieswhile"
+      },
+      {
+        "index": 71,
+        "role": "batch_ocr",
+        "text": "·You take ownership and contribute to team success,managing priorities while"
+      },
+      {
+        "index": 72,
+        "role": "batch_ocr",
+        "text": "supporting others through knowledge sharing."
+      },
+      {
+        "index": 73,
+        "role": "batch_ocr",
+        "text": "·You may also have relevant professional certifications, ora desire to continue"
+      },
+      {
+        "index": 74,
+        "role": "batch_ocr",
+        "text": "developing your capability."
+      },
+      {
+        "index": 75,
+        "role": "batch_ocr",
+        "text": "YourLifeatAlAIToAokiAlA"
+      },
+      {
+        "index": 76,
+        "role": "batch_ocr",
+        "text": "AtAlA,yourexperiencematters,andsodoesyourimpact.Inreturnforyourexpertise,we"
+      },
+      {
+        "index": 77,
+        "role": "batch_ocr",
+        "text": "offer a career where you can apply your skills to meaningful work that improves lives"
+      },
+      {
+        "index": 78,
+        "role": "batch_ocr",
+        "text": "across Asia-Pacific. You'll enjoy flexible ways of working, competitive rewards, and access"
+      },
+      {
+        "index": 79,
+        "role": "batch_ocr",
+        "text": "to continuous learning programs designed to keep you ahead in a rapidly changing world."
+      },
+      {
+        "index": 80,
+        "role": "batch_ocr",
+        "text": "Ourcollaborativeculturevaluesyourideasandempowersyoutoinnovate,solvecomplex"
+      },
+      {
+        "index": 81,
+        "role": "batch_ocr",
+        "text": "challenges, and contribute to ourambition of helping a billion people live Healthier,"
+      },
+      {
+        "index": 82,
+        "role": "batch_ocr",
+        "text": "Longer,BetterLivesby2030."
+      },
+      {
+        "index": 83,
+        "role": "batch_ocr",
+        "text": "Diversity,equity,and inclusionarecentral towhoweareand howwework.Wevalue"
+      },
+      {
+        "index": 84,
+        "role": "batch_ocr",
+        "text": "people from all walks of life and welcome candidates of all backgrounds, identities, and"
+      },
+      {
+        "index": 85,
+        "role": "batch_ocr",
+        "text": "lived experiences,including thosewithdisabilities,additional mental healthneeds,"
+      },
+      {
+        "index": 86,
+        "role": "batch_ocr",
+        "text": "chronichealthconditions,orwhoareneurodiverse.lIfyou'reexcited aboutthisrolebut"
+      },
+      {
+        "index": 87,
+        "role": "batch_ocr",
+        "text": "don't meet every requirement, we still encourage you to apply. And if there's anything we"
+      },
+      {
+        "index": 88,
+        "role": "batch_ocr",
+        "text": "nz...."
+      },
+      {
+        "index": 89,
+        "role": "batch_ocr",
+        "text": ".@aia.com."
+      },
+      {
+        "index": 90,
+        "role": "batch_ocr",
+        "text": "Believe in Better with AlA NZ"
+      },
+      {
+        "index": 91,
+        "role": "batch_ocr",
+        "text": "AIA NZ"
+      },
+      {
+        "index": 92,
+        "role": "body",
+        "text": "GARMIN."
+      },
+      {
+        "index": 93,
+        "role": "body",
+        "text": "GREAT PRODUCTS."
+      },
+      {
+        "index": 94,
+        "role": "body",
+        "text": "GREATPEOPLE."
+      },
+      {
+        "index": 95,
+        "role": "section_hint",
+        "text": "GREATBENEFITS."
+      },
+      {
+        "index": 96,
+        "role": "body",
+        "text": "Responsive hirer"
+      },
+      {
+        "index": 97,
+        "role": "body",
+        "text": "Embedded SoftwareEngineer(C/C++)"
+      },
+      {
+        "index": 98,
+        "role": "body",
+        "text": "Garmin New Zealand Limited View all jobs"
+      },
+      {
+        "index": 99,
+        "role": "body",
+        "text": "Grey Lynn, Auckland"
+      },
+      {
+        "index": 100,
+        "role": "body",
+        "text": "Engineering -Software(Information&Communication Technology)"
+      },
+      {
+        "index": 101,
+        "role": "body",
+        "text": "Fulltime"
+      },
+      {
+        "index": 102,
+        "role": "body",
+        "text": "Posted 22d ago · Medium application volume"
+      },
+      {
+        "index": 103,
+        "role": "body",
+        "text": "Quick apply"
+      },
+      {
+        "index": 104,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 105,
+        "role": "body",
+        "text": "Introduction:"
+      },
+      {
+        "index": 106,
+        "role": "body",
+        "text": "·Do youhave experience with C and/orC++ in the embedded environment?"
+      },
+      {
+        "index": 107,
+        "role": "body",
+        "text": "·Looking for a new technical challenge?"
+      },
+      {
+        "index": 108,
+        "role": "body",
+        "text": "·Want tobuild industry leading cutting edgeconsumerelectronics?"
+      },
+      {
+        "index": 109,
+        "role": "batch_ocr",
+        "text": "GARMIN"
+      },
+      {
+        "index": 110,
+        "role": "batch_ocr",
+        "text": "EmbeddedSoftwareEngineer(C/C++)"
+      },
+      {
+        "index": 111,
+        "role": "batch_ocr",
+        "text": "Grey Lynn,Auckland"
+      },
+      {
+        "index": 112,
+        "role": "batch_ocr",
+        "text": "Engineering-Software (Information&Communication Technology)"
+      },
+      {
+        "index": 113,
+        "role": "batch_ocr",
+        "text": "Posted 22d ago·Medium application volume"
+      },
+      {
+        "index": 114,
+        "role": "batch_ocr",
+        "text": "EmbeddedSoftware Engineer(C/C++)"
+      },
+      {
+        "index": 115,
+        "role": "batch_ocr",
+        "text": "·DoyouhaveexperiencewithCand/orC++intheembeddedenvironment?"
+      },
+      {
+        "index": 116,
+        "role": "batch_ocr",
+        "text": "·Lookingforanewtechnicalchallenge?"
+      },
+      {
+        "index": 117,
+        "role": "batch_ocr",
+        "text": "·Want tobuild industry leading cutting edge consumerelectronics?"
+      },
+      {
+        "index": 118,
+        "role": "batch_ocr",
+        "text": "Quickapply"
+      },
+      {
+        "index": 119,
+        "role": "batch_ocr",
+        "text": "Garmin NewZealand Limited"
+      },
+      {
+        "index": 120,
+        "role": "batch_ocr",
+        "text": "Joinourfast-paced developmentteam that isrevolutionising theglobal marine"
+      },
+      {
+        "index": 121,
+        "role": "batch_ocr",
+        "text": "entertainment industry."
+      },
+      {
+        "index": 122,
+        "role": "batch_ocr",
+        "text": "AtGarmin,wefuelpeople'spassions.Wemakeproductsforeverywherethatpeoplelive,"
+      },
+      {
+        "index": 123,
+        "role": "batch_ocr",
+        "text": "work and play. Our customers are passionate about our products, and so are we."
+      },
+      {
+        "index": 124,
+        "role": "batch_ocr",
+        "text": "Purpose of the Role:"
+      },
+      {
+        "index": 125,
+        "role": "batch_ocr",
+        "text": "to the Marine environment.Tobe part of our team,you must be able to:"
+      },
+      {
+        "index": 126,
+        "role": "batch_ocr",
+        "text": "·Develop new entertainment solutions based upon industrycommunication standards"
+      },
+      {
+        "index": 127,
+        "role": "batch_ocr",
+        "text": "(Bluetooth,USB,Wi-Fi,Ethernet)"
+      },
+      {
+        "index": 128,
+        "role": "batch_ocr",
+        "text": "·Plan and document tasks and requirements"
+      },
+      {
+        "index": 129,
+        "role": "batch_ocr",
+        "text": "·FollowtheGarmindevelopmentprocess"
+      },
+      {
+        "index": 130,
+        "role": "batch_ocr",
+        "text": "·Promoteteam-workandcollaboration"
+      },
+      {
+        "index": 131,
+        "role": "batch_ocr",
+        "text": "Somedomesticandinternationaltravelmayberequiredfromtimetotime."
+      },
+      {
+        "index": 132,
+        "role": "batch_ocr",
+        "text": "Qualifications and Skills:"
+      },
+      {
+        "index": 133,
+        "role": "batch_ocr",
+        "text": "Candidatesforthisrole should possess a Master's or Bachelor's degree in Computer"
+      },
+      {
+        "index": 134,
+        "role": "batch_ocr",
+        "text": "Science, Electrical Engineering,Computer Engineering,Math, Physics or relevant"
+      },
+      {
+        "index": 135,
+        "role": "batch_ocr",
+        "text": "engineering/technical field."
+      },
+      {
+        "index": 136,
+        "role": "batch_ocr",
+        "text": "Ifyou excel insome thefollowing skillswewould liketohear from you:"
+      },
+      {
+        "index": 137,
+        "role": "batch_ocr",
+        "text": "·Writing softwareinC and C++,understandfundamental object-oriented design"
+      },
+      {
+        "index": 138,
+        "role": "batch_ocr",
+        "text": "·Wirednetworking:CAN,NMEA2O0O,USB,Ethernet,TSN"
+      },
+      {
+        "index": 139,
+        "role": "batch_ocr",
+        "text": "·Wirelessnetworking:Bluetooth,LE-Audio,Wi-Fi"
+      },
+      {
+        "index": 140,
+        "role": "batch_ocr",
+        "text": "·UI frameworks: (LVGL, Qt, OpenGL, Android, iOS)"
+      },
+      {
+        "index": 141,
+        "role": "batch_ocr",
+        "text": "·Workflow:JIRA,Confluence,Git,Gerrit,Zuul,Azure DevOps"
+      },
+      {
+        "index": 142,
+        "role": "batch_ocr",
+        "text": "Benefits"
+      },
+      {
+        "index": 143,
+        "role": "batch_ocr",
+        "text": "Garmin NZ offers significant employee benefits including fully funded health,life and"
+      },
+      {
+        "index": 144,
+        "role": "batch_ocr",
+        "text": "Embedded Software Engineer(C/C++)"
+      },
+      {
+        "index": 145,
+        "role": "batch_ocr",
+        "text": "Garmin New Zealand Limited"
+      },
+      {
+        "index": 146,
+        "role": "batch_ocr",
+        "text": "NZ/careers/benefits/"
+      },
+      {
+        "index": 147,
+        "role": "batch_ocr",
+        "text": "AtGarminNZyouwill besurroundedbyotherswhosharethesamepassionaboutwhat"
+      },
+      {
+        "index": 148,
+        "role": "batch_ocr",
+        "text": "theydoeveryday.Weworkcloselywithone anothertodeliverinnovativesolutions at the"
+      },
+      {
+        "index": 149,
+        "role": "batch_ocr",
+        "text": "cutting edge of hardwareand softwaretechnology."
+      },
+      {
+        "index": 150,
+        "role": "batch_ocr",
+        "text": "How to Apply"
+      },
+      {
+        "index": 151,
+        "role": "batch_ocr",
+        "text": "wanttojoina tightknitteamofothersthatsharethatpassion,thenwewanttohearfrom"
+      },
+      {
+        "index": 152,
+        "role": "batch_ocr",
+        "text": "jno人"
+      },
+      {
+        "index": 153,
+        "role": "batch_ocr",
+        "text": "Please includeyourCVanda coverletterinyour application,telling uswhyyou're a great"
+      },
+      {
+        "index": 154,
+        "role": "batch_ocr",
+        "text": "fit for this position."
+      },
+      {
+        "index": 155,
+        "role": "batch_ocr",
+        "text": "You must have the right to live and work in New Zealand to apply for this job. We will only"
+      },
+      {
+        "index": 156,
+        "role": "batch_ocr",
+        "text": "contactcandidateswhoaredeemedtobemostsuitablebasedonourselectioncriteria."
+      },
+      {
+        "index": 157,
+        "role": "batch_ocr",
+        "text": "Employerquestions"
+      },
+      {
+        "index": 158,
+        "role": "batch_ocr",
+        "text": "Yourapplicationwill include thefollowingquestions:"
+      },
+      {
+        "index": 159,
+        "role": "batch_ocr",
+        "text": "·Which of the following statements best describes your right to work in New Zealand?"
+      },
+      {
+        "index": 160,
+        "role": "batch_ocr",
+        "text": "·How many years' experience do you have as an Embedded Software Engineer?"
+      },
+      {
+        "index": 161,
+        "role": "batch_ocr",
+        "text": "Which of the following programming languages are you experienced in?"
+      },
+      {
+        "index": 162,
+        "role": "batch_ocr",
+        "text": "What'syourexpectedannualbasesalary?"
+      },
+      {
+        "index": 163,
+        "role": "batch_ocr",
+        "text": "Be careful"
+      },
+      {
+        "index": 164,
+        "role": "batch_ocr",
+        "text": "Don't provide your bank or credit card details when applying for jobs."
+      },
+      {
+        "index": 165,
+        "role": "batch_ocr",
+        "text": "Learnhowtoprotectyourself"
+      },
+      {
+        "index": 166,
+        "role": "batch_ocr",
+        "text": "Report thisjobad"
+      }
+    ],
+    "requirements": [
+      "·Do youhave experience with C and/orC++ in the embedded environment?"
+    ],
+    "responsibilities": [],
+    "benefits": [
+      "GREATBENEFITS."
+    ],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply",
+      "bbox": {
+        "x": 1191,
+        "y": 1080,
+        "w": 104,
+        "h": 28
+      },
+      "click_point": {
+        "x": 1243,
+        "y": 1094
+      },
+      "candidate_freshness": {
+        "contract_version": "action_candidate_freshness_v1",
+        "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-124744-550714__observe-screen__edge.json",
+        "viewport_size": {
+          "width": 2560,
+          "height": 1400
+        },
+        "source": "seek_apply_button_extraction",
+        "freshness": "current_capture"
+      }
+    },
+    "save_button_state": {
+      "visible": true,
+      "label": "Save",
+      "bbox": {
+        "x": 1354,
+        "y": 1082,
+        "w": 46,
+        "h": 23
+      }
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 1134,
+        "y": 280,
+        "w": 896,
+        "h": 1104
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false,
+        "content_left": 530,
+        "content_width": 1500
+      },
+      "safe_points": [
+        {
+          "x": 1582,
+          "y": 832,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 1134,
+      "y": 60,
+      "w": 896,
+      "h": 1324
+    },
+    "detail_bottom_reached": false,
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-124631-455310__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-124634-454969__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-124641-887502__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-124647-765655__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-124744-550714__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-124747-571298__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-124754-588440__ocr-region__ocr-region.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260625-124800-668576__ocr-region__ocr-region.json"
+    ],
+    "runtime_detail_snapshot": {
+      "contract_version": "runtime_detail_snapshot_v1",
+      "source": "read_region_batch",
+      "revision": 4,
+      "previous_snapshot_id": "8543d61d96bd0743",
+      "snapshot_id": "a6c4a545308df8d8"
+    },
+    "detail_batch_status": "ok",
+    "detail_batch_stop_reason": "max_captures",
+    "detail_batch_unique_line_count": 69,
+    "runtime_detail_dataflow": {
+      "contract_version": "runtime_detail_dataflow_v1",
+      "source_batch_contract": "read_region_batch_v1",
+      "source_batch_status": "ok",
+      "merged_text_line_count": 69,
+      "description_section_count": 167
+    }
+  }
+}

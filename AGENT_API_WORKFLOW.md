@@ -10,6 +10,26 @@ The core rule is:
 
 The desktop test panel also exposes `POST /action/execute_confirmed_point` for an operator who has visibly reviewed a candidate bbox and deliberately presses its coordinate-click button. This diagnostic path is not an autonomous agent execution path and does not replace `pre_click_decision_v1`.
 
+Low-risk navigation clicks such as opening a card, result row, article title, job title, or detail link may be allowed even when their learned-map source originally marked them as `safe_dry_run_only`, as long as local grounding succeeds and the target text does not look like Apply, Submit, Delete, Pay, Purchase, Send, Save changes, Upload, or another side-effect action. Those dangerous targets still require confirmation or remain blocked.
+
+For VISTA-backed execution, prefer compressed grounding. When an upper agent already has a reviewed card/result bbox, send it as `metadata.seeded_candidate_v1` / `metadata.seeded_candidate`; the runtime treats that as the primary path, crops a compact single-candidate ROI, and asks VISTA only to validate the point inside that crop. Trace evidence records `vista_roi_policy=compact_seed_candidate_roi_primary`, `vista_roi_source=seeded_candidate_v1`, processed size, crop bounds, and `fallback_tier=primary`. Ambiguous multi-candidate PathGraph union crops and VISTA direct full-screen grounding are fallback paths, not the normal SEEK/list-detail path.
+
+## Trace Digest For Upper Agents
+
+Upper-layer agents should not paste or read full trace JSON when deciding the next step. First summarize the trace with:
+
+```powershell
+uv run python scripts\agent_trace_digest.py "logs\traces\vision\TRACE.json" --format text
+```
+
+For machine handoff, use JSON:
+
+```powershell
+uv run python scripts\agent_trace_digest.py "logs\traces\vision\TRACE.json" --format json
+```
+
+The script emits `agent_trace_digest_v1` with the request, screen summary, PathGraph/candidate summary, Gate decision, action result, and screenshot/overlay paths. Use this digest for ChatGPT consultation or external-agent handoff, and open the full trace only for the specific raw section referenced by the digest.
+
 ## Path-Graph-Assisted Single-Step Execute
 
 When a `runtime_path_graph_v1` exists for the current page family, an upper-layer agent may ask for graph-assisted actions before choosing the next step:
@@ -28,6 +48,25 @@ This layer is guidance only:
 - Real clicks still must go through `POST /action/execute_recognition_plan` and its `pre_click_decision_v1`.
 - Real scrolls still must go through `POST /action/scroll` and its scroll precondition checks.
 - Multi-step traversal belongs in the upper agent or smoke harness, not inside `/execute/step`.
+
+## Lightweight Execute Observation And Verification
+
+For execute loops, do not rerun full whole-screen understanding after every small page transition. First ask the runtime for a no-model execute-state summary and cheap before/after verification:
+
+```http
+POST /execute/observe
+POST /execute/form_inventory
+POST /execute/verify_diff
+POST /execute/read_region_batch
+```
+
+`/execute/observe` returns `execute_observation_v1`. For SEEK it classifies application states such as `choose_documents`, `questionnaire`, `profile_prompt`, and `review_before_submit`, and separates primary actions, danger actions, profile-mutation actions, form hints, and safety blockers. For generic apps it produces a compact action/form inventory from supplied observation or flow-state evidence.
+
+`/execute/form_inventory` returns `form_field_inventory_v1`. It turns application-flow, employer-question, and answer-plan evidence into stable field ids, labels, bboxes, Continue actions, danger actions, and profile-mutation actions. Use it before filling a form so the agent targets fields by inventory evidence instead of naked coordinates.
+
+`/execute/verify_diff` returns `ui_diff_verification_v1` from before/after screenshots. It detects changed regions and can confirm that a click, scroll, field fill, or step transition visibly changed the expected area before the agent spends time on another expensive model read. This is visual evidence only; it does not replace final-submit guards, target grounding, or semantic review for risky actions.
+
+`/execute/read_region_batch` returns `read_region_batch_v1`. It merges already-captured ROI/OCR batches for one scroll container, de-duplicates repeated lines, records per-capture new-content counts, and stops on no-new-content or wrong-scope evidence. The API does not itself scroll or OCR; capture/scroll remains in `/vision/ocr_region` and `/action/scroll`, or in the SEEK debug runner's `read_detail_batch` convenience step.
 
 ## External Agent Continuous Task Protocol
 
@@ -66,11 +105,46 @@ uv run python scripts\seek_debug_step_runner.py --step extract_cards
 uv run python scripts\seek_debug_step_runner.py --step dry_run_card --job-index 0
 uv run python scripts\seek_debug_step_runner.py --step execute_card --job-index 0
 uv run python scripts\seek_debug_step_runner.py --step verify_detail
-uv run python scripts\seek_debug_step_runner.py --step read_detail_scroll
+uv run python scripts\seek_debug_step_runner.py --step read_detail_batch
 uv run python scripts\seek_debug_step_runner.py --step match
 ```
 
-Each step writes `seek_debug_step_report_v1` under `logs/smoke/seek_debug_step_run_latest/step_NNN_<step>/step_report.json` and updates `state.json`. Reports include `before_image`, `after_image`, trace paths, selected card/detail evidence, and for detail scrolling a `right_detail_scroll_validation_v1` record. The detail-scroll validation must include visual left-pane stability evidence (`left_results_visual_stability`) so a right-pane scroll is not falsely judged by noisy card text extraction, and so accidental scroll bleed into the left results list is visible. It also records compact left-card stability keys, visible detail line hashes, `new_unique_line_count`, `no_progress_count`, `next_recommendation`, `next_wheel_clicks`, and `next_allowed_steps`; debug mode remains one scroll per command, so the agent can inspect each screenshot before continuing. Formal execution may later use the full traversal runner, but only after this step-by-step path proves the coordinates, scroll target, and safety counters.
+Each step writes `seek_debug_step_report_v1` under `logs/smoke/seek_debug_step_run_latest/step_NNN_<step>/step_report.json` and updates `state.json`. Reports include `before_image`, `after_image`, trace paths, selected card/detail evidence, and for detail scrolling a `right_detail_scroll_validation_v1` record. The detail-scroll validation must include visual left-pane stability evidence (`left_results_visual_stability`) so a right-pane scroll is not falsely judged by noisy card text extraction, and so accidental scroll bleed into the left results list is visible. It also records compact left-card stability keys, visible detail line hashes, `new_unique_line_count`, `no_progress_count`, `next_recommendation`, `next_wheel_clicks`, and `next_allowed_steps`.
+
+For long job-detail reading, prefer `--step read_detail_batch` after `verify_detail`. It emits `read_region_batch_v1`, captures/OCRs the known `seek:job_detail` ROI multiple times, scrolls with adaptive wheel clicks between captures, merges unique OCR lines, and stops on repeated no-new-content, wrong-scope evidence, boundary/no-effect evidence, or `--batch-max-captures`. Use the older `read_detail_scroll` only when debugging a single scroll event.
+
+The debug runner now recommends this fast path by default: after `execute_card`, the normal next step is `verify_detail`, and after `verify_detail`, the normal long-read step is `read_detail_batch`. `read_detail_scroll` remains available only for single-scroll diagnosis.
+
+After a live long-read comparison run, generate a compact speed/quality report instead of inspecting every step trace manually:
+
+```powershell
+uv run python scripts\seek_long_read_benchmark_report.py logs\smoke\seek_debug_step_run_latest --out logs\smoke\seek_long_read_benchmark_report.json
+```
+
+The report emits `seek_long_read_benchmark_report_v1` with old repeated-scroll counts, batch-read capture counts, unique OCR line counts, wrong-scope counts, timing totals when available, and a `recommended_path` decision.
+
+After a full operator demo run, generate a readiness report:
+
+```powershell
+uv run python scripts\seek_demo_readiness_report.py `
+  --run-dir logs\smoke\seek_debug_step_run_latest `
+  --application-fill-record logs\smoke\seek_debug_step_run_latest\application_fill_record.json `
+  --out logs\smoke\seek_demo_readiness_report.json
+```
+
+It emits `seek_demo_readiness_report_v1` and checks the demo goals: opened/verified job, detail-read evidence, application started, review page reached, no final submission, screenshots/traces present, and the 5-minute default time budget.
+
+For application-flow and long-read debugging, agents should consume the lightweight machine-readable contracts in each step report before asking a model or Codex to inspect screenshots:
+
+- `execute_observation_v1`: SEEK execute-scoped page state such as `choose_documents`, `questionnaire`, `profile_prompt`, or `review_before_submit`, plus primary actions, danger actions, profile-mutation actions, and safety blockers.
+- `form_field_inventory_v1`: stable form fields by field id, label, type, bbox/group bbox, answer-source requirement, Continue action, danger actions, and profile mutation actions. Fill logic should target these field ids instead of naked coordinates.
+- `ui_diff_verification_v1`: before/after screenshot abs-diff evidence for `detail_opened`, `scroll_progress`, `field_value_changed`, or `step_changed`. Use this to decide whether a small action changed the expected area before rerunning expensive whole-screen understanding.
+- `seek_application_flow_wait_v1`: Apply Entry readiness evidence. `ready_from_apply_entry` means no extra wait or observe was needed because the Apply step already classified the application flow; `ready_from_poll` means a bounded readiness poll found the next application state; `timeout` means the agent must inspect screenshots/traces before continuing.
+- `read_region_batch_v1`: batch long-read evidence for a scroll container. It stores screenshot/OCR trace paths, per-capture new unique line counts, merged text lines, stop reason, and wrong-scope status.
+
+The API-level equivalents currently available are `/execute/observe` for `execute_observation_v1`, `/execute/form_inventory` for `form_field_inventory_v1`, `/execute/verify_diff` for `ui_diff_verification_v1`, and `/execute/read_region_batch` for `read_region_batch_v1`. The SEEK debug runner remains the convenience path when a live single-step debug run should perform capture, scroll, OCR, merge, and reporting in one command.
+
+`read_detail_scroll` now defaults to a larger `8` wheel-click step and can recommend up to `14` wheel clicks when repeated screenshots show little new detail text. If `ui_diff_verification_v1` and `right_detail_scroll_validation_v1` both show no new target-container content, stop reading or switch to a batch-read strategy instead of continuing slow one-scroll loops.
 
 When a detail pane is scrolled far below the header, later widgets such as company profiles, salary panels, or safety notices must not overwrite the verified job header. `verify_detail` and `read_detail_scroll` merge details by preserving the current card/header `job_id`, `title`, `company`, and location unless the new header matches the same compact identity. Salary widgets such as `What can I earn as ...` and `See more detailed salary information` are body evidence, not a new job title/company. If `match` returns `need_user_review`, the agent must stop before Apply Entry and present the job record and screenshots for review.
 
@@ -244,6 +318,7 @@ Request:
   "app_id": "edge",
   "url": "https://www.google.com/search?q=ai%E7%9A%84%E6%9C%80%E6%96%B0%E8%BF%9B%E5%B1%95",
   "bind_after_open": true,
+  "maximize_after_open": true,
   "wait_seconds": 1.5
 }
 ```
@@ -278,6 +353,7 @@ Agent decision:
 - Continue when `success == true`.
 - If `bound_window == null`, inspect `running_windows` and bind manually with `POST /session/bind_window`.
 - Prefer `url` for browser navigation during app launch instead of launching the browser and then typing a URL by hand.
+- `maximize_after_open` defaults to `true` for app-opened windows. Keep it on for website automation and SEEK tests so the first screenshot has stable card/detail coverage. Set it to `false` only when intentionally testing non-maximized layouts.
 
 ### 3. List Candidate Windows
 
@@ -425,7 +501,7 @@ Agent decision:
 - When debugging SEEK traversal, run one visible step at a time and inspect screenshot/overlay evidence before the next real action. The debug sequence is: capture before click, dry-run card click and inspect overlay, execute one card click, capture opened detail, perform one right-pane scroll, capture again, then continue only if the right pane moved and the left results list stayed visually stable.
 - A SEEK detail read is complete only when required detail evidence is present and the right detail pane has bottom evidence (`detail_bottom_reached=true` or an equivalent no-effect boundary probe). Field presence alone is not enough to count `jobs_fully_read`.
 - If a SEEK runner must be stopped locally, use `scripts\stop_seek_mvp_runner.ps1`. It targets only `scripts\seek_mvp_traversal_runner.py` processes and should not be replaced with manual Task Manager cleanup.
-- Apply Entry is an application-flow entrance, not final submission. It is allowed only for `strong_apply` by default and only through `POST /action/execute_recognition_plan` dry-run plus approved-plan real execution. The request metadata must include `forbid_final_submit=true` and `required_container_id=seek:job_detail`; the goal must explicitly forbid `Submit`, `Send application`, and `Complete application`. The action route emits `final_submit_guard_v1` and blocks before clicking if the selected target is a final-submit candidate. After Apply / Quick Apply, observe once, classify `seek_application_flow_state_v1`, generate the read-only `application_answer_plan_v1`, and either stop for review or fill only explicitly safe fields when `--fill-safe-fields` is enabled and profile gates pass. The true final submit step remains forbidden until explicit user review.
+- Apply Entry is an application-flow entrance, not final submission. It is allowed only for `strong_apply` by default and only through `POST /action/execute_recognition_plan` dry-run plus approved-plan real execution. The request metadata must include `forbid_final_submit=true` and `required_container_id=seek:job_detail`; the goal must explicitly forbid `Submit`, `Send application`, and `Complete application`. The action route emits `final_submit_guard_v1` and blocks before clicking if the selected target is a final-submit candidate. After Apply / Quick Apply, reuse the `seek_application_flow_state_v1` already produced by Apply Entry when present; only if that state is unclear should the debug runner poll whole-screen observe up to `--post-apply-capture-wait-seconds` (default `3.0`) and record `seek_application_flow_wait_v1`. Then generate the read-only `application_answer_plan_v1`, and either stop for review or fill only explicitly safe fields when `--fill-safe-fields` is enabled and profile gates pass. The true final submit step remains forbidden until explicit user review.
 - For SEEK profile preparation, keep the domain workflow in `skills/seek-high-precision/SKILL.md` and use the reusable profile helper only to prepare local data:
 
 ```powershell

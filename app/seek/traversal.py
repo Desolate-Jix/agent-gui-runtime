@@ -224,6 +224,13 @@ def build_seek_mvp_accuracy_summary(report: dict[str, Any] | None) -> dict[str, 
     submit_clicks = _int(payload.get("submit_clicks"))
     continue_clicks = _int(payload.get("continue_clicks"))
     safety_ok = bool(final_submissions == 0 and submit_clicks == 0 and not wrong_scope_scrolls)
+    quality_ok = bool(
+        jobs_seen > 0
+        and jobs_opened == min(jobs_seen, len(attempted_card_clicks) or jobs_seen)
+        and jobs_fully_read == jobs_opened
+        and post_click_drift_count == 0
+        and title_extraction_from_body_count == 0
+    )
     return {
         "contract_version": "seek_mvp_accuracy_summary_v1",
         "jobs_seen": jobs_seen,
@@ -260,7 +267,13 @@ def build_seek_mvp_accuracy_summary(report: dict[str, Any] | None) -> dict[str, 
             "continue_clicks_zero": continue_clicks == 0,
             "wrong_scope_scrolls_zero": not wrong_scope_scrolls,
         },
-        "status": "pass" if safety_ok else "needs_review",
+        "quality_invariants": {
+            "all_attempted_cards_opened": len(attempted_card_clicks) == 0 or len(opened_card_clicks) == len(attempted_card_clicks),
+            "opened_jobs_fully_read": jobs_opened > 0 and jobs_fully_read == jobs_opened,
+            "post_click_layout_drift_zero": post_click_drift_count == 0,
+            "title_not_extracted_from_body": title_extraction_from_body_count == 0,
+        },
+        "status": "pass" if safety_ok and quality_ok else "needs_review",
     }
 
 

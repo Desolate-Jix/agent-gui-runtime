@@ -44,6 +44,16 @@
     },
     "source_url": null,
     "source_card_id": "card_job_1",
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "logs/traces/vision/cards.json",
+      "viewport_size": {
+        "width": 1200,
+        "height": 1000
+      },
+      "source": "seek_job_card_extraction",
+      "freshness": "current_capture"
+    },
     "primary_action_id": "action_job_1",
     "child_action_ids": [
       "action_job_1"
@@ -55,10 +65,10 @@
     ],
     "evidence": {
       "texts": [
+        "Software Engineer (Test Systems)",
         "Quantifi Photonics",
         "Rosedale, Auckland",
-        "Full time",
-        "Software Engineer (Test Systems)"
+        "Full time"
       ],
       "source_contract": "screen_inventory_v1"
     }
@@ -113,7 +123,7 @@
     "benefits": [],
     "apply_button_state": {
       "visible": true,
-      "label": "Apply",
+      "label": "Quick apply",
       "bbox": {
         "x": 520,
         "y": 820,
@@ -123,6 +133,16 @@
       "click_point": {
         "x": 575,
         "y": 844
+      },
+      "candidate_freshness": {
+        "contract_version": "action_candidate_freshness_v1",
+        "capture_id": "logs/traces/vision/detail-complete.json",
+        "viewport_size": {
+          "width": 1200,
+          "height": 1000
+        },
+        "source": "seek_apply_button_extraction",
+        "freshness": "current_capture"
       }
     },
     "save_button_state": {

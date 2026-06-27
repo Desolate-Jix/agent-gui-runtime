@@ -43,6 +43,30 @@ Do not add fallback behavior that hides:
 
 Fallback is acceptable only when the root cause is understood, the primary path remains intact, and the response clearly reports that fallback was used.
 
+## Failure To Runtime Contract Rule
+
+When a real GUI / agent run exposes a bug, do not keep fixing one-off site symptoms. First classify the failure as a reusable runtime invariant, then repair that invariant in the common layer whenever possible.
+
+Every real bug report must be closed with this structure:
+
+1. Failure: what visibly failed?
+2. Root invariant violated: which reusable contract was broken?
+3. Fix location: common runtime, app adapter, app profile, debug runner, or test?
+4. Why not app-only: how does this help other websites or Windows apps?
+5. Regression: what test or offline trace replay prevents recurrence?
+6. Safety impact: did this loosen safety, and can it mis-click submit/send/confirm/payment?
+
+Current mandatory runtime contracts:
+
+- Dataflow: any long-read / batch-read result that updates detail text must create the latest detail snapshot, and downstream match / cover-letter / apply decisions must read that latest snapshot only.
+- Candidate freshness: every action candidate must carry capture_id, viewport_size, source, bbox, click_point, and freshness. Execution must not mix old screenshot coordinates with a newer screenshot or recognition result.
+- Action taxonomy: distinguish open_detail, open_apply_flow, fill_field, continue_next_step, and final_submit / send / confirm / payment. Apply / Quick Apply opens an application flow; it is not final submit. Final submit remains hard-blocked.
+- Scoped danger detection: final submit detection must run inside the active application form / modal / flow container. Global search bars or navigation buttons such as Submit search must not trigger final_submit_visible.
+- Scroll scope: when scrolling a target container, target content should change and non-target panes should remain stable. If a non-target pane changes significantly, wrong_scope_detected must be true.
+- OCR canonicalization: short-token OCR confusions such as AIA / AlA can be normalized only in acronym or already-matched context. Do not globally replace characters or weaken all text matching.
+
+Do not run a full real-world flow after contract failures until the relevant contract has a regression test and the narrow verification path passes.
+
 ## Code Search / Context Gathering Rule
 
 To reduce token usage and repeated file reads, prefer codegraph before raw text search when understanding code structure.
@@ -68,7 +92,7 @@ When a task is substantial, architectural, risky, ambiguous, blocked, or explici
 
 Use this as a visible, user-directed workflow:
 
-- Treat the Codex in-app browser as reserved for ChatGPT consultation by default. Reuse the default ChatGPT conversation `https://chatgpt.com/c/6a313e9c-e2d4-83e8-b487-83e69eb0ff58` unless the user gives a different session. Do not use the Codex in-app browser as the default test target for the local panel or real website automation; bind an external browser or application window instead. Use the in-app browser for panel testing only when external browser/window control is unavailable and clearly report that exception.
+- Treat the Codex in-app browser as reserved for ChatGPT consultation by default. Reuse the default ChatGPT conversation `https://chatgpt.com/c/6a3b7817-9624-83ec-98bf-3341c47a968d` unless the user gives a different session. Do not use the Codex in-app browser as the default test target for the local panel or real website automation; bind an external browser or application window instead. Use the in-app browser for panel testing only when external browser/window control is unavailable and clearly report that exception.
 - summarize the current user goal, plan, key evidence, blockers, and proposed next step
 - reuse the user's already-open ChatGPT thread when they say one is open
 - do not send secrets, credentials, private files, screenshots, traces, or externally sensitive data unless the user approved that specific content
@@ -107,17 +131,26 @@ Update only the files impacted by the change, but do not leave `README.md` stale
 
 ## UTF-8 / Chinese Text Rule
 
+This section is a highest-priority rule for any task that reads, writes, edits, tests, or documents Chinese-containing files, scripts, traces, prompts, or JSON. It is at the same priority level as the root-cause incident-review rules.
+
 All recognized Chinese text must be preserved as UTF-8 end to end. Do not introduce mojibake, replacement characters, or question-mark replacement sequences into source code, prompts, traces, tests, docs, or user-facing output.
 
 Rules:
 
+- All file reads and writes default to UTF-8. When editing files, preserve the original encoding, newline style, and unrelated content.
 - Read text and JSON with `encoding="utf-8"` or `encoding="utf-8-sig"` when BOM compatibility is needed.
 - Write JSON with `ensure_ascii=False` and `encoding="utf-8"` so Chinese remains readable in traces.
+- Before reading Chinese-containing files in PowerShell, run `chcp 65001`, set `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8`, and set `$OutputEncoding = [System.Text.Encoding]::UTF8`.
+- Prefer `Get-Content -Raw -Encoding UTF8` when reading Chinese-containing files in PowerShell.
+- Do not use PowerShell here-strings, redirection, `Set-Content`, or `Out-File` to write Chinese-containing source, JSON, docs, or prompts.
+- Do not use `sed` or `awk` to process Chinese-containing files; use Python or Node.js with explicit UTF-8 reads and writes.
+- Do not rewrite, reformat, or broad string-replace an entire file merely to repair encoding.
 - Do not pass Chinese literals through a shell command that may use the Windows ANSI code page. For smoke scripts, prefer `uv run python` with UTF-8 source, a UTF-8 file, or Unicode escapes for test literals.
 - If PowerShell output shows mojibake, verify the actual file or payload with Python using `encoding="utf-8"` and `PYTHONIOENCODING=utf-8` before deciding the data is corrupt.
 - Never add hard-coded mojibake or replacement-marker literals as matching rules. Match the real Unicode string, use Unicode escapes in tests, or normalize/repair at the boundary with an explicit comment and test.
 - Model input/output trace must record the original UTF-8 prompt, OCR text, raw model text, parsed JSON, and parse errors without lossy replacement.
 - When a test covers Chinese recognition, assert on the real Chinese value or a Unicode-escaped equivalent, not on console-garbled output.
+- Code comments must use Chinese. Keep comments minimal and write them as real UTF-8 Chinese.
 
 ## Definition Of Done
 

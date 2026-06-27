@@ -105,6 +105,73 @@ def _extract_action_point(plan: dict[str, Any]) -> Optional[dict[str, int]]:
     return {"x": int(point["x"]), "y": int(point["y"])}
 
 
+def _low_risk_visual_fast_lane_profile(
+    *,
+    request: ExecuteRecognitionPlanRequest,
+    plan: dict[str, Any],
+    pre_click: dict[str, Any],
+    selected_point: Optional[dict[str, int]],
+) -> dict[str, Any]:
+    execution_path = plan.get("execution_path") if isinstance(plan.get("execution_path"), dict) else {}
+    selected_candidate_id = pre_click.get("selected_candidate_id")
+    selected_texts = _selected_target_texts(plan=plan, selected_candidate_id=selected_candidate_id)
+    matched_final_submit_terms = _matched_final_submit_terms(
+        _final_submit_guard_evidence_texts(selected_texts, goal=request.goal)
+    )
+    allowed = (
+        bool(execution_path.get("visual_asset_fast_lane_used"))
+        and bool(pre_click.get("allowed"))
+        and selected_point is not None
+        and not matched_final_submit_terms
+    )
+    reasons: list[str] = []
+    if not execution_path.get("visual_asset_fast_lane_used"):
+        reasons.append("visual_asset_fast_lane_not_used")
+    if not pre_click.get("allowed"):
+        reasons.append("pre_click_not_allowed")
+    if selected_point is None:
+        reasons.append("missing_selected_click_point")
+    if matched_final_submit_terms:
+        reasons.append("final_submit_like_target")
+    return {
+        "contract_version": "low_risk_visual_fast_lane_profile_v1",
+        "allowed": allowed,
+        "selected_candidate_id": selected_candidate_id,
+        "selected_texts": selected_texts,
+        "matched_final_submit_terms": matched_final_submit_terms,
+        "reasons": reasons,
+    }
+
+
+def _should_render_recognition_overlay_for_execution(
+    *,
+    request: ExecuteRecognitionPlanRequest,
+    low_risk_visual_fast_lane: dict[str, Any],
+) -> bool:
+    if request.dry_run:
+        return True
+    return not bool(low_risk_visual_fast_lane.get("allowed"))
+
+
+def _click_timing_options(
+    *,
+    low_risk_visual_fast_lane: dict[str, Any],
+) -> dict[str, Any]:
+    if low_risk_visual_fast_lane.get("allowed"):
+        return {
+            "contract_version": "click_timing_options_v1",
+            "settle_ms": 20,
+            "hold_ms": 20,
+            "reason": "low_risk_visual_asset_fast_lane",
+        }
+    return {
+        "contract_version": "click_timing_options_v1",
+        "settle_ms": 200,
+        "hold_ms": 70,
+        "reason": "default_guarded_click",
+    }
+
+
 FINAL_SUBMIT_GUARD_TERMS = (
     "submit application",
     "send application",
@@ -113,18 +180,92 @@ FINAL_SUBMIT_GUARD_TERMS = (
 )
 
 
+FINAL_SUBMIT_AUTH_CONTRACTS = {"final_submit_decision_v1", "pre_submit_suitability_audit_v1"}
+FINAL_SUBMIT_HARD_RISK_FLAGS = {
+    "unsupported_yes_answer",
+    "unsupported_yes_answers",
+    "unsupported_answer_risk",
+    "unsupported_employer_answer",
+    "missing_current_live_match_decision",
+}
+
+
+def _final_submit_authorization(metadata: dict[str, Any]) -> dict[str, Any] | None:
+    for key in ("final_submit_decision", "final_submit_authorization", "pre_submit_suitability_audit"):
+        value = metadata.get(key)
+        if isinstance(value, dict):
+            return value
+    return None
+
+
+def _validate_final_submit_authorization(metadata: dict[str, Any]) -> dict[str, Any]:
+    authorization = _final_submit_authorization(metadata)
+    errors: list[str] = []
+    if authorization is None:
+        return {
+            "contract_version": "final_submit_authorization_check_v1",
+            "valid": False,
+            "authorization": None,
+            "errors": ["missing_final_submit_decision_v1"],
+        }
+
+    contract_version = str(authorization.get("contract_version") or "")
+    if contract_version not in FINAL_SUBMIT_AUTH_CONTRACTS:
+        errors.append("unsupported_final_submit_authorization_contract")
+
+    allow_final_submit = authorization.get("allow_final_submit") is True or authorization.get("submit_gate") == "allow"
+    if not allow_final_submit:
+        errors.append("allow_final_submit_not_true")
+
+    if authorization.get("user_reviewed_current_job") is not True:
+        errors.append("current_job_not_user_reviewed")
+
+    match_decision = str(authorization.get("match_decision") or authorization.get("decision") or "")
+    user_override = authorization.get("user_override_match_review") is True
+    if match_decision != "strong_apply" and not user_override:
+        errors.append("match_decision_not_strong_apply")
+
+    unsupported_yes_answers = authorization.get("unsupported_yes_answers") is True
+    unsupported_answer_risks = authorization.get("unsupported_answer_risks")
+    if isinstance(unsupported_answer_risks, list) and unsupported_answer_risks:
+        unsupported_yes_answers = True
+    risk_flags = [str(item or "") for item in authorization.get("risk_flags") or []]
+    hard_risks = [flag for flag in risk_flags if flag in FINAL_SUBMIT_HARD_RISK_FLAGS]
+    if unsupported_yes_answers or hard_risks:
+        errors.append("unsupported_answer_or_hard_risk_present")
+
+    return {
+        "contract_version": "final_submit_authorization_check_v1",
+        "valid": not errors,
+        "authorization": authorization,
+        "errors": errors,
+        "match_decision": match_decision,
+        "user_override_match_review": user_override,
+    }
+
+
 def _final_submit_guard_decision(
     *,
     request: ExecuteRecognitionPlanRequest,
     plan: dict[str, Any],
     pre_click: dict[str, Any],
 ) -> dict[str, Any]:
-    enabled = bool((request.metadata or {}).get("forbid_final_submit"))
+    metadata = request.metadata or {}
+    enabled = bool(metadata.get("forbid_final_submit"))
     selected_candidate_id = pre_click.get("selected_candidate_id")
     selected_texts = _selected_target_texts(plan=plan, selected_candidate_id=selected_candidate_id)
     selected_texts = _final_submit_guard_evidence_texts(selected_texts, goal=request.goal)
     matched_terms = _matched_final_submit_terms(selected_texts)
-    allowed = not (enabled and matched_terms)
+    authorization_check = _validate_final_submit_authorization(metadata) if matched_terms else None
+    allowed = not matched_terms or (not enabled and bool(authorization_check and authorization_check.get("valid")))
+    if not matched_terms:
+        reason = "no_final_submit_candidate_detected" if enabled else "guard_not_needed"
+    elif enabled:
+        reason = "final_submit_candidate_blocked"
+    elif authorization_check and authorization_check.get("valid"):
+        reason = "structured_final_submit_authorization_accepted"
+    else:
+        reason = "final_submit_requires_structured_authorization"
     return {
         "contract_version": "final_submit_guard_v1",
         "enabled": enabled,
@@ -132,7 +273,9 @@ def _final_submit_guard_decision(
         "selected_candidate_id": selected_candidate_id,
         "selected_texts": selected_texts,
         "matched_terms": matched_terms,
-        "reason": "final_submit_candidate_blocked" if not allowed else ("no_final_submit_candidate_detected" if enabled else "guard_disabled"),
+        "authorization_required": bool(matched_terms),
+        "authorization_check": authorization_check,
+        "reason": reason,
     }
 
 
@@ -1936,8 +2079,22 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         pre_click = plan.get("pre_click_decision") or {}
         selected_point = _extract_action_point(plan)
         plan_trace_path = plan.get("trace_path")
-        with timer.step("render_recognition_plan_overlay", has_plan_trace=bool(plan_trace_path)):
-            overlay = _render_recognition_plan_overlay_for_execution(plan_trace_path) if plan_trace_path else None
+        low_risk_visual_fast_lane = _low_risk_visual_fast_lane_profile(
+            request=request,
+            plan=plan,
+            pre_click=pre_click,
+            selected_point=selected_point,
+        )
+        should_render_overlay = _should_render_recognition_overlay_for_execution(
+            request=request,
+            low_risk_visual_fast_lane=low_risk_visual_fast_lane,
+        )
+        with timer.step(
+            "render_recognition_plan_overlay",
+            has_plan_trace=bool(plan_trace_path),
+            enabled=bool(should_render_overlay),
+        ):
+            overlay = _render_recognition_plan_overlay_for_execution(plan_trace_path) if plan_trace_path and should_render_overlay else None
         execution_path = {
             "vision_model_used": bool((plan.get("execution_path") or {}).get("vision_model_used")),
             "page_structure_used": True,
@@ -1953,7 +2110,22 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             "dry_run": bool(request.dry_run),
             "retry_policy_used": True,
             "max_execution_attempts": int(request.max_execution_attempts),
+            "low_risk_visual_fast_lane": low_risk_visual_fast_lane,
+            "recognition_plan_overlay_rendered": bool(overlay),
         }
+
+    if "low_risk_visual_fast_lane" not in locals():
+        low_risk_visual_fast_lane = _low_risk_visual_fast_lane_profile(
+            request=request,
+            plan=plan,
+            pre_click=pre_click,
+            selected_point=selected_point,
+        )
+    click_timing = _click_timing_options(low_risk_visual_fast_lane=low_risk_visual_fast_lane)
+    if isinstance(execution_path, dict):
+        execution_path["low_risk_visual_fast_lane"] = low_risk_visual_fast_lane
+        execution_path["click_timing_reason"] = click_timing["reason"]
+        execution_path["recognition_plan_overlay_rendered"] = bool(overlay)
 
     base_result: dict[str, Any] = {
         "contract_version": "execute_recognition_plan_v1",
@@ -1979,6 +2151,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         "effective_execution_options": {
             "provider_mode": plan_request.provider_mode if "plan_request" in locals() else request.provider_mode,
             "metadata": plan_request.metadata if "plan_request" in locals() else request.metadata,
+            "click_timing": click_timing,
         },
     }
 
@@ -2132,8 +2305,8 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                         selected_point["x"],
                         selected_point["y"],
                         move_before_click=True,
-                        settle_ms=200,
-                        hold_ms=70,
+                        settle_ms=int(click_timing["settle_ms"]),
+                        hold_ms=int(click_timing["hold_ms"]),
                     )
                 with timer.step("post_click_verification", attempt=attempt_index, enabled=request.enable_post_click_verification):
                     post_click_verification = (

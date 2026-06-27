@@ -61,6 +61,7 @@ class OpenAppRequest(BaseModel):
     title: Optional[str] = None
     bind_after_open: bool = True
     prefer_new_window: bool = True
+    maximize_after_open: bool = True
     wait_seconds: float = Field(default=1.5, ge=0.0, le=10.0)
 
 
@@ -226,6 +227,47 @@ class ExecuteStepRequest(BaseModel):
     )
     dry_run: bool = True
     dispatch_low_level: bool = False
+
+
+class ExecuteObserveRequest(BaseModel):
+    """Request model for lightweight execute-scoped state observation."""
+
+    app_id: Optional[str] = None
+    observation: dict[str, Any] = Field(default_factory=dict)
+    application_flow_state: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExecuteVerifyDiffRequest(BaseModel):
+    """Request model for lightweight before/after screenshot diff verification."""
+
+    before_image: str = Field(min_length=1)
+    after_image: str = Field(min_length=1)
+    expected_change: Optional[str] = None
+    target_bbox: Optional[ROIModel] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExecuteReadRegionBatchRequest(BaseModel):
+    """Request model for merging already-captured ROI/OCR long-read evidence."""
+
+    target_container_id: str = Field(min_length=1)
+    target_bbox: Optional[dict[str, Any]] = None
+    captures: list[dict[str, Any]] = Field(default_factory=list)
+    max_captures: int = Field(default=5, ge=1, le=20)
+    stop_after_no_new_content: int = Field(default=2, ge=1, le=10)
+    wrong_scope_detected: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExecuteFormInventoryRequest(BaseModel):
+    """Request model for lightweight form field inventory generation."""
+
+    app_id: Optional[str] = None
+    application_flow_state: dict[str, Any] = Field(default_factory=dict)
+    employer_question_inventory: dict[str, Any] = Field(default_factory=dict)
+    application_answer_plan: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ExecuteConfirmedPointRequest(BaseModel):
