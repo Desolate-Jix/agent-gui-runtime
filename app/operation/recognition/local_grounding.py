@@ -7,7 +7,7 @@ from pathlib import Path
 from PIL import Image
 
 from app.core.runtime_artifacts import build_recognition_crop_path
-from app.recognition.schemas import LocalGroundingCandidateResult, LocalGroundingRequest, LocalGroundingResult, RecognitionCandidate
+from app.operation.recognition.schemas import LocalGroundingCandidateResult, LocalGroundingRequest, LocalGroundingResult, RecognitionCandidate
 from app.vision.schemas import BBox
 from modules.ocr.contracts import OCRTextMatch
 

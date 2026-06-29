@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from app.page_structure.schemas import PageElement, PageStructure
+from app.operation.page_structure.schemas import PageElement, PageStructure
 from modules.ocr.contracts import OCRResult
 
 

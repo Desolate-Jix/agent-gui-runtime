@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import base64
 import json
@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from app.core.runtime_artifacts import write_trace
 from app.core.model_server import load_model_profiles
 from app.core.model_server import model_base_url
-from app.models.response import APIResponse, ErrorModel
+from app.api.models.response import APIResponse, ErrorModel
 
 PANEL_DIR = Path(__file__).resolve().parents[1] / "web_panel"
 PANEL_INDEX = PANEL_DIR / "index.html"

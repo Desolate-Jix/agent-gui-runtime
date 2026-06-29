@@ -19,7 +19,7 @@ from app.gate.dataflow import (
 from app.gate.ocr import ocr_contextual_match
 from app.gate.scroll import build_scroll_scope_invariant
 from app.seek.application import assess_seek_application_flow_state
-from app.recognition.schemas import LocalGroundingCandidateResult, LocalGroundingResult
+from app.operation.recognition.schemas import LocalGroundingCandidateResult, LocalGroundingResult
 from app.vision.schemas import ImageSize
 
 

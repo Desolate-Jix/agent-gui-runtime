@@ -7,9 +7,9 @@ logger = logging.getLogger(__name__)
 
 from app.core.window_manager import window_manager
 from app.operation.region_click import run_region_click
-from app.schemas.validator_profile import ValidatorProfile
-from app.vision_protocol.parser import parse_vision_response
-from app.vision_protocol.schemas import BBox, VisionAction, VisionResponse
+from app.operation.validator_profile import ValidatorProfile
+from app.operation.vision_protocol.parser import parse_vision_response
+from app.operation.vision_protocol.schemas import BBox, VisionAction, VisionResponse
 
 
 MIN_BOX_SIZE = 20

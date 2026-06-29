@@ -6,7 +6,7 @@ from typing import Optional
 
 from PIL import Image
 
-from app.schemas.state import PageFingerprint
+from app.vision.state import PageFingerprint
 
 PATCHES_DIR = Path("logs/app-states/patches")
 PATCHES_DIR.mkdir(parents=True, exist_ok=True)

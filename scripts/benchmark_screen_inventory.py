@@ -12,7 +12,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from app.screen_inventory import build_screen_inventory
+from app.operation.screen_inventory import build_screen_inventory
 
 
 def _load_cases(path: Path) -> list[dict[str, Any]]:

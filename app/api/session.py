@@ -4,8 +4,8 @@ from fastapi import APIRouter
 from loguru import logger
 
 from app.core.window_manager import BoundWindow, window_manager
-from app.models.request import BindWindowRequest, ResizeBoundWindowRequest
-from app.models.response import APIResponse, ErrorModel, SessionData, WindowRectModel
+from app.api.models.request import BindWindowRequest, ResizeBoundWindowRequest
+from app.api.models.response import APIResponse, ErrorModel, SessionData, WindowRectModel
 
 router = APIRouter(prefix="/session", tags=["session"])
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from app.api import action as action_api
-from app.models.request import ClickTextRequest, ROIModel, ScrollRequest, TypeTextRequest
+from app.api.models.request import ClickTextRequest, ROIModel, ScrollRequest, TypeTextRequest
 from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
 
 

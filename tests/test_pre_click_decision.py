@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from app.page_structure.schemas import InteractionPolicy, PageElement, VerificationHints
-from app.recognition import (
+from app.operation.page_structure.schemas import InteractionPolicy, PageElement, VerificationHints
+from app.operation.recognition import (
     CandidateRankResult,
     LocalGroundingCandidateResult,
     LocalGroundingResult,

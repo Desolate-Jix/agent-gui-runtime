@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.api.vision import _apply_learned_path_graph_to_screen_map
-from app.models.request import VisionObserveScreenRequestModel
+from app.api.models.request import VisionObserveScreenRequestModel
 
 
 def test_seek_observe_screen_map_uses_learned_path_graph_for_search_results() -> None:

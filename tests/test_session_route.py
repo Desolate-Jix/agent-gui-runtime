@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from app.api import session as session_api
 from app.core.window_manager import BoundWindow, WindowRect
-from app.models.request import ResizeBoundWindowRequest
+from app.api.models.request import ResizeBoundWindowRequest
 
 
 def _bound(title: str = "Demo") -> BoundWindow:

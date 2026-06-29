@@ -5,7 +5,7 @@ import re
 from typing import Any
 
 from app.gate.candidates import build_candidate_freshness
-from app.screen_inventory import build_screen_inventory
+from app.operation.screen_inventory import build_screen_inventory
 from app.seek.scroll_containers import SEEK_JOB_DETAIL, SEEK_RESULTS_LIST, discover_seek_scroll_containers, get_scroll_container
 
 

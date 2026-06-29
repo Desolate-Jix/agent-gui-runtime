@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from app.evaluation.uia_smoke_eval import UIASmokeEvalCase, evaluate_cases
+from app.trace.evaluation.uia_smoke_eval import UIASmokeEvalCase, evaluate_cases
 
 
 def test_uia_smoke_eval_scores_expected_controls(tmp_path) -> None:

@@ -1,7 +1,7 @@
-from app.recognition.candidate_ranker import rank_candidates
-from app.recognition.decision import decide_pre_click
-from app.recognition.local_grounding import run_local_grounding
-from app.recognition.schemas import (
+from app.operation.recognition.candidate_ranker import rank_candidates
+from app.operation.recognition.decision import decide_pre_click
+from app.operation.recognition.local_grounding import run_local_grounding
+from app.operation.recognition.schemas import (
     CandidateRankRequest,
     CandidateRankResult,
     LocalGroundingCandidateResult,

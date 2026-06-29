@@ -34,8 +34,11 @@ The detailed architecture is documented in `docs\GUI_AGENT_RUNTIME_ARCHITECTURE.
 The code-level layer entry points are now explicit:
 
 - `app\operation` exposes the framework operation skill catalog, including observe, locate, click, input, scroll, read, form detection, window binding, and verification.
+- `app\operation.page_structure`, `app\operation.screen_reading`, `app\operation.screen_inventory`, and `app\operation.recognition` own the screen-understanding and recognition pipeline used by `/vision/*`.
+- `app\operation.vision_protocol` owns the vision-action execution adapter on top of Operation primitives.
 - `app\operation.region_click` owns reusable region-click execution used by MouseTester baselines and vision-protocol actions.
 - `app\operation.mousetester` owns MouseTester-specific post-click semantic verification used by live execution and trace evaluation.
+- `app\agent.profile` owns deterministic CV-to-candidate-profile extraction used by job-search profile tooling.
 - `app\gate` exposes common contracts such as bound-window matching, candidate freshness, action taxonomy, scoped danger detection, scroll precondition/effect validation, scroll scope, latest-detail dataflow, contextual OCR normalization, and target-at-point validation.
 - `app\trace` exposes trace event recording and execution-action trace write policy on top of the bounded trace writer.
 
@@ -198,7 +201,7 @@ uv run python scripts\seek_mvp_run_audit.py --report logs\smoke\seek_mvp_travers
 
 The audit emits `seek_mvp_run_audit_v1`. It fails old reports that lack `traversal_trace_path`, flags wrong scroll scopes or submit evidence, and treats `blocked_need_real_candidate_profile` as safe only when Apply Entry, live cover letters, and field filling did not happen.
 
-SEEK remains a high-precision dedicated workflow in `skills/seek-high-precision/SKILL.md`. Reusable pieces have been moved into generic layers: `app/core/audit.py` for audit helpers and `app/profile/cv.py` plus `scripts/candidate_profile_from_cv.py` for local CV-to-profile draft generation. A local draft profile can be generated from a CV, but live Apply Entry still requires readiness to pass and must not infer work rights or other sensitive answers from the CV.
+SEEK remains a high-precision dedicated workflow in `skills/seek-high-precision/SKILL.md`. Reusable pieces have been moved into generic layers: `app/core/audit.py` for audit helpers and `app.agent.profile.cv` plus `scripts/candidate_profile_from_cv.py` for local CV-to-profile draft generation. A local draft profile can be generated from a CV, but live Apply Entry still requires readiness to pass and must not infer work rights or other sensitive answers from the CV.
 
 Stable SEEK execution experience can also be exported into Learn Mode artifacts:
 

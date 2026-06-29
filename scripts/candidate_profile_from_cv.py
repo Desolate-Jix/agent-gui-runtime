@@ -10,7 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from app.profile.cv import build_candidate_profile_from_cv_text, extract_cv_text
+from app.agent.profile.cv import build_candidate_profile_from_cv_text, extract_cv_text
 from app.seek.profile import assess_candidate_profile_readiness
 
 

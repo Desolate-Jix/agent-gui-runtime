@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from app.evaluation.mousetester_trace_eval import MouseTesterEvalCase, evaluate_cases
+from app.trace.evaluation.mousetester_trace_eval import MouseTesterEvalCase, evaluate_cases
 
 
 def test_mousetester_trace_eval_scores_action_trace(tmp_path) -> None:

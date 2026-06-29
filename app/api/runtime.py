@@ -5,8 +5,8 @@ from fastapi import APIRouter, Query
 from app.core.model_server import check_model_server, ensure_model_server, load_model_profiles, profile_for_stage, stop_model_server
 from app.core.runtime_artifacts import RuntimeTimer, write_trace
 from app.gate.contracts import build_gate_contract_catalog
-from app.models.request import ModelServerRequest, RuntimePrepareRequest
-from app.models.response import APIResponse, ErrorModel
+from app.api.models.request import ModelServerRequest, RuntimePrepareRequest
+from app.api.models.response import APIResponse, ErrorModel
 from app.operation.skills import build_operation_skill_catalog
 from app.agent.prompts import (
     PromptRollbackRequest,

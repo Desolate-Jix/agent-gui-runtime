@@ -15,7 +15,7 @@ from app.operation.reading import build_read_region_batch_report
 from app.operation.step import build_execute_step_plan
 from app.operation.verification import build_ui_diff_verification
 from app.learn.path_graph_resolver import resolve_runtime_path_graph
-from app.models.request import (
+from app.api.models.request import (
     AvailableActionsRequest,
     ExecuteFormInventoryRequest,
     ExecuteObserveRequest,
@@ -26,7 +26,7 @@ from app.models.request import (
     ScrollRequest,
     TypeTextRequest,
 )
-from app.models.response import APIResponse, ErrorModel
+from app.api.models.response import APIResponse, ErrorModel
 from app.seek.execute_observation import build_seek_execute_observation
 from app.seek.form_inventory import build_seek_form_field_inventory
 

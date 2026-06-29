@@ -6,7 +6,7 @@ from pathlib import Path
 from app.api import runtime as runtime_api
 from app.core import model_server
 from app.core.model_server import profile_for_stage
-from app.models.request import ModelServerRequest, RuntimePrepareRequest
+from app.api.models.request import ModelServerRequest, RuntimePrepareRequest
 
 
 def test_model_status_reports_profiles(monkeypatch) -> None:

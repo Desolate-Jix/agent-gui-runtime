@@ -20,7 +20,7 @@ App/software profiles are runtime resources. `GET /runtime/app_profiles` lists p
 
 The code-level layer entry points are explicit now: `app.operation` exposes the framework operation skill catalog, `app.gate` exposes shared safety/dataflow contracts including scroll precondition/effect validation, and `app.trace` exposes trace event recording plus execution-action trace write policy. `GET /runtime/operation_skills` returns the base operation catalog, while `GET /runtime/operation_skills?app_id=seek` shows how SEEK profile skills map back to generic Operation skills. `GET /runtime/gate_contracts` and `GET /runtime/gate_contracts?app_id=seek` expose the base and profile-specific Gate catalogs.
 
-Core Gate and Operation implementations now live in the new layer packages. The legacy `app.execute` compatibility package has been removed; new imports should use `app.gate`, `app.operation`, or `app.trace` directly.
+Core Gate and Operation implementations now live in the new layer packages. Screen-understanding and recognition modules have also moved under Operation: `app.operation.page_structure`, `app.operation.screen_reading`, `app.operation.screen_inventory`, `app.operation.recognition`, and `app.operation.vision_protocol`. Deterministic CV-to-candidate-profile extraction now lives under `app.agent.profile`. The legacy execute compatibility package has been removed; new imports should use `app.gate`, `app.operation`, `app.trace`, or `app.agent.profile` directly.
 
 Reusable region-click execution now lives in `app.operation.region_click`; MouseTester baselines and vision-protocol actions no longer import private helpers from the Action API.
 

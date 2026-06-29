@@ -4,8 +4,8 @@ import re
 from difflib import SequenceMatcher
 from typing import Any, Iterable
 
-from app.page_structure.schemas import InteractionPolicy, PageElement, PageText, VerificationHints
-from app.recognition.schemas import CandidateRankRequest, CandidateRankResult, RecognitionCandidate, ScoreBreakdown
+from app.operation.page_structure.schemas import InteractionPolicy, PageElement, PageText, VerificationHints
+from app.operation.recognition.schemas import CandidateRankRequest, CandidateRankResult, RecognitionCandidate, ScoreBreakdown
 from app.vision.schemas import BBox, ImageSize
 
 

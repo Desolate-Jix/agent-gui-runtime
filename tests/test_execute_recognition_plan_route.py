@@ -3,8 +3,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from app.api import action as action_api
-from app.models.request import ExecuteRecognitionPlanRequest
-from app.models.response import APIResponse, VisionResultData
+from app.api.models.request import ExecuteRecognitionPlanRequest
+from app.api.models.response import APIResponse, VisionResultData
 
 
 def _bound_window(

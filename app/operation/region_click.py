@@ -7,7 +7,7 @@ from typing import Any, Callable, Optional
 
 from app.core.input_controller import input_controller
 from app.core.verifier import verifier
-from app.schemas.validator_profile import ValidatorProfile
+from app.operation.validator_profile import ValidatorProfile
 from modules.region.geometry import normalized_point as normalized_point_module
 from modules.region.geometry import window_rect as window_rect_module
 from modules.region.geometry import window_size_bucket as window_size_bucket_module

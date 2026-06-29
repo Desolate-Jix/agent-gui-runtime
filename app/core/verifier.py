@@ -8,7 +8,7 @@ from loguru import logger
 from app.core.runtime_artifacts import VERIFICATION_DIR, build_verification_image_path
 from app.core.screenshot import screenshot_service
 from app.core.window_manager import window_manager
-from app.models.request import ROIModel
+from app.api.models.request import ROIModel
 
 CV2_AVAILABLE = False
 CV2_IMPORT_ERROR: Optional[str] = None

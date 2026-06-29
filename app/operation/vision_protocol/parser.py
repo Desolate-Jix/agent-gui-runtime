@@ -6,7 +6,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from app.vision_protocol.schemas import BBox, VisionAction, VisionResponse, VisionState, VisionTarget, VisionValidator
+from app.operation.vision_protocol.schemas import BBox, VisionAction, VisionResponse, VisionState, VisionTarget, VisionValidator
 
 
 def _as_dict(value: Any) -> dict[str, Any]:

@@ -15,7 +15,7 @@ from app.api.runtime import router as runtime_router
 from app.api.session import router as session_router
 from app.api.state import router as state_router
 from app.api.vision import router as vision_router
-from app.models.response import APIResponse, HealthData
+from app.api.models.response import APIResponse, HealthData
 
 LOG_DIR = Path("logs")
 LOG_DIR.mkdir(parents=True, exist_ok=True)

@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from typing import Iterable
 
-from app.page_structure.schemas import InteractionPolicy, PageElement, PageLink, PageStructure, PageText, VerificationHints
+from app.operation.page_structure.schemas import InteractionPolicy, PageElement, PageLink, PageStructure, PageText, VerificationHints
 from app.vision.schemas import BBox, VisionAnalyzeResponse, VisionRegion
 from modules.ocr.contracts import OCRBoundingBox, OCRResult
 

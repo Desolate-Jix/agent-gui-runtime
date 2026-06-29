@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from app.api import apps as apps_api
-from app.models.request import OpenAppRequest
+from app.api.models.request import OpenAppRequest
 
 
 def test_list_apps_returns_catalog_and_running_windows(monkeypatch) -> None:

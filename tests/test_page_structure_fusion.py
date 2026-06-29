@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.page_structure import build_page_structure
+from app.operation.page_structure import build_page_structure
 from app.vision.schemas import BBox, Diagonal, ImageSize, NormalizedDiagonal, VisionAnalyzeResponse, VisionRegion
 from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
 

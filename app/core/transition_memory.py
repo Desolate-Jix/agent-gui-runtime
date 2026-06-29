@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.schemas.transition import TransitionRecord
+from app.trace.transition import TransitionRecord
 
 TRANSITIONS_DIR = Path("logs/app-transitions")
 TRANSITIONS_DIR.mkdir(parents=True, exist_ok=True)

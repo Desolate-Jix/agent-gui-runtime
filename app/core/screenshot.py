@@ -20,7 +20,7 @@ except Exception as exc:  # pragma: no cover - depends on runtime platform/envir
 
 from app.core.window_manager import window_manager
 from app.core.runtime_artifacts import SCREENSHOTS_DIR, build_screenshot_path
-from app.models.request import ROIModel
+from app.api.models.request import ROIModel
 
 
 class ScreenshotService:

@@ -13,8 +13,8 @@ if str(ROOT) not in sys.path:
 
 from app.core.runtime_artifacts import write_trace
 from app.core.window_manager import window_manager
-from app.evaluation.uia_smoke_eval import UIASmokeEvalCase, evaluate_cases
-from app.screen_reading.uia_provider import uia_provider
+from app.trace.evaluation.uia_smoke_eval import UIASmokeEvalCase, evaluate_cases
+from app.operation.screen_reading.uia_provider import uia_provider
 
 
 DEFAULT_EXPECTED_NAMES = ["返回", "刷新", "点击此处测试"]

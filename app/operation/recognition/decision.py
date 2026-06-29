@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from difflib import SequenceMatcher
 
-from app.recognition.schemas import (
+from app.operation.recognition.schemas import (
     CandidateRankResult,
     LocalGroundingCandidateResult,
     LocalGroundingResult,

@@ -4,8 +4,8 @@ from fastapi import APIRouter
 
 from app.core.screenshot import screenshot_service
 from app.core.window_manager import window_manager
-from app.models.request import CaptureWindowRequest
-from app.models.response import APIResponse, CaptureData, ErrorModel, StateData, WindowRectModel
+from app.api.models.request import CaptureWindowRequest
+from app.api.models.response import APIResponse, CaptureData, ErrorModel, StateData, WindowRectModel
 
 router = APIRouter(tags=["state"])
 

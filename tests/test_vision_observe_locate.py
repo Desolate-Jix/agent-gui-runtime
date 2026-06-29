@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.api import vision as vision_api
-from app.models.request import VisionLocateTargetRequestModel, VisionObserveScreenRequestModel
-from app.models.request import VisionRecognitionPlanRequestModel
-from app.models.response import APIResponse, ErrorModel
+from app.api.models.request import VisionLocateTargetRequestModel, VisionObserveScreenRequestModel
+from app.api.models.request import VisionRecognitionPlanRequestModel
+from app.api.models.response import APIResponse, ErrorModel
 from app.vision.schemas import ImageSize, VisionAnalyzeResponse
 
 

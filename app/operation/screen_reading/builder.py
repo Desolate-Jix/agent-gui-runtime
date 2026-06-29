@@ -3,8 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from app.page_structure.schemas import PageElement, PageStructure, PageText
-from app.screen_reading.uia_provider import WindowsUIAProvider
+from app.operation.page_structure.schemas import PageElement, PageStructure, PageText
+from app.operation.screen_reading.uia_provider import WindowsUIAProvider
 from app.vision.schemas import BBox, VisionAnalyzeResponse, VisionRegion
 from modules.ocr.contracts import OCRResult
 
@@ -135,7 +135,7 @@ def build_screen_reading(
             "ocr_image_path": ocr.image_path,
         },
     }
-    from app.screen_inventory import build_screen_inventory
+    from app.operation.screen_inventory import build_screen_inventory
 
     result["screen_inventory"] = build_screen_inventory(result)
     return result

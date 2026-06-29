@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.screen_inventory import build_screen_inventory
+from app.operation.screen_inventory import build_screen_inventory
 
 
 def test_screen_inventory_splits_actions_text_and_cards() -> None:

@@ -4,8 +4,8 @@ from pathlib import Path
 
 from PIL import Image
 
-from app.page_structure.schemas import InteractionPolicy, PageElement, VerificationHints
-from app.recognition import LocalGroundingRequest, RecognitionCandidate, ScoreBreakdown, run_local_grounding
+from app.operation.page_structure.schemas import InteractionPolicy, PageElement, VerificationHints
+from app.operation.recognition import LocalGroundingRequest, RecognitionCandidate, ScoreBreakdown, run_local_grounding
 from app.vision.schemas import BBox
 from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
 

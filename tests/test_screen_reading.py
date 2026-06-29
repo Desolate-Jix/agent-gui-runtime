@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from app.page_structure import build_page_structure
-from app.screen_reading import build_screen_reading
-from app.screen_reading.uia_provider import _patterns
+from app.operation.page_structure import build_page_structure
+from app.operation.screen_reading import build_screen_reading
+from app.operation.screen_reading.uia_provider import _patterns
 from app.vision.schemas import BBox, Diagonal, ImageSize, NormalizedDiagonal, VisionAnalyzeResponse, VisionRegion
 from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
 

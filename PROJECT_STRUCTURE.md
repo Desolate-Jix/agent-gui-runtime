@@ -1,4 +1,4 @@
-﻿# PROJECT_STRUCTURE
+# PROJECT_STRUCTURE
 
 ## Purpose
 
@@ -21,12 +21,12 @@ Use it when you need to answer:
 
 Recent SEEK debugging exposed reusable runtime failures, so common contracts now live outside the SEEK-specific runner:
 
-- `app/execute/dataflow_contracts.py`: latest detail snapshot rules for long-read and downstream match/apply decisions.
-- `app/execute/candidate_contracts.py`: action candidate freshness metadata and validation (`capture_id`, `viewport_size`, `source`, `bbox`, `click_point`, `freshness`).
-- `app/execute/action_kinds.py`: action taxonomy for `open_detail`, `open_apply_flow`, `fill_field`, `continue_next_step`, and final submit/send/confirm/payment classes.
-- `app/execute/danger_scope.py`: scoped final-submit detection inside the active form/modal/flow container instead of full-screen keyword scanning.
-- `app/execute/scroll_scope.py`: target-container scroll invariant so target content should change while non-target panes stay stable.
-- `app/execute/ocr_normalization.py`: contextual short-token OCR normalization such as `AIA` / `AlA`, without global text weakening.
+- `app/gate/dataflow.py`: latest detail snapshot rules for long-read and downstream match/apply decisions.
+- `app/gate/candidates.py`: action candidate freshness metadata and validation (`capture_id`, `viewport_size`, `source`, `bbox`, `click_point`, `freshness`).
+- `app/gate/actions.py`: action taxonomy for `open_detail`, `open_apply_flow`, `fill_field`, `continue_next_step`, and final submit/send/confirm/payment classes.
+- `app/gate/danger.py`: scoped final-submit detection inside the active form/modal/flow container instead of full-screen keyword scanning.
+- `app/gate/scroll.py`: target-container scroll invariant so target content should change while non-target panes stay stable.
+- `app/gate/ocr.py`: contextual short-token OCR normalization such as `AIA` / `AlA`, without global text weakening.
 
 SEEK-specific extraction and runners may adapt job cards, detail panes, and apply buttons, but these contracts are common runtime behavior and must stay reusable for other websites and Windows apps.
 
@@ -50,12 +50,12 @@ Learn Mode is the map-building side. Execute Mode is the command-running side.
 - `scripts/seek_demo_readiness_report.py` turns a SEEK debug run directory plus optional application fill/audit/benchmark artifacts into `seek_demo_readiness_report_v1`. It checks whether the demo is ready to show: job/detail evidence exists, detail reading used batch or scroll evidence, a station-internal application started, `Review and submit` was reached, `final_submissions=0`, screenshot/trace evidence exists, and the run fits the configured time budget.
 - `scripts/seek_demo_goal_completion_audit.py` is the stricter audit for the original 35-minute-demo optimization goal. It emits `seek_demo_goal_completion_audit_v1` and verifies adaptive result scrolling, multi-capture detail reading, execute-scoped screen understanding after page changes, visual form inventory plus scroll/post-fill verification, `ui_diff_verification_v1`, and the 5-minute Review-before-submit boundary. The current fresh pass writes `logs/smoke/seek_speed_demo_20260623_fresh7_absolute/goal_completion_audit.json`.
 - The SEEK runner also writes an independent `seek_mvp_traversal_trace_v1` and stores its path in `seek_mvp_run_report_v1.traversal_trace_path` for reviewing card clicks, nested scrolls, detail reads, match decisions, Apply Entry stops, answer-plan previews, safe-fill attempts, and safety counters.
-- SEEK high precision workflow instructions live in `skills/seek-high-precision/SKILL.md`. Reusable audit helpers now live in `app/core/audit.py`, while generic CV text extraction and candidate-profile draft generation live in `app/profile/cv.py` and `scripts/candidate_profile_from_cv.py`.
+- SEEK high precision workflow instructions live in `skills/seek-high-precision/SKILL.md`. Reusable audit helpers now live in `app/core/audit.py`, while generic CV text extraction and candidate-profile draft generation live in `app/agent/profile/cv.py` and `scripts/candidate_profile_from_cv.py`.
 - SEEK station-internal application learning evidence now has its own export path. `scripts/seek_debug_export_application_fill_record.py` converts a one-step debug run directory into `seek_application_fill_record_v1`; it can merge cover-letter revision reports (`seek_cover_letter_revision_v1`), root-level manual employer-question reports (`seek_employer_questions_manual_debug_v1`), automated employer-question fill reports from `employer_question_fill_attempt`, and final review boundary reports (`seek_review_submit_stop_before_submit_v1`) into the same auditable record. `scripts/seek_application_final_review_audit.py` proves the run stopped at review before submit; `app/seek/application_artifacts.py` builds `seek_application_flow_artifact_v1`; and `scripts/seek_export_application_flow_artifact.py` writes the audited record into a non-authorizing artifact such as `artifacts/seek/learned_seek_application_flow_92822270_20260620.json`. It records source provenance, screenshot/trace paths, the prefixed state machine, transitions, action templates, verification rules, filled-content summary, and safety/field-fill policies, but keeps `artifact_is_authorization=false` and `final_submit_forbidden=true`. Applications with no visible employer-question step are recorded as an explicit `0/0`, not as missing answers; the current default 92822270 debug sample records `4/4` employer-question answers and a revised cover letter.
 - `app/seek/employer_questions.py` is the pre-click core for formal employer-question filling. It emits `employer_question_inventory_v1` from application form evidence plus optional `screen_reading_v1`/Windows UIA controls, scopes each question to a `question_group_bbox`, filters navigation/final-submit buttons out of answer candidates, records visible `selected_value_candidates` for select/dropdown questions, selects duplicate `Yes`/`No` controls only within the current question group with a `duplicate_option_guard`, emits `employer_question_answer_plan_v1` from `candidate_profile_v1` evidence, and emits dry-run `employer_question_answer_preview_v1` targets. If a work-rights select has a visible selected value matching the planned profile-backed answer, preview emits `action_type=already_selected` with bbox/source evidence instead of requiring a dropdown click. The current 92822270 debug run executed q1 as already selected, q2/q3 through `execute_confirmed_point`, q4 through `type_text`, then continued through Profile to `Review and submit` with `final_submissions=0`.
 - `scripts/seek_application_flow_replay_report.py` turns the learned station-internal application artifact into `seek_application_flow_replay_report_v1`, a dry-run strict replay checklist with one timeline entry per transition. The current default panel/checkpoint sample is `artifacts/seek/learned_seek_application_flow_92822270_20260620.json`; it records screenshot-before/after requirements, safe-fill focus and post-fill verification requirements, employer-question count, profile-mutation prohibition, and final-submit blocking before any live replay is attempted.
 - `scripts/seek_debug_step_runner.py --step continue_application_flow` consumes that replay checklist via `--application-flow-replay`. Each debug step report now records the observed application state, selected `seek_apply:*` transition, screenshot-before/after requirements, safe-fill focus and post-fill verification requirements, and final-submit blocking context before any live fill action is allowed.
-- SEEK debug reports now include execution-time helper contracts so the upper agent does not have to use its own screenshot understanding as the primary decision layer. `app/seek/execute_observation.py` emits `execute_observation_v1` from URL/title/text/UIA/OCR-derived state evidence without a model call, `app/seek/form_inventory.py` wraps application and employer-question evidence as `form_field_inventory_v1`, `app/execute/ui_diff_verification.py` emits `ui_diff_verification_v1` from before/after screenshot differences, and `app/execute/read_region_batch.py` emits `read_region_batch_v1` by merging multiple ROI OCR captures from one scroll container. `app/api/execute.py` now exposes `POST /execute/observe`, `POST /execute/form_inventory`, `POST /execute/verify_diff`, and `POST /execute/read_region_batch` for these lightweight contracts; live OCR/scroll capture still belongs to `/vision/ocr_region`, `/action/scroll`, or the SEEK debug runner's convenience step. `scripts/seek_debug_step_runner.py` attaches these to card clicks, detail scrolls, application-flow continuation, final-review extraction, and the new `read_detail_batch` step. Detail-scroll debugging now defaults to `8` wheel clicks and can recommend `14` when progress is low, reducing the slow one-small-scroll loop observed in live demos.
+- SEEK debug reports now include execution-time helper contracts so the upper agent does not have to use its own screenshot understanding as the primary decision layer. `app/seek/execute_observation.py` emits `execute_observation_v1` from URL/title/text/UIA/OCR-derived state evidence without a model call, `app/seek/form_inventory.py` wraps application and employer-question evidence as `form_field_inventory_v1`, `app/operation/verification.py` emits `ui_diff_verification_v1` from before/after screenshot differences, and `app/operation/reading.py` emits `read_region_batch_v1` by merging multiple ROI OCR captures from one scroll container. `app/api/execute.py` now exposes `POST /execute/observe`, `POST /execute/form_inventory`, `POST /execute/verify_diff`, and `POST /execute/read_region_batch` for these lightweight contracts; live OCR/scroll capture still belongs to `/vision/ocr_region`, `/action/scroll`, or the SEEK debug runner's convenience step. `scripts/seek_debug_step_runner.py` attaches these to card clicks, detail scrolls, application-flow continuation, final-review extraction, and the new `read_detail_batch` step. Detail-scroll debugging now defaults to `8` wheel clicks and can recommend `14` when progress is low, reducing the slow one-small-scroll loop observed in live demos.
 - `artifacts/templates/job_search_application_workflow_template_v1.json` is the first job-search/application workflow template abstracted from SEEK. It models `results list -> job card/detail -> job/company record -> candidate-profile screening -> same-site nonfinal application -> review-before-submit block`, composes `list_detail_path_pattern_v1` and `multi_step_form_review_template_v1`, and keeps external ATS application filling, profile mutation, upload/replace, and final submit blocked unless a future explicit policy enables them.
 - `artifacts/skills/job_search_application_workflow_skill_v1.json` is the matching learned orchestration skill artifact. It does not authorize clicks; it describes the inputs, outputs, step loop, composed skills, and safety policy for an upper agent that wants to run job search one backend step at a time while recording `job_record_v1`, `company_record_v1`, `job_screening_decision_v1`, `application_fill_record_v1`, and `review_reconciliation_v1`.
 - The first generic path-graph-mode export now converts the stable SEEK manual-learning sample into `runtime_path_graph_v1`, `learned_skill_v1`, and `visual_asset_v1`. These live under `artifacts/seek/runtime_path_graph_seek_mvp_20260617.json`, `artifacts/seek/learned_skills_seek_mvp_20260617.json`, and `artifacts/seek/visual_assets_seek_mvp_20260617.json`. They are guidance only; Execute still needs fresh observation, VISTA or equivalent validation, `pre_click_decision_v1`, and post-action verification.
@@ -168,10 +168,10 @@ Execute outputs:
 
 ### File Ownership
 
-- `app/models/request.py`: mode fields and write-policy request contracts
+- `app/api/models/request.py`: mode fields and write-policy request contracts
 - `app/api/vision.py`: Learn Fast, Learn Deep, OCR anchor reuse, PathGraph recall, and recognition-plan candidate fusion
 - `app/api/vision.py`: Screen Map candidate rules for sections, controls, OCR text actions, OCR card aggregation, and noise filtering
-- `app/screen_inventory/`: builds `screen_inventory_v1` from `screen_reading_v1`, compact UIA controls, OCR text, and UI elements
+- `app/operation/screen_inventory/`: builds `screen_inventory_v1` from `screen_reading_v1`, compact UIA controls, OCR text, and UI elements
 - `scripts/benchmark_screen_inventory.py`: measures typed-ground-truth inventory recall for actions, page elements, metadata, and cards, plus action precision, clickable false-positive rate, duplicate rate, coordinate coverage, candidate count, and build latency
 - `app/vision/local_provider.py`: OpenAI-compatible local model calls and `model_io_trace_v1` / `model_io_attempt_v1` recording for every successful or failed attempt
 - `app/api/action.py`: Execute Mode gated click, bound-window scroll actions, post-click verification, transition memory writeback, and fallback planning
@@ -186,13 +186,13 @@ Execute outputs:
 - `app/seek/answer_plan.py`: SEEK-specific read-only application answer planning and risk classification
 - `app/seek/profile.py`: candidate profile readiness checks for real cover-letter generation and single-field safe-fill
 - `app/core/audit.py`: reusable audit helper functions shared by domain auditors
-- `app/profile/cv.py`: generic local CV text extraction and `candidate_profile_v1` draft generation
+- `app/agent/profile/cv.py`: generic local CV text extraction and `candidate_profile_v1` draft generation
 - `scripts/candidate_profile_from_cv.py`: CLI for generating a reviewed local candidate-profile draft from a CV without printing raw contact values
 - `app/seek/learn_artifacts.py`: exports stable SEEK traversal experience into `learned_app_profile_v1` and `path_graph_seed_v1`, plus helper functions for artifact-assisted execution
 - `app/learn/path_graph_artifacts.py`: converts the SEEK manual-learning export into generic `runtime_path_graph_v1`, `learned_skill_v1`, and `visual_asset_v1` artifacts
 - `app/learn/skill_matrix.py`: builds `learned_skill_matrix_v1` from existing runtime path graphs so Execute Mode can prove reusable click, scroll, input, read, and guard coverage
-- `app/execute/available_actions.py`: builds `available_actions_v1` from a runtime path graph so an upper agent can choose among safe graph-assisted actions before normal gated execution
-- `app/execute/path_graph_step.py`: converts one selected `available_actions_v1` item into a single-step Execute plan with `path_graph_action_context_v1` and a low-level click, scroll, or input request payload
+- `app/operation/path_graph.py`: builds `available_actions_v1` from a runtime path graph so an upper agent can choose among safe graph-assisted actions before normal gated execution
+- `app/operation/step.py`: converts one selected `available_actions_v1` item into a single-step Execute plan with `path_graph_action_context_v1` and a low-level click, scroll, or input request payload
 - `app/learn/path_graph_resolver.py`: emits `path_graph_resolution_v1` by matching a runtime graph against provided inventory/scroll-container evidence and safety constraints
 - `app/api/execute.py`: exposes `POST /execute/available_actions` and `POST /execute/step` for path-graph-assisted single-step Execute planning and optional one-step dispatch through existing gated `/action/*` routes
 - `app/learn/visual_asset_crops.py`: optional crop/hash builder for representative visual asset evidence from a current screenshot
@@ -525,11 +525,11 @@ Execute:
     - OCR-driven text click
     - MouseTester-specific region click with validation and persistence
 
-- `app/evaluation/mousetester_trace_eval.py`
+- `app/trace/evaluation/mousetester_trace_eval.py`
   - trace-evaluation helpers for MouseTester recognition/action evidence
   - reports top-1, pre-click, action execution, semantic verification, and retry facts
 
-- `app/evaluation/uia_smoke_eval.py`
+- `app/trace/evaluation/uia_smoke_eval.py`
   - trace-evaluation helpers for Windows UIA smoke evidence
   - scores scan status, control count, button count, and expected control-name substrings such as `杩斿洖`, `鍒锋柊`, and `鐐瑰嚮姝ゅ娴嬭瘯`
 
@@ -585,7 +585,7 @@ Execute:
 
 ### Request/response models
 
-- `app/models/request.py`
+- `app/api/models/request.py`
   - API request payloads
   - actual current models in use:
     - `BindWindowRequest`
@@ -597,25 +597,25 @@ Execute:
     - `ModelServerRequest`
     - `VisionAnalyzeRequestModel`
 
-- `app/models/response.py`
+- `app/api/models/response.py`
   - common API envelope and response payload models
   - route payloads may include `execution_path` and `trace_path` inside `result`
 
 ### Persisted schemas
 
-- `app/schemas/state.py`
+- `app/vision/state.py`
   - `AppState`
 
-- `app/schemas/action_target.py`
+- removed; action targets are represented by gated action request/trace contracts
   - `ActionTarget`
 
-- `app/schemas/validator_profile.py`
+- `app/operation/validator_profile.py`
   - `ValidatorProfile`
 
-- `app/schemas/replay_case.py`
+- removed; replay evidence now lives in Trace artifacts
   - `ReplayCase`
 
-- `app/schemas/transition.py`
+- `app/trace/transition.py`
   - `TransitionRecord`
 
 ### Vision provider layer
@@ -664,7 +664,7 @@ Key files:
   - renders human-review overlays from saved `layer_trace` JSON files
   - supports red region boxes plus blue OCR boxes on the original screenshot
   - can draw either raw provider regions or another trace layer for comparison
-- `app/recognition/plan_overlay.py`
+- `app/operation/recognition/plan_overlay.py`
   - renders human-review overlays from saved `recognition_plan_v1` JSON files
   - shows candidate boxes, allow/reject status, local OCR matches, and refined click points
 - `ocr_region_refiner.py`
@@ -683,7 +683,7 @@ Current status:
 
 ### Page structure fusion layer
 
-- `app/page_structure/`
+- `app/operation/page_structure/`
   - deterministic fusion layer that consumes normalized `vision_regions_v1` plus `OCRResult`
   - outputs `page_structure_v1`
   - does not call an LLM; it keeps click, verification, fallback, and memory decisions transparent
@@ -822,7 +822,7 @@ Runtime output:
 
 ### Screen reading layer
 
-- `app/screen_reading/`
+- `app/operation/screen_reading/`
   - READ-facing screen interpretation layer above `page_structure_v1`
   - outputs `screen_reading_v1`
   - keeps UI recognition separate from action execution
@@ -955,7 +955,7 @@ Layer meanings:
 
 ### Vision execution protocol
 
-- `app/vision_protocol/`
+- `app/operation/vision_protocol/`
   - parser and executor-adapter for structured vision outputs
   - not yet the primary runtime path
 
@@ -1202,7 +1202,7 @@ Current test coverage:
 - provider loading: `app/vision/factory.py`
 - provider impls: `app/vision/local_provider.py`, `app/vision/api_provider.py`
 - learned region artifacts: `app/vision/artifacts.py`
-- protocol handling: `app/vision_protocol/`
+- protocol handling: `app/operation/vision_protocol/`
 
 ### vision page structure
 
@@ -1211,8 +1211,8 @@ Current test coverage:
 - provider loading: `app/vision/factory.py`
 - semantic input: `app/vision/local_provider.py` or `app/vision/api_provider.py`
 - OCR input: `app/core/ocr_service.py`
-- fusion logic: `app/page_structure/fusion.py`
-- output schema: `app/page_structure/schemas.py`
+- fusion logic: `app/operation/page_structure/fusion.py`
+- output schema: `app/operation/page_structure/schemas.py`
 
 Execution sequence:
 
@@ -1236,7 +1236,7 @@ The first version intentionally does not make action decisions. It prepares exec
 
 - route: `app/api/vision.py`
 - endpoint: `POST /vision/screen_reading`
-- builder: `app/screen_reading/builder.py`
+- builder: `app/operation/screen_reading/builder.py`
 
 Use this when the upper layer wants a fuller READ result instead of only the older page-structure fusion result. The current implementation strengthens the UI part of READ by returning OCR-backed elements, visual-only/icon candidates, module grouping, locator hints, reserved provider slots, and learning hooks.
 
@@ -1397,10 +1397,10 @@ MVP non-goals:
   - keep using:
     - `app/api/vision.py`
     - `app/vision/`
-    - `app/page_structure/`
+    - `app/operation/page_structure/`
 - `candidate`
   - add new module:
-    - `app/recognition/candidate_ranker.py`
+    - `app/operation/recognition/candidate_ranker.py`
   - responsibility:
     - rank parsed elements for one task
   - current contract:
@@ -1428,7 +1428,7 @@ MVP non-goals:
     - stores `bbox_refine_reason` without mutating the original element bbox
 - `narrow_search`
   - add new module:
-    - `app/recognition/local_grounding.py`
+    - `app/operation/recognition/local_grounding.py`
   - responsibility:
     - crop and rerun local analysis on candidate ROIs
   - current contract:
@@ -1445,7 +1445,7 @@ MVP non-goals:
   - first reuse:
     - `app/core/verifier.py`
   - then add task-specific decision logic:
-    - `app/recognition/decision.py`
+    - `app/operation/recognition/decision.py`
   - current pre-click contract:
     - response: `PreClickDecisionResult`
     - response version: `pre_click_decision_v1`
@@ -1460,7 +1460,7 @@ MVP non-goals:
     - refined click point inside candidate refined bbox when present, otherwise original candidate bbox
 - orchestration
   - add one thin coordinator:
-    - `app/recognition/pipeline.py`
+    - `app/operation/recognition/pipeline.py`
 
 #### Current MVP planning endpoint
 
@@ -1538,11 +1538,11 @@ For one controlled page family such as MouseTester:
 #### MVP implementation order
 
 1. implement `candidate` ranking without any clicking
-   - status: first local contract and unit tests exist under `app/recognition/`
+   - status: first local contract and unit tests exist under `app/operation/recognition/`
 2. implement local ROI `narrow_search`
-   - status: OCR-first `narrow_search_v1` exists under `app/recognition/local_grounding.py`
+   - status: OCR-first `narrow_search_v1` exists under `app/operation/recognition/local_grounding.py`
 3. connect pre-click `verify`
-   - status: `pre_click_decision_v1` exists under `app/recognition/decision.py`
+   - status: `pre_click_decision_v1` exists under `app/operation/recognition/decision.py`
 4. expose a no-click planning route
    - status: `POST /vision/recognition_plan` exists and returns `recognition_plan_v1`
 5. attach action execution only after the planning path is measured
@@ -1701,7 +1701,7 @@ Expected recovery behavior:
 ### Legacy or partially retained structures
 
 - old template/scene config folders
-- old request models for template/wait flows in `app/models/request.py`
+- old request models for template/wait flows in `app/api/models/request.py`
 - `app/vision/` provider abstraction is active; local provider supports OpenAI-compatible multimodal endpoints, API provider is still stubbed
 
 ## Recommended Documentation Split

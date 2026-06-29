@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from app.page_structure.schemas import InteractionPolicy, PageElement, PageStructure, PageText, VerificationHints
-from app.recognition import CandidateRankRequest, rank_candidates
+from app.operation.page_structure.schemas import InteractionPolicy, PageElement, PageStructure, PageText, VerificationHints
+from app.operation.recognition import CandidateRankRequest, rank_candidates
 from app.vision.schemas import BBox, ImageSize
 
 

@@ -12,8 +12,8 @@ from fastapi import APIRouter
 
 from app.core.runtime_artifacts import RuntimeTimer, write_trace
 from app.core.window_manager import window_manager
-from app.models.request import OpenAppRequest
-from app.models.response import APIResponse, ErrorModel
+from app.api.models.request import OpenAppRequest
+from app.api.models.response import APIResponse, ErrorModel
 
 router = APIRouter(prefix="/apps", tags=["apps"])
 

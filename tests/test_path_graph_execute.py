@@ -11,7 +11,7 @@ from app.operation.step import build_execute_step_plan
 from app.learn.path_graph_artifacts import build_seek_runtime_path_graph_export
 from app.learn.path_graph_resolver import resolve_runtime_path_graph
 from app.main import app
-from app.models.response import APIResponse
+from app.api.models.response import APIResponse
 from app.seek.learn_artifacts import build_seek_learn_artifacts
 
 

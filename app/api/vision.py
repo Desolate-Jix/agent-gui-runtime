@@ -19,7 +19,7 @@ from app.operation.visual_asset_matching import match_visual_asset
 from app.learn.interface_map import build_learned_interface_map
 from app.learn.path_graph_resolver import resolve_runtime_path_graph
 from app.learn.visual_asset_crops import build_visual_assets_from_screen_map
-from app.models.request import (
+from app.api.models.request import (
     VisionAnalyzeRequestModel,
     VisionLocateTargetRequestModel,
     VisionObserveScreenRequestModel,
@@ -27,16 +27,16 @@ from app.models.request import (
     VisionRecognitionPlanRequestModel,
     VisionReviewOverlayRequestModel,
 )
-from app.models.response import APIResponse, ErrorModel, VisionResultData
-from app.models.request import OCRRegionRequest
-from app.page_structure import build_page_structure
-from app.page_structure.schemas import InteractionPolicy, PageElement, PageStructure, VerificationHints
-from app.recognition import CandidateRankRequest, LocalGroundingRequest, decide_pre_click, rank_candidates, run_local_grounding
-from app.recognition.schemas import CandidateRankResult, LocalGroundingCandidateResult, LocalGroundingResult, RecognitionCandidate, ScoreBreakdown
-from app.recognition.plan_overlay import render_recognition_plan_overlay
-from app.screen_inventory import build_screen_inventory
-from app.screen_reading import build_screen_reading
-from app.screen_reading.uia_provider import uia_provider
+from app.api.models.response import APIResponse, ErrorModel, VisionResultData
+from app.api.models.request import OCRRegionRequest
+from app.operation.page_structure import build_page_structure
+from app.operation.page_structure.schemas import InteractionPolicy, PageElement, PageStructure, VerificationHints
+from app.operation.recognition import CandidateRankRequest, LocalGroundingRequest, decide_pre_click, rank_candidates, run_local_grounding
+from app.operation.recognition.schemas import CandidateRankResult, LocalGroundingCandidateResult, LocalGroundingResult, RecognitionCandidate, ScoreBreakdown
+from app.operation.recognition.plan_overlay import render_recognition_plan_overlay
+from app.operation.screen_inventory import build_screen_inventory
+from app.operation.screen_reading import build_screen_reading
+from app.operation.screen_reading.uia_provider import uia_provider
 from app.vision.artifacts import save_region_artifacts
 from app.vision.anchor_grounding import apply_anchor_grounding_evaluation
 from app.vision.factory import VisionProviderFactory
@@ -346,7 +346,7 @@ def _load_observe_trace_reuse(trace_path_value: str | None, *, image_path: str, 
         if isinstance(screen_reading.get("screen_inventory"), dict):
             screen_inventory = screen_reading["screen_inventory"]
         elif screen_reading.get("contract_version") == "screen_reading_v1":
-            from app.screen_inventory import build_screen_inventory
+            from app.operation.screen_inventory import build_screen_inventory
 
             screen_inventory = build_screen_inventory(screen_reading, goal=goal)
     return {

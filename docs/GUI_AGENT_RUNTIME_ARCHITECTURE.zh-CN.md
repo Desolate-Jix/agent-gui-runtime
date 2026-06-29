@@ -106,12 +106,17 @@ app/operation/
 - PathGraph available actions：`app.operation.path_graph`
 - PathGraph step plan：`app.operation.step`
 - visual asset matching：`app.operation.visual_asset_matching`
+- page structure fusion：`app.operation.page_structure`
+- screen reading：`app.operation.screen_reading`
+- screen inventory：`app.operation.screen_inventory`
+- recognition planning：`app.operation.recognition`
+- vision protocol execution adapter：`app.operation.vision_protocol`
 - long-read region batch：`app.operation.reading`
 - UI diff verification：`app.operation.verification`
 - region click execution：`app.operation.region_click`
 - MouseTester semantic verification：`app.operation.mousetester`
 
-旧 `app.execute` 兼容包已删除；新代码必须直接引用 `app.operation.*`。
+旧执行兼容包和旧顶层屏幕理解/识别模块已删除；新代码必须直接引用 `app.operation.*`。
 
 ### Gate
 
@@ -314,7 +319,7 @@ artifacts/
     app_profile_template_v1.json
 ```
 
-当前阶段先落合同和 profile 资产，不强行搬迁既有模块。
+当前阶段已经完成核心旧模块归位：执行合同进入 Gate / Operation / Trace，屏幕理解和识别进入 Operation，CV profile 解析进入 Agent profile，SEEK 保留为 app/software profile 的领域实现。
 
 ## 迁移顺序
 

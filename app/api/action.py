@@ -21,7 +21,7 @@ from app.core.window_manager import window_manager
 from app.gate.scroll import build_scroll_effect_validation, build_scroll_precondition_decision, build_scroll_safe_point
 from app.operation.mousetester import should_verify_mouse_tester_semantics, target_bbox_from_recommended, verify_mouse_tester_post_click_semantics
 from app.trace.actions import write_execute_trace_if_enabled
-from app.models.request import (
+from app.api.models.request import (
     ClickTextRequest,
     ExecuteConfirmedPointRequest,
     ExecuteRecognitionPlanRequest,
@@ -30,8 +30,8 @@ from app.models.request import (
     VisionRecognitionPlanOverlayRequestModel,
     VisionRecognitionPlanRequestModel,
 )
-from app.models.response import APIResponse, ActionResultData, ErrorModel
-from app.schemas.transition import TransitionRecord
+from app.api.models.response import APIResponse, ActionResultData, ErrorModel
+from app.trace.transition import TransitionRecord
 from app.seek.scroll_containers import (
     discover_seek_scroll_containers,
     get_scroll_container,

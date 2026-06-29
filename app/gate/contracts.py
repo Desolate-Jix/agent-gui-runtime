@@ -38,7 +38,7 @@ _BASE_GATE_CONTRACTS: tuple[GateContract, ...] = (
     ),
     GateContract(
         contract_id="pre_click_decision_v1",
-        layer_module="app.recognition",
+        layer_module="app.operation.recognition",
         purpose="Require an explicit pre-click decision before a real click is executed.",
         blocks_or_flags=["missing_pre_click_decision", "ambiguous_candidate", "target_evidence_mismatch"],
     ),
