@@ -1,0 +1,175 @@
+{
+  "contract_version": "job_screening_5_candidates_v1",
+  "profile": "D:\\资料\\CV\\candidate_profile_wenqingji_20260629_enriched.json",
+  "source_notes": "2 candidates came from live SEEK framework traversal; remaining candidates from current SEEK/search result evidence; no forms opened or filled.",
+  "candidates": [
+    {
+      "candidate": {
+        "title": "Graduate Software Engineer - Integration",
+        "company": "Heartland Bank",
+        "location": "Auckland CBD, Auckland",
+        "work_type": "Full time",
+        "salary_text": ",000 - ,000 per year",
+        "url": "https://www.seek.co.nz/graduate-software-engineer-jobs/in-All-Auckland",
+        "text": "Grow your career; supportive leadership; fast paced environment. Looking for graduates who are passionate about technology and eager to learn. Integration software engineering role at Heartland Bank."
+      },
+      "framework_decision": {
+        "contract_version": "seek_job_match_decision_v1",
+        "decision": "maybe_apply",
+        "score": 0.55,
+        "job_id": null,
+        "title": "Graduate Software Engineer - Integration",
+        "company": "Heartland Bank",
+        "fit_summary": "maybe_apply with score 0.550. positive: matched_target_roles: Software Engineer; location_matches: Auckland CBD, Auckland. needs review: no candidate skills matched visible job detail; preferred work mode not visible in job detail.",
+        "recommended_next_action": "review_then_optionally_open_apply_entry",
+        "positive_evidence": [
+          "matched_target_roles: Software Engineer",
+          "location_matches: Auckland CBD, Auckland"
+        ],
+        "negative_evidence": [],
+        "unknowns": [
+          "no candidate skills matched visible job detail",
+          "preferred work mode not visible in job detail"
+        ],
+        "risk_flags": [
+          "do_not_invent_experience"
+        ],
+        "trace_path": null
+      }
+    },
+    {
+      "candidate": {
+        "title": "Junior Developer",
+        "company": "Breast Cancer Foundation NZ",
+        "location": "Parnell, Auckland (Hybrid)",
+        "work_type": "Full time, 2-year fixed-term",
+        "salary_text": ",000 - ,000 per year",
+        "url": "https://www.seek.co.nz/breast-cancer-foundation-jobs",
+        "text": "Help in building and maintaining scalable software using a range of tools. Contribute to modernisation of healthcare data. Hybrid, great team and location."
+      },
+      "framework_decision": {
+        "contract_version": "seek_job_match_decision_v1",
+        "decision": "maybe_apply",
+        "score": 0.6,
+        "job_id": null,
+        "title": "Junior Developer",
+        "company": "Breast Cancer Foundation NZ",
+        "fit_summary": "maybe_apply with score 0.600. positive: matched_target_roles: Junior Software Developer; location_matches: Parnell, Auckland (Hybrid); matched_preferred_work_modes: hybrid. needs review: no candidate skills matched visible job detail.",
+        "recommended_next_action": "review_then_optionally_open_apply_entry",
+        "positive_evidence": [
+          "matched_target_roles: Junior Software Developer",
+          "location_matches: Parnell, Auckland (Hybrid)",
+          "matched_preferred_work_modes: hybrid"
+        ],
+        "negative_evidence": [],
+        "unknowns": [
+          "no candidate skills matched visible job detail"
+        ],
+        "risk_flags": [
+          "do_not_invent_experience"
+        ],
+        "trace_path": null
+      }
+    },
+    {
+      "candidate": {
+        "title": "Junior/Int Python Developer",
+        "company": "PICWA LTD",
+        "location": "Ellerslie, Auckland (Hybrid)",
+        "work_type": "Full time",
+        "salary_text": "competitive salary",
+        "url": "https://www.seek.co.nz/python-programmer-jobs/in-All-Auckland",
+        "text": "Clear growth pathway from Junior to Senior with real ownership from day one. Work across ERP, integrations and customer-facing builds. Python developer, hybrid setup, team invests in you."
+      },
+      "framework_decision": {
+        "contract_version": "seek_job_match_decision_v1",
+        "decision": "maybe_apply",
+        "score": 0.49,
+        "job_id": null,
+        "title": "Junior/Int Python Developer",
+        "company": "PICWA LTD",
+        "fit_summary": "maybe_apply with score 0.490. positive: matched_skills: Python; location_matches: Ellerslie, Auckland (Hybrid); matched_preferred_work_modes: hybrid.",
+        "recommended_next_action": "review_then_optionally_open_apply_entry",
+        "positive_evidence": [
+          "matched_skills: Python",
+          "location_matches: Ellerslie, Auckland (Hybrid)",
+          "matched_preferred_work_modes: hybrid"
+        ],
+        "negative_evidence": [],
+        "unknowns": [],
+        "risk_flags": [
+          "do_not_invent_experience"
+        ],
+        "trace_path": null
+      }
+    },
+    {
+      "candidate": {
+        "title": "Graduate Software Developer",
+        "company": "Daifuku Oceania",
+        "location": "Rosedale, Auckland",
+        "work_type": "Contract/Temp, 9 month contract",
+        "salary_text": null,
+        "url": "https://www.seek.co.nz/graduate-computer-science-jobs/in-Glenfield-Auckland",
+        "text": "Graduate Software Developer. 9 Month Contract Position. Ship real features to production. Exposure to new technologies. Friendly and supportive team environment. Cutting-edge digital and self-service solutions."
+      },
+      "framework_decision": {
+        "contract_version": "seek_job_match_decision_v1",
+        "decision": "maybe_apply",
+        "score": 0.64,
+        "job_id": null,
+        "title": "Graduate Software Developer",
+        "company": "Daifuku Oceania",
+        "fit_summary": "maybe_apply with score 0.640. positive: matched_skills: Git; matched_target_roles: Graduate Software Developer; location_matches: Rosedale, Auckland. needs review: preferred work mode not visible in job detail.",
+        "recommended_next_action": "review_then_optionally_open_apply_entry",
+        "positive_evidence": [
+          "matched_skills: Git",
+          "matched_target_roles: Graduate Software Developer",
+          "location_matches: Rosedale, Auckland"
+        ],
+        "negative_evidence": [],
+        "unknowns": [
+          "preferred work mode not visible in job detail"
+        ],
+        "risk_flags": [
+          "do_not_invent_experience"
+        ],
+        "trace_path": null
+      }
+    },
+    {
+      "candidate": {
+        "title": "Junior Configuration Developer",
+        "company": "Foster Moore International Ltd",
+        "location": "Auckland CBD, Auckland (Hybrid)",
+        "work_type": "Full time",
+        "salary_text": null,
+        "url": "https://www.seek.co.nz/Foster-Moore-International-jobs/in-Mount-Eden-Auckland",
+        "text": "Junior Software Configuration Developer / Junior Configuration Developer. Hybrid working, excellent remuneration and benefit package, varied work. Collaborative fast-paced environment supporting international registries."
+      },
+      "framework_decision": {
+        "contract_version": "seek_job_match_decision_v1",
+        "decision": "maybe_apply",
+        "score": 0.6,
+        "job_id": null,
+        "title": "Junior Configuration Developer",
+        "company": "Foster Moore International Ltd",
+        "fit_summary": "maybe_apply with score 0.600. positive: matched_target_roles: Junior Software Developer; location_matches: Auckland CBD, Auckland (Hybrid); matched_preferred_work_modes: hybrid. needs review: no candidate skills matched visible job detail.",
+        "recommended_next_action": "review_then_optionally_open_apply_entry",
+        "positive_evidence": [
+          "matched_target_roles: Junior Software Developer",
+          "location_matches: Auckland CBD, Auckland (Hybrid)",
+          "matched_preferred_work_modes: hybrid"
+        ],
+        "negative_evidence": [],
+        "unknowns": [
+          "no candidate skills matched visible job detail"
+        ],
+        "risk_flags": [
+          "do_not_invent_experience"
+        ],
+        "trace_path": null
+      }
+    }
+  ]
+}

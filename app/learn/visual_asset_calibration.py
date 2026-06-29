@@ -4,7 +4,7 @@ from pathlib import Path
 from statistics import median
 from typing import Any
 
-from app.execute.visual_asset_matching import match_visual_asset
+from app.operation.visual_asset_matching import match_visual_asset
 from app.learn.interface_map import merge_visual_asset_match_evidence
 
 

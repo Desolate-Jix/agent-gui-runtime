@@ -4,14 +4,14 @@
   "decision": {
     "contract_version": "seek_job_match_decision_v1",
     "decision": "strong_apply",
-    "score": 0.73,
+    "score": 0.82,
     "job_id": "seek_job_7aab55c0941f",
     "title": "Software Engineer (Test Systems)",
     "company": "Quantifi Photonics",
-    "fit_summary": "strong_apply with score 0.730. positive: matched_skills: C#, photonics; matched_target_roles: Software Engineer; location_matches: Rosedale, Auckland.",
+    "fit_summary": "strong_apply with score 0.820. positive: matched_skills: C#, test automation, photonics; matched_target_roles: Software Engineer; location_matches: Rosedale, Auckland.",
     "recommended_next_action": "open_apply_entry_and_prepare_safe_fields",
     "positive_evidence": [
-      "matched_skills: C#, photonics",
+      "matched_skills: C#, test automation, photonics",
       "matched_target_roles: Software Engineer",
       "location_matches: Rosedale, Auckland"
     ],

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from app.execute.ui_diff_verification import build_ui_diff_verification
+from app.operation.verification import build_ui_diff_verification
 
 
 def test_ui_diff_detects_field_value_change_inside_target(tmp_path: Path) -> None:

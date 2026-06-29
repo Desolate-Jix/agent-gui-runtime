@@ -224,7 +224,7 @@
     <rect class="learn" x="815" y="0" rx="18" width="330" height="105"/>
     <text class="cn" x="980" y="36" text-anchor="middle">学习记忆层（下一阶段）</text>
     <text class="en" x="980" y="66" text-anchor="middle">Learning Write-back</text>
-    <text class="small" x="980" y="91" text-anchor="middle">ReplayCase / TransitionRecord / TargetAsset</text>
+    <text class="small" x="980" y="91" text-anchor="middle">Trace evidence / TransitionRecord / TargetAsset</text>
     <rect class="panelGreen" x="1205" y="0" rx="14" width="330" height="105"/>
     <text class="body" x="1225" y="29">成功经验可复用，但不绕过安全。</text>
     <text class="small" x="1225" y="57">Reuse evidence, still require fresh checks.</text>

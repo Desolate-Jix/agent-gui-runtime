@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.execute.action_kinds import classify_action_taxonomy, infer_low_level_action_type
+from app.gate.actions import classify_action_taxonomy, infer_low_level_action_type
 
 
 PATH_GRAPH_ACTION_CONTEXT_CONTRACT = "path_graph_action_context_v1"

@@ -3,7 +3,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.seek.matching import load_candidate_profile, merge_seek_job_identity, save_suitable_job_record, score_seek_job
+from app.seek.matching import (
+    apply_agent_suitability_review,
+    find_agent_suitability_review,
+    load_candidate_profile,
+    merge_seek_job_identity,
+    save_suitable_job_record,
+    score_seek_job,
+)
 
 
 def _card() -> dict:
@@ -74,6 +81,96 @@ def test_profile_match_scores_and_saves_suitable_job(tmp_path) -> None:
     saved = json.loads((tmp_path / "saved" / "seek_job_software_engineer.json").read_text(encoding="utf-8"))
     assert saved["contract_version"] == "saved_seek_job_record_v1"
     assert saved["decision"]["decision"] == "strong_apply"
+
+
+def test_agent_full_jd_review_policy_disables_local_keyword_suitability_decision(tmp_path) -> None:
+    detail = {
+        **_detail(),
+        "requirements": ["Python", "React", "SQL", "Auckland based graduate software role."],
+        "description_sections": [
+            {
+                "index": 0,
+                "role": "body",
+                "text": "Full job description text that must be reviewed by the agent before suitability is decided.",
+            }
+        ],
+    }
+
+    decision = score_seek_job(
+        profile={
+            "contract_version": "candidate_profile_v1",
+            "skills": ["Python", "React", "SQL"],
+            "target_roles": ["Graduate Software Developer"],
+            "location_constraints": ["Auckland"],
+            "job_search_preferences": {"screening_policy": "agent_full_jd_review_required"},
+        },
+        card=_card(),
+        detail=detail,
+    )
+    saved_path = save_suitable_job_record(
+        decision=decision,
+        card=_card(),
+        detail=detail,
+        output_dir=tmp_path / "saved",
+    )
+
+    assert decision["decision"] == "need_user_review"
+    assert decision["score"] == 0.0
+    assert "local_keyword_suitability_screening_disabled" in decision["risk_flags"]
+    assert decision["recommended_next_action"] == "ask_user_or_gpt_for_review"
+    assert decision["agent_review"]["contract_version"] == "job_suitability_agent_review_payload_v1"
+    assert "Full job description text" in decision["agent_review"]["full_job_text"]
+    assert saved_path is None
+
+
+def test_agent_suitability_pass_verdict_unlocks_apply_entry_after_full_jd_review() -> None:
+    decision = score_seek_job(
+        profile={
+            "contract_version": "candidate_profile_v1",
+            "skills": ["Python", "React", "SQL"],
+            "target_roles": ["Graduate Software Developer"],
+            "location_constraints": ["Auckland"],
+            "job_search_preferences": {"screening_policy": "agent_full_jd_review_required"},
+        },
+        card=_card(),
+        detail={
+            **_detail(),
+            "description_sections": [{"index": 0, "role": "body", "text": "Complete JD reviewed by agent."}],
+        },
+    )
+    review = {
+        "contract_version": "agent_suitability_review_v1",
+        "job_id": "seek_job_software_engineer",
+        "verdict": "pass",
+        "full_jd_reviewed": True,
+        "reasons": ["Graduate software role matches the candidate profile."],
+    }
+
+    reviewed = apply_agent_suitability_review(decision, review)
+
+    assert reviewed["decision"] == "strong_apply"
+    assert reviewed["recommended_next_action"] == "open_apply_entry_and_prepare_safe_fields"
+    assert reviewed["agent_suitability_review"]["verdict"] == "pass"
+    assert "agent_full_jd_review_passed" in reviewed["risk_flags"]
+
+
+def test_agent_suitability_review_lookup_matches_job_identity() -> None:
+    decision = {"job_id": "seek_job_software_engineer", "title": "Software Engineer", "company": "Example Systems"}
+    review = find_agent_suitability_review(
+        [
+            {
+                "contract_version": "agent_suitability_review_v1",
+                "job_id": "seek_job_software_engineer",
+                "verdict": "pass",
+            }
+        ],
+        match_decision=decision,
+        card=_card(),
+        detail=_detail(),
+    )
+
+    assert review is not None
+    assert review["verdict"] == "pass"
 
 
 def test_description_sections_contribute_to_profile_match() -> None:
@@ -271,7 +368,7 @@ def test_work_rights_or_background_check_terms_require_review() -> None:
         **_detail(),
         "requirements": [
             "C# programming experience",
-            "Applicants must have NZ citizenship and security clearance.",
+            "Applicants may be asked to complete a police check and background check.",
         ],
     }
 
@@ -290,6 +387,76 @@ def test_work_rights_or_background_check_terms_require_review() -> None:
     assert decision["decision"] == "need_user_review"
     assert "work_rights_or_background_check_requires_review" in decision["risk_flags"]
     assert any("work_rights_or_background_check_requires_review" in item for item in decision["unknowns"])
+
+
+def test_citizenship_and_security_clearance_requirements_hard_skip() -> None:
+    decision = score_seek_job(
+        profile={
+            "contract_version": "candidate_profile_v1",
+            "skills": ["Python", "C#", "SQL", "API"],
+            "target_roles": ["Software Engineer"],
+            "location_constraints": ["Auckland"],
+            "work_rights_summary": "Post-study open work visa.",
+        },
+        card={
+            **_card(),
+            "title": "Software Engineer",
+            "company": "Government Communications Security Bureau",
+        },
+        detail={
+            **_detail(),
+            "title": "Software Engineer",
+            "company": "Government Communications Security Bureau",
+            "requirements": [
+                "You must be a New Zealand citizen.",
+                "You must be eligible to obtain and maintain a Top Secret Special national security clearance.",
+                "A 10-year checkable background in New Zealand may be required.",
+                "C# and SQL experience.",
+            ],
+        },
+    )
+
+    assert decision["decision"] == "skip"
+    assert decision["score"] == 0.0
+    assert "citizenship_or_national_security_clearance_hard_skip" in decision["risk_flags"]
+    assert any("citizenship_or_national_security_clearance" in item for item in decision["negative_evidence"])
+
+
+def test_hardware_electrical_engineering_internship_hard_skips_for_software_profile(tmp_path) -> None:
+    card = {
+        **_card(),
+        "title": "HARDWARE ENGINEER SUMMER INTERNSHIP/GRADUATE",
+        "company": "TRV Trading",
+        "location": "New Lynn, Auckland (Hybrid)",
+    }
+    detail = {
+        **_detail(),
+        "title": "HARDWARE ENGINEER SUMMER INTERNSHIP/GRADUATE",
+        "company": "TRV Trading",
+        "location": "New Lynn, Auckland (Hybrid)",
+        "classification": "Electrical/Electronic Engineering (Engineering)",
+        "requirements": ["Java Programming", "Business Modelling"],
+        "responsibilities": [
+            "Build proprietary hardware that executes the world's fastest trades.",
+            "Hardware engineering internship with graduate position pathway.",
+        ],
+    }
+    decision = score_seek_job(
+        profile={
+            "contract_version": "candidate_profile_v1",
+            "skills": ["Java", "Python", "React", "SQL", "API"],
+            "target_roles": ["Graduate Software Developer", "Software Engineer"],
+            "location_constraints": ["Auckland"],
+        },
+        card=card,
+        detail=detail,
+    )
+    saved_path = save_suitable_job_record(decision=decision, card=card, detail=detail, output_dir=tmp_path / "saved")
+
+    assert decision["decision"] == "skip"
+    assert decision["score"] == 0.0
+    assert "hardware_or_electrical_engineering_role_hard_skip" in decision["risk_flags"]
+    assert saved_path is None
 
 
 def test_many_years_experience_requirement_skips_even_with_matching_skills() -> None:

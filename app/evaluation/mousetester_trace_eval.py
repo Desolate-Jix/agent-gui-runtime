@@ -128,8 +128,8 @@ def _try_replay_semantic_verification(
     if not before_path.exists() or not after_path.exists():
         return None
     try:
-        from app.api.action import _verify_mouse_tester_post_click_semantics
         from app.models.request import ExecuteRecognitionPlanRequest
+        from app.operation.mousetester import verify_mouse_tester_post_click_semantics
 
         request_payload = payload.get("request") or {}
         request = ExecuteRecognitionPlanRequest(
@@ -137,7 +137,7 @@ def _try_replay_semantic_verification(
             app_name=request_payload.get("app_name") or "mousetesterweb",
             state_hint=request_payload.get("state_hint"),
         )
-        replayed = _verify_mouse_tester_post_click_semantics(
+        replayed = verify_mouse_tester_post_click_semantics(
             request=request,
             plan=plan,
             generic_verification=generic,

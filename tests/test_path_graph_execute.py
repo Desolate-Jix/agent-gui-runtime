@@ -6,8 +6,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 import app.api.execute as execute_api
-from app.execute.available_actions import build_available_actions
-from app.execute.path_graph_step import build_execute_step_plan
+from app.operation.path_graph import build_available_actions
+from app.operation.step import build_execute_step_plan
 from app.learn.path_graph_artifacts import build_seek_runtime_path_graph_export
 from app.learn.path_graph_resolver import resolve_runtime_path_graph
 from app.main import app

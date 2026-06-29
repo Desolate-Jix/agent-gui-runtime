@@ -2,6 +2,57 @@
 
 [中文](README.md) | [English](README.en.md)
 
+## Runtime architecture direction (2026-06-29)
+
+The project architecture is being reorganized around a general GUI Agent Runtime, not around a single website workflow.
+
+The default execution model is now **Agentic Loop-first**:
+
+```text
+user conversation
+-> Agent understands the goal and decides the next intent
+-> Operation observes the current screen
+-> Agent decides from current evidence
+-> Gate checks the real action
+-> Operation executes
+-> Trace records evidence
+-> observe again
+```
+
+`Workflow` / `PathGraph` is treated as a learned, reusable asset rather than the mandatory entry point for execution. When a matching PathGraph exists, the Agent may use it as guidance; when a screen is unfamiliar, the runtime still proceeds through observe -> decision -> gate -> operation -> trace.
+
+Layer ownership is now explicit:
+
+- `Agent`: conversation understanding, task decomposition, prompt editing/versioning, content decisions, `ask_user_required`, and PathGraph selection.
+- `Operation`: screen understanding, locate, click, input, scroll, read, form detection, window/app adapters, and skill execution.
+- `Gate`: candidate freshness, coordinate validation, action taxonomy, danger detection, final-submit blocking, and policy enforcement.
+- `Trace`: prompt/output records, screenshots/OCR/UIA/DOM evidence, operation evidence, gate decisions, audit, replay, and learning input.
+- `Workflow / PathGraph asset`: abstract workflow templates and concrete learned graphs with states, transitions, skill bindings, gate requirements, and verification rules.
+
+The detailed architecture is documented in `docs\GUI_AGENT_RUNTIME_ARCHITECTURE.zh-CN.md`. The first code-level contract slice lives in `app\runtime_architecture\contracts.py`, with a reusable app profile template at `artifacts\templates\app_profile_template_v1.json`.
+
+The code-level layer entry points are now explicit:
+
+- `app\operation` exposes the framework operation skill catalog, including observe, locate, click, input, scroll, read, form detection, window binding, and verification.
+- `app\operation.region_click` owns reusable region-click execution used by MouseTester baselines and vision-protocol actions.
+- `app\operation.mousetester` owns MouseTester-specific post-click semantic verification used by live execution and trace evaluation.
+- `app\gate` exposes common contracts such as bound-window matching, candidate freshness, action taxonomy, scoped danger detection, scroll precondition/effect validation, scroll scope, latest-detail dataflow, contextual OCR normalization, and target-at-point validation.
+- `app\trace` exposes trace event recording and execution-action trace write policy on top of the bounded trace writer.
+
+New runtime code should import shared safety contracts from `app\gate`, operation helpers from `app\operation`, and trace policy from `app\trace`.
+
+SEEK is now represented as an app/software profile, not the root architecture. Its current profile is `artifacts\app_profiles\seek_app_profile_v1.json`; it records SEEK-specific Agent prompt requirements, Operation skills, Gate contracts, Trace requirements, learned PathGraph assets, and final-submit policy.
+
+The local panel has been updated to match this architecture. The shared Navigation Path / PathGraph card now shows the Agentic Loop strip, and each Runtime PathGraph node detail records the execution model, PathGraph role, Gate requirement, and app profile path so learned graphs are displayed as guidance assets rather than hardcoded scripts.
+
+App/software profiles are now runtime resources. Use `GET /runtime/app_profiles` to list profiles and `GET /runtime/app_profiles/{app_id}` to load one profile. The panel's Artifact Replay page reads the SEEK profile through this API and shows the profile policy beside the loaded PathGraph.
+
+Operation skills are runtime resources too. Use `GET /runtime/operation_skills` for the base framework skill catalog or `GET /runtime/operation_skills?app_id=seek` to see how SEEK profile skills map back to generic Operation skills such as `read_full_page`, `scroll_region`, and `open_apply_flow`.
+
+Gate contracts are runtime resources as well. Use `GET /runtime/gate_contracts` for the base Gate catalog or `GET /runtime/gate_contracts?app_id=seek` to see the SEEK profile's safety/dataflow contracts, including bound-window matching, final-submit blocking, profile-mutation blocking, latest-detail snapshot checks, and contextual OCR normalization.
+
+Agent prompts are also runtime resources. Use `GET /runtime/agent_prompts`, `GET /runtime/agent_prompts/{prompt_id}`, `GET /runtime/agent_prompts/{prompt_id}/versions`, `GET /runtime/agent_prompts/{prompt_id}/versions/{version}`, `GET /runtime/agent_prompts/{prompt_id}/diff`, `POST /runtime/agent_prompts/{prompt_id}/versions`, and `POST /runtime/agent_prompts/{prompt_id}/rollback` to list, load, compare, save, and rollback prompt versions. The panel can load, edit, diff, and rollback the full-JD suitability prompt `job_suitability_full_jd_v1`, preserving the rule that complete job text goes to the Agent before Apply Entry.
+
 ## Contract-first SEEK policy (2026-06-24)
 
 Recent live SEEK failures are now handled as reusable runtime contracts instead of one-off site patches. Before any full SEEK apply run, keep the common regression set green for latest detail dataflow, candidate freshness, action taxonomy, scoped final-submit detection, scroll-scope validation, contextual OCR normalization, SEEK extraction, SEEK runners, and path-graph execution.
@@ -603,7 +654,6 @@ For list-style text targets, fusion also records an `unreferenced_text_contamina
 - `POST /action/execute_confirmed_point`（操作者确认坐标点击）
 - `POST /action/type_text`
 - `POST /action/click_text`
-- `POST /action/click_mouse_tester_left_region`
 
 ## 识别管线
 

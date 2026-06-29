@@ -1,13 +1,334 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from app.core.model_server import check_model_server, ensure_model_server, load_model_profiles, profile_for_stage, stop_model_server
 from app.core.runtime_artifacts import RuntimeTimer, write_trace
+from app.gate.contracts import build_gate_contract_catalog
 from app.models.request import ModelServerRequest, RuntimePrepareRequest
 from app.models.response import APIResponse, ErrorModel
+from app.operation.skills import build_operation_skill_catalog
+from app.agent.prompts import (
+    PromptRollbackRequest,
+    PromptVersionSave,
+    diff_agent_prompt_versions,
+    get_agent_prompt,
+    get_agent_prompt_version,
+    list_agent_prompt_versions,
+    list_agent_prompts,
+    rollback_agent_prompt_version,
+    save_agent_prompt_version,
+)
+from app.runtime_architecture import build_default_architecture_spec
+from app.runtime_architecture.profiles import get_app_profile, list_app_profiles
 
 router = APIRouter(prefix="/runtime", tags=["runtime"])
+
+
+@router.get("/architecture", response_model=APIResponse)
+def runtime_architecture() -> APIResponse:
+    spec = build_default_architecture_spec()
+    return APIResponse(
+        success=True,
+        message="Runtime architecture loaded",
+        data=spec.model_dump(),
+        error=None,
+    )
+
+
+@router.get("/operation_skills", response_model=APIResponse)
+def operation_skills(app_id: str | None = Query(default=None)) -> APIResponse:
+    try:
+        catalog = build_operation_skill_catalog(app_id)
+        return APIResponse(
+            success=True,
+            message="Operation skills listed",
+            data=catalog,
+            error=None,
+        )
+    except FileNotFoundError as exc:
+        return APIResponse(
+            success=False,
+            message="App profile not found",
+            data={"app_id": app_id},
+            error=ErrorModel(code="app_profile_not_found", details=str(exc)),
+        )
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Operation skills failed",
+            data={"app_id": app_id},
+            error=ErrorModel(code="operation_skills_failed", details=str(exc)),
+        )
+
+
+@router.get("/gate_contracts", response_model=APIResponse)
+def gate_contracts(app_id: str | None = Query(default=None)) -> APIResponse:
+    try:
+        catalog = build_gate_contract_catalog(app_id)
+        return APIResponse(
+            success=True,
+            message="Gate contracts listed",
+            data=catalog,
+            error=None,
+        )
+    except FileNotFoundError as exc:
+        return APIResponse(
+            success=False,
+            message="App profile not found",
+            data={"app_id": app_id},
+            error=ErrorModel(code="app_profile_not_found", details=str(exc)),
+        )
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Gate contracts failed",
+            data={"app_id": app_id},
+            error=ErrorModel(code="gate_contracts_failed", details=str(exc)),
+        )
+
+
+@router.get("/agent_prompts", response_model=APIResponse)
+def agent_prompts() -> APIResponse:
+    prompts = list_agent_prompts()
+    return APIResponse(
+        success=True,
+        message="Agent prompts listed",
+        data={"contract_version": "runtime_agent_prompts_v1", "prompts": prompts},
+        error=None,
+    )
+
+
+@router.get("/agent_prompts/{prompt_id}", response_model=APIResponse)
+def agent_prompt(prompt_id: str) -> APIResponse:
+    try:
+        prompt, path = get_agent_prompt(prompt_id)
+        return APIResponse(
+            success=True,
+            message="Agent prompt loaded",
+            data={
+                "contract_version": "runtime_agent_prompt_v1",
+                "path": str(path),
+                "prompt": prompt.model_dump(),
+            },
+            error=None,
+        )
+    except FileNotFoundError as exc:
+        return APIResponse(
+            success=False,
+            message="Agent prompt not found",
+            data={"prompt_id": prompt_id},
+            error=ErrorModel(code="agent_prompt_not_found", details=str(exc)),
+        )
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Agent prompt load failed",
+            data={"prompt_id": prompt_id},
+            error=ErrorModel(code="agent_prompt_load_failed", details=str(exc)),
+        )
+
+
+@router.get("/agent_prompts/{prompt_id}/versions", response_model=APIResponse)
+def agent_prompt_versions(prompt_id: str) -> APIResponse:
+    try:
+        versions = list_agent_prompt_versions(prompt_id)
+        return APIResponse(
+            success=True,
+            message="Agent prompt versions listed",
+            data={
+                "contract_version": "runtime_agent_prompt_versions_v1",
+                "prompt_id": prompt_id,
+                "versions": versions,
+            },
+            error=None,
+        )
+    except FileNotFoundError as exc:
+        return APIResponse(
+            success=False,
+            message="Agent prompt not found",
+            data={"prompt_id": prompt_id},
+            error=ErrorModel(code="agent_prompt_not_found", details=str(exc)),
+        )
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Agent prompt versions failed",
+            data={"prompt_id": prompt_id},
+            error=ErrorModel(code="agent_prompt_versions_failed", details=str(exc)),
+        )
+
+
+@router.get("/agent_prompts/{prompt_id}/versions/{version}", response_model=APIResponse)
+def agent_prompt_version(prompt_id: str, version: str) -> APIResponse:
+    try:
+        prompt, path = get_agent_prompt_version(prompt_id, version)
+        return APIResponse(
+            success=True,
+            message="Agent prompt version loaded",
+            data={
+                "contract_version": "runtime_agent_prompt_version_v1",
+                "path": str(path),
+                "prompt": prompt.model_dump(),
+            },
+            error=None,
+        )
+    except FileNotFoundError as exc:
+        return APIResponse(
+            success=False,
+            message="Agent prompt version not found",
+            data={"prompt_id": prompt_id, "version": version},
+            error=ErrorModel(code="agent_prompt_version_not_found", details=str(exc)),
+        )
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Agent prompt version load failed",
+            data={"prompt_id": prompt_id, "version": version},
+            error=ErrorModel(code="agent_prompt_version_load_failed", details=str(exc)),
+        )
+
+
+@router.get("/agent_prompts/{prompt_id}/diff", response_model=APIResponse)
+def agent_prompt_diff(
+    prompt_id: str,
+    from_version: str = Query(min_length=1),
+    to_version: str = Query(min_length=1),
+) -> APIResponse:
+    try:
+        diff = diff_agent_prompt_versions(prompt_id, from_version, to_version)
+        return APIResponse(success=True, message="Agent prompt diff generated", data=diff, error=None)
+    except FileNotFoundError as exc:
+        return APIResponse(
+            success=False,
+            message="Agent prompt diff version not found",
+            data={"prompt_id": prompt_id, "from_version": from_version, "to_version": to_version},
+            error=ErrorModel(code="agent_prompt_version_not_found", details=str(exc)),
+        )
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Agent prompt diff failed",
+            data={"prompt_id": prompt_id, "from_version": from_version, "to_version": to_version},
+            error=ErrorModel(code="agent_prompt_diff_failed", details=str(exc)),
+        )
+
+
+@router.post("/agent_prompts/{prompt_id}/rollback", response_model=APIResponse)
+def rollback_agent_prompt(prompt_id: str, request: PromptRollbackRequest) -> APIResponse:
+    try:
+        prompt, path, trace_path = rollback_agent_prompt_version(prompt_id, request)
+        return APIResponse(
+            success=True,
+            message="Agent prompt rollback version saved",
+            data={
+                "contract_version": "runtime_agent_prompt_rollback_v1",
+                "path": str(path),
+                "trace_path": trace_path,
+                "prompt": prompt.model_dump(),
+            },
+            error=None,
+        )
+    except FileExistsError as exc:
+        return APIResponse(
+            success=False,
+            message="Agent prompt rollback target already exists",
+            data={"prompt_id": prompt_id, "new_version": request.new_version},
+            error=ErrorModel(code="agent_prompt_version_exists", details=str(exc)),
+        )
+    except FileNotFoundError as exc:
+        return APIResponse(
+            success=False,
+            message="Agent prompt rollback source not found",
+            data={"prompt_id": prompt_id, "target_version": request.target_version},
+            error=ErrorModel(code="agent_prompt_version_not_found", details=str(exc)),
+        )
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Agent prompt rollback failed",
+            data={"prompt_id": prompt_id},
+            error=ErrorModel(code="agent_prompt_rollback_failed", details=str(exc)),
+        )
+
+
+@router.post("/agent_prompts/{prompt_id}/versions", response_model=APIResponse)
+def save_agent_prompt(prompt_id: str, request: PromptVersionSave) -> APIResponse:
+    try:
+        prompt, path, trace_path = save_agent_prompt_version(prompt_id, request)
+        return APIResponse(
+            success=True,
+            message="Agent prompt version saved",
+            data={
+                "contract_version": "runtime_agent_prompt_save_v1",
+                "path": str(path),
+                "trace_path": trace_path,
+                "prompt": prompt.model_dump(),
+            },
+            error=None,
+        )
+    except FileExistsError as exc:
+        return APIResponse(
+            success=False,
+            message="Agent prompt version already exists",
+            data={"prompt_id": prompt_id, "version": request.version},
+            error=ErrorModel(code="agent_prompt_version_exists", details=str(exc)),
+        )
+    except FileNotFoundError as exc:
+        return APIResponse(
+            success=False,
+            message="Agent prompt not found",
+            data={"prompt_id": prompt_id},
+            error=ErrorModel(code="agent_prompt_not_found", details=str(exc)),
+        )
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Agent prompt save failed",
+            data={"prompt_id": prompt_id},
+            error=ErrorModel(code="agent_prompt_save_failed", details=str(exc)),
+        )
+
+
+@router.get("/app_profiles", response_model=APIResponse)
+def app_profiles() -> APIResponse:
+    profiles = list_app_profiles()
+    return APIResponse(
+        success=True,
+        message="App profiles listed",
+        data={"contract_version": "runtime_app_profiles_v1", "profiles": profiles},
+        error=None,
+    )
+
+
+@router.get("/app_profiles/{app_id}", response_model=APIResponse)
+def app_profile(app_id: str) -> APIResponse:
+    try:
+        profile, path = get_app_profile(app_id)
+        return APIResponse(
+            success=True,
+            message="App profile loaded",
+            data={
+                "contract_version": "runtime_app_profile_v1",
+                "path": str(path),
+                "profile": profile.model_dump(),
+            },
+            error=None,
+        )
+    except FileNotFoundError as exc:
+        return APIResponse(
+            success=False,
+            message="App profile not found",
+            data={"app_id": app_id},
+            error=ErrorModel(code="app_profile_not_found", details=str(exc)),
+        )
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="App profile load failed",
+            data={"app_id": app_id},
+            error=ErrorModel(code="app_profile_load_failed", details=str(exc)),
+        )
 
 
 @router.get("/models", response_model=APIResponse)

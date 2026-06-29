@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
-from app.execute.action_kinds import infer_action_kind, infer_low_level_action_type
+from app.gate.actions import infer_action_kind, infer_low_level_action_type
 
 
 LEARNED_SKILL_MATRIX_CONTRACT = "learned_skill_matrix_v1"

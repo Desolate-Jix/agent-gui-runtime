@@ -459,9 +459,36 @@
                   <span data-i18n="current_state_id">Current state ID</span>
                   <input id="replayStateId" value="" placeholder="optional" />
                 </label>
+                <label>
+                  <span data-i18n="app_profile_id">App Profile</span>
+                  <input id="replayAppProfileId" value="seek" />
+                </label>
+                <label>
+                  <span data-i18n="agent_prompt_id">Agent Prompt</span>
+                  <input id="replayAgentPromptId" value="job_suitability_full_jd_v1" />
+                </label>
+                <label>
+                  <span data-i18n="agent_prompt_version">Prompt version</span>
+                  <input id="replayAgentPromptVersion" value="" placeholder="new version id" />
+                </label>
+                <label>
+                  <span data-i18n="agent_prompt_version_select">Existing version</span>
+                  <select id="replayAgentPromptVersionSelect"></select>
+                </label>
+                <label>
+                  <span data-i18n="agent_prompt_compare_version">Compare to</span>
+                  <input id="replayAgentPromptCompareVersion" value="2026-06-29.base" />
+                </label>
               </div>
               <div class="button-row">
                 <button id="replayLoadBtn" data-i18n="load_artifact">Load artifact</button>
+                <button id="replayAppProfileLoadBtn" data-i18n="load_app_profile">Load app profile</button>
+                <button id="replayAgentPromptLoadBtn" data-i18n="load_agent_prompt">Load agent prompt</button>
+                <button id="replayAgentPromptVersionsBtn" data-i18n="load_agent_prompt_versions">Load versions</button>
+                <button id="replayAgentPromptLoadVersionBtn" data-i18n="load_agent_prompt_version">Load selected version</button>
+                <button id="replayAgentPromptDiffBtn" data-i18n="diff_agent_prompt_versions">Diff versions</button>
+                <button id="replayAgentPromptSaveBtn" data-i18n="save_agent_prompt_version">Save prompt version</button>
+                <button id="replayAgentPromptRollbackBtn" data-i18n="rollback_agent_prompt_version">Rollback as new version</button>
                 <button id="replayUseCurrentAppMapBtn" data-i18n="use_current_app_map">Use current app map</button>
                 <button id="replayInterfaceMapLoadBtn" data-i18n="load_interface_map">Load interface map</button>
                 <button id="replayInterfaceCalibrationLoadBtn" data-i18n="load_interface_calibration">Load calibration</button>
@@ -472,6 +499,10 @@
                 <button id="replayTaskStepBtn" data-i18n="execute_next_step">Execute next step</button>
               </div>
               <div class="artifact-summary" id="replayGraphSummary"></div>
+              <div class="run-summary app-profile-summary" id="replayAppProfileSummary"></div>
+              <div class="run-summary agent-prompt-summary" id="replayAgentPromptSummary"></div>
+              <textarea id="replayAgentPromptTemplate" class="agent-prompt-editor" rows="10" placeholder="Agent prompt template"></textarea>
+              <pre id="replayAgentPromptDiff" class="agent-prompt-diff"></pre>
               <div class="interface-map-panel" id="replayInterfaceMapPanel"></div>
               <div class="action-table" id="replayGraphActions"></div>
               <details class="replay-advanced-tools">
@@ -694,6 +725,17 @@
                 <div class="path-status-strip">
                   <span id="pathGraphModeBadge">live</span>
                   <span id="pathGraphStateBadge">idle</span>
+                </div>
+              </div>
+              <div class="runtime-architecture-strip" id="runtimeArchitectureStrip">
+                <strong data-i18n="runtime_architecture_title">Agentic Loop</strong>
+                <span data-i18n="runtime_architecture_summary" data-runtime-architecture-summary>Agent decides -> Gate checks -> Operation acts -> Trace records; PathGraph is guidance.</span>
+                <div>
+                  <i>Agent</i>
+                  <i>Operation</i>
+                  <i>Gate</i>
+                  <i>Trace</i>
+                  <i>PathGraph asset</i>
                 </div>
               </div>
               <div class="path-toolbar">

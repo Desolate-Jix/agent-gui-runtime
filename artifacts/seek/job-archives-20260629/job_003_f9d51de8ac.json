@@ -1,0 +1,146 @@
+{
+  "contract_version": "seek_job_archive_v1",
+  "source_url": null,
+  "mode": "no_apply_traversal",
+  "index": 3,
+  "job_id": "seek_job_d0de7c76e389",
+  "title": "Graduate Software Engineer- Integration",
+  "company": "$65,000 - $90,000 per year",
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_d0de7c76e389",
+    "title": "Graduate Software Engineer- Integration",
+    "company": "$65,000 - $90,000 per year",
+    "location": "Auckland CBD, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": "$65,000 - $90,000 per year",
+    "classification": "GraduateSoftware Engineer-",
+    "card_bbox": {
+      "x": 652,
+      "y": 1037,
+      "w": 384,
+      "h": 247
+    },
+    "click_point": {
+      "x": 776,
+      "y": 1048
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_25",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_49_graduatesoftware-engineer",
+      "page_text_50_integration",
+      "page_text_52_heartland-bank",
+      "page_text_53_auckland-cbd-auckland",
+      "page_text_54_65-000-90-000-per-year",
+      "page_text_55_grow-your-caroer",
+      "page_text_56_supportive-leadership",
+      "page_text_57_fast-paced-environment",
+      "page_text_58_we-re-looking-for-graduates-who-are-passionate-a"
+    ],
+    "evidence": {
+      "texts": [
+        "GraduateSoftware Engineer-",
+        "Integration",
+        "Heartland Bank",
+        "Auckland CBD, Auckland",
+        "$65,000 - $90,000 per year",
+        "Grow your caroer!",
+        "Supportive leadership",
+        "·Fast paced environment",
+        "We're looking for graduates who are passionate about"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": false,
+        "has_salary": true
+      }
+    },
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-175715-469565__observe-screen__edge.json",
+      "viewport_size": {
+        "width": 2560,
+        "height": 1400
+      },
+      "source": "seek_job_card_extraction",
+      "freshness": "current_capture"
+    }
+  },
+  "card_click": {
+    "opened": false,
+    "failure_reason": "dry_run_not_approved",
+    "approved_plan_id": null,
+    "dry_run_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-175718-233990__execute-mode-plan-preview__edge.json",
+    "execute_trace_path": null,
+    "recognition_plan_trace_path": null,
+    "post_click_layout": null
+  },
+  "detail": null,
+  "detail_complete": null,
+  "detail_missing_evidence": [],
+  "detail_read": {
+    "detail": null,
+    "complete": null,
+    "missing_evidence": [],
+    "coordinate_strategy": null,
+    "read_container_id": null,
+    "uses_precise_relocation": null,
+    "scroll_count": 0,
+    "scrolls": []
+  },
+  "clear_path_node": {
+    "node_id": "seek_job_d0de7c76e389",
+    "node_type": "seek_job_card_to_detail",
+    "title": "Graduate Software Engineer- Integration",
+    "company": "$65,000 - $90,000 per year",
+    "location": "Auckland CBD, Auckland",
+    "card_bbox": {
+      "x": 652,
+      "y": 1037,
+      "w": 384,
+      "h": 247
+    },
+    "click_point": {
+      "x": 776,
+      "y": 1048
+    },
+    "open_action": {
+      "action_id": "open_job_card",
+      "opened": false,
+      "failure_reason": "dry_run_not_approved",
+      "approved_plan_id": null,
+      "dry_run_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-175718-233990__execute-mode-plan-preview__edge.json",
+      "execute_trace_path": null,
+      "recognition_plan_trace_path": null
+    },
+    "read_detail_action": {
+      "action_id": "read_detail",
+      "container_id": null,
+      "coordinate_strategy": null,
+      "complete": null,
+      "missing_evidence": [],
+      "scroll_count": 0,
+      "trace_paths": null
+    },
+    "match": {
+      "decision": null,
+      "score": null,
+      "recommended_next_action": null
+    }
+  },
+  "match_decision": null,
+  "apply_entry": null,
+  "safety": {
+    "submit_clicks": 0,
+    "final_submission_performed": false
+  },
+  "search_restore": null
+}

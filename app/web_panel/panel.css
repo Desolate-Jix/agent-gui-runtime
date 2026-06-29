@@ -1450,6 +1450,52 @@ body.agent-mode-execute .nav-group-learn {
   text-overflow: ellipsis;
 }
 
+.runtime-architecture-strip {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #dbe6f5;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.runtime-architecture-strip strong {
+  color: #101828;
+  font-size: 12px;
+}
+
+.runtime-architecture-strip span {
+  color: #52637a;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.runtime-architecture-strip div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.runtime-architecture-strip i {
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  padding: 3px 8px;
+  border: 1px solid #d9e5f6;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #344054;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 650;
+}
+
+.runtime-architecture-strip.runtime-architecture-active {
+  border-color: #b9d6fe;
+  background: #eff6ff;
+}
+
 #navPathCanvas {
   display: block;
   width: 100%;
@@ -1833,14 +1879,16 @@ body.agent-mode-execute .nav-group-learn {
 }
 
 .runtime-node-meta,
-.runtime-child-states {
+.runtime-child-states,
+.runtime-node-architecture {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
 .runtime-node-meta span,
-.runtime-child-states span {
+.runtime-child-states span,
+.runtime-node-architecture span {
   display: grid;
   gap: 2px;
   min-width: 88px;
@@ -1851,15 +1899,127 @@ body.agent-mode-execute .nav-group-learn {
 }
 
 .runtime-node-meta strong,
-.runtime-child-states strong {
+.runtime-child-states strong,
+.runtime-node-architecture strong {
   color: #101828;
   font-size: 12px;
 }
 
 .runtime-node-meta small,
-.runtime-child-states small {
+.runtime-child-states small,
+.runtime-node-architecture small {
   color: #667085;
   font-size: 10px;
+}
+
+.runtime-node-architecture span {
+  min-width: 140px;
+  background: #f8fbff;
+}
+
+.app-profile-summary {
+  display: grid;
+  gap: 10px;
+}
+
+.app-profile-policy {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid #dbe6f5;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.app-profile-policy strong {
+  color: #101828;
+  font-size: 12px;
+}
+
+.app-profile-policy ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.app-profile-policy li {
+  color: #52637a;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.app-profile-skill-list li {
+  display: grid;
+  gap: 2px;
+}
+
+.app-profile-skill-list strong {
+  color: #101828;
+  font-size: 11px;
+}
+
+.app-profile-skill-list span {
+  color: #667085;
+  font-size: 10px;
+}
+
+.agent-prompt-summary {
+  display: grid;
+  gap: 10px;
+}
+
+.agent-prompt-policy {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid #dbe6f5;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.agent-prompt-policy strong {
+  color: #101828;
+  font-size: 12px;
+}
+
+.agent-prompt-policy ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.agent-prompt-policy li {
+  color: #52637a;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.agent-prompt-editor {
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  padding: 12px;
+  border: 1px solid #d7dce3;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #101828;
+  font: 12px/1.5 Consolas, "Cascadia Mono", monospace;
+}
+
+.agent-prompt-diff {
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #d7dce3;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #101828;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 12px/1.5 Consolas, "Cascadia Mono", monospace;
 }
 
 .runtime-node-edges {

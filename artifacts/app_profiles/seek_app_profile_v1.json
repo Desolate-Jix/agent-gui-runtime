@@ -1,0 +1,97 @@
+{
+  "contract_version": "app_profile_v1",
+  "app_id": "seek",
+  "display_name": "SEEK Job Board",
+  "execution_model": "agentic_loop_first",
+  "profile_role": "Job-board software profile that stores SEEK-specific learned evidence without making SEEK the runtime architecture center.",
+  "agent_prompt_requirements": [
+    "User goals are interpreted by the Agent from conversation, not by a prewritten task-spec layer.",
+    "Job suitability must be decided by the Agent from the latest full job detail text, not from local keyword filtering or card snippets.",
+    "Human review is an Agent decision output such as ask_user_required, not a separate runtime layer.",
+    "Agent may use SEEK learned PathGraph assets when the current page state matches; otherwise it must continue through the generic observe-decision-action loop.",
+    "External ATS, login, CAPTCHA, missing profile evidence, and ambiguous application steps must produce ask_user_required or stop decisions."
+  ],
+  "operation_skills": [
+    "observe_screen",
+    "locate_job_card",
+    "open_job_detail",
+    "read_full_job_detail",
+    "scroll_results_list",
+    "scroll_detail_pane",
+    "reset_detail_pane_to_header",
+    "open_apply_entry",
+    "observe_application_flow",
+    "read_application_form",
+    "verify_page_change"
+  ],
+  "gate_contracts": [
+    "candidate_freshness_v1",
+    "bound_window_match_v1",
+    "pre_click_decision_v1",
+    "action_taxonomy_v1",
+    "scroll_scope_v1",
+    "scoped_danger_detection_v1",
+    "apply_entry_is_open_apply_flow_v1",
+    "final_submit_guard_v1",
+    "profile_mutation_requires_user_approval_v1",
+    "latest_detail_snapshot_v1",
+    "ocr_contextual_normalization_v1"
+  ],
+  "trace_requirements": [
+    "Record each observed screen and detail snapshot that feeds Agent suitability decisions.",
+    "Record Agent full-JD suitability prompt input summary and structured verdict.",
+    "Record each operation candidate with capture_id, viewport_size, source, bbox, click_point, and freshness.",
+    "Record each Gate decision before real clicks, typing, and scrolling.",
+    "Archive per-job evidence: source card, full detail read, Agent verdict, Apply Entry result, and final-submit blocker state."
+  ],
+  "workflow_assets": [
+    {
+      "contract_version": "runtime_path_graph_v1",
+      "asset_id": "seek_search_results_runtime_path_graph_v1",
+      "path": "artifacts/seek/runtime_path_graph_seek_mvp_20260617.json",
+      "role": "Learned PathGraph for SEEK list/detail reading and safe Apply Entry navigation.",
+      "authorization": "guidance_only"
+    },
+    {
+      "contract_version": "seek_application_flow_artifact_v1",
+      "asset_id": "seek_application_flow_92822270_contract_debug",
+      "path": "artifacts/seek/learned_seek_application_flow_92822270_20260624_contract_debug.json",
+      "role": "Non-authorizing learned sample for SEEK internal application flow up to Review and submit.",
+      "authorization": "final_submit_forbidden"
+    }
+  ],
+  "learning_assets": [
+    {
+      "contract_version": "learned_app_profile_v1",
+      "path": "artifacts/seek/learned_app_profile_seek_mvp_20260617.json"
+    },
+    {
+      "contract_version": "learned_interface_map_v1",
+      "path": "artifacts/seek/learned_interface_map_seek_mvp_20260617.json"
+    },
+    {
+      "contract_version": "learned_skill_v1",
+      "path": "artifacts/seek/learned_skills_seek_mvp_20260617.json"
+    },
+    {
+      "contract_version": "visual_asset_v1",
+      "path": "artifacts/seek/visual_assets_seek_mvp_20260617.json"
+    }
+  ],
+  "policy": {
+    "workflow_first_required": false,
+    "unknown_interface_policy": "agentic_loop_observe_decide_gate_operate_trace",
+    "job_suitability_decider": "agent_full_job_detail_review",
+    "local_keyword_suitability_screening": "disabled_for_real_user_profile",
+    "apply_entry_action_type": "open_apply_flow",
+    "form_fill_default": "forbidden_unless_user_task_allows",
+    "final_submit_default": "forbidden",
+    "external_ats_policy": "ask_user_required",
+    "login_or_captcha_policy": "ask_user_required"
+  },
+  "notes": [
+    "SEEK is a software/app profile and learning sample, not the root architecture.",
+    "PathGraph assets are concrete learned workflows. They guide operation only after current observation and Gate validation.",
+    "The 2026-06-29 job-screening correction is captured here: full content goes to Agent; local snippets do not decide suitability."
+  ]
+}

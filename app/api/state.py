@@ -12,7 +12,7 @@ router = APIRouter(tags=["state"])
 
 @router.get("/state", response_model=APIResponse)
 def get_state() -> APIResponse:
-    """Return runtime state for the currently bound session without legacy scene detection."""
+    """Return runtime state for the currently bound session."""
     bound = window_manager.get_bound_window()
 
     if bound is None:

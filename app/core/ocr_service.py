@@ -140,7 +140,7 @@ class OCRService:
         text = ""
         score = 0.0
 
-        # PaddleOCR legacy style: [polygon, [text, score]]
+        # PaddleOCR nested style: [polygon, [text, score]]
         if len(item) >= 2 and isinstance(item[1], (list, tuple)) and len(item[1]) >= 2:
             text = str(item[1][0]).strip()
             try:

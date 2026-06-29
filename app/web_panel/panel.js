@@ -40,6 +40,7 @@ const DEFAULT_SEEK_APPLICATION_RECORD_PATH = "logs/smoke/seek_apply_live_9282227
 const DEFAULT_SEEK_APPLICATION_AUDIT_PATH = "logs/smoke/seek_apply_live_92822270_20260620_b/final_review_audit.json";
 const DEFAULT_SEEK_APPLICATION_ARTIFACT_PATH = "artifacts/seek/learned_seek_application_flow_92822270_20260620.json";
 const DEFAULT_INTERFACE_CALIBRATION_REPORT_PATH = "artifacts/visual-match-smoke/live_seek_20260624/visual_asset_calibration_report.json";
+const DEFAULT_SEEK_APP_PROFILE_PATH = "artifacts/app_profiles/seek_app_profile_v1.json";
 let replayArtifact = null;
 let replayInterfaceMap = null;
 let replayInterfaceMapPath = "";
@@ -49,6 +50,8 @@ let selectedInterfaceMapRef = "";
 let replayRegressionReport = null;
 let learnSampleReadinessGate = null;
 let seekApplicationEvidence = null;
+let replayAppProfile = null;
+let replayAgentPrompt = null;
 
 /* Navigation path graph state */
 // Each page node:
@@ -229,8 +232,8 @@ const translations = {
     workspace_hint_learn: "建图、校准坐标、写入路径图",
     workspace_hint_execute: "可用动作、定位、Gate、动作证据",
     workspace_hint_system: "绑定窗口、截图、Trace、模型",
-    nav_group_learn_flow: "1 整屏理解 -> 2 坐标校准 -> PathGraph",
-    nav_group_execute_flow: "1 可用动作 -> 2 精准定位 -> 3 点击 Gate -> 4 输入/验证",
+    nav_group_learn_flow: "Agent 探索 -> Trace -> 学习 PathGraph",
+    nav_group_execute_flow: "Observe -> Agent 决策 -> Gate -> Operation -> Trace",
     nav_trace_audit: "Trace 审计",
     nav_learn_observe: "整屏理解 / Learn Fast",
     nav_learn_locate: "坐标校准 / Learn Deep",
@@ -324,6 +327,14 @@ const translations = {
     screenshot_preview: "截图预览",
     action_path_graph: "运行管线",
     path_graph_title: "导航路径图",
+    runtime_architecture_title: "Agentic Loop",
+    runtime_architecture_summary: "Agent 做决定，Gate 做安全检查，Operation 执行动作，Trace 记录证据；PathGraph 是学习出来的 workflow 资产。",
+    runtime_architecture_profile: "软件 Profile",
+    runtime_architecture_execution_model: "执行模型",
+    runtime_architecture_pathgraph_role: "PathGraph 角色",
+    runtime_architecture_pathgraph_hint: "导航资产，不是动作授权",
+    runtime_architecture_gate_hint: "真实动作必须重新观察并通过 Gate",
+    runtime_architecture_unknown_hint: "陌生界面继续走 observe -> decision -> gate -> operation -> trace",
     nav_path_detail: "页面详情",
     path_empty_hint: "整屏理解后开始生成导航路径",
     path_detail_empty: "点击导航路径节点查看页面概述",
@@ -423,6 +434,24 @@ const translations = {
     interface_map_path: "Interface Map 路径",
     interface_calibration_report_path: "校准报告路径",
     interface_map_save_name: "编辑后 Interface Map 文件",
+    app_profile_id: "软件 Profile",
+    load_app_profile: "加载软件 Profile",
+    app_profile_summary: "软件 Profile 摘要",
+    app_profile_policy: "Profile 策略",
+    operation_layer_skills: "Operation 层 skill",
+    gate_layer_contracts: "Gate 层合同",
+    agent_prompt_id: "Agent Prompt",
+    agent_prompt_version: "Prompt 版本",
+    agent_prompt_version_select: "已有版本",
+    agent_prompt_compare_version: "对比版本",
+    load_agent_prompt: "加载 Agent Prompt",
+    load_agent_prompt_versions: "加载版本",
+    load_agent_prompt_version: "加载选中版本",
+    diff_agent_prompt_versions: "对比 Prompt",
+    save_agent_prompt_version: "保存 Prompt 版本",
+    rollback_agent_prompt_version: "回滚为新版本",
+    agent_prompt_summary: "Agent Prompt 摘要",
+    agent_prompt_editor: "Prompt 模板",
     use_current_app_map: "使用当前应用地图",
     load_interface_map: "加载界面地图",
     load_interface_calibration: "加载校准报告",
@@ -435,7 +464,7 @@ const translations = {
     interface_inspector: "节点详情",
     interface_editor_hint: "可编辑区域名称/类型，以及固定按钮的动作、危险等级和所属区域；保存时会写 edit trace。",
     replay_page_summary: "页面摘要",
-    replay_page_summary_hint: "这是页面级节点；点击下方区域、按钮截图或 ROI，右侧节点详情会显示可调用 workflow / skill。",
+    replay_page_summary_hint: "这是 PathGraph 中的页面级 workflow 资产节点；点击下方区域、按钮截图或 ROI，右侧节点详情会显示可调用 skill 和 Gate 约束。",
     replay_child_states: "子状态",
     replay_regions: "区域",
     replay_page_nodes: "页面节点",
@@ -555,8 +584,8 @@ const translations = {
     workspace_hint_learn: "Build map, calibrate coordinates, write PathGraph",
     workspace_hint_execute: "Available actions, locate, gate, evidence",
     workspace_hint_system: "Bind windows, capture, traces, models",
-    nav_group_learn_flow: "1 Observe -> 2 Coordinate calibration -> PathGraph",
-    nav_group_execute_flow: "1 Available actions -> 2 Precise locate -> 3 Click Gate -> 4 Input/verify",
+    nav_group_learn_flow: "Agent explores -> Trace -> learn PathGraph",
+    nav_group_execute_flow: "Observe -> Agent decision -> Gate -> Operation -> Trace",
     nav_trace_audit: "Trace Audit",
     nav_learn_observe: "Observe / Learn Fast",
     nav_learn_locate: "Coordinate Calibration / Learn Deep",
@@ -650,6 +679,14 @@ const translations = {
     screenshot_preview: "Screenshot Preview",
     action_path_graph: "Runtime Pipeline",
     path_graph_title: "Navigation Path",
+    runtime_architecture_title: "Agentic Loop",
+    runtime_architecture_summary: "Agent decides, Gate checks safety, Operation acts, Trace records evidence; PathGraph is a learned workflow asset.",
+    runtime_architecture_profile: "Software Profile",
+    runtime_architecture_execution_model: "Execution model",
+    runtime_architecture_pathgraph_role: "PathGraph role",
+    runtime_architecture_pathgraph_hint: "Navigation asset, not action authorization",
+    runtime_architecture_gate_hint: "Real actions must re-observe and pass Gate",
+    runtime_architecture_unknown_hint: "Unknown screens keep using observe -> decision -> gate -> operation -> trace",
     nav_path_detail: "Page Detail",
     path_empty_hint: "Observe a screen to start building the navigation path",
     path_detail_empty: "Click a page node to view its observe summary",
@@ -749,6 +786,24 @@ const translations = {
     interface_map_path: "Interface Map path",
     interface_calibration_report_path: "Calibration report path",
     interface_map_save_name: "Edited Interface Map file",
+    app_profile_id: "App Profile",
+    load_app_profile: "Load app profile",
+    app_profile_summary: "App profile summary",
+    app_profile_policy: "Profile policy",
+    operation_layer_skills: "Operation layer skills",
+    gate_layer_contracts: "Gate layer contracts",
+    agent_prompt_id: "Agent Prompt",
+    agent_prompt_version: "Prompt version",
+    agent_prompt_version_select: "Existing version",
+    agent_prompt_compare_version: "Compare to",
+    load_agent_prompt: "Load agent prompt",
+    load_agent_prompt_versions: "Load versions",
+    load_agent_prompt_version: "Load selected version",
+    diff_agent_prompt_versions: "Diff prompts",
+    save_agent_prompt_version: "Save prompt version",
+    rollback_agent_prompt_version: "Rollback as new version",
+    agent_prompt_summary: "Agent prompt summary",
+    agent_prompt_editor: "Prompt template",
     use_current_app_map: "Use current app map",
     load_interface_map: "Load interface map",
     load_interface_calibration: "Load calibration",
@@ -761,7 +816,7 @@ const translations = {
     interface_inspector: "Node Inspector",
     interface_editor_hint: "Edit region labels/types and fixed button action, danger, and region. Saving writes an edit trace.",
     replay_page_summary: "Page Summary",
-    replay_page_summary_hint: "This is a page-level node. Click a region, button crop, or ROI below to show callable workflow / skill details in the inspector.",
+    replay_page_summary_hint: "This is a page-level workflow asset node inside the PathGraph. Click a region, button crop, or ROI below to show callable skills and Gate constraints in the inspector.",
     replay_child_states: "Child states",
     replay_regions: "Regions",
     replay_page_nodes: "Page nodes",
@@ -1318,7 +1373,6 @@ async function api(method, path, payload = null, options = {}) {
     return { success: false, message: t("request_already_running") };
   }
   pendingRequests.add(requestKey);
-  markWorkflow(workflowStep, "active");
   setStatus("running");
   const controller = new AbortController();
   const timeoutMs = Number(options.timeoutSeconds || requestTimeoutSeconds()) * 1000;
@@ -1343,13 +1397,11 @@ async function api(method, path, payload = null, options = {}) {
     if (!options.skipRender) renderResponse(data, options.summary || `${method} ${path}`);
     const ok = response.ok && data.success !== false;
     setStatus(ok ? statusTextForResponse(data) : "failed", ok ? "ok" : "error");
-    markWorkflow(workflowStep, ok ? "done" : "error");
     return data;
   } catch (error) {
     const data = { success: false, message: "Request failed", error: String(error) };
     if (!options.skipRender) renderResponse(data, options.summary || `${method} ${path}`);
     setStatus("failed", "error");
-    markWorkflow(workflowStep, "error");
     return data;
   } finally {
     window.clearTimeout(timeoutId);
@@ -1360,11 +1412,6 @@ async function api(method, path, payload = null, options = {}) {
 function requestTimeoutSeconds() {
   const value = Number($("timeoutSeconds")?.value || 600);
   return Number.isFinite(value) && value > 0 ? value : 600;
-}
-
-function markWorkflow(step, status) {
-  // No-op: the old workflow strip is replaced by the nav path graph.
-  // Kept for backward compatibility with api() call sites.
 }
 
 function resultOf(response) {
@@ -2761,7 +2808,7 @@ function loadPathGraph(appName) {
 }
 
 function normalizePathData(data) {
-  // Support both legacy format (nodes/edges) and new format (pages/transitions)
+  // Normalize saved graph artifacts into the panel's internal nav state.
   if (data.pages && !data.nodes) {
     data.nodes = data.pages;
     delete data.pages;
@@ -3691,6 +3738,30 @@ function setPathGraphBadges({ mode = "live", state = "idle" } = {}) {
   const stateBadge = $("pathGraphStateBadge");
   if (modeBadge) modeBadge.textContent = mode;
   if (stateBadge) stateBadge.textContent = state;
+  updateRuntimeArchitectureStrip();
+}
+
+function runtimeArchitectureProfilePath(graph = runtimePathGraphView?.graph || {}) {
+  const appId = String(graph?.app_id || runtimePathGraphView?.graph?.app_id || "").toLowerCase();
+  const graphId = String(graph?.graph_id || runtimePathGraphView?.graph?.graph_id || "").toLowerCase();
+  if (appId === "seek" || graphId.includes("seek")) return DEFAULT_SEEK_APP_PROFILE_PATH;
+  return "";
+}
+
+function updateRuntimeArchitectureStrip() {
+  const strip = $("runtimeArchitectureStrip");
+  if (!strip) return;
+  const graph = runtimePathGraphView?.graph || {};
+  const graphActive = !!runtimePathGraphView?.graph;
+  const profilePath = runtimeArchitectureProfilePath(graph);
+  strip.classList.toggle("runtime-architecture-active", graphActive);
+  strip.dataset.profilePath = profilePath;
+  const summary = strip.querySelector("[data-runtime-architecture-summary]");
+  if (summary) {
+    summary.textContent = graphActive
+      ? `${t("runtime_architecture_pathgraph_role")}: ${t("runtime_architecture_pathgraph_hint")}`
+      : t("runtime_architecture_summary");
+  }
 }
 
 function runtimeGraphStateLabel(state) {
@@ -4582,11 +4653,18 @@ function runtimeNodeDetailHtml(node = {}) {
     ...(Array.isArray(node.regionRefs) ? node.regionRefs : []),
     ...(Array.isArray(node.requiredRegions) ? node.requiredRegions : []),
   ].filter(Boolean);
+  const profilePath = runtimeArchitectureProfilePath(graph);
   return `
     <section class="runtime-node-detail">
       <div>
         <h5>${escapeHtml(t("replay_page_summary"))}</h5>
         <p>${escapeHtml(t("replay_page_summary_hint"))}</p>
+      </div>
+      <div class="runtime-node-architecture">
+        <span><strong>${escapeHtml(t("runtime_architecture_execution_model"))}</strong><small>Agentic Loop-first</small></span>
+        <span><strong>${escapeHtml(t("runtime_architecture_pathgraph_role"))}</strong><small>${escapeHtml(t("runtime_architecture_pathgraph_hint"))}</small></span>
+        <span><strong>Gate</strong><small>${escapeHtml(t("runtime_architecture_gate_hint"))}</small></span>
+        <span><strong>${escapeHtml(t("runtime_architecture_profile"))}</strong><small>${escapeHtml(profilePath || graph.app_id || "generic")}</small></span>
       </div>
       <div class="runtime-node-meta">
         <span><strong>${childIds.length}</strong><small>${escapeHtml(t("replay_child_states"))}</small></span>
@@ -5482,6 +5560,117 @@ async function readArtifactJson(path) {
   }
 }
 
+async function fetchRuntimeAppProfile(appId) {
+  const normalized = String(appId || "").trim();
+  if (!normalized) throw new Error("app profile id is required");
+  const response = await fetch(`${baseUrl()}/runtime/app_profiles/${encodeURIComponent(normalized)}`);
+  const payload = await response.json();
+  if (!payload?.success) {
+    throw new Error(payload?.error?.details || payload?.message || `failed to load app profile: ${normalized}`);
+  }
+  return payload.data || {};
+}
+
+async function fetchRuntimeOperationSkills(appId = "") {
+  const normalized = String(appId || "").trim();
+  const params = normalized ? `?${new URLSearchParams({ app_id: normalized }).toString()}` : "";
+  const response = await fetch(`${baseUrl()}/runtime/operation_skills${params}`);
+  const payload = await response.json();
+  if (!payload?.success) {
+    throw new Error(payload?.error?.details || payload?.message || "failed to load operation skills");
+  }
+  return payload.data || {};
+}
+
+async function fetchRuntimeGateContracts(appId = "") {
+  const normalized = String(appId || "").trim();
+  const params = normalized ? `?${new URLSearchParams({ app_id: normalized }).toString()}` : "";
+  const response = await fetch(`${baseUrl()}/runtime/gate_contracts${params}`);
+  const payload = await response.json();
+  if (!payload?.success) {
+    throw new Error(payload?.error?.details || payload?.message || "failed to load gate contracts");
+  }
+  return payload.data || {};
+}
+
+async function fetchRuntimeAgentPrompt(promptId) {
+  const normalized = String(promptId || "").trim();
+  if (!normalized) throw new Error("agent prompt id is required");
+  const response = await fetch(`${baseUrl()}/runtime/agent_prompts/${encodeURIComponent(normalized)}`);
+  const payload = await response.json();
+  if (!payload?.success) {
+    throw new Error(payload?.error?.details || payload?.message || `failed to load agent prompt: ${normalized}`);
+  }
+  return payload.data || {};
+}
+
+async function fetchRuntimeAgentPromptVersions(promptId) {
+  const normalized = String(promptId || "").trim();
+  if (!normalized) throw new Error("agent prompt id is required");
+  const response = await fetch(`${baseUrl()}/runtime/agent_prompts/${encodeURIComponent(normalized)}/versions`);
+  const payload = await response.json();
+  if (!payload?.success) {
+    throw new Error(payload?.error?.details || payload?.message || `failed to load agent prompt versions: ${normalized}`);
+  }
+  return payload.data || {};
+}
+
+async function fetchRuntimeAgentPromptVersion(promptId, version) {
+  const normalized = String(promptId || "").trim();
+  const selectedVersion = String(version || "").trim();
+  if (!normalized || !selectedVersion) throw new Error("agent prompt id and version are required");
+  const response = await fetch(`${baseUrl()}/runtime/agent_prompts/${encodeURIComponent(normalized)}/versions/${encodeURIComponent(selectedVersion)}`);
+  const payload = await response.json();
+  if (!payload?.success) {
+    throw new Error(payload?.error?.details || payload?.message || `failed to load agent prompt version: ${normalized}@${selectedVersion}`);
+  }
+  return payload.data || {};
+}
+
+async function fetchRuntimeAgentPromptDiff(promptId, fromVersion, toVersion) {
+  const normalized = String(promptId || "").trim();
+  const from = String(fromVersion || "").trim();
+  const to = String(toVersion || "").trim();
+  if (!normalized || !from || !to) throw new Error("agent prompt id, from version, and to version are required");
+  const params = new URLSearchParams({ from_version: from, to_version: to });
+  const response = await fetch(`${baseUrl()}/runtime/agent_prompts/${encodeURIComponent(normalized)}/diff?${params.toString()}`);
+  const payload = await response.json();
+  if (!payload?.success) {
+    throw new Error(payload?.error?.details || payload?.message || `failed to diff agent prompt: ${normalized}`);
+  }
+  return payload.data || {};
+}
+
+async function saveRuntimeAgentPromptVersion(promptId, payload) {
+  const normalized = String(promptId || "").trim();
+  if (!normalized) throw new Error("agent prompt id is required");
+  const response = await fetch(`${baseUrl()}/runtime/agent_prompts/${encodeURIComponent(normalized)}/versions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json();
+  if (!data?.success) {
+    throw new Error(data?.error?.details || data?.message || `failed to save agent prompt: ${normalized}`);
+  }
+  return data.data || {};
+}
+
+async function rollbackRuntimeAgentPromptVersion(promptId, payload) {
+  const normalized = String(promptId || "").trim();
+  if (!normalized) throw new Error("agent prompt id is required");
+  const response = await fetch(`${baseUrl()}/runtime/agent_prompts/${encodeURIComponent(normalized)}/rollback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json();
+  if (!data?.success) {
+    throw new Error(data?.error?.details || data?.message || `failed to rollback agent prompt: ${normalized}`);
+  }
+  return data.data || {};
+}
+
 function inferTemplateLowLevel(actionId, template = {}) {
   const declared = String(template.low_level_action_type || template.action_type || template.kind || template.operation || "").toLowerCase();
   if (["click", "scroll", "input", "observe", "verify"].includes(declared)) return declared;
@@ -5553,6 +5742,146 @@ function renderReplayGraph(graph, path) {
         </div>`).join("")}
     </div>`;
   renderActionTable("replayGraphActions", actionRowsFromGraph(graph));
+}
+
+function renderReplayAppProfile(profileData = null) {
+  const panel = $("replayAppProfileSummary");
+  if (!panel) return;
+  if (!profileData) {
+    panel.innerHTML = `<p class="trace-idle">${escapeHtml(t("no_response"))}</p>`;
+    return;
+  }
+  const profile = profileData.profile || profileData;
+  const operationCatalog = profileData.operation_skill_catalog || {};
+  const operationSkills = Array.isArray(operationCatalog.skills) ? operationCatalog.skills : [];
+  const gateCatalog = profileData.gate_contract_catalog || {};
+  const gateContracts = Array.isArray(gateCatalog.contracts) ? gateCatalog.contracts : [];
+  const policy = profile.policy && typeof profile.policy === "object" ? profile.policy : {};
+  const items = [
+    ["path", profileData.path || ""],
+    ["contract", profile.contract_version || ""],
+    ["app_id", profile.app_id || ""],
+    ["display_name", profile.display_name || ""],
+    ["execution_model", profile.execution_model || ""],
+    ["operation_skills", Array.isArray(profile.operation_skills) ? profile.operation_skills.length : 0],
+    ["gate_contracts", Array.isArray(profile.gate_contracts) ? profile.gate_contracts.length : 0],
+    ["workflow_assets", Array.isArray(profile.workflow_assets) ? profile.workflow_assets.length : 0],
+    ["learning_assets", Array.isArray(profile.learning_assets) ? profile.learning_assets.length : 0],
+    ["final_submit_default", policy.final_submit_default || ""],
+    ["job_suitability_decider", policy.job_suitability_decider || ""],
+    ["unknown_interface_policy", policy.unknown_interface_policy || ""],
+  ];
+  const promptRequirements = Array.isArray(profile.agent_prompt_requirements) ? profile.agent_prompt_requirements : [];
+  const operationRows = operationSkills.slice(0, 8).map((skill) => {
+    const base = skill.base_skill_id ? ` -> ${skill.base_skill_id}` : "";
+    const gate = skill.requires_gate === false ? "no gate" : "gate";
+    return `<li><strong>${escapeHtml(skill.skill_id || "")}${escapeHtml(base)}</strong><span>${escapeHtml(`${skill.category || ""} / ${skill.side_effect_class || ""} / ${gate}`)}</span></li>`;
+  }).join("");
+  const gateRows = gateContracts.slice(0, 8).map((contract) => `
+    <li>
+      <strong>${escapeHtml(contract.contract_id || "")}</strong>
+      <span>${escapeHtml(contract.layer_module || "")}</span>
+    </li>`).join("");
+  panel.innerHTML = `
+    <h4>${escapeHtml(t("app_profile_summary"))}</h4>
+    <div class="summary-grid summary-grid-pairs">
+      ${items.map(([label, value]) => `
+        <div class="summary-item${label === "path" || label === "unknown_interface_policy" ? " summary-item-wide" : ""}">
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(String(value ?? ""))}</strong>
+        </div>`).join("")}
+    </div>
+    <div class="app-profile-policy">
+      <strong>${escapeHtml(t("app_profile_policy"))}</strong>
+      <ul>
+        ${promptRequirements.slice(0, 5).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+      </ul>
+    </div>
+    <div class="app-profile-policy">
+      <strong>${escapeHtml(t("operation_layer_skills"))}</strong>
+      <ul class="app-profile-skill-list">
+        ${operationRows || `<li>${escapeHtml(t("no_response"))}</li>`}
+      </ul>
+    </div>
+    <div class="app-profile-policy">
+      <strong>${escapeHtml(t("gate_layer_contracts"))}</strong>
+      <ul class="app-profile-skill-list">
+        ${gateRows || `<li>${escapeHtml(t("no_response"))}</li>`}
+      </ul>
+    </div>`;
+}
+
+function renderReplayAgentPrompt(promptData = null) {
+  const panel = $("replayAgentPromptSummary");
+  const editor = $("replayAgentPromptTemplate");
+  const diffPanel = $("replayAgentPromptDiff");
+  if (!panel) return;
+  if (!promptData) {
+    panel.innerHTML = `<p class="trace-idle">${escapeHtml(t("no_response"))}</p>`;
+    if (editor) editor.value = "";
+    if (diffPanel) diffPanel.textContent = "";
+    return;
+  }
+  const prompt = promptData.prompt || promptData;
+  if (editor) editor.value = prompt.template || "";
+  if ($("replayAgentPromptVersion")) $("replayAgentPromptVersion").value = "";
+  const items = [
+    ["path", promptData.path || ""],
+    ["prompt_id", prompt.prompt_id || ""],
+    ["title", prompt.title || ""],
+    ["task", prompt.task || ""],
+    ["version", prompt.version || ""],
+    ["language", prompt.language || ""],
+    ["output_contract", prompt.output_contract || ""],
+    ["variables", Array.isArray(prompt.variables) ? prompt.variables.join(", ") : ""],
+    ["app_profile_refs", Array.isArray(prompt.app_profile_refs) ? prompt.app_profile_refs.join(", ") : ""],
+  ];
+  const safetyNotes = Array.isArray(prompt.safety_notes) ? prompt.safety_notes : [];
+  panel.innerHTML = `
+    <h4>${escapeHtml(t("agent_prompt_summary"))}</h4>
+    <div class="summary-grid summary-grid-pairs">
+      ${items.map(([label, value]) => `
+        <div class="summary-item${label === "path" || label === "variables" || label === "app_profile_refs" ? " summary-item-wide" : ""}">
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(String(value ?? ""))}</strong>
+        </div>`).join("")}
+    </div>
+    <div class="agent-prompt-policy">
+      <strong>${escapeHtml(t("agent_prompt_editor"))}</strong>
+      <ul>
+        ${safetyNotes.slice(0, 5).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+      </ul>
+    </div>`;
+}
+
+function renderReplayAgentPromptVersions(versionData = null) {
+  const select = $("replayAgentPromptVersionSelect");
+  if (!select) return;
+  const versions = Array.isArray(versionData?.versions) ? versionData.versions : [];
+  select.innerHTML = versions.map((item) => {
+    const version = String(item.version || "");
+    const label = `${version}${item.path ? ` · ${basename(item.path)}` : ""}`;
+    return `<option value="${escapeHtml(version)}">${escapeHtml(label)}</option>`;
+  }).join("");
+  const currentVersion = String(replayAgentPrompt?.prompt?.version || "");
+  if (currentVersion && versions.some((item) => String(item.version || "") === currentVersion)) {
+    select.value = currentVersion;
+  }
+}
+
+function renderReplayAgentPromptDiff(diffData = null) {
+  const panel = $("replayAgentPromptDiff");
+  if (!panel) return;
+  if (!diffData) {
+    panel.textContent = "";
+    return;
+  }
+  const header = [
+    `${diffData.prompt_id || ""}: ${diffData.from_version || ""} -> ${diffData.to_version || ""}`,
+    `changed=${diffData.changed === true}`,
+    "",
+  ].join("\n");
+  panel.textContent = `${header}${diffData.diff || ""}`;
 }
 
 function renderInterfaceMap(map, path) {
@@ -7394,6 +7723,8 @@ async function loadReplayArtifact() {
   }
   try {
     replayArtifact = await readArtifactJson(path);
+    const appId = String(replayArtifact.app_id || "").trim();
+    if (appId && $("replayAppProfileId")) $("replayAppProfileId").value = appId;
     const interfaceMapLoad = await ensureReplayInterfaceMapForRuntimeGraph(replayArtifact, path);
     renderReplayGraph(replayArtifact, path);
     renderRuntimePathGraph(replayArtifact, {
@@ -7401,6 +7732,12 @@ async function loadReplayArtifact() {
       mode: currentAgentMode === "execute" ? "execute" : "learn/replay",
       currentStateId: String($("replayStateId")?.value || "").trim(),
     });
+    if (appId) {
+      await loadReplayAppProfile({ silent: true });
+    }
+    if ($("replayAgentPromptId")?.value) {
+      await loadReplayAgentPrompt({ silent: true });
+    }
     renderResponse({
       success: true,
       message: "Artifact loaded",
@@ -7418,6 +7755,255 @@ async function loadReplayArtifact() {
   } catch (error) {
     renderReplayGraph(null, path);
     renderResponse({ success: false, message: "Artifact load failed", error: String(error.message || error) }, "Artifact replay");
+    return null;
+  }
+}
+
+async function loadReplayAppProfile(options = {}) {
+  const appId = String($("replayAppProfileId")?.value || replayArtifact?.app_id || "").trim();
+  if (!appId) {
+    renderReplayAppProfile(null);
+    if (!options.silent) {
+      renderResponse({ success: false, message: "app_profile_id is required" }, "App profile");
+    }
+    return null;
+  }
+  try {
+    const data = await fetchRuntimeAppProfile(appId);
+    try {
+      data.operation_skill_catalog = await fetchRuntimeOperationSkills(appId);
+    } catch (catalogError) {
+      data.operation_skill_catalog_error = String(catalogError.message || catalogError);
+    }
+    try {
+      data.gate_contract_catalog = await fetchRuntimeGateContracts(appId);
+    } catch (gateError) {
+      data.gate_contract_catalog_error = String(gateError.message || gateError);
+    }
+    replayAppProfile = data;
+    renderReplayAppProfile(data);
+    if (!options.silent) {
+      renderResponse({
+        success: true,
+        message: "App profile loaded",
+        data: {
+          contract_version: "app_profile_panel_load_v1",
+          app_id: data.profile?.app_id || appId,
+          path: data.path || "",
+          execution_model: data.profile?.execution_model || "",
+          workflow_asset_count: Array.isArray(data.profile?.workflow_assets) ? data.profile.workflow_assets.length : 0,
+        },
+      }, "App profile");
+    }
+    return data;
+  } catch (error) {
+    replayAppProfile = null;
+    renderReplayAppProfile(null);
+    if (!options.silent) {
+      renderResponse({ success: false, message: "App profile load failed", error: String(error.message || error) }, "App profile");
+    }
+    return null;
+  }
+}
+
+async function loadReplayAgentPrompt(options = {}) {
+  const promptId = String($("replayAgentPromptId")?.value || "").trim();
+  if (!promptId) {
+    renderReplayAgentPrompt(null);
+    if (!options.silent) {
+      renderResponse({ success: false, message: "agent_prompt_id is required" }, "Agent prompt");
+    }
+    return null;
+  }
+  try {
+    const data = await fetchRuntimeAgentPrompt(promptId);
+    replayAgentPrompt = data;
+    renderReplayAgentPrompt(data);
+    await loadReplayAgentPromptVersions({ silent: true });
+    if (!options.silent) {
+      renderResponse({
+        success: true,
+        message: "Agent prompt loaded",
+        data: {
+          contract_version: "agent_prompt_panel_load_v1",
+          prompt_id: data.prompt?.prompt_id || promptId,
+          path: data.path || "",
+          version: data.prompt?.version || "",
+          output_contract: data.prompt?.output_contract || "",
+        },
+      }, "Agent prompt");
+    }
+    return data;
+  } catch (error) {
+    replayAgentPrompt = null;
+    renderReplayAgentPrompt(null);
+    if (!options.silent) {
+      renderResponse({ success: false, message: "Agent prompt load failed", error: String(error.message || error) }, "Agent prompt");
+    }
+    return null;
+  }
+}
+
+async function loadReplayAgentPromptVersions(options = {}) {
+  const promptId = String($("replayAgentPromptId")?.value || "").trim();
+  if (!promptId) {
+    renderReplayAgentPromptVersions(null);
+    if (!options.silent) renderResponse({ success: false, message: "agent_prompt_id is required" }, "Agent prompt");
+    return null;
+  }
+  try {
+    const data = await fetchRuntimeAgentPromptVersions(promptId);
+    renderReplayAgentPromptVersions(data);
+    if (!options.silent) {
+      renderResponse({
+        success: true,
+        message: "Agent prompt versions loaded",
+        data: {
+          contract_version: "agent_prompt_versions_panel_load_v1",
+          prompt_id: data.prompt_id || promptId,
+          version_count: Array.isArray(data.versions) ? data.versions.length : 0,
+        },
+      }, "Agent prompt");
+    }
+    return data;
+  } catch (error) {
+    renderReplayAgentPromptVersions(null);
+    if (!options.silent) {
+      renderResponse({ success: false, message: "Agent prompt versions load failed", error: String(error.message || error) }, "Agent prompt");
+    }
+    return null;
+  }
+}
+
+async function loadSelectedReplayAgentPromptVersion() {
+  const promptId = String($("replayAgentPromptId")?.value || "").trim();
+  const version = String($("replayAgentPromptVersionSelect")?.value || "").trim();
+  if (!promptId || !version) {
+    renderResponse({ success: false, message: "agent_prompt_id and selected version are required" }, "Agent prompt");
+    return null;
+  }
+  try {
+    const data = await fetchRuntimeAgentPromptVersion(promptId, version);
+    replayAgentPrompt = data;
+    renderReplayAgentPrompt(data);
+    renderResponse({
+      success: true,
+      message: "Agent prompt version loaded",
+      data: {
+        contract_version: "agent_prompt_version_panel_load_v1",
+        prompt_id: data.prompt?.prompt_id || promptId,
+        version: data.prompt?.version || version,
+        path: data.path || "",
+      },
+    }, "Agent prompt");
+    return data;
+  } catch (error) {
+    renderResponse({ success: false, message: "Agent prompt version load failed", error: String(error.message || error) }, "Agent prompt");
+    return null;
+  }
+}
+
+async function diffReplayAgentPromptVersions() {
+  const promptId = String($("replayAgentPromptId")?.value || "").trim();
+  const fromVersion = String($("replayAgentPromptVersionSelect")?.value || "").trim();
+  const toVersion = String($("replayAgentPromptCompareVersion")?.value || replayAgentPrompt?.prompt?.version || "").trim();
+  if (!promptId || !fromVersion || !toVersion) {
+    renderResponse({ success: false, message: "prompt id, selected version, and compare version are required" }, "Agent prompt");
+    return null;
+  }
+  try {
+    const data = await fetchRuntimeAgentPromptDiff(promptId, fromVersion, toVersion);
+    renderReplayAgentPromptDiff(data);
+    renderResponse({
+      success: true,
+      message: "Agent prompt diff generated",
+      data: {
+        contract_version: "agent_prompt_diff_panel_v1",
+        prompt_id: data.prompt_id,
+        from_version: data.from_version,
+        to_version: data.to_version,
+        changed: data.changed,
+      },
+    }, "Agent prompt");
+    return data;
+  } catch (error) {
+    renderReplayAgentPromptDiff(null);
+    renderResponse({ success: false, message: "Agent prompt diff failed", error: String(error.message || error) }, "Agent prompt");
+    return null;
+  }
+}
+
+async function saveReplayAgentPromptVersion() {
+  const promptId = String($("replayAgentPromptId")?.value || "").trim();
+  const version = String($("replayAgentPromptVersion")?.value || "").trim();
+  const template = String($("replayAgentPromptTemplate")?.value || "").trim();
+  if (!promptId || !version || !template) {
+    renderResponse({ success: false, message: "prompt id, version, and template are required" }, "Agent prompt");
+    return null;
+  }
+  try {
+    const data = await saveRuntimeAgentPromptVersion(promptId, {
+      contract_version: "agent_prompt_version_save_v1",
+      template,
+      version,
+      change_note: "Saved from local panel Agent Prompt editor",
+      author: "panel",
+    });
+    replayAgentPrompt = data;
+    renderReplayAgentPrompt(data);
+    await loadReplayAgentPromptVersions({ silent: true });
+    renderResponse({
+      success: true,
+      message: "Agent prompt version saved",
+      data: {
+        contract_version: "agent_prompt_panel_save_v1",
+        prompt_id: data.prompt?.prompt_id || promptId,
+        version: data.prompt?.version || version,
+        path: data.path || "",
+        trace_path: data.trace_path || "",
+      },
+    }, "Agent prompt");
+    return data;
+  } catch (error) {
+    renderResponse({ success: false, message: "Agent prompt save failed", error: String(error.message || error) }, "Agent prompt");
+    return null;
+  }
+}
+
+async function rollbackReplayAgentPromptVersion() {
+  const promptId = String($("replayAgentPromptId")?.value || "").trim();
+  const targetVersion = String($("replayAgentPromptVersionSelect")?.value || "").trim();
+  const newVersion = String($("replayAgentPromptVersion")?.value || "").trim();
+  if (!promptId || !targetVersion || !newVersion) {
+    renderResponse({ success: false, message: "prompt id, selected version, and new version are required" }, "Agent prompt");
+    return null;
+  }
+  try {
+    const data = await rollbackRuntimeAgentPromptVersion(promptId, {
+      contract_version: "agent_prompt_rollback_v1",
+      target_version: targetVersion,
+      new_version: newVersion,
+      change_note: `Rollback ${promptId} to ${targetVersion} from local panel`,
+      author: "panel",
+    });
+    replayAgentPrompt = data;
+    renderReplayAgentPrompt(data);
+    await loadReplayAgentPromptVersions({ silent: true });
+    renderResponse({
+      success: true,
+      message: "Agent prompt rollback version saved",
+      data: {
+        contract_version: "agent_prompt_rollback_panel_v1",
+        prompt_id: data.prompt?.prompt_id || promptId,
+        target_version: targetVersion,
+        new_version: data.prompt?.version || newVersion,
+        path: data.path || "",
+        trace_path: data.trace_path || "",
+      },
+    }, "Agent prompt");
+    return data;
+  } catch (error) {
+    renderResponse({ success: false, message: "Agent prompt rollback failed", error: String(error.message || error) }, "Agent prompt");
     return null;
   }
 }
@@ -8181,6 +8767,13 @@ function bindEvents() {
   on("learnValidationResetBtn", "click", resetLearnValidation);
   on("replayPreset", "change", applyReplayPreset);
   on("replayLoadBtn", "click", loadReplayArtifact);
+  on("replayAppProfileLoadBtn", "click", loadReplayAppProfile);
+  on("replayAgentPromptLoadBtn", "click", loadReplayAgentPrompt);
+  on("replayAgentPromptVersionsBtn", "click", loadReplayAgentPromptVersions);
+  on("replayAgentPromptLoadVersionBtn", "click", loadSelectedReplayAgentPromptVersion);
+  on("replayAgentPromptDiffBtn", "click", diffReplayAgentPromptVersions);
+  on("replayAgentPromptSaveBtn", "click", saveReplayAgentPromptVersion);
+  on("replayAgentPromptRollbackBtn", "click", rollbackReplayAgentPromptVersion);
   on("replayUseCurrentAppMapBtn", "click", useCurrentAppInterfaceMap);
   on("replayInterfaceMapLoadBtn", "click", loadReplayInterfaceMap);
   on("replayInterfaceCalibrationLoadBtn", "click", loadReplayInterfaceCalibrationReport);

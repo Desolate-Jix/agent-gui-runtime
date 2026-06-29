@@ -1,0 +1,2222 @@
+{
+  "contract_version": "seek_job_archive_v1",
+  "source_url": "https://www.seek.co.nz/graduate-software-developer-jobs/in-All-Auckland",
+  "mode": "no_apply_traversal",
+  "index": 0,
+  "job_id": "seek_job_ae2137228610",
+  "title": "Software Engineer Specialist-Integration",
+  "company": "AIA New Zealand",
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_22ebfd65012e",
+    "title": "Software Engineer Specialist - Integration",
+    "company": "AIA New Zealand",
+    "location": "Takapuna, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": "Software Engineer Specialist -",
+    "card_bbox": {
+      "x": 652,
+      "y": 547,
+      "w": 436,
+      "h": 231
+    },
+    "click_point": {
+      "x": 778,
+      "y": 560
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_3",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_29_software-engineer-specialist",
+      "page_text_30_integration",
+      "page_text_31_aia-new-zealand",
+      "page_text_32_takapuna-auckland",
+      "page_text_33_a-strong-culture-of-innovation-with-health-and-w",
+      "page_text_34_its-heart",
+      "page_text_35_help-us-redefine-how-people-think-about-insuranc",
+      "page_text_36_recharge-days-ala-vitality-membership-and",
+      "page_text_37_opportunities-to-advance-your-career"
+    ],
+    "evidence": {
+      "texts": [
+        "Software Engineer Specialist -",
+        "Integration",
+        "AIA New Zealand",
+        "Takapuna, Auckland",
+        "A strong culture of innovation with health and wellbeing at",
+        "its heart",
+        "Help us redefine how people think about insurance",
+        "Recharge days, AlA Vitality membership and",
+        "opportunities to advance your career"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": false,
+        "has_salary": false
+      }
+    },
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-175927-889753__observe-screen__edge.json",
+      "viewport_size": {
+        "width": 2560,
+        "height": 1400
+      },
+      "source": "seek_job_card_extraction",
+      "freshness": "current_capture"
+    }
+  },
+  "card_click": {
+    "opened": true,
+    "failure_reason": null,
+    "approved_plan_id": "ce780e1f76534a5298e879f33e9e740f",
+    "dry_run_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-175930-413101__execute-mode-plan-preview__edge.json",
+    "execute_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-175932-423080__execute-mode-click__edge.json",
+    "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-175930-326258__execute-mode-recognition-plan__edge.json",
+    "post_click_layout": {
+      "contract_version": "seek_post_click_layout_check_v1",
+      "ok": true,
+      "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-175941-961029__observe-screen__edge.json",
+      "cards_seen": 2,
+      "target_title": "Software Engineer Specialist - Integration",
+      "detail_title": "Software Engineer Specialist-Integration",
+      "title_matches": true,
+      "apply_visible": true,
+      "save_visible": false,
+      "post_click_detail_header": {
+        "header_visible": true,
+        "title_extraction_source": "detail_header",
+        "title_extraction_confidence": 0.9,
+        "title_candidate": "Software Engineer Specialist-Integration",
+        "title_candidate_rejected_as_body_fragment": false,
+        "evidence_quality": "header_title_candidate"
+      },
+      "failure_classification": {
+        "failure_reason": null,
+        "failure_group": null,
+        "is_layout_drift": false,
+        "evidence_quality": "header_title_candidate"
+      },
+      "failure_reasons": []
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_ae2137228610",
+    "title": "Software Engineer Specialist-Integration",
+    "company": "AIA New Zealand",
+    "location": "Takapuna, Auckland",
+    "work_type": "Fulltime",
+    "classification": "SoftwareEngineerSpecialist-Integration",
+    "salary_text": null,
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "Companies"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "Recruiters"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Employer site"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "All Auckland"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "SEEK"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "HEALTHIER,"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "LONGER,"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "BETTER"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "LIVES"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "PRID"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "gendertick"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "PLEDGE"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "HEALTHIER,LONGER."
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "BETTERLIVES"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "SoftwareEngineerSpecialist-Integration"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "AIA New Zealand"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "★4.97reviews·View alljobs"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "Takapuna, Auckland"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "Engineering -Software(Information&CommunicationTechnology)"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "Fulltime"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "Posted 6d ago"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "Apply"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "Visitedemployer's applicationsite on24Jun2026"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "1 skill or credential matches your profile"
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "C#ProgrammingShow all"
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "Your Role with Us|To Turanga ki a Matou"
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "AllAuckland"
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "AlA New Zealand ★ 4.9 7reviews ·View alljobs"
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "Engineering - Software (Information & Communication Technology)"
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "Visited employer's application site on 24 Jun 2026"
+      },
+      {
+        "index": 31,
+        "role": "body",
+        "text": "1 skill or credential matches your profle"
+      },
+      {
+        "index": 32,
+        "role": "body",
+        "text": "√C#ProgrammingShow all"
+      },
+      {
+        "index": 33,
+        "role": "body",
+        "text": "Your Role with Us |To Turanga ki a Matou"
+      },
+      {
+        "index": 34,
+        "role": "body",
+        "text": "As a Software Engineer Specialist - Integration in our Technology team, you'llplay a key"
+      },
+      {
+        "index": 35,
+        "role": "body",
+        "text": "role in designing and delivering integration solutions that keep our systems connected,"
+      },
+      {
+        "index": 36,
+        "role": "body",
+        "text": "secure,and running smoothly.You'll collaborate with architects,engineers,and business"
+      },
+      {
+        "index": 37,
+        "role": "body",
+        "text": "stakeholders tobuild robust,scalable platforms that support both strategic initiatives and"
+      },
+      {
+        "index": 38,
+        "role": "body",
+        "text": "day-to-dayoperations.This is an exciting opportunityto grow yourtechnical expertise,"
+      },
+      {
+        "index": 39,
+        "role": "body",
+        "text": "strengthen your influence across teams, and contribute to continuous improvement as"
+      },
+      {
+        "index": 40,
+        "role": "body",
+        "text": "you help shape reliable,future-ready integration capabilities."
+      },
+      {
+        "index": 41,
+        "role": "body",
+        "text": "Your lmpact|To Panga"
+      },
+      {
+        "index": 42,
+        "role": "body",
+        "text": "·Design and deliverintegration solutions that enable reliable,secure connectivity and"
+      },
+      {
+        "index": 43,
+        "role": "body",
+        "text": "support business outcomes across the organisation."
+      },
+      {
+        "index": 44,
+        "role": "body",
+        "text": "·Develop and enhance integration components that meet quality standards,improving"
+      },
+      {
+        "index": 45,
+        "role": "body",
+        "text": "system performance and maintainability."
+      },
+      {
+        "index": 46,
+        "role": "body",
+        "text": "·Resolveincidentsandstrengthenreliability,contributing toimprovedsystemstability"
+      },
+      {
+        "index": 47,
+        "role": "body",
+        "text": "Software Engineer Specialist -Integration"
+      },
+      {
+        "index": 48,
+        "role": "body",
+        "text": "Apply C"
+      },
+      {
+        "index": 49,
+        "role": "body",
+        "text": "AlA New Zealand"
+      },
+      {
+        "index": 50,
+        "role": "body",
+        "text": "·Design and deliverintegration solutions that enablereliable,secure connectivity and"
+      },
+      {
+        "index": 51,
+        "role": "body",
+        "text": "·Resolveincidents and strengthen reliability,contributing toimproved system stability"
+      },
+      {
+        "index": 52,
+        "role": "body",
+        "text": "and seamless operations."
+      },
+      {
+        "index": 53,
+        "role": "section_hint",
+        "text": "·Collaborate with stakeholders to clarify requirements and deliversolutions that align"
+      },
+      {
+        "index": 54,
+        "role": "body",
+        "text": "with business needs and expectations."
+      },
+      {
+        "index": 55,
+        "role": "body",
+        "text": "integration practices for long-term success."
+      },
+      {
+        "index": 56,
+        "role": "body",
+        "text": "Your Capabilities|OAheinga"
+      },
+      {
+        "index": 57,
+        "role": "body",
+        "text": "·Youbring strong experience in integration orC#.NETdevelopment,with the abilityto"
+      },
+      {
+        "index": 58,
+        "role": "body",
+        "text": "deliver solutions in complex environments."
+      },
+      {
+        "index": 59,
+        "role": "body",
+        "text": "·You have arelevant tertiaryqualification in IT,ComputerScience,orarelated discipline"
+      },
+      {
+        "index": 60,
+        "role": "body",
+        "text": "that underpins your technical expertise."
+      },
+      {
+        "index": 61,
+        "role": "body",
+        "text": "·You communicate clearly and build effectiverelationships,enabling collaboration with"
+      },
+      {
+        "index": 62,
+        "role": "body",
+        "text": "both technical and non-technical stakeholders."
+      },
+      {
+        "index": 63,
+        "role": "body",
+        "text": "·You apply analytical thinking and sound judgement,balancing quality, risk, and"
+      },
+      {
+        "index": 64,
+        "role": "body",
+        "text": "delivery outcomes to solve problems effectively."
+      },
+      {
+        "index": 65,
+        "role": "body",
+        "text": "·You take ownership and contribute to team success,managing priorities while"
+      },
+      {
+        "index": 66,
+        "role": "body",
+        "text": "supporting othersthrough knowledge sharing."
+      },
+      {
+        "index": 67,
+        "role": "body",
+        "text": "·You may also have relevant professional certifications, ora desire to continue"
+      },
+      {
+        "index": 68,
+        "role": "body",
+        "text": "developing your capability."
+      },
+      {
+        "index": 69,
+        "role": "body",
+        "text": "Your Life at AIA| To Ao ki AIA"
+      },
+      {
+        "index": 70,
+        "role": "body",
+        "text": "At AlA,yourexperience matters, and so does yourimpact.In return foryourexpertise,we"
+      },
+      {
+        "index": 71,
+        "role": "body",
+        "text": "offer a career where you can apply your skills to meaningful work that improves lives"
+      },
+      {
+        "index": 72,
+        "role": "body",
+        "text": "across Asia-Pacific.You*llenjoy flexible ways of working,competitive rewards, and access"
+      },
+      {
+        "index": 73,
+        "role": "body",
+        "text": "to continuous learning programs designed to keep you ahead in a rapidly changing world."
+      },
+      {
+        "index": 74,
+        "role": "body",
+        "text": "Our collaborative culture values your ideas and empowers you to innovate,solve complex"
+      },
+      {
+        "index": 75,
+        "role": "body",
+        "text": "challenges, and contribute to ourambition of helping a bilion people live Healthier,"
+      },
+      {
+        "index": 76,
+        "role": "body",
+        "text": "Longer, Better Lives by 2030."
+      },
+      {
+        "index": 77,
+        "role": "body",
+        "text": "Software Engineer Specialist-Integration"
+      },
+      {
+        "index": 78,
+        "role": "body",
+        "text": "Believe inBetterwithAlA NZ"
+      },
+      {
+        "index": 79,
+        "role": "body",
+        "text": "AIA NZ"
+      },
+      {
+        "index": 80,
+        "role": "body",
+        "text": "YouTube"
+      },
+      {
+        "index": 81,
+        "role": "body",
+        "text": "to be part of that."
+      },
+      {
+        "index": 82,
+        "role": "body",
+        "text": "Company profile"
+      },
+      {
+        "index": 83,
+        "role": "body",
+        "text": "HEALTHIER.LONGER."
+      },
+      {
+        "index": 84,
+        "role": "body",
+        "text": "AIA"
+      },
+      {
+        "index": 85,
+        "role": "body",
+        "text": "★4.9·7reviews"
+      },
+      {
+        "index": 86,
+        "role": "body",
+        "text": "Insurance"
+      },
+      {
+        "index": 87,
+        "role": "body",
+        "text": "g 101-1,000 employees"
+      },
+      {
+        "index": 88,
+        "role": "body",
+        "text": "AlA Group is one of the largest life insurers in the world, with a presence in 18"
+      },
+      {
+        "index": 89,
+        "role": "body",
+        "text": "markets across Asia Pacific. AlA New Zealand Limited is part of the AlA Group and"
+      },
+      {
+        "index": 90,
+        "role": "body",
+        "text": "has been providing insurance to New Zealanders since 1981.."
+      },
+      {
+        "index": 91,
+        "role": "body",
+        "text": "Showmore"
+      },
+      {
+        "index": 92,
+        "role": "section_hint",
+        "text": "Perks and benefits"
+      },
+      {
+        "index": 93,
+        "role": "body",
+        "text": "·AlA Vitality"
+      },
+      {
+        "index": 94,
+        "role": "body",
+        "text": "·FlexYourDay"
+      },
+      {
+        "index": 95,
+        "role": "body",
+        "text": "·Insurances"
+      },
+      {
+        "index": 96,
+        "role": "body",
+        "text": "·CareerDevelopment"
+      },
+      {
+        "index": 97,
+        "role": "body",
+        "text": "·AlAVitality·FlexYourDay·Insurances"
+      },
+      {
+        "index": 98,
+        "role": "body",
+        "text": "·Additional Leave·Reward &Recognition·EnhancedParentalLeave"
+      },
+      {
+        "index": 99,
+        "role": "body",
+        "text": "More about this company→"
+      },
+      {
+        "index": 100,
+        "role": "body",
+        "text": "Be careful"
+      },
+      {
+        "index": 101,
+        "role": "body",
+        "text": "Don't provide your bank or credit card details when applying for jobs."
+      },
+      {
+        "index": 102,
+        "role": "body",
+        "text": "Learn how to protect yourself"
+      },
+      {
+        "index": 103,
+        "role": "body",
+        "text": "Report this job ad"
+      }
+    ],
+    "requirements": [
+      "·Collaborate with stakeholders to clarify requirements and deliversolutions that align",
+      "·Youbring strong experience in integration orC#.NETdevelopment,with the abilityto",
+      "At AlA,yourexperience matters, and so does yourimpact.In return foryourexpertise,we",
+      "offer a career where you can apply your skills to meaningful work that improves lives"
+    ],
+    "responsibilities": [
+      "Your Role with Us|To Turanga ki a Matou",
+      "Your Role with Us |To Turanga ki a Matou",
+      "role in designing and delivering integration solutions that keep our systems connected,"
+    ],
+    "benefits": [
+      "across Asia-Pacific.You*llenjoy flexible ways of working,competitive rewards, and access",
+      "Insurance",
+      "has been providing insurance to New Zealanders since 1981..",
+      "Perks and benefits",
+      "·Insurances",
+      "·AlAVitality·FlexYourDay·Insurances"
+    ],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Apply",
+      "bbox": {
+        "x": 1204,
+        "y": 1004,
+        "w": 84,
+        "h": 33
+      },
+      "click_point": {
+        "x": 1246,
+        "y": 1020
+      },
+      "candidate_freshness": {
+        "contract_version": "action_candidate_freshness_v1",
+        "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-175950-293684__observe-screen__edge.json",
+        "viewport_size": {
+          "width": 2560,
+          "height": 1400
+        },
+        "source": "seek_apply_button_extraction",
+        "freshness": "current_capture"
+      }
+    },
+    "save_button_state": {
+      "visible": false,
+      "label": null,
+      "bbox": null
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 1134,
+        "y": 280,
+        "w": 896,
+        "h": 1104
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false,
+        "content_left": 530,
+        "content_width": 1500
+      },
+      "safe_points": [
+        {
+          "x": 1582,
+          "y": 832,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 1134,
+      "y": 60,
+      "w": 896,
+      "h": 1324
+    },
+    "detail_bottom_reached": true,
+    "detail_scroll_history": [
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-175952-110649__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": true
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": false,
+        "wheel_clicks": 4,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-180004-405512__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": false,
+        "wheel_clicks": 8,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-180018-059344__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": false,
+        "wheel_clicks": 12,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-180029-219812__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": false,
+        "wheel_clicks": 12,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ]
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-175950-293684__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-180002-593713__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-180016-227166__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-180027-394656__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-180038-292195__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 106,
+      "action_count": 0,
+      "texts": [
+        "Companies",
+        "Recruiters",
+        "Employer site",
+        "All Auckland",
+        "SEEK",
+        "HEALTHIER,",
+        "LONGER,",
+        "BETTER",
+        "LIVES",
+        "PRID",
+        "C",
+        "gendertick",
+        "PLEDGE",
+        "HEALTHIER,LONGER.",
+        "BETTERLIVES",
+        "SoftwareEngineerSpecialist-Integration",
+        "AIA New Zealand",
+        "★4.97reviews·View alljobs",
+        "Takapuna, Auckland",
+        "国",
+        "Engineering -Software(Information&CommunicationTechnology)",
+        "Fulltime",
+        "Posted 6d ago",
+        "Apply",
+        "Visitedemployer's applicationsite on24Jun2026",
+        "How you match ①",
+        "1 skill or credential matches your profile",
+        "C#ProgrammingShow all",
+        "Your Role with Us|To Turanga ki a Matou",
+        "AllAuckland",
+        "AlA New Zealand ★ 4.9 7reviews ·View alljobs",
+        "Engineering - Software (Information & Communication Technology)",
+        "Visited employer's application site on 24 Jun 2026",
+        "1 skill or credential matches your profle",
+        "√C#ProgrammingShow all",
+        "Your Role with Us |To Turanga ki a Matou",
+        "As a Software Engineer Specialist - Integration in our Technology team, you'llplay a key",
+        "role in designing and delivering integration solutions that keep our systems connected,",
+        "secure,and running smoothly.You'll collaborate with architects,engineers,and business",
+        "stakeholders tobuild robust,scalable platforms that support both strategic initiatives and",
+        "day-to-dayoperations.This is an exciting opportunityto grow yourtechnical expertise,",
+        "strengthen your influence across teams, and contribute to continuous improvement as",
+        "you help shape reliable,future-ready integration capabilities.",
+        "Your lmpact|To Panga",
+        "·Design and deliverintegration solutions that enable reliable,secure connectivity and",
+        "support business outcomes across the organisation.",
+        "·Develop and enhance integration components that meet quality standards,improving",
+        "system performance and maintainability.",
+        "·Resolveincidentsandstrengthenreliability,contributing toimprovedsystemstability",
+        "Software Engineer Specialist -Integration",
+        "Apply C",
+        "AlA New Zealand",
+        "·Design and deliverintegration solutions that enablereliable,secure connectivity and",
+        "·Resolveincidents and strengthen reliability,contributing toimproved system stability",
+        "and seamless operations.",
+        "·Collaborate with stakeholders to clarify requirements and deliversolutions that align",
+        "with business needs and expectations.",
+        "integration practices for long-term success.",
+        "Your Capabilities|OAheinga",
+        "·Youbring strong experience in integration orC#.NETdevelopment,with the abilityto",
+        "deliver solutions in complex environments.",
+        "·You have arelevant tertiaryqualification in IT,ComputerScience,orarelated discipline",
+        "that underpins your technical expertise.",
+        "·You communicate clearly and build effectiverelationships,enabling collaboration with",
+        "both technical and non-technical stakeholders.",
+        "·You apply analytical thinking and sound judgement,balancing quality, risk, and",
+        "delivery outcomes to solve problems effectively.",
+        "·You take ownership and contribute to team success,managing priorities while",
+        "supporting othersthrough knowledge sharing.",
+        "·You may also have relevant professional certifications, ora desire to continue",
+        "developing your capability.",
+        "Your Life at AIA| To Ao ki AIA",
+        "At AlA,yourexperience matters, and so does yourimpact.In return foryourexpertise,we",
+        "offer a career where you can apply your skills to meaningful work that improves lives",
+        "across Asia-Pacific.You*llenjoy flexible ways of working,competitive rewards, and access",
+        "to continuous learning programs designed to keep you ahead in a rapidly changing world.",
+        "Our collaborative culture values your ideas and empowers you to innovate,solve complex",
+        "challenges, and contribute to ourambition of helping a bilion people live Healthier,",
+        "Longer, Better Lives by 2030.",
+        "Software Engineer Specialist-Integration",
+        "Believe inBetterwithAlA NZ",
+        "AIA NZ",
+        "YouTube",
+        "to be part of that.",
+        "Company profile",
+        "HEALTHIER.LONGER.",
+        "AIA",
+        "★4.9·7reviews",
+        "Insurance",
+        "g 101-1,000 employees",
+        "AlA Group is one of the largest life insurers in the world, with a presence in 18",
+        "markets across Asia Pacific. AlA New Zealand Limited is part of the AlA Group and",
+        "has been providing insurance to New Zealanders since 1981..",
+        "Showmore",
+        "Perks and benefits",
+        "·AlA Vitality",
+        "·FlexYourDay",
+        "·Insurances",
+        "·CareerDevelopment",
+        "·AlAVitality·FlexYourDay·Insurances",
+        "·Additional Leave·Reward &Recognition·EnhancedParentalLeave",
+        "More about this company→",
+        "Be careful",
+        "Don't provide your bank or credit card details when applying for jobs.",
+        "Learn how to protect yourself",
+        "Report this job ad"
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  },
+  "detail_complete": true,
+  "detail_missing_evidence": [],
+  "detail_read": {
+    "detail": {
+      "contract_version": "seek_job_detail_v1",
+      "job_id": "seek_job_ae2137228610",
+      "title": "Software Engineer Specialist-Integration",
+      "company": "AIA New Zealand",
+      "location": "Takapuna, Auckland",
+      "work_type": "Fulltime",
+      "classification": "SoftwareEngineerSpecialist-Integration",
+      "salary_text": null,
+      "description_sections": [
+        {
+          "index": 0,
+          "role": "body",
+          "text": "Companies"
+        },
+        {
+          "index": 1,
+          "role": "body",
+          "text": "Recruiters"
+        },
+        {
+          "index": 2,
+          "role": "body",
+          "text": "Employer site"
+        },
+        {
+          "index": 3,
+          "role": "body",
+          "text": "All Auckland"
+        },
+        {
+          "index": 4,
+          "role": "body",
+          "text": "SEEK"
+        },
+        {
+          "index": 5,
+          "role": "body",
+          "text": "HEALTHIER,"
+        },
+        {
+          "index": 6,
+          "role": "body",
+          "text": "LONGER,"
+        },
+        {
+          "index": 7,
+          "role": "body",
+          "text": "BETTER"
+        },
+        {
+          "index": 8,
+          "role": "body",
+          "text": "LIVES"
+        },
+        {
+          "index": 9,
+          "role": "body",
+          "text": "PRID"
+        },
+        {
+          "index": 10,
+          "role": "body",
+          "text": "gendertick"
+        },
+        {
+          "index": 11,
+          "role": "body",
+          "text": "PLEDGE"
+        },
+        {
+          "index": 12,
+          "role": "body",
+          "text": "HEALTHIER,LONGER."
+        },
+        {
+          "index": 13,
+          "role": "body",
+          "text": "BETTERLIVES"
+        },
+        {
+          "index": 14,
+          "role": "body",
+          "text": "SoftwareEngineerSpecialist-Integration"
+        },
+        {
+          "index": 15,
+          "role": "body",
+          "text": "AIA New Zealand"
+        },
+        {
+          "index": 16,
+          "role": "body",
+          "text": "★4.97reviews·View alljobs"
+        },
+        {
+          "index": 17,
+          "role": "body",
+          "text": "Takapuna, Auckland"
+        },
+        {
+          "index": 18,
+          "role": "body",
+          "text": "Engineering -Software(Information&CommunicationTechnology)"
+        },
+        {
+          "index": 19,
+          "role": "body",
+          "text": "Fulltime"
+        },
+        {
+          "index": 20,
+          "role": "body",
+          "text": "Posted 6d ago"
+        },
+        {
+          "index": 21,
+          "role": "body",
+          "text": "Apply"
+        },
+        {
+          "index": 22,
+          "role": "body",
+          "text": "Visitedemployer's applicationsite on24Jun2026"
+        },
+        {
+          "index": 23,
+          "role": "body",
+          "text": "How you match ①"
+        },
+        {
+          "index": 24,
+          "role": "body",
+          "text": "1 skill or credential matches your profile"
+        },
+        {
+          "index": 25,
+          "role": "body",
+          "text": "C#ProgrammingShow all"
+        },
+        {
+          "index": 26,
+          "role": "body",
+          "text": "Your Role with Us|To Turanga ki a Matou"
+        },
+        {
+          "index": 27,
+          "role": "body",
+          "text": "AllAuckland"
+        },
+        {
+          "index": 28,
+          "role": "body",
+          "text": "AlA New Zealand ★ 4.9 7reviews ·View alljobs"
+        },
+        {
+          "index": 29,
+          "role": "body",
+          "text": "Engineering - Software (Information & Communication Technology)"
+        },
+        {
+          "index": 30,
+          "role": "body",
+          "text": "Visited employer's application site on 24 Jun 2026"
+        },
+        {
+          "index": 31,
+          "role": "body",
+          "text": "1 skill or credential matches your profle"
+        },
+        {
+          "index": 32,
+          "role": "body",
+          "text": "√C#ProgrammingShow all"
+        },
+        {
+          "index": 33,
+          "role": "body",
+          "text": "Your Role with Us |To Turanga ki a Matou"
+        },
+        {
+          "index": 34,
+          "role": "body",
+          "text": "As a Software Engineer Specialist - Integration in our Technology team, you'llplay a key"
+        },
+        {
+          "index": 35,
+          "role": "body",
+          "text": "role in designing and delivering integration solutions that keep our systems connected,"
+        },
+        {
+          "index": 36,
+          "role": "body",
+          "text": "secure,and running smoothly.You'll collaborate with architects,engineers,and business"
+        },
+        {
+          "index": 37,
+          "role": "body",
+          "text": "stakeholders tobuild robust,scalable platforms that support both strategic initiatives and"
+        },
+        {
+          "index": 38,
+          "role": "body",
+          "text": "day-to-dayoperations.This is an exciting opportunityto grow yourtechnical expertise,"
+        },
+        {
+          "index": 39,
+          "role": "body",
+          "text": "strengthen your influence across teams, and contribute to continuous improvement as"
+        },
+        {
+          "index": 40,
+          "role": "body",
+          "text": "you help shape reliable,future-ready integration capabilities."
+        },
+        {
+          "index": 41,
+          "role": "body",
+          "text": "Your lmpact|To Panga"
+        },
+        {
+          "index": 42,
+          "role": "body",
+          "text": "·Design and deliverintegration solutions that enable reliable,secure connectivity and"
+        },
+        {
+          "index": 43,
+          "role": "body",
+          "text": "support business outcomes across the organisation."
+        },
+        {
+          "index": 44,
+          "role": "body",
+          "text": "·Develop and enhance integration components that meet quality standards,improving"
+        },
+        {
+          "index": 45,
+          "role": "body",
+          "text": "system performance and maintainability."
+        },
+        {
+          "index": 46,
+          "role": "body",
+          "text": "·Resolveincidentsandstrengthenreliability,contributing toimprovedsystemstability"
+        },
+        {
+          "index": 47,
+          "role": "body",
+          "text": "Software Engineer Specialist -Integration"
+        },
+        {
+          "index": 48,
+          "role": "body",
+          "text": "Apply C"
+        },
+        {
+          "index": 49,
+          "role": "body",
+          "text": "AlA New Zealand"
+        },
+        {
+          "index": 50,
+          "role": "body",
+          "text": "·Design and deliverintegration solutions that enablereliable,secure connectivity and"
+        },
+        {
+          "index": 51,
+          "role": "body",
+          "text": "·Resolveincidents and strengthen reliability,contributing toimproved system stability"
+        },
+        {
+          "index": 52,
+          "role": "body",
+          "text": "and seamless operations."
+        },
+        {
+          "index": 53,
+          "role": "section_hint",
+          "text": "·Collaborate with stakeholders to clarify requirements and deliversolutions that align"
+        },
+        {
+          "index": 54,
+          "role": "body",
+          "text": "with business needs and expectations."
+        },
+        {
+          "index": 55,
+          "role": "body",
+          "text": "integration practices for long-term success."
+        },
+        {
+          "index": 56,
+          "role": "body",
+          "text": "Your Capabilities|OAheinga"
+        },
+        {
+          "index": 57,
+          "role": "body",
+          "text": "·Youbring strong experience in integration orC#.NETdevelopment,with the abilityto"
+        },
+        {
+          "index": 58,
+          "role": "body",
+          "text": "deliver solutions in complex environments."
+        },
+        {
+          "index": 59,
+          "role": "body",
+          "text": "·You have arelevant tertiaryqualification in IT,ComputerScience,orarelated discipline"
+        },
+        {
+          "index": 60,
+          "role": "body",
+          "text": "that underpins your technical expertise."
+        },
+        {
+          "index": 61,
+          "role": "body",
+          "text": "·You communicate clearly and build effectiverelationships,enabling collaboration with"
+        },
+        {
+          "index": 62,
+          "role": "body",
+          "text": "both technical and non-technical stakeholders."
+        },
+        {
+          "index": 63,
+          "role": "body",
+          "text": "·You apply analytical thinking and sound judgement,balancing quality, risk, and"
+        },
+        {
+          "index": 64,
+          "role": "body",
+          "text": "delivery outcomes to solve problems effectively."
+        },
+        {
+          "index": 65,
+          "role": "body",
+          "text": "·You take ownership and contribute to team success,managing priorities while"
+        },
+        {
+          "index": 66,
+          "role": "body",
+          "text": "supporting othersthrough knowledge sharing."
+        },
+        {
+          "index": 67,
+          "role": "body",
+          "text": "·You may also have relevant professional certifications, ora desire to continue"
+        },
+        {
+          "index": 68,
+          "role": "body",
+          "text": "developing your capability."
+        },
+        {
+          "index": 69,
+          "role": "body",
+          "text": "Your Life at AIA| To Ao ki AIA"
+        },
+        {
+          "index": 70,
+          "role": "body",
+          "text": "At AlA,yourexperience matters, and so does yourimpact.In return foryourexpertise,we"
+        },
+        {
+          "index": 71,
+          "role": "body",
+          "text": "offer a career where you can apply your skills to meaningful work that improves lives"
+        },
+        {
+          "index": 72,
+          "role": "body",
+          "text": "across Asia-Pacific.You*llenjoy flexible ways of working,competitive rewards, and access"
+        },
+        {
+          "index": 73,
+          "role": "body",
+          "text": "to continuous learning programs designed to keep you ahead in a rapidly changing world."
+        },
+        {
+          "index": 74,
+          "role": "body",
+          "text": "Our collaborative culture values your ideas and empowers you to innovate,solve complex"
+        },
+        {
+          "index": 75,
+          "role": "body",
+          "text": "challenges, and contribute to ourambition of helping a bilion people live Healthier,"
+        },
+        {
+          "index": 76,
+          "role": "body",
+          "text": "Longer, Better Lives by 2030."
+        },
+        {
+          "index": 77,
+          "role": "body",
+          "text": "Software Engineer Specialist-Integration"
+        },
+        {
+          "index": 78,
+          "role": "body",
+          "text": "Believe inBetterwithAlA NZ"
+        },
+        {
+          "index": 79,
+          "role": "body",
+          "text": "AIA NZ"
+        },
+        {
+          "index": 80,
+          "role": "body",
+          "text": "YouTube"
+        },
+        {
+          "index": 81,
+          "role": "body",
+          "text": "to be part of that."
+        },
+        {
+          "index": 82,
+          "role": "body",
+          "text": "Company profile"
+        },
+        {
+          "index": 83,
+          "role": "body",
+          "text": "HEALTHIER.LONGER."
+        },
+        {
+          "index": 84,
+          "role": "body",
+          "text": "AIA"
+        },
+        {
+          "index": 85,
+          "role": "body",
+          "text": "★4.9·7reviews"
+        },
+        {
+          "index": 86,
+          "role": "body",
+          "text": "Insurance"
+        },
+        {
+          "index": 87,
+          "role": "body",
+          "text": "g 101-1,000 employees"
+        },
+        {
+          "index": 88,
+          "role": "body",
+          "text": "AlA Group is one of the largest life insurers in the world, with a presence in 18"
+        },
+        {
+          "index": 89,
+          "role": "body",
+          "text": "markets across Asia Pacific. AlA New Zealand Limited is part of the AlA Group and"
+        },
+        {
+          "index": 90,
+          "role": "body",
+          "text": "has been providing insurance to New Zealanders since 1981.."
+        },
+        {
+          "index": 91,
+          "role": "body",
+          "text": "Showmore"
+        },
+        {
+          "index": 92,
+          "role": "section_hint",
+          "text": "Perks and benefits"
+        },
+        {
+          "index": 93,
+          "role": "body",
+          "text": "·AlA Vitality"
+        },
+        {
+          "index": 94,
+          "role": "body",
+          "text": "·FlexYourDay"
+        },
+        {
+          "index": 95,
+          "role": "body",
+          "text": "·Insurances"
+        },
+        {
+          "index": 96,
+          "role": "body",
+          "text": "·CareerDevelopment"
+        },
+        {
+          "index": 97,
+          "role": "body",
+          "text": "·AlAVitality·FlexYourDay·Insurances"
+        },
+        {
+          "index": 98,
+          "role": "body",
+          "text": "·Additional Leave·Reward &Recognition·EnhancedParentalLeave"
+        },
+        {
+          "index": 99,
+          "role": "body",
+          "text": "More about this company→"
+        },
+        {
+          "index": 100,
+          "role": "body",
+          "text": "Be careful"
+        },
+        {
+          "index": 101,
+          "role": "body",
+          "text": "Don't provide your bank or credit card details when applying for jobs."
+        },
+        {
+          "index": 102,
+          "role": "body",
+          "text": "Learn how to protect yourself"
+        },
+        {
+          "index": 103,
+          "role": "body",
+          "text": "Report this job ad"
+        }
+      ],
+      "requirements": [
+        "·Collaborate with stakeholders to clarify requirements and deliversolutions that align",
+        "·Youbring strong experience in integration orC#.NETdevelopment,with the abilityto",
+        "At AlA,yourexperience matters, and so does yourimpact.In return foryourexpertise,we",
+        "offer a career where you can apply your skills to meaningful work that improves lives"
+      ],
+      "responsibilities": [
+        "Your Role with Us|To Turanga ki a Matou",
+        "Your Role with Us |To Turanga ki a Matou",
+        "role in designing and delivering integration solutions that keep our systems connected,"
+      ],
+      "benefits": [
+        "across Asia-Pacific.You*llenjoy flexible ways of working,competitive rewards, and access",
+        "Insurance",
+        "has been providing insurance to New Zealanders since 1981..",
+        "Perks and benefits",
+        "·Insurances",
+        "·AlAVitality·FlexYourDay·Insurances"
+      ],
+      "apply_button_state": {
+        "visible": true,
+        "label": "Apply",
+        "bbox": {
+          "x": 1204,
+          "y": 1004,
+          "w": 84,
+          "h": 33
+        },
+        "click_point": {
+          "x": 1246,
+          "y": 1020
+        },
+        "candidate_freshness": {
+          "contract_version": "action_candidate_freshness_v1",
+          "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-175950-293684__observe-screen__edge.json",
+          "viewport_size": {
+            "width": 2560,
+            "height": 1400
+          },
+          "source": "seek_apply_button_extraction",
+          "freshness": "current_capture"
+        }
+      },
+      "save_button_state": {
+        "visible": false,
+        "label": null,
+        "bbox": null
+      },
+      "detail_container": {
+        "container_id": "seek:job_detail",
+        "stable_key": "seek.search.job_detail",
+        "pane_role": "job_detail",
+        "scroll_scope": "container",
+        "axis": "vertical",
+        "bbox": {
+          "x": 1134,
+          "y": 280,
+          "w": 896,
+          "h": 1104
+        },
+        "can_scroll_up": true,
+        "can_scroll_down": true,
+        "confidence": 0.9,
+        "sources": [
+          "seek_layout_heuristic"
+        ],
+        "evidence": {
+          "layout": "left_results_right_detail",
+          "role_hint": "right job detail pane",
+          "title_contains_seek": false,
+          "content_left": 530,
+          "content_width": 1500
+        },
+        "safe_points": [
+          {
+            "x": 1582,
+            "y": 832,
+            "reason": "inside_job_detail_body"
+          }
+        ]
+      },
+      "detail_read_bbox": {
+        "x": 1134,
+        "y": 60,
+        "w": 896,
+        "h": 1324
+      },
+      "detail_bottom_reached": true,
+      "detail_scroll_history": [
+        {
+          "success": true,
+          "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-175952-110649__scroll__scroll-down.json",
+          "contract_version": "scroll_action_v2",
+          "scroll_scope": "container",
+          "target_pane": "job_detail",
+          "target_container_id": "seek:job_detail",
+          "learned_artifact_source": "default_seek_runner",
+          "precondition_decision": {
+            "contract_version": "scroll_precondition_decision_v1",
+            "decision": "ALLOW",
+            "reasons": [
+              "point_inside_window",
+              "coordinate_window_size_not_required",
+              "target_container_found",
+              "container_bbox_available",
+              "point_inside_container",
+              "container_can_scroll_down"
+            ],
+            "reject_reasons": []
+          },
+          "effect_validation": {
+            "contract_version": "scroll_effect_validation_v1",
+            "status": "moved",
+            "target_container_id": "seek:job_detail",
+            "target_pane": "job_detail",
+            "target_container_content_changed": true,
+            "target_container_scroll_offset_changed": null,
+            "same_semantic_page": true,
+            "non_target_panes_stable": null,
+            "wrong_scope_detected": false,
+            "no_effect_detected": false,
+            "verification_basis": {
+              "diff_changed": true,
+              "cursor_and_focus": true
+            }
+          },
+          "bottom_probe": true,
+          "bottom_reached": false,
+          "wheel_clicks": 4,
+          "adaptive_repeated_observations": 0,
+          "missing_evidence": [
+            "detail_bottom"
+          ]
+        },
+        {
+          "success": true,
+          "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-180004-405512__scroll__scroll-down.json",
+          "contract_version": "scroll_action_v2",
+          "scroll_scope": "container",
+          "target_pane": "job_detail",
+          "target_container_id": "seek:job_detail",
+          "learned_artifact_source": "default_seek_runner",
+          "precondition_decision": {
+            "contract_version": "scroll_precondition_decision_v1",
+            "decision": "ALLOW",
+            "reasons": [
+              "point_inside_window",
+              "coordinate_window_size_not_required",
+              "target_container_found",
+              "container_bbox_available",
+              "point_inside_container",
+              "container_can_scroll_down"
+            ],
+            "reject_reasons": []
+          },
+          "effect_validation": {
+            "contract_version": "scroll_effect_validation_v1",
+            "status": "moved",
+            "target_container_id": "seek:job_detail",
+            "target_pane": "job_detail",
+            "target_container_content_changed": true,
+            "target_container_scroll_offset_changed": null,
+            "same_semantic_page": true,
+            "non_target_panes_stable": null,
+            "wrong_scope_detected": false,
+            "no_effect_detected": false,
+            "verification_basis": {
+              "diff_changed": true,
+              "cursor_and_focus": false
+            }
+          },
+          "bottom_probe": true,
+          "bottom_reached": false,
+          "wheel_clicks": 8,
+          "adaptive_repeated_observations": 0,
+          "missing_evidence": [
+            "detail_bottom"
+          ]
+        },
+        {
+          "success": true,
+          "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-180018-059344__scroll__scroll-down.json",
+          "contract_version": "scroll_action_v2",
+          "scroll_scope": "container",
+          "target_pane": "job_detail",
+          "target_container_id": "seek:job_detail",
+          "learned_artifact_source": "default_seek_runner",
+          "precondition_decision": {
+            "contract_version": "scroll_precondition_decision_v1",
+            "decision": "ALLOW",
+            "reasons": [
+              "point_inside_window",
+              "coordinate_window_size_not_required",
+              "target_container_found",
+              "container_bbox_available",
+              "point_inside_container",
+              "container_can_scroll_down"
+            ],
+            "reject_reasons": []
+          },
+          "effect_validation": {
+            "contract_version": "scroll_effect_validation_v1",
+            "status": "moved",
+            "target_container_id": "seek:job_detail",
+            "target_pane": "job_detail",
+            "target_container_content_changed": true,
+            "target_container_scroll_offset_changed": null,
+            "same_semantic_page": true,
+            "non_target_panes_stable": null,
+            "wrong_scope_detected": false,
+            "no_effect_detected": false,
+            "verification_basis": {
+              "diff_changed": true,
+              "cursor_and_focus": false
+            }
+          },
+          "bottom_probe": true,
+          "bottom_reached": false,
+          "wheel_clicks": 12,
+          "adaptive_repeated_observations": 0,
+          "missing_evidence": [
+            "detail_bottom"
+          ]
+        },
+        {
+          "success": true,
+          "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-180029-219812__scroll__scroll-down.json",
+          "contract_version": "scroll_action_v2",
+          "scroll_scope": "container",
+          "target_pane": "job_detail",
+          "target_container_id": "seek:job_detail",
+          "learned_artifact_source": "default_seek_runner",
+          "precondition_decision": {
+            "contract_version": "scroll_precondition_decision_v1",
+            "decision": "ALLOW",
+            "reasons": [
+              "point_inside_window",
+              "coordinate_window_size_not_required",
+              "target_container_found",
+              "container_bbox_available",
+              "point_inside_container",
+              "container_can_scroll_down"
+            ],
+            "reject_reasons": []
+          },
+          "effect_validation": {
+            "contract_version": "scroll_effect_validation_v1",
+            "status": "moved",
+            "target_container_id": "seek:job_detail",
+            "target_pane": "job_detail",
+            "target_container_content_changed": true,
+            "target_container_scroll_offset_changed": null,
+            "same_semantic_page": true,
+            "non_target_panes_stable": null,
+            "wrong_scope_detected": false,
+            "no_effect_detected": false,
+            "verification_basis": {
+              "diff_changed": true,
+              "cursor_and_focus": false
+            }
+          },
+          "bottom_probe": true,
+          "bottom_reached": false,
+          "wheel_clicks": 12,
+          "adaptive_repeated_observations": 0,
+          "missing_evidence": [
+            "detail_bottom"
+          ]
+        }
+      ],
+      "trace_paths": [
+        "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-175950-293684__observe-screen__edge.json",
+        "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-180002-593713__observe-screen__edge.json",
+        "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-180016-227166__observe-screen__edge.json",
+        "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-180027-394656__observe-screen__edge.json",
+        "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-180038-292195__observe-screen__edge.json"
+      ],
+      "evidence": {
+        "text_count": 106,
+        "action_count": 0,
+        "texts": [
+          "Companies",
+          "Recruiters",
+          "Employer site",
+          "All Auckland",
+          "SEEK",
+          "HEALTHIER,",
+          "LONGER,",
+          "BETTER",
+          "LIVES",
+          "PRID",
+          "C",
+          "gendertick",
+          "PLEDGE",
+          "HEALTHIER,LONGER.",
+          "BETTERLIVES",
+          "SoftwareEngineerSpecialist-Integration",
+          "AIA New Zealand",
+          "★4.97reviews·View alljobs",
+          "Takapuna, Auckland",
+          "国",
+          "Engineering -Software(Information&CommunicationTechnology)",
+          "Fulltime",
+          "Posted 6d ago",
+          "Apply",
+          "Visitedemployer's applicationsite on24Jun2026",
+          "How you match ①",
+          "1 skill or credential matches your profile",
+          "C#ProgrammingShow all",
+          "Your Role with Us|To Turanga ki a Matou",
+          "AllAuckland",
+          "AlA New Zealand ★ 4.9 7reviews ·View alljobs",
+          "Engineering - Software (Information & Communication Technology)",
+          "Visited employer's application site on 24 Jun 2026",
+          "1 skill or credential matches your profle",
+          "√C#ProgrammingShow all",
+          "Your Role with Us |To Turanga ki a Matou",
+          "As a Software Engineer Specialist - Integration in our Technology team, you'llplay a key",
+          "role in designing and delivering integration solutions that keep our systems connected,",
+          "secure,and running smoothly.You'll collaborate with architects,engineers,and business",
+          "stakeholders tobuild robust,scalable platforms that support both strategic initiatives and",
+          "day-to-dayoperations.This is an exciting opportunityto grow yourtechnical expertise,",
+          "strengthen your influence across teams, and contribute to continuous improvement as",
+          "you help shape reliable,future-ready integration capabilities.",
+          "Your lmpact|To Panga",
+          "·Design and deliverintegration solutions that enable reliable,secure connectivity and",
+          "support business outcomes across the organisation.",
+          "·Develop and enhance integration components that meet quality standards,improving",
+          "system performance and maintainability.",
+          "·Resolveincidentsandstrengthenreliability,contributing toimprovedsystemstability",
+          "Software Engineer Specialist -Integration",
+          "Apply C",
+          "AlA New Zealand",
+          "·Design and deliverintegration solutions that enablereliable,secure connectivity and",
+          "·Resolveincidents and strengthen reliability,contributing toimproved system stability",
+          "and seamless operations.",
+          "·Collaborate with stakeholders to clarify requirements and deliversolutions that align",
+          "with business needs and expectations.",
+          "integration practices for long-term success.",
+          "Your Capabilities|OAheinga",
+          "·Youbring strong experience in integration orC#.NETdevelopment,with the abilityto",
+          "deliver solutions in complex environments.",
+          "·You have arelevant tertiaryqualification in IT,ComputerScience,orarelated discipline",
+          "that underpins your technical expertise.",
+          "·You communicate clearly and build effectiverelationships,enabling collaboration with",
+          "both technical and non-technical stakeholders.",
+          "·You apply analytical thinking and sound judgement,balancing quality, risk, and",
+          "delivery outcomes to solve problems effectively.",
+          "·You take ownership and contribute to team success,managing priorities while",
+          "supporting othersthrough knowledge sharing.",
+          "·You may also have relevant professional certifications, ora desire to continue",
+          "developing your capability.",
+          "Your Life at AIA| To Ao ki AIA",
+          "At AlA,yourexperience matters, and so does yourimpact.In return foryourexpertise,we",
+          "offer a career where you can apply your skills to meaningful work that improves lives",
+          "across Asia-Pacific.You*llenjoy flexible ways of working,competitive rewards, and access",
+          "to continuous learning programs designed to keep you ahead in a rapidly changing world.",
+          "Our collaborative culture values your ideas and empowers you to innovate,solve complex",
+          "challenges, and contribute to ourambition of helping a bilion people live Healthier,",
+          "Longer, Better Lives by 2030.",
+          "Software Engineer Specialist-Integration",
+          "Believe inBetterwithAlA NZ",
+          "AIA NZ",
+          "YouTube",
+          "to be part of that.",
+          "Company profile",
+          "HEALTHIER.LONGER.",
+          "AIA",
+          "★4.9·7reviews",
+          "Insurance",
+          "g 101-1,000 employees",
+          "AlA Group is one of the largest life insurers in the world, with a presence in 18",
+          "markets across Asia Pacific. AlA New Zealand Limited is part of the AlA Group and",
+          "has been providing insurance to New Zealanders since 1981..",
+          "Showmore",
+          "Perks and benefits",
+          "·AlA Vitality",
+          "·FlexYourDay",
+          "·Insurances",
+          "·CareerDevelopment",
+          "·AlAVitality·FlexYourDay·Insurances",
+          "·Additional Leave·Reward &Recognition·EnhancedParentalLeave",
+          "More about this company→",
+          "Be careful",
+          "Don't provide your bank or credit card details when applying for jobs.",
+          "Learn how to protect yourself",
+          "Report this job ad"
+        ],
+        "source_contract": "merged_seek_job_detail_v1"
+      }
+    },
+    "complete": true,
+    "missing_evidence": [],
+    "coordinate_strategy": "fixed_seek_job_detail_container_after_card_click",
+    "read_container_id": "seek:job_detail",
+    "uses_precise_relocation": false,
+    "scroll_count": 4,
+    "scrolls": [
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-175952-110649__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": true
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": false,
+        "wheel_clicks": 4,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-180004-405512__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": false,
+        "wheel_clicks": 8,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-180018-059344__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": false,
+        "wheel_clicks": 12,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-180029-219812__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": false,
+        "wheel_clicks": 12,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ]
+      }
+    ]
+  },
+  "clear_path_node": {
+    "node_id": "seek_job_22ebfd65012e",
+    "node_type": "seek_job_card_to_detail",
+    "title": "Software Engineer Specialist-Integration",
+    "company": "AIA New Zealand",
+    "location": "Takapuna, Auckland",
+    "card_bbox": {
+      "x": 652,
+      "y": 547,
+      "w": 436,
+      "h": 231
+    },
+    "click_point": {
+      "x": 778,
+      "y": 560
+    },
+    "open_action": {
+      "action_id": "open_job_card",
+      "opened": true,
+      "failure_reason": null,
+      "approved_plan_id": "ce780e1f76534a5298e879f33e9e740f",
+      "dry_run_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-175930-413101__execute-mode-plan-preview__edge.json",
+      "execute_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-175932-423080__execute-mode-click__edge.json",
+      "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-175930-326258__execute-mode-recognition-plan__edge.json"
+    },
+    "read_detail_action": {
+      "action_id": "read_detail",
+      "container_id": "seek:job_detail",
+      "coordinate_strategy": "fixed_seek_job_detail_container_after_card_click",
+      "complete": true,
+      "missing_evidence": [],
+      "scroll_count": 4,
+      "trace_paths": [
+        "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-175950-293684__observe-screen__edge.json",
+        "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-180002-593713__observe-screen__edge.json",
+        "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-180016-227166__observe-screen__edge.json",
+        "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-180027-394656__observe-screen__edge.json",
+        "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-180038-292195__observe-screen__edge.json"
+      ]
+    },
+    "match": {
+      "decision": "maybe_apply",
+      "score": 0.69,
+      "recommended_next_action": "review_then_optionally_open_apply_entry"
+    }
+  },
+  "match_decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "maybe_apply",
+    "score": 0.69,
+    "job_id": "seek_job_ae2137228610",
+    "title": "Software Engineer Specialist - Integration",
+    "company": "AIA New Zealand",
+    "fit_summary": "maybe_apply with score 0.690. positive: matched_skills: C#; matched_target_roles: Software Engineer; location_matches: Takapuna, Auckland.",
+    "recommended_next_action": "review_then_optionally_open_apply_entry",
+    "positive_evidence": [
+      "matched_skills: C#",
+      "matched_target_roles: Software Engineer",
+      "location_matches: Takapuna, Auckland",
+      "matched_preferred_work_modes: onsite"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null,
+    "saved_job_path": "artifacts\\seek\\saved-jobs-20260629-vista\\seek_job_ae2137228610.json"
+  },
+  "apply_entry": null,
+  "safety": {
+    "submit_clicks": 0,
+    "final_submission_performed": false
+  },
+  "search_restore": null
+}

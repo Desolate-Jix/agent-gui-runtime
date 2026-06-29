@@ -4,7 +4,7 @@ import hashlib
 import json
 from typing import Any
 
-from app.execute.read_region_batch import extract_ocr_text_lines
+from app.operation.reading import extract_ocr_text_lines
 
 
 DETAIL_SNAPSHOT_CONTRACT = "runtime_detail_snapshot_v1"

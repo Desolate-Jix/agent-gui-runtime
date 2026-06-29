@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.execute.action_kinds import classify_action_taxonomy, infer_action_kind, infer_low_level_action_type
+from app.gate.actions import classify_action_taxonomy, infer_action_kind, infer_low_level_action_type
 
 
 AVAILABLE_ACTIONS_CONTRACT = "available_actions_v1"
@@ -15,8 +15,6 @@ def build_available_actions(
     include_guarded_apply: bool = False,
     path_graph_resolution: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build the action menu that Execute Mode may ask an agent to choose from."""
-
     graph = runtime_path_graph if isinstance(runtime_path_graph, dict) else {}
     resolution = path_graph_resolution if isinstance(path_graph_resolution, dict) else {}
     resolved_state_id = current_state_id or resolution.get("state_id")

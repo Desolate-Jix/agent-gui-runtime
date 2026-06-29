@@ -1,0 +1,584 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "seek_job_2a1274f317cd",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "maybe_apply",
+    "score": 0.69,
+    "job_id": "seek_job_2a1274f317cd",
+    "title": "HARDWAREENGINEERSUMMERINTERNSHIP/",
+    "company": "GRADUATE",
+    "fit_summary": "maybe_apply with score 0.690. positive: matched_skills: Java; matched_target_roles: Software Engineer; location_matches: New Lynn, Auckland (Hybrid).",
+    "recommended_next_action": "review_then_optionally_open_apply_entry",
+    "positive_evidence": [
+      "matched_skills: Java",
+      "matched_target_roles: Software Engineer",
+      "location_matches: New Lynn, Auckland (Hybrid)",
+      "matched_preferred_work_modes: hybrid"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience"
+    ],
+    "trace_path": null
+  },
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_d935da7aab55",
+    "title": "HARDWARE ENGINEER SUMMER",
+    "company": "INTERNSHIP/ GRADUATE",
+    "location": "New Lynn, Auckland (Hybrid)",
+    "posted_at_text": null,
+    "work_type": "Hybrid",
+    "salary_text": "$62,500 + performance and profit share",
+    "classification": null,
+    "card_bbox": {
+      "x": 652,
+      "y": 952,
+      "w": 391,
+      "h": 233
+    },
+    "click_point": {
+      "x": 797,
+      "y": 965
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_16",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_42_hardware-engineer-summer",
+      "page_text_43_internship-graduate",
+      "page_text_45_trv-trading",
+      "page_text_46_strong-applicant",
+      "page_text_47_new-lynn-auckland-hybrid",
+      "page_text_48_62-500-performance-and-profit-share",
+      "page_text_49_bonuses",
+      "page_text_50_build-proprietary-hardware-that-executes-the-wor"
+    ],
+    "evidence": {
+      "texts": [
+        "HARDWARE ENGINEER SUMMER",
+        "INTERNSHIP/ GRADUATE",
+        "TRV Trading",
+        "Strong applicant",
+        "New Lynn, Auckland (Hybrid)",
+        "$62,500 + performance and profit share",
+        "bonuses",
+        "Build proprietary hardware that executes the world's"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": true,
+        "has_salary": true
+      }
+    },
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-175927-889753__observe-screen__edge.json",
+      "viewport_size": {
+        "width": 2560,
+        "height": 1400
+      },
+      "source": "seek_job_card_extraction",
+      "freshness": "current_capture"
+    }
+  },
+  "detail": {
+    "contract_version": "seek_job_detail_v1",
+    "job_id": "seek_job_2a1274f317cd",
+    "title": "HARDWAREENGINEERSUMMERINTERNSHIP/",
+    "company": "GRADUATE",
+    "location": "New Lynn, Auckland (Hybrid)",
+    "work_type": "Hybrid",
+    "classification": "Electrical/Electronic Engineering (Engineering)",
+    "salary_text": "$62,500+performance andprofit sharebonuses",
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "Companies"
+      },
+      {
+        "index": 1,
+        "role": "body",
+        "text": "Recruiters"
+      },
+      {
+        "index": 2,
+        "role": "body",
+        "text": "Employer site"
+      },
+      {
+        "index": 3,
+        "role": "body",
+        "text": "AllAuckland"
+      },
+      {
+        "index": 4,
+        "role": "body",
+        "text": "SEEK"
+      },
+      {
+        "index": 5,
+        "role": "body",
+        "text": "PROPRIETARYTRADING"
+      },
+      {
+        "index": 6,
+        "role": "body",
+        "text": "AOTEAROA"
+      },
+      {
+        "index": 7,
+        "role": "body",
+        "text": "RAING"
+      },
+      {
+        "index": 8,
+        "role": "body",
+        "text": "AING"
+      },
+      {
+        "index": 9,
+        "role": "body",
+        "text": "Strong applicant"
+      },
+      {
+        "index": 10,
+        "role": "body",
+        "text": "HARDWAREENGINEERSUMMERINTERNSHIP/"
+      },
+      {
+        "index": 11,
+        "role": "body",
+        "text": "GRADUATE"
+      },
+      {
+        "index": 12,
+        "role": "body",
+        "text": "TRV Trading View all iobs"
+      },
+      {
+        "index": 13,
+        "role": "body",
+        "text": "New Lynn, Auckland (Hybrid)"
+      },
+      {
+        "index": 14,
+        "role": "body",
+        "text": "Electrical/Electronic Engineering (Engineering)"
+      },
+      {
+        "index": 15,
+        "role": "body",
+        "text": "Fulltime"
+      },
+      {
+        "index": 16,
+        "role": "body",
+        "text": "$62,500+performance andprofit sharebonuses"
+      },
+      {
+        "index": 17,
+        "role": "body",
+        "text": "Posted 7d ago · Medium application volume"
+      },
+      {
+        "index": 18,
+        "role": "body",
+        "text": "Quickapply"
+      },
+      {
+        "index": 19,
+        "role": "body",
+        "text": "Save"
+      },
+      {
+        "index": 20,
+        "role": "body",
+        "text": "How you match ①"
+      },
+      {
+        "index": 21,
+        "role": "body",
+        "text": "2 skills and credentials match your profile"
+      },
+      {
+        "index": 22,
+        "role": "body",
+        "text": "Business Modelling"
+      },
+      {
+        "index": 23,
+        "role": "body",
+        "text": "JavaProgrammingS"
+      },
+      {
+        "index": 24,
+        "role": "body",
+        "text": "Show all"
+      },
+      {
+        "index": 25,
+        "role": "body",
+        "text": "TRV Trading View alljobs"
+      },
+      {
+        "index": 26,
+        "role": "body",
+        "text": "$62,500 + performance and profit share bonuses"
+      },
+      {
+        "index": 27,
+        "role": "body",
+        "text": "Quick apply"
+      },
+      {
+        "index": 28,
+        "role": "body",
+        "text": "Java ProgrammingShow all"
+      },
+      {
+        "index": 29,
+        "role": "body",
+        "text": "THEOPPORTUNITY"
+      },
+      {
+        "index": 30,
+        "role": "body",
+        "text": "Are you passionate about challenging the status quo? Do you enjoy innovative problem-"
+      },
+      {
+        "index": 31,
+        "role": "body",
+        "text": "solving? Are you driven by curiosity and a desire to learn?"
+      },
+      {
+        "index": 32,
+        "role": "body",
+        "text": "At TRV, we are performing some of the fastest trades in the world. Key to that"
+      },
+      {
+        "index": 33,
+        "role": "body",
+        "text": "performance is our proprietary hardware and the software that communicates with it.As a"
+      },
+      {
+        "index": 34,
+        "role": "body",
+        "text": "business, we continually innovate new solutions to remain competitive in a dynamic"
+      },
+      {
+        "index": 35,
+        "role": "body",
+        "text": "financial landscape.If the challenge of using the latest technology to solve problems"
+      },
+      {
+        "index": 36,
+        "role": "body",
+        "text": "sounds appealing,then theTRVhardware engineering internship is a great fit foryou.The"
+      },
+      {
+        "index": 37,
+        "role": "body",
+        "text": "right candlidates secure a graduate position at the end of the programme."
+      },
+      {
+        "index": 38,
+        "role": "body",
+        "text": "WHATYOU'LLDO"
+      },
+      {
+        "index": 39,
+        "role": "body",
+        "text": "From day one, you are immersed in real projects, complex problem solving and"
+      },
+      {
+        "index": 40,
+        "role": "body",
+        "text": "opportunities to learn from our strongest engineers and traders."
+      }
+    ],
+    "requirements": [
+      "2 skills and credentials match your profile"
+    ],
+    "responsibilities": [],
+    "benefits": [
+      "New Lynn, Auckland (Hybrid)"
+    ],
+    "apply_button_state": {
+      "visible": true,
+      "label": "Quick apply",
+      "bbox": {
+        "x": 1191,
+        "y": 701,
+        "w": 104,
+        "h": 31
+      },
+      "click_point": {
+        "x": 1243,
+        "y": 716
+      },
+      "candidate_freshness": {
+        "contract_version": "action_candidate_freshness_v1",
+        "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-180112-820195__observe-screen__edge.json",
+        "viewport_size": {
+          "width": 2560,
+          "height": 1400
+        },
+        "source": "seek_apply_button_extraction",
+        "freshness": "current_capture"
+      }
+    },
+    "save_button_state": {
+      "visible": false,
+      "label": null,
+      "bbox": null
+    },
+    "detail_container": {
+      "container_id": "seek:job_detail",
+      "stable_key": "seek.search.job_detail",
+      "pane_role": "job_detail",
+      "scroll_scope": "container",
+      "axis": "vertical",
+      "bbox": {
+        "x": 1134,
+        "y": 280,
+        "w": 896,
+        "h": 1104
+      },
+      "can_scroll_up": true,
+      "can_scroll_down": true,
+      "confidence": 0.9,
+      "sources": [
+        "seek_layout_heuristic"
+      ],
+      "evidence": {
+        "layout": "left_results_right_detail",
+        "role_hint": "right job detail pane",
+        "title_contains_seek": false,
+        "content_left": 530,
+        "content_width": 1500
+      },
+      "safe_points": [
+        {
+          "x": 1582,
+          "y": 832,
+          "reason": "inside_job_detail_body"
+        }
+      ]
+    },
+    "detail_read_bbox": {
+      "x": 1134,
+      "y": 60,
+      "w": 896,
+      "h": 1324
+    },
+    "detail_bottom_reached": true,
+    "detail_scroll_history": [
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-180102-938023__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": true
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": false,
+        "wheel_clicks": 4,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-180114-635807__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": false,
+        "wheel_clicks": 8,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ]
+      },
+      {
+        "success": true,
+        "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-180127-533572__scroll__scroll-down.json",
+        "contract_version": "scroll_action_v2",
+        "scroll_scope": "container",
+        "target_pane": "job_detail",
+        "target_container_id": "seek:job_detail",
+        "learned_artifact_source": "default_seek_runner",
+        "precondition_decision": {
+          "contract_version": "scroll_precondition_decision_v1",
+          "decision": "ALLOW",
+          "reasons": [
+            "point_inside_window",
+            "coordinate_window_size_not_required",
+            "target_container_found",
+            "container_bbox_available",
+            "point_inside_container",
+            "container_can_scroll_down"
+          ],
+          "reject_reasons": []
+        },
+        "effect_validation": {
+          "contract_version": "scroll_effect_validation_v1",
+          "status": "moved",
+          "target_container_id": "seek:job_detail",
+          "target_pane": "job_detail",
+          "target_container_content_changed": true,
+          "target_container_scroll_offset_changed": null,
+          "same_semantic_page": true,
+          "non_target_panes_stable": null,
+          "wrong_scope_detected": false,
+          "no_effect_detected": false,
+          "verification_basis": {
+            "diff_changed": true,
+            "cursor_and_focus": false
+          }
+        },
+        "bottom_probe": true,
+        "bottom_reached": true,
+        "wheel_clicks": 12,
+        "adaptive_repeated_observations": 0,
+        "missing_evidence": [
+          "detail_bottom"
+        ],
+        "right_detail_no_progress_after_scroll": true,
+        "adaptive_stop_reason": "right_detail_content_unchanged_after_scroll"
+      }
+    ],
+    "trace_paths": [
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-180101-097999__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-180112-820195__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-180125-662775__observe-screen__edge.json",
+      "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-180136-003693__observe-screen__edge.json"
+    ],
+    "evidence": {
+      "text_count": 47,
+      "action_count": 0,
+      "texts": [
+        "Companies",
+        "Recruiters",
+        "Employer site",
+        "AllAuckland",
+        "SEEK",
+        "PROPRIETARYTRADING",
+        "IN",
+        "AOTEAROA",
+        "RAING",
+        "AING",
+        "Strong applicant",
+        "HARDWAREENGINEERSUMMERINTERNSHIP/",
+        "GRADUATE",
+        "TRV Trading View all iobs",
+        "New Lynn, Auckland (Hybrid)",
+        "Electrical/Electronic Engineering (Engineering)",
+        "Fulltime",
+        "$62,500+performance andprofit sharebonuses",
+        "Posted 7d ago · Medium application volume",
+        "Quickapply",
+        "Save",
+        "How you match ①",
+        "2 skills and credentials match your profile",
+        "Business Modelling",
+        "JavaProgrammingS",
+        "Show all",
+        "TRV Trading View alljobs",
+        "$62,500 + performance and profit share bonuses",
+        "Quick apply",
+        "Java ProgrammingShow all",
+        "THEOPPORTUNITY",
+        "Are you passionate about challenging the status quo? Do you enjoy innovative problem-",
+        "solving? Are you driven by curiosity and a desire to learn?",
+        "At TRV, we are performing some of the fastest trades in the world. Key to that",
+        "performance is our proprietary hardware and the software that communicates with it.As a",
+        "business, we continually innovate new solutions to remain competitive in a dynamic",
+        "financial landscape.If the challenge of using the latest technology to solve problems",
+        "sounds appealing,then theTRVhardware engineering internship is a great fit foryou.The",
+        "right candlidates secure a graduate position at the end of the programme.",
+        "WHATYOU'LLDO",
+        "From day one, you are immersed in real projects, complex problem solving and",
+        "opportunities to learn from our strongest engineers and traders.",
+        "日",
+        "G",
+        "中",
+        "聊天",
+        "四田"
+      ],
+      "source_contract": "merged_seek_job_detail_v1"
+    }
+  }
+}

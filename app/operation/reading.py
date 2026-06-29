@@ -17,8 +17,6 @@ def build_read_region_batch_report(
     stop_after_no_new_content: int = 2,
     wrong_scope_detected: bool = False,
 ) -> dict[str, Any]:
-    """Merge a batch of region OCR captures into a compact long-read report."""
-
     merged_lines: list[str] = []
     seen: set[str] = set()
     normalized_capture_summaries: list[dict[str, Any]] = []

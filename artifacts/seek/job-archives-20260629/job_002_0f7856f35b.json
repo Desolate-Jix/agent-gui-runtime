@@ -1,0 +1,148 @@
+{
+  "contract_version": "seek_job_archive_v1",
+  "source_url": null,
+  "mode": "no_apply_traversal",
+  "index": 2,
+  "job_id": "seek_job_83439caa05f7",
+  "title": "Software Engineer",
+  "company": "Government Communications",
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_83439caa05f7",
+    "title": "Software Engineer",
+    "company": "Government Communications",
+    "location": "Auckland CBD, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": "Software Engineer",
+    "card_bbox": {
+      "x": 652,
+      "y": 1035,
+      "w": 433,
+      "h": 257
+    },
+    "click_point": {
+      "x": 732,
+      "y": 1049
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_26",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_43_software-engineer",
+      "page_text_44_government-communications",
+      "page_text_45_security-bureau",
+      "page_text_46_auckland-cbd-auckland",
+      "page_text_47_join-a-collaborative-people-first-team-where-you",
+      "page_text_48_is-valued-every-day",
+      "page_text_49_shape-mission-critical-software-that-powers-the-",
+      "page_text_50_nzsis",
+      "page_text_51_partner-directly-with-stakeholders-to-turn-their",
+      "page_text_52_designs"
+    ],
+    "evidence": {
+      "texts": [
+        "Software Engineer",
+        "Government Communications",
+        "Security Bureau",
+        "Auckland CBD, Auckland",
+        "Join a collaborative, people first team where your impact",
+        "is valued every day",
+        "Shape mission critical software that powers the GCSB and",
+        "NZSIS",
+        "Partner directly with stakeholders to turn their ideas into",
+        "designs"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": false,
+        "has_salary": false
+      }
+    },
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-175701-788782__observe-screen__edge.json",
+      "viewport_size": {
+        "width": 2560,
+        "height": 1400
+      },
+      "source": "seek_job_card_extraction",
+      "freshness": "current_capture"
+    }
+  },
+  "card_click": {
+    "opened": false,
+    "failure_reason": "dry_run_not_approved",
+    "approved_plan_id": null,
+    "dry_run_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-175704-551045__execute-mode-plan-preview__edge.json",
+    "execute_trace_path": null,
+    "recognition_plan_trace_path": null,
+    "post_click_layout": null
+  },
+  "detail": null,
+  "detail_complete": null,
+  "detail_missing_evidence": [],
+  "detail_read": {
+    "detail": null,
+    "complete": null,
+    "missing_evidence": [],
+    "coordinate_strategy": null,
+    "read_container_id": null,
+    "uses_precise_relocation": null,
+    "scroll_count": 0,
+    "scrolls": []
+  },
+  "clear_path_node": {
+    "node_id": "seek_job_83439caa05f7",
+    "node_type": "seek_job_card_to_detail",
+    "title": "Software Engineer",
+    "company": "Government Communications",
+    "location": "Auckland CBD, Auckland",
+    "card_bbox": {
+      "x": 652,
+      "y": 1035,
+      "w": 433,
+      "h": 257
+    },
+    "click_point": {
+      "x": 732,
+      "y": 1049
+    },
+    "open_action": {
+      "action_id": "open_job_card",
+      "opened": false,
+      "failure_reason": "dry_run_not_approved",
+      "approved_plan_id": null,
+      "dry_run_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-175704-551045__execute-mode-plan-preview__edge.json",
+      "execute_trace_path": null,
+      "recognition_plan_trace_path": null
+    },
+    "read_detail_action": {
+      "action_id": "read_detail",
+      "container_id": null,
+      "coordinate_strategy": null,
+      "complete": null,
+      "missing_evidence": [],
+      "scroll_count": 0,
+      "trace_paths": null
+    },
+    "match": {
+      "decision": null,
+      "score": null,
+      "recommended_next_action": null
+    }
+  },
+  "match_decision": null,
+  "apply_entry": null,
+  "safety": {
+    "submit_clicks": 0,
+    "final_submission_performed": false
+  },
+  "search_restore": null
+}

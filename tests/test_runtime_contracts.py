@@ -3,21 +3,21 @@ from __future__ import annotations
 import pytest
 
 from app.api import vision as vision_api
-from app.execute.action_kinds import classify_action_taxonomy
-from app.execute.candidate_contracts import (
+from app.gate.actions import classify_action_taxonomy
+from app.gate.candidates import (
     attach_candidate_freshness,
     validate_action_candidate_freshness,
     validate_action_candidate_target_at_point,
 )
-from app.execute.danger_scope import scoped_final_submit_visible_blocker
-from app.execute.dataflow_contracts import (
+from app.gate.danger import scoped_final_submit_visible_blocker
+from app.gate.dataflow import (
     merge_read_batch_into_detail_snapshot,
     put_latest_detail_snapshot,
     require_latest_detail_snapshot,
     with_detail_snapshot,
 )
-from app.execute.ocr_normalization import ocr_contextual_match
-from app.execute.scroll_scope import build_scroll_scope_invariant
+from app.gate.ocr import ocr_contextual_match
+from app.gate.scroll import build_scroll_scope_invariant
 from app.seek.application import assess_seek_application_flow_state
 from app.recognition.schemas import LocalGroundingCandidateResult, LocalGroundingResult
 from app.vision.schemas import ImageSize

@@ -8,6 +8,8 @@ from typing import Any
 
 
 MATCH_DECISIONS = {"strong_apply", "maybe_apply", "skip", "need_user_review"}
+AGENT_REVIEW_PASS_VERDICTS = {"pass", "suitable", "open_apply_entry", "apply_entry_allowed"}
+AGENT_REVIEW_REJECT_VERDICTS = {"reject", "skip", "not_suitable", "do_not_apply"}
 EXPERIENCE_HARD_SKIP_MIN_YEARS = 2
 EXPERIENCE_REVIEW_MIN_YEARS = 1
 WORK_RIGHTS_REVIEW_TERMS = (
@@ -52,6 +54,44 @@ SENIOR_REVIEW_TERMS = (
     "team leadership",
     "lead on complex",
     "take a leading role",
+)
+SECURITY_CLEARANCE_HARD_SKIP_TERMS = (
+    "top secret special",
+    "tss clearance",
+    "national security clearance",
+    "security clearance",
+    "nz security clearance",
+    "new zealand security clearance",
+    "citizenship and security clearance",
+    "citizen and security clearance",
+    "nz citizenship and security clearance",
+    "new zealand citizenship and security clearance",
+)
+LONG_NZ_BACKGROUND_HARD_SKIP_TERMS = (
+    "10 years in new zealand",
+    "10 years of new zealand",
+    "10-year background",
+    "10 year background",
+    "checkable background",
+    "10 years checkable",
+)
+HARDWARE_ELECTRICAL_CLASSIFICATION_TERMS = (
+    "electrical/electronic engineering",
+    "electrical engineering",
+    "electronic engineering",
+    "hardware engineering",
+    "hardware engineer",
+    "embedded hardware",
+    "fpga",
+    "pcb",
+    "circuit",
+    "electronics",
+)
+SOFTWARE_RESCUE_TERMS = (
+    "embedded software",
+    "software engineer",
+    "software developer",
+    "firmware",
 )
 
 
@@ -119,6 +159,19 @@ def score_seek_job(
     title = str(detail_payload.get("title") or card_payload.get("title") or "")
     company = str(detail_payload.get("company") or card_payload.get("company") or "")
 
+    if _agent_full_jd_review_required(profile):
+        return _decision(
+            decision="need_user_review",
+            score=0.0,
+            positive=["full_job_detail_ready_for_agent_review"],
+            negative=[],
+            unknowns=["agent_full_jd_review_required"],
+            risk_flags=[*risk_flags, "local_keyword_suitability_screening_disabled"],
+            card=card_payload,
+            detail=detail_payload,
+            agent_review=_agent_review_payload(card=card_payload, detail=detail_payload),
+        )
+
     matched_excluded_roles = [term for term in excluded_roles if _contains(title, term) or _contains(job_text, term)]
     matched_excluded_companies = [term for term in excluded_companies if _contains(company, term)]
     if matched_excluded_roles or matched_excluded_companies:
@@ -133,6 +186,20 @@ def score_seek_job(
             negative=negative,
             unknowns=unknowns,
             risk_flags=[*risk_flags, "candidate_profile_exclusion_matched"],
+            card=card_payload,
+            detail=detail_payload,
+        )
+
+    hard_gate = _hard_requirement_gate(title=title, job_text=job_text, detail=detail_payload)
+    if hard_gate["decision"] == "skip":
+        negative.append(hard_gate["summary"])
+        return _decision(
+            decision="skip",
+            score=0.0,
+            positive=positive,
+            negative=negative,
+            unknowns=unknowns,
+            risk_flags=[*risk_flags, hard_gate["risk_flag"]],
             card=card_payload,
             detail=detail_payload,
         )
@@ -245,6 +312,98 @@ def save_suitable_job_record(
     return str(path)
 
 
+def load_agent_suitability_reviews(path: str | Path | None) -> list[dict[str, Any]]:
+    if not path:
+        return []
+    payload = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+    if isinstance(payload, dict) and isinstance(payload.get("reviews"), list):
+        return [item for item in payload["reviews"] if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        return [payload]
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    raise ValueError("agent suitability review file must contain an object, reviews list, or list of objects")
+
+
+def find_agent_suitability_review(
+    reviews: list[dict[str, Any]],
+    *,
+    match_decision: dict[str, Any],
+    card: dict[str, Any],
+    detail: dict[str, Any],
+) -> dict[str, Any] | None:
+    if not reviews:
+        return None
+    wanted = {
+        _identity_key(match_decision.get("job_id"), match_decision.get("title"), match_decision.get("company")),
+        _identity_key(detail.get("job_id"), detail.get("title"), detail.get("company")),
+        _identity_key(card.get("job_id"), card.get("title"), card.get("company")),
+    }
+    wanted = {item for item in wanted if item}
+    for review in reviews:
+        keys = {
+            _identity_key(review.get("job_id"), review.get("title"), review.get("company")),
+            _identity_key(review.get("job", {}).get("job_id") if isinstance(review.get("job"), dict) else None,
+                          review.get("job", {}).get("title") if isinstance(review.get("job"), dict) else None,
+                          review.get("job", {}).get("company") if isinstance(review.get("job"), dict) else None),
+        }
+        if any(key and key in wanted for key in keys):
+            return review
+    return None
+
+
+def apply_agent_suitability_review(match_decision: dict[str, Any], review: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(review, dict):
+        return match_decision
+    verdict = _normalized_review_verdict(review)
+    next_decision = "need_user_review"
+    positive = _strings(match_decision.get("positive_evidence"))
+    negative = _strings(match_decision.get("negative_evidence"))
+    unknowns = _strings(match_decision.get("unknowns"))
+    risk_flags = _strings(match_decision.get("risk_flags"))
+    if verdict in AGENT_REVIEW_PASS_VERDICTS:
+        next_decision = "strong_apply"
+        positive = [*positive, "agent_suitability_review_passed"]
+        risk_flags = [flag for flag in risk_flags if flag != "local_keyword_suitability_screening_disabled"]
+        risk_flags.append("agent_full_jd_review_passed")
+        unknowns = [item for item in unknowns if item != "agent_full_jd_review_required"]
+    elif verdict in AGENT_REVIEW_REJECT_VERDICTS:
+        next_decision = "skip"
+        negative = [*negative, "agent_suitability_review_rejected"]
+        risk_flags.append("agent_full_jd_review_rejected")
+        unknowns = [item for item in unknowns if item != "agent_full_jd_review_required"]
+    else:
+        unknowns = [*unknowns, "agent_suitability_review_missing_or_needs_more_info"]
+        risk_flags.append("agent_full_jd_review_not_passed")
+    reviewed = {
+        **match_decision,
+        "decision": next_decision,
+        "score": 0.0,
+        "fit_summary": _fit_summary(
+            decision=next_decision,
+            score=0.0,
+            positive=positive,
+            negative=negative,
+            unknowns=unknowns,
+        ),
+        "recommended_next_action": _recommended_next_action(next_decision),
+        "positive_evidence": positive,
+        "negative_evidence": negative,
+        "unknowns": unknowns,
+        "risk_flags": _unique_strings(risk_flags),
+        "agent_suitability_review": {
+            "contract_version": str(review.get("contract_version") or "agent_suitability_review_v1"),
+            "verdict": verdict or "needs_more_info",
+            "full_jd_reviewed": bool(review.get("full_jd_reviewed")),
+            "reviewer": review.get("reviewer") or "agent",
+            "reasons": _strings(review.get("reasons")),
+            "risks": _strings(review.get("risks")),
+            "source_path": review.get("source_path"),
+        },
+    }
+    return reviewed
+
+
 def merge_seek_job_identity(card: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
     merged = dict(detail)
     for key in ("title", "company", "location", "work_type"):
@@ -298,6 +457,39 @@ def _experience_gate(*, title: str, job_text: str) -> dict[str, Any]:
     return {"decision": "none", "summary": ""}
 
 
+def _hard_requirement_gate(*, title: str, job_text: str, detail: dict[str, Any]) -> dict[str, Any]:
+    normalized_title = _match_normalized_text(title)
+    normalized_text = _match_normalized_text(job_text)
+    if any(term in normalized_text for term in SECURITY_CLEARANCE_HARD_SKIP_TERMS) and (
+        "citizen" in normalized_text or "citizenship" in normalized_text or "top secret special" in normalized_text
+    ):
+        return {
+            "decision": "skip",
+            "summary": "hard_requirement_skip: citizenship_or_national_security_clearance",
+            "risk_flag": "citizenship_or_national_security_clearance_hard_skip",
+        }
+    if any(term in normalized_text for term in LONG_NZ_BACKGROUND_HARD_SKIP_TERMS) and (
+        "citizen" in normalized_text or "security" in normalized_text or "background" in normalized_text
+    ):
+        return {
+            "decision": "skip",
+            "summary": "hard_requirement_skip: long_new_zealand_background_or_residence_requirement",
+            "risk_flag": "long_new_zealand_background_or_residence_hard_skip",
+        }
+
+    classification = _match_normalized_text(detail.get("classification"))
+    hardware_context = " ".join([normalized_title, classification, normalized_text])
+    hardware_hit = any(term in hardware_context for term in HARDWARE_ELECTRICAL_CLASSIFICATION_TERMS)
+    software_rescue = any(term in normalized_title for term in SOFTWARE_RESCUE_TERMS)
+    if hardware_hit and not software_rescue:
+        return {
+            "decision": "skip",
+            "summary": "hard_requirement_skip: hardware_or_electrical_engineering_role_outside_profile",
+            "risk_flag": "hardware_or_electrical_engineering_role_hard_skip",
+        }
+    return {"decision": "none", "summary": "", "risk_flag": ""}
+
+
 def _experience_pattern_text(value: Any) -> str:
     text = str(value or "").casefold()
     text = text.replace("–", "-").replace("—", "-").replace("−", "-")
@@ -315,9 +507,10 @@ def _decision(
     risk_flags: list[str],
     card: dict[str, Any],
     detail: dict[str, Any],
+    agent_review: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     decision_value = decision if decision in MATCH_DECISIONS else "need_user_review"
-    return {
+    payload = {
         "contract_version": "seek_job_match_decision_v1",
         "decision": decision_value,
         "score": score,
@@ -338,6 +531,9 @@ def _decision(
         "risk_flags": risk_flags,
         "trace_path": None,
     }
+    if agent_review is not None:
+        payload["agent_review"] = agent_review
+    return payload
 
 
 def _job_text(card: dict[str, Any], detail: dict[str, Any]) -> str:
@@ -353,6 +549,57 @@ def _job_text(card: dict[str, Any], detail: dict[str, Any]) -> str:
         for key in ("requirements", "responsibilities", "benefits"):
             parts.extend(_strings(payload.get(key)))
     return " ".join(parts).casefold()
+
+
+def _agent_full_jd_review_required(profile: dict[str, Any]) -> bool:
+    preferences = profile.get("job_search_preferences") if isinstance(profile.get("job_search_preferences"), dict) else {}
+    policy = str(preferences.get("screening_policy") or preferences.get("suitability_policy") or "").casefold()
+    return policy in {
+        "agent_full_jd_review",
+        "agent_full_jd_review_required",
+        "agent_review_full_detail_required",
+    }
+
+
+def _agent_review_payload(*, card: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "contract_version": "job_suitability_agent_review_payload_v1",
+        "instruction": "Use the full job detail text to decide suitability. Do not decide from title or keyword matches alone.",
+        "card": {
+            key: card.get(key)
+            for key in ("job_id", "title", "company", "location", "work_type", "salary_text", "classification", "source_url")
+            if card.get(key) is not None
+        },
+        "detail": {
+            key: detail.get(key)
+            for key in ("job_id", "title", "company", "location", "work_type", "salary_text", "classification", "source_url")
+            if detail.get(key) is not None
+        },
+        "full_job_text": _job_text_for_agent(card=card, detail=detail),
+    }
+
+
+def _job_text_for_agent(*, card: dict[str, Any], detail: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for payload in (card, detail):
+        for key in ("title", "company", "location", "work_type", "classification", "salary_text", "source_url"):
+            value = str(payload.get(key) or "").strip()
+            if value:
+                parts.append(f"{key}: {value}")
+        evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}
+        texts = _strings(evidence.get("texts"))
+        if texts:
+            parts.append("visible_card_or_ocr_text: " + " | ".join(texts))
+        for section in payload.get("description_sections") or []:
+            if isinstance(section, dict):
+                text = str(section.get("text") or "").strip()
+                if text:
+                    parts.append(text)
+        for key in ("requirements", "responsibilities", "benefits"):
+            values = _strings(payload.get(key))
+            if values:
+                parts.append(f"{key}: " + " | ".join(values))
+    return "\n".join(parts)
 
 
 def _fit_summary(
@@ -404,6 +651,33 @@ def _profile_terms(profile: dict[str, Any], *keys: str) -> list[str]:
             seen.add(folded)
             unique.append(cleaned)
     return unique
+
+
+def _unique_strings(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for value in values:
+        cleaned = " ".join(str(value or "").split())
+        folded = cleaned.casefold()
+        if cleaned and folded not in seen:
+            seen.add(folded)
+            unique.append(cleaned)
+    return unique
+
+
+def _identity_key(job_id: Any, title: Any, company: Any) -> str:
+    if str(job_id or "").strip():
+        return "id:" + _compact_text(str(job_id))
+    basis = "|".join([str(title or ""), str(company or "")]).strip("|")
+    return "tc:" + _compact_text(basis) if basis else ""
+
+
+def _normalized_review_verdict(review: dict[str, Any]) -> str:
+    for key in ("verdict", "decision", "suitability", "recommendation"):
+        value = str(review.get(key) or "").strip().casefold()
+        if value:
+            return re.sub(r"[^a-z0-9_]+", "_", value).strip("_")
+    return ""
 
 
 def _contains(haystack: str, needle: str) -> bool:

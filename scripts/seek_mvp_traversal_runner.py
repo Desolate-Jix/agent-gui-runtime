@@ -16,14 +16,22 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from app.core.runtime_artifacts import write_trace
-from app.execute.ocr_normalization import canonicalize_short_ocr_token, ocr_contextual_match
-from app.execute.visual_asset_matching import match_visual_asset
+from app.gate.ocr import canonicalize_short_ocr_token, ocr_contextual_match
+from app.operation.visual_asset_matching import match_visual_asset
 from app.seek.application import assess_seek_application_flow_state, build_seek_apply_flow_decision
 from app.seek.answer_plan import build_application_answer_plan
 from app.seek.cover_letter import build_cover_letter_draft
 from app.seek.extraction import extract_seek_job_cards, extract_seek_job_detail
 from app.seek.learn_artifacts import action_metadata, scroll_target_for_action
-from app.seek.matching import load_candidate_profile, merge_seek_job_identity, save_suitable_job_record, score_seek_job
+from app.seek.matching import (
+    apply_agent_suitability_review,
+    find_agent_suitability_review,
+    load_agent_suitability_reviews,
+    load_candidate_profile,
+    merge_seek_job_identity,
+    save_suitable_job_record,
+    score_seek_job,
+)
 from app.seek.profile import assess_candidate_profile_readiness
 from app.seek.traversal import (
     assess_seek_job_detail_completeness,
@@ -3284,6 +3292,7 @@ def run_traversal(
     timeout: float,
     max_results_scrolls: int = 8,
     candidate_profile: dict[str, Any] | None = None,
+    agent_suitability_reviews: list[dict[str, Any]] | None = None,
     saved_jobs_dir: str | Path = "artifacts/seek/saved-jobs",
     apply_entry: bool = False,
     allow_maybe_apply: bool = False,
@@ -3296,6 +3305,7 @@ def run_traversal(
     job_archives_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
+    agent_suitability_reviews = agent_suitability_reviews or []
     profile_readiness = assess_candidate_profile_readiness(candidate_profile)
     apply_entry_profile_gate = _apply_entry_profile_gate(
         apply_entry=apply_entry,
@@ -3433,6 +3443,14 @@ def run_traversal(
                 detail_complete=completeness.get("complete") is True,
                 missing_detail_evidence=[str(item) for item in completeness.get("missing_evidence") or []],
             )
+            review = find_agent_suitability_review(
+                agent_suitability_reviews,
+                match_decision=match_decision,
+                card=job,
+                detail=detail,
+            )
+            if review is not None:
+                match_decision = apply_agent_suitability_review(match_decision, review)
             saved_path = save_suitable_job_record(
                 decision=match_decision,
                 card=job,
@@ -3530,6 +3548,7 @@ def run_traversal(
             "jobs": aligned_jobs,
             "job_archives": job_archives,
             "jobs_opened": sum(1 for item in aligned_jobs if isinstance(item.get("detail"), dict)),
+            "agent_suitability_reviews_loaded": len(agent_suitability_reviews),
             "jobs_fully_read": sum(
                 1
                 for item in aligned_jobs
@@ -3600,6 +3619,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-safe-fields-to-fill", type=int, default=1, help="Maximum auto_safe_known fields to fill in one Apply Entry. Defaults to 1.")
     parser.add_argument("--allow-cover-letter-fill", action="store_true", help="Allow safe-fill to type a generated cover letter draft. Default is disabled.")
     parser.add_argument("--candidate-profile", type=Path, default=None, help="Optional candidate_profile_v1 JSON used for job matching.")
+    parser.add_argument("--agent-suitability-review", type=Path, default=None, help="Optional agent_suitability_review_v1 JSON or reviews list. Apply Entry is allowed only after a pass verdict for full JD review.")
     parser.add_argument("--learned-artifact", type=Path, default=None, help="Optional learned_app_profile_v1 or seek_learn_artifact_export_v1 JSON used to assist SEEK execution.")
     parser.add_argument("--saved-jobs-dir", type=Path, default=Path("artifacts/seek/saved-jobs"))
     parser.add_argument(
@@ -3614,6 +3634,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args(argv)
     candidate_profile = load_candidate_profile(args.candidate_profile)
+    agent_suitability_reviews = load_agent_suitability_reviews(args.agent_suitability_review)
     learned_artifact = load_learned_artifact(args.learned_artifact)
     job_archives_dir = args.job_archives_dir or (args.out.parent / f"{args.out.stem}_job_archives")
     report = run_traversal(
@@ -3626,6 +3647,7 @@ def main(argv: list[str] | None = None) -> int:
         timeout=args.timeout,
         max_results_scrolls=args.max_results_scrolls,
         candidate_profile=candidate_profile,
+        agent_suitability_reviews=agent_suitability_reviews,
         saved_jobs_dir=args.saved_jobs_dir,
         apply_entry=args.apply_entry,
         allow_maybe_apply=args.allow_maybe_apply,

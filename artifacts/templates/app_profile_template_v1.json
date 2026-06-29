@@ -1,0 +1,42 @@
+{
+  "contract_version": "app_profile_v1",
+  "app_id": "example_app",
+  "display_name": "Example App",
+  "execution_model": "agentic_loop_first",
+  "profile_role": "Reusable app/software profile for the GUI Agent Runtime",
+  "agent_prompt_requirements": [
+    "Agent must understand the user goal from conversation and produce structured decisions.",
+    "Agent may select a learned PathGraph when it matches the current app state.",
+    "Agent must output ask_user_required when information, permission, or safety is ambiguous."
+  ],
+  "operation_skills": [
+    "observe_screen",
+    "locate_element",
+    "click_target",
+    "type_text",
+    "scroll_region",
+    "read_region"
+  ],
+  "gate_contracts": [
+    "candidate_freshness_v1",
+    "pre_click_decision_v1",
+    "action_taxonomy_v1",
+    "final_submit_guard_v1"
+  ],
+  "trace_requirements": [
+    "Record agent prompt and structured decision.",
+    "Record operation evidence before and after each real action.",
+    "Record gate allow/block decision with evidence refs.",
+    "Preserve replay inputs for prompt, gate, and operation regression."
+  ],
+  "workflow_assets": [],
+  "learning_assets": [],
+  "policy": {
+    "workflow_first_required": false,
+    "unknown_interface_policy": "agentic_loop_observe_decide_act_trace",
+    "final_submit_default": "forbidden"
+  },
+  "notes": [
+    "This profile is guidance and evidence, not action authorization."
+  ]
+}

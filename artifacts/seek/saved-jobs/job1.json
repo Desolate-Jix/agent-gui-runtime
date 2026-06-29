@@ -1,0 +1,75 @@
+{
+  "contract_version": "saved_seek_job_record_v1",
+  "job_id": "job1",
+  "decision": {
+    "contract_version": "seek_job_match_decision_v1",
+    "decision": "strong_apply",
+    "score": 0.0,
+    "job_id": "job1",
+    "title": "Graduate Software Developer",
+    "company": "Example Ltd",
+    "fit_summary": "strong_apply with score 0.000. positive: full_job_detail_ready_for_agent_review; agent_suitability_review_passed.",
+    "recommended_next_action": "open_apply_entry_and_prepare_safe_fields",
+    "positive_evidence": [
+      "full_job_detail_ready_for_agent_review",
+      "agent_suitability_review_passed"
+    ],
+    "negative_evidence": [],
+    "unknowns": [],
+    "risk_flags": [
+      "do_not_invent_experience",
+      "agent_full_jd_review_passed"
+    ],
+    "trace_path": null,
+    "agent_review": {
+      "contract_version": "job_suitability_agent_review_payload_v1",
+      "instruction": "Use the full job detail text to decide suitability. Do not decide from title or keyword matches alone.",
+      "card": {
+        "job_id": "job1",
+        "title": "Graduate Software Developer",
+        "company": "Example Ltd"
+      },
+      "detail": {
+        "job_id": "job1",
+        "title": "Graduate Software Developer",
+        "company": "Example Ltd",
+        "location": "Auckland CBD, Auckland"
+      },
+      "full_job_text": "title: Graduate Software Developer\ncompany: Example Ltd\ntitle: Graduate Software Developer\ncompany: Example Ltd\nlocation: Auckland CBD, Auckland\nComplete JD reviewed by agent.\nrequirements: Python | React | SQL"
+    },
+    "agent_suitability_review": {
+      "contract_version": "agent_suitability_review_v1",
+      "verdict": "pass",
+      "full_jd_reviewed": true,
+      "reviewer": "agent",
+      "reasons": [
+        "Full JD matches the candidate profile."
+      ],
+      "risks": [],
+      "source_path": null
+    }
+  },
+  "card": {
+    "job_id": "job1",
+    "title": "Graduate Software Developer",
+    "company": "Example Ltd"
+  },
+  "detail": {
+    "job_id": "job1",
+    "title": "Graduate Software Developer",
+    "company": "Example Ltd",
+    "location": "Auckland CBD, Auckland",
+    "requirements": [
+      "Python",
+      "React",
+      "SQL"
+    ],
+    "description_sections": [
+      {
+        "index": 0,
+        "role": "body",
+        "text": "Complete JD reviewed by agent."
+      }
+    ]
+  }
+}

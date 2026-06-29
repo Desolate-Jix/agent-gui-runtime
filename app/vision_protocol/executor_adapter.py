@@ -6,6 +6,7 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 from app.core.window_manager import window_manager
+from app.operation.region_click import run_region_click
 from app.schemas.validator_profile import ValidatorProfile
 from app.vision_protocol.parser import parse_vision_response
 from app.vision_protocol.schemas import BBox, VisionAction, VisionResponse
@@ -130,9 +131,7 @@ def execute_vision_action(vision_action: VisionAction) -> dict[str, Any]:
         version=1,
     )
 
-    from app.api.action import _run_region_click
-
-    result = _run_region_click(
+    result = run_region_click(
         case_name=vision_action.action_id,
         bound=bound,
         panel_locator=panel_locator,

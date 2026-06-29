@@ -1,0 +1,23 @@
+{
+  "contract_version": "agent_prompt_template_v1",
+  "prompt_id": "job_suitability_full_jd_v1",
+  "title": "Full job detail suitability review",
+  "task": "job_suitability_review",
+  "version": "2026-06-29.base",
+  "language": "zh-CN",
+  "template": "你是岗位匹配审核 Agent。\\n\\n候选人资料：\\n{{candidate_profile}}\\n\\n用户硬性要求：\\n{{user_constraints}}\\n\\n完整岗位内容：\\n{{full_job_detail_text}}\\n\\n任务：判断这个岗位是否适合进入 Apply entry。\\n\\n规则：\\n- 必须基于完整岗位内容判断。\\n- 不允许只根据标题、关键词或岗位卡片摘要判断。\\n- 如果岗位要求明显不符合，必须 reject。\\n- 特别检查工作年限、学历/专业方向、签证/居住/公民身份、security clearance、地点/远程要求、实习/graduate/senior/hardware/electrical 方向不匹配、同公司重复岗位。\\n- 如果信息不足，输出 need_more_info。\\n- 不要建议最终提交申请。\\n\\n只输出符合 job_suitability_decision_v1 的 JSON。",
+  "variables": [
+    "candidate_profile",
+    "user_constraints",
+    "full_job_detail_text"
+  ],
+  "output_contract": "job_suitability_decision_v1",
+  "safety_notes": [
+    "Full JD review is required before Apply Entry.",
+    "Local keyword or card-snippet screening must not produce pass/fail for real user profiles.",
+    "Final submit remains forbidden."
+  ],
+  "app_profile_refs": [
+    "artifacts/app_profiles/seek_app_profile_v1.json"
+  ]
+}

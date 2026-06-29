@@ -50,18 +50,25 @@ from app.seek.execute_observation import build_seek_execute_observation  # noqa:
 from app.seek.final_review import build_seek_final_review_extraction  # noqa: E402
 from app.seek.form_inventory import build_seek_form_field_inventory  # noqa: E402
 from app.seek.learn_artifacts import scroll_target_for_action  # noqa: E402
-from app.seek.matching import load_candidate_profile, save_suitable_job_record, score_seek_job  # noqa: E402
+from app.seek.matching import (  # noqa: E402
+    apply_agent_suitability_review,
+    find_agent_suitability_review,
+    load_agent_suitability_reviews,
+    load_candidate_profile,
+    save_suitable_job_record,
+    score_seek_job,
+)
 from app.seek.scroll_containers import SEEK_JOB_DETAIL, discover_seek_scroll_containers, get_scroll_container  # noqa: E402
-from app.execute.read_region_batch import build_read_region_batch_report  # noqa: E402
-from app.execute.scroll_scope import build_scroll_scope_invariant  # noqa: E402
-from app.execute.dataflow_contracts import (  # noqa: E402
+from app.operation.reading import build_read_region_batch_report  # noqa: E402
+from app.gate.scroll import build_scroll_scope_invariant  # noqa: E402
+from app.gate.dataflow import (  # noqa: E402
     merge_read_batch_into_detail_snapshot,
     put_latest_detail_snapshot,
     require_latest_detail_snapshot,
     with_detail_snapshot,
 )
-from app.execute.candidate_contracts import validate_action_candidate_target_at_point  # noqa: E402
-from app.execute.ui_diff_verification import build_ui_diff_verification  # noqa: E402
+from app.gate.candidates import validate_action_candidate_target_at_point  # noqa: E402
+from app.operation.verification import build_ui_diff_verification  # noqa: E402
 
 
 DEFAULT_SEEK_URL = "https://nz.seek.com/"
@@ -2813,10 +2820,19 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
         state["next_allowed_steps"] = ["match", "read_detail_batch"] if batch.get("status") == "ok" else ["verify_detail", "capture"]
     elif step == "match":
         profile = load_candidate_profile(args.candidate_profile)
+        agent_suitability_reviews = load_agent_suitability_reviews(args.agent_suitability_review)
         card = state.get("current_job") if isinstance(state.get("current_job"), dict) else None
         detail = state.get("detail") if isinstance(state.get("detail"), dict) else None
         require_latest_detail_snapshot(state, detail)
         decision = score_seek_job(profile=profile, card=card, detail=detail, detail_complete=True)
+        review = find_agent_suitability_review(
+            agent_suitability_reviews,
+            match_decision=decision,
+            card=card or {},
+            detail=detail or {},
+        )
+        if review is not None:
+            decision = apply_agent_suitability_review(decision, review)
         saved_path = save_suitable_job_record(decision=decision, card=card or {}, detail=detail or {})
         state["match_decision"] = decision
         report = {
@@ -2825,6 +2841,8 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
             "detail": detail,
             "match_decision": decision,
             "saved_job_record_path": saved_path,
+            "agent_suitability_reviews_loaded": len(agent_suitability_reviews),
+            "agent_suitability_review_applied": review is not None,
             "next_safe_step": decision.get("recommended_next_action"),
         }
         state["next_allowed_steps"] = ["dry_run_apply_entry"] if decision.get("decision") in {"strong_apply", "maybe_apply"} else ["extract_cards"]
@@ -3207,6 +3225,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-max-captures", type=int, default=5)
     parser.add_argument("--batch-stop-after-no-new-content", type=int, default=2)
     parser.add_argument("--candidate-profile", default=str(DEFAULT_CANDIDATE_PROFILE))
+    parser.add_argument(
+        "--agent-suitability-review",
+        default=None,
+        help="Optional agent_suitability_review_v1 JSON or reviews list. Apply Entry is allowed only after a pass verdict for full JD review.",
+    )
     parser.add_argument("--learned-artifact", default="artifacts/seek/learned_seek_mvp_from_5job_smoke_20260617.json")
     parser.add_argument("--application-flow-replay", default=str(DEFAULT_APPLICATION_FLOW_REPLAY))
     parser.add_argument("--application-fill-record", default=None)

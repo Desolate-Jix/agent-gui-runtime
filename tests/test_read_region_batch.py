@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.execute.read_region_batch import build_read_region_batch_report, extract_ocr_text_lines
+from app.operation.reading import build_read_region_batch_report, extract_ocr_text_lines
 
 
 def _ocr(*texts: str) -> dict:

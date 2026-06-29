@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from app.execute.visual_asset_matching import match_visual_asset
+from app.operation.visual_asset_matching import match_visual_asset
 
 
 def _draw_button(path: Path, *, button_xy: tuple[int, int], label: str = "Quick apply") -> dict[str, int]:

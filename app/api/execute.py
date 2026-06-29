@@ -10,10 +10,10 @@ from app.api.action import execute_recognition_plan as dispatch_recognition_plan
 from app.api.action import scroll as dispatch_scroll
 from app.api.action import type_text as dispatch_type_text
 from app.core.runtime_artifacts import RuntimeTimer, write_trace
-from app.execute.available_actions import build_available_actions
-from app.execute.path_graph_step import build_execute_step_plan
-from app.execute.read_region_batch import build_read_region_batch_report
-from app.execute.ui_diff_verification import build_ui_diff_verification
+from app.operation.path_graph import build_available_actions
+from app.operation.reading import build_read_region_batch_report
+from app.operation.step import build_execute_step_plan
+from app.operation.verification import build_ui_diff_verification
 from app.learn.path_graph_resolver import resolve_runtime_path_graph
 from app.models.request import (
     AvailableActionsRequest,

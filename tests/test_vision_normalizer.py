@@ -92,7 +92,7 @@ def test_normalizer_builds_region_from_diagonal_and_generates_match_keys() -> No
     assert region.to_dict()["grounding_constraints"]["final_bbox_reason"].startswith("Visual nav item")
 
 
-def test_normalizer_derives_regions_from_targets_for_backward_compatibility() -> None:
+def test_normalizer_derives_regions_from_target_only_provider_output() -> None:
     raw = {
         "provider": "api",
         "screen_summary": "Simple page",

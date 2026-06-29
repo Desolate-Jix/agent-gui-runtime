@@ -5,21 +5,22 @@ import re
 import shutil
 import uuid
 from datetime import datetime, timedelta, timezone
-from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter
 
-from app.actions.known_action_runner import run_known_action
-from app.core.action_registry import action_registry
 from app.core.input_controller import input_controller
 from app.core.ocr_service import ocr_service
 from app.core.runtime_artifacts import RuntimeTimer, new_learned_instruction_id, write_trace
 from app.core.screenshot import screenshot_service
+from app.gate.window import validate_bound_window_for_app
 from app.core.transition_memory import transition_memory
 from app.core.verifier import verifier
 from app.core.window_manager import window_manager
+from app.gate.scroll import build_scroll_effect_validation, build_scroll_precondition_decision, build_scroll_safe_point
+from app.operation.mousetester import should_verify_mouse_tester_semantics, target_bbox_from_recommended, verify_mouse_tester_post_click_semantics
+from app.trace.actions import write_execute_trace_if_enabled
 from app.models.request import (
     ClickTextRequest,
     ExecuteConfirmedPointRequest,
@@ -30,26 +31,16 @@ from app.models.request import (
     VisionRecognitionPlanRequestModel,
 )
 from app.models.response import APIResponse, ActionResultData, ErrorModel
-from app.schemas.action_target import ActionTarget
-from app.schemas.state import AppState
 from app.schemas.transition import TransitionRecord
-from app.schemas.validator_profile import ValidatorProfile
 from app.seek.scroll_containers import (
-    SEEK_JOB_DETAIL,
-    SEEK_RESULTS_LIST,
     discover_seek_scroll_containers,
     get_scroll_container,
     seek_scroll_target_for_goal,
 )
 from modules.ocr.matching import bbox_center, find_text_matches
 from modules.region.geometry import (
-    generate_zone_points as generate_zone_points_module,
-    locate_mouse_tester_panel as locate_mouse_tester_panel_module,
-    normalized_point as normalized_point_module,
     window_rect as window_rect_module,
-    window_size_bucket as window_size_bucket_module,
 )
-from modules.validation.counter import evaluate_counter_result as evaluate_counter_result_module
 
 try:
     from PIL import Image
@@ -58,22 +49,11 @@ except Exception:  # pragma: no cover - depends on optional runtime imaging supp
 
 router = APIRouter(prefix="/action", tags=["action"])
 
-CACHE_DIR = Path("logs/region-click-cache")
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
-CASES_DIR = Path("logs/region-click-cases")
-CASES_DIR.mkdir(parents=True, exist_ok=True)
 APPROVED_PLANS_DIR = Path("logs/approved-plans")
 APPROVED_PLANS_DIR.mkdir(parents=True, exist_ok=True)
 APPROVED_PLAN_TTL_SECONDS = 300
 LEARNED_INSTRUCTIONS_DIR = Path("artifacts/local-learning/instructions")
 LEARNED_INSTRUCTIONS_DIR.mkdir(parents=True, exist_ok=True)
-LEGACY_LEARNED_INSTRUCTIONS_DIR = Path("logs/learned-instructions")
-
-RegionClickPanelLocator = Callable[[Any], dict[str, Any]]
-RegionClickZoneResolver = Callable[[dict[str, Any]], dict[str, Any]]
-RegionClickPointStrategy = Callable[[dict[str, Any], Optional[dict[str, float]]], list[dict[str, Any]]]
-RegionClickValidator = Callable[[list[str], list[str]], dict[str, Any]]
-
 
 def _run_recognition_plan_for_execution(request: VisionRecognitionPlanRequestModel) -> APIResponse:
     from app.api.vision import recognition_plan
@@ -346,215 +326,11 @@ def _final_submit_guard_evidence_texts(texts: list[str], *, goal: str) -> list[s
     return filtered
 
 
-def _should_verify_mouse_tester_semantics(request: ExecuteRecognitionPlanRequest, plan: dict[str, Any]) -> bool:
-    values = [
-        request.app_name or "",
-        request.state_hint or "",
-        plan.get("goal") or "",
-        (plan.get("parse_result") or {}).get("vision_regions", {}).get("screen_summary") or "",
-    ]
-    normalized = " ".join(str(value).casefold() for value in values)
-    return "mousetester" in normalized or "mouse tester" in normalized or "鼠标" in normalized
-
-
-def _verify_mouse_tester_post_click_semantics(
-    *,
-    request: ExecuteRecognitionPlanRequest,
-    plan: dict[str, Any],
-    generic_verification: dict[str, Any],
-) -> dict[str, Any]:
-    before_path = ((generic_verification.get("before") or {}).get("image_path"))
-    after_path = ((generic_verification.get("after") or {}).get("image_path"))
-    recommended = plan.get("recommended_target") or {}
-    target_bbox = _target_bbox_from_recommended(recommended)
-    if not before_path or not after_path or target_bbox is None:
-        return {
-            "applicable": True,
-            "verified": False,
-            "reason": "missing_before_after_or_target_bbox",
-            "before_path": before_path,
-            "after_path": after_path,
-            "target_bbox": target_bbox,
-        }
-
-    image_size = _image_size_from_plan(plan)
-    verification_bbox = _expand_bbox(target_bbox, pad_x=90, pad_y=55, image_size=image_size)
-    before_texts = _ocr_texts_in_bbox(before_path, verification_bbox)
-    after_texts = _ocr_texts_in_bbox(after_path, verification_bbox)
-    expected_values = [
-        request.goal,
-        str(recommended.get("label") or ""),
-        str(recommended.get("text") or ""),
-    ]
-    before_target_present = _texts_contain_expected(before_texts, expected_values)
-    after_target_present = _texts_contain_expected(after_texts, expected_values)
-    localized_text_changed = _text_signature(before_texts) != _text_signature(after_texts)
-    diff_overlaps_target = _diff_overlaps_bbox(generic_verification.get("diff") or {}, verification_bbox)
-    target_text_replaced = bool(before_target_present and not after_target_present)
-    verified = bool(diff_overlaps_target and localized_text_changed and (target_text_replaced or before_target_present))
-
-    return {
-        "applicable": True,
-        "verified": verified,
-        "profile": "mousetester_target_text_change_v1",
-        "target_bbox": target_bbox,
-        "verification_bbox": verification_bbox,
-        "before_path": before_path,
-        "after_path": after_path,
-        "before_texts": before_texts,
-        "after_texts": after_texts,
-        "before_target_present": before_target_present,
-        "after_target_present": after_target_present,
-        "target_text_replaced": target_text_replaced,
-        "localized_text_changed": localized_text_changed,
-        "diff_overlaps_target": diff_overlaps_target,
-        "reasons": _semantic_verification_reasons(
-            before_target_present=before_target_present,
-            after_target_present=after_target_present,
-            target_text_replaced=target_text_replaced,
-            localized_text_changed=localized_text_changed,
-            diff_overlaps_target=diff_overlaps_target,
-        ),
-    }
-
-
-def _target_bbox_from_recommended(recommended: dict[str, Any]) -> Optional[dict[str, int]]:
-    source = recommended.get("refined_bbox") or (recommended.get("element") or {}).get("bbox")
-    if not source:
-        return None
-    return {
-        "x": int(source.get("x", 0)),
-        "y": int(source.get("y", 0)),
-        "width": int(source.get("width", source.get("w", 0))),
-        "height": int(source.get("height", source.get("h", 0))),
-    }
-
-
-def _image_size_from_plan(plan: dict[str, Any]) -> Optional[dict[str, int]]:
-    image_size = (((plan.get("parse_result") or {}).get("vision_regions") or {}).get("image_size") or {})
-    width = image_size.get("width")
-    height = image_size.get("height")
-    if width and height:
-        return {"width": int(width), "height": int(height)}
-    return None
-
-
-def _expand_bbox(
-    bbox: dict[str, int],
-    *,
-    pad_x: int,
-    pad_y: int,
-    image_size: Optional[dict[str, int]] = None,
-) -> dict[str, int]:
-    x1 = int(bbox["x"]) - int(pad_x)
-    y1 = int(bbox["y"]) - int(pad_y)
-    x2 = int(bbox["x"]) + int(bbox["width"]) + int(pad_x)
-    y2 = int(bbox["y"]) + int(bbox["height"]) + int(pad_y)
-    x1 = max(0, x1)
-    y1 = max(0, y1)
-    if image_size:
-        x2 = min(int(image_size["width"]), x2)
-        y2 = min(int(image_size["height"]), y2)
-    return {"x": x1, "y": y1, "width": max(1, x2 - x1), "height": max(1, y2 - y1)}
-
-
-def _ocr_texts_in_bbox(image_path: str, bbox: dict[str, int]) -> list[dict[str, Any]]:
-    result = ocr_service.scan_image(image_path)
-    texts: list[dict[str, Any]] = []
-    for match in result.matches:
-        match_bbox = match.bbox.to_dict()
-        center = {
-            "x": int(match_bbox["x"] + match_bbox["width"] / 2),
-            "y": int(match_bbox["y"] + match_bbox["height"] / 2),
-        }
-        if _point_in_rect(center, bbox):
-            texts.append({"text": match.text, "score": float(match.score), "bbox": match_bbox})
-    texts.sort(key=lambda item: (item["bbox"]["y"], item["bbox"]["x"]))
-    return texts
-
-
-def _texts_contain_expected(texts: list[dict[str, Any]], expected_values: list[str]) -> bool:
-    expected = [_normalize_semantic_text(value) for value in expected_values if _normalize_semantic_text(value)]
-    for item in texts:
-        normalized_text = _normalize_semantic_text(str(item.get("text") or ""))
-        if any(_semantic_text_similarity(normalized_text, value) >= 0.75 for value in expected):
-            return True
-    return False
-
-
-def _text_signature(texts: list[dict[str, Any]]) -> list[str]:
-    return [_normalize_semantic_text(str(item.get("text") or "")) for item in texts]
-
-
-def _diff_overlaps_bbox(diff: dict[str, Any], bbox: dict[str, int]) -> bool:
-    for region in diff.get("regions") or []:
-        region_bbox = {
-            "x": int(region.get("x", 0)),
-            "y": int(region.get("y", 0)),
-            "width": int(region.get("width", region.get("w", 0))),
-            "height": int(region.get("height", region.get("h", 0))),
-        }
-        if _rects_intersect(region_bbox, bbox):
-            return True
-    return False
-
-
-def _semantic_verification_reasons(
-    *,
-    before_target_present: bool,
-    after_target_present: bool,
-    target_text_replaced: bool,
-    localized_text_changed: bool,
-    diff_overlaps_target: bool,
-) -> list[str]:
-    reasons: list[str] = []
-    reasons.append("before_target_present" if before_target_present else "before_target_missing")
-    reasons.append("after_target_still_present" if after_target_present else "after_target_absent")
-    if target_text_replaced:
-        reasons.append("target_text_replaced")
-    if localized_text_changed:
-        reasons.append("localized_text_changed")
-    if diff_overlaps_target:
-        reasons.append("diff_overlaps_target")
-    else:
-        reasons.append("diff_did_not_overlap_target")
-    return reasons
-
-
 def _point_in_rect(point: dict[str, int], rect: dict[str, int]) -> bool:
     return (
         int(rect["x"]) <= int(point["x"]) <= int(rect["x"]) + int(rect["width"])
         and int(rect["y"]) <= int(point["y"]) <= int(rect["y"]) + int(rect["height"])
     )
-
-
-def _rects_intersect(left: dict[str, int], right: dict[str, int]) -> bool:
-    left_x2 = int(left["x"]) + int(left["width"])
-    left_y2 = int(left["y"]) + int(left["height"])
-    right_x2 = int(right["x"]) + int(right["width"])
-    right_y2 = int(right["y"]) + int(right["height"])
-    return not (
-        left_x2 < int(right["x"])
-        or right_x2 < int(left["x"])
-        or left_y2 < int(right["y"])
-        or right_y2 < int(left["y"])
-    )
-
-
-def _semantic_text_similarity(left: str, right: str) -> float:
-    if not left or not right:
-        return 0.0
-    if left == right:
-        return 1.0
-    if min(len(left), len(right)) >= 3 and (left in right or right in left):
-        return 0.9
-    return SequenceMatcher(None, left, right).ratio()
-
-
-def _normalize_semantic_text(value: str) -> str:
-    normalized = str(value or "").casefold()
-    normalized = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", " ", normalized)
-    return " ".join(normalized.split())
 
 
 def _execution_attempt_verified(
@@ -660,57 +436,6 @@ def _window_rect(bound: Any) -> dict[str, int]:
     return window_rect_module(bound)
 
 
-def _window_size_bucket(rect: dict[str, int]) -> str:
-    return window_size_bucket_module(rect)
-
-
-def _locate_mouse_tester_panel(bound: Any) -> dict[str, Any]:
-    return locate_mouse_tester_panel_module(bound)
-
-
-def _generate_zone_points(zone: dict[str, Any], preferred_norm_point: Optional[dict[str, float]] = None) -> list[dict[str, Any]]:
-    return generate_zone_points_module(zone, preferred_norm_point)
-
-
-def _counter_value(texts: list[str]) -> Optional[int]:
-    from modules.validation.counter import counter_value
-
-    return counter_value(texts)
-
-
-def _evaluate_counter_result(before_numeric_texts: list[str], after_numeric_texts: list[str]) -> dict[str, Any]:
-    return evaluate_counter_result_module(before_numeric_texts, after_numeric_texts)
-
-
-def _normalized_point(zone: dict[str, Any], point: dict[str, Any]) -> dict[str, float]:
-    return normalized_point_module(zone, point)
-
-
-def _load_region_click_memory(case_name: str, bucket: str) -> Optional[dict[str, Any]]:
-    path = CACHE_DIR / f"{case_name}-{bucket}.json"
-    if not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-
-
-def _save_region_click_memory(case_name: str, bucket: str, payload: dict[str, Any]) -> str:
-    path = CACHE_DIR / f"{case_name}-{bucket}.json"
-    payload = {**payload, "updated_at": datetime.now(timezone.utc).isoformat()}
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    return str(path.resolve())
-
-
-def _capture_bound_window_image(bound: Any, name_prefix: str) -> Optional[str]:
-    capture = screenshot_service.capture_window(save_image=True, purpose="state_snapshot", name_hint=name_prefix)
-    image_path = capture.get("image_path")
-    if not image_path:
-        return None
-    return str(Path(image_path).resolve())
-
-
 def _bound_window_snapshot(bound: Any) -> dict[str, Any]:
     rect = _window_rect(bound)
     return {
@@ -766,56 +491,10 @@ def _normalize_window_token(value: Any) -> str:
 
 
 def _bound_window_matches_request(bound: Any, request: ExecuteRecognitionPlanRequest) -> dict[str, Any]:
-    expected = _normalize_window_token(request.app_name)
-    snapshot = _bound_window_snapshot(bound)
-    process = _normalize_window_token(snapshot.get("process_name"))
-    title = _normalize_window_token(snapshot.get("title"))
-    if not expected:
-        return {"valid": True, "reason": "no_app_name_requested", "bound_window": snapshot}
-
-    aliases = {
-        "edge": {"processes": {"msedgeexe"}, "title_tokens": set()},
-        "msedge": {"processes": {"msedgeexe"}, "title_tokens": set()},
-        "browser": {"processes": {"msedgeexe", "chromeexe", "firefoxexe"}, "title_tokens": set()},
-        "chrome": {"processes": {"chromeexe"}, "title_tokens": set()},
-        "notepad": {"processes": {"notepadexe"}, "title_tokens": {"notepad"}},
-        "qq": {"processes": {"qqexe"}, "title_tokens": {"qq"}},
-        "mousetester": {"processes": {"msedgeexe", "chromeexe"}, "title_tokens": {"mousetester"}},
-        "mousetesterweb": {"processes": {"msedgeexe", "chromeexe"}, "title_tokens": {"mousetester"}},
-    }
-    alias = aliases.get(expected)
-    if alias is not None:
-        allowed_processes = alias["processes"]
-        title_tokens = alias["title_tokens"]
-        valid = process in allowed_processes or any(token in title for token in title_tokens)
-        return {
-            "valid": valid,
-            "reason": "matched_app_alias" if valid else "process_name_mismatch",
-            "expected_app_name": request.app_name,
-            "allowed_processes": sorted(allowed_processes),
-            "actual_process_name": snapshot.get("process_name"),
-            "actual_title": snapshot.get("title"),
-            "bound_window": snapshot,
-        }
-
-    valid = bool(expected and (expected in process or expected in title))
-    if not valid:
-        return {
-            "valid": True,
-            "reason": "unmapped_app_name_not_enforced",
-            "expected_app_name": request.app_name,
-            "actual_process_name": snapshot.get("process_name"),
-            "actual_title": snapshot.get("title"),
-            "bound_window": snapshot,
-        }
-    return {
-        "valid": valid,
-        "reason": "matched_process_or_title",
-        "expected_app_name": request.app_name,
-        "actual_process_name": snapshot.get("process_name"),
-        "actual_title": snapshot.get("title"),
-        "bound_window": snapshot,
-    }
+    return validate_bound_window_for_app(
+        expected_app_name=request.app_name,
+        bound_window=_bound_window_snapshot(bound),
+    )
 
 
 def _approved_plan_path(approved_plan_id: str) -> Path:
@@ -832,13 +511,6 @@ def _learned_instruction_path(learned_instruction_id: str) -> Path:
     return LEARNED_INSTRUCTIONS_DIR / safe_id / "learned_instruction.json"
 
 
-def _legacy_learned_instruction_path(learned_instruction_id: str) -> Path:
-    safe_id = re.sub(r"[^a-zA-Z0-9_.-]+", "", learned_instruction_id)
-    if not safe_id:
-        raise ValueError("learned_instruction_id is empty or invalid")
-    return LEGACY_LEARNED_INSTRUCTIONS_DIR / f"{safe_id}.json"
-
-
 def _instruction_learning_enabled(request: ExecuteRecognitionPlanRequest) -> bool:
     write_policy = request.write_policy.model_dump() if hasattr(request.write_policy, "model_dump") else {}
     return bool(write_policy.get("element_memory", True)) and str(request.learning_mode or "").strip().casefold() in {"instruction", "instruction_learning"}
@@ -847,11 +519,6 @@ def _instruction_learning_enabled(request: ExecuteRecognitionPlanRequest) -> boo
 def _element_memory_enabled(request: ExecuteRecognitionPlanRequest) -> bool:
     write_policy = request.write_policy.model_dump() if hasattr(request.write_policy, "model_dump") else {}
     return bool(write_policy.get("element_memory", True))
-
-
-def _execute_trace_enabled(request: ExecuteRecognitionPlanRequest) -> bool:
-    write_policy = request.write_policy.model_dump() if hasattr(request.write_policy, "model_dump") else {}
-    return write_policy.get("trace", True) is not False
 
 
 def _rect_from_bbox(value: Any) -> dict[str, int] | None:
@@ -879,108 +546,8 @@ def _bbox_payload(rect: dict[str, int] | None) -> dict[str, int] | None:
     return {"x": int(rect["x"]), "y": int(rect["y"]), "w": int(rect["width"]), "h": int(rect["height"])}
 
 
-def _scroll_window_size_matches(requested: Any, actual: dict[str, int]) -> bool:
-    if requested is None:
-        return True
-    if not isinstance(requested, dict):
-        return False
-    try:
-        width = int(requested.get("width") or requested.get("w") or 0)
-        height = int(requested.get("height") or requested.get("h") or 0)
-    except (TypeError, ValueError):
-        return False
-    return width == int(actual["width"]) and height == int(actual["height"])
-
-
-def _scroll_safe_point(container_rect: dict[str, int], *, explicit_x: int | None, explicit_y: int | None) -> dict[str, int]:
-    if explicit_x is not None and explicit_y is not None:
-        return {"x": int(explicit_x), "y": int(explicit_y)}
-    inset_x = max(12, min(48, int(container_rect["width"]) // 8))
-    inset_y = max(12, min(64, int(container_rect["height"]) // 8))
-    return {
-        "x": int(container_rect["x"]) + max(inset_x, int(container_rect["width"]) // 2),
-        "y": int(container_rect["y"]) + max(inset_y, int(container_rect["height"]) // 2),
-    }
-
-
-def _scroll_precondition_decision(
-    *,
-    request: ScrollRequest,
-    window_rect: dict[str, int],
-    point: dict[str, int],
-    container_rect: dict[str, int] | None,
-    target_container: dict[str, Any] | None,
-) -> dict[str, Any]:
-    reasons: list[str] = []
-    reject_reasons: list[str] = []
-    window_bounds = {"x": 0, "y": 0, "width": max(0, int(window_rect["width"]) - 1), "height": max(0, int(window_rect["height"]) - 1)}
-    if _point_in_rect(point, window_bounds):
-        reasons.append("point_inside_window")
-    else:
-        reject_reasons.append("point_outside_window")
-    if _scroll_window_size_matches(request.coordinate_window_size, window_rect):
-        reasons.append("coordinate_window_size_matched" if request.coordinate_window_size else "coordinate_window_size_not_required")
-    else:
-        reject_reasons.append("coordinate_window_size_mismatch")
-    if request.scroll_scope == "container":
-        if target_container is not None:
-            reasons.append("target_container_found")
-        else:
-            reject_reasons.append("target_container_missing")
-        if container_rect is not None:
-            reasons.append("container_bbox_available")
-            if _point_in_rect(point, container_rect):
-                reasons.append("point_inside_container")
-            else:
-                reject_reasons.append("point_outside_container")
-        else:
-            reject_reasons.append("container_bbox_missing")
-        if target_container is not None:
-            key = "can_scroll_down" if request.direction == "down" else "can_scroll_up"
-            if target_container.get(key) is False:
-                reject_reasons.append(f"container_cannot_scroll_{request.direction}")
-            else:
-                reasons.append(f"container_can_scroll_{request.direction}")
-    else:
-        reasons.append("window_or_page_scroll_scope")
-    return {
-        "contract_version": "scroll_precondition_decision_v1",
-        "decision": "ALLOW" if not reject_reasons else "REJECT",
-        "reasons": reasons,
-        "reject_reasons": reject_reasons,
-    }
-
-
-def _scroll_effect_validation(
-    *,
-    request: ScrollRequest,
-    post_scroll_verification: dict[str, Any] | None,
-    target_container: dict[str, Any] | None,
-) -> dict[str, Any]:
-    verification = post_scroll_verification if isinstance(post_scroll_verification, dict) else {}
-    diff = verification.get("diff") if isinstance(verification.get("diff"), dict) else {}
-    changed = bool(diff.get("changed") or verification.get("verified"))
-    return {
-        "contract_version": "scroll_effect_validation_v1",
-        "status": "moved" if changed else "unknown",
-        "target_container_id": (target_container or {}).get("container_id") or request.target_container_id,
-        "target_pane": (target_container or {}).get("pane_role") or request.target_pane,
-        "target_container_content_changed": changed,
-        "target_container_scroll_offset_changed": None,
-        "same_semantic_page": True,
-        "non_target_panes_stable": None,
-        "wrong_scope_detected": False,
-        "no_effect_detected": False if changed else None,
-        "verification_basis": verification.get("verification_basis"),
-    }
-
-
 def _write_execute_trace_if_enabled(request: ExecuteRecognitionPlanRequest, **kwargs: Any) -> str | None:
-    if not _execute_trace_enabled(request):
-        return None
-    if kwargs.get("operation") == "execute_recognition_plan":
-        kwargs["operation"] = "execute_mode_plan_preview" if request.dry_run else "execute_mode_click"
-    return write_trace(**kwargs)
+    return write_execute_trace_if_enabled(request, write_trace_fn=write_trace, **kwargs)
 
 
 def _execute_plan_request_defaults(request: ExecuteRecognitionPlanRequest) -> tuple[Optional[str], dict[str, Any]]:
@@ -1477,7 +1044,7 @@ def _copy_learning_file(source: Any, destination: Path, *, missing_sources: list
 
 
 def _learning_target_bbox(plan: dict[str, Any], selected_point: dict[str, Any]) -> dict[str, int]:
-    target_bbox = _target_bbox_from_recommended(plan.get("recommended_target") or {})
+    target_bbox = target_bbox_from_recommended(plan.get("recommended_target") or {})
     if target_bbox is not None:
         return target_bbox
     x = int(selected_point.get("x", 0))
@@ -1680,8 +1247,6 @@ def _rewrite_execute_trace_result(*, trace_path: Optional[str], success: bool, r
 
 def _load_learned_instruction(learned_instruction_id: str) -> dict[str, Any]:
     path = _learned_instruction_path(learned_instruction_id)
-    if not path.exists():
-        path = _legacy_learned_instruction_path(learned_instruction_id)
     if not path.exists():
         raise ValueError(f"learned_instruction_id not found: {learned_instruction_id}")
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -2322,15 +1887,15 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 with timer.step(
                     "semantic_post_click_verification",
                     attempt=attempt_index,
-                    enabled=request.enable_post_click_verification and _should_verify_mouse_tester_semantics(request, plan),
+                    enabled=request.enable_post_click_verification and should_verify_mouse_tester_semantics(request=request, plan=plan),
                 ):
                     semantic_post_click_verification = (
-                        _verify_mouse_tester_post_click_semantics(
+                        verify_mouse_tester_post_click_semantics(
                             request=request,
                             plan=plan,
                             generic_verification=post_click_verification,
                         )
-                        if request.enable_post_click_verification and _should_verify_mouse_tester_semantics(request, plan)
+                        if request.enable_post_click_verification and should_verify_mouse_tester_semantics(request=request, plan=plan)
                         else {"applicable": False, "verified": None, "verification_skipped": True}
                     )
                 attempt_verified = _execution_attempt_verified(
@@ -2632,84 +2197,6 @@ def execute_confirmed_point(request: ExecuteConfirmedPointRequest) -> APIRespons
         )
 
 
-def _ensure_mouse_tester_state_assets(bound: Any) -> tuple[Optional[AppState], list[ActionTarget], dict[str, ValidatorProfile]]:
-    state_id = f"mousetester_main_{_window_size_bucket(_window_rect(bound))}"
-    state = action_registry.load_state_hint(state_id)
-    if state is None:
-        state = AppState(
-            state_id=state_id,
-            app_name="MouseTesterWeb",
-            state_name="main_page",
-            window_size_bucket=_window_size_bucket(_window_rect(bound)),
-            fingerprint=None,
-            panel_profiles=[],
-            known_action_ids=["click_mouse_tester_left_region", "click_mouse_tester_left_region_alt"],
-            tags=["legacy-reduced", "manual-zone"],
-            version=1,
-        )
-        action_registry.save_state_hint(state)
-
-    action_specs = [
-        {
-            "action_id": "click_mouse_tester_left_region",
-            "action_name": "Click MouseTester Left Region",
-            "zone": {"nx": 0.10, "ny": 0.15, "nw": 0.35, "nh": 0.40},
-            "validator_id": "validator_mouse_tester_left_counter",
-        },
-        {
-            "action_id": "click_mouse_tester_left_region_alt",
-            "action_name": "Click MouseTester Left Region Alt",
-            "zone": {"nx": 0.14, "ny": 0.18, "nw": 0.28, "nh": 0.32},
-            "validator_id": "validator_mouse_tester_left_counter",
-        },
-    ]
-
-    actions: list[ActionTarget] = []
-    for spec in action_specs:
-        action = action_registry.load_action(spec["action_id"])
-        if action is None:
-            action = ActionTarget(
-                action_id=spec["action_id"],
-                state_id=state.state_id,
-                action_name=spec["action_name"],
-                target_kind="region",
-                panel_locator_profile={
-                    "mode": "window_relative_rect",
-                    "coord_space": "window",
-                    "nx": 0.16,
-                    "ny": 0.48,
-                    "nw": 0.48,
-                    "nh": 0.40,
-                },
-                zone_resolver_profile={"mode": "panel_relative_rect", "coord_space": "panel", **spec["zone"]},
-                point_strategy_profile={"mode": "grid", "rows": 3, "cols": 3, "inset": 0.18, "prefer_memory": True},
-                validator_profile_id=spec["validator_id"],
-                successful_points=[],
-                forbidden_points=[],
-                local_patch_template_path=None,
-                notes="Reduced legacy region action kept as reusable click fallback.",
-                version=1,
-            )
-            action_registry.save_action(action)
-        actions.append(action)
-
-    validator = action_registry.load_validator("validator_mouse_tester_left_counter")
-    if validator is None:
-        validator = ValidatorProfile(
-            validator_profile_id="validator_mouse_tester_left_counter",
-            name="MouseTester Left Counter Validator",
-            ocr_roi=None,
-            roi_diff_threshold=0.01,
-            strict_rule={"type": "counter_change_or_visual_diff"},
-            weak_rule={"type": "visual_diff"},
-            version=1,
-        )
-        action_registry.save_validator(validator)
-
-    validators = {action.action_id: validator for action in actions}
-    return state, actions, validators
-
-
 @router.post("/click_text", response_model=APIResponse)
 def click_text(request: ClickTextRequest) -> APIResponse:
     bound = window_manager.get_bound_window()
@@ -2988,8 +2475,8 @@ def scroll(request: ScrollRequest) -> APIResponse:
         container_rect = _rect_from_bbox(request.container_bbox)
         if container_rect is None and target_container is not None:
             container_rect = _rect_from_bbox(target_container.get("bbox"))
-        point = _scroll_safe_point(container_rect or {"x": 0, "y": 0, "width": rect["width"], "height": rect["height"]}, explicit_x=request.x, explicit_y=request.y)
-        precondition = _scroll_precondition_decision(
+        point = build_scroll_safe_point(container_rect or {"x": 0, "y": 0, "width": rect["width"], "height": rect["height"]}, explicit_x=request.x, explicit_y=request.y)
+        precondition = build_scroll_precondition_decision(
             request=request,
             window_rect=window_size,
             point=point,
@@ -3097,7 +2584,7 @@ def scroll(request: ScrollRequest) -> APIResponse:
                 if request.enable_verification
                 else {"verified": None, "verification_skipped": True}
             )
-        result["scroll_effect_validation"] = _scroll_effect_validation(
+        result["scroll_effect_validation"] = build_scroll_effect_validation(
             request=request,
             post_scroll_verification=result.get("post_scroll_verification"),
             target_container=target_container,
@@ -3133,173 +2620,3 @@ def scroll(request: ScrollRequest) -> APIResponse:
             data=result,
             error=ErrorModel(code="scroll_failed", details=str(exc)),
         )
-
-
-def _run_region_click(
-    *,
-    case_name: str,
-    bound: Any,
-    panel_locator: RegionClickPanelLocator,
-    zone_resolver: RegionClickZoneResolver,
-    point_strategy: RegionClickPointStrategy,
-    validator: RegionClickValidator,
-    validator_profile: Optional[ValidatorProfile] = None,
-    max_retries: int = 1,
-) -> dict[str, Any]:
-    panel = panel_locator(bound)
-    zone = zone_resolver(panel)
-    bucket = _window_size_bucket(_window_rect(bound))
-    memory = _load_region_click_memory(case_name, bucket) or {}
-    preferred_norm_point = memory.get("preferred_norm_point")
-    points = point_strategy(zone, preferred_norm_point)
-
-    before_state = verifier.capture_pre_action_state(action_name=case_name)
-    retries: list[dict[str, Any]] = []
-
-    for attempt_index, point in enumerate(points[: max(1, len(points))]):
-        click_result = input_controller.click_point(point["x"], point["y"], move_before_click=True, settle_ms=100, hold_ms=70)
-        verification = verifier.verify_action(case_name, before_state=before_state, click_result=click_result)
-        diff_changed = verification.get("diff", {}).get("changed")
-        counter_eval = validator([], [])
-        if diff_changed and not counter_eval.get("weak_success"):
-            counter_eval["weak_success"] = True
-        if diff_changed and not counter_eval.get("strict_success"):
-            counter_eval["strict_success"] = True
-        success = bool(counter_eval.get("strict_success") or counter_eval.get("weak_success"))
-
-        retry_entry = {
-            "attempt": attempt_index + 1,
-            "point": point,
-            "click": click_result,
-            "verification": verification,
-            "counter_eval": counter_eval,
-            "success": success,
-        }
-        retries.append(retry_entry)
-
-        if success:
-            memory_path = _save_region_click_memory(
-                case_name,
-                bucket,
-                {
-                    "preferred_norm_point": _normalized_point(zone, point),
-                    "last_success_point": point,
-                    "validator_profile_id": validator_profile.validator_profile_id if validator_profile else None,
-                },
-            )
-            case_path = str((CASES_DIR / f"{case_name}-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.json").resolve())
-            Path(case_path).write_text(json.dumps(retry_entry, ensure_ascii=False, indent=2), encoding="utf-8")
-            return {
-                "success": True,
-                "panel": panel,
-                "zone": zone,
-                "points": points,
-                "selected_point": point,
-                "strict_success": bool(counter_eval.get("strict_success")),
-                "weak_success": bool(counter_eval.get("weak_success")),
-                "verification": verification,
-                "roi_diff_score": verification.get("diff", {}).get("count"),
-                "retries": retries,
-                "memory_path": memory_path,
-                "case_path": case_path,
-            }
-
-        if attempt_index + 1 >= max_retries and max_retries > 0:
-            break
-
-    return {
-        "success": False,
-        "panel": panel,
-        "zone": zone,
-        "points": points,
-        "retries": retries,
-    }
-
-
-@router.post("/click_mouse_tester_left_region", response_model=APIResponse)
-def click_mouse_tester_left_region() -> APIResponse:
-    bound = window_manager.get_bound_window()
-    if bound is None:
-        return APIResponse(success=False, message="No bound window is currently available", data=None, error=ErrorModel(code="no_bound_window", details="Bind a MouseTester window before calling /action/click_mouse_tester_left_region"))
-
-    state_before, actions, validators = _ensure_mouse_tester_state_assets(bound)
-
-    primary_action = next((a for a in actions if a.action_id == "click_mouse_tester_left_region"), None)
-    alt_action = next((a for a in actions if a.action_id == "click_mouse_tester_left_region_alt"), None)
-
-    def execute_with_action(action_target: ActionTarget) -> dict[str, Any]:
-        zone_profile = action_target.zone_resolver_profile
-
-        def dynamic_zone(panel: dict[str, Any]) -> dict[str, Any]:
-            return {
-                "x": int(panel["x"] + panel["width"] * float(zone_profile.get("nx", 0.0))),
-                "y": int(panel["y"] + panel["height"] * float(zone_profile.get("ny", 0.0))),
-                "width": max(1, int(panel["width"] * float(zone_profile.get("nw", 1.0)))),
-                "height": max(1, int(panel["height"] * float(zone_profile.get("nh", 1.0)))),
-                "source": action_target.action_id,
-            }
-
-        return run_known_action(
-            app_name="MouseTesterWeb",
-            state_before=state_before,
-            action_target=action_target,
-            validator_profile=validators.get(action_target.action_id),
-            capture_state_image=lambda prefix: _capture_bound_window_image(bound, prefix),
-            get_window_bucket=lambda: _window_size_bucket(_window_rect(bound)),
-            execute_action=lambda: _run_region_click(
-                case_name=action_target.action_id,
-                bound=bound,
-                panel_locator=_locate_mouse_tester_panel,
-                zone_resolver=dynamic_zone,
-                point_strategy=_generate_zone_points,
-                validator=_evaluate_counter_result,
-                validator_profile=validators.get(action_target.action_id),
-            ),
-        )
-
-    try:
-        result = execute_with_action(primary_action) if primary_action else {"success": False}
-        if not result.get("success") and alt_action is not None:
-            result["fallback_attempted_action_id"] = alt_action.action_id
-            fallback_result = execute_with_action(alt_action)
-            result["fallback_result"] = {
-                "success": fallback_result.get("success"),
-                "action_target_id": fallback_result.get("action_target_id"),
-                "strict_success": fallback_result.get("strict_success"),
-                "weak_success": fallback_result.get("weak_success"),
-            }
-            if fallback_result.get("success"):
-                result = fallback_result
-                result["used_fallback_action"] = True
-    except Exception as exc:
-        return APIResponse(success=False, message="Region click execution failed", data=None, error=ErrorModel(code="region_click_failed", details=str(exc)))
-
-    if not result["success"]:
-        result["execution_path"] = {
-            "vision_model_used": False,
-            "page_structure_used": False,
-            "coordinate_source": "region_grid_or_memory_point",
-            "selection_source": "known_action_target",
-        }
-        result["trace_path"] = write_trace(
-            category="actions",
-            operation="click_mouse_tester_left_region",
-            payload={"success": False, "result": result},
-            name_hint="mouse_tester_left_region",
-        )
-        return APIResponse(success=False, message="MouseTester left region click did not change the counter", data=result, error=ErrorModel(code="counter_not_changed", details="No known action target changed the target counter; generic region_click path remains available as fallback"))
-
-    result["execution_path"] = {
-        "vision_model_used": False,
-        "page_structure_used": False,
-        "coordinate_source": "region_grid_or_memory_point",
-        "selection_source": "known_action_target",
-    }
-    result["trace_path"] = write_trace(
-        category="actions",
-        operation="click_mouse_tester_left_region",
-        payload={"success": True, "result": result},
-        name_hint="mouse_tester_left_region",
-    )
-    data = ActionResultData(action="click_mouse_tester_left_region", result=result)
-    return APIResponse(success=True, message="MouseTester left region clicked successfully", data=data.model_dump(), error=None)

@@ -13,9 +13,9 @@ from PIL import Image, ImageDraw, ImageFont
 from app.core.ocr_service import ocr_service
 from app.core.runtime_artifacts import ARTIFACTS_DIR, RuntimeTimer, build_review_overlay_path, write_trace
 from app.core.screenshot import screenshot_service
-from app.execute.candidate_contracts import validate_action_candidate_freshness
-from app.execute.available_actions import build_available_actions
-from app.execute.visual_asset_matching import match_visual_asset
+from app.gate.candidates import validate_action_candidate_freshness
+from app.operation.path_graph import build_available_actions
+from app.operation.visual_asset_matching import match_visual_asset
 from app.learn.interface_map import build_learned_interface_map
 from app.learn.path_graph_resolver import resolve_runtime_path_graph
 from app.learn.visual_asset_crops import build_visual_assets_from_screen_map

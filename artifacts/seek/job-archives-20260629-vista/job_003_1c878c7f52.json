@@ -1,0 +1,179 @@
+{
+  "contract_version": "seek_job_archive_v1",
+  "source_url": "https://www.seek.co.nz/graduate-software-developer-jobs/in-All-Auckland",
+  "mode": "no_apply_traversal",
+  "index": 3,
+  "job_id": "seek_job_9f1e5e3080e2",
+  "title": "Graduate Software Engineer - Integration",
+  "company": "Fast paced environment",
+  "card": {
+    "contract_version": "seek_job_card_v1",
+    "job_id": "seek_job_9f1e5e3080e2",
+    "title": "Graduate Software Engineer - Integration",
+    "company": "Fast paced environment",
+    "location": "Auckland CBD, Auckland",
+    "posted_at_text": null,
+    "work_type": null,
+    "salary_text": null,
+    "classification": "Graduate Software Engineer -",
+    "card_bbox": {
+      "x": 652,
+      "y": 633,
+      "w": 383,
+      "h": 250
+    },
+    "click_point": {
+      "x": 777,
+      "y": 647
+    },
+    "source_url": null,
+    "source_card_id": "synthetic_results_text_11",
+    "primary_action_id": null,
+    "child_action_ids": [],
+    "child_page_element_ids": [
+      "page_text_33_graduate-software-engineer",
+      "page_text_34_integration",
+      "page_text_36_heartland-bank",
+      "page_text_37_auckland-cbd-auckland",
+      "page_text_38_e-1ed-00006-00059",
+      "page_text_39_grow-your-career",
+      "page_text_40_supportive-leadership",
+      "page_text_41_fast-paced-environment",
+      "page_text_42_we-re-looking-for-graduates-who-are-passionate-a"
+    ],
+    "evidence": {
+      "texts": [
+        "Graduate Software Engineer -",
+        "Integration",
+        "Heartland Bank",
+        "Auckland CBD, Auckland",
+        "e 1ed 00006$-00059$",
+        "· Grow your career!",
+        "· Supportive leadership",
+        "Fast paced environment",
+        "We're looking for graduates who are passionate about"
+      ],
+      "source_contract": "screen_inventory_v1",
+      "synthetic_from": "results_list_page_elements",
+      "synthetic_validation": {
+        "has_location": true,
+        "has_company": true,
+        "has_posted_at": false,
+        "has_work_type": false,
+        "has_salary": false
+      }
+    },
+    "candidate_freshness": {
+      "contract_version": "action_candidate_freshness_v1",
+      "capture_id": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-180234-136563__observe-screen__edge.json",
+      "viewport_size": {
+        "width": 2560,
+        "height": 1400
+      },
+      "source": "seek_job_card_extraction",
+      "freshness": "current_capture"
+    }
+  },
+  "card_click": {
+    "opened": false,
+    "failure_reason": "post_click_layout_drift",
+    "approved_plan_id": "a9c3b493fb664dae8ee22abc1cfb888b",
+    "dry_run_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-180237-837198__execute-mode-plan-preview__edge.json",
+    "execute_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-180239-859962__execute-mode-click__edge.json",
+    "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-180237-754198__execute-mode-recognition-plan__edge.json",
+    "post_click_layout": {
+      "contract_version": "seek_post_click_layout_check_v1",
+      "ok": false,
+      "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-180249-618240__observe-screen__edge.json",
+      "cards_seen": 2,
+      "target_title": "Graduate Software Engineer - Integration",
+      "detail_title": "HARDWAREENGINEERSUMMERINTERNSHIP/",
+      "title_matches": false,
+      "apply_visible": false,
+      "save_visible": false,
+      "post_click_detail_header": {
+        "header_visible": false,
+        "title_extraction_source": "detail_body",
+        "title_extraction_confidence": 0.35,
+        "title_candidate": "HARDWAREENGINEERSUMMERINTERNSHIP/",
+        "title_candidate_rejected_as_body_fragment": true,
+        "evidence_quality": "body_fragment_candidate"
+      },
+      "failure_classification": {
+        "failure_reason": "detail_title_mismatch",
+        "failure_group": "post_click_verification_failed",
+        "is_layout_drift": true,
+        "evidence_quality": "body_fragment_candidate"
+      },
+      "failure_reasons": [
+        "detail_title_mismatch"
+      ]
+    }
+  },
+  "detail": null,
+  "detail_complete": null,
+  "detail_missing_evidence": [],
+  "detail_read": {
+    "detail": null,
+    "complete": null,
+    "missing_evidence": [],
+    "coordinate_strategy": null,
+    "read_container_id": null,
+    "uses_precise_relocation": null,
+    "scroll_count": 0,
+    "scrolls": []
+  },
+  "clear_path_node": {
+    "node_id": "seek_job_9f1e5e3080e2",
+    "node_type": "seek_job_card_to_detail",
+    "title": "Graduate Software Engineer - Integration",
+    "company": "Fast paced environment",
+    "location": "Auckland CBD, Auckland",
+    "card_bbox": {
+      "x": 652,
+      "y": 633,
+      "w": 383,
+      "h": 250
+    },
+    "click_point": {
+      "x": 777,
+      "y": 647
+    },
+    "open_action": {
+      "action_id": "open_job_card",
+      "opened": false,
+      "failure_reason": "post_click_layout_drift",
+      "approved_plan_id": "a9c3b493fb664dae8ee22abc1cfb888b",
+      "dry_run_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-180237-837198__execute-mode-plan-preview__edge.json",
+      "execute_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260629-180239-859962__execute-mode-click__edge.json",
+      "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260629-180237-754198__execute-mode-recognition-plan__edge.json"
+    },
+    "read_detail_action": {
+      "action_id": "read_detail",
+      "container_id": null,
+      "coordinate_strategy": null,
+      "complete": null,
+      "missing_evidence": [],
+      "scroll_count": 0,
+      "trace_paths": null
+    },
+    "match": {
+      "decision": null,
+      "score": null,
+      "recommended_next_action": null
+    }
+  },
+  "match_decision": null,
+  "apply_entry": null,
+  "safety": {
+    "submit_clicks": 0,
+    "final_submission_performed": false
+  },
+  "search_restore": {
+    "success": true,
+    "message": "App open requested",
+    "error": null,
+    "reason": "restore_after_post_click_layout_drift",
+    "new_jobs_added": 0
+  }
+}

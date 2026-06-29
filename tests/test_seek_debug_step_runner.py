@@ -86,6 +86,7 @@ def _args(tmp_path: Path, step: str) -> argparse.Namespace:
         batch_max_captures=4,
         batch_stop_after_no_new_content=1,
         candidate_profile=None,
+        agent_suitability_review=None,
         learned_artifact=None,
         application_flow_replay=None,
         application_fill_record=None,
@@ -770,6 +771,70 @@ def test_read_detail_batch_updates_state_detail_for_match(monkeypatch, tmp_path:
     assert state_after["detail"]["trace_paths"] == ["ocr_trace.json"]
     assert state_after["detail"]["apply_button_state"]["label"] == "Apply"
     assert state_after["detail"]["apply_button_state"]["source"] == "read_detail_batch_ocr"
+
+
+def test_match_step_applies_agent_suitability_pass_review(tmp_path: Path) -> None:
+    args = _args(tmp_path, "match")
+    run_dir = Path(args.run_dir)
+    run_dir.mkdir(parents=True)
+    profile_path = tmp_path / "candidate.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "contract_version": "candidate_profile_v1",
+                "skills": ["Python", "React", "SQL"],
+                "target_roles": ["Graduate Software Developer"],
+                "location_constraints": ["Auckland"],
+                "job_search_preferences": {"screening_policy": "agent_full_jd_review_required"},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    review_path = tmp_path / "agent_review.json"
+    review_path.write_text(
+        json.dumps(
+            {
+                "contract_version": "agent_suitability_review_v1",
+                "job_id": "job1",
+                "verdict": "pass",
+                "full_jd_reviewed": True,
+                "reasons": ["Full JD matches the candidate profile."],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    args.candidate_profile = str(profile_path)
+    args.agent_suitability_review = str(review_path)
+    state = {
+        "contract_version": runner.STATE_CONTRACT,
+        "run_id": "seek_debug",
+        "run_dir": str(run_dir),
+        "phase": "read_detail_batch",
+        "step_index": 6,
+        "current_job": {"job_id": "job1", "title": "Graduate Software Developer", "company": "Example Ltd"},
+        "detail": {
+            "job_id": "job1",
+            "title": "Graduate Software Developer",
+            "company": "Example Ltd",
+            "location": "Auckland CBD, Auckland",
+            "requirements": ["Python", "React", "SQL"],
+            "description_sections": [{"index": 0, "role": "body", "text": "Complete JD reviewed by agent."}],
+        },
+        "steps": [],
+        "safety": runner._default_safety(),
+    }
+    runner.put_latest_detail_snapshot(state, state["detail"])
+    (run_dir / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+    payload = runner.run_step(args)
+
+    assert payload["match_decision"]["decision"] == "strong_apply"
+    assert payload["agent_suitability_review_applied"] is True
+    assert payload["match_decision"]["agent_suitability_review"]["verdict"] == "pass"
+    saved_state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert saved_state["next_allowed_steps"] == ["dry_run_apply_entry"]
 
 
 def test_execute_card_resets_stale_detail_snapshot(monkeypatch, tmp_path: Path) -> None:

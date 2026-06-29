@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from app.execute.danger_scope import scoped_final_submit_visible_blocker
+from app.gate.danger import scoped_final_submit_visible_blocker
 
 
 FINAL_SUBMIT_TERMS = {

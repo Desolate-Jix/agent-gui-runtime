@@ -18,8 +18,6 @@ def build_ui_diff_verification(
     threshold: int = 28,
     min_changed_ratio: float = 0.00002,
 ) -> dict[str, Any]:
-    """Build a lightweight screenshot-diff verifier without invoking a model."""
-
     result: dict[str, Any] = {
         "contract_version": CONTRACT_VERSION,
         "expected_change": expected_change or "unknown",

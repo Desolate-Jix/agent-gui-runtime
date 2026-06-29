@@ -88,6 +88,22 @@ def test_web_panel_serves_browser_control_surface() -> None:
     assert 'id="replayPreset"' in response.text
     assert 'value="github_issues">GitHub Issues' in response.text
     assert 'id="replayGraphPath"' in response.text
+    assert 'id="replayAppProfileId"' in response.text
+    assert 'id="replayAppProfileLoadBtn"' in response.text
+    assert 'id="replayAppProfileSummary"' in response.text
+    assert 'id="replayAgentPromptId"' in response.text
+    assert 'id="replayAgentPromptVersion"' in response.text
+    assert 'id="replayAgentPromptVersionSelect"' in response.text
+    assert 'id="replayAgentPromptCompareVersion"' in response.text
+    assert 'id="replayAgentPromptLoadBtn"' in response.text
+    assert 'id="replayAgentPromptVersionsBtn"' in response.text
+    assert 'id="replayAgentPromptLoadVersionBtn"' in response.text
+    assert 'id="replayAgentPromptDiffBtn"' in response.text
+    assert 'id="replayAgentPromptSaveBtn"' in response.text
+    assert 'id="replayAgentPromptRollbackBtn"' in response.text
+    assert 'id="replayAgentPromptSummary"' in response.text
+    assert 'id="replayAgentPromptTemplate"' in response.text
+    assert 'id="replayAgentPromptDiff"' in response.text
     assert 'id="replayInterfaceMapPath"' in response.text
     assert 'id="replayInterfaceCalibrationPath"' in response.text
     assert 'id="replayLoadBtn"' in response.text
@@ -228,7 +244,8 @@ def test_web_panel_serves_static_assets() -> None:
     assert "canonicalAppNameFromTitle" in response.text
     assert "stateHintFromWindow" in response.text
     assert "syncWindowAppAndState" in response.text
-    assert "markWorkflow" in response.text
+    assert "Agentic Loop-first" in response.text
+    assert "const workflowStep = options.workflowStep || null" in response.text
     assert "roiPayload" in response.text
     assert "callAnalyzeApi" in response.text
     assert "generateManualBox" in response.text
@@ -980,7 +997,7 @@ def test_web_panel_inspects_locate_trace_nested_plan_ocr_and_visuals(tmp_path) -
     assert path_recall["raw"]["candidates"][0]["candidate_id"] == "news_card"
 
 
-def test_web_panel_inspects_legacy_overlay_trace(tmp_path) -> None:
+def test_web_panel_inspects_archived_overlay_trace(tmp_path) -> None:
     client = TestClient(app)
     trace_path = tmp_path / "overlay.json"
     trace_path.write_text(
@@ -1014,7 +1031,7 @@ def test_web_panel_inspects_legacy_overlay_trace(tmp_path) -> None:
     assert data["flow_stages"][2]["raw"]["output_path"] == "overlay.png"
 
 
-def test_web_panel_inspects_legacy_layer_trace(tmp_path) -> None:
+def test_web_panel_inspects_archived_layer_trace(tmp_path) -> None:
     client = TestClient(app)
     trace_path = tmp_path / "layer.json"
     trace_path.write_text(
@@ -1429,6 +1446,7 @@ def test_web_panel_inspects_failed_screen_reading_trace(tmp_path) -> None:
 
 def test_panel_path_detail_keeps_interface_inspector_and_seek_layout() -> None:
     panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8")
+    panel_html = Path("app/web_panel/index.html").read_text(encoding="utf-8")
 
     assert "path-detail-interface-workbench" in panel_js
     assert "path-detail-interface-inspector" in panel_js
@@ -1443,6 +1461,45 @@ def test_panel_path_detail_keeps_interface_inspector_and_seek_layout() -> None:
     assert "interface-inspector-region-action-group" in panel_js
     assert "runtimePathGraphView.currentStateId = nodeId" in panel_js
     assert "state: nodeId" in panel_js
+    assert "runtime-architecture-strip" in panel_html
+    assert "runtime-node-architecture" in panel_js
+    assert "Agentic Loop-first" in panel_js
+    assert "runtimeArchitectureProfilePath" in panel_js
+    assert "fetchRuntimeAppProfile" in panel_js
+    assert "fetchRuntimeOperationSkills" in panel_js
+    assert "fetchRuntimeGateContracts" in panel_js
+    assert "/runtime/operation_skills" in panel_js
+    assert "/runtime/gate_contracts" in panel_js
+    assert "operation_skill_catalog" in panel_js
+    assert "gate_contract_catalog" in panel_js
+    assert "operation_layer_skills" in panel_js
+    assert "gate_layer_contracts" in panel_js
+    assert "fetchRuntimeAgentPrompt" in panel_js
+    assert "fetchRuntimeAgentPromptVersions" in panel_js
+    assert "fetchRuntimeAgentPromptVersion" in panel_js
+    assert "fetchRuntimeAgentPromptDiff" in panel_js
+    assert "saveRuntimeAgentPromptVersion" in panel_js
+    assert "rollbackRuntimeAgentPromptVersion" in panel_js
+    assert "loadReplayAgentPrompt" in panel_js
+    assert "loadReplayAgentPromptVersions" in panel_js
+    assert "loadSelectedReplayAgentPromptVersion" in panel_js
+    assert "diffReplayAgentPromptVersions" in panel_js
+    assert "saveReplayAgentPromptVersion" in panel_js
+    assert "rollbackReplayAgentPromptVersion" in panel_js
+    assert "/runtime/agent_prompts/" in panel_js
+    assert "/versions/" in panel_js
+    assert "/diff?" in panel_js
+    assert "/rollback" in panel_js
+    assert "agent-prompt-editor" in panel_html
+    assert "agent-prompt-diff" in panel_html
+    assert "agent-prompt-policy" in panel_js
+    assert "loadReplayAppProfile" in panel_js
+    assert "renderReplayAppProfile" in panel_js
+    assert "/runtime/app_profiles/" in panel_js
+    assert "app-profile-policy" in panel_js
+    assert "DEFAULT_SEEK_APP_PROFILE_PATH" in panel_js
+    assert "PathGraph 是学习出来的 workflow 资产" in panel_js
+    assert "导航资产，不是动作授权" in panel_js
     assert "runtime-node-workflow" not in panel_js
     assert "graph.action_templates" in panel_js
     assert "ensureReplayInterfaceMapForRuntimeGraph" in panel_js
@@ -1511,6 +1568,15 @@ def test_panel_translation_keys_stay_bilingual() -> None:
     assert "interface_calibration_report_path" in zh_keys
     assert "load_interface_calibration" in zh_keys
     assert "use_current_app_map" in zh_keys
+    assert "runtime_architecture_title" in zh_keys
+    assert "runtime_architecture_pathgraph_hint" in zh_keys
+    assert "app_profile_id" in zh_keys
+    assert "load_app_profile" in zh_keys
+    assert "app_profile_summary" in zh_keys
+    assert "agent_prompt_id" in zh_keys
+    assert "load_agent_prompt" in zh_keys
+    assert "save_agent_prompt_version" in zh_keys
+    assert "agent_prompt_summary" in zh_keys
 
 
 def test_panel_region_workflow_stays_in_node_detail_and_inspector() -> None:

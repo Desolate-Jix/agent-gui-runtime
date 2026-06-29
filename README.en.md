@@ -6,6 +6,28 @@ A local Windows-only GUI automation runtime for AI agents.
 
 `agent-gui-runtime` is not a full agent. It is an execution layer that exposes stable local HTTP APIs so an upper-layer agent can discover applications, bind windows, capture screenshots, run OCR and vision recognition, build click plans, execute gated clicks, and verify results.
 
+Architecture update (2026-06-29): the project is being reorganized around a general GUI Agent Runtime. The default execution model is Agentic Loop-first:
+
+```text
+observe -> Agent decision -> Gate -> Operation -> Trace -> observe
+```
+
+Workflow / PathGraph is a learned reusable asset, not the required execution entry point. Unknown interfaces can still be handled by observing the current screen, asking the Agent for the next intent, gating any real action, executing through Operation skills, and recording Trace evidence. See `ARCHITECTURE.md` and `docs\GUI_AGENT_RUNTIME_ARCHITECTURE.zh-CN.md`; SEEK now lives as an app profile at `artifacts\app_profiles\seek_app_profile_v1.json`.
+
+The local panel now reflects this model: the shared Navigation Path / PathGraph card shows the Agentic Loop strip, and Runtime PathGraph node details show execution model, PathGraph role, Gate requirement, and app profile path.
+
+App/software profiles are runtime resources. `GET /runtime/app_profiles` lists profiles and `GET /runtime/app_profiles/{app_id}` loads one profile. The panel's Artifact Replay page uses this API to show the SEEK profile policy beside the loaded PathGraph.
+
+The code-level layer entry points are explicit now: `app.operation` exposes the framework operation skill catalog, `app.gate` exposes shared safety/dataflow contracts including scroll precondition/effect validation, and `app.trace` exposes trace event recording plus execution-action trace write policy. `GET /runtime/operation_skills` returns the base operation catalog, while `GET /runtime/operation_skills?app_id=seek` shows how SEEK profile skills map back to generic Operation skills. `GET /runtime/gate_contracts` and `GET /runtime/gate_contracts?app_id=seek` expose the base and profile-specific Gate catalogs.
+
+Core Gate and Operation implementations now live in the new layer packages. The legacy `app.execute` compatibility package has been removed; new imports should use `app.gate`, `app.operation`, or `app.trace` directly.
+
+Reusable region-click execution now lives in `app.operation.region_click`; MouseTester baselines and vision-protocol actions no longer import private helpers from the Action API.
+
+MouseTester-specific post-click semantic verification now lives in `app.operation.mousetester`, so live execution and trace evaluation share the same Operation-layer verifier.
+
+Agent prompts are runtime resources too. `GET /runtime/agent_prompts`, `GET /runtime/agent_prompts/{prompt_id}`, `GET /runtime/agent_prompts/{prompt_id}/versions`, `GET /runtime/agent_prompts/{prompt_id}/versions/{version}`, `GET /runtime/agent_prompts/{prompt_id}/diff`, `POST /runtime/agent_prompts/{prompt_id}/versions`, and `POST /runtime/agent_prompts/{prompt_id}/rollback` list, load, compare, save, and rollback prompt versions. The panel can load, edit, diff, and rollback the full-JD suitability prompt `job_suitability_full_jd_v1`.
+
 Core path:
 
 ```text
@@ -316,7 +338,6 @@ Actions:
 - `POST /action/execute_confirmed_point`
 - `POST /action/type_text`
 - `POST /action/click_text`
-- `POST /action/click_mouse_tester_left_region`
 
 ## Recognition Pipeline
 
