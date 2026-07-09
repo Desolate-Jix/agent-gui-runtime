@@ -1,0 +1,32 @@
+{
+  "contract_version": "recorded_parser_output_v1",
+  "provider": "omniparser_style_sample",
+  "source_type": "recorded_parser_output",
+  "recorded_output_origin": "omniparser_output_shape_fixture",
+  "actual_model_call_in_this_run": false,
+  "note": "Uses the OmniParser-style parsed_content_list shape documented by public examples: type, bbox, interactivity, content, source.",
+  "observe_bundle": {
+    "contract_version": "learn_observe_bundle_v1",
+    "screen_size": {"width": 1000, "height": 800},
+    "sources": {
+      "omniparser": {
+        "parsed_content_list": [
+          {
+            "type": "icon",
+            "content": "Search",
+            "bbox": [0.1, 0.2, 0.2, 0.25],
+            "interactivity": true,
+            "source": "box_yolo_content_yolo"
+          },
+          {
+            "type": "text",
+            "content": "Latest News",
+            "bbox": [0.1, 0.5, 0.35, 0.55],
+            "interactivity": false,
+            "source": "text_ocr"
+          }
+        ]
+      }
+    }
+  }
+}

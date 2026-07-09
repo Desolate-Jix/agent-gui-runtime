@@ -1,0 +1,192 @@
+{
+  "contract_version": "learn_fusion_pathgraph_integration_readiness_report_v1",
+  "integration_readiness_status": "blocked_pending_calibration",
+  "pathgraph_candidate_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_7b471afc08/pathgraph_candidate/pathgraph_candidate.json",
+  "validation_report_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_7b471afc08/pathgraph_candidate/promotion_validation_report.json",
+  "candidate_validation_status": "blocked_pending_calibration",
+  "candidate_failed_checks": [
+    "regions_present",
+    "action_templates_present",
+    "precise_understanding_ready_for_pathgraph_candidate"
+  ],
+  "precise_understanding_readiness_summary": {
+    "readiness_status": "needs_pending_calibration",
+    "total_locator_cards": 10,
+    "calibrated_cases": 2,
+    "uncalibrated_locator_cards": 8,
+    "calibration_coverage_rate": 0.2,
+    "pending_calibration_ready_count": 6,
+    "pending_calibration_review_count": 2,
+    "pathgraph_status": "blocked_from_pathgraph_candidate_review",
+    "ready_for_runtime_pathgraph_promotion": false,
+    "display_only": true,
+    "not_accuracy": true,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false
+  },
+  "evidence_integrity": {
+    "contract_version": "learn_precise_understanding_evidence_integrity_v1",
+    "status": "complete",
+    "required_for_pathgraph_review": true,
+    "missing_declared_evidence": [],
+    "display_only": true,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false,
+    "screenshot": {
+      "kind": "screenshot",
+      "path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+      "declared_path": "artifacts\\screenshots\\jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+      "exists": true,
+      "sha256": "4ad07148c25da7935c8845a8455346c167d7fbb3056f15c7ab50be004d12283b"
+    },
+    "full_screen_understanding_overlay": {
+      "kind": "full_screen_understanding_overlay",
+      "path": "logs/benchmarks/learn_full_screen_understanding_backlog_triage_preview_20260706/full_screen_understanding_overlay.png",
+      "declared_path": "D:\\agent-gui-runtime\\logs\\benchmarks\\learn_full_screen_understanding_backlog_triage_preview_20260706\\full_screen_understanding_overlay.png",
+      "exists": true,
+      "sha256": "317632d716d6c00d7ce6c2a8306ad17a16244867f9d8b120cff18c2100534dec"
+    },
+    "compiled_overlay": {
+      "kind": "compiled_overlay",
+      "path": "logs/benchmarks/learn_locator_card_execute_calibration_seek_full_20260705/numbered_region_calibration_overlay.png",
+      "declared_path": "D:\\agent-gui-runtime\\logs\\benchmarks\\learn_locator_card_execute_calibration_seek_full_20260705\\numbered_region_calibration_overlay.png",
+      "exists": true,
+      "sha256": "baedf7b003b2bac7848b25a6fd4991ce593f74fd6c1c4a2504ec9476ced7ab46"
+    },
+    "source_status_report": {
+      "kind": "source_status_report",
+      "path": "logs/benchmarks/learn_pathgraph_readiness_with_refresh_plan_20260706/refresh_base/learn_fusion_refresh_base_status.json",
+      "declared_path": "logs/benchmarks/learn_pathgraph_readiness_with_refresh_plan_20260706/refresh_base/learn_fusion_refresh_base_status.json",
+      "exists": true,
+      "sha256": "28c0c40b5ab0953c105b1dca0bdc7d06f6172b1aa2e9a8e794c566879b44be30"
+    },
+    "source_calibration_report": {
+      "kind": "source_calibration_report",
+      "path": "logs/benchmarks/learn_locator_card_execute_calibration_seek_full_20260705/numbered_region_calibration_report.json",
+      "declared_path": "logs/benchmarks/learn_locator_card_execute_calibration_seek_full_20260705/numbered_region_calibration_report.json",
+      "exists": true,
+      "sha256": "56b3ad46ffe02977d0f369e23645391c1aa4871e352c8ac1679431a833b46bb2"
+    }
+  },
+  "calibration_pre_run_check": {
+    "contract_version": "learn_fusion_calibration_pre_run_check_v1",
+    "pre_run_status": "ready_after_explicit_approval",
+    "approval_packet_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_7b471afc08/pathgraph_candidate/learn_fusion_model_start_approval_packet.json",
+    "approval_packet_sha256": "abf52ba40e5ef100a4dceae64d822b63afc10c71f7ef4ffed4525f6bbee6d6c6",
+    "requires_explicit_user_approval": true,
+    "may_start_model_after_user_approval": true,
+    "may_run_calibration_batch_now": false,
+    "ready_region_numbers": [
+      1,
+      2,
+      3,
+      6,
+      8,
+      9
+    ],
+    "command_region_numbers": [
+      1,
+      2,
+      3,
+      6,
+      8,
+      9
+    ],
+    "tasks_path": "logs/benchmarks/learn_locator_card_open_detail_multi_probe_20260705/generated_numbered_region_tasks.json",
+    "batch_plan_path": "logs/benchmarks/numbered_region_calibration_batch_plan_with_refresh_seek_20260706/numbered_region_calibration_batch_plan.json",
+    "expected_rerun_report_path": "logs/benchmarks/numbered_region_calibration_batch_plan_with_refresh_seek_20260706/next_numbered_region_calibration/numbered_region_calibration_report.json",
+    "refresh_rerun_report_path": "logs/benchmarks/numbered_region_calibration_batch_plan_with_refresh_seek_20260706/next_numbered_region_calibration/numbered_region_calibration_report.json",
+    "checks": {
+      "approval_packet_ready": true,
+      "requires_explicit_user_approval": true,
+      "approval_does_not_execute": true,
+      "may_start_after_approval": true,
+      "may_run_calibration_batch_now_false": true,
+      "candidate_blocked_pending_calibration": true,
+      "calibration_command_no_execute_flag": true,
+      "refresh_command_no_execute_flag": true,
+      "calibration_command_has_probe": true,
+      "refresh_command_has_refresh_script": true,
+      "tasks_file_exists": true,
+      "regions_match_ready_regions": true,
+      "refresh_rerun_report_present": true,
+      "expected_rerun_report_present": true,
+      "refresh_rerun_report_matches_expected": true,
+      "batch_plan_exists": true,
+      "future_rerun_report_awaiting": true,
+      "post_batch_refresh_requires_completed_batch": true,
+      "no_model_started": true,
+      "no_live_clicks": true,
+      "no_live_fills": true,
+      "no_live_submits": true,
+      "execute_binding_disabled": true,
+      "artifact_not_authorization": true,
+      "no_model_ports_listening": true,
+      "no_suspected_model_processes": true
+    },
+    "safety": {
+      "model_started": false,
+      "live_clicks": 0,
+      "live_fills": 0,
+      "live_submits": 0,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false
+    },
+    "model_runtime_snapshot": {
+      "contract_version": "model_runtime_snapshot_v1",
+      "checked_at": "2026-07-05T21:24:05.697381+00:00",
+      "checked_ports": [
+        11434,
+        1240,
+        1241,
+        1244,
+        1245,
+        8000,
+        8001,
+        8080
+      ],
+      "listening_ports": [],
+      "suspected_model_processes": [],
+      "model_ports_clear": true,
+      "model_processes_clear": true,
+      "probe_platform": "Windows",
+      "interpretation": "Snapshot only; this report does not stop, start, or contact any model service."
+    },
+    "blockers": [],
+    "interpretation": "No-model pre-run check for the numbered-region calibration batch. Ready means the packet can be shown for explicit approval; this report does not start models, run calibration, click, fill, submit, refresh, merge, or promote Runtime PathGraph.",
+    "report_path": "D:\\agent-gui-runtime\\artifacts\\learning-draft-review\\actual_parser_output_with_fusion_status_7b471afc08\\pathgraph_candidate\\learn_fusion_calibration_pre_run_check_report.json",
+    "approval_packet_current_sha256": "abf52ba40e5ef100a4dceae64d822b63afc10c71f7ef4ffed4525f6bbee6d6c6",
+    "approval_packet_checksum_status": "matched",
+    "effective_pre_run_status": "ready_after_explicit_approval",
+    "effective_may_run_calibration_batch_now": false,
+    "stale_pre_run_evidence": false
+  },
+  "ready_for_audited_pathgraph_review": false,
+  "ready_for_runtime_pathgraph_promotion": false,
+  "not_runtime_promotion": true,
+  "next_required_steps": [
+    "run_approved_numbered_region_calibration_batch",
+    "run_gated_post_batch_refresh",
+    "rerun_pathgraph_candidate_validation"
+  ],
+  "blockers": [
+    "pending_calibration_required"
+  ],
+  "safety": {
+    "display_only": true,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false,
+    "final_submit_forbidden": true,
+    "real_action_requires_gate": true,
+    "model_started": false,
+    "live_clicks": 0,
+    "live_fills": 0,
+    "live_submits": 0,
+    "runtime_pathgraph_promotion": false
+  },
+  "interpretation": "Offline PathGraph integration readiness report for Learning Draft fusion output. It does not start models, click, fill, submit, merge, refresh, or promote Runtime PathGraph.",
+  "display_only": true,
+  "execute_binding_enabled": false,
+  "artifact_is_authorization": false,
+  "report_path": "D:\\agent-gui-runtime\\artifacts\\learning-draft-review\\actual_parser_output_with_fusion_status_7b471afc08\\pathgraph_candidate\\learn_fusion_pathgraph_integration_readiness_report.json"
+}

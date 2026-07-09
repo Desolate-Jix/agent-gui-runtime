@@ -1,0 +1,67 @@
+{
+  "contract_version": "learned_interface_map_v1",
+  "app_id": "model_learning_benchmark",
+  "page_type": "search_page",
+  "source": {
+    "trial_path": "logs/benchmarks/model_learning_template_loader_trials/8c6d360d2caf/recorded_seek_search_input_similarity/trial_result.json",
+    "sha256": "cf83de077ac52e35680c8683d6046cccbb3556f915a655d05690627705677f6e",
+    "attempt_index": 0,
+    "readonly": true,
+    "posthoc_optimization_allowed": false,
+    "loaded_at": "2026-07-07T13:33:10.897346"
+  },
+  "loader": {
+    "contract_version": "model_learning_artifact_loader_v1",
+    "source_trial_path": "logs/benchmarks/model_learning_template_loader_trials/8c6d360d2caf/recorded_seek_search_input_similarity/trial_result.json",
+    "source_sha256": "cf83de077ac52e35680c8683d6046cccbb3556f915a655d05690627705677f6e",
+    "source_attempt_index": 0,
+    "source_artifact_readonly": true,
+    "posthoc_optimization_allowed": false
+  },
+  "screen_summary": "A job search input field showing 'All jobs • All Auckland' with a magnifying glass icon.",
+  "page_details": {},
+  "states": [
+    {
+      "state_id": "s1",
+      "label": "job_search_initial",
+      "page_type": "search_page",
+      "region_refs": [
+        "r1"
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "model:transition:a1",
+      "from_state_id": "s1",
+      "to_state_id": "s1",
+      "action_template_id": "a1",
+      "default_available": true,
+      "verification_refs": []
+    }
+  ],
+  "regions": [
+    {
+      "region_id": "r1",
+      "label": "search_input_field",
+      "role": "text_input",
+      "region_type": "text_input",
+      "source_artifact_readonly": true
+    }
+  ],
+  "fixed_visual_assets": [],
+  "dynamic_areas": [],
+  "danger_zones": [],
+  "editor_policy": {
+    "source_artifact_editable": false,
+    "derived_artifact_editable": false,
+    "save_as_required_for_manual_changes": true
+  },
+  "summary": {
+    "state_count": 1,
+    "region_count": 1,
+    "fixed_visual_asset_count": 0,
+    "dynamic_area_count": 0,
+    "danger_zone_count": 0
+  }
+}

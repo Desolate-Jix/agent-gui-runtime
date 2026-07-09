@@ -1,0 +1,127 @@
+{
+  "contract_version": "recorded_parser_output_v1",
+  "provider": "execute_recognition_plan_candidate_result",
+  "source_type": "recorded_parser_output",
+  "recorded_output_origin": "existing_execute_recognition_plan_trace",
+  "actual_model_call_in_this_run": false,
+  "trace_path": "logs/traces/vision/20260703-174837-380843__execute-mode-recognition-plan__docs.json",
+  "image_path": "C:\\Users\\DesolateJix\\AppData\\Local\\Temp\\pytest-of-DesolateJix\\pytest-1705\\test_seeded_candidate_uses_see0\\capture.png",
+  "goal": "Click search",
+  "surface": "docs_search",
+  "observe_bundle": {
+    "contract_version": "learn_observe_bundle_v1",
+    "screen_size": {
+      "width": 900,
+      "height": 760
+    },
+    "sources": {
+      "execute_candidate_result": {
+        "source_trace_path": "logs/traces/vision/20260703-174837-380843__execute-mode-recognition-plan__docs.json",
+        "goal": "Click search",
+        "candidates": [
+          {
+            "candidate_id": "seeded_docs-search",
+            "rank": 1,
+            "element_id": "seeded_docs-search",
+            "label": "search",
+            "role": "button",
+            "text": "search",
+            "score": 0.99,
+            "eligible": true,
+            "reasons": [
+              "seeded_candidate",
+              "seeded_candidate_point_inside_bbox",
+              "seeded_candidate_primary_point_used_after_vista_disagreement"
+            ],
+            "score_breakdown": {
+              "text_similarity": 0.99,
+              "role_score": 0.9,
+              "policy_score": 0.78,
+              "confidence_score": 0.99,
+              "state_score": 0.5,
+              "screen_reading_score": 0.2,
+              "ad_penalty": 0.0,
+              "blocked_penalty": 0.0,
+              "total": 0.8592
+            },
+            "element": {
+              "element_id": "seeded_docs-search",
+              "label": "search",
+              "role": "button",
+              "interaction_type": "click",
+              "description": "search results visible",
+              "text": "search",
+              "bbox": {
+                "x": 497,
+                "y": 272,
+                "w": 57,
+                "h": 22
+              },
+              "semantic_bbox": null,
+              "click_point": {
+                "x": 525,
+                "y": 283
+              },
+              "click_strategy": "seeded_candidate_v1_then_local_grounding",
+              "possible_destinations": [
+                "search results visible"
+              ],
+              "verification_hints": {
+                "expected_changes": [
+                  "search results visible"
+                ],
+                "target_scope": "local"
+              },
+              "interaction_policy": {
+                "allowed": true,
+                "zone_type": "general_action",
+                "priority": "seeded_candidate",
+                "ad_risk": 0.0,
+                "reasons": [
+                  "seeded_candidate_policy",
+                  "risk_class:safe_click_allowed",
+                  "risk_class_safe_click_allowed"
+                ]
+              },
+              "fusion_confidence": 0.99,
+              "coordinate_confidence": "seeded_candidate_observation_hint",
+              "memory_key": "seeded_candidate:docs-search",
+              "sources": [
+                "seeded_candidate_v1"
+              ],
+              "source_region_ids": [],
+              "source_text_ids": [],
+              "evidence": {
+                "seeded_candidate": {
+                  "contract_version": "seeded_candidate_v1",
+                  "candidate_id": "docs-search",
+                  "label": "search",
+                  "role": "button",
+                  "bbox": {
+                    "x": 497,
+                    "y": 272,
+                    "w": 57,
+                    "h": 22
+                  },
+                  "click_point": {
+                    "x": 525,
+                    "y": 283
+                  },
+                  "risk_class": "safe_click_allowed",
+                  "expected_effect": "search results visible"
+                }
+              }
+            },
+            "refined_bbox": {
+              "x": 497,
+              "y": 272,
+              "w": 57,
+              "h": 22
+            },
+            "bbox_refine_reason": "seeded_candidate_bbox"
+          }
+        ]
+      }
+    }
+  }
+}

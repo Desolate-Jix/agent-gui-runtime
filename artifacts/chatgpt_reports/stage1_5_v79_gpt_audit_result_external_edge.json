@@ -1,0 +1,73 @@
+{
+  "contract_version": "chatgpt_visual_audit_result_v1",
+  "checkpoint": "learn_stage1_5_protected_set_v79",
+  "created_at_local": "2026-07-07T19:17:02+12:00",
+  "reviewer": "ChatGPT visible web session",
+  "submission_path": {
+    "browser": "external_edge",
+    "click_method": "framework_real_click",
+    "image_paste_method": "framework_clipboard_image_paste",
+    "browser_bridge_role": "status_or_coordinate_assist_only",
+    "attachment_count_confirmed_before_send": 3
+  },
+  "review_inputs": [
+    {
+      "surface": "python.org",
+      "overlay_path": "artifacts/review-overlays/welcome-to-python-org-microsoft-edge__observe-screen__python-org__full-window__20260703-173928-663164__stage1-5-partition__20260707-190545-518337.png",
+      "report_path": "logs/benchmarks/learn_stage1_only_python_v79/stage1_region_localization_report_20260707-190545.json"
+    },
+    {
+      "surface": "AppleMusic",
+      "overlay_path": "artifacts/review-overlays/apple-music__observe-screen__applemusic__full-window__20260706-200734-125573__stage1-region-localization__20260707-190545-751337.png",
+      "report_path": "logs/benchmarks/learn_stage1_only_applemusic_v79/stage1_region_localization_report_20260707-190545.json"
+    },
+    {
+      "surface": "QQ",
+      "overlay_path": "artifacts/review-overlays/qq__observe-screen__qq__full-window__20260706-185700-021296__stage1-5-partition__20260707-190508-119306.png",
+      "report_path": "logs/benchmarks/learn_stage1_only_qq_v79/stage1_region_localization_report_20260707-190508.json"
+    }
+  ],
+  "review_result": {
+    "python.org": {
+      "verdict": "CONDITIONAL PASS",
+      "notes": [
+        "Browser chrome, header, primary area, and right floating/scroll review ownership are basically separated.",
+        "Stage1.5 content_column is reasonable for deeper numbering.",
+        "The broad primary_area must not be numbered directly."
+      ]
+    },
+    "AppleMusic": {
+      "verdict": "PASS",
+      "notes": [
+        "Top/header, left navigation, and primary content remain separated.",
+        "No obvious regression from the QQ bottom-composer fix."
+      ]
+    },
+    "QQ": {
+      "verdict": "CONDITIONAL PASS",
+      "notes": [
+        "conversation_list and message_thread are separated.",
+        "bottom_composer horizontal overreach is improved by constraining it to the message_thread channel.",
+        "bottom_composer still has vertical/blank-space overreach and must remain review-only."
+      ]
+    }
+  },
+  "global_remaining_issues": [
+    "QQ bottom_composer vertical_or_blank_space_overreach",
+    "Python.org broad_primary_must_use_content_column_before_numbering"
+  ],
+  "anti_inflation": {
+    "not_execute_authorization": true,
+    "not_runtime_pathgraph_promotion": true,
+    "not_recognition_accuracy_claim": true,
+    "not_demo_complete": true
+  },
+  "evidence_screenshots": [
+    "artifacts/chatgpt_reports/before_v79_send_confirm_with_text.png",
+    "artifacts/chatgpt_reports/after_v79_enter_send_check.png",
+    "artifacts/chatgpt_reports/after_v79_gpt_response_check.png",
+    "artifacts/chatgpt_reports/after_v79_gpt_response_scroll1.png",
+    "artifacts/chatgpt_reports/after_v79_gpt_response_scroll2.png",
+    "artifacts/chatgpt_reports/after_v79_gpt_response_scroll3.png"
+  ]
+}

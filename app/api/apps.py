@@ -14,6 +14,7 @@ from app.core.runtime_artifacts import RuntimeTimer, write_trace
 from app.core.window_manager import window_manager
 from app.api.models.request import OpenAppRequest
 from app.api.models.response import APIResponse, ErrorModel
+from app.operation.runtime_context import build_operation_runtime_context, operation_trace_link
 
 router = APIRouter(prefix="/apps", tags=["apps"])
 
@@ -169,6 +170,17 @@ def open_app(request: OpenAppRequest) -> APIResponse:
             "windows_before_open": before_windows,
             "running_windows": windows,
         }
+        operation_context = build_operation_runtime_context(
+            request=request,
+            skill_id="bind_window",
+            semantic_action="bind_window" if bound_payload is not None else "open_app",
+            side_effect_class="navigation",
+            requires_gate=False,
+            window_binding_id=f"window:{int(bound.handle)}" if bound_payload is not None and bound is not None else None,
+            viewport_size=_bound_window_size(bound_payload),
+        )
+        result["operation_context"] = operation_context
+        result["operation_trace_link"] = operation_trace_link(operation_context, result_status="success")
         result["timings"] = timer.to_dict()
         result["trace_path"] = write_trace(
             category="apps",
@@ -319,3 +331,19 @@ def _bound_window_payload(bound: Any) -> dict[str, Any] | None:
         },
         "is_active": bound.is_active,
     }
+
+
+def _bound_window_size(bound_payload: dict[str, Any] | None) -> dict[str, int] | None:
+    if not isinstance(bound_payload, dict):
+        return None
+    rect = bound_payload.get("rect")
+    if not isinstance(rect, dict):
+        return None
+    try:
+        width = int(rect["right"]) - int(rect["left"])
+        height = int(rect["bottom"]) - int(rect["top"])
+    except Exception:
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return {"width": width, "height": height}

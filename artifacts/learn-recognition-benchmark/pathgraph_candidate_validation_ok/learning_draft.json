@@ -1,0 +1,265 @@
+{
+  "contract_version": "learning_template_draft_v1",
+  "screen_summary": "Validate a recognized draft can enter the reviewed pathgraph candidate safety path.",
+  "state_guess": "python_homepage",
+  "states": [
+    {
+      "state_id": "python_homepage",
+      "label": "python_homepage",
+      "summary": "Validate a recognized draft can enter the reviewed pathgraph candidate safety path."
+    }
+  ],
+  "regions": [
+    {
+      "region_id": "region_1",
+      "label": "Search",
+      "role": "button",
+      "bbox": {
+        "x": 980,
+        "y": 140,
+        "w": 92,
+        "h": 36
+      },
+      "source_item_id": "uia_control_1",
+      "grounding_status": "validated",
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false
+    }
+  ],
+  "action_templates": [
+    {
+      "action_template_id": "action_1",
+      "label": "Search",
+      "target_entity": "region_1",
+      "target_region_id": "region_1",
+      "semantic_action": "activate",
+      "action_kind": "activate",
+      "low_level_action_type": "click",
+      "source_item_id": "uia_control_1",
+      "bbox": {
+        "x": 980,
+        "y": 140,
+        "w": 92,
+        "h": 36
+      },
+      "click_point": {
+        "x": 1024,
+        "y": 158
+      },
+      "requires_gate": true,
+      "candidate_freshness_required": true,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "verification_rule_ids": [
+        "target_region_still_visible",
+        "point_inside_validated_region",
+        "no_final_submit_surface"
+      ]
+    }
+  ],
+  "blockers": [
+    {
+      "blocker_id": "final_submit_guard",
+      "label": "Block final submit/send/confirm/payment actions",
+      "blocked_terms": [
+        "submit",
+        "send",
+        "complete",
+        "confirm",
+        "payment"
+      ],
+      "scope": "active_application_or_form_surface",
+      "severity": "hard_block"
+    },
+    {
+      "blocker_id": "stale_or_unverified_grounding",
+      "label": "Block stale screenshots or unverified coordinate transforms",
+      "requires": [
+        "fresh_capture",
+        "coordinate_transform_replay",
+        "point_inside_validated_region"
+      ],
+      "severity": "hard_block"
+    }
+  ],
+  "verification_rules": [
+    {
+      "rule_id": "target_region_still_visible",
+      "label": "Target region must still be visible in the current capture",
+      "required": true
+    },
+    {
+      "rule_id": "point_inside_validated_region",
+      "label": "Resolved point must remain inside the validated region bbox",
+      "required": true
+    },
+    {
+      "rule_id": "no_final_submit_surface",
+      "label": "Do not execute if the candidate is a final submit/send/confirm/payment control",
+      "required": true
+    }
+  ],
+  "agent_decision_points": [],
+  "operation_skills": [
+    "click_target",
+    "locate_element",
+    "observe_screen"
+  ],
+  "gate_contracts": [
+    {
+      "contract_id": "pre_click_decision_v1",
+      "required": true,
+      "checks": [
+        "fresh_capture_id",
+        "point_inside_bbox",
+        "candidate_score_margin",
+        "danger_zone_rejection"
+      ]
+    },
+    {
+      "contract_id": "final_submit_guard_v1",
+      "required": true,
+      "blocked_actions": [
+        "final_submit",
+        "send",
+        "confirm",
+        "payment"
+      ]
+    }
+  ],
+  "learning_source": "learn_recognition_pipeline_v2",
+  "evidence_refs": {
+    "screen_inventory_count": 1,
+    "raw_screen_inventory_count": 1,
+    "accepted_for_grounding_count": 1,
+    "grounding_validation_count": 1,
+    "layout_cleanup_suppressed_count": 0,
+    "source_contract": ""
+  },
+  "page_details": {
+    "contract_version": "learning_draft_page_details_v1",
+    "display_only": true,
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "screen": {
+      "app_name": "",
+      "state_hint": "",
+      "image_path": "",
+      "screen_size": {
+        "width": 1280,
+        "height": 720
+      },
+      "summary": "Validate a recognized draft can enter the reviewed pathgraph candidate safety path."
+    },
+    "model_roles": {},
+    "layout_graph": {
+      "contract_version": "learn_layout_graph_v1",
+      "display_only": true,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "node_count": 1,
+      "zone_count": 1,
+      "zones": {
+        "browser_chrome": {
+          "zone_id": "browser_chrome",
+          "item_ids": []
+        },
+        "page_header": {
+          "zone_id": "page_header",
+          "item_ids": [
+            "uia_control_1"
+          ]
+        },
+        "main_content": {
+          "zone_id": "main_content",
+          "item_ids": []
+        },
+        "lower_content": {
+          "zone_id": "lower_content",
+          "item_ids": []
+        },
+        "floating_overlay": {
+          "zone_id": "floating_overlay",
+          "item_ids": []
+        },
+        "unknown": {
+          "zone_id": "unknown",
+          "item_ids": []
+        }
+      },
+      "nodes": {
+        "uia_control_1": {
+          "item_id": "uia_control_1",
+          "label": "Search",
+          "role": "button",
+          "item_type": "actionable",
+          "surface_zone": "page_header",
+          "bbox": {
+            "x": 980,
+            "y": 140,
+            "w": 92,
+            "h": 36
+          },
+          "review_only": false,
+          "grounding_eligible": false,
+          "split_roi_required": false,
+          "parent_ids": [],
+          "child_ids": []
+        }
+      },
+      "reading_order": [
+        "uia_control_1"
+      ],
+      "overlap_clusters": [],
+      "interpretation": "layout graph groups parser candidates for review and ROI planning only; it is not click permission, Execute authorization, or a recognition accuracy metric"
+    },
+    "inventory_summary": {
+      "input_count": 1,
+      "accepted_for_grounding_count": 1,
+      "rejected_non_actionable_count": 0,
+      "needs_human_review_count": 0,
+      "danger_zone_count": 0,
+      "screen_inventory_count": 1,
+      "grounding_validation_count": 1
+    },
+    "review_only_regions": [],
+    "grounding_candidates": [
+      {
+        "item_id": "uia_control_1",
+        "label": "Search",
+        "item_type": "actionable",
+        "role": "button",
+        "bbox": {
+          "x": 980,
+          "y": 140,
+          "w": 92,
+          "h": 36
+        },
+        "source_evidence": [
+          "uia"
+        ],
+        "evidence_level": "uia_control",
+        "decision": {
+          "outcome": "accepted_for_grounding",
+          "reason": "actionable_with_grounding_evidence",
+          "grounding_eligible": true,
+          "review_only": false
+        },
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false
+      }
+    ],
+    "danger_zones": [],
+    "interpretation": "Read-only page understanding details; not a PathGraph, not click authorization, and not Execute binding."
+  },
+  "safety": {
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "real_action_requires_gate": true,
+    "final_submit_forbidden": true
+  },
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "real_action_requires_gate": true,
+  "final_submit_forbidden": true
+}

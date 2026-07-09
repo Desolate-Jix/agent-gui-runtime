@@ -1,0 +1,67 @@
+{
+  "contract_version": "learning_pattern_template_v1",
+  "pattern_id": "entry_boundary",
+  "display_name": "Entry Boundary",
+  "purpose": "Learn non-final entry buttons such as Apply, Book, Register, Checkout, or Continue to form.",
+  "applies_when": [
+    "A button opens a new flow but is not the final submit.",
+    "The next page may be same-site, external, login-gated, or account-gated.",
+    "The runtime must inspect the new flow before filling or submitting."
+  ],
+  "states": [
+    "entry_button_visible",
+    "entry_click_gated",
+    "entry_flow_opened",
+    "entry_flow_classified",
+    "entry_flow_deferred_or_ready"
+  ],
+  "regions": [
+    "entry_button_region",
+    "active_flow_container",
+    "browser_url_or_app_state"
+  ],
+  "operation_skills": [
+    "open_apply_flow",
+    "click_target",
+    "observe_screen",
+    "verify_change"
+  ],
+  "semantic_actions": [
+    "open_entry_flow",
+    "open_apply_flow",
+    "classify_entry_flow"
+  ],
+  "gate_contracts": [
+    "apply_entry_is_open_apply_flow_v1",
+    "candidate_freshness_v1",
+    "pre_click_decision_v1",
+    "scoped_danger_detection_v1",
+    "final_submit_guard_v1"
+  ],
+  "trace_requirements": [
+    "Record before-click URL or app state when available.",
+    "Record post-click URL or app state.",
+    "Record whether the opened flow is same-site, external, login/account/privacy gated, or unsupported.",
+    "Record that entry click is not final submit."
+  ],
+  "success_conditions": [
+    "Entry flow opens and is classified.",
+    "Final submit remains blocked.",
+    "External/login/account/privacy/captcha/upload boundaries are reported as review stops."
+  ],
+  "stop_conditions": [
+    "entry_button_not_found",
+    "entry_click_is_final_submit",
+    "external_account_or_privacy_required",
+    "login_or_captcha_required",
+    "upload_required"
+  ],
+  "seek_source": {
+    "profile_id": "seek",
+    "source_assets": [
+      "artifacts/seek/learned_seek_application_flow_92822270_20260624_contract_debug.json"
+    ],
+    "lesson": "SEEK Apply and Quick Apply are open_apply_flow actions, not final submit; external ATS and account/privacy steps stop for review."
+  },
+  "authorization": "opens_flow_only"
+}

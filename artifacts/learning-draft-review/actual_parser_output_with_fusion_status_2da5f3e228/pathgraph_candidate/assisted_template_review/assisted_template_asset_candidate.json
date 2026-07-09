@@ -1,0 +1,59 @@
+{
+  "contract_version": "assisted_template_asset_candidate_v1",
+  "asset_candidate_status": "no_accepted_items",
+  "source_tracking": "assisted_generation",
+  "counts_as_pure_model_generated": false,
+  "created_at": "2026-07-05T23:11:13.311315",
+  "package_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_2da5f3e228/pathgraph_candidate/assisted_template_review/assisted_template_review_package.json",
+  "review_record_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_2da5f3e228/pathgraph_candidate/assisted_template_review/assisted_template_review_record.json",
+  "package_sha256": "7b49097eef1faa3fd74eed58ab242b2c23e4e15189880c3b47ad61eb66f7aac5",
+  "review_record_sha256": "61d0e517266c993b2e07e02cbeae15b0c650a6bed0b9144e3e8e89ca5df98854",
+  "runtime_path_graph_candidate_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_2da5f3e228/pathgraph_candidate/runtime_path_graph_candidate.json",
+  "runtime_path_graph_candidate_sha256": "b27b5e3056d1684ae1c032fcf944430b706f18dec5e5c9f085fce0041e7437ef",
+  "interface_map_candidate_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_2da5f3e228/pathgraph_candidate/interface_map_candidate.json",
+  "interface_map_candidate_sha256": "cd19c76ef73b4234fadd9396cc062a980ac98ce4f652479af7b3b83cddc53567",
+  "validation_report_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_2da5f3e228/pathgraph_candidate/promotion_validation_report.json",
+  "validation_report_sha256": "4774b90f0aaec4b8f3fb838934e71db704966eab68d9158111e496d10a159e13",
+  "accepted_items": {
+    "states": [],
+    "regions": [],
+    "action_templates": [],
+    "transitions": []
+  },
+  "accepted_item_keys": [],
+  "summary": {
+    "accepted_state_count": 0,
+    "accepted_region_count": 0,
+    "accepted_action_template_count": 0,
+    "accepted_transition_count": 0,
+    "accepted_total_count": 0,
+    "asset_validation_status": "no_accepted_items",
+    "asset_validation_error_count": 0,
+    "asset_validation_warning_count": 0,
+    "review_decision": "needs_changes",
+    "validation_status": "passed_candidate"
+  },
+  "asset_validation_summary": {
+    "contract_version": "assisted_template_asset_validation_summary_v1",
+    "validation_status": "no_accepted_items",
+    "error_count": 0,
+    "warning_count": 0,
+    "issues": [],
+    "checks": {
+      "accepted_state_count": 0,
+      "accepted_region_count": 0,
+      "accepted_action_template_count": 0,
+      "accepted_transition_count": 0
+    },
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "ready_for_runtime_pathgraph_promotion": false
+  },
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "ready_for_runtime_pathgraph_promotion": false,
+  "final_submit_forbidden": true,
+  "real_action_requires_gate": true,
+  "authorization_scope": "display_and_review_only",
+  "interpretation": "accepted checklist items exported as a reviewable assisted-template asset candidate; this does not authorize Execute, clicks, form filling, submit, or Runtime PathGraph promotion"
+}

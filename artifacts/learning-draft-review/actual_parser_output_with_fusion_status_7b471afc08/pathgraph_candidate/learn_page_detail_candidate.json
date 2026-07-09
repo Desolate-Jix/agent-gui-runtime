@@ -1,0 +1,1199 @@
+{
+  "contract_version": "learn_page_detail_candidate_v1",
+  "source_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_7b471afc08/pathgraph_candidate/pathgraph_candidate.json",
+  "precise_understanding_candidate_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_7b471afc08/pathgraph_candidate/learn_precise_understanding_candidate.json",
+  "screen_summary": "Auto-generated page detail candidate from Learn Mode full-screen understanding and calibration evidence.",
+  "layout_mode": "spatial_bbox_order",
+  "readiness_status": "needs_pending_calibration",
+  "screenshot_path": "artifacts\\screenshots\\jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+  "full_screen_understanding_overlay_path": "logs/benchmarks/learn_full_screen_understanding_backlog_triage_preview_20260706/full_screen_understanding_overlay.png",
+  "compiled_overlay_path": "logs/benchmarks/learn_locator_card_execute_calibration_seek_full_20260705/numbered_region_calibration_overlay.png",
+  "summary": {
+    "region_count": 10,
+    "section_count": 4,
+    "possible_operation_count": 10,
+    "pending_calibration_count": 6,
+    "review_blocked_count": 2,
+    "pathgraph_candidate_review_ready_count": 0,
+    "runtime_pathgraph_promotion": false,
+    "display_only": true,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false
+  },
+  "layout": {
+    "bounds": {
+      "x": 656,
+      "y": 186,
+      "w": 1264,
+      "h": 1158
+    },
+    "sections": [
+      {
+        "section_id": "top_search_and_filters",
+        "label": "Top Search And Filters",
+        "bbox": {
+          "x": 656,
+          "y": 186,
+          "w": 840,
+          "h": 108
+        },
+        "region_count": 2,
+        "region_numbers": [
+          1,
+          9
+        ],
+        "possible_operations": [
+          "fill_field",
+          "open_filter"
+        ],
+        "operation_summary": {
+          "kind_counts": {
+            "fill_field": 1,
+            "open_filter": 1
+          },
+          "readiness_counts": {
+            "blocked_pending_calibration": 2
+          }
+        },
+        "operation_links": [
+          {
+            "region_no": 1,
+            "region_id": "learn_region_1",
+            "label": "Job search bar",
+            "operation_kind": "fill_field",
+            "operation_label": "Type or edit search/filter text",
+            "readiness": "blocked_pending_calibration",
+            "candidate_point": {
+              "x": 813,
+              "y": 189
+            },
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 9,
+            "region_id": "learn_region_9",
+            "label": "Job filters",
+            "operation_kind": "open_filter",
+            "operation_label": "Open or change filter",
+            "readiness": "blocked_pending_calibration",
+            "candidate_point": {
+              "x": 942,
+              "y": 272
+            },
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "regions": [
+          {
+            "region_no": 1,
+            "region_id": "learn_region_1",
+            "source_item_id": "c1",
+            "label": "Job search bar",
+            "role": "input",
+            "bbox": {
+              "x": 656,
+              "y": 186,
+              "w": 840,
+              "h": 42
+            },
+            "candidate_point": {
+              "x": 813,
+              "y": 189
+            },
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              186,
+              656
+            ],
+            "description": "Job search bar · role=input · operation=fill_field · readiness=blocked_pending_calibration",
+            "possible_operation": {
+              "kind": "fill_field",
+              "label": "Type or edit search/filter text",
+              "readiness": "blocked_pending_calibration",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "pending_execute_dry_run_calibration",
+            "pathgraph_candidate_review_state": "blocked_pending_execute_dry_run_calibration",
+            "required_next_step": "run_execute_dry_run_calibration_for_numbered_region",
+            "evidence": {
+              "point_quality": "vista_point_inside_seed_bbox",
+              "gate_safety": "passed_allowed_dry_run",
+              "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260705-152708-398565__execute-mode-plan-preview__seek.json",
+              "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260705-152708-340564__execute-mode-recognition-plan__seek.json",
+              "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\20260705-152708-340564-execute-mode-recognition-plan-seek__recognition-plan-overlay__20260705-152708-343565.png"
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 9,
+            "region_id": "learn_region_9",
+            "source_item_id": "c10",
+            "label": "Job filters",
+            "role": "menu_item",
+            "bbox": {
+              "x": 656,
+              "y": 252,
+              "w": 572,
+              "h": 42
+            },
+            "candidate_point": {
+              "x": 942,
+              "y": 272
+            },
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              252,
+              656
+            ],
+            "description": "Job filters · role=menu_item · operation=open_filter · readiness=blocked_pending_calibration",
+            "possible_operation": {
+              "kind": "open_filter",
+              "label": "Open or change filter",
+              "readiness": "blocked_pending_calibration",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "pending_execute_dry_run_calibration",
+            "pathgraph_candidate_review_state": "blocked_pending_execute_dry_run_calibration",
+            "required_next_step": "run_execute_dry_run_calibration_for_numbered_region",
+            "evidence": {
+              "point_quality": "vista_point_inside_seed_bbox",
+              "gate_safety": "passed_allowed_dry_run",
+              "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260705-152715-201436__execute-mode-plan-preview__seek.json",
+              "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260705-152715-135437__execute-mode-recognition-plan__seek.json",
+              "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\20260705-152715-135437-execute-mode-recognition-plan-seek__recognition-plan-overlay__20260705-152715-138437.png"
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "section_id": "left_results_list",
+        "label": "Left Results List",
+        "bbox": {
+          "x": 656,
+          "y": 336,
+          "w": 470,
+          "h": 1008
+        },
+        "region_count": 4,
+        "region_numbers": [
+          10,
+          4,
+          5,
+          6
+        ],
+        "possible_operations": [
+          "open_detail",
+          "read_only",
+          "submit_search"
+        ],
+        "operation_summary": {
+          "kind_counts": {
+            "open_detail": 2,
+            "read_only": 1,
+            "submit_search": 1
+          },
+          "readiness_counts": {
+            "blocked_manual_review": 1,
+            "blocked_pending_calibration": 1,
+            "review_required": 2
+          }
+        },
+        "operation_links": [
+          {
+            "region_no": 10,
+            "region_id": "learn_region_10",
+            "label": "Job count indicator",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "blocked_manual_review",
+            "candidate_point": {
+              "x": 654,
+              "y": 365
+            },
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 4,
+            "region_id": "learn_region_4",
+            "label": "Job listing card",
+            "operation_kind": "open_detail",
+            "operation_label": "Open job detail",
+            "readiness": "review_required",
+            "candidate_point": {
+              "x": 721,
+              "y": 580
+            },
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 5,
+            "region_id": "learn_region_5",
+            "label": "Job listing card",
+            "operation_kind": "open_detail",
+            "operation_label": "Open job detail",
+            "readiness": "review_required",
+            "candidate_point": {
+              "x": 735,
+              "y": 961
+            },
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 6,
+            "region_id": "learn_region_6",
+            "label": "Save search button",
+            "operation_kind": "submit_search",
+            "operation_label": "Run search",
+            "readiness": "blocked_pending_calibration",
+            "candidate_point": {
+              "x": 825,
+              "y": 1323
+            },
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "regions": [
+          {
+            "region_no": 10,
+            "region_id": "learn_region_10",
+            "source_item_id": "c11",
+            "label": "Job count indicator",
+            "role": "other",
+            "bbox": {
+              "x": 656,
+              "y": 336,
+              "w": 112,
+              "h": 42
+            },
+            "candidate_point": {
+              "x": 654,
+              "y": 365
+            },
+            "layout_zone": "left_results_list",
+            "visual_order_key": [
+              336,
+              656
+            ],
+            "description": "Job count indicator · role=other · operation=read_only · readiness=blocked_manual_review",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "blocked_manual_review",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "review_before_calibration",
+            "pathgraph_candidate_review_state": "blocked_manual_review_before_calibration",
+            "required_next_step": "human_review_before_execute_dry_run_calibration",
+            "evidence": {
+              "point_quality": "vista_point_inside_seed_bbox",
+              "gate_safety": "passed_rejected",
+              "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260705-152715-969188__execute-mode-plan-preview__seek.json",
+              "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260705-152715-902619__execute-mode-recognition-plan__seek.json",
+              "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\20260705-152715-902619-execute-mode-recognition-plan-seek__recognition-plan-overlay__20260705-152715-905619.png"
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 4,
+            "region_id": "learn_region_4",
+            "source_item_id": "c4",
+            "label": "Job listing card",
+            "role": "card",
+            "bbox": {
+              "x": 656,
+              "y": 518,
+              "w": 470,
+              "h": 378
+            },
+            "candidate_point": {
+              "x": 721,
+              "y": 580
+            },
+            "layout_zone": "left_results_list",
+            "visual_order_key": [
+              518,
+              656
+            ],
+            "description": "Job listing card · role=card · operation=open_detail · readiness=review_required",
+            "possible_operation": {
+              "kind": "open_detail",
+              "label": "Open job detail",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "calibrated_safe_intercept_review_required",
+            "pathgraph_candidate_review_state": "blocked:semantic_only_requires_cross_evidence_or_human_review",
+            "required_next_step": "resolve_blocker_before_pathgraph_review",
+            "evidence": {
+              "point_quality": "vista_point_inside_seed_bbox",
+              "gate_safety": "passed_rejected",
+              "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260705-152711-060116__execute-mode-plan-preview__seek.json",
+              "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260705-152710-992883__execute-mode-recognition-plan__seek.json",
+              "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\20260705-152710-992883-execute-mode-recognition-plan-seek__recognition-plan-overlay__20260705-152710-995882.png"
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 5,
+            "region_id": "learn_region_5",
+            "source_item_id": "c5",
+            "label": "Job listing card",
+            "role": "card",
+            "bbox": {
+              "x": 656,
+              "y": 896,
+              "w": 470,
+              "h": 238
+            },
+            "candidate_point": {
+              "x": 735,
+              "y": 961
+            },
+            "layout_zone": "left_results_list",
+            "visual_order_key": [
+              896,
+              656
+            ],
+            "description": "Job listing card · role=card · operation=open_detail · readiness=review_required",
+            "possible_operation": {
+              "kind": "open_detail",
+              "label": "Open job detail",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "calibrated_safe_intercept_review_required",
+            "pathgraph_candidate_review_state": "blocked:semantic_only_requires_cross_evidence_or_human_review",
+            "required_next_step": "resolve_blocker_before_pathgraph_review",
+            "evidence": {
+              "point_quality": "vista_point_inside_seed_bbox",
+              "gate_safety": "passed_rejected",
+              "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260705-152711-876925__execute-mode-plan-preview__seek.json",
+              "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260705-152711-806844__execute-mode-recognition-plan__seek.json",
+              "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\20260705-152711-806844-execute-mode-recognition-plan-seek__recognition-plan-overlay__20260705-152711-809844.png"
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 6,
+            "region_id": "learn_region_6",
+            "source_item_id": "c7",
+            "label": "Save search button",
+            "role": "button",
+            "bbox": {
+              "x": 768,
+              "y": 1302,
+              "w": 204,
+              "h": 42
+            },
+            "candidate_point": {
+              "x": 825,
+              "y": 1323
+            },
+            "layout_zone": "left_results_list",
+            "visual_order_key": [
+              1302,
+              768
+            ],
+            "description": "Save search button · role=button · operation=submit_search · readiness=blocked_pending_calibration",
+            "possible_operation": {
+              "kind": "submit_search",
+              "label": "Run search",
+              "readiness": "blocked_pending_calibration",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "pending_execute_dry_run_calibration",
+            "pathgraph_candidate_review_state": "blocked_pending_execute_dry_run_calibration",
+            "required_next_step": "run_execute_dry_run_calibration_for_numbered_region",
+            "evidence": {
+              "point_quality": "vista_point_inside_seed_bbox",
+              "gate_safety": "passed_allowed_dry_run",
+              "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260705-152712-641011__execute-mode-plan-preview__seek.json",
+              "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260705-152712-581011__execute-mode-recognition-plan__seek.json",
+              "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\20260705-152712-581011-execute-mode-recognition-plan-seek__recognition-plan-overlay__20260705-152712-584011.png"
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "section_id": "right_detail_panel",
+        "label": "Right Detail Panel",
+        "bbox": {
+          "x": 1178,
+          "y": 186,
+          "w": 742,
+          "h": 710
+        },
+        "region_count": 3,
+        "region_numbers": [
+          2,
+          3,
+          7
+        ],
+        "possible_operations": [
+          "fill_field",
+          "read_only",
+          "submit_search"
+        ],
+        "operation_summary": {
+          "kind_counts": {
+            "fill_field": 1,
+            "read_only": 1,
+            "submit_search": 1
+          },
+          "readiness_counts": {
+            "blocked_manual_review": 1,
+            "blocked_pending_calibration": 2
+          }
+        },
+        "operation_links": [
+          {
+            "region_no": 2,
+            "region_id": "learn_region_2",
+            "label": "Location filter",
+            "operation_kind": "fill_field",
+            "operation_label": "Type or edit search/filter text",
+            "readiness": "blocked_pending_calibration",
+            "candidate_point": {
+              "x": 1644,
+              "y": 207
+            },
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 3,
+            "region_id": "learn_region_3",
+            "label": "Search button",
+            "operation_kind": "submit_search",
+            "operation_label": "Run search",
+            "readiness": "blocked_pending_calibration",
+            "candidate_point": {
+              "x": 1837,
+              "y": 203
+            },
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 7,
+            "region_id": "learn_region_7",
+            "label": "Job details placeholder",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "blocked_manual_review",
+            "candidate_point": {
+              "x": 1261,
+              "y": 452
+            },
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "regions": [
+          {
+            "region_no": 2,
+            "region_id": "learn_region_2",
+            "source_item_id": "c2",
+            "label": "Location filter",
+            "role": "input",
+            "bbox": {
+              "x": 1496,
+              "y": 186,
+              "w": 296,
+              "h": 42
+            },
+            "candidate_point": {
+              "x": 1644,
+              "y": 207
+            },
+            "layout_zone": "right_detail_panel",
+            "visual_order_key": [
+              186,
+              1496
+            ],
+            "description": "Location filter · role=input · operation=fill_field · readiness=blocked_pending_calibration",
+            "possible_operation": {
+              "kind": "fill_field",
+              "label": "Type or edit search/filter text",
+              "readiness": "blocked_pending_calibration",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "pending_execute_dry_run_calibration",
+            "pathgraph_candidate_review_state": "blocked_pending_execute_dry_run_calibration",
+            "required_next_step": "run_execute_dry_run_calibration_for_numbered_region",
+            "evidence": {
+              "point_quality": "vista_point_inside_seed_bbox",
+              "gate_safety": "passed_allowed_dry_run",
+              "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260705-152709-447172__execute-mode-plan-preview__seek.json",
+              "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260705-152709-389172__execute-mode-recognition-plan__seek.json",
+              "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\20260705-152709-389172-execute-mode-recognition-plan-seek__recognition-plan-overlay__20260705-152709-392172.png"
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 3,
+            "region_id": "learn_region_3",
+            "source_item_id": "c3",
+            "label": "Search button",
+            "role": "button",
+            "bbox": {
+              "x": 1792,
+              "y": 186,
+              "w": 128,
+              "h": 42
+            },
+            "candidate_point": {
+              "x": 1837,
+              "y": 203
+            },
+            "layout_zone": "right_detail_panel",
+            "visual_order_key": [
+              186,
+              1792
+            ],
+            "description": "Search button · role=button · operation=submit_search · readiness=blocked_pending_calibration",
+            "possible_operation": {
+              "kind": "submit_search",
+              "label": "Run search",
+              "readiness": "blocked_pending_calibration",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "pending_execute_dry_run_calibration",
+            "pathgraph_candidate_review_state": "blocked_pending_execute_dry_run_calibration",
+            "required_next_step": "run_execute_dry_run_calibration_for_numbered_region",
+            "evidence": {
+              "point_quality": "vista_point_inside_seed_bbox",
+              "gate_safety": "passed_allowed_dry_run",
+              "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260705-152710-213293__execute-mode-plan-preview__seek.json",
+              "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260705-152710-149294__execute-mode-recognition-plan__seek.json",
+              "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\20260705-152710-149294-execute-mode-recognition-plan-seek__recognition-plan-overlay__20260705-152710-152293.png"
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 7,
+            "region_id": "learn_region_7",
+            "source_item_id": "c8",
+            "label": "Job details placeholder",
+            "role": "other",
+            "bbox": {
+              "x": 1178,
+              "y": 336,
+              "w": 716,
+              "h": 560
+            },
+            "candidate_point": {
+              "x": 1261,
+              "y": 452
+            },
+            "layout_zone": "right_detail_panel",
+            "visual_order_key": [
+              336,
+              1178
+            ],
+            "description": "Job details placeholder · role=other · operation=read_only · readiness=blocked_manual_review",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "blocked_manual_review",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "review_before_calibration",
+            "pathgraph_candidate_review_state": "blocked_manual_review_before_calibration",
+            "required_next_step": "human_review_before_execute_dry_run_calibration",
+            "evidence": {
+              "point_quality": "vista_point_inside_seed_bbox",
+              "gate_safety": "passed_rejected",
+              "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260705-152713-443122__execute-mode-plan-preview__seek.json",
+              "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260705-152713-384122__execute-mode-recognition-plan__seek.json",
+              "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\20260705-152713-384122-execute-mode-recognition-plan-seek__recognition-plan-overlay__20260705-152713-387122.png"
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "section_id": "middle_controls",
+        "label": "Middle Controls",
+        "bbox": {
+          "x": 998,
+          "y": 434,
+          "w": 102,
+          "h": 42
+        },
+        "region_count": 1,
+        "region_numbers": [
+          8
+        ],
+        "possible_operations": [
+          "open_filter"
+        ],
+        "operation_summary": {
+          "kind_counts": {
+            "open_filter": 1
+          },
+          "readiness_counts": {
+            "blocked_pending_calibration": 1
+          }
+        },
+        "operation_links": [
+          {
+            "region_no": 8,
+            "region_id": "learn_region_8",
+            "label": "Filter toggle",
+            "operation_kind": "open_filter",
+            "operation_label": "Open or change filter",
+            "readiness": "blocked_pending_calibration",
+            "candidate_point": {
+              "x": 962,
+              "y": 373
+            },
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "regions": [
+          {
+            "region_no": 8,
+            "region_id": "learn_region_8",
+            "source_item_id": "c9",
+            "label": "Filter toggle",
+            "role": "toggle",
+            "bbox": {
+              "x": 998,
+              "y": 434,
+              "w": 102,
+              "h": 42
+            },
+            "candidate_point": {
+              "x": 962,
+              "y": 373
+            },
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              434,
+              998
+            ],
+            "description": "Filter toggle · role=toggle · operation=open_filter · readiness=blocked_pending_calibration",
+            "possible_operation": {
+              "kind": "open_filter",
+              "label": "Open or change filter",
+              "readiness": "blocked_pending_calibration",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "pending_execute_dry_run_calibration",
+            "pathgraph_candidate_review_state": "blocked_pending_execute_dry_run_calibration",
+            "required_next_step": "run_execute_dry_run_calibration_for_numbered_region",
+            "evidence": {
+              "point_quality": "vista_point_outside_seed_bbox",
+              "gate_safety": "passed_allowed_dry_run",
+              "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260705-152714-145243__execute-mode-plan-preview__seek.json",
+              "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260705-152714-081244__execute-mode-recognition-plan__seek.json",
+              "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\20260705-152714-081244-execute-mode-recognition-plan-seek__recognition-plan-overlay__20260705-152714-084243.png"
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      }
+    ],
+    "regions": [
+      {
+        "region_no": 1,
+        "region_id": "learn_region_1",
+        "source_item_id": "c1",
+        "label": "Job search bar",
+        "role": "input",
+        "bbox": {
+          "x": 656,
+          "y": 186,
+          "w": 840,
+          "h": 42
+        },
+        "candidate_point": {
+          "x": 813,
+          "y": 189
+        },
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          186,
+          656
+        ],
+        "description": "Job search bar · role=input · operation=fill_field · readiness=blocked_pending_calibration",
+        "possible_operation": {
+          "kind": "fill_field",
+          "label": "Type or edit search/filter text",
+          "readiness": "blocked_pending_calibration",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "pending_execute_dry_run_calibration",
+        "pathgraph_candidate_review_state": "blocked_pending_execute_dry_run_calibration",
+        "required_next_step": "run_execute_dry_run_calibration_for_numbered_region",
+        "evidence": {
+          "point_quality": "vista_point_inside_seed_bbox",
+          "gate_safety": "passed_allowed_dry_run",
+          "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260705-152708-398565__execute-mode-plan-preview__seek.json",
+          "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260705-152708-340564__execute-mode-recognition-plan__seek.json",
+          "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\20260705-152708-340564-execute-mode-recognition-plan-seek__recognition-plan-overlay__20260705-152708-343565.png"
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 2,
+        "region_id": "learn_region_2",
+        "source_item_id": "c2",
+        "label": "Location filter",
+        "role": "input",
+        "bbox": {
+          "x": 1496,
+          "y": 186,
+          "w": 296,
+          "h": 42
+        },
+        "candidate_point": {
+          "x": 1644,
+          "y": 207
+        },
+        "layout_zone": "right_detail_panel",
+        "visual_order_key": [
+          186,
+          1496
+        ],
+        "description": "Location filter · role=input · operation=fill_field · readiness=blocked_pending_calibration",
+        "possible_operation": {
+          "kind": "fill_field",
+          "label": "Type or edit search/filter text",
+          "readiness": "blocked_pending_calibration",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "pending_execute_dry_run_calibration",
+        "pathgraph_candidate_review_state": "blocked_pending_execute_dry_run_calibration",
+        "required_next_step": "run_execute_dry_run_calibration_for_numbered_region",
+        "evidence": {
+          "point_quality": "vista_point_inside_seed_bbox",
+          "gate_safety": "passed_allowed_dry_run",
+          "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260705-152709-447172__execute-mode-plan-preview__seek.json",
+          "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260705-152709-389172__execute-mode-recognition-plan__seek.json",
+          "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\20260705-152709-389172-execute-mode-recognition-plan-seek__recognition-plan-overlay__20260705-152709-392172.png"
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 3,
+        "region_id": "learn_region_3",
+        "source_item_id": "c3",
+        "label": "Search button",
+        "role": "button",
+        "bbox": {
+          "x": 1792,
+          "y": 186,
+          "w": 128,
+          "h": 42
+        },
+        "candidate_point": {
+          "x": 1837,
+          "y": 203
+        },
+        "layout_zone": "right_detail_panel",
+        "visual_order_key": [
+          186,
+          1792
+        ],
+        "description": "Search button · role=button · operation=submit_search · readiness=blocked_pending_calibration",
+        "possible_operation": {
+          "kind": "submit_search",
+          "label": "Run search",
+          "readiness": "blocked_pending_calibration",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "pending_execute_dry_run_calibration",
+        "pathgraph_candidate_review_state": "blocked_pending_execute_dry_run_calibration",
+        "required_next_step": "run_execute_dry_run_calibration_for_numbered_region",
+        "evidence": {
+          "point_quality": "vista_point_inside_seed_bbox",
+          "gate_safety": "passed_allowed_dry_run",
+          "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260705-152710-213293__execute-mode-plan-preview__seek.json",
+          "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260705-152710-149294__execute-mode-recognition-plan__seek.json",
+          "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\20260705-152710-149294-execute-mode-recognition-plan-seek__recognition-plan-overlay__20260705-152710-152293.png"
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 4,
+        "region_id": "learn_region_4",
+        "source_item_id": "c4",
+        "label": "Job listing card",
+        "role": "card",
+        "bbox": {
+          "x": 656,
+          "y": 518,
+          "w": 470,
+          "h": 378
+        },
+        "candidate_point": {
+          "x": 721,
+          "y": 580
+        },
+        "layout_zone": "left_results_list",
+        "visual_order_key": [
+          518,
+          656
+        ],
+        "description": "Job listing card · role=card · operation=open_detail · readiness=review_required",
+        "possible_operation": {
+          "kind": "open_detail",
+          "label": "Open job detail",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "calibrated_safe_intercept_review_required",
+        "pathgraph_candidate_review_state": "blocked:semantic_only_requires_cross_evidence_or_human_review",
+        "required_next_step": "resolve_blocker_before_pathgraph_review",
+        "evidence": {
+          "point_quality": "vista_point_inside_seed_bbox",
+          "gate_safety": "passed_rejected",
+          "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260705-152711-060116__execute-mode-plan-preview__seek.json",
+          "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260705-152710-992883__execute-mode-recognition-plan__seek.json",
+          "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\20260705-152710-992883-execute-mode-recognition-plan-seek__recognition-plan-overlay__20260705-152710-995882.png"
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 5,
+        "region_id": "learn_region_5",
+        "source_item_id": "c5",
+        "label": "Job listing card",
+        "role": "card",
+        "bbox": {
+          "x": 656,
+          "y": 896,
+          "w": 470,
+          "h": 238
+        },
+        "candidate_point": {
+          "x": 735,
+          "y": 961
+        },
+        "layout_zone": "left_results_list",
+        "visual_order_key": [
+          896,
+          656
+        ],
+        "description": "Job listing card · role=card · operation=open_detail · readiness=review_required",
+        "possible_operation": {
+          "kind": "open_detail",
+          "label": "Open job detail",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "calibrated_safe_intercept_review_required",
+        "pathgraph_candidate_review_state": "blocked:semantic_only_requires_cross_evidence_or_human_review",
+        "required_next_step": "resolve_blocker_before_pathgraph_review",
+        "evidence": {
+          "point_quality": "vista_point_inside_seed_bbox",
+          "gate_safety": "passed_rejected",
+          "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260705-152711-876925__execute-mode-plan-preview__seek.json",
+          "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260705-152711-806844__execute-mode-recognition-plan__seek.json",
+          "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\20260705-152711-806844-execute-mode-recognition-plan-seek__recognition-plan-overlay__20260705-152711-809844.png"
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 6,
+        "region_id": "learn_region_6",
+        "source_item_id": "c7",
+        "label": "Save search button",
+        "role": "button",
+        "bbox": {
+          "x": 768,
+          "y": 1302,
+          "w": 204,
+          "h": 42
+        },
+        "candidate_point": {
+          "x": 825,
+          "y": 1323
+        },
+        "layout_zone": "left_results_list",
+        "visual_order_key": [
+          1302,
+          768
+        ],
+        "description": "Save search button · role=button · operation=submit_search · readiness=blocked_pending_calibration",
+        "possible_operation": {
+          "kind": "submit_search",
+          "label": "Run search",
+          "readiness": "blocked_pending_calibration",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "pending_execute_dry_run_calibration",
+        "pathgraph_candidate_review_state": "blocked_pending_execute_dry_run_calibration",
+        "required_next_step": "run_execute_dry_run_calibration_for_numbered_region",
+        "evidence": {
+          "point_quality": "vista_point_inside_seed_bbox",
+          "gate_safety": "passed_allowed_dry_run",
+          "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260705-152712-641011__execute-mode-plan-preview__seek.json",
+          "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260705-152712-581011__execute-mode-recognition-plan__seek.json",
+          "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\20260705-152712-581011-execute-mode-recognition-plan-seek__recognition-plan-overlay__20260705-152712-584011.png"
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 7,
+        "region_id": "learn_region_7",
+        "source_item_id": "c8",
+        "label": "Job details placeholder",
+        "role": "other",
+        "bbox": {
+          "x": 1178,
+          "y": 336,
+          "w": 716,
+          "h": 560
+        },
+        "candidate_point": {
+          "x": 1261,
+          "y": 452
+        },
+        "layout_zone": "right_detail_panel",
+        "visual_order_key": [
+          336,
+          1178
+        ],
+        "description": "Job details placeholder · role=other · operation=read_only · readiness=blocked_manual_review",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "blocked_manual_review",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "review_before_calibration",
+        "pathgraph_candidate_review_state": "blocked_manual_review_before_calibration",
+        "required_next_step": "human_review_before_execute_dry_run_calibration",
+        "evidence": {
+          "point_quality": "vista_point_inside_seed_bbox",
+          "gate_safety": "passed_rejected",
+          "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260705-152713-443122__execute-mode-plan-preview__seek.json",
+          "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260705-152713-384122__execute-mode-recognition-plan__seek.json",
+          "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\20260705-152713-384122-execute-mode-recognition-plan-seek__recognition-plan-overlay__20260705-152713-387122.png"
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 8,
+        "region_id": "learn_region_8",
+        "source_item_id": "c9",
+        "label": "Filter toggle",
+        "role": "toggle",
+        "bbox": {
+          "x": 998,
+          "y": 434,
+          "w": 102,
+          "h": 42
+        },
+        "candidate_point": {
+          "x": 962,
+          "y": 373
+        },
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          434,
+          998
+        ],
+        "description": "Filter toggle · role=toggle · operation=open_filter · readiness=blocked_pending_calibration",
+        "possible_operation": {
+          "kind": "open_filter",
+          "label": "Open or change filter",
+          "readiness": "blocked_pending_calibration",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "pending_execute_dry_run_calibration",
+        "pathgraph_candidate_review_state": "blocked_pending_execute_dry_run_calibration",
+        "required_next_step": "run_execute_dry_run_calibration_for_numbered_region",
+        "evidence": {
+          "point_quality": "vista_point_outside_seed_bbox",
+          "gate_safety": "passed_allowed_dry_run",
+          "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260705-152714-145243__execute-mode-plan-preview__seek.json",
+          "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260705-152714-081244__execute-mode-recognition-plan__seek.json",
+          "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\20260705-152714-081244-execute-mode-recognition-plan-seek__recognition-plan-overlay__20260705-152714-084243.png"
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 9,
+        "region_id": "learn_region_9",
+        "source_item_id": "c10",
+        "label": "Job filters",
+        "role": "menu_item",
+        "bbox": {
+          "x": 656,
+          "y": 252,
+          "w": 572,
+          "h": 42
+        },
+        "candidate_point": {
+          "x": 942,
+          "y": 272
+        },
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          252,
+          656
+        ],
+        "description": "Job filters · role=menu_item · operation=open_filter · readiness=blocked_pending_calibration",
+        "possible_operation": {
+          "kind": "open_filter",
+          "label": "Open or change filter",
+          "readiness": "blocked_pending_calibration",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "pending_execute_dry_run_calibration",
+        "pathgraph_candidate_review_state": "blocked_pending_execute_dry_run_calibration",
+        "required_next_step": "run_execute_dry_run_calibration_for_numbered_region",
+        "evidence": {
+          "point_quality": "vista_point_inside_seed_bbox",
+          "gate_safety": "passed_allowed_dry_run",
+          "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260705-152715-201436__execute-mode-plan-preview__seek.json",
+          "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260705-152715-135437__execute-mode-recognition-plan__seek.json",
+          "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\20260705-152715-135437-execute-mode-recognition-plan-seek__recognition-plan-overlay__20260705-152715-138437.png"
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 10,
+        "region_id": "learn_region_10",
+        "source_item_id": "c11",
+        "label": "Job count indicator",
+        "role": "other",
+        "bbox": {
+          "x": 656,
+          "y": 336,
+          "w": 112,
+          "h": 42
+        },
+        "candidate_point": {
+          "x": 654,
+          "y": 365
+        },
+        "layout_zone": "left_results_list",
+        "visual_order_key": [
+          336,
+          656
+        ],
+        "description": "Job count indicator · role=other · operation=read_only · readiness=blocked_manual_review",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "blocked_manual_review",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "review_before_calibration",
+        "pathgraph_candidate_review_state": "blocked_manual_review_before_calibration",
+        "required_next_step": "human_review_before_execute_dry_run_calibration",
+        "evidence": {
+          "point_quality": "vista_point_inside_seed_bbox",
+          "gate_safety": "passed_rejected",
+          "trace_path": "D:\\agent-gui-runtime\\logs\\traces\\actions\\20260705-152715-969188__execute-mode-plan-preview__seek.json",
+          "recognition_plan_trace_path": "D:\\agent-gui-runtime\\logs\\traces\\vision\\20260705-152715-902619__execute-mode-recognition-plan__seek.json",
+          "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\20260705-152715-902619-execute-mode-recognition-plan-seek__recognition-plan-overlay__20260705-152715-905619.png"
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      }
+    ]
+  },
+  "safety": {
+    "display_only": true,
+    "model_started": false,
+    "live_clicks": 0,
+    "live_fills": 0,
+    "live_submits": 0,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false,
+    "runtime_pathgraph_promotion": false
+  },
+  "display_only": true,
+  "execute_binding_enabled": false,
+  "artifact_is_authorization": false,
+  "not_accuracy": true,
+  "not_e2e_success": true,
+  "interpretation": "Template-like page detail candidate generated from model-produced learning artifacts and existing calibration evidence. It is arranged by source bbox layout for demo/review only; it does not start models, click, fill, submit, authorize Execute, or promote Runtime PathGraph.",
+  "report_path": "D:\\agent-gui-runtime\\artifacts\\learning-draft-review\\actual_parser_output_with_fusion_status_7b471afc08\\pathgraph_candidate\\learn_page_detail_candidate.json"
+}

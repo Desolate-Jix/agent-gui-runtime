@@ -487,6 +487,36 @@ def test_apply_flow_decision_defers_third_party_ats() -> None:
     assert decision["safety_counters"]["forms_filled"] == 0
 
 
+def test_workday_create_account_privacy_step_requires_user_approval() -> None:
+    state = assess_seek_application_flow_state(
+        {
+            "trace_path": "logs/traces/vision/workday-create-account.json",
+            "screen_inventory": {
+                "contract_version": "screen_inventory_v1",
+                "available_actions": [{"label": "Create Account"}],
+                "page_elements": [
+                    {"text": "Create Account"},
+                    {"text": "Email Address"},
+                    {"text": "Password Requirements"},
+                    {"text": "Verify New Password"},
+                    {"text": "I consent to Heartland's Privacy Statement"},
+                ],
+                "cards": [],
+            },
+        }
+    )
+
+    decision = build_seek_apply_flow_decision(state)
+
+    assert state["state_type"] == "account_or_privacy_approval_required"
+    assert state["stop_reason"] == "account_or_privacy_approval_required"
+    assert "account_or_privacy_approval_required" in state["risk_flags"]
+    assert decision["state_type"] == "account_or_privacy_approval_required_blocked"
+    assert decision["reason"] == "account_or_privacy_approval_required"
+    assert decision["blocked_downstream"]["safe_fill"] is True
+    assert "user_account_privacy_approval" in decision["allowed_next_steps"]
+
+
 def test_apply_flow_decision_allows_seek_internal_read_only_plan() -> None:
     state = assess_seek_application_flow_state(
         {

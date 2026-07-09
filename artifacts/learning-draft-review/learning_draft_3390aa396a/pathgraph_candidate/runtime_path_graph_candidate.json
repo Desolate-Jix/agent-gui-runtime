@@ -1,0 +1,122 @@
+{
+  "contract_version": "runtime_path_graph_v1",
+  "graph_id": "reviewed_learning_app:model_loaded:d92fa385ec73",
+  "app_id": "reviewed_learning_app",
+  "page_type": "python_homepage",
+  "coordinate_policy": {
+    "coordinate_space": "window_screenshot",
+    "requires_current_capture": true,
+    "source_bbox_is_learning_evidence_only": true
+  },
+  "loader": {
+    "contract_version": "model_learning_artifact_loader_v1",
+    "source_trial_path": "artifacts/learning-draft-review/learning_draft_3390aa396a/reviewed_template_candidate.json",
+    "source_sha256": "d92fa385ec73c8e0cab24b31ea4f8e53969d147cca26ebee716fb89a2cd6168e",
+    "source_attempt_index": null,
+    "source_artifact_readonly": true,
+    "posthoc_optimization_allowed": false,
+    "candidate_mode": true
+  },
+  "source": {
+    "trial_path": "artifacts/learning-draft-review/learning_draft_3390aa396a/reviewed_template_candidate.json",
+    "reviewed_candidate_path": "artifacts/learning-draft-review/learning_draft_3390aa396a/reviewed_template_candidate.json",
+    "source_trial_path": "artifacts/learn-recognition-benchmark/pathgraph_candidate_validation_ok/learning_draft.json",
+    "sha256": "d92fa385ec73c8e0cab24b31ea4f8e53969d147cca26ebee716fb89a2cd6168e",
+    "attempt_index": null,
+    "readonly": true,
+    "posthoc_optimization_allowed": false,
+    "candidate_mode": true
+  },
+  "states": [
+    {
+      "state_id": "python_homepage",
+      "label": "python_homepage",
+      "page_type": "python_homepage",
+      "region_refs": [
+        "region_1"
+      ]
+    }
+  ],
+  "regions": [
+    {
+      "region_id": "region_1",
+      "label": "Search",
+      "role": "button",
+      "bbox": {
+        "x": 980,
+        "y": 140,
+        "w": 92,
+        "h": 36
+      },
+      "source_item_id": "uia_control_1",
+      "region_type": "button",
+      "source_artifact_readonly": true
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "model:transition:action_1",
+      "from_state_id": "python_homepage",
+      "to_state_id": "python_homepage",
+      "action_template_id": "action_1",
+      "default_available": true,
+      "verification_refs": []
+    }
+  ],
+  "action_templates": [
+    {
+      "action_template_id": "action_1",
+      "label": "Search",
+      "target_entity": "region_1",
+      "semantic_action": "activate",
+      "source_item_id": "uia_control_1",
+      "bbox": {
+        "x": 980,
+        "y": 140,
+        "w": 92,
+        "h": 36
+      },
+      "click_point": {
+        "x": 1024,
+        "y": 158
+      },
+      "action_type": "input",
+      "low_level_action_type": "input",
+      "requires_gate": true,
+      "learned_skill_ref": "skill.input_text_into_field",
+      "artifact_is_authorization": false,
+      "input_target": {
+        "region_id": "region_1",
+        "role": "button",
+        "requires_current_validation": true
+      },
+      "input_policy": {
+        "requires_agent_text": true,
+        "clear_existing": true,
+        "submit_allowed": false,
+        "text_is_not_stored_by_menu": true
+      }
+    }
+  ],
+  "artifact_is_authorization": false,
+  "safety": {
+    "final_submit_allowed": false,
+    "final_submit_forbidden": true,
+    "real_action_requires_gate": true,
+    "observation_source_only": true,
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "candidate_only": true
+  },
+  "summary": {
+    "state_count": 1,
+    "region_count": 1,
+    "transition_count": 1,
+    "action_template_count": 1
+  },
+  "candidate_mode": true,
+  "candidate_contract_version": "runtime_path_graph_candidate_v1",
+  "execute_binding_enabled": false,
+  "final_submit_forbidden": true,
+  "real_action_requires_gate": true
+}

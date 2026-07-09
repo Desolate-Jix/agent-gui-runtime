@@ -1,0 +1,95 @@
+{
+  "contract_version": "runtime_path_graph_v1",
+  "graph_id": "model_learning_benchmark:model_loaded:6b060a91dd3b",
+  "app_id": "model_learning_benchmark",
+  "page_type": "search_page",
+  "coordinate_policy": {
+    "coordinate_space": "window_screenshot",
+    "requires_current_capture": true,
+    "source_bbox_is_learning_evidence_only": true
+  },
+  "loader": {
+    "contract_version": "model_learning_artifact_loader_v1",
+    "source_trial_path": "logs/benchmarks/model_learning_patch_retry_checkpoint4_7/cases/checkpoint4_actual_recorded_seek_search_input_similarity/loader_trials/checkpoint4_actual_recorded_seek_search_input_similarity/trial_result.json",
+    "source_sha256": "6b060a91dd3be093d9b910995d741f79794e54ac565db6092afcf202bedfd6b2",
+    "source_attempt_index": 0,
+    "source_artifact_readonly": true,
+    "posthoc_optimization_allowed": false
+  },
+  "source": {
+    "trial_path": "logs/benchmarks/model_learning_patch_retry_checkpoint4_7/cases/checkpoint4_actual_recorded_seek_search_input_similarity/loader_trials/checkpoint4_actual_recorded_seek_search_input_similarity/trial_result.json",
+    "sha256": "6b060a91dd3be093d9b910995d741f79794e54ac565db6092afcf202bedfd6b2",
+    "attempt_index": 0,
+    "readonly": true,
+    "posthoc_optimization_allowed": false,
+    "loaded_at": "2026-07-02T23:06:09.835843"
+  },
+  "states": [
+    {
+      "state_id": "s1",
+      "label": "job_search_home",
+      "page_type": "search_page",
+      "region_refs": [
+        "r1"
+      ]
+    }
+  ],
+  "regions": [
+    {
+      "region_id": "r1",
+      "label": "search_input_field",
+      "role": "text_input",
+      "region_type": "text_input",
+      "source_artifact_readonly": true
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "model:transition:a1",
+      "from_state_id": "s1",
+      "to_state_id": "s1",
+      "action_template_id": "a1",
+      "default_available": true,
+      "verification_refs": []
+    }
+  ],
+  "action_templates": [
+    {
+      "action_template_id": "a1",
+      "label": "type_job_query",
+      "semantic_action": "type_text",
+      "risk_level": "low",
+      "requires_gate": true,
+      "expected_effect": "populate search field with job query",
+      "action_type": "input",
+      "low_level_action_type": "input",
+      "target_entity": "r1",
+      "learned_skill_ref": "skill.input_text_into_field",
+      "artifact_is_authorization": false,
+      "input_target": {
+        "region_id": "r1",
+        "role": "text_input",
+        "requires_current_validation": true
+      },
+      "input_policy": {
+        "requires_agent_text": true,
+        "clear_existing": true,
+        "submit_allowed": false,
+        "text_is_not_stored_by_menu": true
+      }
+    }
+  ],
+  "artifact_is_authorization": false,
+  "safety": {
+    "final_submit_allowed": false,
+    "final_submit_forbidden": true,
+    "real_action_requires_gate": true,
+    "observation_source_only": true
+  },
+  "summary": {
+    "state_count": 1,
+    "region_count": 1,
+    "transition_count": 1,
+    "action_template_count": 1
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "contract_version": "learn_fusion_demo_readiness_v1",
+  "demo_readiness_status": "ready_for_preflight_demo",
+  "raw_recommended_source_path": "logs/benchmarks/learn_pathgraph_readiness_with_handoff_20260706/actual_parser_output_with_fusion_status.json",
+  "recommended_load_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_7b471afc08/pathgraph_candidate/pathgraph_candidate.json",
+  "candidate_validation_status": "blocked_pending_calibration",
+  "candidate_readiness_status": "blocked_from_promotion_review",
+  "preflight_status": "ready_for_explicit_model_start",
+  "may_start_model_after_user_approval": true,
+  "may_run_calibration_batch_now": false,
+  "ready_region_numbers": [
+    1,
+    2,
+    3,
+    6,
+    8,
+    9
+  ],
+  "review_blocked_region_numbers": [
+    7,
+    10
+  ],
+  "safety": {
+    "model_started": false,
+    "live_clicks": 0,
+    "live_fills": 0,
+    "live_submits": 0,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false
+  },
+  "blockers": [],
+  "interpretation": "Offline demo readiness report for the current learn-fusion PathGraph candidate. Ready means the UI can show the candidate blocker and model-start preflight context; it does not start models, run calibration, click, fill, submit, refresh, merge, or promote Runtime PathGraph.",
+  "report_path": "D:\\agent-gui-runtime\\artifacts\\learning-draft-review\\actual_parser_output_with_fusion_status_7b471afc08\\pathgraph_candidate\\learn_fusion_demo_readiness_report.json"
+}

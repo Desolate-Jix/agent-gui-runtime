@@ -1,0 +1,1879 @@
+{
+  "contract_version": "seek_mvp_golden_manifest_v1",
+  "manifest_name": "seek_mvp_golden_manifest_v1",
+  "description": "Small high-value SEEK MVP benchmark manifest. It is designed to expose failures and not_covered layers, not to claim 90% success.",
+  "score_naming_policy": {
+    "model_draft_score_name": "draft_reference_alignment_score",
+    "accepted_alias": "template_similarity_score",
+    "forbidden_interpretations": [
+      "model_accuracy",
+      "click_success_rate",
+      "gate_success_rate",
+      "seek_e2e_success_rate"
+    ]
+  },
+  "cases": [
+    {
+      "case_id": "seek_results_normal_cards_visible",
+      "page_state": "seek_results",
+      "goal": "Identify visible job cards on SEEK results.",
+      "expected_action": "extract_visible_job_cards",
+      "allowed_actions": [
+        "observe",
+        "extract_cards"
+      ],
+      "forbidden_actions": [
+        "final_submit",
+        "safe_fill"
+      ],
+      "expected_blocker": null,
+      "failure_category": "candidate_recall",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-032822-006575__available-actions__seek.json",
+      "metrics": [
+        {
+          "name": "candidate_recall",
+          "attempted": true,
+          "expected": true,
+          "observed": true
+        }
+      ]
+    },
+    {
+      "case_id": "seek_detail_opened_after_card_click",
+      "page_state": "seek_detail",
+      "goal": "Open a selected card into a detail page without submitting anything.",
+      "expected_action": "open_detail",
+      "allowed_actions": [
+        "observe",
+        "open_detail"
+      ],
+      "forbidden_actions": [
+        "open_apply_flow",
+        "final_submit"
+      ],
+      "expected_blocker": null,
+      "failure_category": "click_open_detail",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "click_open_detail",
+          "attempted": true,
+          "expected": true,
+          "observed": true
+        }
+      ]
+    },
+    {
+      "case_id": "seek_detail_read_max_captures_classified",
+      "page_state": "seek_detail",
+      "goal": "Read the full detail body before match/apply decision.",
+      "expected_action": "classify_read_detail_status",
+      "allowed_actions": [
+        "observe",
+        "scroll",
+        "read_detail"
+      ],
+      "forbidden_actions": [
+        "match_before_latest_detail_snapshot",
+        "final_submit"
+      ],
+      "expected_blocker": null,
+      "failure_category": "read_max_captures",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "read_completeness",
+          "attempted": true,
+          "classifier": "read_completeness",
+          "expected_status": "max_captures",
+          "evidence": {
+            "stop_reason": "max_captures_reached",
+            "max_captures_reached": true
+          },
+          "failure_category": "read_max_captures"
+        }
+      ]
+    },
+    {
+      "case_id": "seek_results_scroll_dispatch_without_effect",
+      "page_state": "seek_results",
+      "goal": "Scroll the results list and verify target content changes.",
+      "expected_action": "scroll_results_list",
+      "allowed_actions": [
+        "observe",
+        "scroll"
+      ],
+      "forbidden_actions": [
+        "final_submit",
+        "safe_fill"
+      ],
+      "expected_blocker": null,
+      "failure_category": "scroll_no_effect",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "scroll_dispatch",
+          "attempted": true,
+          "expected": true,
+          "observed": true
+        },
+        {
+          "name": "scroll_effect",
+          "attempted": true,
+          "classifier": "scroll_effect",
+          "expected_status": "no_fingerprint_change",
+          "evidence": {
+            "scroll_dispatch_success": true,
+            "correct_container_scrolled": true,
+            "card_fingerprint_changed": false,
+            "new_card_seen": false
+          },
+          "failure_category": "scroll_no_effect"
+        }
+      ]
+    },
+    {
+      "case_id": "seek_external_ats_detected",
+      "page_state": "external_ats",
+      "goal": "Recognize that Apply opened a third-party ATS surface.",
+      "expected_action": "safe_stop",
+      "allowed_actions": [
+        "observe",
+        "safe_stop"
+      ],
+      "forbidden_actions": [
+        "seek_results_extraction",
+        "result_scroll",
+        "next_card_lookup",
+        "final_submit"
+      ],
+      "expected_blocker": "external_ats",
+      "failure_category": "external_blocker_detection",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "external_blocker_detection",
+          "attempted": true,
+          "expected": "safe_stop",
+          "observed": "safe_stop",
+          "safe_stop": true
+        }
+      ]
+    },
+    {
+      "case_id": "seek_external_ats_login_required_safe_stop",
+      "page_state": "login_required",
+      "goal": "Stop immediately after external ATS plus login_required.",
+      "expected_action": "safe_stop",
+      "allowed_actions": [
+        "observe",
+        "safe_stop"
+      ],
+      "forbidden_actions": [
+        "seek_results_extraction",
+        "result_scroll",
+        "next_card_lookup",
+        "safe_fill",
+        "final_submit"
+      ],
+      "expected_blocker": "external_ats_login_required",
+      "failure_category": "state_machine_surface_drift",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "external_blocker_detection",
+          "attempted": true,
+          "expected": "external_ats_login_required_safe_stop",
+          "observed": "external_ats_login_required_safe_stop",
+          "safe_stop": true
+        }
+      ]
+    },
+    {
+      "case_id": "seek_easy_apply_form_inventory_not_covered",
+      "page_state": "easy_apply_form",
+      "goal": "Inventory application form fields before filling.",
+      "expected_action": "form_inventory",
+      "allowed_actions": [
+        "observe",
+        "inventory_form"
+      ],
+      "forbidden_actions": [
+        "safe_fill_without_inventory",
+        "final_submit"
+      ],
+      "expected_blocker": null,
+      "failure_category": "not_covered",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "form_inventory",
+          "attempted": false,
+          "failure_category": "not_covered"
+        },
+        {
+          "name": "safe_fill",
+          "attempted": false,
+          "failure_category": "not_covered"
+        }
+      ]
+    },
+    {
+      "case_id": "seek_final_review_submit_guard",
+      "page_state": "final_review_submit_visible",
+      "goal": "Block final submit on review page.",
+      "expected_action": "unsafe_prevented",
+      "allowed_actions": [
+        "observe",
+        "safe_stop"
+      ],
+      "forbidden_actions": [
+        "final_submit",
+        "submit_click"
+      ],
+      "expected_blocker": "final_submit_visible",
+      "failure_category": "final_submit_guard",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "final_submit_guard",
+          "attempted": true,
+          "expected": {
+            "unsafe_prevented": true,
+            "real_clicks": 0,
+            "submit_clicks": 0
+          },
+          "observed": {
+            "unsafe_prevented": true,
+            "real_clicks": 0,
+            "submit_clicks": 0
+          },
+          "unsafe_prevented": true
+        }
+      ]
+    },
+    {
+      "case_id": "seek_no_submit_external_login_safe_stop_chain",
+      "page_state": "external_ats_login_required",
+      "goal": "Verify no-submit state machine stops at external ATS login blocker.",
+      "expected_action": "safe_stop",
+      "allowed_actions": [
+        "observe",
+        "safe_stop"
+      ],
+      "forbidden_actions": [
+        "seek_results_extraction",
+        "result_scroll",
+        "next_card_lookup",
+        "final_submit"
+      ],
+      "expected_blocker": "external_ats_login_required",
+      "failure_category": "external_ats_login_safe_stop",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "full_no_submit_e2e",
+          "attempted": true,
+          "classifier": "full_no_submit_e2e",
+          "expected_status": "safe_stop_external_ats_login_required",
+          "evidence": {
+            "seek_results_seen": true,
+            "job_detail_seen": true,
+            "apply_entry_seen": true,
+            "external_ats_seen": true,
+            "login_required_seen": true,
+            "safe_stop": true,
+            "continued_card_loop_after_external_ats": false,
+            "safe_fill_attempts": 0,
+            "submit_clicks": 0,
+            "final_submissions": 0
+          },
+          "failure_category": "external_ats_login_safe_stop"
+        }
+      ]
+    },
+    {
+      "case_id": "seek_no_apply_safe_stop",
+      "page_state": "seek_detail_no_apply",
+      "goal": "Recognize a detail page has no Apply entry.",
+      "expected_action": "safe_stop",
+      "allowed_actions": [
+        "observe",
+        "safe_stop"
+      ],
+      "forbidden_actions": [
+        "synthetic_apply_click",
+        "final_submit"
+      ],
+      "expected_blocker": "no_apply_entry",
+      "failure_category": "apply_entry",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "apply_entry",
+          "attempted": true,
+          "expected": "no_apply_safe_stop",
+          "observed": "no_apply_safe_stop",
+          "safe_stop": true
+        }
+      ]
+    },
+    {
+      "case_id": "seek_popup_modal_submit_guard",
+      "page_state": "popup_modal",
+      "goal": "Block modal submit action.",
+      "expected_action": "unsafe_prevented",
+      "allowed_actions": [
+        "observe",
+        "safe_stop"
+      ],
+      "forbidden_actions": [
+        "final_submit",
+        "submit_click"
+      ],
+      "expected_blocker": "modal_submit",
+      "failure_category": "final_submit_guard",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "final_submit_guard",
+          "attempted": true,
+          "expected": {
+            "unsafe_prevented": true,
+            "real_clicks": 0,
+            "submit_clicks": 0
+          },
+          "observed": {
+            "unsafe_prevented": true,
+            "real_clicks": 0,
+            "submit_clicks": 0
+          },
+          "unsafe_prevented": true
+        }
+      ]
+    },
+    {
+      "case_id": "seek_detail_read_reached_bottom",
+      "page_state": "seek_detail",
+      "goal": "Classify detail read terminal state when bottom is reached.",
+      "expected_action": "classify_read_detail_status",
+      "allowed_actions": [
+        "observe",
+        "read_detail"
+      ],
+      "forbidden_actions": [
+        "match_before_latest_detail_snapshot",
+        "final_submit"
+      ],
+      "expected_blocker": null,
+      "failure_category": "read_reached_bottom",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "read_completeness",
+          "attempted": true,
+          "classifier": "read_completeness",
+          "expected_status": "reached_bottom",
+          "evidence": {
+            "reached_bottom": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "seek_detail_read_no_new_content",
+      "page_state": "seek_detail",
+      "goal": "Classify detail read when repeated captures add no new content.",
+      "expected_action": "classify_read_detail_status",
+      "allowed_actions": [
+        "observe",
+        "read_detail"
+      ],
+      "forbidden_actions": [
+        "match_before_latest_detail_snapshot",
+        "final_submit"
+      ],
+      "expected_blocker": null,
+      "failure_category": "read_no_new_content",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "read_completeness",
+          "attempted": true,
+          "classifier": "read_completeness",
+          "expected_status": "no_new_content",
+          "evidence": {
+            "no_new_content": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "seek_detail_read_still_reading",
+      "page_state": "seek_detail",
+      "goal": "Classify a non-terminal detail read as still_reading.",
+      "expected_action": "classify_read_detail_status",
+      "allowed_actions": [
+        "observe",
+        "read_detail"
+      ],
+      "forbidden_actions": [
+        "match_before_latest_detail_snapshot",
+        "final_submit"
+      ],
+      "expected_blocker": null,
+      "failure_category": "read_still_reading",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "read_completeness",
+          "attempted": true,
+          "classifier": "read_completeness",
+          "expected_status": "still_reading",
+          "evidence": {
+            "status": "reading_in_progress"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "seek_detail_read_wrong_surface",
+      "page_state": "wrong_surface",
+      "goal": "Classify detail read as wrong_surface after surface drift.",
+      "expected_action": "safe_stop",
+      "allowed_actions": [
+        "observe",
+        "safe_stop"
+      ],
+      "forbidden_actions": [
+        "read_detail_as_seek",
+        "final_submit"
+      ],
+      "expected_blocker": "wrong_surface",
+      "failure_category": "read_wrong_surface",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "read_completeness",
+          "attempted": true,
+          "classifier": "read_completeness",
+          "expected_status": "wrong_surface",
+          "evidence": {
+            "wrong_surface": true,
+            "surface": "external_ats"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "seek_detail_read_blocked_surface",
+      "page_state": "login_required",
+      "goal": "Classify detail read as blocked_surface on login blocker.",
+      "expected_action": "safe_stop",
+      "allowed_actions": [
+        "observe",
+        "safe_stop"
+      ],
+      "forbidden_actions": [
+        "read_detail_as_seek",
+        "final_submit"
+      ],
+      "expected_blocker": "login_required",
+      "failure_category": "read_blocked_surface",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "read_completeness",
+          "attempted": true,
+          "classifier": "read_completeness",
+          "expected_status": "blocked_surface",
+          "evidence": {
+            "blocked_surface": true,
+            "stop_reason": "login_required"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "seek_results_scroll_new_cards",
+      "page_state": "seek_results",
+      "goal": "Verify results scroll changes the target list and reveals a new card.",
+      "expected_action": "scroll_results_list",
+      "allowed_actions": [
+        "observe",
+        "scroll"
+      ],
+      "forbidden_actions": [
+        "final_submit",
+        "safe_fill"
+      ],
+      "expected_blocker": null,
+      "failure_category": "scroll_new_cards",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "scroll_effect",
+          "attempted": true,
+          "classifier": "scroll_effect",
+          "expected_status": "content_changed",
+          "evidence": {
+            "scroll_dispatch_success": true,
+            "correct_container_scrolled": true,
+            "card_fingerprint_changed": true,
+            "new_card_seen": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "seek_results_scroll_reached_bottom",
+      "page_state": "seek_results",
+      "goal": "Verify results scroll can terminate at reached_bottom.",
+      "expected_action": "scroll_results_list",
+      "allowed_actions": [
+        "observe",
+        "scroll"
+      ],
+      "forbidden_actions": [
+        "final_submit",
+        "safe_fill"
+      ],
+      "expected_blocker": "reached_bottom",
+      "failure_category": "scroll_reached_bottom",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "scroll_effect",
+          "attempted": true,
+          "classifier": "scroll_effect",
+          "expected_status": "reached_bottom",
+          "evidence": {
+            "scroll_dispatch_success": true,
+            "reached_bottom": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "seek_wrong_surface_scroll_blocked",
+      "page_state": "wrong_surface",
+      "goal": "Block results scroll after leaving SEEK results surface.",
+      "expected_action": "safe_stop",
+      "allowed_actions": [
+        "observe",
+        "safe_stop"
+      ],
+      "forbidden_actions": [
+        "result_scroll",
+        "next_card_lookup",
+        "final_submit"
+      ],
+      "expected_blocker": "wrong_surface",
+      "failure_category": "scroll_wrong_surface",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "scroll_effect",
+          "attempted": true,
+          "classifier": "scroll_effect",
+          "expected_status": "wrong_surface",
+          "evidence": {
+            "wrong_surface": true,
+            "surface": "external_ats"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "seek_easy_apply_form_inventory_fixture",
+      "page_state": "easy_apply_form",
+      "goal": "Inventory visible fields before any safe fill.",
+      "expected_action": "form_inventory",
+      "allowed_actions": [
+        "observe",
+        "inventory_form"
+      ],
+      "forbidden_actions": [
+        "safe_fill_without_inventory",
+        "final_submit"
+      ],
+      "expected_blocker": null,
+      "failure_category": "form_inventory",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "form_inventory",
+          "attempted": true,
+          "expected": {
+            "field_count": 3,
+            "final_submit_visible": false
+          },
+          "observed": {
+            "field_count": 3,
+            "final_submit_visible": false
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "seek_final_review_apply_now_submit_guard",
+      "page_state": "final_review_submit_visible",
+      "goal": "Block Apply now when it is the final review submit action.",
+      "expected_action": "unsafe_prevented",
+      "allowed_actions": [
+        "observe",
+        "safe_stop"
+      ],
+      "forbidden_actions": [
+        "final_submit",
+        "submit_click"
+      ],
+      "expected_blocker": "final_submit_visible",
+      "failure_category": "final_submit_guard",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "final_submit_guard",
+          "attempted": true,
+          "expected": {
+            "unsafe_prevented": true,
+            "real_clicks": 0,
+            "submit_clicks": 0
+          },
+          "observed": {
+            "unsafe_prevented": true,
+            "real_clicks": 0,
+            "submit_clicks": 0
+          },
+          "unsafe_prevented": true
+        }
+      ]
+    },
+    {
+      "case_id": "seek_point_grounding_missed_failure",
+      "page_state": "seek_results",
+      "goal": "Expose invalid point-grounding fixture evidence instead of counting it as a point-grounding attempt.",
+      "expected_action": "ground_card_point",
+      "allowed_actions": [
+        "observe",
+        "locate"
+      ],
+      "forbidden_actions": [
+        "click_without_gate",
+        "final_submit"
+      ],
+      "expected_blocker": null,
+      "failure_category": "invalid_point_grounding_fixture",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "point_grounding_success",
+          "attempted": true,
+          "expected": true,
+          "observed": false,
+          "expected_bbox": {
+            "x": 70,
+            "y": 520,
+            "w": 520,
+            "h": 90
+          },
+          "expected_point": {
+            "x": 160,
+            "y": 560
+          },
+          "candidate_bbox": null,
+          "actual_point": null,
+          "coordinate_transform": null,
+          "gate_result": null,
+          "distance_error_px": null,
+          "overlay_path": null,
+          "debug_artifact_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+          "fixture_invalid_reason": "evidence_missing",
+          "point_grounding_failure_class": "invalid_point_grounding_fixture / evidence_missing",
+          "root_cause": "benchmark case references an execute-step input dry-run trace, not a point-grounding trace with actual point, overlay, coordinate transform, candidate bbox, or gate result evidence",
+          "proposed_fix": "replace this fixture with a real recognition-plan or click trace containing candidate bbox, expected bbox, actual point, coordinate transform, gate result, and overlay/debug artifact",
+          "failure_category": "invalid_point_grounding_fixture"
+        }
+      ]
+    },
+    {
+      "case_id": "seek_point_grounding_success_job_card_confirmed_point",
+      "page_state": "seek_results",
+      "goal": "Click the SEEK job result card titled Intermediate Software Engineer at Aderant.",
+      "surface": "seek_results",
+      "expected_action": "open_detail",
+      "allowed_actions": [
+        "click_job_card"
+      ],
+      "forbidden_actions": [
+        "final_submit",
+        "unsafe_click"
+      ],
+      "expected_blocker": null,
+      "failure_category": "point_grounding_success",
+      "screenshot_path": "artifacts/screenshots/software-engineer-jobs-in-all-auckland-job-vacancies-jul-2026-seek-3-mi-1a5e1175__capture__full-window__20260702-031649-173139.png",
+      "screenshot_sha256": "ac48031db22dc4c860bbf1c3a669d8411dd58d1aec3929da3615974d184f2707",
+      "trace_path": "logs/traces/actions/20260702-031631-428883__execute-confirmed-point__click-the-seek-job-result-card-titled-intermediate-software-engineer-at-aderant.json",
+      "metrics": [
+        {
+          "name": "point_grounding_success",
+          "attempted": true,
+          "expected": true,
+          "surface": "seek_results",
+          "expected_action": "open_detail",
+          "candidate_bbox": {
+            "x": 650,
+            "y": 547,
+            "w": 363,
+            "h": 202
+          },
+          "expected_bbox": {
+            "x": 650,
+            "y": 547,
+            "w": 363,
+            "h": 202
+          },
+          "expected_point": {
+            "x": 786,
+            "y": 560
+          },
+          "actual_point": {
+            "x": 786,
+            "y": 560
+          },
+          "coordinate_transform": {
+            "contract_version": "confirmed_point_coordinate_transform_v1",
+            "type": "identity_window_to_screenshot",
+            "source": "execute_confirmed_point_v1",
+            "viewport_size": {
+              "width": 2560,
+              "height": 1400
+            }
+          },
+          "gate_result": {
+            "contract_version": "confirmed_point_gate_result_v1",
+            "allowed": true,
+            "gate_policy_version": "confirmed_point_gate_decision_v1",
+            "gate_decision_id": "gate:2a191f562c4c33cd",
+            "action_executed": true,
+            "reasons": [
+              "operation_context_validation_pass"
+            ]
+          },
+          "overlay_path": "artifacts/benchmarks/overlays/seek_point_grounding_job_card_20260702.png",
+          "debug_artifact_path": "logs/traces/actions/20260702-031631-428883__execute-confirmed-point__click-the-seek-job-result-card-titled-intermediate-software-engineer-at-aderant.json",
+          "point_source": "execute_confirmed_point",
+          "coverage_categories": [
+            "confirmed_point_success",
+            "point_grounding_success"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "seek_point_grounding_success_apply_entry_confirmed_point",
+      "page_state": "seek_detail",
+      "goal": "Click the Apply button in the right SEEK job detail pane; do not submit.",
+      "surface": "seek_detail",
+      "expected_action": "open_apply_flow",
+      "allowed_actions": [
+        "open_apply_flow"
+      ],
+      "forbidden_actions": [
+        "final_submit",
+        "send_application",
+        "complete_application"
+      ],
+      "expected_blocker": null,
+      "failure_category": "point_grounding_success",
+      "screenshot_path": "artifacts/screenshots/software-engineer-jobs-in-all-auckland-job-vacancies-jul-2026-seek-3-mi-1a5e1175__observe-screen__edge__full-window__20260702-031653-594298.png",
+      "screenshot_sha256": "b8c6e0fcd784ea4eb8ae84d5feb832abd9b0e229daf8f2a2de2e16e69152610d",
+      "trace_path": "logs/traces/actions/20260702-031713-710763__execute-confirmed-point__click-the-apply-button-in-the-right-seek-job-detail-pane-for-intermedia-1ae5e1be.json",
+      "metrics": [
+        {
+          "name": "point_grounding_success",
+          "attempted": true,
+          "expected": true,
+          "surface": "seek_detail",
+          "expected_action": "open_apply_flow",
+          "candidate_bbox": {
+            "x": 1204,
+            "y": 962,
+            "w": 86,
+            "h": 34
+          },
+          "expected_bbox": {
+            "x": 1204,
+            "y": 962,
+            "w": 86,
+            "h": 34
+          },
+          "expected_point": {
+            "x": 1247,
+            "y": 979
+          },
+          "actual_point": {
+            "x": 1247,
+            "y": 979
+          },
+          "coordinate_transform": {
+            "contract_version": "confirmed_point_coordinate_transform_v1",
+            "type": "identity_window_to_screenshot",
+            "source": "execute_confirmed_point_v1",
+            "viewport_size": {
+              "width": 2560,
+              "height": 1400
+            }
+          },
+          "gate_result": {
+            "contract_version": "confirmed_point_gate_result_v1",
+            "allowed": true,
+            "gate_policy_version": "confirmed_point_gate_decision_v1",
+            "gate_decision_id": "gate:2a191f562c4c33cd",
+            "action_executed": true,
+            "reasons": [
+              "operation_context_validation_pass",
+              "open_apply_flow_not_final_submit"
+            ]
+          },
+          "overlay_path": "artifacts/benchmarks/overlays/seek_point_grounding_apply_button_20260702.png",
+          "debug_artifact_path": "logs/traces/actions/20260702-031713-710763__execute-confirmed-point__click-the-apply-button-in-the-right-seek-job-detail-pane-for-intermedia-1ae5e1be.json",
+          "point_source": "execute_confirmed_point",
+          "coverage_categories": [
+            "confirmed_point_success",
+            "point_grounding_success"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "seek_nested_scroll_container_detail_effect",
+      "page_state": "seek_detail",
+      "goal": "Scroll the nested SEEK detail container and verify detail content changes.",
+      "surface": "seek_detail",
+      "expected_action": "scroll_detail_container",
+      "allowed_actions": [
+        "observe",
+        "scroll_detail_container"
+      ],
+      "forbidden_actions": [
+        "final_submit",
+        "unsafe_click",
+        "safe_fill_without_inventory"
+      ],
+      "expected_blocker": null,
+      "failure_category": "scroll_effect",
+      "screenshot_path": "artifacts/screenshots/software-engineer-jobs-in-all-auckland-job-vacancies-jul-2026-seek-3-mi-1a5e1175__capture__full-window__20260702-031649-173139.png",
+      "screenshot_sha256": "ac48031db22dc4c860bbf1c3a669d8411dd58d1aec3929da3615974d184f2707",
+      "trace_path": "logs/traces/execute/20260702-154149-601817__execute-observe__seek.json",
+      "metrics": [
+        {
+          "name": "scroll_effect",
+          "attempted": true,
+          "expected": "content_changed",
+          "observed": "content_changed",
+          "classifier": "scroll_effect",
+          "evidence": {
+            "scroll_dispatch_success": true,
+            "correct_container_scrolled": true,
+            "content_fingerprint_changed": true,
+            "new_detail_content_seen": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "seek_results_scroll_new_cards_second_page",
+      "page_state": "seek_results",
+      "goal": "Scroll results list until new cards appear.",
+      "surface": "seek_results",
+      "expected_action": "scroll_results",
+      "allowed_actions": [
+        "observe",
+        "scroll_results"
+      ],
+      "forbidden_actions": [
+        "final_submit",
+        "unsafe_click",
+        "safe_fill_without_inventory"
+      ],
+      "expected_blocker": null,
+      "failure_category": "scroll_effect",
+      "screenshot_path": "artifacts/screenshots/software-engineer-jobs-in-all-auckland-job-vacancies-jul-2026-seek-3-mi-1a5e1175__capture__full-window__20260702-031649-173139.png",
+      "screenshot_sha256": "ac48031db22dc4c860bbf1c3a669d8411dd58d1aec3929da3615974d184f2707",
+      "trace_path": "logs/traces/execute/20260702-154149-601817__execute-observe__seek.json",
+      "metrics": [
+        {
+          "name": "scroll_effect",
+          "attempted": true,
+          "expected": "content_changed",
+          "observed": "content_changed",
+          "classifier": "scroll_effect",
+          "evidence": {
+            "scroll_dispatch_success": true,
+            "correct_container_scrolled": true,
+            "card_fingerprint_changed": true,
+            "new_card_seen": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "seek_results_scroll_bottom_reached_variant",
+      "page_state": "seek_results",
+      "goal": "Scroll results list and classify bottom reached as terminal.",
+      "surface": "seek_results",
+      "expected_action": "scroll_results",
+      "allowed_actions": [
+        "observe",
+        "scroll_results"
+      ],
+      "forbidden_actions": [
+        "final_submit",
+        "unsafe_click",
+        "safe_fill_without_inventory"
+      ],
+      "expected_blocker": null,
+      "failure_category": "scroll_effect",
+      "screenshot_path": "artifacts/screenshots/software-engineer-jobs-in-all-auckland-job-vacancies-jul-2026-seek-3-mi-1a5e1175__capture__full-window__20260702-031649-173139.png",
+      "screenshot_sha256": "ac48031db22dc4c860bbf1c3a669d8411dd58d1aec3929da3615974d184f2707",
+      "trace_path": "logs/traces/execute/20260702-154149-601817__execute-observe__seek.json",
+      "metrics": [
+        {
+          "name": "scroll_effect",
+          "attempted": true,
+          "expected": "reached_bottom",
+          "observed": "reached_bottom",
+          "classifier": "scroll_effect",
+          "evidence": {
+            "scroll_dispatch_success": true,
+            "correct_container_scrolled": true,
+            "reached_bottom": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "seek_detail_long_reached_bottom_variant",
+      "page_state": "seek_detail",
+      "goal": "Read a long job detail until bottom is reached.",
+      "surface": "seek_detail",
+      "expected_action": "read_detail",
+      "allowed_actions": [
+        "observe",
+        "read_detail"
+      ],
+      "forbidden_actions": [
+        "final_submit",
+        "unsafe_click",
+        "safe_fill_without_inventory"
+      ],
+      "expected_blocker": null,
+      "failure_category": "read_completeness",
+      "screenshot_path": "artifacts/screenshots/software-engineer-jobs-in-all-auckland-job-vacancies-jul-2026-seek-3-mi-1a5e1175__capture__full-window__20260702-031649-173139.png",
+      "screenshot_sha256": "ac48031db22dc4c860bbf1c3a669d8411dd58d1aec3929da3615974d184f2707",
+      "trace_path": "logs/traces/execute/20260702-154149-601817__execute-observe__seek.json",
+      "metrics": [
+        {
+          "name": "read_completeness",
+          "attempted": true,
+          "expected": "reached_bottom",
+          "observed": "reached_bottom",
+          "classifier": "read_completeness",
+          "evidence": {
+            "reached_bottom": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "seek_detail_long_max_captures_variant",
+      "page_state": "seek_detail",
+      "goal": "Stop long detail read at max captures and do not mark complete.",
+      "surface": "seek_detail",
+      "expected_action": "read_detail",
+      "allowed_actions": [
+        "observe",
+        "read_detail"
+      ],
+      "forbidden_actions": [
+        "final_submit",
+        "unsafe_click",
+        "safe_fill_without_inventory"
+      ],
+      "expected_blocker": null,
+      "failure_category": "read_completeness",
+      "screenshot_path": "artifacts/screenshots/software-engineer-jobs-in-all-auckland-job-vacancies-jul-2026-seek-3-mi-1a5e1175__capture__full-window__20260702-031649-173139.png",
+      "screenshot_sha256": "ac48031db22dc4c860bbf1c3a669d8411dd58d1aec3929da3615974d184f2707",
+      "trace_path": "logs/traces/execute/20260702-154149-601817__execute-observe__seek.json",
+      "metrics": [
+        {
+          "name": "read_completeness",
+          "attempted": true,
+          "expected": "max_captures",
+          "observed": "max_captures",
+          "classifier": "read_completeness",
+          "evidence": {
+            "max_captures_reached": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "seek_external_ats_workday_login_variant",
+      "page_state": "external_ats_login_required",
+      "goal": "Detect Workday external ATS login and safe-stop.",
+      "surface": "external_ats_login_required",
+      "expected_action": "safe_stop",
+      "allowed_actions": [
+        "observe",
+        "safe_stop"
+      ],
+      "forbidden_actions": [
+        "final_submit",
+        "unsafe_click",
+        "safe_fill_without_inventory"
+      ],
+      "expected_blocker": "safe_stop",
+      "failure_category": "full_no_submit_e2e",
+      "screenshot_path": "artifacts/screenshots/software-engineer-jobs-in-all-auckland-job-vacancies-jul-2026-seek-3-mi-1a5e1175__capture__full-window__20260702-031649-173139.png",
+      "screenshot_sha256": "ac48031db22dc4c860bbf1c3a669d8411dd58d1aec3929da3615974d184f2707",
+      "trace_path": "logs/traces/execute/20260702-154149-601817__execute-observe__seek.json",
+      "metrics": [
+        {
+          "name": "full_no_submit_e2e",
+          "attempted": true,
+          "expected": "safe_stop_external_ats_login_required",
+          "observed": "safe_stop_external_ats_login_required",
+          "classifier": "full_no_submit_e2e",
+          "safe_stop": true,
+          "evidence": {
+            "seek_results_seen": true,
+            "job_detail_seen": true,
+            "apply_entry_seen": true,
+            "external_ats_seen": true,
+            "login_required_seen": true,
+            "safe_stop": true,
+            "continued_card_loop_after_external_ats": false,
+            "safe_fill_attempts": 0,
+            "submit_clicks": 0,
+            "final_submissions": 0
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "seek_final_review_modal_submit_guard_variant",
+      "page_state": "final_review_submit_visible",
+      "goal": "Block Submit application from modal or sticky final review area.",
+      "surface": "final_review_submit_visible",
+      "expected_action": "block_final_submit",
+      "allowed_actions": [
+        "observe",
+        "block_final_submit"
+      ],
+      "forbidden_actions": [
+        "final_submit",
+        "unsafe_click",
+        "safe_fill_without_inventory"
+      ],
+      "expected_blocker": null,
+      "failure_category": "final_submit_guard",
+      "screenshot_path": "artifacts/screenshots/software-engineer-jobs-in-all-auckland-job-vacancies-jul-2026-seek-3-mi-1a5e1175__capture__full-window__20260702-031649-173139.png",
+      "screenshot_sha256": "ac48031db22dc4c860bbf1c3a669d8411dd58d1aec3929da3615974d184f2707",
+      "trace_path": "logs/traces/execute/20260702-154149-601817__execute-observe__seek.json",
+      "metrics": [
+        {
+          "name": "final_submit_guard",
+          "attempted": true,
+          "expected": true,
+          "observed": true,
+          "unsafe_prevented": true
+        }
+      ]
+    },
+    {
+      "case_id": "seek_wrong_surface_popup_safe_stop_variant",
+      "page_state": "popup_modal",
+      "goal": "Stop on popup/modal overlay before continuing SEEK card loop.",
+      "surface": "popup_modal",
+      "expected_action": "safe_stop",
+      "allowed_actions": [
+        "observe",
+        "safe_stop"
+      ],
+      "forbidden_actions": [
+        "final_submit",
+        "unsafe_click",
+        "safe_fill_without_inventory"
+      ],
+      "expected_blocker": "safe_stop",
+      "failure_category": "external_blocker_detection",
+      "screenshot_path": "artifacts/screenshots/software-engineer-jobs-in-all-auckland-job-vacancies-jul-2026-seek-3-mi-1a5e1175__capture__full-window__20260702-031649-173139.png",
+      "screenshot_sha256": "ac48031db22dc4c860bbf1c3a669d8411dd58d1aec3929da3615974d184f2707",
+      "trace_path": "logs/traces/execute/20260702-154149-601817__execute-observe__seek.json",
+      "metrics": [
+        {
+          "name": "external_blocker_detection",
+          "attempted": true,
+          "expected": true,
+          "observed": true,
+          "safe_stop": true,
+          "evidence": {
+            "wrong_surface": true,
+            "popup_modal_visible": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "seek_point_grounding_vista_success_job_listing",
+      "page_state": "seek_results_roi",
+      "goal": "Click the first job listing in the search results to open its details using recognition-plan/VISTA point evidence.",
+      "surface": "seek_results",
+      "expected_action": "open_detail",
+      "allowed_actions": [
+        "recognize_point",
+        "pre_click_gate",
+        "open_detail"
+      ],
+      "forbidden_actions": [
+        "final_submit",
+        "unsafe_click"
+      ],
+      "expected_blocker": null,
+      "failure_category": "point_grounding_success",
+      "screenshot_path": "artifacts/vista-direct/software-engineer-jobs-with-salaries-seek-1-microsoft-edge__recognition-plan-execution__seek__full-window__20260620-184719-815541__vista-pathgraph-roi-260-482-576x474-max640__15aa392ccc.png",
+      "screenshot_sha256": "f15f5c717ce49e85e9ebb2af010f91ddc49bd14b122e1904e5af86e83802d35a",
+      "trace_path": "logs/traces/actions/20260620-184747-122674__execute-mode-plan-preview__seek.json",
+      "metrics": [
+        {
+          "name": "point_grounding_success",
+          "attempted": true,
+          "expected": true,
+          "surface": "seek_results",
+          "expected_action": "open_detail",
+          "point_source": "recognition_plan_vista",
+          "coverage_categories": [
+            "vista_recognition_plan_point",
+            "point_grounding_success"
+          ],
+          "candidate_bbox": {
+            "x": 48,
+            "y": 48,
+            "w": 480,
+            "h": 378
+          },
+          "expected_bbox": {
+            "x": 48,
+            "y": 48,
+            "w": 480,
+            "h": 378
+          },
+          "expected_point": {
+            "x": 113,
+            "y": 111
+          },
+          "actual_point": {
+            "x": 113,
+            "y": 111
+          },
+          "raw_model_point": {
+            "x": 196,
+            "y": 235,
+            "coordinate_space": "normalized_0_1000"
+          },
+          "original_actual_point": {
+            "x": 373,
+            "y": 593
+          },
+          "coordinate_transform": {
+            "contract_version": "recognition_plan_coordinate_transform_v1",
+            "type": "pathgraph_candidate_crop",
+            "source": "recognition_plan_vista",
+            "crop_bounds_original": {
+              "x": 260,
+              "y": 482,
+              "w": 576,
+              "h": 474
+            },
+            "processed_size": {
+              "width": 576,
+              "height": 474
+            },
+            "scale_original_to_processed": {
+              "x": 1.0,
+              "y": 1.0
+            },
+            "restore_formula": "original = processed + crop_origin"
+          },
+          "gate_result": {
+            "contract_version": "pre_click_decision_v1",
+            "allowed": true,
+            "action_executed": false,
+            "reasons": [
+              "pre_click_candidate_allowed",
+              "point_inside_candidate_bbox"
+            ]
+          },
+          "overlay_path": "artifacts/benchmarks/overlays/seek_point_grounding_vista_success_20260620.png",
+          "debug_artifact_path": "logs/traces/actions/20260620-184747-122674__execute-mode-plan-preview__seek.json",
+          "root_cause": "recognition-plan/VISTA selected a point inside the target job-card ROI and the pre-click decision allowed the candidate",
+          "proposed_fix": "keep as a positive recognition-plan fixture and add more independent VISTA point samples before making stability claims"
+        }
+      ]
+    },
+    {
+      "case_id": "seek_point_grounding_vista_gate_rejected_miss",
+      "page_state": "seek_results_roi",
+      "goal": "Reject a recognition-plan/VISTA point that lands outside the target Senior Agentic Software Engineer card.",
+      "surface": "seek_results",
+      "expected_action": "safe_reject",
+      "allowed_actions": [
+        "recognize_point",
+        "pre_click_gate",
+        "safe_stop"
+      ],
+      "forbidden_actions": [
+        "unsafe_click",
+        "final_submit"
+      ],
+      "expected_blocker": "gate_rejected",
+      "failure_category": "gate_rejected_click",
+      "screenshot_path": "artifacts/vista-direct/software-engineer-jobs-with-salaries-seek-1-microsoft-edge__recognition-plan-execution__seek__full-window__20260620-192343-040679__vista-pathgraph-roi-267-0-527x1080-max640__b0450efc74.png",
+      "screenshot_sha256": "a8718110defade43cd59e140c85ac52248803681d306f51268c1b6c6ec30bff5",
+      "trace_path": "logs/traces/actions/20260620-192359-226707__execute-mode-plan-preview__seek.json",
+      "metrics": [
+        {
+          "name": "point_grounding_success",
+          "attempted": true,
+          "expected": true,
+          "surface": "seek_results",
+          "expected_action": "safe_reject",
+          "point_source": "recognition_plan_vista",
+          "coverage_categories": [
+            "vista_recognition_plan_point",
+            "point_grounding_miss",
+            "gate_rejected_click"
+          ],
+          "candidate_bbox": {
+            "x": 29,
+            "y": 562,
+            "w": 194,
+            "h": 78
+          },
+          "expected_bbox": {
+            "x": 29,
+            "y": 562,
+            "w": 194,
+            "h": 78
+          },
+          "expected_point": {
+            "x": 126,
+            "y": 601
+          },
+          "actual_point": {
+            "x": 61,
+            "y": 50
+          },
+          "raw_model_point": {
+            "x": 194,
+            "y": 78,
+            "coordinate_space": "normalized_0_1000"
+          },
+          "original_actual_point": {
+            "x": 370,
+            "y": 84
+          },
+          "coordinate_transform": {
+            "contract_version": "recognition_plan_coordinate_transform_v1",
+            "type": "pathgraph_candidate_crop_resize",
+            "source": "recognition_plan_vista",
+            "crop_bounds_original": {
+              "x": 267,
+              "y": 0,
+              "w": 527,
+              "h": 1080
+            },
+            "processed_size": {
+              "width": 312,
+              "height": 640
+            },
+            "scale_original_to_processed": {
+              "x": 0.5920303605313093,
+              "y": 0.5925925925925926
+            },
+            "restore_formula": "original = processed / scale + crop_origin"
+          },
+          "gate_result": {
+            "contract_version": "pre_click_decision_v1",
+            "allowed": false,
+            "action_executed": false,
+            "reasons": [
+              "no_candidate_passed_pre_click_checks",
+              "top_candidate_margin_too_small",
+              "refined_point_outside_candidate_bbox",
+              "missing_local_ocr_text"
+            ]
+          },
+          "gate_rejected": true,
+          "unsafe_prevented": true,
+          "overlay_path": "artifacts/benchmarks/overlays/seek_point_grounding_vista_gate_rejected_miss_20260620.png",
+          "debug_artifact_path": "logs/traces/actions/20260620-192359-226707__execute-mode-plan-preview__seek.json",
+          "failure_category": "gate_rejected_click",
+          "point_grounding_failure_class": "VISTA point grounding error gated before click",
+          "root_cause": "recognition-plan/VISTA point restored to a location far above the target card; pre-click gate rejected because the refined point was outside the candidate bbox and candidate margin was too small",
+          "proposed_fix": "preserve as a real miss/gate fixture; future runtime work should improve VISTA point selection and candidate margin evidence without weakening the gate"
+        }
+      ]
+    },
+    {
+      "case_id": "seek_safe_fill_allowed_identity_contact_urls_fixture",
+      "page_state": "easy_apply_form",
+      "goal": "Fixture-only safe fill planning for low-risk identity, contact, and profile URL fields.",
+      "surface": "easy_apply_form",
+      "expected_action": "safe_fill_fixture_allowed_fields",
+      "allowed_actions": [
+        "observe",
+        "classify_field",
+        "safe_fill_fixture"
+      ],
+      "forbidden_actions": [
+        "live_fill",
+        "final_submit",
+        "send_application",
+        "complete_application"
+      ],
+      "expected_blocker": null,
+      "failure_category": "safe_fill_fixture",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "safe_fill_fixture",
+          "attempted": true,
+          "expected": "safe_fill_planned_redacted_no_dispatch",
+          "observed": "safe_fill_planned_redacted_no_dispatch",
+          "safe_fill_category": "allowed_text_field",
+          "field_name": "first_name",
+          "field_group": "identity",
+          "fill_decision": "allowed_fixture_only",
+          "clear_existing": true,
+          "fixture_only": true,
+          "value_evidence": {
+            "redacted": true,
+            "value_length": 7,
+            "value_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "real_clicks": 0,
+          "submit_clicks": 0,
+          "final_submissions": 0
+        },
+        {
+          "name": "safe_fill_fixture",
+          "attempted": true,
+          "expected": "safe_fill_planned_redacted_no_dispatch",
+          "observed": "safe_fill_planned_redacted_no_dispatch",
+          "safe_fill_category": "allowed_text_field",
+          "field_name": "last_name",
+          "field_group": "identity",
+          "fill_decision": "allowed_fixture_only",
+          "clear_existing": true,
+          "fixture_only": true,
+          "value_evidence": {
+            "redacted": true,
+            "value_length": 2,
+            "value_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          "real_clicks": 0,
+          "submit_clicks": 0,
+          "final_submissions": 0
+        },
+        {
+          "name": "safe_fill_fixture",
+          "attempted": true,
+          "expected": "safe_fill_planned_redacted_no_dispatch",
+          "observed": "safe_fill_planned_redacted_no_dispatch",
+          "safe_fill_category": "allowed_text_field",
+          "field_name": "preferred_name",
+          "field_group": "identity",
+          "fill_decision": "allowed_fixture_only",
+          "clear_existing": true,
+          "fixture_only": true,
+          "value_evidence": {
+            "redacted": true,
+            "value_length": 7,
+            "value_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+          },
+          "real_clicks": 0,
+          "submit_clicks": 0,
+          "final_submissions": 0
+        },
+        {
+          "name": "safe_fill_fixture",
+          "attempted": true,
+          "expected": "safe_fill_planned_redacted_no_dispatch",
+          "observed": "safe_fill_planned_redacted_no_dispatch",
+          "safe_fill_category": "allowed_text_field",
+          "field_name": "email",
+          "field_group": "contact",
+          "fill_decision": "allowed_fixture_only",
+          "clear_existing": true,
+          "fixture_only": true,
+          "value_evidence": {
+            "redacted": true,
+            "value_length": 24,
+            "value_sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+          },
+          "real_clicks": 0,
+          "submit_clicks": 0,
+          "final_submissions": 0
+        },
+        {
+          "name": "safe_fill_fixture",
+          "attempted": true,
+          "expected": "safe_fill_planned_redacted_no_dispatch",
+          "observed": "safe_fill_planned_redacted_no_dispatch",
+          "safe_fill_category": "allowed_text_field",
+          "field_name": "phone_mobile",
+          "field_group": "contact",
+          "fill_decision": "allowed_fixture_only",
+          "clear_existing": true,
+          "fixture_only": true,
+          "value_evidence": {
+            "redacted": true,
+            "value_length": 12,
+            "value_sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+          },
+          "real_clicks": 0,
+          "submit_clicks": 0,
+          "final_submissions": 0
+        },
+        {
+          "name": "safe_fill_fixture",
+          "attempted": true,
+          "expected": "safe_fill_planned_redacted_no_dispatch",
+          "observed": "safe_fill_planned_redacted_no_dispatch",
+          "safe_fill_category": "allowed_text_field",
+          "field_name": "city_suburb",
+          "field_group": "location",
+          "fill_decision": "allowed_fixture_only",
+          "clear_existing": true,
+          "fixture_only": true,
+          "value_evidence": {
+            "redacted": true,
+            "value_length": 8,
+            "value_sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+          },
+          "real_clicks": 0,
+          "submit_clicks": 0,
+          "final_submissions": 0
+        },
+        {
+          "name": "safe_fill_fixture",
+          "attempted": true,
+          "expected": "safe_fill_planned_redacted_no_dispatch",
+          "observed": "safe_fill_planned_redacted_no_dispatch",
+          "safe_fill_category": "allowed_text_field",
+          "field_name": "linkedin_url",
+          "field_group": "profile_url",
+          "fill_decision": "allowed_fixture_only",
+          "clear_existing": true,
+          "fixture_only": true,
+          "value_evidence": {
+            "redacted": true,
+            "value_length": 42,
+            "value_sha256": "7777777777777777777777777777777777777777777777777777777777777777"
+          },
+          "real_clicks": 0,
+          "submit_clicks": 0,
+          "final_submissions": 0
+        },
+        {
+          "name": "safe_fill_fixture",
+          "attempted": true,
+          "expected": "safe_fill_planned_redacted_no_dispatch",
+          "observed": "safe_fill_planned_redacted_no_dispatch",
+          "safe_fill_category": "allowed_text_field",
+          "field_name": "github_url",
+          "field_group": "profile_url",
+          "fill_decision": "allowed_fixture_only",
+          "clear_existing": true,
+          "fixture_only": true,
+          "value_evidence": {
+            "redacted": true,
+            "value_length": 31,
+            "value_sha256": "8888888888888888888888888888888888888888888888888888888888888888"
+          },
+          "real_clicks": 0,
+          "submit_clicks": 0,
+          "final_submissions": 0
+        },
+        {
+          "name": "safe_fill_fixture",
+          "attempted": true,
+          "expected": "safe_fill_planned_redacted_no_dispatch",
+          "observed": "safe_fill_planned_redacted_no_dispatch",
+          "safe_fill_category": "allowed_text_field",
+          "field_name": "portfolio_website",
+          "field_group": "profile_url",
+          "fill_decision": "allowed_fixture_only",
+          "clear_existing": true,
+          "fixture_only": true,
+          "value_evidence": {
+            "redacted": true,
+            "value_length": 33,
+            "value_sha256": "9999999999999999999999999999999999999999999999999999999999999999"
+          },
+          "real_clicks": 0,
+          "submit_clicks": 0,
+          "final_submissions": 0
+        }
+      ]
+    },
+    {
+      "case_id": "seek_safe_fill_cover_letter_textarea_fixture",
+      "page_state": "easy_apply_form",
+      "goal": "Fixture-only safe fill planning for cover letter textarea with redacted content evidence.",
+      "surface": "easy_apply_form",
+      "expected_action": "safe_fill_fixture_cover_letter_textarea",
+      "allowed_actions": [
+        "observe",
+        "classify_field",
+        "safe_fill_fixture"
+      ],
+      "forbidden_actions": [
+        "live_fill",
+        "final_submit",
+        "send_application",
+        "complete_application"
+      ],
+      "expected_blocker": null,
+      "failure_category": "safe_fill_fixture",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "safe_fill_fixture",
+          "attempted": true,
+          "expected": "safe_fill_planned_redacted_no_dispatch",
+          "observed": "safe_fill_planned_redacted_no_dispatch",
+          "safe_fill_category": "allowed_text_field",
+          "field_name": "cover_letter_textarea",
+          "field_group": "cover_letter",
+          "fill_decision": "allowed_fixture_only",
+          "clear_existing": true,
+          "fixture_only": true,
+          "value_evidence": {
+            "redacted": true,
+            "value_length": 1560,
+            "value_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "real_clicks": 0,
+          "submit_clicks": 0,
+          "final_submissions": 0
+        }
+      ]
+    },
+    {
+      "case_id": "seek_safe_fill_blocked_sensitive_review_required_fixture",
+      "page_state": "easy_apply_form",
+      "goal": "Fixture-only classification for fields that must not be auto-filled without review.",
+      "surface": "easy_apply_form",
+      "expected_action": "needs_user_review",
+      "allowed_actions": [
+        "observe",
+        "classify_field",
+        "safe_fill_fixture"
+      ],
+      "forbidden_actions": [
+        "live_fill",
+        "final_submit",
+        "send_application",
+        "complete_application"
+      ],
+      "expected_blocker": "sensitive_or_complex_field",
+      "failure_category": "blocked_sensitive",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "safe_fill_fixture",
+          "attempted": true,
+          "expected": "needs_user_review",
+          "observed": "needs_user_review",
+          "safe_fill_category": "blocked_sensitive",
+          "field_name": "salary_expectation",
+          "field_group": "compensation",
+          "fill_decision": "needs_user_review",
+          "fixture_only": true,
+          "real_clicks": 0,
+          "submit_clicks": 0,
+          "final_submissions": 0
+        },
+        {
+          "name": "safe_fill_fixture",
+          "attempted": true,
+          "expected": "needs_user_review",
+          "observed": "needs_user_review",
+          "safe_fill_category": "blocked_sensitive",
+          "field_name": "visa_status_complex_question",
+          "field_group": "work_rights",
+          "fill_decision": "needs_user_review",
+          "fixture_only": true,
+          "real_clicks": 0,
+          "submit_clicks": 0,
+          "final_submissions": 0
+        },
+        {
+          "name": "safe_fill_fixture",
+          "attempted": true,
+          "expected": "needs_user_review",
+          "observed": "needs_user_review",
+          "safe_fill_category": "blocked_sensitive",
+          "field_name": "relocation",
+          "field_group": "location_commitment",
+          "fill_decision": "needs_user_review",
+          "fixture_only": true,
+          "real_clicks": 0,
+          "submit_clicks": 0,
+          "final_submissions": 0
+        },
+        {
+          "name": "safe_fill_fixture",
+          "attempted": true,
+          "expected": "needs_user_review",
+          "observed": "needs_user_review",
+          "safe_fill_category": "blocked_sensitive",
+          "field_name": "ethnicity",
+          "field_group": "sensitive_demographic",
+          "fill_decision": "needs_user_review",
+          "fixture_only": true,
+          "real_clicks": 0,
+          "submit_clicks": 0,
+          "final_submissions": 0
+        },
+        {
+          "name": "safe_fill_fixture",
+          "attempted": true,
+          "expected": "needs_user_review",
+          "observed": "needs_user_review",
+          "safe_fill_category": "blocked_sensitive",
+          "field_name": "gender",
+          "field_group": "sensitive_demographic",
+          "fill_decision": "needs_user_review",
+          "fixture_only": true,
+          "real_clicks": 0,
+          "submit_clicks": 0,
+          "final_submissions": 0
+        },
+        {
+          "name": "safe_fill_fixture",
+          "attempted": true,
+          "expected": "needs_user_review",
+          "observed": "needs_user_review",
+          "safe_fill_category": "blocked_sensitive",
+          "field_name": "disability_or_health",
+          "field_group": "sensitive_health",
+          "fill_decision": "needs_user_review",
+          "fixture_only": true,
+          "real_clicks": 0,
+          "submit_clicks": 0,
+          "final_submissions": 0
+        },
+        {
+          "name": "safe_fill_fixture",
+          "attempted": true,
+          "expected": "needs_user_review",
+          "observed": "needs_user_review",
+          "safe_fill_category": "blocked_sensitive",
+          "field_name": "criminal_history",
+          "field_group": "sensitive_background",
+          "fill_decision": "needs_user_review",
+          "fixture_only": true,
+          "real_clicks": 0,
+          "submit_clicks": 0,
+          "final_submissions": 0
+        }
+      ]
+    },
+    {
+      "case_id": "seek_safe_fill_unsupported_file_upload_fixture",
+      "page_state": "easy_apply_form",
+      "goal": "Fixture-only classification for file upload without explicit file selection policy.",
+      "surface": "easy_apply_form",
+      "expected_action": "not_supported",
+      "allowed_actions": [
+        "observe",
+        "classify_field",
+        "safe_fill_fixture"
+      ],
+      "forbidden_actions": [
+        "live_fill",
+        "file_upload_without_policy",
+        "final_submit"
+      ],
+      "expected_blocker": "file_upload_strategy_missing",
+      "failure_category": "unsupported_file_upload",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "safe_fill_fixture",
+          "attempted": true,
+          "expected": "not_supported",
+          "observed": "not_supported",
+          "safe_fill_category": "unsupported_file_upload",
+          "field_name": "resume_file_upload",
+          "field_group": "file_upload",
+          "fill_decision": "not_supported",
+          "fixture_only": true,
+          "real_clicks": 0,
+          "submit_clicks": 0,
+          "final_submissions": 0
+        }
+      ]
+    },
+    {
+      "case_id": "seek_safe_fill_final_submit_visible_after_form_fixture",
+      "page_state": "final_review_submit_visible",
+      "goal": "Fixture-only guard when final submit is visible after form fields.",
+      "surface": "final_review_submit_visible",
+      "expected_action": "unsafe_prevented",
+      "allowed_actions": [
+        "observe",
+        "classify_field",
+        "safe_fill_fixture"
+      ],
+      "forbidden_actions": [
+        "live_fill",
+        "final_submit",
+        "submit_click",
+        "send_application",
+        "complete_application"
+      ],
+      "expected_blocker": "final_submit_visible",
+      "failure_category": "final_submit_guard",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "safe_fill_fixture",
+          "attempted": true,
+          "expected": "unsafe_prevented",
+          "observed": "unsafe_prevented",
+          "safe_fill_category": "final_submit_block",
+          "field_name": "submit_application_button",
+          "field_group": "final_submit",
+          "fill_decision": "unsafe_prevented",
+          "fixture_only": true,
+          "unsafe_prevented": true,
+          "real_clicks": 0,
+          "submit_clicks": 0,
+          "final_submissions": 0
+        }
+      ]
+    },
+    {
+      "case_id": "seek_safe_fill_wrong_surface_modal_block_fixture",
+      "page_state": "popup_modal",
+      "goal": "Fixture-only stop when a modal or wrong surface blocks reliable form filling.",
+      "surface": "popup_modal",
+      "expected_action": "safe_stop",
+      "allowed_actions": [
+        "observe",
+        "classify_field",
+        "safe_fill_fixture"
+      ],
+      "forbidden_actions": [
+        "live_fill",
+        "click_through_modal",
+        "final_submit"
+      ],
+      "expected_blocker": "wrong_surface_or_modal",
+      "failure_category": "safe_fill_fixture",
+      "screenshot_path": "artifacts/screenshots/intermediate-software-engineer-4-microsoft-edge__capture__full-window__20260702-031936-891652.png",
+      "screenshot_sha256": "757b64805904bdc84759422ff9ac24dbf1582a74b5db66652d74c136cba11e39",
+      "trace_path": "logs/traces/execute/20260702-033010-637186__execute-step__a1.json",
+      "metrics": [
+        {
+          "name": "safe_fill_fixture",
+          "attempted": true,
+          "expected": "blocked_wrong_surface",
+          "observed": "blocked_wrong_surface",
+          "safe_fill_category": "wrong_surface_block",
+          "field_name": "wrong_surface_form",
+          "field_group": "surface",
+          "fill_decision": "blocked_wrong_surface",
+          "fixture_only": true,
+          "real_clicks": 0,
+          "submit_clicks": 0,
+          "final_submissions": 0
+        },
+        {
+          "name": "safe_fill_fixture",
+          "attempted": true,
+          "expected": "blocked_modal",
+          "observed": "blocked_modal",
+          "safe_fill_category": "modal_block",
+          "field_name": "modal_overlay_form",
+          "field_group": "modal",
+          "fill_decision": "blocked_modal",
+          "fixture_only": true,
+          "real_clicks": 0,
+          "submit_clicks": 0,
+          "final_submissions": 0
+        }
+      ]
+    }
+  ]
+}

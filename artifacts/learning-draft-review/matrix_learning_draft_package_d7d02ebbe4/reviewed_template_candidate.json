@@ -1,0 +1,271 @@
+{
+  "contract_version": "reviewed_template_candidate_v1",
+  "source": {
+    "source_path": "artifacts/learn-recognition-matrix-evidence/uground2b_actual_v3/matrix_learning_draft_package.json",
+    "source_trial_path": "artifacts/learn-recognition-matrix-evidence/uground2b_actual_v3/matrix_learning_draft_package.json",
+    "original_draft_path": "artifacts/learn-recognition-matrix-evidence/uground2b_actual_v3/matrix_learning_draft_package.json",
+    "sha256": "d7d02ebbe44688acc32681ac5a0fe996745113dfe087d7a80780033fac7a97c1",
+    "attempt_index": null,
+    "readonly": true
+  },
+  "source_after_review": "mixed",
+  "counts_as_pure_model_generated": false,
+  "artifact_is_authorization": false,
+  "draft_only": false,
+  "reviewed_by_human": true,
+  "review_status": "needs_human_review",
+  "final_submit_forbidden": true,
+  "real_action_requires_gate": true,
+  "execute_binding_enabled": false,
+  "authorization_scope": "display_and_review_only",
+  "draft": {
+    "contract_version": "learning_template_draft_v1",
+    "screen_summary": "learn_mode_uground_2b grounding matrix evidence: 5 passed actual-call point candidates from fixed candidate set.",
+    "state_guess": "python_homepage",
+    "states": [
+      {
+        "state_id": "python_homepage",
+        "label": "Python Homepage",
+        "state_type": "learn_recognition_surface",
+        "description": "Surface reconstructed from actual grounding matrix evidence."
+      },
+      {
+        "state_id": "seek_results_header",
+        "label": "Seek Results Header",
+        "state_type": "learn_recognition_surface",
+        "description": "Surface reconstructed from actual grounding matrix evidence."
+      }
+    ],
+    "regions": [
+      {
+        "region_id": "region_1_search_keyword_field",
+        "label": "Search keyword field",
+        "region_type": "validated_grounding_target",
+        "state_id": "seek_results_header",
+        "bbox": {
+          "x": 633,
+          "y": 184,
+          "w": 850,
+          "h": 48
+        },
+        "click_point": {
+          "x": 1058,
+          "y": 207
+        },
+        "source_case_id": "recorded_parser_seek_search_header_controls",
+        "source_profile_id": "learn_mode_uground_2b",
+        "display_only": true
+      },
+      {
+        "region_id": "region_2_seek_search_button",
+        "label": "SEEK search button",
+        "region_type": "validated_grounding_target",
+        "state_id": "seek_results_header",
+        "bbox": {
+          "x": 1820,
+          "y": 184,
+          "w": 92,
+          "h": 48
+        },
+        "click_point": {
+          "x": 1866,
+          "y": 208
+        },
+        "source_case_id": "recorded_parser_seek_search_header_controls",
+        "source_profile_id": "learn_mode_uground_2b",
+        "display_only": true
+      },
+      {
+        "region_id": "region_3_pay_filter",
+        "label": "Pay filter",
+        "region_type": "validated_grounding_target",
+        "state_id": "seek_results_header",
+        "bbox": {
+          "x": 632,
+          "y": 258,
+          "w": 78,
+          "h": 42
+        },
+        "click_point": {
+          "x": 671,
+          "y": 276
+        },
+        "source_case_id": "recorded_parser_seek_search_header_controls",
+        "source_profile_id": "learn_mode_uground_2b",
+        "display_only": true
+      },
+      {
+        "region_id": "region_4_search_button",
+        "label": "Search button",
+        "region_type": "validated_grounding_target",
+        "state_id": "python_homepage",
+        "bbox": {
+          "x": 1322,
+          "y": 244,
+          "w": 57,
+          "h": 46
+        },
+        "click_point": {
+          "x": 1351,
+          "y": 267
+        },
+        "source_case_id": "recorded_parser_calibrated_targets_python_homepage",
+        "source_profile_id": "learn_mode_uground_2b",
+        "display_only": true
+      },
+      {
+        "region_id": "region_5_downloads_link",
+        "label": "Downloads link",
+        "region_type": "validated_grounding_target",
+        "state_id": "python_homepage",
+        "bbox": {
+          "x": 766,
+          "y": 363,
+          "w": 99,
+          "h": 30
+        },
+        "click_point": {
+          "x": 815,
+          "y": 378
+        },
+        "source_case_id": "recorded_parser_calibrated_targets_python_homepage",
+        "source_profile_id": "learn_mode_uground_2b",
+        "display_only": true
+      }
+    ],
+    "action_templates": [
+      {
+        "action_template_id": "action_1_search_keyword_field",
+        "label": "Search keyword field",
+        "semantic_action": "search_or_filter",
+        "low_level_action_type": "point_grounding_candidate",
+        "target_entity": "region_1_search_keyword_field",
+        "state_id": "seek_results_header",
+        "expected_effect": "needs_human_review_before_use",
+        "evidence_ref": "logs\\benchmarks\\learn_recognition_grounding_model_matrix_uground2b_actual_v3\\learn_mode_uground_2b\\01_recorded_parser_seek_search_header_controls\\actual_grounding_output_v1.json",
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "action_template_id": "action_2_seek_search_button",
+        "label": "SEEK search button",
+        "semantic_action": "search_or_filter",
+        "low_level_action_type": "point_grounding_candidate",
+        "target_entity": "region_2_seek_search_button",
+        "state_id": "seek_results_header",
+        "expected_effect": "needs_human_review_before_use",
+        "evidence_ref": "logs\\benchmarks\\learn_recognition_grounding_model_matrix_uground2b_actual_v3\\learn_mode_uground_2b\\02_recorded_parser_seek_search_header_controls\\actual_grounding_output_v1.json",
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "action_template_id": "action_3_pay_filter",
+        "label": "Pay filter",
+        "semantic_action": "open_filter",
+        "low_level_action_type": "point_grounding_candidate",
+        "target_entity": "region_3_pay_filter",
+        "state_id": "seek_results_header",
+        "expected_effect": "needs_human_review_before_use",
+        "evidence_ref": "logs\\benchmarks\\learn_recognition_grounding_model_matrix_uground2b_actual_v3\\learn_mode_uground_2b\\03_recorded_parser_seek_search_header_controls\\actual_grounding_output_v1.json",
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "action_template_id": "action_4_search_button",
+        "label": "Search button",
+        "semantic_action": "search_or_filter",
+        "low_level_action_type": "point_grounding_candidate",
+        "target_entity": "region_4_search_button",
+        "state_id": "python_homepage",
+        "expected_effect": "needs_human_review_before_use",
+        "evidence_ref": "logs\\benchmarks\\learn_recognition_grounding_model_matrix_uground2b_actual_v3\\learn_mode_uground_2b\\04_recorded_parser_calibrated_targets_python_homepage\\actual_grounding_output_v1.json",
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "action_template_id": "action_5_downloads_link",
+        "label": "Downloads link",
+        "semantic_action": "open_download_or_navigation",
+        "low_level_action_type": "point_grounding_candidate",
+        "target_entity": "region_5_downloads_link",
+        "state_id": "python_homepage",
+        "expected_effect": "needs_human_review_before_use",
+        "evidence_ref": "logs\\benchmarks\\learn_recognition_grounding_model_matrix_uground2b_actual_v3\\learn_mode_uground_2b\\05_recorded_parser_calibrated_targets_python_homepage\\actual_grounding_output_v1.json",
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      }
+    ],
+    "blockers": [
+      {
+        "blocker_id": "display_only_no_execute_binding",
+        "description": "Matrix evidence cannot be used as Execute authorization."
+      },
+      {
+        "blocker_id": "insufficient_sample_size_for_reliability",
+        "description": "This fixed matrix is too small to prove recognition reliability or 90% accuracy."
+      }
+    ],
+    "verification_rules": [
+      {
+        "rule_id": "validator_valid_candidate_required",
+        "description": "Each candidate must have Validator status valid_candidate and point_quality passed_inside_expected_bbox.",
+        "source": "matrix_evidence"
+      },
+      {
+        "rule_id": "human_review_before_execute",
+        "description": "Matrix-derived candidates are display/review evidence only and cannot authorize Execute.",
+        "source": "safety_policy"
+      }
+    ],
+    "agent_decision_points": [
+      {
+        "decision_id": "review_matrix_candidate_before_promotion",
+        "description": "Human review is required before converting any matrix-derived region/action into a reusable template."
+      }
+    ],
+    "operation_skills": [
+      "roi_point_grounding",
+      "coordinate_transform_replay",
+      "validator_check"
+    ],
+    "gate_contracts": [
+      "no_execute_binding",
+      "final_submit_forbidden",
+      "human_review_required"
+    ],
+    "learning_source": "actual_call_matrix_evidence",
+    "notes": [
+      {
+        "note_id": "matrix_summary",
+        "text": "{\"passed\": 5, \"attempted\": 5, \"rate\": 1.0, \"interpretation\": \"fresh actual grounding calls only; not a reliability or 90% accuracy claim\"}"
+      },
+      {
+        "note_id": "matrix_interpretation",
+        "text": "matrix rows are comparable only when they use the same cases_json_path; readiness blockers are not model calls"
+      }
+    ],
+    "safety": {
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "real_action_requires_gate": true,
+      "final_submit_forbidden": true,
+      "authorization_scope": "display_and_review_only"
+    }
+  },
+  "safety": {
+    "artifact_is_authorization": false,
+    "final_submit_allowed": false,
+    "final_submit_forbidden": true,
+    "real_action_requires_gate": true,
+    "execute_binding_enabled": false,
+    "authorization_scope": "display_and_review_only"
+  },
+  "audit": {
+    "source_trial_path": "artifacts/learn-recognition-matrix-evidence/uground2b_actual_v3/matrix_learning_draft_package.json",
+    "original_draft_path": "artifacts/learn-recognition-matrix-evidence/uground2b_actual_v3/matrix_learning_draft_package.json",
+    "reviewed_at": "2026-07-04T03:50:07.460482",
+    "changes_summary": [],
+    "review_status": "needs_human_review",
+    "authorization_scope": "display_and_review_only"
+  }
+}

@@ -1,0 +1,21 @@
+请作为视觉审核 reviewer，只审核这三张学习模式识别 overlay 图，不需要给实现建议。
+
+图片顺序：
+1. Python.org：蓝框是 Stage1 大栏，橙框是 Stage1.5 content_column。
+2. Apple Music：只有 Stage1 大栏；当前判断是 geometry ready，不需要 Stage1.5。
+3. QQ：蓝框是 Stage1 大栏，橙框是 Stage1.5 conversation_list / message_thread / bottom_composer。
+
+审核目标：
+- Stage1 大栏是否定位正确：浏览器/顶栏/左栏/右栏/主栏是否分开，是否明显越界或挤压。
+- Stage1.5 是否只做内部只读拆分，没有改变 Stage1 大栏。
+- 内部子区是否被裁剪在父栏内，是否有明显漏区、越界、误合并。
+- 对每张图给 PASS / CONDITIONAL PASS / FAIL。
+
+请按这个格式输出：
+Python.org: ...
+Apple Music: ...
+QQ: ...
+主要问题:
+下一步是否允许进入后续编号定位:
+
+注意：这不是执行模式，不授权点击；不要评价最终 PathGraph 或真实执行成功率。

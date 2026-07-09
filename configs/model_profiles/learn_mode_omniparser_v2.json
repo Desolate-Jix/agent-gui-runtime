@@ -1,0 +1,30 @@
+{
+  "profile_id": "learn_mode_omniparser_v2",
+  "label": "Learn Mode OmniParser V2 provider candidate",
+  "mode_scope": "learn_only",
+  "role": [
+    "learn_recognition_candidate",
+    "screen_parser_provider"
+  ],
+  "intended_pipeline_stage": "parser_provider",
+  "provider_mode": "metadata_only",
+  "model_family": "OmniParser",
+  "model_id": "microsoft/OmniParser-v2",
+  "max_parameters_b": 1.0,
+  "experiment_priority": 2,
+  "input_contract": "full_screen_screenshot",
+  "output_contract": "screen_inventory_interactable_boxes_v2",
+  "coordinate_output": "bbox_candidates_normalized_or_pixel_requires_adapter",
+  "parser_role": "ui_element_parser",
+  "grounding_role": "not_used_for_final_point",
+  "recommended_use": "Parser provider for interactable element boxes and icon captions before classifier and ROI grounding.",
+  "candidate_source_url": "https://github.com/microsoft/omniparser",
+  "download_status": "not_downloaded",
+  "model_path": "",
+  "launchable": false,
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "real_action_requires_gate": true,
+  "final_submit_forbidden": true,
+  "notes": "Metadata-only provider candidate. Parser output is screen inventory evidence, not click authorization."
+}

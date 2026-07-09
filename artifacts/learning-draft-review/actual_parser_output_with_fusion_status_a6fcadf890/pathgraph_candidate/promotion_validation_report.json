@@ -1,0 +1,395 @@
+{
+  "contract_version": "pathgraph_candidate_validation_report_v1",
+  "validation_status": "blocked_pending_calibration",
+  "checks": [
+    {
+      "check_id": "states_present",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "count": 1
+      }
+    },
+    {
+      "check_id": "regions_present",
+      "passed": false,
+      "severity": "hard_error",
+      "details": {
+        "count": 0
+      }
+    },
+    {
+      "check_id": "action_templates_present",
+      "passed": false,
+      "severity": "hard_error",
+      "details": {
+        "count": 0
+      }
+    },
+    {
+      "check_id": "action_region_linkage",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "unlinked_actions": []
+      }
+    },
+    {
+      "check_id": "blockers_present",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "count": 2
+      }
+    },
+    {
+      "check_id": "verification_rules_present",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "count": 3
+      }
+    },
+    {
+      "check_id": "unsafe_final_actions_absent",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "unsafe_actions": []
+      }
+    },
+    {
+      "check_id": "artifact_is_authorization_false",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {}
+    },
+    {
+      "check_id": "execute_binding_disabled",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {}
+    },
+    {
+      "check_id": "final_submit_forbidden",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {}
+    },
+    {
+      "check_id": "source_not_pure_model_generated",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {}
+    },
+    {
+      "check_id": "precise_understanding_ready_for_pathgraph_candidate",
+      "passed": false,
+      "severity": "hard_error",
+      "details": {
+        "precise_understanding_readiness_summary": {
+          "readiness_status": "needs_pending_calibration",
+          "total_locator_cards": 10,
+          "calibrated_cases": 2,
+          "uncalibrated_locator_cards": 8,
+          "calibration_coverage_rate": 0.2,
+          "pending_calibration_ready_count": 6,
+          "pending_calibration_review_count": 2,
+          "pathgraph_status": "blocked_from_pathgraph_candidate_review",
+          "ready_for_runtime_pathgraph_promotion": false,
+          "display_only": true,
+          "not_accuracy": true,
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        }
+      }
+    },
+    {
+      "check_id": "precise_understanding_evidence_integrity_complete",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "evidence_integrity": {
+          "contract_version": "learn_precise_understanding_evidence_integrity_v1",
+          "status": "complete",
+          "required_for_pathgraph_review": true,
+          "missing_declared_evidence": [],
+          "display_only": true,
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false,
+          "screenshot": {
+            "kind": "screenshot",
+            "path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+            "declared_path": "artifacts\\screenshots\\jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+            "exists": true,
+            "sha256": "4ad07148c25da7935c8845a8455346c167d7fbb3056f15c7ab50be004d12283b"
+          },
+          "full_screen_understanding_overlay": {
+            "kind": "full_screen_understanding_overlay",
+            "path": "logs/benchmarks/learn_full_screen_understanding_backlog_triage_preview_20260706/full_screen_understanding_overlay.png",
+            "declared_path": "D:\\agent-gui-runtime\\logs\\benchmarks\\learn_full_screen_understanding_backlog_triage_preview_20260706\\full_screen_understanding_overlay.png",
+            "exists": true,
+            "sha256": "317632d716d6c00d7ce6c2a8306ad17a16244867f9d8b120cff18c2100534dec"
+          },
+          "compiled_overlay": {
+            "kind": "compiled_overlay",
+            "path": "logs/benchmarks/learn_locator_card_execute_calibration_seek_full_20260705/numbered_region_calibration_overlay.png",
+            "declared_path": "D:\\agent-gui-runtime\\logs\\benchmarks\\learn_locator_card_execute_calibration_seek_full_20260705\\numbered_region_calibration_overlay.png",
+            "exists": true,
+            "sha256": "baedf7b003b2bac7848b25a6fd4991ce593f74fd6c1c4a2504ec9476ced7ab46"
+          },
+          "source_status_report": {
+            "kind": "source_status_report",
+            "path": "logs/benchmarks/learn_pathgraph_readiness_with_refresh_plan_20260706/refresh_base/learn_fusion_refresh_base_status.json",
+            "declared_path": "logs/benchmarks/learn_pathgraph_readiness_with_refresh_plan_20260706/refresh_base/learn_fusion_refresh_base_status.json",
+            "exists": true,
+            "sha256": "ff124892230855c6e56af698c812619044009b029c039edfef3e9b2e091238f2"
+          },
+          "source_calibration_report": {
+            "kind": "source_calibration_report",
+            "path": "logs/benchmarks/learn_locator_card_execute_calibration_seek_full_20260705/numbered_region_calibration_report.json",
+            "declared_path": "logs/benchmarks/learn_locator_card_execute_calibration_seek_full_20260705/numbered_region_calibration_report.json",
+            "exists": true,
+            "sha256": "56b3ad46ffe02977d0f369e23645391c1aa4871e352c8ac1679431a833b46bb2"
+          }
+        }
+      }
+    },
+    {
+      "check_id": "no_dispatch_dry_run_preview_only",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "operation_dispatch": "not_executed"
+      }
+    }
+  ],
+  "summary": {
+    "state_count": 1,
+    "region_count": 0,
+    "action_template_count": 0,
+    "blocker_count": 2,
+    "verification_rule_count": 3,
+    "failed_check_count": 3,
+    "operation_dispatch": "not_executed",
+    "candidate_only": true,
+    "manual_bbox_edit_summary": {
+      "contract_version": "manual_bbox_edit_summary_v1",
+      "edited_region_count": 0,
+      "edited_action_count": 0,
+      "edited_total": 0,
+      "point_inside_bbox_passed": 0,
+      "point_inside_bbox_failed": 0,
+      "invalid_geometry_count": 0,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false
+    },
+    "source_freshness_summary": {
+      "contract_version": "source_freshness_summary_v1",
+      "source_image_status": "available",
+      "checksum_status": "matched",
+      "freshness_status": "verified",
+      "warning_count": 0,
+      "warnings": [],
+      "source_image_path": "artifacts\\screenshots\\jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+      "source_image_sha256": "4ad07148c25da7935c8845a8455346c167d7fbb3056f15c7ab50be004d12283b",
+      "actual_source_image_sha256": "4ad07148c25da7935c8845a8455346c167d7fbb3056f15c7ab50be004d12283b",
+      "source_image_evidence_source": "page_details.precise_understanding_fusion_status",
+      "checksum_binding_status": "computed_from_existing_fusion_source",
+      "edited_geometry_requires_review": false,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false
+    },
+    "precise_understanding_summary": {
+      "contract_version": "precise_understanding_summary_v1",
+      "state_count": 1,
+      "region_count": 0,
+      "bbox_region_count": 0,
+      "action_template_count": 0,
+      "action_click_point_count": 0,
+      "open_detail_transition_hint_count": 0,
+      "blocker_count": 2,
+      "verification_rule_count": 3,
+      "semantic_actions": [],
+      "candidate_only": true,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "final_submit_forbidden": true,
+      "interpretation": "review-only precise understanding summary; not Execute authorization"
+    },
+    "precise_understanding_readiness_summary": {
+      "readiness_status": "needs_pending_calibration",
+      "total_locator_cards": 10,
+      "calibrated_cases": 2,
+      "uncalibrated_locator_cards": 8,
+      "calibration_coverage_rate": 0.2,
+      "pending_calibration_ready_count": 6,
+      "pending_calibration_review_count": 2,
+      "pathgraph_status": "blocked_from_pathgraph_candidate_review",
+      "ready_for_runtime_pathgraph_promotion": false,
+      "display_only": true,
+      "not_accuracy": true,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false
+    },
+    "evidence_integrity": {
+      "contract_version": "learn_precise_understanding_evidence_integrity_v1",
+      "status": "complete",
+      "required_for_pathgraph_review": true,
+      "missing_declared_evidence": [],
+      "display_only": true,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false,
+      "screenshot": {
+        "kind": "screenshot",
+        "path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+        "declared_path": "artifacts\\screenshots\\jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+        "exists": true,
+        "sha256": "4ad07148c25da7935c8845a8455346c167d7fbb3056f15c7ab50be004d12283b"
+      },
+      "full_screen_understanding_overlay": {
+        "kind": "full_screen_understanding_overlay",
+        "path": "logs/benchmarks/learn_full_screen_understanding_backlog_triage_preview_20260706/full_screen_understanding_overlay.png",
+        "declared_path": "D:\\agent-gui-runtime\\logs\\benchmarks\\learn_full_screen_understanding_backlog_triage_preview_20260706\\full_screen_understanding_overlay.png",
+        "exists": true,
+        "sha256": "317632d716d6c00d7ce6c2a8306ad17a16244867f9d8b120cff18c2100534dec"
+      },
+      "compiled_overlay": {
+        "kind": "compiled_overlay",
+        "path": "logs/benchmarks/learn_locator_card_execute_calibration_seek_full_20260705/numbered_region_calibration_overlay.png",
+        "declared_path": "D:\\agent-gui-runtime\\logs\\benchmarks\\learn_locator_card_execute_calibration_seek_full_20260705\\numbered_region_calibration_overlay.png",
+        "exists": true,
+        "sha256": "baedf7b003b2bac7848b25a6fd4991ce593f74fd6c1c4a2504ec9476ced7ab46"
+      },
+      "source_status_report": {
+        "kind": "source_status_report",
+        "path": "logs/benchmarks/learn_pathgraph_readiness_with_refresh_plan_20260706/refresh_base/learn_fusion_refresh_base_status.json",
+        "declared_path": "logs/benchmarks/learn_pathgraph_readiness_with_refresh_plan_20260706/refresh_base/learn_fusion_refresh_base_status.json",
+        "exists": true,
+        "sha256": "ff124892230855c6e56af698c812619044009b029c039edfef3e9b2e091238f2"
+      },
+      "source_calibration_report": {
+        "kind": "source_calibration_report",
+        "path": "logs/benchmarks/learn_locator_card_execute_calibration_seek_full_20260705/numbered_region_calibration_report.json",
+        "declared_path": "logs/benchmarks/learn_locator_card_execute_calibration_seek_full_20260705/numbered_region_calibration_report.json",
+        "exists": true,
+        "sha256": "56b3ad46ffe02977d0f369e23645391c1aa4871e352c8ac1679431a833b46bb2"
+      }
+    },
+    "pending_detail_observe_request_count": 0
+  },
+  "manual_bbox_edit_summary": {
+    "contract_version": "manual_bbox_edit_summary_v1",
+    "edited_region_count": 0,
+    "edited_action_count": 0,
+    "edited_total": 0,
+    "point_inside_bbox_passed": 0,
+    "point_inside_bbox_failed": 0,
+    "invalid_geometry_count": 0,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false
+  },
+  "source_freshness_summary": {
+    "contract_version": "source_freshness_summary_v1",
+    "source_image_status": "available",
+    "checksum_status": "matched",
+    "freshness_status": "verified",
+    "warning_count": 0,
+    "warnings": [],
+    "source_image_path": "artifacts\\screenshots\\jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+    "source_image_sha256": "4ad07148c25da7935c8845a8455346c167d7fbb3056f15c7ab50be004d12283b",
+    "actual_source_image_sha256": "4ad07148c25da7935c8845a8455346c167d7fbb3056f15c7ab50be004d12283b",
+    "source_image_evidence_source": "page_details.precise_understanding_fusion_status",
+    "checksum_binding_status": "computed_from_existing_fusion_source",
+    "edited_geometry_requires_review": false,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false
+  },
+  "precise_understanding_summary": {
+    "contract_version": "precise_understanding_summary_v1",
+    "state_count": 1,
+    "region_count": 0,
+    "bbox_region_count": 0,
+    "action_template_count": 0,
+    "action_click_point_count": 0,
+    "open_detail_transition_hint_count": 0,
+    "blocker_count": 2,
+    "verification_rule_count": 3,
+    "semantic_actions": [],
+    "candidate_only": true,
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "final_submit_forbidden": true,
+    "interpretation": "review-only precise understanding summary; not Execute authorization"
+  },
+  "precise_understanding_readiness_summary": {
+    "readiness_status": "needs_pending_calibration",
+    "total_locator_cards": 10,
+    "calibrated_cases": 2,
+    "uncalibrated_locator_cards": 8,
+    "calibration_coverage_rate": 0.2,
+    "pending_calibration_ready_count": 6,
+    "pending_calibration_review_count": 2,
+    "pathgraph_status": "blocked_from_pathgraph_candidate_review",
+    "ready_for_runtime_pathgraph_promotion": false,
+    "display_only": true,
+    "not_accuracy": true,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false
+  },
+  "evidence_integrity": {
+    "contract_version": "learn_precise_understanding_evidence_integrity_v1",
+    "status": "complete",
+    "required_for_pathgraph_review": true,
+    "missing_declared_evidence": [],
+    "display_only": true,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false,
+    "screenshot": {
+      "kind": "screenshot",
+      "path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+      "declared_path": "artifacts\\screenshots\\jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+      "exists": true,
+      "sha256": "4ad07148c25da7935c8845a8455346c167d7fbb3056f15c7ab50be004d12283b"
+    },
+    "full_screen_understanding_overlay": {
+      "kind": "full_screen_understanding_overlay",
+      "path": "logs/benchmarks/learn_full_screen_understanding_backlog_triage_preview_20260706/full_screen_understanding_overlay.png",
+      "declared_path": "D:\\agent-gui-runtime\\logs\\benchmarks\\learn_full_screen_understanding_backlog_triage_preview_20260706\\full_screen_understanding_overlay.png",
+      "exists": true,
+      "sha256": "317632d716d6c00d7ce6c2a8306ad17a16244867f9d8b120cff18c2100534dec"
+    },
+    "compiled_overlay": {
+      "kind": "compiled_overlay",
+      "path": "logs/benchmarks/learn_locator_card_execute_calibration_seek_full_20260705/numbered_region_calibration_overlay.png",
+      "declared_path": "D:\\agent-gui-runtime\\logs\\benchmarks\\learn_locator_card_execute_calibration_seek_full_20260705\\numbered_region_calibration_overlay.png",
+      "exists": true,
+      "sha256": "baedf7b003b2bac7848b25a6fd4991ce593f74fd6c1c4a2504ec9476ced7ab46"
+    },
+    "source_status_report": {
+      "kind": "source_status_report",
+      "path": "logs/benchmarks/learn_pathgraph_readiness_with_refresh_plan_20260706/refresh_base/learn_fusion_refresh_base_status.json",
+      "declared_path": "logs/benchmarks/learn_pathgraph_readiness_with_refresh_plan_20260706/refresh_base/learn_fusion_refresh_base_status.json",
+      "exists": true,
+      "sha256": "ff124892230855c6e56af698c812619044009b029c039edfef3e9b2e091238f2"
+    },
+    "source_calibration_report": {
+      "kind": "source_calibration_report",
+      "path": "logs/benchmarks/learn_locator_card_execute_calibration_seek_full_20260705/numbered_region_calibration_report.json",
+      "declared_path": "logs/benchmarks/learn_locator_card_execute_calibration_seek_full_20260705/numbered_region_calibration_report.json",
+      "exists": true,
+      "sha256": "56b3ad46ffe02977d0f369e23645391c1aa4871e352c8ac1679431a833b46bb2"
+    }
+  },
+  "pending_detail_observe_requests": [],
+  "safety": {
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "final_submit_forbidden": true,
+    "real_action_requires_gate": true
+  },
+  "paths": {
+    "runtime_path_graph_candidate_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_a6fcadf890/pathgraph_candidate/runtime_path_graph_candidate.json",
+    "interface_map_candidate_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_a6fcadf890/pathgraph_candidate/interface_map_candidate.json"
+  }
+}

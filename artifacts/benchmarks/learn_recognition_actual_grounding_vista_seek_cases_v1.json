@@ -1,0 +1,25 @@
+{
+  "contract_version": "learn_actual_grounding_vista_seek_cases_v1",
+  "profile_id": "learn_grounding_vista_4b_baseline",
+  "interpretation": "Saved-SEEK-screenshot actual grounding smoke for learn-only VISTA baseline. These are non-submit header controls and remain display-only; they do not authorize Execute, live safe fill, or submit.",
+  "cases": [
+    {
+      "case_id": "recorded_parser_seek_search_header_controls",
+      "label": "Search keyword field",
+      "screenshot_path": "D:/agent-gui-runtime/artifacts/screenshots/jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+      "expected_case_outcome": "actual_grounding_call"
+    },
+    {
+      "case_id": "recorded_parser_seek_search_header_controls",
+      "label": "SEEK search button",
+      "screenshot_path": "D:/agent-gui-runtime/artifacts/screenshots/jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+      "expected_case_outcome": "actual_grounding_call"
+    },
+    {
+      "case_id": "recorded_parser_seek_search_header_controls",
+      "label": "Pay filter",
+      "screenshot_path": "D:/agent-gui-runtime/artifacts/screenshots/jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+      "expected_case_outcome": "actual_grounding_call"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "contract_version": "chatgpt_visual_audit_result_v1",
+  "checkpoint": "stage2_v89_member_partial_cleanup",
+  "sent_prompt_path": "logs/benchmarks/stage2_v89_member_partial_cleanup_gpt_audit_prompt.txt",
+  "image_count_verified_in_latest_user_message": 3,
+  "latest_user_prompt_verified": true,
+  "delivery_verified_by_dom": true,
+  "reviewer_status": {
+    "applemusic": "PASS",
+    "qq": "CONDITIONAL PASS",
+    "python_org": "CONDITIONAL PASS"
+  },
+  "reviewer_text": "AppleMusic: PASS for this checkpoint\n\nVisible result\n\nCard/grid structure is stable.\n\nThe red-star / ?????? card now appears as a complete card slot rather than an incomplete icon-only card.\n\nFirst-row media cards remain intact.\n\nSecond-row cards remain aligned inside the same row group.\n\nBottom partial cards remain partial/review-style and were not incorrectly promoted into full cards.\n\nNo visible pollution from the QQ member-list rule or Python.org content-column behavior.\n\nVisible issues\n\nTopbar labels/control boxes are still visually dense.\n\nLeft review/background strip remains visible.\n\nThis remains display/review evidence only.\n\nProtected-set regression: none visible.\n\nQQ: CONDITIONAL PASS\n\nVisible result\n\nRight-side member area is more complete than earlier versions.\n\nThe member list region appears to include the main consecutive member rows after the ????? 1263? header.\n\nAnnouncement rows are still visually separate as notice_item / boundary-review content, not obviously swallowed into the member list.\n\nMessage/thread/sidebar geometry does not appear polluted by the AppleMusic card-slot rule.\n\nVisible issues\n\n4.2 boundary_review_region still looks like a noisy transition between announcement and member list.\n\nThe member list still may not include every visible compact row farther down the right sidebar; lower rows appear less clearly boxed.\n\nRight sidebar remains visually cluttered.\n\nTopbar and message-thread overlays remain dense.\n\nProtected-set regression: no obvious regression, but right sidebar is not clean enough for full pass.\n\nPython.org: CONDITIONAL PASS\n\nVisible result\n\nI do not see new large wrong media-card slots caused by the dense-row placeholder rule.\n\nNumbering still appears concentrated in the central content area, not across the whole wide primary background.\n\nBottom duplicate partial-card overlays appear reduced compared with earlier overlaid versions.\n\nBrowser chrome / header / content-column separation remains broadly consistent.\n\nVisible issues\n\nHero/code/text area is still heavily fragmented.\n\nMany orange text/link boxes overlap in the hero panel.\n\nCards and news/events rows remain dense.\n\nBlue review/structure boxes still overlap heavily in the main content area.\n\nBottom page sections are still visually busy; this is not a clean page-detail rendering yet.\n\nProtected-set regression: no obvious regression from the new media-card slot rule.\n\nOverall\nAppleMusic: PASS for this checkpoint\nQQ: CONDITIONAL PASS\nPython.org: CONDITIONAL PASS\n\nv87 appears to improve AppleMusic?s red-star card without visible protected-set regression in QQ or Python.org. This remains display/review-only Learning Mode evidence, not Execute authorization, Runtime PathGraph readiness, or a completed demo.",
+  "reviewer_caveat": "The final paragraph says v87, but the latest user message verified by DOM contained the v89 member/partial cleanup prompt and three v89 images.",
+  "display_only": true,
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "not_accuracy": true
+}

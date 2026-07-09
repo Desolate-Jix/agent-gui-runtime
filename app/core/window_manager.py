@@ -332,9 +332,10 @@ class WindowManager:
     def _activate_window(self, handle: int) -> None:
         """Best-effort lightweight foreground activation for screen-coordinate capture."""
         try:
-            win32gui.ShowWindow(handle, win32con.SW_RESTORE)  # type: ignore[union-attr]
+            if hasattr(win32gui, "IsIconic") and win32gui.IsIconic(handle):  # type: ignore[union-attr]
+                win32gui.ShowWindow(handle, win32con.SW_RESTORE)  # type: ignore[union-attr]
         except Exception as exc:
-            logger.warning("ShowWindow(SW_RESTORE) failed for handle {}: {}", handle, exc)
+            logger.warning("Window restore check failed for handle {}: {}", handle, exc)
 
         try:
             win32gui.BringWindowToTop(handle)  # type: ignore[union-attr]

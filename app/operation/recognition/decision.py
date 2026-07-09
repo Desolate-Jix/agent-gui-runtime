@@ -55,13 +55,33 @@ def decide_pre_click(
             if decision.allowed:
                 decision.allowed = False
                 decision.reasons = [item for item in decision.reasons if item != "pre_click_checks_passed"]
-                decision.reasons.append(blocked_reason)
+            if blocked_reason in decision.reasons:
+                continue
+            decision.reasons.append(blocked_reason)
 
-    top_margin_ok = _top_margin_ok(candidates, min_margin=min_margin)
-    if not top_margin_ok:
+    raw_top_margin_ok = _top_margin_ok(candidates, min_margin=min_margin)
+    equivalent_duplicate_margin_override_used = (
+        not raw_top_margin_ok and _top_margin_equivalent_duplicate_ok(candidates, min_margin=min_margin)
+    )
+    effective_top_margin_ok = raw_top_margin_ok or equivalent_duplicate_margin_override_used
+    if not effective_top_margin_ok:
         for index, decision in enumerate(decisions):
             if allow_low_margin_when_grounded and index == 0 and decision.allowed and "pre_click_checks_passed" in decision.reasons:
                 decision.reasons.append("top_candidate_margin_reviewed_override")
+                continue
+            decision.allowed = False
+            decision.reasons = [item for item in decision.reasons if item != "pre_click_checks_passed"]
+            decision.reasons.append("top_candidate_margin_too_small")
+    elif equivalent_duplicate_margin_override_used:
+        top_candidate = candidates.candidates[0] if candidates.candidates else None
+        for index, decision in enumerate(decisions):
+            candidate = candidates.candidates[index]
+            is_equivalent_top = (
+                top_candidate is not None
+                and (index == 0 or _candidates_are_equivalent_duplicates(top_candidate, candidate))
+            )
+            if decision.allowed and is_equivalent_top:
+                decision.reasons.append("top_candidate_margin_equivalent_duplicate")
                 continue
             decision.allowed = False
             decision.reasons = [item for item in decision.reasons if item != "pre_click_checks_passed"]
@@ -70,7 +90,9 @@ def decide_pre_click(
     allowed = [item for item in decisions if item.allowed]
     selected = allowed[0] if allowed else None
     reasons = ["pre_click_candidate_allowed"] if selected is not None else ["no_candidate_passed_pre_click_checks"]
-    if not top_margin_ok:
+    if equivalent_duplicate_margin_override_used and selected is not None:
+        reasons.append("top_candidate_margin_equivalent_duplicate")
+    elif not effective_top_margin_ok:
         reasons.append("top_candidate_margin_reviewed_override" if selected is not None else "top_candidate_margin_too_small")
 
     return PreClickDecisionResult(
@@ -83,8 +105,15 @@ def decide_pre_click(
         summary={
             "candidate_count": len(candidates.candidates),
             "allowed_candidate_count": len(allowed),
-            "top_margin_ok": top_margin_ok,
-            "low_margin_reviewed_override_used": bool(selected is not None and not top_margin_ok and allow_low_margin_when_grounded),
+            "top_margin_ok": effective_top_margin_ok,
+            "raw_top_margin_ok": raw_top_margin_ok,
+            "equivalent_duplicate_margin_override_used": equivalent_duplicate_margin_override_used,
+            "low_margin_reviewed_override_used": bool(
+                selected is not None
+                and not raw_top_margin_ok
+                and not equivalent_duplicate_margin_override_used
+                and allow_low_margin_when_grounded
+            ),
             "margin_to_second": candidates.margin_to_second,
         },
     )
@@ -107,6 +136,10 @@ def _candidate_decision(
     if candidate.score < min_candidate_score:
         allowed = False
         reasons.append("candidate_score_too_low")
+    goal_action_terms = _explicit_goal_action_terms(goal)
+    if goal_action_terms and not (_candidate_action_terms(candidate) & goal_action_terms):
+        allowed = False
+        reasons.append("candidate_goal_action_mismatch")
     goal_mentions_candidate_label = _goal_explicitly_requests_candidate_label(goal, candidate)
     if candidate.score_breakdown.text_similarity < min_local_text_similarity and not goal_mentions_candidate_label:
         allowed = False
@@ -209,6 +242,70 @@ def _top_margin_ok(candidates: CandidateRankResult, *, min_margin: float) -> boo
     if candidates.margin_to_second is None:
         return False
     return float(candidates.margin_to_second) >= min_margin
+
+
+def _top_margin_equivalent_duplicate_ok(candidates: CandidateRankResult, *, min_margin: float) -> bool:
+    if len(candidates.candidates) < 2 or candidates.margin_to_second is None:
+        return False
+    if float(candidates.margin_to_second) >= min_margin:
+        return False
+    top = candidates.candidates[0]
+    runner_up = candidates.candidates[1]
+    return _candidates_are_equivalent_duplicates(top, runner_up)
+
+
+def _candidates_are_equivalent_duplicates(left: RecognitionCandidate, right: RecognitionCandidate) -> bool:
+    if left.element_id == right.element_id:
+        return False
+    if not _candidate_text_equivalent(left, right):
+        return False
+    return _candidate_geometry_equivalent(left, right)
+
+
+def _candidate_text_equivalent(left: RecognitionCandidate, right: RecognitionCandidate) -> bool:
+    left_values = [_normalize_text(value) for value in _candidate_label_values(left)]
+    right_values = [_normalize_text(value) for value in _candidate_label_values(right)]
+    left_values = [value for value in left_values if value]
+    right_values = [value for value in right_values if value]
+    for left_value in left_values:
+        for right_value in right_values:
+            if left_value == right_value:
+                return True
+            if min(len(left_value), len(right_value)) >= 10 and _text_similarity(left_value, right_value) >= 0.92:
+                return True
+    return False
+
+
+def _candidate_geometry_equivalent(left: RecognitionCandidate, right: RecognitionCandidate) -> bool:
+    left_bbox = _candidate_decision_bbox(left)
+    right_bbox = _candidate_decision_bbox(right)
+    if _bbox_iou(left_bbox, right_bbox) >= 0.55:
+        return True
+    left_point = left.element.click_point
+    right_point = right.element.click_point
+    if not left_point or not right_point:
+        return False
+    dx = int(left_point.get("x", 0)) - int(right_point.get("x", 0))
+    dy = int(left_point.get("y", 0)) - int(right_point.get("y", 0))
+    return (dx * dx + dy * dy) ** 0.5 <= 24
+
+
+def _bbox_iou(left: BBox, right: BBox) -> float:
+    left_x2 = left.x + left.w
+    left_y2 = left.y + left.h
+    right_x2 = right.x + right.w
+    right_y2 = right.y + right.h
+    intersection_w = max(0, min(left_x2, right_x2) - max(left.x, right.x))
+    intersection_h = max(0, min(left_y2, right_y2) - max(left.y, right.y))
+    intersection = intersection_w * intersection_h
+    if intersection <= 0:
+        return 0.0
+    left_area = max(0, left.w) * max(0, left.h)
+    right_area = max(0, right.w) * max(0, right.h)
+    union = left_area + right_area - intersection
+    if union <= 0:
+        return 0.0
+    return intersection / union
 
 
 def _point_inside_bbox(point: dict[str, int], bbox: BBox, *, padding: int = 0) -> bool:
@@ -335,6 +432,53 @@ def _goal_explicitly_requests_candidate_label(goal: str, candidate: RecognitionC
             if _negates_next_click_target(before):
                 continue
             return True
+    return False
+
+
+def _explicit_goal_action_terms(goal: str) -> set[str]:
+    goal_text = _normalize_text(goal)
+    term_groups = {
+        "open_detail": ["open detail", "job detail", "job listing", "listing card", "result card"],
+        "apply": ["apply", "quick apply", "申请"],
+        "continue": ["continue", "next", "下一步", "继续"],
+        "submit": ["submit", "send", "confirm", "提交", "发送", "确认"],
+        "save": ["save", "saved", "保存", "收藏"],
+        "search": ["search", "find", "搜索", "查找"],
+        "filter": ["filter", "refine", "pay", "date listed", "classification", "筛选"],
+    }
+    terms: set[str] = set()
+    for canonical, values in term_groups.items():
+        if any(_has_positive_goal_term(goal_text, _normalize_text(value)) for value in values):
+            terms.add(canonical)
+    return terms
+
+
+def _candidate_action_terms(candidate: RecognitionCandidate) -> set[str]:
+    text = _normalize_text(" ".join(_candidate_label_values(candidate) + [candidate.role, candidate.element.description]))
+    terms: set[str] = set()
+    term_groups = {
+        "open_detail": ["open detail", "job detail", "job listing", "listing card", "result card", "card"],
+        "apply": ["apply", "quick apply", "申请"],
+        "continue": ["continue", "next", "下一步", "继续"],
+        "submit": ["submit", "send", "confirm", "提交", "发送", "确认"],
+        "save": ["save", "saved", "保存", "收藏"],
+        "search": ["search", "find", "搜索", "查找"],
+        "filter": ["filter", "refine", "pay", "date listed", "classification", "筛选"],
+    }
+    for canonical, values in term_groups.items():
+        if any(_normalize_text(value) in text for value in values):
+            terms.add(canonical)
+    return terms
+
+
+def _has_positive_goal_term(goal_text: str, term: str) -> bool:
+    if not term:
+        return False
+    for match in re.finditer(rf"(?<!\w){re.escape(term)}(?!\w)", goal_text):
+        before = goal_text[max(0, match.start() - 56) : match.start()].strip()
+        if _negates_next_click_target(before):
+            continue
+        return True
     return False
 
 

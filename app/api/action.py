@@ -20,6 +20,7 @@ from app.core.verifier import verifier
 from app.core.window_manager import window_manager
 from app.gate.scroll import build_scroll_effect_validation, build_scroll_precondition_decision, build_scroll_safe_point
 from app.operation.mousetester import should_verify_mouse_tester_semantics, target_bbox_from_recommended, verify_mouse_tester_post_click_semantics
+from app.operation.runtime_context import build_operation_runtime_context, operation_trace_link
 from app.trace.actions import write_execute_trace_if_enabled
 from app.api.models.request import (
     ClickTextRequest,
@@ -27,6 +28,7 @@ from app.api.models.request import (
     ExecuteRecognitionPlanRequest,
     ScrollRequest,
     TypeTextRequest,
+    VisionObserveScreenRequestModel,
     VisionRecognitionPlanOverlayRequestModel,
     VisionRecognitionPlanRequestModel,
 )
@@ -59,6 +61,12 @@ def _run_recognition_plan_for_execution(request: VisionRecognitionPlanRequestMod
     from app.api.vision import recognition_plan
 
     return recognition_plan(request)
+
+
+def _run_observe_screen_for_execution(request: VisionObserveScreenRequestModel) -> APIResponse:
+    from app.api.vision import observe_screen
+
+    return observe_screen(request)
 
 
 def _render_recognition_plan_overlay_for_execution(trace_path: str) -> Optional[dict[str, Any]]:
@@ -447,6 +455,13 @@ def _bound_window_snapshot(bound: Any) -> dict[str, Any]:
     }
 
 
+def _window_binding_id(bound: Any | None) -> str | None:
+    if bound is None:
+        return None
+    handle = getattr(bound, "handle", None)
+    return f"window:{int(handle)}" if handle is not None else None
+
+
 def _size_from_rect(rect: dict[str, Any]) -> dict[str, int]:
     return {"width": int(rect.get("width") or 0), "height": int(rect.get("height") or 0)}
 
@@ -519,6 +534,28 @@ def _instruction_learning_enabled(request: ExecuteRecognitionPlanRequest) -> boo
 def _element_memory_enabled(request: ExecuteRecognitionPlanRequest) -> bool:
     write_policy = request.write_policy.model_dump() if hasattr(request.write_policy, "model_dump") else {}
     return bool(write_policy.get("element_memory", True))
+
+
+def _auto_observe_learning_artifacts_enabled(request: ExecuteRecognitionPlanRequest) -> bool:
+    if request.auto_observe_learning_artifacts:
+        return True
+    metadata = request.metadata if isinstance(request.metadata, dict) else {}
+    learning_artifacts = metadata.get("learning_artifacts") if isinstance(metadata.get("learning_artifacts"), dict) else {}
+    return bool(learning_artifacts.get("auto_observe") or metadata.get("auto_observe_learning_artifacts"))
+
+
+def _auto_observe_metadata(request: ExecuteRecognitionPlanRequest) -> dict[str, Any]:
+    metadata = request.metadata if isinstance(request.metadata, dict) else {}
+    learning_artifacts = metadata.get("learning_artifacts") if isinstance(metadata.get("learning_artifacts"), dict) else {}
+    configured = learning_artifacts.get("observe_metadata") if isinstance(learning_artifacts.get("observe_metadata"), dict) else {}
+    observe_metadata = dict(configured)
+    observe_metadata.setdefault("visual_assets", {"enabled": True})
+    observe_metadata["auto_observe_for_execute"] = {
+        "contract_version": "auto_observe_for_execute_v1",
+        "source": "execute_recognition_plan",
+        "reason": "load_learned_path_graph_and_interface_assets",
+    }
+    return observe_metadata
 
 
 def _rect_from_bbox(value: Any) -> dict[str, int] | None:
@@ -1301,6 +1338,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
     timer = RuntimeTimer()
     bound = window_manager.get_bound_window()
     live_capture: Optional[dict[str, Any]] = None
+    auto_observe_trace: dict[str, Any] | None = None
 
     def attach_timings(result: dict[str, Any]) -> dict[str, Any]:
         result["timings"] = timer.to_dict()
@@ -1559,6 +1597,66 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 error=ErrorModel(code="missing_image_source", details="Provide image_path or set capture_live=true"),
             )
 
+        effective_observe_trace_path = request.observe_trace_path
+        if _auto_observe_learning_artifacts_enabled(request) and not effective_observe_trace_path:
+            observe_request = VisionObserveScreenRequestModel(
+                app_name=request.app_name,
+                state_hint=request.state_hint,
+                provider_mode=None,
+                agent_mode="learn",
+                learn_depth="fast",
+                metadata=_auto_observe_metadata(request),
+                capture_live=False,
+                image_path=image_path,
+            )
+            with timer.step("auto_observe_learning_artifacts"):
+                observe_response = _run_observe_screen_for_execution(observe_request)
+            observe_result = ((observe_response.data or {}).get("result") if observe_response.data else None) if observe_response.success else None
+            observe_trace_path = observe_result.get("trace_path") if isinstance(observe_result, dict) else None
+            auto_observe_trace = {
+                "contract_version": "auto_observe_for_execute_v1",
+                "enabled": True,
+                "success": bool(observe_response.success and observe_trace_path),
+                "trace_path": observe_trace_path,
+                "message": observe_response.message,
+                "error": observe_response.error.model_dump() if observe_response.error else None,
+            }
+            if not observe_response.success or not observe_trace_path:
+                timings = timer.to_dict()
+                failed_result = {
+                    "contract_version": "execute_recognition_plan_v1",
+                    "agent_mode": request.agent_mode,
+                    "learn_depth": request.learn_depth,
+                    "goal": request.goal,
+                    "image_path": image_path,
+                    "live_capture": live_capture,
+                    "auto_observe_trace": auto_observe_trace,
+                    "timings": timings,
+                }
+                trace_path = _write_execute_trace_if_enabled(
+                    request,
+                    category="actions",
+                    operation="execute_recognition_plan",
+                    payload={
+                        "success": False,
+                        "request": request.model_dump(),
+                        "result": failed_result,
+                        "failure_reason": "auto_observe_learning_artifacts_failed",
+                    },
+                    name_hint=request.app_name or "recognition_plan",
+                )
+                failed_result["trace_path"] = trace_path
+                return APIResponse(
+                    success=False,
+                    message="Auto observe for learned artifacts failed",
+                    data={"trace_path": trace_path, "auto_observe_trace": auto_observe_trace, "timings": timings},
+                    error=ErrorModel(
+                        code="auto_observe_learning_artifacts_failed",
+                        details=observe_response.error.model_dump() if observe_response.error else auto_observe_trace,
+                    ),
+                )
+            effective_observe_trace_path = str(observe_trace_path)
+
         effective_provider_mode, effective_metadata = _execute_plan_request_defaults(request)
         plan_request = VisionRecognitionPlanRequestModel(
             image_path=image_path,
@@ -1572,7 +1670,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             write_policy=request.write_policy,
             metadata=effective_metadata,
             top_k=request.top_k,
-            observe_trace_path=request.observe_trace_path,
+            observe_trace_path=effective_observe_trace_path,
         )
         with timer.step("recognition_plan"):
             plan_response = _run_recognition_plan_for_execution(plan_request)
@@ -1703,6 +1801,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         "live_capture": live_capture,
         "recognition_plan": plan,
         "recognition_plan_trace_path": plan_trace_path,
+        "auto_observe_trace": auto_observe_trace,
         "recognition_plan_overlay": overlay,
         "pre_click_decision": pre_click,
         "selected_click_point": selected_point,
@@ -1716,9 +1815,29 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         "effective_execution_options": {
             "provider_mode": plan_request.provider_mode if "plan_request" in locals() else request.provider_mode,
             "metadata": plan_request.metadata if "plan_request" in locals() else request.metadata,
+            "observe_trace_path": plan_request.observe_trace_path if "plan_request" in locals() else request.observe_trace_path,
             "click_timing": click_timing,
         },
     }
+    semantic_action = (
+        str(request.metadata.get("semantic_action"))
+        if isinstance(request.metadata, dict) and request.metadata.get("semantic_action")
+        else ("open_apply_flow" if request.task == "open_apply_flow" else "click_target")
+    )
+    operation_context = build_operation_runtime_context(
+        request=request,
+        skill_id="open_apply_flow" if semantic_action == "open_apply_flow" else "click_target",
+        semantic_action=semantic_action,
+        side_effect_class="navigation",
+        requires_gate=True,
+        gate_decision=pre_click,
+        capture_id=image_path,
+        window_binding_id=_window_binding_id(bound),
+        viewport_size=_coordinate_size_from_live_capture(live_capture) or (_size_from_rect(_window_rect(bound)) if bound is not None else None),
+        evidence_refs=[ref for ref in [plan_trace_path] if ref],
+    )
+    base_result["operation_context"] = operation_context
+    base_result["operation_trace_link"] = operation_trace_link(operation_context, result_status="planned")
 
     base_result["final_submit_guard"] = _final_submit_guard_decision(
         request=request,
@@ -1726,6 +1845,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         pre_click=pre_click,
     )
     if not base_result["final_submit_guard"]["allowed"]:
+        base_result["operation_trace_link"] = operation_trace_link(operation_context, result_status="blocked")
         base_result["agent_execution_guidance"] = _agent_execution_guidance(
             request=request,
             status="blocked",
@@ -1766,6 +1886,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         )
 
     if not pre_click.get("allowed") or selected_point is None:
+        base_result["operation_trace_link"] = operation_trace_link(operation_context, result_status="blocked")
         base_result["fallback_plan"] = _execute_fallback_plan(
             request=request,
             failure_reason="pre_click_rejected",
@@ -1837,6 +1958,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             status="dry_run_ready",
             result=base_result,
         )
+        base_result["operation_trace_link"] = operation_trace_link(operation_context, result_status="dry_run_ready")
         attach_timings(base_result)
         base_result["trace_path"] = _write_execute_trace_if_enabled(
             request,
@@ -1926,6 +2048,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 break
     except Exception as exc:
         base_result["execution_path"]["action_executed"] = bool(attempts)
+        base_result["operation_trace_link"] = operation_trace_link(operation_context, result_status="execution_failed")
         base_result["attempts"] = attempts
         base_result["fallback_plan"] = _execute_fallback_plan(
             request=request,
@@ -1994,6 +2117,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
     attach_timings(base_result)
 
     if not verified:
+        base_result["operation_trace_link"] = operation_trace_link(operation_context, result_status="verification_failed")
         error_code = "semantic_post_click_verification_failed" if semantic_post_click_verification.get("applicable") else "post_click_verification_failed"
         base_result["fallback_plan"] = _execute_fallback_plan(
             request=request,
@@ -2078,6 +2202,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         status="executed_verified",
         result=base_result,
     )
+    base_result["operation_trace_link"] = operation_trace_link(operation_context, result_status="executed_verified")
     attach_timings(base_result)
     base_result["trace_path"] = _write_execute_trace_if_enabled(
         request,
@@ -2151,6 +2276,24 @@ def execute_confirmed_point(request: ExecuteConfirmedPointRequest) -> APIRespons
             "dry_run": bool(request.dry_run),
         },
     }
+    operation_context = build_operation_runtime_context(
+        request=request,
+        skill_id="click_target",
+        semantic_action="click_target",
+        side_effect_class="navigation",
+        requires_gate=True,
+        gate_decision={
+            "contract_version": "confirmed_point_gate_decision_v1",
+            "allowed": True,
+            "reasons": ["human_confirmed_point", "point_inside_bbox", "point_inside_bound_window"],
+        },
+        capture_id=request.source_trace_path,
+        window_binding_id=_window_binding_id(bound),
+        viewport_size={"width": int(rect["width"]), "height": int(rect["height"])},
+        evidence_refs=[ref for ref in [request.source_trace_path] if ref],
+    )
+    result["operation_context"] = operation_context
+    result["operation_trace_link"] = operation_trace_link(operation_context, result_status="dry_run_ready" if request.dry_run else "planned")
     if request.dry_run:
         result["timings"] = timer.to_dict()
         result["trace_path"] = write_trace(
@@ -2172,6 +2315,7 @@ def execute_confirmed_point(request: ExecuteConfirmedPointRequest) -> APIRespons
                 hold_ms=70,
             )
         result["execution_path"]["action_executed"] = True
+        result["operation_trace_link"] = operation_trace_link(operation_context, result_status="executed")
         result["timings"] = timer.to_dict()
         result["trace_path"] = write_trace(
             category="actions",
@@ -2183,6 +2327,7 @@ def execute_confirmed_point(request: ExecuteConfirmedPointRequest) -> APIRespons
         return APIResponse(success=True, message="Confirmed coordinate click dispatched", data=data.model_dump(), error=None)
     except Exception as exc:
         result["timings"] = timer.to_dict()
+        result["operation_trace_link"] = operation_trace_link(operation_context, result_status="execution_failed")
         result["trace_path"] = write_trace(
             category="actions",
             operation="execute_confirmed_point",
@@ -2402,6 +2547,24 @@ def type_text(request: TypeTextRequest) -> APIResponse:
             "action_executed": False,
         },
     }
+    operation_context = build_operation_runtime_context(
+        request=request,
+        skill_id="type_text",
+        semantic_action=str(request.metadata.get("semantic_action") or "type_text") if isinstance(request.metadata, dict) else "type_text",
+        side_effect_class="write",
+        requires_gate=True,
+        gate_decision={
+            "contract_version": "type_text_gate_decision_v1",
+            "allowed": True,
+            "reasons": ["bound_window_available", "field_point_verified" if request.click_before_typing else "no_focus_click_requested"],
+            "submit": bool(request.submit),
+        },
+        window_binding_id=_window_binding_id(bound),
+        viewport_size=_size_from_rect(_window_rect(bound)),
+        allowed_action_scope="verified_field_only",
+    )
+    result["operation_context"] = operation_context
+    result["operation_trace_link"] = operation_trace_link(operation_context, result_status="dry_run_ready" if request.dry_run else "planned")
     if request.dry_run:
         result["trace_path"] = write_trace(
             category="actions",
@@ -2423,6 +2586,7 @@ def type_text(request: TypeTextRequest) -> APIResponse:
             restore_clipboard=request.restore_clipboard,
         )
         result["execution_path"]["action_executed"] = True
+        result["operation_trace_link"] = operation_trace_link(operation_context, result_status="executed")
         result["trace_path"] = write_trace(
             category="actions",
             operation="type_text",
@@ -2432,6 +2596,7 @@ def type_text(request: TypeTextRequest) -> APIResponse:
         data = ActionResultData(action="type_text", result=result)
         return APIResponse(success=True, message="Text input dispatched", data=data.model_dump(), error=None)
     except Exception as exc:
+        result["operation_trace_link"] = operation_trace_link(operation_context, result_status="execution_failed")
         result["trace_path"] = write_trace(
             category="actions",
             operation="type_text",
@@ -2483,6 +2648,19 @@ def scroll(request: ScrollRequest) -> APIResponse:
             container_rect=container_rect,
             target_container=target_container,
         )
+        operation_context = build_operation_runtime_context(
+            request=request,
+            skill_id="scroll_region",
+            semantic_action="scroll_region",
+            side_effect_class="navigation",
+            requires_gate=True,
+            gate_decision=precondition,
+            capture_id=request.source_trace_path,
+            window_binding_id=_window_binding_id(bound),
+            viewport_size=window_size,
+            allowed_action_scope=request.target_container_id or request.scroll_scope,
+            evidence_refs=[ref for ref in [request.source_trace_path] if ref],
+        )
         if precondition["decision"] != "ALLOW":
             timings = timer.to_dict()
             return APIResponse(
@@ -2495,6 +2673,8 @@ def scroll(request: ScrollRequest) -> APIResponse:
                     "scroll_containers": scroll_containers,
                     "target_container": target_container,
                     "precondition_decision": precondition,
+                    "operation_context": operation_context,
+                    "operation_trace_link": operation_trace_link(operation_context, result_status="blocked"),
                     "timings": timings,
                 },
                 error=ErrorModel(code="scroll_precondition_rejected", details=precondition),
@@ -2535,6 +2715,8 @@ def scroll(request: ScrollRequest) -> APIResponse:
             "target_point_policy": request.target_point_policy,
         },
         "precondition_decision": precondition,
+        "operation_context": operation_context,
+        "operation_trace_link": operation_trace_link(operation_context, result_status="dry_run_ready" if request.dry_run else "planned"),
         "execution_path": {
             "vision_model_used": False,
             "page_structure_used": False,
@@ -2552,6 +2734,7 @@ def scroll(request: ScrollRequest) -> APIResponse:
             "target_pane": result.get("target_pane"),
         }
         result["outcome"] = {"status": "dry_run_ready", "should_retry_goal": False}
+        result["operation_trace_link"] = operation_trace_link(operation_context, result_status="dry_run_ready")
         result["timings"] = timer.to_dict()
         result["trace_path"] = write_trace(
             category="actions",
@@ -2597,6 +2780,7 @@ def scroll(request: ScrollRequest) -> APIResponse:
                 "reason": "rerun the same goal after container-aware scroll evidence is recorded",
             },
         }
+        result["operation_trace_link"] = operation_trace_link(operation_context, result_status=result["scroll_effect_validation"]["status"])
         result["timings"] = timer.to_dict()
         result["trace_path"] = write_trace(
             category="actions",
@@ -2608,6 +2792,7 @@ def scroll(request: ScrollRequest) -> APIResponse:
         return APIResponse(success=True, message="Scroll dispatched", data=data.model_dump(), error=None)
     except Exception as exc:
         result["timings"] = timer.to_dict()
+        result["operation_trace_link"] = operation_trace_link(operation_context, result_status="execution_failed")
         result["trace_path"] = write_trace(
             category="actions",
             operation="scroll",

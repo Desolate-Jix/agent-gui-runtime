@@ -1,0 +1,19 @@
+请继续作为视觉审核 reviewer，审核这轮 v74 的三张学习模式 overlay 图。
+
+图片顺序：
+1. Python.org v74：蓝框 Stage1，橙框 Stage1.5 content_column。
+2. Apple Music v74：只有 Stage1，大栏 geometry ready，不需要 Stage1.5。
+3. QQ v74：蓝框 Stage1，橙框 Stage1.5 conversation_list / message_thread / bottom_composer。
+
+本轮相对上次变化：
+- QQ 的 message_thread 已尝试延伸到 bottom_composer 上边界，避免消息区与输入区之间断层。
+- Python 和 AppleMusic 只是保护集回归，理论上不应被 QQ 修复污染。
+
+请只审核栏定位和 Stage1.5 内部子区，不评价后续编号、PathGraph 或真实执行。
+
+请按格式输出：
+Python.org: PASS / CONDITIONAL PASS / FAIL + 主要问题
+Apple Music: PASS / CONDITIONAL PASS / FAIL + 主要问题
+QQ: PASS / CONDITIONAL PASS / FAIL + 主要问题
+是否允许进入后续编号定位：
+仍需修复的问题：

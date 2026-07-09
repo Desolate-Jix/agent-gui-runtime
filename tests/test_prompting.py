@@ -56,3 +56,21 @@ def test_observe_prompt_includes_strict_json_validity_rules() -> None:
     assert "parseable JSON" in prompt
     assert "comma separator" in prompt
     assert "no trailing commas" in prompt
+
+
+def test_observe_prompt_requires_locator_ready_region_details() -> None:
+    prompt = build_region_analysis_prompt(
+        VisionAnalyzeRequest(
+            image_path="seek.png",
+            task="observe_screen",
+            goal="learn SEEK results page modules for later precise locator calibration",
+            app_name="seek",
+        ),
+        ImageSize(width=1280, height=720),
+    )
+
+    assert "locator task card" in prompt
+    assert "job card must include title, company, location" in prompt
+    assert "text_lines must list the exact visible anchor texts" in prompt
+    assert "clickable-area hint" in prompt
+    assert "boundary definition" in prompt

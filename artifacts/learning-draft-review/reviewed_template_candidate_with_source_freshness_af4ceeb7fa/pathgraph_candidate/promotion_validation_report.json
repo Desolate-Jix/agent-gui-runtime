@@ -1,0 +1,276 @@
+{
+  "contract_version": "pathgraph_candidate_validation_report_v1",
+  "validation_status": "passed_candidate",
+  "checks": [
+    {
+      "check_id": "states_present",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "count": 2
+      }
+    },
+    {
+      "check_id": "regions_present",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "count": 2
+      }
+    },
+    {
+      "check_id": "action_templates_present",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "count": 2
+      }
+    },
+    {
+      "check_id": "action_region_linkage",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "unlinked_actions": []
+      }
+    },
+    {
+      "check_id": "blockers_present",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "count": 2
+      }
+    },
+    {
+      "check_id": "verification_rules_present",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "count": 3
+      }
+    },
+    {
+      "check_id": "unsafe_final_actions_absent",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "unsafe_actions": []
+      }
+    },
+    {
+      "check_id": "artifact_is_authorization_false",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {}
+    },
+    {
+      "check_id": "execute_binding_disabled",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {}
+    },
+    {
+      "check_id": "final_submit_forbidden",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {}
+    },
+    {
+      "check_id": "source_not_pure_model_generated",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {}
+    },
+    {
+      "check_id": "no_dispatch_dry_run_preview_only",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "operation_dispatch": "not_executed"
+      }
+    }
+  ],
+  "summary": {
+    "state_count": 2,
+    "region_count": 2,
+    "action_template_count": 2,
+    "blocker_count": 2,
+    "verification_rule_count": 3,
+    "failed_check_count": 0,
+    "operation_dispatch": "not_executed",
+    "candidate_only": true,
+    "manual_bbox_edit_summary": {
+      "contract_version": "manual_bbox_edit_summary_v1",
+      "edited_region_count": 0,
+      "edited_action_count": 0,
+      "edited_total": 0,
+      "point_inside_bbox_passed": 0,
+      "point_inside_bbox_failed": 0,
+      "invalid_geometry_count": 0,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false
+    },
+    "source_freshness_summary": {
+      "contract_version": "source_freshness_summary_v1",
+      "source_image_status": "available",
+      "checksum_status": "matched",
+      "freshness_status": "verified",
+      "warning_count": 0,
+      "warnings": [],
+      "edited_geometry_requires_review": false,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false
+    },
+    "precise_understanding_summary": {
+      "contract_version": "precise_understanding_summary_v1",
+      "state_count": 2,
+      "region_count": 4,
+      "bbox_region_count": 4,
+      "action_template_count": 3,
+      "action_click_point_count": 3,
+      "open_detail_transition_hint_count": 2,
+      "detail_surface_attachment_count": 2,
+      "semantic_actions": [
+        "open_apply_flow",
+        "open_detail"
+      ],
+      "candidate_only": true,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "final_submit_forbidden": true,
+      "interpretation": "review-only precise understanding summary; not Execute authorization"
+    },
+    "pending_detail_observe_request_count": 2,
+    "detail_surface_attachment_count": 2
+  },
+  "manual_bbox_edit_summary": {
+    "contract_version": "manual_bbox_edit_summary_v1",
+    "edited_region_count": 0,
+    "edited_action_count": 0,
+    "edited_total": 0,
+    "point_inside_bbox_passed": 0,
+    "point_inside_bbox_failed": 0,
+    "invalid_geometry_count": 0,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false
+  },
+  "source_freshness_summary": {
+    "contract_version": "source_freshness_summary_v1",
+    "source_image_status": "available",
+    "checksum_status": "matched",
+    "freshness_status": "verified",
+    "warning_count": 0,
+    "warnings": [],
+    "edited_geometry_requires_review": false,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false
+  },
+  "precise_understanding_summary": {
+    "contract_version": "precise_understanding_summary_v1",
+    "state_count": 2,
+    "region_count": 4,
+    "bbox_region_count": 4,
+    "action_template_count": 3,
+    "action_click_point_count": 3,
+    "open_detail_transition_hint_count": 2,
+    "detail_surface_attachment_count": 2,
+    "semantic_actions": [
+      "open_apply_flow",
+      "open_detail"
+    ],
+    "candidate_only": true,
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "final_submit_forbidden": true,
+    "interpretation": "review-only precise understanding summary; not Execute authorization"
+  },
+  "pending_detail_observe_requests": [
+    {
+      "contract_version": "pending_detail_observe_request_v1",
+      "request_id": "detail_observe:action_1",
+      "source_action_template_id": "action_1",
+      "from_state_id": "seek_results",
+      "target_state_id": "model_detail_view",
+      "transition_id": "model:transition:action_1",
+      "transition_type": "open_detail",
+      "target_surface": "detail_pane_or_detail_page",
+      "observe_goal": "re-observe detail surface after reviewed open_detail candidate",
+      "requires_user_review": true,
+      "requires_post_action_observe": true,
+      "no_dispatch": true,
+      "candidate_only": true,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "final_submit_forbidden": true,
+      "status": "attached",
+      "attached_detail_surface_attachment_id": "detail_surface:detail_observe:action_1"
+    },
+    {
+      "contract_version": "pending_detail_observe_request_v1",
+      "request_id": "detail_observe:action_2",
+      "source_action_template_id": "action_2",
+      "from_state_id": "seek_results",
+      "target_state_id": "model_detail_view",
+      "transition_id": "model:transition:action_2",
+      "transition_type": "open_detail",
+      "target_surface": "detail_pane_or_detail_page",
+      "observe_goal": "re-observe detail surface after reviewed open_detail candidate",
+      "requires_user_review": true,
+      "requires_post_action_observe": true,
+      "no_dispatch": true,
+      "candidate_only": true,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "final_submit_forbidden": true,
+      "status": "attached",
+      "attached_detail_surface_attachment_id": "detail_surface:detail_observe:action_2"
+    }
+  ],
+  "safety": {
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "final_submit_forbidden": true,
+    "real_action_requires_gate": true
+  },
+  "paths": {
+    "runtime_path_graph_candidate_path": "artifacts/learning-draft-review/reviewed_template_candidate_with_source_freshness_af4ceeb7fa/pathgraph_candidate/runtime_path_graph_candidate.json",
+    "interface_map_candidate_path": "artifacts/learning-draft-review/reviewed_template_candidate_with_source_freshness_af4ceeb7fa/pathgraph_candidate/interface_map_candidate.json"
+  },
+  "detail_surface_attachments": [
+    {
+      "contract_version": "detail_surface_attachment_v1",
+      "attachment_id": "detail_surface:detail_observe:action_1",
+      "request_id": "detail_observe:action_1",
+      "source_action_template_id": "action_1",
+      "from_state_id": "seek_results",
+      "target_state_id": "model_detail_view",
+      "detail_source_path": "logs/benchmarks/learn_detail_surface_attachment_fixture_20260705/detail_trial_result.json",
+      "region_count": 2,
+      "action_template_count": 1,
+      "no_dispatch": true,
+      "requires_user_review": true,
+      "candidate_only": true,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "final_submit_forbidden": true
+    },
+    {
+      "contract_version": "detail_surface_attachment_v1",
+      "attachment_id": "detail_surface:detail_observe:action_2",
+      "request_id": "detail_observe:action_2",
+      "source_action_template_id": "action_2",
+      "from_state_id": "seek_results",
+      "target_state_id": "model_detail_view",
+      "detail_source_path": "logs/benchmarks/learn_detail_surface_attachment_fixture_20260705/detail_trial_result.json",
+      "region_count": 2,
+      "action_template_count": 1,
+      "no_dispatch": true,
+      "requires_user_review": true,
+      "candidate_only": true,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "final_submit_forbidden": true
+    }
+  ]
+}

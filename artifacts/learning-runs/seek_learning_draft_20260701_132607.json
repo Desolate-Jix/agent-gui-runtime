@@ -1,0 +1,1703 @@
+{
+  "contract_version": "learning_draft_pipeline_result_v1",
+  "learning_episode": {
+    "contract_version": "learning_episode_v1",
+    "episode_id": "seek_learning_episode_cd510d2dcfe3",
+    "source_app_profile_id": "seek",
+    "source_trace_refs": [
+      "logs\\smoke\\seek_mvp_readonly_after_parser_title_filter_5jobs_20260617.json"
+    ],
+    "source_interface_map_ref": "artifacts\\visual-match-smoke\\live_seek_20260624\\learned_interface_map_calibrated_real_crops.json",
+    "source_path_graph_ref": "artifacts\\seek\\runtime_path_graph_seek_mvp_20260617.json",
+    "source_app_profile_ref": "artifacts\\app_profiles\\seek_app_profile_v1.json",
+    "state_hint": "seek_search_results_with_detail",
+    "screenshots": [
+      "Job description body text ROI. Batch screenshots/OCR should read this until the body reaches bottom.",
+      "artifacts/screenshots/graduate-software-jobs-in-all-auckland-job-vacancies-jun-2026-seek-micr-06bf33e0__capture__full-window__20260624-231504-408645.png",
+      "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-163501-349708.png",
+      "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-163715-332563.png",
+      "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-171506-036452.png",
+      "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_application_back_button.png",
+      "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_application_continue_button.png",
+      "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_application_progress_steps.png",
+      "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_cover_letter_text_area.png",
+      "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_resume_select_dropdown.png",
+      "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_review_edit_icon.png",
+      "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_apply_button_context_real.png",
+      "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_apply_button_real.png",
+      "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_detail_scrollbar_real.png",
+      "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_job_card_shape_real.png",
+      "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_quick_apply_button_real.png",
+      "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_results_scrollbar_real.png",
+      "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_save_button_real.png",
+      "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_search_button_context_real.png",
+      "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_search_button_real.png",
+      "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_search_input_context_real.png",
+      "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_search_input_real.png",
+      "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_selected_card_highlight_real.png",
+      "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_job_card_shape.current_match.png",
+      "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_job_card_shape.current_roi.png",
+      "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_quick_apply_button.current_match.png",
+      "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_quick_apply_button.current_roi.png",
+      "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_submit_application_button.current_match.png",
+      "artifacts\\visual-match-smoke\\live_seek_20260624\\matches\\seek_visual_submit_application_button.current_roi.png",
+      "artifacts\\visual-match-smoke\\local_seek_buttons\\crops\\seek_visual_submit_application_button.png",
+      "artifacts\\visual-match-smoke\\local_seek_buttons\\seek_detail_local_screenshot.png"
+    ],
+    "ocr_refs": [],
+    "uia_refs": [],
+    "dom_refs": [],
+    "created_at": "2026-07-01T01:26:07.249646+00:00"
+  },
+  "normalized_observation": {
+    "contract_version": "normalized_learning_observation_v1",
+    "source_episode_id": "seek_learning_episode_cd510d2dcfe3",
+    "app_id": "seek",
+    "page_type": "seek_search_results_with_detail",
+    "states": [
+      {
+        "state_id": "seek_home_page",
+        "label": "SEEK home/search page",
+        "page_type": "seek_search_results_with_detail",
+        "description": "Search results, selected job detail pane, filters, cards, and detail reading regions.",
+        "region_refs": [
+          "top_search_area",
+          "results_list",
+          "job_detail"
+        ],
+        "child_state_ids": [
+          "seek_search_results_empty_detail",
+          "seek_search_results_with_selected_job",
+          "seek_detail_scrolled",
+          "seek_results_list_scrolled"
+        ]
+      },
+      {
+        "state_id": "seek_application_page",
+        "label": "SEEK application page",
+        "page_type": "seek_station_internal_application",
+        "description": "Station-internal application form, profile step, review boundary, and final submit guard.",
+        "region_refs": [
+          "application_form"
+        ],
+        "child_state_ids": [
+          "seek_apply_entry_form"
+        ],
+        "safety": {
+          "final_submit": "forbidden"
+        }
+      }
+    ],
+    "regions": [
+      {
+        "region_id": "top_search_area",
+        "label": "SEEK top search and filters area",
+        "role": "search_controls",
+        "region_type": "navigation",
+        "parent_region_id": null,
+        "container_id": null,
+        "bbox": {
+          "x": 608,
+          "y": 119,
+          "w": 1169,
+          "h": 140
+        }
+      },
+      {
+        "region_id": "results_list",
+        "label": "SEEK left job results list",
+        "role": "list",
+        "region_type": "dynamic_collection",
+        "parent_region_id": null,
+        "container_id": "seek:results_list",
+        "bbox": {
+          "x": 608,
+          "y": 384,
+          "w": 474,
+          "h": 1016
+        }
+      },
+      {
+        "region_id": "job_detail",
+        "label": "SEEK right job detail pane",
+        "role": "detail",
+        "region_type": "detail_content",
+        "parent_region_id": null,
+        "container_id": "seek:job_detail",
+        "bbox": {
+          "x": 1157,
+          "y": 384,
+          "w": 620,
+          "h": 1016
+        }
+      },
+      {
+        "region_id": "job_card",
+        "label": "Job result card",
+        "role": "entity_card",
+        "region_type": "dynamic_collection",
+        "parent_region_id": "results_list",
+        "container_id": null,
+        "bbox": {
+          "x": 608,
+          "y": 532,
+          "w": 474,
+          "h": 218
+        }
+      },
+      {
+        "region_id": "detail_header",
+        "label": "Opened job title/company/apply area",
+        "role": "detail_header",
+        "region_type": "fixed_controls",
+        "parent_region_id": "job_detail",
+        "container_id": null,
+        "bbox": {
+          "x": 1157,
+          "y": 384,
+          "w": 620,
+          "h": 620
+        }
+      },
+      {
+        "region_id": "detail_body",
+        "label": "Opened job description body",
+        "role": "detail_body",
+        "region_type": "detail_content",
+        "parent_region_id": "job_detail",
+        "container_id": null,
+        "bbox": {
+          "x": 1157,
+          "y": 920,
+          "w": 620,
+          "h": 480
+        }
+      },
+      {
+        "region_id": "application_form",
+        "label": "SEEK application form",
+        "role": "form_flow",
+        "region_type": "form_flow",
+        "parent_region_id": null,
+        "container_id": "seek:application_form",
+        "bbox": null
+      },
+      {
+        "region_id": "application_progress",
+        "label": "Application step progress",
+        "role": "navigation",
+        "region_type": "navigation",
+        "parent_region_id": "application_form",
+        "container_id": "seek:application_progress",
+        "bbox": null
+      },
+      {
+        "region_id": "application_documents",
+        "label": "Choose documents step",
+        "role": "fixed_controls",
+        "region_type": "fixed_controls",
+        "parent_region_id": "application_form",
+        "container_id": "seek:application_documents",
+        "bbox": null
+      },
+      {
+        "region_id": "application_questions",
+        "label": "Employer questions step",
+        "role": "form_flow",
+        "region_type": "form_flow",
+        "parent_region_id": "application_form",
+        "container_id": "seek:application_questions",
+        "bbox": null
+      },
+      {
+        "region_id": "application_profile",
+        "label": "Update SEEK profile step",
+        "role": "form_flow",
+        "region_type": "form_flow",
+        "parent_region_id": "application_form",
+        "container_id": "seek:application_profile",
+        "bbox": null
+      },
+      {
+        "region_id": "application_review_step",
+        "label": "Review and submit step",
+        "role": "form_flow",
+        "region_type": "form_flow",
+        "parent_region_id": "application_form",
+        "container_id": null,
+        "bbox": null
+      },
+      {
+        "region_id": "application_review",
+        "label": "Final submit boundary",
+        "role": "danger_zone",
+        "region_type": "danger_zone",
+        "parent_region_id": "application_review_step",
+        "container_id": "seek:application_review",
+        "bbox": null
+      }
+    ],
+    "dynamic_areas": [
+      {
+        "area_id": "seek:job_cards",
+        "region_id": "results_list",
+        "container_id": "seek:results_list",
+        "entity_type": "job_card",
+        "roi_policy": {
+          "source": "region_bbox_hint_then_current_detection",
+          "send_roi_to_model": true,
+          "full_screen_fallback": true
+        },
+        "model_budget": {
+          "preferred_scope": "region_roi",
+          "avoid_full_screen_grounding": true
+        },
+        "scroll_policy": {
+          "load_more_action_template_id": "load_more_results",
+          "wrong_scope_detection_required": true
+        },
+        "label": "Job cards list",
+        "description": "Repeatable job result cards inside the left results list. Each card usually contains title, company, location, summary, and opens the right job-detail pane.",
+        "role": "ROI",
+        "semantic_role": "repeatable_job_cards"
+      },
+      {
+        "area_id": "job_detail:content_roi",
+        "region_id": "job_detail",
+        "container_id": "seek:job_detail",
+        "entity_type": "detail_content",
+        "roi_policy": {
+          "source": "region_bbox_hint",
+          "send_roi_to_model": true,
+          "full_screen_fallback": true
+        },
+        "model_budget": {
+          "preferred_scope": "region_roi",
+          "avoid_full_screen_grounding": true
+        },
+        "scroll_policy": {
+          "wrong_scope_detection_required": true
+        },
+        "label": "Job detail pane content",
+        "description": "Scrollable right detail pane content. Use this as the broad ROI when reading the selected job.",
+        "role": "ROI",
+        "semantic_role": "detail_pane_reading_roi"
+      },
+      {
+        "area_id": "detail_body:content_roi",
+        "region_id": "detail_body",
+        "container_id": null,
+        "entity_type": "detail_content",
+        "roi_policy": {
+          "source": "region_bbox_hint",
+          "send_roi_to_model": true,
+          "full_screen_fallback": true
+        },
+        "model_budget": {
+          "preferred_scope": "region_roi",
+          "avoid_full_screen_grounding": true
+        },
+        "scroll_policy": {
+          "wrong_scope_detection_required": true
+        },
+        "label": "Job description body text",
+        "description": "Job description body text ROI. Batch screenshots/OCR should read this until the body reaches bottom.",
+        "role": "ROI",
+        "semantic_role": "detail_body_text_roi"
+      },
+      {
+        "area_id": "seek:application:cover_letter_roi",
+        "label": "Cover letter writing area",
+        "region_id": "application_documents",
+        "role": "ROI",
+        "semantic_role": "cover_letter_text_input",
+        "bbox_hint": {
+          "x": 640,
+          "y": 930,
+          "w": 560,
+          "h": 185
+        },
+        "model_policy": "roi_only_first",
+        "artifact_is_authorization": false,
+        "description": "Application document step ROI containing the cover-letter input. Keep the default resume and rewrite only the cover letter."
+      },
+      {
+        "area_id": "seek:application:question_fields_roi",
+        "label": "Employer question fields",
+        "region_id": "application_questions",
+        "role": "ROI",
+        "semantic_role": "employer_question_fields",
+        "bbox_hint": {
+          "x": 640,
+          "y": 430,
+          "w": 650,
+          "h": 520
+        },
+        "model_policy": "roi_only_first",
+        "artifact_is_authorization": false,
+        "description": "Employer question ROI. Read labels and safe input fields; answer from the candidate profile and current job detail."
+      },
+      {
+        "area_id": "seek:application:profile_review_roi",
+        "label": "Profile review fields",
+        "region_id": "application_profile",
+        "role": "ROI",
+        "semantic_role": "profile_review_fields",
+        "bbox_hint": {
+          "x": 640,
+          "y": 120,
+          "w": 650,
+          "h": 790
+        },
+        "model_policy": "roi_only_first",
+        "artifact_is_authorization": false,
+        "description": "SEEK profile review ROI. Prefer continuing without mutating long-lived profile fields unless explicitly requested."
+      },
+      {
+        "area_id": "seek:application:final_review_roi",
+        "label": "Final review summary",
+        "region_id": "application_review",
+        "role": "ROI",
+        "semantic_role": "final_review_summary",
+        "bbox_hint": {
+          "x": 640,
+          "y": 500,
+          "w": 560,
+          "h": 580
+        },
+        "model_policy": "roi_only_first",
+        "artifact_is_authorization": false,
+        "description": "Final review ROI. Read and audit the application summary, but never authorize final Submit automatically."
+      }
+    ],
+    "visual_assets": [
+      {
+        "asset_id": "seek:visual:search_input",
+        "label": "Search input field",
+        "role": "input",
+        "region_id": "top_search_area",
+        "semantic_action": "type_public_search_query",
+        "danger_level": "low",
+        "source_asset_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_search_input_real.png",
+        "source_bbox": null,
+        "allowed_region_ids": [
+          "top_search_area"
+        ],
+        "fast_lane_allowed": true
+      },
+      {
+        "asset_id": "seek:visual:search_button",
+        "label": "Search button",
+        "role": "button",
+        "region_id": "top_search_area",
+        "semantic_action": "search_or_filter_results",
+        "danger_level": "low",
+        "source_asset_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_search_button_real.png",
+        "source_bbox": {
+          "x": 1051,
+          "y": 297,
+          "w": 56,
+          "h": 56
+        },
+        "allowed_region_ids": [
+          "top_search_area"
+        ],
+        "fast_lane_allowed": false
+      },
+      {
+        "asset_id": "seek:visual:apply_button",
+        "label": "Apply button",
+        "role": "button",
+        "region_id": "detail_header",
+        "semantic_action": "external_apply_flow",
+        "danger_level": "external_flow_entry",
+        "source_asset_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_apply_button_real.png",
+        "source_bbox": {
+          "x": 1764,
+          "y": 191,
+          "w": 76,
+          "h": 27
+        },
+        "allowed_region_ids": [
+          "detail_header"
+        ],
+        "fast_lane_allowed": false
+      },
+      {
+        "asset_id": "seek:visual:quick_apply_button",
+        "label": "Quick Apply button",
+        "role": "button",
+        "region_id": "detail_header",
+        "semantic_action": "open_apply_flow",
+        "danger_level": "low",
+        "source_asset_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_quick_apply_button_real.png",
+        "source_bbox": {
+          "x": 0,
+          "y": 0,
+          "w": 151,
+          "h": 54
+        },
+        "allowed_region_ids": [
+          "detail_header"
+        ],
+        "fast_lane_allowed": false
+      },
+      {
+        "asset_id": "seek:visual:save_icon",
+        "label": "Save icon",
+        "role": "icon_button",
+        "region_id": "detail_header",
+        "semantic_action": "save_or_bookmark",
+        "danger_level": "low",
+        "source_asset_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_save_button_real.png",
+        "source_bbox": {
+          "x": 1328,
+          "y": 1061,
+          "w": 82,
+          "h": 54
+        },
+        "allowed_region_ids": [
+          "detail_header"
+        ],
+        "fast_lane_allowed": false
+      },
+      {
+        "asset_id": "seek:visual:job_card_shape",
+        "label": "Job card shape",
+        "role": "card",
+        "region_id": "job_card",
+        "semantic_action": "open_detail",
+        "danger_level": "low",
+        "source_asset_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_job_card_shape_real.png",
+        "source_bbox": {
+          "x": 608,
+          "y": 532,
+          "w": 474,
+          "h": 218
+        },
+        "allowed_region_ids": [
+          "job_card"
+        ],
+        "fast_lane_allowed": false
+      },
+      {
+        "asset_id": "seek:visual:selected_card_highlight",
+        "label": "Selected card highlight",
+        "role": "selection_state",
+        "region_id": "job_card",
+        "semantic_action": "visual_evidence",
+        "danger_level": "low",
+        "source_asset_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_selected_card_highlight_real.png",
+        "source_bbox": {
+          "x": 608,
+          "y": 532,
+          "w": 474,
+          "h": 218
+        },
+        "allowed_region_ids": [
+          "job_card"
+        ],
+        "fast_lane_allowed": false
+      },
+      {
+        "asset_id": "seek:visual:results_scrollbar",
+        "label": "Results list scrollbar",
+        "role": "scrollbar",
+        "region_id": "results_list",
+        "semantic_action": "scroll_container",
+        "danger_level": "low",
+        "source_asset_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_results_scrollbar_real.png",
+        "source_bbox": {
+          "x": 1386,
+          "y": 291,
+          "w": 44,
+          "h": 71
+        },
+        "allowed_region_ids": [
+          "results_list"
+        ],
+        "fast_lane_allowed": false
+      },
+      {
+        "asset_id": "seek:visual:detail_scrollbar",
+        "label": "Job detail scrollbar",
+        "role": "scrollbar",
+        "region_id": "job_detail",
+        "semantic_action": "scroll_container",
+        "danger_level": "low",
+        "source_asset_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_detail_scrollbar_real.png",
+        "source_bbox": {
+          "x": 1419,
+          "y": 411,
+          "w": 12,
+          "h": 354
+        },
+        "allowed_region_ids": [
+          "job_detail"
+        ],
+        "fast_lane_allowed": false
+      },
+      {
+        "asset_id": "seek:visual:submit_application_button",
+        "label": "Submit application",
+        "role": "button",
+        "region_id": "application_review",
+        "semantic_action": "final_submit",
+        "danger_level": "final_submit",
+        "source_asset_ref": "artifacts\\visual-match-smoke\\local_seek_buttons\\crops\\seek_visual_submit_application_button.png",
+        "source_bbox": {
+          "x": 650,
+          "y": 620,
+          "w": 220,
+          "h": 60
+        },
+        "allowed_region_ids": [
+          "application_review"
+        ],
+        "fast_lane_allowed": false
+      },
+      {
+        "asset_id": "seek:visual:application_progress_steps",
+        "label": "Application progress steps",
+        "role": "progress_indicator",
+        "region_id": "application_progress",
+        "semantic_action": "state_progress",
+        "danger_level": "low",
+        "source_asset_ref": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_application_progress_steps.png",
+        "source_bbox": {
+          "x": 640,
+          "y": 420,
+          "w": 660,
+          "h": 70
+        },
+        "allowed_region_ids": [
+          "application_progress"
+        ],
+        "fast_lane_allowed": false
+      },
+      {
+        "asset_id": "seek:visual:resume_select_dropdown",
+        "label": "Resume selection dropdown",
+        "role": "select",
+        "region_id": "application_documents",
+        "semantic_action": "keep_default_resume",
+        "danger_level": "low",
+        "source_asset_ref": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_resume_select_dropdown.png",
+        "source_bbox": {
+          "x": 670,
+          "y": 802,
+          "w": 415,
+          "h": 43
+        },
+        "allowed_region_ids": [
+          "application_documents"
+        ],
+        "fast_lane_allowed": false
+      },
+      {
+        "asset_id": "seek:visual:cover_letter_text_area",
+        "label": "Cover letter text area",
+        "role": "textarea",
+        "region_id": "application_documents",
+        "semantic_action": "fill_field",
+        "danger_level": "low",
+        "source_asset_ref": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_cover_letter_text_area.png",
+        "source_bbox": {
+          "x": 668,
+          "y": 1083,
+          "w": 505,
+          "h": 36
+        },
+        "allowed_region_ids": [
+          "application_documents"
+        ],
+        "fast_lane_allowed": false
+      },
+      {
+        "asset_id": "seek:visual:application_continue_button",
+        "label": "Continue button",
+        "role": "button",
+        "region_id": "application_profile",
+        "semantic_action": "continue_next_step",
+        "danger_level": "medium",
+        "source_asset_ref": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_application_continue_button.png",
+        "source_bbox": {
+          "x": 1054,
+          "y": 912,
+          "w": 118,
+          "h": 40
+        },
+        "allowed_region_ids": [
+          "application_profile"
+        ],
+        "fast_lane_allowed": false
+      },
+      {
+        "asset_id": "seek:visual:application_back_button",
+        "label": "Back button",
+        "role": "button",
+        "region_id": "application_profile",
+        "semantic_action": "go_back",
+        "danger_level": "low",
+        "source_asset_ref": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_application_back_button.png",
+        "source_bbox": {
+          "x": 640,
+          "y": 912,
+          "w": 88,
+          "h": 36
+        },
+        "allowed_region_ids": [
+          "application_profile"
+        ],
+        "fast_lane_allowed": false
+      },
+      {
+        "asset_id": "seek:visual:review_edit_icon",
+        "label": "Review edit icon",
+        "role": "icon_button",
+        "region_id": "application_review",
+        "semantic_action": "edit_review_section",
+        "danger_level": "medium",
+        "source_asset_ref": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_review_edit_icon.png",
+        "source_bbox": {
+          "x": 1150,
+          "y": 715,
+          "w": 32,
+          "h": 32
+        },
+        "allowed_region_ids": [
+          "application_review"
+        ],
+        "fast_lane_allowed": false
+      }
+    ],
+    "actions": [
+      {
+        "action_template_id": "open_job_card",
+        "semantic_action": "open_job_card",
+        "target_entity": "job_card",
+        "required_region_id": null,
+        "required_container_id": "seek:results_list",
+        "safety_policy": {}
+      },
+      {
+        "action_template_id": "read_detail",
+        "semantic_action": "read_detail",
+        "target_entity": "job_detail",
+        "required_region_id": null,
+        "required_container_id": null,
+        "safety_policy": {}
+      },
+      {
+        "action_template_id": "load_more_results",
+        "semantic_action": "load_more_results",
+        "target_entity": "results_list",
+        "required_region_id": null,
+        "required_container_id": null,
+        "safety_policy": {}
+      },
+      {
+        "action_template_id": "apply_entry",
+        "semantic_action": "open_apply_flow",
+        "target_entity": "apply_button",
+        "required_region_id": null,
+        "required_container_id": "seek:job_detail",
+        "safety_policy": {}
+      },
+      {
+        "action_template_id": "read_application_flow",
+        "semantic_action": "read",
+        "target_entity": "seek:application_form",
+        "required_region_id": null,
+        "required_container_id": "seek:application_form",
+        "safety_policy": {
+          "final_submit_forbidden": true
+        }
+      },
+      {
+        "action_template_id": "detect_application_step",
+        "semantic_action": "read",
+        "target_entity": "seek:application_progress",
+        "required_region_id": "application_progress",
+        "required_container_id": "seek:application_form",
+        "safety_policy": {
+          "final_submit_forbidden": true
+        }
+      },
+      {
+        "action_template_id": "keep_default_resume",
+        "semantic_action": "review",
+        "target_entity": "seek:application_documents",
+        "required_region_id": "application_documents",
+        "required_container_id": "seek:application_form",
+        "safety_policy": {
+          "mutates_profile": false,
+          "final_submit_forbidden": true
+        }
+      },
+      {
+        "action_template_id": "fill_employer_questions",
+        "semantic_action": "input",
+        "target_entity": "seek:application_questions",
+        "required_region_id": "application_questions",
+        "required_container_id": "seek:application_form",
+        "safety_policy": {
+          "final_submit_forbidden": true
+        }
+      },
+      {
+        "action_template_id": "continue_application_next_step",
+        "semantic_action": "click",
+        "target_entity": "seek:application_form",
+        "required_region_id": null,
+        "required_container_id": "seek:application_form",
+        "safety_policy": {
+          "final_submit_forbidden": true
+        }
+      },
+      {
+        "action_template_id": "continue_without_profile_mutation",
+        "semantic_action": "click",
+        "target_entity": "seek:application_profile",
+        "required_region_id": "application_profile",
+        "required_container_id": "seek:application_form",
+        "safety_policy": {
+          "mutates_profile": false,
+          "final_submit_forbidden": true
+        }
+      },
+      {
+        "action_template_id": "extract_final_review",
+        "semantic_action": "read",
+        "target_entity": "seek:application_review",
+        "required_region_id": "application_review",
+        "required_container_id": "seek:application_form",
+        "safety_policy": {
+          "final_submit_forbidden": true
+        }
+      },
+      {
+        "action_template_id": "final_submit",
+        "semantic_action": "final_submit",
+        "target_entity": "seek:application_review",
+        "required_region_id": "application_review",
+        "required_container_id": "seek:application_form",
+        "safety_policy": {
+          "final_submit_forbidden": true,
+          "hard_block": true
+        }
+      }
+    ],
+    "danger_zones": [
+      {
+        "zone_id": "danger:seek:visual:submit_application_button",
+        "asset_id": "seek:visual:submit_application_button",
+        "semantic_action": "final_submit",
+        "danger_level": "final_submit",
+        "fast_lane_allowed": false
+      },
+      {
+        "zone_id": "danger:action:final_submit",
+        "action_template_id": "final_submit",
+        "semantic_action": "final_submit",
+        "danger_level": "final_submit",
+        "fast_lane_allowed": false
+      }
+    ],
+    "path_patterns": [
+      {
+        "contract_version": "list_detail_path_pattern_v1",
+        "pattern_id": "seek:pattern:list_detail_right_pane",
+        "pattern_type": "split_list_detail",
+        "list_container_id": "seek:results_list",
+        "detail_container_id": "seek:job_detail",
+        "list_region_id": "results_list",
+        "detail_region_id": "job_detail",
+        "list_entity_type": "job_card",
+        "detail_entity_type": "job_detail",
+        "open_action_template_id": "open_job_card",
+        "read_detail_action_template_id": "read_detail",
+        "load_more_action_template_id": "load_more_results",
+        "identity_mapping": {
+          "list_entity_type": "job_card",
+          "detail_entity_type": "job_detail_header",
+          "primary_key_fields": [
+            {
+              "list_field": "title",
+              "detail_field": "title",
+              "match_type": "text_similarity",
+              "min_similarity": 0.82,
+              "required": true
+            }
+          ],
+          "secondary_fields": [
+            {
+              "list_field": "company",
+              "detail_field": "company",
+              "match_type": "partial_text_match",
+              "required": false
+            },
+            {
+              "list_field": "location",
+              "detail_field": "location",
+              "match_type": "partial_text_match",
+              "required": false
+            }
+          ],
+          "reject_if_detail_title_source": [
+            "detail_body",
+            "unknown"
+          ]
+        },
+        "detail_read_policy": {
+          "detail_container_id": "seek:job_detail",
+          "scroll_scope": "container",
+          "requires_container_bbox": true,
+          "header_region_id": "detail_header",
+          "body_region_id": "detail_body",
+          "preserve_header_fields_on_scroll": true,
+          "adaptive_scroll": {
+            "enabled": true,
+            "initial_wheel_clicks": 5,
+            "max_wheel_clicks": 10,
+            "increase_wheel_on_low_progress": true,
+            "stop_after_no_progress_count": 2,
+            "progress_signals": [
+              "new_unique_text_lines",
+              "detail_crop_hash_changed",
+              "scroll_effect_moved"
+            ]
+          },
+          "non_target_stability": {
+            "required": true,
+            "stable_container_id": "seek:results_list",
+            "signals": [
+              "visible_card_hashes_stable",
+              "top_card_title_stable",
+              "results_list_crop_hash_stable"
+            ]
+          },
+          "stop_reasons": [
+            "bottom_reached",
+            "right_detail_no_progress_after_scroll",
+            "max_scrolls_reached",
+            "wrong_scope_scroll_detected"
+          ]
+        },
+        "pre_action_cleanup": [
+          {
+            "for_action_template_id": "open_job_card",
+            "when_previous_action_in": [
+              "read_detail",
+              "read_detail_pane_until_bounded"
+            ],
+            "cleanup_action": "reset_detail_container_to_header",
+            "target_container_id": "seek:job_detail",
+            "direction": "up",
+            "wheel_clicks": 8,
+            "verify_after_cleanup": {
+              "detail_header_visible": true,
+              "wrong_scope_detected": false
+            },
+            "reason": "ensure_detail_header_visible_for_next_post_click_verification"
+          }
+        ],
+        "safety_policy_refs": [
+          "final_submit_guard_v1",
+          "artifact_cannot_authorize_click"
+        ],
+        "artifact_is_authorization": false
+      }
+    ],
+    "learned_patterns": [
+      {
+        "contract_version": "learning_pattern_ref_v1",
+        "pattern_id": "list_detail_page",
+        "path": "artifacts/learning_patterns/list_detail_page_template_v1.json",
+        "role": "SEEK search results and right-detail pane learning pattern.",
+        "authorization": "guidance_only"
+      },
+      {
+        "contract_version": "learning_pattern_ref_v1",
+        "pattern_id": "long_detail_reading",
+        "path": "artifacts/learning_patterns/long_detail_reading_template_v1.json",
+        "role": "SEEK full JD reading and latest detail snapshot pattern.",
+        "authorization": "guidance_only"
+      },
+      {
+        "contract_version": "learning_pattern_ref_v1",
+        "pattern_id": "agent_full_content_review",
+        "path": "artifacts/learning_patterns/agent_full_content_review_template_v1.json",
+        "role": "Full job detail text must be reviewed by Agent before Apply Entry.",
+        "authorization": "decision_support_only"
+      },
+      {
+        "contract_version": "learning_pattern_ref_v1",
+        "pattern_id": "entry_boundary",
+        "path": "artifacts/learning_patterns/entry_boundary_template_v1.json",
+        "role": "Apply and Quick Apply open an application flow; they are not final submit.",
+        "authorization": "opens_flow_only"
+      },
+      {
+        "contract_version": "learning_pattern_ref_v1",
+        "pattern_id": "multi_step_form",
+        "path": "artifacts/learning_patterns/multi_step_form_template_v1.json",
+        "role": "Station-internal SEEK application form up to Review and submit.",
+        "authorization": "safe_fill_only"
+      },
+      {
+        "contract_version": "learning_pattern_ref_v1",
+        "pattern_id": "danger_zone_final_submit",
+        "path": "artifacts/learning_patterns/danger_zone_final_submit_template_v1.json",
+        "role": "Submit application and similar destructive/final actions are blocked by default.",
+        "authorization": "blocked_by_default"
+      }
+    ],
+    "skipped_dynamic_content": [
+      {
+        "region_id": "results_list",
+        "reason": "dynamic_roi_not_fixed_template"
+      },
+      {
+        "region_id": "job_detail",
+        "reason": "dynamic_roi_not_fixed_template"
+      },
+      {
+        "region_id": "detail_body",
+        "reason": "dynamic_roi_not_fixed_template"
+      },
+      {
+        "region_id": "application_documents",
+        "reason": "dynamic_roi_not_fixed_template"
+      },
+      {
+        "region_id": "application_questions",
+        "reason": "dynamic_roi_not_fixed_template"
+      },
+      {
+        "region_id": "application_profile",
+        "reason": "dynamic_roi_not_fixed_template"
+      },
+      {
+        "region_id": "application_review",
+        "reason": "dynamic_roi_not_fixed_template"
+      }
+    ]
+  },
+  "pattern_candidates": [
+    {
+      "contract_version": "pattern_candidate_v1",
+      "candidate_id": "seek_learning_episode_cd510d2dcfe3:list_detail_page",
+      "matched_pattern_id": "list_detail_page",
+      "confidence": 0.92,
+      "evidence": [
+        {
+          "source_type": "region",
+          "ref": "results_list",
+          "summary": "list region exists"
+        },
+        {
+          "source_type": "region",
+          "ref": "job_detail",
+          "summary": "detail region exists"
+        },
+        {
+          "source_type": "path_pattern",
+          "ref": "list_detail_path_pattern_v1",
+          "summary": "runtime graph contains split list/detail path pattern"
+        }
+      ],
+      "proposed_regions": [
+        {
+          "region_id": "results_list",
+          "role": "list",
+          "region_type": "dynamic_collection",
+          "bbox": {
+            "x": 608,
+            "y": 384,
+            "w": 474,
+            "h": 1016
+          }
+        },
+        {
+          "region_id": "job_detail",
+          "role": "detail",
+          "region_type": "detail_content",
+          "bbox": {
+            "x": 1157,
+            "y": 384,
+            "w": 620,
+            "h": 1016
+          }
+        }
+      ],
+      "proposed_actions": [
+        {
+          "action_template_id": "read_detail",
+          "semantic_action": "read_detail",
+          "target_entity": "job_detail"
+        }
+      ],
+      "proposed_danger_zones": [],
+      "source_episode_id": "seek_learning_episode_cd510d2dcfe3"
+    },
+    {
+      "contract_version": "pattern_candidate_v1",
+      "candidate_id": "seek_learning_episode_cd510d2dcfe3:primary_button",
+      "matched_pattern_id": "primary_button",
+      "confidence": 0.86,
+      "evidence": [
+        {
+          "source_type": "visual_asset",
+          "ref": "seek:visual:apply_button",
+          "summary": "Apply button fixed visual asset"
+        },
+        {
+          "source_type": "visual_asset",
+          "ref": "seek:visual:quick_apply_button",
+          "summary": "Quick Apply button fixed visual asset"
+        },
+        {
+          "source_type": "visual_asset",
+          "ref": "seek:visual:save_icon",
+          "summary": "Save icon fixed visual asset"
+        },
+        {
+          "source_type": "visual_asset",
+          "ref": "seek:visual:job_card_shape",
+          "summary": "Job card shape fixed visual asset"
+        },
+        {
+          "source_type": "visual_asset",
+          "ref": "seek:visual:application_continue_button",
+          "summary": "Continue button fixed visual asset"
+        }
+      ],
+      "proposed_regions": [
+        {
+          "region_id": "detail_header",
+          "role": "detail_header",
+          "region_type": "fixed_controls",
+          "bbox": {
+            "x": 1157,
+            "y": 384,
+            "w": 620,
+            "h": 620
+          }
+        },
+        {
+          "region_id": "detail_header",
+          "role": "detail_header",
+          "region_type": "fixed_controls",
+          "bbox": {
+            "x": 1157,
+            "y": 384,
+            "w": 620,
+            "h": 620
+          }
+        },
+        {
+          "region_id": "detail_header",
+          "role": "detail_header",
+          "region_type": "fixed_controls",
+          "bbox": {
+            "x": 1157,
+            "y": 384,
+            "w": 620,
+            "h": 620
+          }
+        },
+        {
+          "region_id": "job_card",
+          "role": "entity_card",
+          "region_type": "dynamic_collection",
+          "bbox": {
+            "x": 608,
+            "y": 532,
+            "w": 474,
+            "h": 218
+          }
+        },
+        {
+          "region_id": "application_profile",
+          "role": "form_flow",
+          "region_type": "form_flow",
+          "bbox": null
+        }
+      ],
+      "proposed_actions": [
+        {
+          "asset_id": "seek:visual:apply_button",
+          "label": "Apply button",
+          "semantic_action": "open_apply_flow",
+          "danger_level": "flow_entry"
+        },
+        {
+          "asset_id": "seek:visual:quick_apply_button",
+          "label": "Quick Apply button",
+          "semantic_action": "open_apply_flow",
+          "danger_level": "flow_entry"
+        },
+        {
+          "asset_id": "seek:visual:save_icon",
+          "label": "Save icon",
+          "semantic_action": "save_or_bookmark",
+          "danger_level": "low"
+        },
+        {
+          "asset_id": "seek:visual:job_card_shape",
+          "label": "Job card shape",
+          "semantic_action": "open_detail",
+          "danger_level": "low"
+        },
+        {
+          "asset_id": "seek:visual:application_continue_button",
+          "label": "Continue button",
+          "semantic_action": "continue_next_step",
+          "danger_level": "medium"
+        }
+      ],
+      "proposed_danger_zones": [],
+      "source_episode_id": "seek_learning_episode_cd510d2dcfe3"
+    },
+    {
+      "contract_version": "pattern_candidate_v1",
+      "candidate_id": "seek_learning_episode_cd510d2dcfe3:form_region",
+      "matched_pattern_id": "form_region",
+      "confidence": 0.84,
+      "evidence": [
+        {
+          "source_type": "region",
+          "ref": "application_form",
+          "summary": "form-like region"
+        },
+        {
+          "source_type": "region",
+          "ref": "application_questions",
+          "summary": "form-like region"
+        },
+        {
+          "source_type": "region",
+          "ref": "application_profile",
+          "summary": "form-like region"
+        },
+        {
+          "source_type": "region",
+          "ref": "application_review_step",
+          "summary": "form-like region"
+        }
+      ],
+      "proposed_regions": [
+        {
+          "region_id": "application_form",
+          "role": "form_flow",
+          "region_type": "form_flow",
+          "bbox": null
+        },
+        {
+          "region_id": "application_questions",
+          "role": "form_flow",
+          "region_type": "form_flow",
+          "bbox": null
+        },
+        {
+          "region_id": "application_profile",
+          "role": "form_flow",
+          "region_type": "form_flow",
+          "bbox": null
+        },
+        {
+          "region_id": "application_review_step",
+          "role": "form_flow",
+          "region_type": "form_flow",
+          "bbox": null
+        }
+      ],
+      "proposed_actions": [
+        {
+          "action_template_id": "read_application_flow",
+          "semantic_action": "read",
+          "target_entity": "seek:application_form"
+        },
+        {
+          "action_template_id": "detect_application_step",
+          "semantic_action": "read",
+          "target_entity": "seek:application_progress"
+        },
+        {
+          "action_template_id": "continue_application_next_step",
+          "semantic_action": "click",
+          "target_entity": "seek:application_form"
+        }
+      ],
+      "proposed_danger_zones": [],
+      "source_episode_id": "seek_learning_episode_cd510d2dcfe3"
+    },
+    {
+      "contract_version": "pattern_candidate_v1",
+      "candidate_id": "seek_learning_episode_cd510d2dcfe3:danger_submit_zone",
+      "matched_pattern_id": "danger_submit_zone",
+      "confidence": 0.98,
+      "evidence": [
+        {
+          "source_type": "visual_asset",
+          "ref": "seek:visual:submit_application_button",
+          "summary": "final submit visual asset"
+        },
+        {
+          "source_type": "action",
+          "ref": "final_submit",
+          "summary": "final submit action template"
+        },
+        {
+          "source_type": "danger_zone",
+          "ref": "danger:seek:visual:submit_application_button",
+          "summary": "existing danger-zone evidence"
+        },
+        {
+          "source_type": "danger_zone",
+          "ref": "danger:action:final_submit",
+          "summary": "existing danger-zone evidence"
+        }
+      ],
+      "proposed_regions": [
+        {
+          "region_id": "application_review",
+          "role": "danger_zone",
+          "region_type": "danger_zone",
+          "bbox": null
+        },
+        {
+          "region_id": "application_review_step",
+          "role": "form_flow",
+          "region_type": "form_flow",
+          "bbox": null
+        }
+      ],
+      "proposed_actions": [
+        {
+          "asset_id": "seek:visual:submit_application_button",
+          "label": "Submit application",
+          "semantic_action": "final_submit",
+          "danger_level": "final_submit"
+        },
+        {
+          "action_template_id": "final_submit",
+          "semantic_action": "final_submit",
+          "target_entity": "seek:application_review"
+        }
+      ],
+      "proposed_danger_zones": [
+        {
+          "zone_id": "danger_submit_zone",
+          "semantic_action": "final_submit",
+          "danger_level": "final_submit",
+          "fast_lane_allowed": false,
+          "final_submit_guard_required": true
+        }
+      ],
+      "source_episode_id": "seek_learning_episode_cd510d2dcfe3"
+    }
+  ],
+  "learned_interface_map_draft": {
+    "contract_version": "learned_interface_map_draft_v1",
+    "draft_id": "seek_interface_map_draft_cd510d2dcfe3",
+    "status": "draft_generated_from_trace",
+    "source_episode_id": "seek_learning_episode_cd510d2dcfe3",
+    "source_patterns": [
+      "list_detail_page",
+      "primary_button",
+      "form_region",
+      "danger_submit_zone"
+    ],
+    "states": [
+      {
+        "state_id": "seek_home_page",
+        "label": "SEEK home/search page",
+        "page_type": "seek_search_results_with_detail",
+        "description": "Search results, selected job detail pane, filters, cards, and detail reading regions.",
+        "region_refs": [
+          "top_search_area",
+          "results_list",
+          "job_detail"
+        ],
+        "child_state_ids": [
+          "seek_search_results_empty_detail",
+          "seek_search_results_with_selected_job",
+          "seek_detail_scrolled",
+          "seek_results_list_scrolled"
+        ]
+      },
+      {
+        "state_id": "seek_application_page",
+        "label": "SEEK application page",
+        "page_type": "seek_station_internal_application",
+        "description": "Station-internal application form, profile step, review boundary, and final submit guard.",
+        "region_refs": [
+          "application_form"
+        ],
+        "child_state_ids": [
+          "seek_apply_entry_form"
+        ],
+        "safety": {
+          "final_submit": "forbidden"
+        }
+      }
+    ],
+    "regions": [
+      {
+        "region_id": "results_list",
+        "label": "SEEK left job results list",
+        "role": "list",
+        "region_type": "dynamic_collection",
+        "parent_region_id": null,
+        "container_id": "seek:results_list",
+        "source_bbox": {
+          "x": 608,
+          "y": 384,
+          "w": 474,
+          "h": 1016
+        },
+        "source_is_authorization": false
+      },
+      {
+        "region_id": "job_detail",
+        "label": "SEEK right job detail pane",
+        "role": "detail",
+        "region_type": "detail_content",
+        "parent_region_id": null,
+        "container_id": "seek:job_detail",
+        "source_bbox": {
+          "x": 1157,
+          "y": 384,
+          "w": 620,
+          "h": 1016
+        },
+        "source_is_authorization": false
+      },
+      {
+        "region_id": "detail_header",
+        "label": "Opened job title/company/apply area",
+        "role": "detail_header",
+        "region_type": "fixed_controls",
+        "parent_region_id": "job_detail",
+        "container_id": null,
+        "source_bbox": {
+          "x": 1157,
+          "y": 384,
+          "w": 620,
+          "h": 620
+        },
+        "source_is_authorization": false
+      },
+      {
+        "region_id": "detail_body",
+        "label": "Opened job description body",
+        "role": "detail_body",
+        "region_type": "detail_content",
+        "parent_region_id": "job_detail",
+        "container_id": null,
+        "source_bbox": {
+          "x": 1157,
+          "y": 920,
+          "w": 620,
+          "h": 480
+        },
+        "source_is_authorization": false
+      },
+      {
+        "region_id": "application_form",
+        "label": "SEEK application form",
+        "role": "form_flow",
+        "region_type": "form_flow",
+        "parent_region_id": null,
+        "container_id": "seek:application_form",
+        "source_bbox": null,
+        "source_is_authorization": false
+      },
+      {
+        "region_id": "danger_submit_zone",
+        "label": "Final submit boundary",
+        "role": "danger_zone",
+        "region_type": "danger_zone",
+        "parent_region_id": "application_review_step",
+        "container_id": "seek:application_review",
+        "source_bbox": null,
+        "source_is_authorization": false
+      }
+    ],
+    "visual_assets": [
+      {
+        "asset_id": "seek:visual:apply_button",
+        "label": "Apply button",
+        "role": "button",
+        "region_id": "detail_header",
+        "source_asset_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_apply_button_real.png",
+        "source_bbox": {
+          "x": 1764,
+          "y": 191,
+          "w": 76,
+          "h": 27
+        },
+        "semantic_action": "open_apply_flow",
+        "danger_level": "flow_entry",
+        "allowed_region_ids": [
+          "detail_header"
+        ],
+        "forbidden_region_ids": [
+          "global_navigation",
+          "browser_chrome"
+        ],
+        "fast_lane_allowed": false,
+        "eligibility_blockers": [
+          "requires_complete_agent_review",
+          "requires_current_gate"
+        ],
+        "final_submit_guard_required": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "asset_id": "seek:visual:quick_apply_button",
+        "label": "Quick Apply button",
+        "role": "button",
+        "region_id": "detail_header",
+        "source_asset_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_quick_apply_button_real.png",
+        "source_bbox": {
+          "x": 0,
+          "y": 0,
+          "w": 151,
+          "h": 54
+        },
+        "semantic_action": "open_apply_flow",
+        "danger_level": "flow_entry",
+        "allowed_region_ids": [
+          "detail_header"
+        ],
+        "forbidden_region_ids": [
+          "global_navigation",
+          "browser_chrome"
+        ],
+        "fast_lane_allowed": false,
+        "eligibility_blockers": [
+          "requires_complete_agent_review",
+          "requires_current_gate"
+        ],
+        "final_submit_guard_required": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "asset_id": "seek:visual:save_icon",
+        "label": "Save icon",
+        "role": "icon_button",
+        "region_id": "detail_header",
+        "source_asset_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_save_button_real.png",
+        "source_bbox": {
+          "x": 1328,
+          "y": 1061,
+          "w": 82,
+          "h": 54
+        },
+        "semantic_action": "save_or_bookmark",
+        "danger_level": "low",
+        "allowed_region_ids": [
+          "detail_header"
+        ],
+        "forbidden_region_ids": [
+          "global_navigation",
+          "browser_chrome"
+        ],
+        "fast_lane_allowed": false,
+        "eligibility_blockers": [],
+        "final_submit_guard_required": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "asset_id": "seek:visual:job_card_shape",
+        "label": "Job card shape",
+        "role": "card",
+        "region_id": "job_card",
+        "source_asset_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_job_card_shape_real.png",
+        "source_bbox": {
+          "x": 608,
+          "y": 532,
+          "w": 474,
+          "h": 218
+        },
+        "semantic_action": "open_detail",
+        "danger_level": "low",
+        "allowed_region_ids": [
+          "job_card"
+        ],
+        "forbidden_region_ids": [
+          "global_navigation",
+          "browser_chrome"
+        ],
+        "fast_lane_allowed": false,
+        "eligibility_blockers": [],
+        "final_submit_guard_required": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "asset_id": "seek:visual:submit_application_button",
+        "label": "Submit application",
+        "role": "button",
+        "region_id": "danger_submit_zone",
+        "source_asset_ref": "artifacts\\visual-match-smoke\\local_seek_buttons\\crops\\seek_visual_submit_application_button.png",
+        "source_bbox": {
+          "x": 650,
+          "y": 620,
+          "w": 220,
+          "h": 60
+        },
+        "semantic_action": "final_submit",
+        "danger_level": "final_submit",
+        "allowed_region_ids": [
+          "application_review",
+          "danger_submit_zone"
+        ],
+        "forbidden_region_ids": [
+          "global_navigation",
+          "browser_chrome"
+        ],
+        "fast_lane_allowed": false,
+        "eligibility_blockers": [
+          "final_submit_guard_required",
+          "explicit_user_review_required"
+        ],
+        "final_submit_guard_required": true,
+        "artifact_is_authorization": false
+      },
+      {
+        "asset_id": "seek:visual:application_continue_button",
+        "label": "Continue button",
+        "role": "button",
+        "region_id": "application_profile",
+        "source_asset_ref": "artifacts/visual-assets/seek/application_crops_20260625/seek_visual_application_continue_button.png",
+        "source_bbox": {
+          "x": 1054,
+          "y": 912,
+          "w": 118,
+          "h": 40
+        },
+        "semantic_action": "continue_next_step",
+        "danger_level": "medium",
+        "allowed_region_ids": [
+          "application_profile"
+        ],
+        "forbidden_region_ids": [
+          "global_navigation",
+          "browser_chrome"
+        ],
+        "fast_lane_allowed": false,
+        "eligibility_blockers": [],
+        "final_submit_guard_required": false,
+        "artifact_is_authorization": false
+      }
+    ],
+    "transitions": [
+      {
+        "transition_id": "draft:seek:open_flow",
+        "from_state_id": "seek_job_detail",
+        "semantic_action": "open_apply_flow",
+        "to_state_id": "seek_apply_entry_form",
+        "source_pattern_id": "entry_boundary",
+        "final_submit_guard_required": true,
+        "artifact_is_authorization": false
+      },
+      {
+        "transition_id": "draft:seek:final_submit",
+        "from_state_id": "seek_application_form",
+        "semantic_action": "final_submit",
+        "to_state_id": "terminal/submitted",
+        "source_pattern_id": "danger_zone_final_submit",
+        "final_submit_guard_required": true,
+        "hard_block": true,
+        "artifact_is_authorization": false
+      }
+    ],
+    "danger_zones": [
+      {
+        "zone_id": "danger_submit_zone",
+        "asset_id": "seek:visual:submit_application_button",
+        "label": "Submit application",
+        "semantic_action": "final_submit",
+        "danger_level": "final_submit",
+        "fast_lane_allowed": false,
+        "final_submit_guard_required": true
+      }
+    ],
+    "warnings": [
+      {
+        "code": "orphan_asset_region",
+        "asset_id": "seek:visual:job_card_shape",
+        "region_id": "job_card"
+      },
+      {
+        "code": "orphan_asset_region",
+        "asset_id": "seek:visual:application_continue_button",
+        "region_id": "application_profile"
+      }
+    ],
+    "promotion_policy": {
+      "promotion_allowed": false,
+      "requires_human_review": true,
+      "writes_profile_or_path_graph": false
+    }
+  },
+  "learning_eval_report": {
+    "contract_version": "learning_eval_report_v1",
+    "episode_id": "seek_learning_episode_cd510d2dcfe3",
+    "draft_id": "seek_interface_map_draft_cd510d2dcfe3",
+    "page_type_correct": true,
+    "region_iou": {
+      "results_list": {
+        "status": "computed",
+        "iou": 1.0
+      },
+      "job_detail": {
+        "status": "computed",
+        "iou": 1.0
+      },
+      "detail_header": {
+        "status": "computed",
+        "iou": 1.0
+      },
+      "detail_body": {
+        "status": "computed",
+        "iou": 1.0
+      },
+      "application_form": {
+        "status": "missing_bbox",
+        "iou": null
+      }
+    },
+    "action_accuracy": {
+      "quick_apply_open_apply_flow": true,
+      "apply_open_apply_flow": true,
+      "submit_application_final_submit": true
+    },
+    "danger_zone_recall": 1.0,
+    "false_safe_actions": 0,
+    "missing_required_regions": [],
+    "wrong_semantic_actions": [],
+    "warnings": [
+      {
+        "code": "orphan_asset_region",
+        "asset_id": "seek:visual:job_card_shape",
+        "region_id": "job_card"
+      },
+      {
+        "code": "orphan_asset_region",
+        "asset_id": "seek:visual:application_continue_button",
+        "region_id": "application_profile"
+      }
+    ],
+    "promotion_allowed": false
+  },
+  "safety": {
+    "real_clicks_performed": 0,
+    "opens_apply_flow": false,
+    "final_submit_blocked": true,
+    "promotion_allowed": false
+  }
+}

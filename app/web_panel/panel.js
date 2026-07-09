@@ -3,14 +3,16 @@
 let lastResponse = {};
 let lastTracePath = "";
 let lastObserveTracePath = "";
+let lastLearningDraftObserveResponse = null;
+let lastLearningDraftObserveTracePath = "";
 let currentImagePath = "";
 let currentImageUrl = "";
 let modelProfiles = [];
 let appCatalog = [];
 
 const DEFAULT_STAGE_PROFILE_IDS = {
-  observe: "qwen3_vl_4b_q4_k_m",
-  understanding: "qwen3_vl_4b_q4_k_m",
+  observe: "qwen3_vl_8b_q4_k_m",
+  understanding: "qwen3_vl_8b_q4_k_m",
   locate: "vista_4b_transformers",
   grounding: "vista_4b_transformers",
 };
@@ -26,6 +28,7 @@ let learnValidationRun = null;
 let taskRunState = null;
 const BROWSER_APP_IDS = new Set(["browser", "edge", "msedge", "chrome", "firefox"]);
 const CARD_ORDER_STORAGE_KEY = "openclaw.panel.cardOrder.v1";
+const LEARNING_DRAFT_PATH_SPLIT_STORAGE_KEY = "openclaw.panel.learningDraftPathSplit.v1";
 const CARD_DRAG_START_THRESHOLD_PX = 6;
 const DEFAULT_SEEK_GRAPH_PATH = "artifacts/seek/runtime_path_graph_seek_mvp_20260617.json";
 const DEFAULT_WIKIPEDIA_GRAPH_PATH = "artifacts/wikipedia/runtime_path_graph_wikipedia_search_v1.json";
@@ -41,6 +44,12 @@ const DEFAULT_SEEK_APPLICATION_AUDIT_PATH = "logs/smoke/seek_apply_live_92822270
 const DEFAULT_SEEK_APPLICATION_ARTIFACT_PATH = "artifacts/seek/learned_seek_application_flow_92822270_20260620.json";
 const DEFAULT_INTERFACE_CALIBRATION_REPORT_PATH = "artifacts/visual-match-smoke/live_seek_20260624/visual_asset_calibration_report.json";
 const DEFAULT_SEEK_APP_PROFILE_PATH = "artifacts/app_profiles/seek_app_profile_v1.json";
+const LEARNING_DRAFT_FRESHNESS_DEMO_SUMMARY_PATH = "artifacts/learning-draft-freshness-demo/freshness_demo_summary.json";
+const LEARNING_DRAFT_FRESHNESS_DEMO_CASES = {
+  freshness_matched: "artifacts/learning-draft-review/trial_result_8d7a049ff6/reviewed_template_candidate.json",
+  freshness_missing_file: "artifacts/learning-draft-review/trial_result_427ab51e2b/reviewed_template_candidate.json",
+  freshness_checksum_mismatch: "artifacts/learning-draft-review/trial_result_b872cf649c/reviewed_template_candidate.json",
+};
 let replayArtifact = null;
 let replayInterfaceMap = null;
 let replayInterfaceMapPath = "";
@@ -52,6 +61,24 @@ let learnSampleReadinessGate = null;
 let seekApplicationEvidence = null;
 let replayAppProfile = null;
 let replayAgentPrompt = null;
+let learningDraftReview = null;
+let selectedLearningDraftNodeId = "";
+let learningDraftReviewBboxEdits = { regions: {}, actions: {} };
+let imageInspectorEditContext = null;
+let imageInspectorSelection = null;
+let assistedTemplateAcceptanceSuggestions = [];
+let assistedTemplateAcceptanceSimulation = null;
+
+const LEARNING_INTERFACE_FLOW_STEPS = [
+  "bind_capture",
+  "screen_understanding",
+  "numbered_map",
+  "page_details",
+  "precise_calibration",
+  "fusion",
+  "pathgraph_draft",
+  "complete",
+];
 
 /* Navigation path graph state */
 // Each page node:
@@ -66,6 +93,7 @@ let navPathAppName = "";
 let navPathDirty = false;    // true when unsaved changes exist
 let liveSessionSnapshot = null;  // saved live session when viewing history
 let runtimePathGraphView = null; // learned artifact rendered into the shared PathGraph card
+let currentLearnReplaySubview = "template";
 
 const stageMeta = {
   open_bind: ["stage_open_bind_title", "stage_open_bind_subtitle"],
@@ -123,6 +151,28 @@ const PAGE_REGISTRY = {
     api: "/execute/available_actions, /execute/step",
     sideEffectKey: "side_effect_safe_validation",
     showPipeline: false,
+  },
+  learn_interface: {
+    page: "learn_replay",
+    group: "learn",
+    agentMode: "learn",
+    titleKey: "stage_learn_interface_title",
+    subtitleKey: "stage_learn_interface_subtitle",
+    api: "/vision/observe_screen, /panel/run_learning_recognition_trial, /panel/load_learning_draft_review",
+    sideEffectKey: "side_effect_observe_only",
+    showPipeline: false,
+    learnReplaySubview: "draft",
+  },
+  template_display: {
+    page: "learn_replay",
+    group: "learn",
+    agentMode: "learn",
+    titleKey: "stage_template_display_title",
+    subtitleKey: "stage_template_display_subtitle",
+    api: "/panel/file, /execute/available_actions, /execute/step",
+    sideEffectKey: "side_effect_safe_validation",
+    showPipeline: false,
+    learnReplaySubview: "template",
   },
   learn_replay: {
     page: "learn_replay",
@@ -229,15 +279,17 @@ const translations = {
     nav_group_execute: "执行模式",
     nav_group_tools: "系统工具",
     workspace_switch: "工作区切换",
-    workspace_hint_learn: "建图、校准坐标、写入路径图",
+    workspace_hint_learn: "绑定、截图、学习界面、模板展示、Trace、安全验证",
     workspace_hint_execute: "可用动作、定位、Gate、动作证据",
     workspace_hint_system: "绑定窗口、截图、Trace、模型",
-    nav_group_learn_flow: "Agent 探索 -> Trace -> 学习 PathGraph",
+    nav_group_learn_flow: "学习界面内绑定和截图 -> 模板展示 -> Trace -> 安全验证",
     nav_group_execute_flow: "Observe -> Agent 决策 -> Gate -> Operation -> Trace",
     nav_trace_audit: "Trace 审计",
     nav_learn_observe: "整屏理解 / Learn Fast",
     nav_learn_locate: "坐标校准 / Learn Deep",
     nav_learn_replay: "学习产物回放",
+    nav_learn_interface: "学习界面",
+    nav_template_display: "模板展示",
     nav_learn_validation: "路径图安全验证",
     nav_execute_actions: "当前状态 / 可用动作",
     nav_execute_task_run: "路径图任务运行",
@@ -349,6 +401,7 @@ const translations = {
     save_file_name: "文件名",
     save: "保存",
     cancel: "取消",
+    close: "关闭",
     api_response: "API 响应",
     copy: "复制",
     stage_open_bind_title: "打开 / 绑定",
@@ -363,6 +416,10 @@ const translations = {
     stage_learn_deep_subtitle: "学习模式：校准 PathGraph 子节点坐标、补充遗漏节点，不真实点击",
     stage_learn_replay_title: "学习产物回放 / 路径图验证",
     stage_learn_replay_subtitle: "学习模式：查看 SEEK/Wikipedia 路径图产物、验证报告和连续 Execute 回放",
+    stage_learn_interface_title: "学习界面",
+    stage_learn_interface_subtitle: "绑定并截图当前界面，整屏理解、区域编号、校准并输出融合草稿和只读 PathGraph。",
+    stage_template_display_title: "模板展示",
+    stage_template_display_subtitle: "加载已审阅模板，查看 PathGraph、界面结构、动作模板、skill 和安全规则。",
     stage_learn_validation_title: "路径图安全验证",
     stage_learn_validation_subtitle: "学习模式：用 read-only/no-write 安全动作验证候选路径图，不执行真实输入",
     stage_execute_actions_title: "当前状态 / 可用动作",
@@ -429,8 +486,182 @@ const translations = {
     learn_validation_hint: "验证候选路径图是否能安全行走。只允许 read-only/no-write 动作；input、Apply、Submit、Delete、Save changes 会被过滤。",
     learn_replay_title: "学习产物回放 / 路径图验证",
     learn_replay_hint: "加载学习产物，查看路径图结构、动作模板、skill 和安全规则；多步回放只在面板 harness 串联，后端 Execute 仍一次只执行一步。",
+    template_subinterface: "模板界面",
+    learning_draft_subinterface: "学习草稿界面",
+    template_replay_section: "模板回放 / Template Replay",
+    template_replay_section_hint: "只加载 Runtime PathGraph / Interface Map 产物；不会自动展示模型学习草稿。",
+    learning_studio_section: "学习工作台 / Learning Studio",
+    learning_studio_section_hint: "单独加载和修改模型学习草稿，保存为不可执行的审阅候选。",
+    learning_interface_prep_title: "打开、绑定、截图",
+    learning_interface_prep_hint: "在学习界面里完成目标窗口准备。这里只收集证据，不会点击目标应用。",
+    learning_interface_app_catalog: "启动目标",
+    learning_interface_window: "目标窗口",
+    learning_interface_image_path: "最新截图",
+    learning_interface_prep_idle: "就绪 · 不会真实点击",
+    learning_interface_flow_title: "学习当前界面",
+    learning_interface_flow_hint: "绑定并截图，整屏理解，区域编号，执行模式定位链校准，再输出融合草稿和只读 PathGraph。",
+    learning_interface_run: "学习当前界面",
+    learning_interface_flow_idle: "空闲 · 不会真实点击",
+    learning_flow_bind_capture: "绑定 / 截图",
+    learning_flow_screen_understanding: "整屏理解",
+    learning_flow_numbered_map: "编号选择图",
+    learning_flow_page_details: "界面详情",
+    learning_flow_precise_calibration: "精准校准",
+    learning_flow_fusion: "融合结果",
+    learning_flow_pathgraph_draft: "PathGraph 草稿",
+    learning_flow_complete: "完成",
+    learning_draft_advanced_diagnostics: "高级诊断",
+    learning_draft_advanced_diagnostics_hint: "旧的分步工具和产物路径；Demo 时保持折叠。",
+    learning_draft_history_title: "历史学习草稿",
+    learning_draft_history_empty: "加载最近草稿或运行学习后显示历史。",
+    learning_draft_screenshot_title: "截图 / 编号图",
+    learning_draft_screenshot_empty: "还没有加载学习截图。",
+    learning_draft_manual_edit_title: "人工修改草稿",
+    learning_draft_manual_region_label: "区域名称",
+    learning_draft_manual_region_role: "角色",
+    learning_draft_manual_region_section: "页面区块",
+    learning_draft_manual_operation: "可能操作",
+    learning_draft_manual_enter_pathgraph: "可进入 PathGraph 草稿",
+    learning_draft_manual_needs_recalibration: "需要重新校准",
+    learning_draft_manual_notes: "修改说明",
+    learning_draft_manual_save: "保存人工修改",
+    learning_draft_raw_details: "原始草稿字段",
+    learning_trial_app: "学习应用",
+    learning_trial_state: "学习状态",
+    learning_trial_max_attempts: "试跑次数",
+    learning_trial_goal: "学习试跑目标",
+    learning_trial_image_path: "学习试跑截图",
+    learning_trial_result_path: "最新学习 trial 结果",
+    learning_trial_capture: "截取当前绑定窗口",
+    learning_trial_run: "运行草稿试跑",
+    learning_pathgraph_candidate_path: "候选 PathGraph",
+    learning_pathgraph_validation_path: "候选校验报告",
+    learning_pathgraph_candidate_generate: "生成候选 PathGraph",
+    learning_model_start_approval_packet_create: "生成模型启动批准资料包",
+    learning_calibration_pre_run_check_create: "生成校准预运行检查",
+    learning_pathgraph_integration_readiness_create: "生成 PathGraph 集成就绪报告",
+    learning_current_evidence_packet_create: "生成当前证据包",
+    learning_precise_understanding_candidate_create: "生成精准理解候选图",
+    learning_page_detail_candidate_create: "生成界面详情候选",
+    learning_demo_scaffold_create: "生成学习 demo 串联包",
+    learning_demo_scaffold: "学习 demo 串联包",
+    learning_demo_goal_readiness_create: "生成 demo 目标验收",
+    learning_demo_goal_readiness: "学习 demo 目标验收",
+    learning_assisted_template_package_path: "辅助模板审查包",
+    learning_assisted_template_package_create: "生成审查包",
+    learning_assisted_template_package_load: "加载审查包",
+    learning_assisted_template_suggestions_create: "生成接受建议",
+    learning_assisted_template_suggestions: "接受建议",
+    learning_assisted_template_suggestion_apply: "预填到清单",
+    learning_assisted_template_acceptance_simulation_create: "模拟接受建议",
+    learning_assisted_template_acceptance_simulation: "接受建议模拟",
+    learning_assisted_template_acceptance_simulation_apply: "预填模拟建议到清单",
+    learning_assisted_template_completeness: "路径图草稿完整性",
+    learning_assisted_template_completeness_passed: "已通过人工资产检查，可继续人工路径图审查",
+    learning_assisted_template_completeness_blocked: "仍有阻塞项，不能进入路径图提升",
+    learning_assisted_template_review_to_graph_diff: "审查到路径图差异",
+    learning_assisted_template_asset_candidate_path: "辅助模板资产候选",
+    learning_assisted_template_asset_candidate_create: "生成资产候选",
+    learning_assisted_template_graph_draft_path: "辅助模板路径图草稿",
+    learning_assisted_template_graph_draft_create: "生成路径图草稿",
+    learning_assisted_template_promotion_preflight_create: "生成提升预检",
+    learning_assisted_template_promotion_preflight: "人工提升预检",
+    learning_assisted_template_audited_promotion_request_create: "生成审计请求预览",
+    learning_assisted_template_audited_promotion_request: "审计提升请求预览",
+    learning_assisted_template_checklist: "辅助模板审查清单",
+    learning_assisted_template_empty: "暂无审查包。",
+    learning_assisted_template_decisions_save: "保存清单标记",
+    learning_assisted_template_decisions_save_export: "保存并生成资产候选",
+    learning_assisted_template_decisions_save_graph_preview: "保存并生成路径图草稿预览",
+    learning_assisted_template_decisions_save_audit_preview: "保存并生成审计预览",
     artifact_preset: "产物预设",
     load_artifact: "加载产物",
+    model_artifact_trial_path: "模型产物 trial 路径",
+    load_model_artifact: "加载模型产物",
+    learning_draft_review_source_path: "学习草稿审阅来源",
+    learning_draft_review: "加载学习草稿",
+    learning_draft_recommended_load: "加载当前推荐草稿",
+    learning_draft_review_save: "保存审阅候选",
+    learning_draft_review_title: "学习草稿审阅",
+    learning_draft_review_hint: "以接近模板的结构展示和修改学习草稿；只保存审阅候选，不授权点击或 Execute 绑定。",
+    learning_draft_review_status: "审阅状态",
+    learning_draft_summary: "草稿摘要",
+    learning_draft_states: "状态",
+    learning_draft_regions: "区域",
+    learning_draft_actions: "动作模板",
+    learning_draft_blockers: "阻断条件",
+    learning_draft_verification_rules: "验证规则",
+    learning_draft_safety_status: "安全 / 状态",
+    learning_draft_path_preview_title: "草稿路径图预览",
+    learning_draft_path_preview_hint: "从学习草稿生成的只读预览；不加载模板回放，不绑定 Execute，也不授权点击。",
+    learning_draft_not_executable: "候选 / 不可执行",
+    learning_draft_node_detail: "页面详情",
+    learning_draft_related_regions: "关联区域",
+    learning_draft_related_actions: "关联动作",
+    learning_draft_candidate_transitions: "候选跳转",
+    learning_draft_pathgraph_readiness: "路径图接入准备度",
+    learning_draft_detail_attachments: "详情接入结果",
+    learning_draft_attached_detail_regions: "已接入详情区域",
+    learning_draft_attached_detail_actions: "已接入详情动作",
+    learning_detail_observe_candidate_path: "候选路径图",
+    learning_detail_observe_request_select: "待接入请求",
+    learning_detail_observe_request_id: "详情观察请求",
+    learning_detail_observe_source_select: "最近详情草稿",
+    learning_detail_observe_source_path: "详情草稿来源",
+    learning_detail_observe_sources: "加载最近草稿",
+    learning_detail_observe_attach: "接入详情观察",
+    learning_draft_page_understanding: "页面理解详情",
+    learning_draft_review_only_regions: "只读 / 需审阅区域",
+    learning_draft_grounding_candidates: "定位候选",
+    learning_draft_danger_zones: "危险区域",
+    learning_draft_pipeline_audit: "识别链路审计",
+    learning_draft_cleanup: "候选清理",
+    learning_draft_gate: "定位 Gate",
+    learning_draft_roi_grounding: "ROI 定位",
+    learning_draft_fusion_status: "融合识别状态",
+    learning_draft_pathgraph_review_queue: "路径图审核队列",
+    learning_draft_pathgraph_preflight_plan: "路径图接入预检",
+    learning_draft_review_patch_proposal: "草稿修改建议",
+    learning_draft_preview_bbox: "预览框",
+    learning_draft_image_inspector: "原图检查",
+    learning_draft_edit_bbox: "修改框",
+    learning_draft_drag_bbox_hint: "在原图上拖拽选择新框；使用选框只更新学习草稿审阅候选，不授权点击。",
+    learning_draft_apply_selected_bbox: "使用选框",
+    learning_draft_bbox_edit_saved: "已记录人工框选",
+    learning_draft_bbox_edited: "人工改框",
+    learning_draft_bbox_edit_summary: "人工框选校验",
+    learning_draft_source_freshness_summary: "截图来源校验",
+    learning_draft_freshness_demo_case: "截图来源演示",
+    learning_draft_load_freshness_demo: "加载来源演示",
+    learning_draft_no_path_nodes: "暂无可预览的草稿状态",
+    learning_draft_evidence_sources: "证据来源",
+    screen_understanding_preview_title: "整屏理解预览",
+    screen_understanding_preview_not_available: "暂无整屏理解证据",
+    screen_understanding_preview_hint: "只读展示 parser/classifier 的候选结果；语义区域不可点击，候选点仍需 ROI 定位和 Gate。",
+    screen_understanding_full_overlay: "查看全图识别图",
+    screen_understanding_calibration_backlog: "待校准区域",
+    screen_understanding_calibration_batch_plan: "下一批校准计划",
+    screen_understanding_calibration_batch_ready: "可校准区域",
+    screen_understanding_calibration_batch_review: "需先审阅",
+    screen_understanding_calibration_batch_command: "预览命令",
+    screen_understanding_post_batch_refresh_command: "校准后刷新命令",
+    screen_understanding_calibration_handoff: "校准交接预检",
+    screen_understanding_calibration_batch_acceptance: "校准批次验收",
+    screen_understanding_handoff_consistency: "交接一致性审计",
+    screen_understanding_model_start_runbook: "模型启动运行手册",
+    screen_understanding_evidence_integrity: "证据完整性",
+    screen_understanding_handoff_ready: "可在批准后启动",
+    screen_understanding_handoff_rerun_status: "后续报告状态",
+    screen_understanding_handoff_blockers: "阻断项",
+    screen_understanding_handoff_warnings: "提醒",
+    screen_understanding_review_only: "只读/需审阅区域",
+    screen_understanding_grounding_candidates: "可进入定位的候选",
+    screen_understanding_danger_zones: "危险区域",
+    screen_understanding_available: "可展示",
+    screen_understanding_empty: "暂无候选",
+    learning_review_empty: "暂无内容",
+    replay_advanced_actions: "高级操作",
+    replay_advanced_actions_hint: "Prompt、Profile、保存和调试运行工具。",
     interface_map_path: "Interface Map 路径",
     interface_calibration_report_path: "校准报告路径",
     interface_map_save_name: "编辑后 Interface Map 文件",
@@ -455,6 +686,10 @@ const translations = {
     use_current_app_map: "使用当前应用地图",
     load_interface_map: "加载界面地图",
     load_interface_calibration: "加载校准报告",
+    learning_safety_warnings: "安全警告",
+    false_safe_actions: "错误安全动作",
+    danger_zone_recall: "危险区召回",
+    promotion_allowed: "允许提升",
     save_interface_map: "保存界面地图",
     interface_map_title: "学习界面地图",
     interface_regions: "区域",
@@ -519,6 +754,11 @@ const translations = {
     replay_source_image_preview: "源截图预览",
     replay_source_image: "源截图",
     replay_recrop_button: "重新裁剪按钮截图",
+    replay_open_crop_selector: "打开原图框选",
+    replay_crop_selector_title: "框选原图区域 / select source region",
+    replay_crop_selector_hint: "在原图上拖拽框选按钮区域，松开后会回填 x/y/w/h。这里只更新学习截图，不授权点击。",
+    replay_crop_selector_apply: "使用选区",
+    replay_crop_selector_cancel: "关闭",
     replay_no_button_crop: "结构节点 / no button crop",
     replay_no_button_crop_hint: "这个节点是滚动区域或视觉证据，不是可点击按钮截图；学习地图只保留它的结构和可调用 skill，不提供按钮裁剪。",
     learn_replay_advanced_tools: "高级诊断（可选）",
@@ -581,15 +821,17 @@ const translations = {
     nav_group_execute: "Execute Mode",
     nav_group_tools: "System Tools",
     workspace_switch: "Workspace Switch",
-    workspace_hint_learn: "Build map, calibrate coordinates, write PathGraph",
+    workspace_hint_learn: "Bind, screenshot, learn interface, show template, trace, validate safety",
     workspace_hint_execute: "Available actions, locate, gate, evidence",
     workspace_hint_system: "Bind windows, capture, traces, models",
-    nav_group_learn_flow: "Agent explores -> Trace -> learn PathGraph",
+    nav_group_learn_flow: "Bind and screenshot inside Learn interface -> template display -> Trace -> safety validation",
     nav_group_execute_flow: "Observe -> Agent decision -> Gate -> Operation -> Trace",
     nav_trace_audit: "Trace Audit",
     nav_learn_observe: "Observe / Learn Fast",
     nav_learn_locate: "Coordinate Calibration / Learn Deep",
     nav_learn_replay: "Artifact Replay",
+    nav_learn_interface: "Learn interface",
+    nav_template_display: "Template display",
     nav_learn_validation: "PathGraph Validation",
     nav_execute_actions: "Current State / Actions",
     nav_execute_task_run: "PathGraph Task Run",
@@ -701,6 +943,7 @@ const translations = {
     save_file_name: "File name",
     save: "Save",
     cancel: "Cancel",
+    close: "Close",
     api_response: "API Response",
     copy: "Copy",
     stage_open_bind_title: "Open / Bind",
@@ -715,6 +958,10 @@ const translations = {
     stage_learn_deep_subtitle: "Learn Mode: calibrate PathGraph child-node coordinates and add missing nodes; no real click",
     stage_learn_replay_title: "Artifact Replay / PathGraph Validation",
     stage_learn_replay_subtitle: "Learn Mode: inspect SEEK/Wikipedia PathGraph artifacts, validation reports, and continuous Execute replay",
+    stage_learn_interface_title: "Learn interface",
+    stage_learn_interface_subtitle: "Bind and screenshot the current interface, understand the full screen, number regions, calibrate, and output a fused draft plus read-only PathGraph.",
+    stage_template_display_title: "Template display",
+    stage_template_display_subtitle: "Load reviewed templates and inspect PathGraph, interface structure, action templates, skills, and safety rules.",
     stage_learn_validation_title: "PathGraph Safe Validation",
     stage_learn_validation_subtitle: "Learn Mode: validate candidate PathGraph with read-only/no-write safe actions; no real input",
     stage_execute_actions_title: "Current State / Available Actions",
@@ -781,8 +1028,182 @@ const translations = {
     learn_validation_hint: "Validate whether a candidate PathGraph can be walked safely. Only read-only/no-write actions are allowed; input, Apply, Submit, Delete, and Save changes are filtered.",
     learn_replay_title: "Artifact Replay / PathGraph Validation",
     learn_replay_hint: "Load a learned artifact, inspect PathGraph structure, action templates, skills, and safety rules. Multi-step replay is chained by the panel harness; backend Execute still performs one step at a time.",
+    template_subinterface: "Template",
+    learning_draft_subinterface: "Learning draft",
+    template_replay_section: "Template Replay",
+    template_replay_section_hint: "Load Runtime PathGraph / Interface Map artifacts only; model learning drafts are not auto-rendered.",
+    learning_studio_section: "Learning Studio",
+    learning_studio_section_hint: "Load and edit model learning drafts separately as non-executable reviewed candidates.",
+    learning_interface_prep_title: "Open, bind, and screenshot",
+    learning_interface_prep_hint: "Prepare the target window inside Learn interface. This only collects evidence and will not click the target app.",
+    learning_interface_app_catalog: "Launch target",
+    learning_interface_window: "Target window",
+    learning_interface_image_path: "Latest screenshot",
+    learning_interface_prep_idle: "ready · no live click",
+    learning_interface_flow_title: "Learn current interface",
+    learning_interface_flow_hint: "Bind and screenshot, understand the full screen, number regions, calibrate with the Execute locator chain, then output a fused draft and read-only PathGraph.",
+    learning_interface_run: "Learn current interface",
+    learning_interface_flow_idle: "idle · no live click",
+    learning_flow_bind_capture: "Bind / screenshot",
+    learning_flow_screen_understanding: "Full-screen understanding",
+    learning_flow_numbered_map: "Numbered selection map",
+    learning_flow_page_details: "Interface details",
+    learning_flow_precise_calibration: "Precise calibration",
+    learning_flow_fusion: "Fusion",
+    learning_flow_pathgraph_draft: "PathGraph draft",
+    learning_flow_complete: "Complete",
+    learning_draft_advanced_diagnostics: "Advanced diagnostics",
+    learning_draft_advanced_diagnostics_hint: "Old split-step tools and artifact paths; keep closed for demo.",
+    learning_draft_history_title: "History learning drafts",
+    learning_draft_history_empty: "Load recent drafts or run learning to show history.",
+    learning_draft_screenshot_title: "Screenshot / numbered map",
+    learning_draft_screenshot_empty: "No learning screenshot loaded.",
+    learning_draft_manual_edit_title: "Manual draft edit",
+    learning_draft_manual_region_label: "Region label",
+    learning_draft_manual_region_role: "Role",
+    learning_draft_manual_region_section: "Section",
+    learning_draft_manual_operation: "Possible operation",
+    learning_draft_manual_enter_pathgraph: "May enter PathGraph draft",
+    learning_draft_manual_needs_recalibration: "Needs recalibration",
+    learning_draft_manual_notes: "Notes",
+    learning_draft_manual_save: "Save manual edit",
+    learning_draft_raw_details: "Raw draft fields",
+    learning_trial_app: "Learning app",
+    learning_trial_state: "Learning state",
+    learning_trial_max_attempts: "Trial attempts",
+    learning_trial_goal: "Learning trial goal",
+    learning_trial_image_path: "Learning trial image",
+    learning_trial_result_path: "Latest learning trial result",
+    learning_trial_capture: "Capture bound window",
+    learning_trial_run: "Run draft trial",
+    learning_pathgraph_candidate_path: "PathGraph candidate",
+    learning_pathgraph_validation_path: "Candidate validation report",
+    learning_pathgraph_candidate_generate: "Generate PathGraph candidate",
+    learning_model_start_approval_packet_create: "Create model-start approval packet",
+    learning_calibration_pre_run_check_create: "Create calibration pre-run check",
+    learning_pathgraph_integration_readiness_create: "Create PathGraph integration readiness",
+    learning_current_evidence_packet_create: "Create current evidence packet",
+    learning_precise_understanding_candidate_create: "Create precise understanding candidate",
+    learning_page_detail_candidate_create: "Create page detail candidate",
+    learning_demo_scaffold_create: "Create learning demo scaffold",
+    learning_demo_scaffold: "Learning demo scaffold",
+    learning_demo_goal_readiness_create: "Create demo goal audit",
+    learning_demo_goal_readiness: "Learning demo goal audit",
+    learning_assisted_template_package_path: "Assisted template review package",
+    learning_assisted_template_package_create: "Create review package",
+    learning_assisted_template_package_load: "Load review package",
+    learning_assisted_template_suggestions_create: "Create acceptance suggestions",
+    learning_assisted_template_suggestions: "Acceptance suggestions",
+    learning_assisted_template_suggestion_apply: "Apply to checklist",
+    learning_assisted_template_acceptance_simulation_create: "Simulate accepted suggestions",
+    learning_assisted_template_acceptance_simulation: "Acceptance suggestion simulation",
+    learning_assisted_template_acceptance_simulation_apply: "Apply simulated choices to checklist",
+    learning_assisted_template_completeness: "PathGraph draft completeness",
+    learning_assisted_template_completeness_passed: "Manual asset checks passed; ready for manual PathGraph review",
+    learning_assisted_template_completeness_blocked: "Blocked items remain; not ready for PathGraph promotion",
+    learning_assisted_template_review_to_graph_diff: "Review-to-graph diff",
+    learning_assisted_template_asset_candidate_path: "Assisted template asset candidate",
+    learning_assisted_template_asset_candidate_create: "Create asset candidate",
+    learning_assisted_template_graph_draft_path: "Assisted template graph draft",
+    learning_assisted_template_graph_draft_create: "Create graph draft",
+    learning_assisted_template_promotion_preflight_create: "Create promotion preflight",
+    learning_assisted_template_promotion_preflight: "Manual promotion preflight",
+    learning_assisted_template_audited_promotion_request_create: "Create audit request preview",
+    learning_assisted_template_audited_promotion_request: "Audited promotion request preview",
+    learning_assisted_template_checklist: "Assisted template checklist",
+    learning_assisted_template_empty: "No review package loaded.",
+    learning_assisted_template_decisions_save: "Save checklist decisions",
+    learning_assisted_template_decisions_save_export: "Save + create asset candidate",
+    learning_assisted_template_decisions_save_graph_preview: "Save + build graph draft preview",
+    learning_assisted_template_decisions_save_audit_preview: "Save + build audit preview",
     artifact_preset: "Artifact preset",
     load_artifact: "Load artifact",
+    model_artifact_trial_path: "Model artifact trial path",
+    load_model_artifact: "Load model artifact",
+    learning_draft_review_source_path: "Learning draft review source",
+    learning_draft_review: "Load learning draft",
+    learning_draft_recommended_load: "Load recommended current draft",
+    learning_draft_review_save: "Save reviewed candidate",
+    learning_draft_review_title: "Learning Draft Review",
+    learning_draft_review_hint: "Display and edit the learning draft in a template-like shape. This only saves a reviewed candidate and never authorizes clicks or Execute binding.",
+    learning_draft_review_status: "Review status",
+    learning_draft_summary: "Draft summary",
+    learning_draft_states: "States",
+    learning_draft_regions: "Regions",
+    learning_draft_actions: "Action templates",
+    learning_draft_blockers: "Blockers",
+    learning_draft_verification_rules: "Verification rules",
+    learning_draft_safety_status: "Safety / status",
+    learning_draft_path_preview_title: "Draft PathGraph preview",
+    learning_draft_path_preview_hint: "Read-only preview generated from the learning draft. It does not load Template Replay, Execute, or click authorization.",
+    learning_draft_not_executable: "candidate / not executable",
+    learning_draft_node_detail: "Page detail",
+    learning_draft_related_regions: "Related regions",
+    learning_draft_related_actions: "Related actions",
+    learning_draft_candidate_transitions: "Candidate transitions",
+    learning_draft_pathgraph_readiness: "PathGraph readiness",
+    learning_draft_detail_attachments: "Detail attachments",
+    learning_draft_attached_detail_regions: "Attached detail regions",
+    learning_draft_attached_detail_actions: "Attached detail actions",
+    learning_detail_observe_candidate_path: "PathGraph candidate",
+    learning_detail_observe_request_select: "Pending request",
+    learning_detail_observe_request_id: "Detail observe request",
+    learning_detail_observe_source_select: "Recent detail draft",
+    learning_detail_observe_source_path: "Detail draft source",
+    learning_detail_observe_sources: "Load recent drafts",
+    learning_detail_observe_attach: "Attach detail observe",
+    learning_draft_page_understanding: "Page understanding details",
+    learning_draft_review_only_regions: "Review-only regions",
+    learning_draft_grounding_candidates: "Grounding candidates",
+    learning_draft_danger_zones: "Danger zones",
+    learning_draft_pipeline_audit: "Pipeline audit",
+    learning_draft_cleanup: "BBox cleanup",
+    learning_draft_gate: "Grounding gate",
+    learning_draft_roi_grounding: "ROI grounding",
+    learning_draft_fusion_status: "Fusion status",
+    learning_draft_pathgraph_review_queue: "PathGraph review queue",
+    learning_draft_pathgraph_preflight_plan: "PathGraph preflight plan",
+    learning_draft_review_patch_proposal: "Review patch proposal",
+    learning_draft_preview_bbox: "Preview box",
+    learning_draft_image_inspector: "Image inspector",
+    learning_draft_edit_bbox: "Edit box",
+    learning_draft_drag_bbox_hint: "Drag on the original image to select a new box. Applying it only updates the reviewed draft candidate and never authorizes clicks.",
+    learning_draft_apply_selected_bbox: "Use selected box",
+    learning_draft_bbox_edit_saved: "Manual box edit recorded",
+    learning_draft_bbox_edited: "edited bbox",
+    learning_draft_bbox_edit_summary: "Manual bbox validation",
+    learning_draft_source_freshness_summary: "Source freshness",
+    learning_draft_freshness_demo_case: "Freshness demo case",
+    learning_draft_load_freshness_demo: "Load freshness demo",
+    learning_draft_no_path_nodes: "No draft states to preview yet",
+    learning_draft_evidence_sources: "Evidence sources",
+    screen_understanding_preview_title: "Screen Understanding Preview",
+    screen_understanding_preview_not_available: "no screen understanding evidence",
+    screen_understanding_preview_hint: "Read-only parser/classifier candidates. Semantic regions are not clickable; candidates still require ROI grounding and Gate.",
+    screen_understanding_full_overlay: "View full-screen understanding overlay",
+    screen_understanding_calibration_backlog: "Calibration backlog",
+    screen_understanding_calibration_batch_plan: "Next calibration batch",
+    screen_understanding_calibration_batch_ready: "Ready regions",
+    screen_understanding_calibration_batch_review: "Review first",
+    screen_understanding_calibration_batch_command: "Command preview",
+    screen_understanding_post_batch_refresh_command: "Post-batch refresh command",
+    screen_understanding_calibration_handoff: "Calibration handoff preflight",
+    screen_understanding_calibration_batch_acceptance: "Calibration batch acceptance",
+    screen_understanding_handoff_consistency: "Handoff consistency audit",
+    screen_understanding_model_start_runbook: "Model-start runbook",
+    screen_understanding_evidence_integrity: "Evidence integrity",
+    screen_understanding_handoff_ready: "Ready after approval",
+    screen_understanding_handoff_rerun_status: "Rerun report status",
+    screen_understanding_handoff_blockers: "Blockers",
+    screen_understanding_handoff_warnings: "Warnings",
+    screen_understanding_review_only: "Review-only regions",
+    screen_understanding_grounding_candidates: "Grounding candidates",
+    screen_understanding_danger_zones: "Danger zones",
+    screen_understanding_available: "available",
+    screen_understanding_empty: "No candidates",
+    learning_review_empty: "No content yet",
+    replay_advanced_actions: "Advanced actions",
+    replay_advanced_actions_hint: "Prompt, profile, save, and debug-run tools.",
     interface_map_path: "Interface Map path",
     interface_calibration_report_path: "Calibration report path",
     interface_map_save_name: "Edited Interface Map file",
@@ -807,6 +1228,10 @@ const translations = {
     use_current_app_map: "Use current app map",
     load_interface_map: "Load interface map",
     load_interface_calibration: "Load calibration",
+    learning_safety_warnings: "Safety warnings",
+    false_safe_actions: "False-safe actions",
+    danger_zone_recall: "Danger-zone recall",
+    promotion_allowed: "Promotion allowed",
     save_interface_map: "Save interface map",
     interface_map_title: "Learned Interface Map",
     interface_regions: "Regions",
@@ -871,6 +1296,11 @@ const translations = {
     replay_source_image_preview: "Source image preview",
     replay_source_image: "Source image",
     replay_recrop_button: "Recrop button screenshot",
+    replay_open_crop_selector: "Open source image selector",
+    replay_crop_selector_title: "Select source image region",
+    replay_crop_selector_hint: "Drag on the source image to select the button region. Releasing the pointer fills x/y/w/h. This only updates the learned crop and does not authorize clicks.",
+    replay_crop_selector_apply: "Use selection",
+    replay_crop_selector_cancel: "Close",
     replay_no_button_crop: "Structure node / no button crop",
     replay_no_button_crop_hint: "This node is a scroll region or visual evidence, not a clickable button crop. The learned map keeps its structure and callable skill only.",
     learn_replay_advanced_tools: "Advanced diagnostics",
@@ -939,6 +1369,15 @@ function panelQueryFlag(name) {
   if (!params.has(name)) return false;
   const value = String(params.get(name) || "").trim().toLowerCase();
   return value === "" || value === "1" || value === "true" || value === "yes";
+}
+
+function panelQueryValue(...names) {
+  const params = panelQueryParams();
+  for (const name of names) {
+    const value = String(params.get(name) || "").trim();
+    if (value) return value;
+  }
+  return "";
 }
 
 function initialStageFromQuery() {
@@ -1031,9 +1470,17 @@ function syncStageLearningControls(stage = document.querySelector(".stage.active
 }
 
 function responseAllowsPathGraphWrite(result) {
+  if (isScreenUnderstandingResponse(result)) return false;
   const policy = result?.write_policy || nestedGet(result, ["request", "write_policy"]);
   if (!policy || typeof policy !== "object") return true;
   return policy.path_graph !== false;
+}
+
+function isScreenUnderstandingResponse(result = {}) {
+  const taskType = result?.task || nestedGet(result, ["request", "task"]) || "";
+  return taskType === "observe_screen"
+    || result?.contract_version === "screen_observation_v1"
+    || result?.screen_map?.contract_version === "screen_map_v1";
 }
 
 function setStatus(text, state = "neutral") {
@@ -1057,6 +1504,139 @@ function setRuntimeState(text, ok = true) {
   el.style.color = ok ? "#667085" : "#344054";
 }
 
+function sharedPathPages() {
+  return new Set(["locate", "execute_actions", "learn_replay", "learn_validation", "execute_task_run", "execute"]);
+}
+
+function currentPageAllowsSharedPathSurface(page = activeStagePage()) {
+  const currentPage = page || activeStagePage();
+  if (!sharedPathPages().has(currentPage)) return false;
+  if (currentPage === "observe") return false;
+  if (currentPage === "learn_replay" && currentLearnReplaySubview === "draft") return false;
+  return true;
+}
+
+function sharedPathSurfaceVisible() {
+  return document.body.dataset.pathSurface === "visible" && currentPageAllowsSharedPathSurface();
+}
+
+function isScreenUnderstandingStageActive() {
+  const page = document.body.dataset.stagePage || activeStagePage();
+  const activeStage = document.querySelector(".stage.active")?.dataset.stage || "";
+  return page === "observe" || activeStage === "observe";
+}
+
+function shouldBlockPathGraphRestoreForScreenUnderstanding() {
+  return isScreenUnderstandingStageActive();
+}
+
+function hideSharedPathSurface() {
+  document.body.dataset.pathSurface = "hidden";
+  if (pathAnimId) {
+    cancelAnimationFrame(pathAnimId);
+    pathAnimId = 0;
+  }
+  const pathPanel = $("navPathPanel");
+  const pathDetailPanel = $("pathDetailPanel");
+  for (const panel of [pathPanel, pathDetailPanel]) {
+    if (!panel) continue;
+    panel.hidden = true;
+    panel.style.display = "none";
+    panel.setAttribute("aria-hidden", "true");
+  }
+  clearSharedPathDetailDisplay();
+  const canvas = $("navPathCanvas");
+  if (canvas) {
+    const ctx = canvas.getContext("2d");
+    if (ctx) ctx.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
+  }
+  const emptyOverlay = $("pathEmptyOverlay");
+  if (emptyOverlay) emptyOverlay.style.display = "none";
+  pathHoveredNode = null;
+}
+
+function resetSharedPathForScreenUnderstanding(appName = "") {
+  runtimePathGraphView = null;
+  navPathNodes = [];
+  navPathEdges = [];
+  currentNavNodeId = null;
+  expandedPathNodeId = null;
+  pendingTransition = null;
+  navPathCounter = 0;
+  navPathDirty = false;
+  liveSessionSnapshot = null;
+  pathNodePositions = [];
+  pathHoveredNode = null;
+  navPathAppName = String(appName || $("observeApp")?.value || "").trim();
+  updatePathAppLabel();
+  hideSharedPathSurface();
+}
+
+function clearTemplateReplayResidualDisplays(reason = "") {
+  replayArtifact = null;
+  replayInterfaceMap = null;
+  replayInterfaceCalibrationReport = null;
+  replayAppProfile = null;
+  replayAgentPrompt = null;
+  selectedInterfaceMapRef = "";
+  if ($("replayGraphSummary")) $("replayGraphSummary").innerHTML = "";
+  if ($("replayInterfaceMapPanel")) $("replayInterfaceMapPanel").innerHTML = "";
+  if ($("replayGraphActions")) $("replayGraphActions").innerHTML = "";
+  if ($("replayAppProfileSummary")) $("replayAppProfileSummary").innerHTML = "";
+  if ($("replayAgentPromptSummary")) $("replayAgentPromptSummary").innerHTML = "";
+  if ($("replayAgentPromptTemplate")) $("replayAgentPromptTemplate").value = "";
+  if ($("replayAgentPromptDiff")) $("replayAgentPromptDiff").textContent = "";
+  if ($("replayInterfaceCalibrationPath")) $("replayInterfaceCalibrationPath").value = "";
+  if ($("replayAgentPromptVersionSelect")) $("replayAgentPromptVersionSelect").innerHTML = "";
+  if ($("replayAgentPromptVersion")) $("replayAgentPromptVersion").value = "";
+  if ($("replayAgentPromptCompareVersion")) $("replayAgentPromptCompareVersion").value = "";
+}
+
+function clearScreenUnderstandingResidualDisplays(reason = "") {
+  clearLearningDraftTrialArtifacts(reason);
+  clearTemplateReplayResidualDisplays(reason);
+  clearSharedPathDetailDisplay();
+  hideSharedPathSurface();
+  lastResponse = {};
+  if ($("responseText")) $("responseText").textContent = "{}";
+  renderFlowGraph({});
+}
+
+function enterScreenUnderstandingStage() {
+  resetSharedPathForScreenUnderstanding($("observeApp")?.value || "");
+  clearScreenUnderstandingResidualDisplays("not_loaded · screen understanding started");
+  document.body.dataset.pathSurface = "hidden";
+  hideSharedPathSurface();
+}
+
+function clearSharedPathDetailDisplay() {
+  const content = $("pathDetailContent");
+  if (content) content.innerHTML = `<p class="path-detail-empty">${t("path_detail_empty")}</p>`;
+  const meta = $("pathDetailMeta");
+  if (meta) meta.textContent = "";
+}
+
+function setSharedPathSurfaceVisibility(page) {
+  const pathVisible = currentPageAllowsSharedPathSurface(page);
+  document.body.dataset.pathSurface = pathVisible ? "visible" : "hidden";
+  const pathPanel = $("navPathPanel");
+  const pathDetailPanel = $("pathDetailPanel");
+  if (pathPanel) {
+    pathPanel.hidden = !pathVisible;
+    pathPanel.style.display = pathVisible ? "" : "none";
+    pathPanel.setAttribute("aria-hidden", pathVisible ? "false" : "true");
+  }
+  if (pathDetailPanel) {
+    pathDetailPanel.hidden = !pathVisible;
+    pathDetailPanel.style.display = pathVisible ? "" : "none";
+    pathDetailPanel.setAttribute("aria-hidden", pathVisible ? "false" : "true");
+  }
+  if (!pathVisible) {
+    hideSharedPathSurface();
+  }
+  return pathVisible;
+}
+
 function showStage(stage) {
   const meta = pageMetaForStage(stage);
   const page = meta.page || stage;
@@ -1065,41 +1645,45 @@ function showStage(stage) {
     setAgentMode(targetMode, targetMode === "learn" ? "fast" : currentLearnDepth);
   }
   document.body.dataset.workspace = meta.group || "system";
+  document.body.dataset.stagePage = page;
   document.querySelectorAll(".stage").forEach((button) => {
     button.classList.toggle("active", button.dataset.stage === stage);
   });
   document.querySelectorAll(".stage-page").forEach((page) => {
     page.classList.toggle("active", page.dataset.page === meta.page);
   });
+  if (page === "learn_replay" && meta.learnReplaySubview) {
+    setLearnReplaySubview(meta.learnReplaySubview);
+    syncLearningInterfacePrepFromSharedControls();
+  }
   const [fallbackTitleKey, fallbackSubtitleKey] = stageMeta[page] || stageMeta.open_bind;
   $("stageTitle").textContent = t(meta.titleKey || fallbackTitleKey);
   $("stageSubtitle").textContent = t(meta.subtitleKey || fallbackSubtitleKey);
   updatePageMeta(meta);
 
   const flowStrip = document.querySelector(".flow-diagram-strip");
-  const pathPanel = $("navPathPanel");
   const traceView = $("traceFullView");
   const contentGrid = document.querySelector(".content-grid");
   const responseSurface = document.querySelector(".response-surface");
   const previewPanel = document.querySelector(".preview-panel");
-  const pathDetailPanel = $("pathDetailPanel");
   const responsePanel = document.querySelector(".response-panel");
 
-  const needsPath = new Set(["observe", "locate", "execute_actions", "learn_replay", "learn_validation", "execute_task_run", "execute"]);
   const needsPreview = new Set(["capture", "observe", "locate", "execute"]);
   const needsResponse = new Set(["open_bind", "capture", "observe", "locate", "execute_actions", "learn_replay", "learn_validation", "execute_task_run", "execute", "input"]);
   const showsPipeline = meta.showPipeline === true;
   const singleColumn = page === "trace" || page === "model_test" || page === "input";
   const pathFocused = ["execute_actions", "learn_replay", "learn_validation", "execute_task_run"].includes(page);
+  const pathVisible = setSharedPathSurfaceVisibility(page);
+  if (page === "observe") enterScreenUnderstandingStage();
 
   if (flowStrip) flowStrip.style.display = showsPipeline ? "" : "none";
-  if (pathPanel) pathPanel.style.display = needsPath.has(page) ? "" : "none";
   if (previewPanel) previewPanel.style.display = needsPreview.has(page) ? "" : "none";
-  if (pathDetailPanel) pathDetailPanel.style.display = needsPath.has(page) ? "" : "none";
   if (responsePanel) responsePanel.style.display = needsResponse.has(page) ? "" : "none";
   if (contentGrid) contentGrid.classList.toggle("single-column", singleColumn);
   if (contentGrid) contentGrid.classList.toggle("path-focused", pathFocused);
+  document.body.classList.toggle("learn-fast-clean-stage", page === "observe");
   if (responseSurface) responseSurface.style.display = page === "model_test" ? "none" : "";
+  applyLearnReplaySubviewChrome(page);
   syncStageLearningControls(stage);
 
   if (traceView) {
@@ -1113,6 +1697,7 @@ function showStage(stage) {
 
   if (page === "open_bind") refreshWindows(false);
   if (page === "model_test") populateModelTestProfiles();
+  if (pathVisible) renderNavPath();
   refreshDraggableCards();
 }
 
@@ -1417,11 +2002,20 @@ function requestTimeoutSeconds() {
 function resultOf(response) {
   const data = response && typeof response.data === "object" ? response.data : {};
   const result = data && typeof data.result === "object" ? data.result : {};
-  return Object.keys(result).length ? result : response;
+  if (Object.keys(result).length) return result;
+  if (Object.keys(data).length) return data;
+  const directResult = response && typeof response.result === "object" ? response.result : {};
+  return Object.keys(directResult).length ? directResult : (response || {});
 }
 
 function statusTextForResponse(response) {
   const result = resultOf(response);
+  const learnAllTargets = result?.learn_all_targets && typeof result.learn_all_targets === "object"
+    ? result.learn_all_targets
+    : null;
+  if (learnAllTargets && Number(learnAllTargets.target_count || 0) <= 0) {
+    return "no_targets";
+  }
   if (
     result?.location_status === "learn_all_targets_ready"
     || result?.learn_all_targets?.status === "ready"
@@ -1639,6 +2233,7 @@ function setAppCatalog(apps) {
   } else {
     select.value = "";
   }
+  syncLearningInterfacePrepFromSharedControls();
 }
 
 function applySelectedCatalogApp() {
@@ -1649,6 +2244,7 @@ function applySelectedCatalogApp() {
   if (app.process_name) $("bindProcess").value = String(app.process_name);
   if (app.title_hint) $("bindTitle").value = String(app.title_hint);
   syncWindowAppAndState();
+  syncLearningInterfacePrepFromSharedControls();
 }
 
 function setWindowCandidates(candidates) {
@@ -1660,6 +2256,7 @@ function setWindowCandidates(candidates) {
     option.value = "";
     option.textContent = t("no_windows");
     select.appendChild(option);
+    syncLearningInterfacePrepFromSharedControls();
     return;
   }
   for (const candidate of windowCandidates) {
@@ -1670,6 +2267,7 @@ function setWindowCandidates(candidates) {
   }
   select.value = windowCandidateLabel(windowCandidates[0]);
   applySelectedWindow();
+  syncLearningInterfacePrepFromSharedControls();
 }
 
 function applySelectedWindow() {
@@ -1681,6 +2279,7 @@ function applySelectedWindow() {
   const inferredAppId = appIdFromProcessName(candidate.process_name);
   if (inferredAppId) $("appId").value = inferredAppId;
   syncWindowAppAndState(candidate);
+  syncLearningInterfacePrepFromSharedControls();
 }
 
 function selectedWindowCandidate() {
@@ -1837,6 +2436,129 @@ async function refreshWindows(showResponse = true) {
   if (!showResponse && response?.success === false) {
     setStatus("idle");
   }
+  return response;
+}
+
+function syncSelectOptions(sourceId, targetId) {
+  const source = $(sourceId);
+  const target = $(targetId);
+  if (!source || !target) return;
+  const preferredValue = target.value || source.value || "";
+  target.innerHTML = source.innerHTML;
+  const hasPreferred = Array.from(target.options || []).some((option) => option.value === preferredValue);
+  target.value = hasPreferred ? preferredValue : source.value;
+}
+
+function syncLearningInterfacePrepFromSharedControls() {
+  syncSelectOptions("appCatalogSelect", "learningInterfaceAppCatalogSelect");
+  syncSelectOptions("windowSelect", "learningInterfaceWindowSelect");
+  const imagePath = $("learningInterfaceImagePath");
+  if (imagePath) imagePath.value = currentImagePath || $("imagePath")?.value || "";
+}
+
+function syncLearningInterfacePrepToSharedControls() {
+  const prepAppSelect = $("learningInterfaceAppCatalogSelect");
+  const appSelect = $("appCatalogSelect");
+  if (prepAppSelect && appSelect && prepAppSelect.value !== appSelect.value) {
+    appSelect.value = prepAppSelect.value;
+    applySelectedCatalogApp();
+  }
+  const prepWindowSelect = $("learningInterfaceWindowSelect");
+  const windowSelect = $("windowSelect");
+  if (prepWindowSelect && windowSelect && prepWindowSelect.value !== windowSelect.value) {
+    windowSelect.value = prepWindowSelect.value;
+    applySelectedWindow();
+  }
+}
+
+async function listAppsAndWindows() {
+  const response = await api("GET", "/apps", null, { summary: "GET /apps", workflowStep: "open" });
+  setAppCatalog(nestedGet(response, ["data", "catalog", "apps"]) || []);
+  setWindowCandidates(nestedGet(response, ["data", "running_windows"]) || []);
+  syncLearningInterfacePrepFromSharedControls();
+  return response;
+}
+
+async function openSelectedApp() {
+  syncLearningInterfacePrepToSharedControls();
+  const response = await api("POST", "/apps/open", {
+    app_id: $("appId").value || null,
+    url: $("appUrl").value || null,
+    bind_after_open: true,
+    wait_seconds: 1.5,
+  }, { summary: "POST /apps/open", workflowStep: "open" });
+  setWindowCandidates(nestedGet(response, ["data", "running_windows"]) || []);
+  const app = nestedGet(response, ["data", "app"]);
+  if (app && !appCatalog.some((item) => item.app_id === app.app_id)) {
+    setAppCatalog([app, ...appCatalog]);
+  }
+  syncWindowAppAndState();
+  syncLearningInterfacePrepFromSharedControls();
+  return response;
+}
+
+async function bindSelectedWindow() {
+  syncLearningInterfacePrepToSharedControls();
+  syncWindowAppAndState(selectedWindowCandidate());
+  if (navPathAppName) {
+    const restored = restorePathGraph(navPathAppName);
+    if (!restored) updatePathAppLabel();
+  }
+  const response = await api("POST", "/session/bind_window", {
+    process_name: $("bindProcess").value || null,
+    title: $("bindTitle").value || null,
+  }, { summary: "POST /session/bind_window", workflowStep: "open" });
+  syncLearningInterfacePrepFromSharedControls();
+  return response;
+}
+
+async function captureBoundWindow() {
+  const payload = { save_image: $("captureSave").checked };
+  const roi = roiPayload();
+  if (roi) payload.roi = roi;
+  const response = await api("POST", "/state/capture_window", payload, { summary: "POST /state/capture_window", workflowStep: "capture" });
+  syncLearningInterfacePrepFromSharedControls();
+  return response;
+}
+
+async function learningInterfaceListApps() {
+  const status = $("learningInterfacePrepStatus");
+  if (status) status.textContent = "listing apps";
+  const response = await listAppsAndWindows();
+  if (status) status.textContent = t("learning_interface_prep_idle");
+  return response;
+}
+
+async function learningInterfaceOpenApp() {
+  const status = $("learningInterfacePrepStatus");
+  if (status) status.textContent = "opening app";
+  const response = await openSelectedApp();
+  if (status) status.textContent = t("learning_interface_prep_idle");
+  return response;
+}
+
+async function learningInterfaceListWindows() {
+  const status = $("learningInterfacePrepStatus");
+  if (status) status.textContent = "listing windows";
+  const response = await refreshWindows(true);
+  syncLearningInterfacePrepFromSharedControls();
+  if (status) status.textContent = t("learning_interface_prep_idle");
+  return response;
+}
+
+async function learningInterfaceBindWindow() {
+  const status = $("learningInterfacePrepStatus");
+  if (status) status.textContent = "binding window";
+  const response = await bindSelectedWindow();
+  if (status) status.textContent = t("learning_interface_prep_idle");
+  return response;
+}
+
+async function learningInterfaceCapture() {
+  const status = $("learningInterfacePrepStatus");
+  if (status) status.textContent = "capturing screenshot";
+  const response = await captureBoundWindow();
+  if (status) status.textContent = t("learning_interface_prep_idle");
   return response;
 }
 
@@ -2193,6 +2915,10 @@ function renderFlowGraph(response) {
 function renderResponse(response, summary) {
   lastResponse = response || {};
   const result = resultOf(lastResponse);
+  const isObserveScreenResponse = isScreenUnderstandingResponse(result);
+  if (isObserveScreenResponse) {
+    resetSharedPathForScreenUnderstanding(result.app_name || nestedGet(result, ["request", "app_name"]) || navPathAppName);
+  }
   lastTracePath = result.trace_path || result.recognition_plan_trace_path || nestedGet(result, ["recognition_plan", "trace_path"]) || lastTracePath;
   if (result.contract_version === "screen_observation_v1" || result.screen_map?.contract_version === "screen_map_v1") {
     lastObserveTracePath = result.trace_path || lastObserveTracePath;
@@ -2203,6 +2929,7 @@ function renderResponse(response, summary) {
   if (responseAllowsPathGraphWrite(result)) {
     ingestNavPathFromResponse(lastResponse);
   }
+  if (isObserveScreenResponse) hideSharedPathSurface();
   const imagePath = result.image_path || nestedGet(lastResponse, ["data", "image_path"]) || nestedGet(result, ["capture", "image_path"]) || nestedGet(result, ["live_capture", "image_path"]);
   if (imagePath) setCurrentImage(imagePath);
   const overlayPath = result.coordinate_overlay_path
@@ -2264,6 +2991,8 @@ function setCurrentImage(path, url = "") {
   currentImagePath = path || "";
   currentImageUrl = url || (path ? panelFileUrl(path) : "");
   $("imagePath").value = currentImagePath;
+  const learningImagePath = $("learningInterfaceImagePath");
+  if (learningImagePath) learningImagePath.value = currentImagePath;
   $("previewMeta").textContent = currentImagePath ? basename(currentImagePath) : t("no_image");
   const img = $("previewImage");
   const overlay = $("bboxOverlay");
@@ -2315,6 +3044,107 @@ function previewBox() {
   overlay.style.width = `${bbox.width * scaleX}px`;
   overlay.style.height = `${bbox.height * scaleY}px`;
   overlay.style.display = "block";
+}
+
+function drawImageInspectorSelection(bbox, point) {
+  const image = $("imageInspectorImage");
+  const box = $("imageInspectorBox");
+  const pointEl = $("imageInspectorPoint");
+  const normalized = normalizeBbox(bbox);
+  if (!image || !box) return;
+  const scaleX = image.naturalWidth ? image.clientWidth / image.naturalWidth : 1;
+  const scaleY = image.naturalHeight ? image.clientHeight / image.naturalHeight : 1;
+  if (normalized) {
+    box.style.left = `${Math.round(normalized.x * scaleX)}px`;
+    box.style.top = `${Math.round(normalized.y * scaleY)}px`;
+    box.style.width = `${Math.round(normalized.width * scaleX)}px`;
+    box.style.height = `${Math.round(normalized.height * scaleY)}px`;
+    box.style.display = "block";
+  } else {
+    box.style.display = "none";
+  }
+  if (pointEl && point && Number.isFinite(Number(point.x)) && Number.isFinite(Number(point.y))) {
+    pointEl.style.left = `${Math.round(Number(point.x) * scaleX)}px`;
+    pointEl.style.top = `${Math.round(Number(point.y) * scaleY)}px`;
+    pointEl.style.display = "block";
+  } else if (pointEl) {
+    pointEl.style.display = "none";
+  }
+}
+
+function imageInspectorEventPoint(event) {
+  const image = $("imageInspectorImage");
+  if (!image || !image.naturalWidth || !image.naturalHeight) return null;
+  const rect = image.getBoundingClientRect();
+  const scaleX = image.naturalWidth / Math.max(1, rect.width);
+  const scaleY = image.naturalHeight / Math.max(1, rect.height);
+  const x = Math.max(0, Math.min(image.naturalWidth, (event.clientX - rect.left) * scaleX));
+  const y = Math.max(0, Math.min(image.naturalHeight, (event.clientY - rect.top) * scaleY));
+  return { x, y };
+}
+
+function imageInspectorBoxFromPoints(start, end) {
+  if (!start || !end) return null;
+  const x = Math.round(Math.min(start.x, end.x));
+  const y = Math.round(Math.min(start.y, end.y));
+  const width = Math.round(Math.abs(end.x - start.x));
+  const height = Math.round(Math.abs(end.y - start.y));
+  if (width <= 1 || height <= 1) return null;
+  return { x, y, width, height };
+}
+
+function closeImageInspector() {
+  const overlay = $("imageInspectorOverlay");
+  const image = $("imageInspectorImage");
+  const box = $("imageInspectorBox");
+  const pointEl = $("imageInspectorPoint");
+  const footer = $("imageInspectorFooter");
+  if (overlay) overlay.style.display = "none";
+  if (image) image.removeAttribute("src");
+  if (box) box.style.display = "none";
+  if (pointEl) pointEl.style.display = "none";
+  if (footer) footer.style.display = "none";
+  imageInspectorEditContext = null;
+  imageInspectorSelection = null;
+}
+
+function openImageInspector({ imagePath = "", bbox = null, point = null, title = "", editContext = null } = {}) {
+  const overlay = $("imageInspectorOverlay");
+  const image = $("imageInspectorImage");
+  const box = $("imageInspectorBox");
+  const pointEl = $("imageInspectorPoint");
+  const footer = $("imageInspectorFooter");
+  const hint = $("imageInspectorEditHint");
+  const applyButton = $("imageInspectorApplyBoxBtn");
+  const meta = $("imageInspectorMeta");
+  const titleEl = $("imageInspectorTitle");
+  if (!overlay || !image || !box) return;
+  const normalized = normalizeBbox(bbox);
+  const resolvedImagePath = String(imagePath || currentImagePath || "").trim();
+  if (!resolvedImagePath) {
+    renderResponse({ success: false, message: "Image path is required for full-image preview." }, "learning draft image inspector");
+    return;
+  }
+  overlay.style.display = "flex";
+  box.style.display = "none";
+  if (pointEl) pointEl.style.display = "none";
+  imageInspectorEditContext = editContext && editContext.id ? editContext : null;
+  imageInspectorSelection = normalized ? {
+    bbox: normalized,
+    point: point || { x: normalized.x + normalized.width / 2, y: normalized.y + normalized.height / 2 },
+  } : null;
+  if (footer) footer.style.display = imageInspectorEditContext ? "flex" : "none";
+  if (hint) hint.textContent = imageInspectorEditContext ? t("learning_draft_drag_bbox_hint") : "";
+  if (applyButton) applyButton.disabled = !imageInspectorSelection;
+  if (titleEl) titleEl.textContent = title || t("learning_draft_image_inspector");
+  if (meta) {
+    const pointText = point ? ` · point=${Math.round(Number(point.x || 0))},${Math.round(Number(point.y || 0))}` : "";
+    meta.textContent = `${basename(resolvedImagePath)}${normalized ? ` · bbox=${Math.round(normalized.x)},${Math.round(normalized.y)},${Math.round(normalized.width)},${Math.round(normalized.height)}` : ""}${pointText}`;
+  }
+  image.onload = () => {
+    drawImageInspectorSelection(imageInspectorSelection?.bbox || normalized, imageInspectorSelection?.point || point);
+  };
+  image.src = panelFileUrl(resolvedImagePath);
 }
 
 function normalizeBbox(source) {
@@ -2840,6 +3670,10 @@ function normalizePathData(data) {
 }
 
 function restorePathGraph(appName) {
+  if (shouldBlockPathGraphRestoreForScreenUnderstanding()) {
+    resetSharedPathForScreenUnderstanding(appName || navPathAppName);
+    return false;
+  }
   const data = loadPathGraph(appName);
   if (!data || !data.nodes?.length) return false;
 
@@ -3885,6 +4719,10 @@ function runtimeGraphDisplayStateId(graph = {}, stateId = "") {
 
 function renderRuntimePathGraph(graph, options = {}) {
   if (!graph || typeof graph !== "object") return;
+  if (shouldBlockPathGraphRestoreForScreenUnderstanding()) {
+    resetSharedPathForScreenUnderstanding(options.path || graph.app_id || navPathAppName);
+    return;
+  }
   const states = runtimeGraphDisplayStates(graph);
   const transitions = runtimeGraphDisplayTransitions(graph);
   const templates = runtimeGraphTemplateMap(graph);
@@ -4380,6 +5218,17 @@ function populatePathHistory() {
 }
 
 function renderNavPath() {
+  if (!sharedPathSurfaceVisible()) {
+    clearSharedPathDetailDisplay();
+    const canvas = $("navPathCanvas");
+    const overlay = $("pathEmptyOverlay");
+    if (canvas) {
+      const ctx = canvas.getContext("2d");
+      if (ctx) ctx.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
+    }
+    if (overlay) overlay.style.display = "none";
+    return;
+  }
   if (!ensurePathCanvas()) return;
   updatePathCanvasHeight();
   resizePathCanvas();
@@ -4459,6 +5308,10 @@ function generateFakePathData() {
 }
 
 function showNavNodeDetail(nodeId, focusControlIndex = null, options = {}) {
+  if (!sharedPathSurfaceVisible()) {
+    clearSharedPathDetailDisplay();
+    return;
+  }
   const node = navPathNodes.find((n) => n.id === nodeId);
   if (!node) return;
   currentNavNodeId = nodeId;
@@ -5066,6 +5919,15 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (ch) => map[ch] || ch);
 }
 
+function escapeAttr(str) {
+  return escapeHtml(str).replace(/`/g, "&#96;");
+}
+
+function cssEscapeValue(str) {
+  if (window.CSS && typeof window.CSS.escape === "function") return window.CSS.escape(String(str || ""));
+  return String(str || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
 function safeFileStem(value) {
   return String(value || "")
     .trim()
@@ -5078,13 +5940,17 @@ function safeFileStem(value) {
 function ingestNavPathFromResponse(response) {
   const result = resultOf(response);
   if (!result || typeof result !== "object") return;
+  if (isScreenUnderstandingResponse(result)) return;
+
+  const taskType = result.task || nestedGet(result, ["request", "task"]) || "";
+  const isObserveScreenTask = taskType === "observe_screen";
 
   // Derive app name from the response or current binding
   const respAppName = result.app_name || nestedGet(result, ["recognition_plan", "app_name"]) || "";
   if (respAppName && !navPathAppName) {
     navPathAppName = respAppName;
-    // Try to restore saved path for this app
-    const restored = restorePathGraph(respAppName);
+    // 整屏理解不能把旧模板/历史 PathGraph 自动带回当前学习页。
+    const restored = isObserveScreenTask ? false : restorePathGraph(respAppName);
     if (!restored) updatePathAppLabel();
   }
 
@@ -5101,8 +5967,6 @@ function ingestNavPathFromResponse(response) {
     nestedGet(result, ["screen_reading", "state_guess"]) ||
     nestedGet(result, ["parse_result", "screen_reading", "state_guess"]) ||
     result.suggested_state_hint;
-  const taskType = result.task || nestedGet(result, ["request", "task"]) || "";
-
   if (screenSummary || (taskType === "observe_screen" && (stateGuess || result.screen_reading || result.ui))) {
     const summary = screenSummary || result.message || "";
     const guess = stateGuess || "";
@@ -5715,7 +6579,9 @@ function renderReplayGraph(graph, path) {
     return;
   }
   const count = (key) => Array.isArray(graph[key]) ? graph[key].length : 0;
-  const safety = graph.safety_policy && typeof graph.safety_policy === "object" ? graph.safety_policy : {};
+  const safety = graph.safety_policy && typeof graph.safety_policy === "object"
+    ? graph.safety_policy
+    : (graph.safety && typeof graph.safety === "object" ? graph.safety : {});
   const items = [
     ["path", path || ""],
     ["contract", graph.contract_version || ""],
@@ -5729,7 +6595,7 @@ function renderReplayGraph(graph, path) {
     ["learned_skills", count("learned_skill_refs")],
     ["visual_assets", count("visual_asset_refs")],
     ["verification_rules", count("verification_rules")],
-    ["final_submit_forbidden", String(safety.forbid_final_submit ?? safety.final_submit === "forbidden" ?? true)],
+    ["final_submit_forbidden", String(safety.final_submit_forbidden ?? safety.forbid_final_submit ?? safety.final_submit === "forbidden" ?? true)],
     ["artifact_is_authorization", "false"],
   ];
   summary.innerHTML = `
@@ -6308,16 +7174,42 @@ function interfaceLayoutChildRegionHtml(entry, assets = [], dynamicAreas = [], d
 }
 
 function interfaceRegionContentNodesHtml(regionAssets = [], regionDynamics = [], regionDangerZones = []) {
-  const visualAssets = [...regionAssets].sort(({ asset: left }, { asset: right }) => {
-    const leftHasThumb = interfaceAssetShouldShowThumb(left);
-    const rightHasThumb = interfaceAssetShouldShowThumb(right);
-    if (leftHasThumb !== rightHasThumb) return leftHasThumb ? -1 : 1;
-    return String(left?.label || left?.asset_id || "").localeCompare(String(right?.label || right?.asset_id || ""));
-  });
+  const visualAssets = interfaceSortedVisualAssets(regionAssets);
   return `
     ${regionDynamics.map(({ area, dynamicIndex }) => interfaceDynamicNodeHtml(area, dynamicIndex)).join("")}
     ${visualAssets.map(({ asset, assetIndex }) => interfaceVisualNodeHtml(asset, assetIndex)).join("")}
     ${regionDangerZones.map(({ zone, dangerIndex }) => interfaceDangerNodeHtml(zone, dangerIndex)).join("")}`;
+}
+
+function interfaceAssetSortBbox(asset = {}) {
+  const geometry = asset.source_geometry && typeof asset.source_geometry === "object" ? asset.source_geometry : {};
+  const source = asset.source && typeof asset.source === "object" ? asset.source : {};
+  const crop = asset.crop && typeof asset.crop === "object" ? asset.crop : {};
+  const bbox = geometry.bbox || source.bbox || crop.tight_bbox || asset.bbox || null;
+  if (!bbox || typeof bbox !== "object") return null;
+  const x = Number(bbox.x);
+  const y = Number(bbox.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x, y };
+}
+
+function interfaceSortedVisualAssets(regionAssets = []) {
+  return [...regionAssets].sort(({ asset: left }, { asset: right }) => {
+    const leftHasThumb = interfaceAssetShouldShowThumb(left);
+    const rightHasThumb = interfaceAssetShouldShowThumb(right);
+    if (leftHasThumb !== rightHasThumb) return leftHasThumb ? -1 : 1;
+    const leftBbox = interfaceAssetSortBbox(left);
+    const rightBbox = interfaceAssetSortBbox(right);
+    if (leftBbox && rightBbox) {
+      const yDelta = leftBbox.y - rightBbox.y;
+      if (Math.abs(yDelta) > 24) return yDelta;
+      const xDelta = leftBbox.x - rightBbox.x;
+      if (xDelta) return xDelta;
+    }
+    if (leftBbox && !rightBbox) return -1;
+    if (!leftBbox && rightBbox) return 1;
+    return String(left?.label || left?.asset_id || "").localeCompare(String(right?.label || right?.asset_id || ""));
+  });
 }
 
 function interfaceStateRefsForRegion(regionId = "", states = []) {
@@ -6464,7 +7356,7 @@ function interfaceSpatialRegionCardHtml(entry, assets = [], dynamicAreas = [], d
         </button>
       </header>
       <div class="interface-spatial-assets">
-        ${regionAssets.slice(0, 4).map(({ asset, assetIndex }) => interfaceVisualNodeHtml(asset, assetIndex)).join("")}
+        ${interfaceSortedVisualAssets(regionAssets).slice(0, 4).map(({ asset, assetIndex }) => interfaceVisualNodeHtml(asset, assetIndex)).join("")}
         ${regionDynamics.slice(0, 2).map(({ area, dynamicIndex }) => interfaceDynamicNodeHtml(area, dynamicIndex)).join("")}
         ${regionDangerZones.slice(0, 2).map(({ zone, dangerIndex }) => interfaceDangerNodeHtml(zone, dangerIndex)).join("")}
       </div>
@@ -6508,7 +7400,7 @@ function interfaceRegionCardHtml(entry, childrenByParent, assets = [], dynamicAr
         <div class="interface-node-group">
           <h6>截图按钮 / fixed visual assets</h6>
           <div class="interface-node-row">
-            ${regionAssets.map(({ asset, assetIndex }) => interfaceVisualNodeHtml(asset, assetIndex)).join("")}
+            ${interfaceSortedVisualAssets(regionAssets).map(({ asset, assetIndex }) => interfaceVisualNodeHtml(asset, assetIndex)).join("")}
           </div>
         </div>` : ""}
       ${regionDynamics.length ? `
@@ -6579,7 +7471,7 @@ function interfaceRegionLaneHtml(region = {}, index = 0, assets = [], dynamicAre
           <div class="interface-node-group">
             <h6>固定按钮 / visual assets</h6>
             <div class="interface-node-row">
-              ${regionAssets.map(({ asset, assetIndex }) => interfaceVisualNodeHtml(asset, assetIndex)).join("")}
+              ${interfaceSortedVisualAssets(regionAssets).map(({ asset, assetIndex }) => interfaceVisualNodeHtml(asset, assetIndex)).join("")}
             </div>
           </div>` : ""}
         ${regionDynamics.length ? `
@@ -6609,6 +7501,7 @@ function interfaceAssetBelongsToRegion(asset = {}, regionId = "") {
 
 function interfaceAssetImageRefs(asset = {}) {
   const refs = asset.template_refs && typeof asset.template_refs === "object" ? asset.template_refs : {};
+  const fullSource = interfaceAssetFullSourceImage(asset);
   const evidence = asset.last_match_evidence && typeof asset.last_match_evidence === "object" ? asset.last_match_evidence : {};
   const calibrationMatch = interfaceCalibrationMatchForAsset(asset.asset_id);
   return [
@@ -6616,8 +7509,16 @@ function interfaceAssetImageRefs(asset = {}) {
     [t("replay_source_context_crop"), refs.context_crop_ref],
     [t("replay_current_match"), calibrationMatch?.current_match_ref || refs.current_match_ref || evidence.current_match_ref],
     [t("replay_current_roi"), calibrationMatch?.current_roi_ref || refs.current_roi_ref || evidence.current_roi_ref],
-    [t("replay_source_image"), refs.source_image_path],
+    [t("replay_source_image"), fullSource],
   ].filter(([, path]) => path);
+}
+
+function interfaceAssetFullSourceImage(asset = {}) {
+  const refs = asset.template_refs && typeof asset.template_refs === "object" ? asset.template_refs : {};
+  const source = asset.source && typeof asset.source === "object" ? asset.source : {};
+  const geometry = asset.source_geometry && typeof asset.source_geometry === "object" ? asset.source_geometry : {};
+  const crop = asset.crop && typeof asset.crop === "object" ? asset.crop : {};
+  return source.source_image_path || source.capture_id || crop.source_image_path || geometry.source_image_path || refs.source_image_path || "";
 }
 
 function interfaceVisualNodeHtml(asset = {}, index = 0) {
@@ -6923,6 +7824,11 @@ function bindInterfaceMapEditor(panel) {
       recropInterfaceAsset(Number(control.dataset.interfaceRecropsAsset || 0));
     });
   });
+  panel.querySelectorAll("[data-interface-select-crop]").forEach((control) => {
+    control.addEventListener("click", () => {
+      openInterfaceCropSelector(Number(control.dataset.interfaceSelectCrop || 0));
+    });
+  });
 }
 
 function interfaceMapSelectedItem(map, ref) {
@@ -7174,10 +8080,9 @@ function interfaceInspectorEditorHtml(selected, regionIds = []) {
     const region = Array.isArray(item.allowed_region_ids) && item.allowed_region_ids.length ? item.allowed_region_ids[0] : (item.region_id || "");
     const regionOptions = regionIds.length ? regionIds : [region].filter(Boolean);
     const refs = item.template_refs && typeof item.template_refs === "object" ? item.template_refs : {};
-    const source = item.source && typeof item.source === "object" ? item.source : {};
     const geometry = item.source_geometry && typeof item.source_geometry === "object" ? item.source_geometry : {};
     const bbox = geometry.bbox && typeof geometry.bbox === "object" ? geometry.bbox : {};
-    const sourceImage = refs.source_image_path || source.source_image_path || geometry.source_image_path || "";
+    const sourceImage = interfaceAssetFullSourceImage(item);
     const canRecrop = interfaceAssetShouldShowThumb(item);
     return `
       <div class="interface-policy-editor">
@@ -7216,6 +8121,7 @@ function interfaceInspectorEditorHtml(selected, regionIds = []) {
         <label><span>y</span><input type="number" data-interface-crop="y" data-index="${assetIndex}" value="${escapeHtml(String(bbox.y ?? 0))}" /></label>
         <label><span>w</span><input type="number" data-interface-crop="w" data-index="${assetIndex}" value="${escapeHtml(String(bbox.w ?? bbox.width ?? 1))}" /></label>
         <label><span>h</span><input type="number" data-interface-crop="h" data-index="${assetIndex}" value="${escapeHtml(String(bbox.h ?? bbox.height ?? 1))}" /></label>
+        ${sourceImage ? `<button type="button" class="interface-crop-select-button" data-interface-select-crop="${assetIndex}">${escapeHtml(t("replay_open_crop_selector"))}</button>` : ""}
         <button type="button" data-interface-recrops-asset="${assetIndex}">${escapeHtml(t("replay_recrop_button"))}</button>
       </div>` : `
       <div class="interface-crop-editor interface-crop-disabled">
@@ -7408,6 +8314,165 @@ async function recropInterfaceAsset(index) {
     },
   }, "Interface asset crop");
   return response;
+}
+
+function interfaceCropInput(panel, index, name) {
+  return panel?.querySelector(`[data-interface-crop="${name}"][data-index="${index}"]`) || null;
+}
+
+function interfaceCropValues(index) {
+  const panel = $("replayInterfaceMapPanel");
+  const read = (name, fallback = "") => String(interfaceCropInput(panel, index, name)?.value || fallback || "");
+  return {
+    source_image_path: read("source_image_path"),
+    x: Number(read("x", "0") || 0),
+    y: Number(read("y", "0") || 0),
+    w: Number(read("w", "1") || 1),
+    h: Number(read("h", "1") || 1),
+  };
+}
+
+function writeInterfaceCropValues(index, bbox) {
+  const panel = $("replayInterfaceMapPanel");
+  const values = {
+    x: Math.max(0, Math.round(Number(bbox.x || 0))),
+    y: Math.max(0, Math.round(Number(bbox.y || 0))),
+    w: Math.max(1, Math.round(Number(bbox.w ?? bbox.width ?? 1))),
+    h: Math.max(1, Math.round(Number(bbox.h ?? bbox.height ?? 1))),
+  };
+  Object.entries(values).forEach(([name, value]) => {
+    const input = interfaceCropInput(panel, index, name);
+    if (input) input.value = String(value);
+  });
+  return values;
+}
+
+function openInterfaceCropSelector(index) {
+  const asset = replayInterfaceMap?.fixed_visual_assets?.[index];
+  const values = interfaceCropValues(index);
+  const sourceImage = values.source_image_path || interfaceAssetFullSourceImage(asset || {});
+  if (!sourceImage) {
+    renderResponse({ success: false, message: "source_image_path is required for crop selector" }, "Interface asset crop");
+    return;
+  }
+  closeInterfaceCropSelector();
+  const modal = document.createElement("div");
+  modal.className = "interface-crop-selector-modal";
+  modal.innerHTML = `
+    <div class="interface-crop-selector-dialog" role="dialog" aria-modal="true" aria-label="${escapeHtml(t("replay_crop_selector_title"))}">
+      <header>
+        <div>
+          <strong>${escapeHtml(t("replay_crop_selector_title"))}</strong>
+          <span>${escapeHtml(t("replay_crop_selector_hint"))}</span>
+        </div>
+        <button type="button" class="interface-crop-selector-close" data-interface-crop-selector-close>${escapeHtml(t("replay_crop_selector_cancel"))}</button>
+      </header>
+      <div class="interface-crop-selector-stage">
+        <img src="${escapeHtml(traceImageUrl(sourceImage))}" alt="${escapeHtml(t("replay_source_image"))}" draggable="false" data-interface-crop-selector-image />
+        <div class="interface-crop-selector-box" data-interface-crop-selector-box></div>
+      </div>
+      <footer>
+        <span data-interface-crop-selector-readout>x=${escapeHtml(String(values.x))}, y=${escapeHtml(String(values.y))}, w=${escapeHtml(String(values.w))}, h=${escapeHtml(String(values.h))}</span>
+        <button type="button" data-interface-crop-selector-apply>${escapeHtml(t("replay_crop_selector_apply"))}</button>
+      </footer>
+    </div>`;
+  document.body.appendChild(modal);
+  bindInterfaceCropSelector(modal, index, values);
+}
+
+function closeInterfaceCropSelector() {
+  document.querySelectorAll(".interface-crop-selector-modal").forEach((modal) => modal.remove());
+}
+
+function bindInterfaceCropSelector(modal, index, initialBbox) {
+  const image = modal.querySelector("[data-interface-crop-selector-image]");
+  const box = modal.querySelector("[data-interface-crop-selector-box]");
+  const readout = modal.querySelector("[data-interface-crop-selector-readout]");
+  let active = false;
+  let start = null;
+  let selected = { ...initialBbox };
+
+  const renderBox = () => {
+    if (!image || !box || !image.naturalWidth || !image.naturalHeight) return;
+    const rect = image.getBoundingClientRect();
+    const scaleX = rect.width / image.naturalWidth;
+    const scaleY = rect.height / image.naturalHeight;
+    const x = selected.x * scaleX;
+    const y = selected.y * scaleY;
+    const w = selected.w * scaleX;
+    const h = selected.h * scaleY;
+    box.style.display = w > 0 && h > 0 ? "block" : "none";
+    box.style.left = `${image.offsetLeft + x}px`;
+    box.style.top = `${image.offsetTop + y}px`;
+    box.style.width = `${w}px`;
+    box.style.height = `${h}px`;
+    if (readout) readout.textContent = `x=${Math.round(selected.x)}, y=${Math.round(selected.y)}, w=${Math.round(selected.w)}, h=${Math.round(selected.h)}`;
+  };
+
+  const pointFromEvent = (event) => {
+    const rect = image.getBoundingClientRect();
+    const x = Math.min(Math.max(event.clientX - rect.left, 0), rect.width);
+    const y = Math.min(Math.max(event.clientY - rect.top, 0), rect.height);
+    return {
+      x: x * (image.naturalWidth / Math.max(1, rect.width)),
+      y: y * (image.naturalHeight / Math.max(1, rect.height)),
+    };
+  };
+
+  const updateFromDrag = (point) => {
+    const x1 = Math.min(start.x, point.x);
+    const y1 = Math.min(start.y, point.y);
+    const x2 = Math.max(start.x, point.x);
+    const y2 = Math.max(start.y, point.y);
+    selected = {
+      x: Math.floor(x1),
+      y: Math.floor(y1),
+      w: Math.max(1, Math.ceil(x2 - x1)),
+      h: Math.max(1, Math.ceil(y2 - y1)),
+    };
+    renderBox();
+  };
+
+  image?.addEventListener("load", renderBox);
+  image?.addEventListener("pointerdown", (event) => {
+    if (!image.naturalWidth || !image.naturalHeight) return;
+    active = true;
+    start = pointFromEvent(event);
+    updateFromDrag(start);
+    image.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  });
+  image?.addEventListener("pointermove", (event) => {
+    if (!active || !start) return;
+    updateFromDrag(pointFromEvent(event));
+  });
+  image?.addEventListener("pointerup", (event) => {
+    if (!active || !start) return;
+    updateFromDrag(pointFromEvent(event));
+    active = false;
+    start = null;
+    image.releasePointerCapture?.(event.pointerId);
+  });
+  image?.addEventListener("pointercancel", () => {
+    active = false;
+    start = null;
+  });
+  modal.querySelector("[data-interface-crop-selector-apply]")?.addEventListener("click", () => {
+    writeInterfaceCropValues(index, selected);
+    closeInterfaceCropSelector();
+  });
+  modal.querySelector("[data-interface-crop-selector-close]")?.addEventListener("click", closeInterfaceCropSelector);
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) closeInterfaceCropSelector();
+  });
+  document.addEventListener("keydown", function handleEscape(event) {
+    if (!document.body.contains(modal)) {
+      document.removeEventListener("keydown", handleEscape);
+      return;
+    }
+    if (event.key === "Escape") closeInterfaceCropSelector();
+  });
+  renderBox();
 }
 
 function interfaceMapEditSummary(map) {
@@ -7759,6 +8824,5187 @@ async function loadReplayArtifact() {
   }
 }
 
+function learningDraftReviewSourcePath() {
+  const candidates = [
+    $("learningDraftReviewSourcePath")?.value,
+    $("learningTrialResultPath")?.value,
+    $("learningPathGraphCandidatePath")?.value,
+    $("learningPathGraphValidationPath")?.value,
+    $("replayModelArtifactPath")?.value,
+  ].map((value) => String(value || "").trim()).filter(Boolean);
+  return candidates[0] || "";
+}
+
+function setLearningDraftReviewSourcePath(path) {
+  if ($("learningDraftReviewSourcePath")) $("learningDraftReviewSourcePath").value = String(path || "");
+}
+
+async function loadLearningDraftFreshnessDemo() {
+  const caseId = String($("learningDraftFreshnessDemoCase")?.value || "freshness_matched").trim();
+  const sourcePath = LEARNING_DRAFT_FRESHNESS_DEMO_CASES[caseId] || LEARNING_DRAFT_FRESHNESS_DEMO_CASES.freshness_matched;
+  setLearningDraftReviewSourcePath(sourcePath);
+  setLearningPathGraphCandidatePaths({});
+  const data = await loadLearningDraftReview({ skipResponse: true });
+  renderResponse({
+    success: Boolean(data),
+    message: data ? "Learning draft freshness demo loaded" : "Learning draft freshness demo load failed",
+    data: {
+      contract_version: "learning_draft_freshness_demo_panel_load_v1",
+      case_id: caseId,
+      summary_path: LEARNING_DRAFT_FRESHNESS_DEMO_SUMMARY_PATH,
+      reviewed_template_candidate_path: sourcePath,
+      source_freshness_summary: data?.audit?.source_freshness_summary || {},
+      execute_binding_enabled: false,
+      artifact_is_authorization: false,
+    },
+  }, "Learning draft freshness demo");
+  return data;
+}
+
+async function loadRecommendedLearningDraftReview() {
+  const response = await api("GET", "/panel/learning_draft_sources", null, {
+    summary: "GET /panel/learning_draft_sources",
+    workflowStep: "learning_draft_recommended_source",
+    skipRender: true,
+  });
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "Learning draft source list failed" }, "Learning draft review");
+    return null;
+  }
+  const sources = Array.isArray(response.data?.sources) ? response.data.sources : [];
+  setLearningDetailObserveSourceOptions(sources);
+  const recommended = preferredLearningDraftReviewSource(sources);
+  const sourcePath = learningDraftSourceLoadPath(recommended);
+  if (!sourcePath) {
+    renderResponse({ success: false, message: "No recommended learning draft source is available" }, "Learning draft review");
+    return null;
+  }
+  setLearningDraftReviewSourcePath(sourcePath);
+  if ($("learningDetailObserveSourcePath")) $("learningDetailObserveSourcePath").value = sourcePath;
+  setLearningPathGraphCandidatePaths({});
+  const data = await loadLearningDraftReview({ skipResponse: true });
+  renderResponse({
+    success: Boolean(data),
+    message: data ? "Recommended current learning draft loaded" : "Recommended current learning draft load failed",
+    data: {
+      source_path: sourcePath,
+      original_source_path: recommended?.source_path || "",
+      pathgraph_candidate_path: recommended?.pathgraph_candidate_path || "",
+      source_category: recommended?.source_category || "",
+      pinned: recommended?.pinned === true,
+      preflight_status: recommended?.preflight_status || "",
+      readiness_status: recommended?.readiness_status || data?.screen_understanding_preview?.readiness_status || "",
+      handoff_status: recommended?.handoff_status || data?.screen_understanding_preview?.calibration_handoff_report?.handoff_status || "",
+      rerun_report_status: recommended?.rerun_report_status || "",
+      execute_binding_enabled: false,
+      artifact_is_authorization: false,
+      model_started: false,
+    },
+  }, "Learning draft review");
+  return data;
+}
+
+function setLearningTrialImagePath(path) {
+  if ($("learningTrialImagePath")) $("learningTrialImagePath").value = String(path || "");
+}
+
+function compactLearningDraftTargets(targets, limit = 24) {
+  if (!Array.isArray(targets)) return [];
+  return targets.slice(0, limit).map((target) => ({
+    candidate_id: target.candidate_id || target.id || "",
+    label: target.label || "",
+    role: target.role || "",
+    semantic_action: target.semantic_action || target.action_type || "",
+    bbox: target.bbox || null,
+    click_point: target.click_point || null,
+    section_id: target.section_id || "",
+    source: target.source || "",
+    confidence: target.confidence ?? null,
+    coordinate_source: target.coordinate_source || "",
+    coordinate_validation: target.coordinate_validation && typeof target.coordinate_validation === "object" ? target.coordinate_validation : null,
+    coordinate_validation_status: nestedGet(target, ["coordinate_validation", "status"]) || "",
+    vista_coordinate_validation: target.vista_coordinate_validation && typeof target.vista_coordinate_validation === "object" ? target.vista_coordinate_validation : null,
+    vista_status: nestedGet(target, ["vista_coordinate_validation", "status"]) || "",
+  }));
+}
+
+function screenMapEvidenceCount(screenMap) {
+  if (!screenMap || typeof screenMap !== "object") return 0;
+  const candidates = Array.isArray(screenMap.candidates) ? screenMap.candidates.length : 0;
+  const sections = Array.isArray(screenMap.sections) ? screenMap.sections.length : 0;
+  const regions = Array.isArray(screenMap.regions) ? screenMap.regions.length : 0;
+  const inventory = screenMap.inventory && typeof screenMap.inventory === "object" ? screenMap.inventory : {};
+  const inventoryItems = ["actions", "text_blocks", "cards", "regions"].reduce((total, key) => (
+    total + (Array.isArray(inventory[key]) ? inventory[key].length : 0)
+  ), 0);
+  return candidates + sections + regions + inventoryItems;
+}
+
+function buildLearningDraftObservationEvidence() {
+  const result = resultOf(lastResponse);
+  const learnTargets = nestedGet(result, ["learn_all_targets", "targets"]) || [];
+  const learnReviewBoxes = nestedGet(result, ["learn_all_targets", "review_boxes"]) || [];
+  const pathReview = result.path_map_review && typeof result.path_map_review === "object" ? result.path_map_review : {};
+  const observeReuse = result.observe_trace_reuse && typeof result.observe_trace_reuse === "object" ? result.observe_trace_reuse : {};
+  const screenMap = result.screen_map && typeof result.screen_map === "object" ? result.screen_map : null;
+  const hasScreenMapEvidence = screenMapEvidenceCount(screenMap) > 0;
+  const hasCalibratedTargets = Array.isArray(learnTargets) && learnTargets.length > 0;
+  const hasReviewBoxes = Array.isArray(learnReviewBoxes) && learnReviewBoxes.length > 0;
+  const evidence = {
+    contract_version: "panel_learning_draft_observation_evidence_v1",
+    evidence_source: "panel_current_learn_trace",
+    model_roles: {
+      screen_understanding: {
+        stage: "Learn Fast",
+        model_profile_id: $("observeModelProfile")?.value || "",
+        expected_model_family: "8B",
+        trace_path: observeReuse.trace_path || observeReuse.source_trace_path || "",
+      },
+        coordinate_calibration: {
+          stage: "Learn Deep",
+          model_profile_id: $("locateModelProfile")?.value || "",
+          expected_model_family: "4B",
+          trace_path: hasCalibratedTargets ? (nestedGet(result, ["learn_all_targets", "trace_path"]) || result.trace_path || "") : "",
+        },
+      },
+    current_image_path: String($("learningTrialImagePath")?.value || currentImagePath || result.image_path || "").trim(),
+    screen_size: result.screen_size || result.viewport_size || result.image_size || nestedGet(result, ["capture", "image_size"]) || {},
+    screen_summary: result.screen_summary || nestedGet(result, ["screen_map", "summary", "screen_summary"]) || nestedGet(result, ["screen_reading", "screen_summary"]) || "",
+      screen_map: screenMap,
+    coordinate_overlay_path: result.coordinate_overlay_path || nestedGet(result, ["learn_all_targets", "overlay_path"]) || "",
+    learn_all_targets_summary: {
+      status: nestedGet(result, ["learn_all_targets", "status"]) || "",
+      target_count: nestedGet(result, ["learn_all_targets", "target_count"]) || 0,
+      validated_count: nestedGet(result, ["learn_all_targets", "validated_count"]) || 0,
+      invalid_count: nestedGet(result, ["learn_all_targets", "invalid_count"]) || 0,
+      filtered_browser_chrome_count: nestedGet(result, ["learn_all_targets", "filtered_browser_chrome_count"]) || 0,
+      filtered_noise_count: nestedGet(result, ["learn_all_targets", "filtered_noise_count"]) || 0,
+      review_box_count: nestedGet(result, ["learn_all_targets", "review_box_count"]) || 0,
+      visual_overlap_removal_count: nestedGet(result, ["learn_all_targets", "visual_overlap_removal_count"]) || 0,
+    },
+    calibrated_targets: compactLearningDraftTargets(learnTargets, 24),
+    review_boxes: compactLearningDraftTargets(learnReviewBoxes, 80),
+    path_map_review_summary: pathReview.summary || {},
+    path_map_review_removals: Array.isArray(pathReview.removals) ? pathReview.removals.slice(0, 20) : [],
+    no_click_authorization: true,
+    execute_binding_enabled: false,
+  };
+    evidence.evidence_quality = evidence.calibrated_targets.length
+      ? "calibrated_targets_available"
+      : hasReviewBoxes
+        ? "review_boxes_available_no_executable_targets"
+      : hasScreenMapEvidence
+        ? "screen_map_available_no_recent_learn_deep"
+        : "screenshot_only_no_recent_learn_deep";
+    return evidence;
+  }
+
+function setLearningTrialResultPath(path) {
+  if ($("learningTrialResultPath")) $("learningTrialResultPath").value = String(path || "");
+}
+
+function setLearningDetailObserveRequests(requests = []) {
+  const select = $("learningDetailObserveRequestSelect");
+  if (!select) return;
+  const items = Array.isArray(requests) ? requests.filter((item) => item && typeof item === "object") : [];
+  const currentRequestId = String($("learningDetailObserveRequestId")?.value || "").trim();
+  select.innerHTML = `<option value="">--</option>`;
+  items.forEach((item, index) => {
+    const requestId = String(item.request_id || "");
+    if (!requestId) return;
+    const status = String(item.status || "pending");
+    const fromState = String(item.from_state_id || "");
+    const targetState = String(item.target_state_id || "");
+    const option = document.createElement("option");
+    option.value = requestId;
+    option.textContent = `${index + 1}. ${requestId} · ${status}${targetState ? ` · ${fromState}->${targetState}` : ""}`;
+    select.appendChild(option);
+  });
+  const preferred = items.find((item) => String(item.request_id || "") === currentRequestId)
+    || items.find((item) => String(item.status || "pending") !== "attached")
+    || items[0];
+  const preferredRequestId = String(preferred?.request_id || "");
+  select.value = preferredRequestId;
+  if ($("learningDetailObserveRequestId")) {
+    $("learningDetailObserveRequestId").value = preferredRequestId;
+  }
+}
+
+function setLearningDetailObserveSourceOptions(sources = []) {
+  const select = $("learningDetailObserveSourceSelect");
+  const items = Array.isArray(sources) ? sources.filter((item) => item && typeof item === "object") : [];
+  renderLearningDraftHistoryList(items);
+  if (!select) return;
+  const currentSourcePath = String($("learningDetailObserveSourcePath")?.value || "").trim();
+  select.innerHTML = `<option value="">--</option>`;
+  items.forEach((item, index) => {
+    const sourcePath = String(item.source_path || "");
+    const loadPath = learningDraftSourceLoadPath(item);
+    if (!sourcePath || !loadPath) return;
+    const summary = String(item.screen_summary || item.state_guess || sourcePath);
+    const sourceCategory = String(item.source_category || "");
+    const sourceBadge = item.pinned === true || sourceCategory === "recommended_current_precise_understanding"
+      ? "[Recommended current] "
+      : "";
+    const pageDetailBadge = sourceCategory === "recent_learning_page_detail" ? "[Page detail] " : "";
+    const demoScaffoldSourceBadge = sourceCategory === "recent_learning_demo_scaffold" ? "[Demo scaffold] " : "";
+    const preflightBadge = String(item.preflight_status || "") === "ready_for_explicit_model_start"
+      && String(item.pathgraph_candidate_path || "").trim()
+      ? "[Ready preflight] "
+      : "";
+    const demoChainBadge = item.learning_demo_chain_can_be_demoed === true
+      && item.learning_demo_chain_final_complete !== true
+      && String(item.pathgraph_candidate_path || "").trim()
+      ? "[Demo chain] "
+      : "";
+    const sourceMeta = learningDraftSourceMetaText(item);
+    const actionCount = Number(item.action_template_count || 0);
+    const option = document.createElement("option");
+    option.value = loadPath;
+    option.textContent = `${index + 1}. ${sourceBadge}${pageDetailBadge}${demoScaffoldSourceBadge}${demoChainBadge}${preflightBadge}${summary.slice(0, 80)} · actions=${actionCount}${sourceMeta ? ` · ${sourceMeta}` : ""}`;
+    select.appendChild(option);
+  });
+  const preferred = items.find((item) => learningDraftSourceLoadPath(item) === currentSourcePath)
+    || items.find((item) => String(item.source_path || "") === currentSourcePath)
+    || preferredLearningDraftReviewSource(items);
+  const preferredSourcePath = learningDraftSourceLoadPath(preferred);
+  select.value = preferredSourcePath;
+  if (!currentSourcePath && $("learningDetailObserveSourcePath")) {
+    $("learningDetailObserveSourcePath").value = preferredSourcePath;
+  }
+  setRecommendedLearningDraftReviewSource(items);
+}
+
+function renderLearningDraftHistoryList(sources = []) {
+  const target = $("learningDraftHistoryList");
+  if (!target) return;
+  const items = Array.isArray(sources) ? sources.filter((item) => item && typeof item === "object") : [];
+  if (!items.length) {
+    target.innerHTML = `<p class="trace-idle">${escapeHtml(t("learning_draft_history_empty"))}</p>`;
+    return;
+  }
+  target.innerHTML = items.slice(0, 12).map((item, index) => {
+    const loadPath = learningDraftSourceLoadPath(item);
+    const summary = String(item.screen_summary || item.state_guess || item.source_path || loadPath || "").trim();
+    const meta = learningDraftSourceMetaText(item);
+    return `
+      <button type="button" class="learning-draft-history-item" data-learning-draft-history-path="${escapeAttr(loadPath)}">
+        <strong>${escapeHtml(`${index + 1}. ${summary || "learning draft"}`)}</strong>
+        <span>${escapeHtml(meta || loadPath || "no source path")}</span>
+      </button>`;
+  }).join("");
+  target.querySelectorAll("[data-learning-draft-history-path]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const path = String(button.getAttribute("data-learning-draft-history-path") || "").trim();
+      if (!path) return;
+      setLearningDraftReviewSourcePath(path);
+      if ($("learningDetailObserveSourcePath")) $("learningDetailObserveSourcePath").value = path;
+      await loadLearningDraftReview();
+    });
+  });
+}
+
+function learningDraftSourceLoadPath(item = {}) {
+  return String(item.pathgraph_candidate_path || item.source_path || "").trim();
+}
+
+function preferredLearningDraftReviewSource(items = []) {
+  const sources = Array.isArray(items) ? items.filter((item) => item && typeof item === "object") : [];
+  return sources.find((item) => (
+    item.fresh_model_chain_accepted === true
+    && item.fresh_model_counts_as_final_goal_completion === true
+  ))
+    || sources.find((item) => (
+    item.learning_demo_chain_can_be_demoed === true
+    && item.learning_demo_chain_final_complete === true
+  ))
+    || sources.find((item) => (
+    item.learning_demo_chain_can_be_demoed === true
+    && item.learning_demo_chain_final_complete !== true
+    && String(item.pathgraph_candidate_path || "").trim()
+  ))
+    || sources.find((item) => (
+    String(item.preflight_status || "") === "ready_for_explicit_model_start"
+    && String(item.pathgraph_candidate_path || "").trim()
+  ))
+    || sources.find((item) => item.pinned === true || String(item.source_category || "") === "recommended_current_precise_understanding")
+    || sources[0]
+    || {};
+}
+
+function learningDraftSourceMetaText(source = {}) {
+  const parts = [];
+  const sourceCategory = String(source.source_category || "").trim();
+  const readiness = String(source.readiness_status || "").trim();
+  const handoff = String(source.handoff_status || "").trim();
+  const consistency = String(source.consistency_status || "").trim();
+  const runbook = String(source.runbook_status || "").trim();
+  const preflight = String(source.preflight_status || "").trim();
+  const demoReadiness = String(source.demo_readiness_status || "").trim();
+  const approvalPacket = String(source.approval_packet_status || "").trim();
+  const calibrationPreRun = String(source.calibration_pre_run_status || "").trim();
+  const pathgraphIntegration = String(source.pathgraph_integration_status || "").trim();
+  const pathgraphIntegrationReportPath = String(source.pathgraph_integration_report_path || "").trim();
+  const currentEvidencePacket = String(source.current_evidence_packet_status || "").trim();
+  const currentEvidencePacketPath = String(source.current_evidence_packet_path || "").trim();
+  const currentEvidencePacketIntegration = String(source.current_evidence_packet_integration_status || "").trim();
+  const preciseUnderstandingCandidate = String(source.precise_understanding_candidate_status || "").trim();
+  const preciseUnderstandingCandidatePath = String(source.precise_understanding_candidate_path || "").trim();
+  const pageDetailCandidate = String(source.page_detail_candidate_status || "").trim();
+  const pageDetailCandidatePath = String(source.page_detail_candidate_path || "").trim();
+  const demoScaffold = String(source.learning_demo_scaffold_status || "").trim();
+  const demoScaffoldPath = String(source.learning_demo_scaffold_path || "").trim();
+  const demoScaffoldModelOrigin = String(source.learning_demo_scaffold_model_origin_status || "").trim();
+  const demoScaffoldModelPreview = String(source.learning_demo_scaffold_model_preview_status || "").trim();
+  const demoScaffoldModelOnlyStatus = String(source.learning_demo_scaffold_model_only_status || "").trim();
+  const demoGoalStatus = String(source.learning_demo_goal_status || "").trim();
+  const demoGoalPath = String(source.learning_demo_goal_path || "").trim();
+  const freshModelAcceptance = String(source.fresh_model_acceptance_status || "").trim();
+  const calibrationPreRunCheckedAt = String(source.calibration_pre_run_checked_at || "").trim();
+  const calibrationPreRunChecksumStatus = String(source.calibration_pre_run_approval_packet_checksum_status || "").trim();
+  const rerun = String(source.rerun_report_status || "").trim();
+  const coverage = Number(source.calibration_coverage_rate);
+  const currentEvidencePacketCoverage = Number(source.current_evidence_packet_coverage);
+  const preciseUnderstandingTotalRegions = Number(source.precise_understanding_candidate_total_regions);
+  const preciseUnderstandingPending = Number(source.precise_understanding_candidate_pending_count);
+  const preciseUnderstandingPathgraphReady = Number(source.precise_understanding_candidate_pathgraph_ready_count);
+  const pageDetailRegions = Number(source.page_detail_candidate_region_count);
+  const pageDetailSections = Number(source.page_detail_candidate_section_count);
+  const pageDetailOperations = Number(source.page_detail_candidate_possible_operation_count);
+  const demoScaffoldArtifacts = Number(source.learning_demo_scaffold_artifact_count);
+  const demoScaffoldFailures = Number(source.learning_demo_scaffold_failure_count);
+  const demoScaffoldActualModelEvidence = Number(source.learning_demo_scaffold_actual_model_call_evidence_count);
+  const demoScaffoldAssistedEvidence = Number(source.learning_demo_scaffold_assisted_evidence_count);
+  const demoScaffoldModelPreviewRegions = Number(source.learning_demo_scaffold_model_preview_region_count);
+  const demoScaffoldModelPreviewActions = Number(source.learning_demo_scaffold_model_preview_action_count);
+  const demoScaffoldModelPageSections = Number(source.learning_demo_scaffold_model_page_detail_section_count);
+  const demoScaffoldModelPageOps = Number(source.learning_demo_scaffold_model_page_detail_operation_count);
+  const demoGoalPassed = Number(source.learning_demo_goal_passed_requirement_count);
+  const demoGoalFailed = Number(source.learning_demo_goal_failed_requirement_count);
+  const demoGoalBlockers = Number(source.learning_demo_goal_blocker_count);
+  const freshModelActualEvidence = Number(source.fresh_model_actual_model_call_evidence_count);
+  const freshModelAssistedEvidence = Number(source.fresh_model_assisted_or_human_review_evidence_count);
+  const freshModelBlockers = Number(source.fresh_model_acceptance_blocker_count);
+  const freshModelReplacementPlan = String(source.fresh_model_replacement_plan_status || "").trim();
+  const freshModelSourcesToReplace = learningDraftArray(source.fresh_model_replacement_sources_to_replace);
+  const freshModelReplacementSteps = Number(source.fresh_model_replacement_step_count);
+  const freshModelReplacementRunNow = Number(source.fresh_model_replacement_command_executes_now_count);
+  const demoChainReadySteps = Number(source.learning_demo_chain_ready_step_count);
+  const demoChainTotalSteps = Number(source.learning_demo_chain_total_step_count);
+  const demoChainMissingProofs = Number(source.learning_demo_chain_missing_proof_count);
+  const demoChainBlockers = Number(source.learning_demo_chain_blocker_count);
+  const pendingReady = Number(source.pending_calibration_ready_count);
+  const runbookReady = Number(source.runbook_ready_region_count);
+  if (sourceCategory) parts.push(`source_category=${sourceCategory}`);
+  if (readiness) parts.push(readiness);
+  if (Number.isFinite(coverage)) parts.push(`coverage=${coverage}`);
+  if (Number.isFinite(pendingReady)) parts.push(`pending_ready=${pendingReady}`);
+  if (handoff) parts.push(`handoff=${handoff}`);
+  if (consistency) parts.push(`consistency=${consistency}`);
+  if (runbook) parts.push(`runbook=${runbook}`);
+  if (preflight) parts.push(`preflight=${preflight}`);
+  if (demoReadiness) parts.push(`demo=${demoReadiness}`);
+  if (approvalPacket) parts.push(`approval=${approvalPacket}`);
+  if (calibrationPreRun) parts.push(`calibration_pre_run=${calibrationPreRun}`);
+  if (pathgraphIntegration) parts.push(`pathgraph_integration=${pathgraphIntegration}`);
+  if (pathgraphIntegrationReportPath) parts.push(`pathgraph_integration_report=${pathgraphIntegrationReportPath}`);
+  if (currentEvidencePacket) parts.push(`current_evidence_packet=${currentEvidencePacket}`);
+  if (currentEvidencePacketPath) parts.push(`current_evidence_packet_path=${currentEvidencePacketPath}`);
+  if (Number.isFinite(currentEvidencePacketCoverage)) parts.push(`current_packet_coverage=${currentEvidencePacketCoverage}`);
+  if (currentEvidencePacketIntegration) parts.push(`current_packet_integration=${currentEvidencePacketIntegration}`);
+  if (preciseUnderstandingCandidate) parts.push(`precise_understanding=${preciseUnderstandingCandidate}`);
+  if (preciseUnderstandingCandidatePath) parts.push(`precise_understanding_candidate=${preciseUnderstandingCandidatePath}`);
+  if (Number.isFinite(preciseUnderstandingTotalRegions)) parts.push(`precise_regions=${preciseUnderstandingTotalRegions}`);
+  if (Number.isFinite(preciseUnderstandingPending)) parts.push(`precise_pending=${preciseUnderstandingPending}`);
+  if (Number.isFinite(preciseUnderstandingPathgraphReady)) parts.push(`precise_pathgraph_ready=${preciseUnderstandingPathgraphReady}`);
+  if (pageDetailCandidate) parts.push(`page_detail=${pageDetailCandidate}`);
+  if (pageDetailCandidatePath) parts.push(`page_detail_candidate=${pageDetailCandidatePath}`);
+  if (demoScaffold) parts.push(`demo_scaffold=${demoScaffold}`);
+  if (demoScaffoldPath) parts.push(`demo_scaffold_path=${demoScaffoldPath}`);
+  if (demoScaffoldModelOrigin) parts.push(`demo_model_origin=${demoScaffoldModelOrigin}`);
+  if (demoScaffoldModelPreview) parts.push(`demo_model_preview=${demoScaffoldModelPreview}`);
+  if (demoScaffoldModelOnlyStatus) parts.push(`demo_model_only=${demoScaffoldModelOnlyStatus}`);
+  if (demoGoalStatus) parts.push(`demo_goal=${demoGoalStatus}`);
+  if (demoGoalPath) parts.push(`demo_goal_report=${demoGoalPath}`);
+  if (freshModelAcceptance) parts.push(`fresh_acceptance=${freshModelAcceptance}`);
+  if (Number.isFinite(pageDetailRegions)) parts.push(`page_regions=${pageDetailRegions}`);
+  if (Number.isFinite(pageDetailSections)) parts.push(`page_sections=${pageDetailSections}`);
+  if (Number.isFinite(pageDetailOperations)) parts.push(`page_ops=${pageDetailOperations}`);
+  if (Number.isFinite(demoScaffoldArtifacts)) parts.push(`demo_artifacts=${demoScaffoldArtifacts}`);
+  if (Number.isFinite(demoScaffoldFailures)) parts.push(`demo_failures=${demoScaffoldFailures}`);
+  if (Number.isFinite(demoScaffoldActualModelEvidence)) parts.push(`demo_actual_model_evidence=${demoScaffoldActualModelEvidence}`);
+  if (Number.isFinite(demoScaffoldAssistedEvidence)) parts.push(`demo_assisted_evidence=${demoScaffoldAssistedEvidence}`);
+  if (Number.isFinite(demoScaffoldModelPreviewRegions)) parts.push(`demo_model_preview_regions=${demoScaffoldModelPreviewRegions}`);
+  if (Number.isFinite(demoScaffoldModelPreviewActions)) parts.push(`demo_model_preview_actions=${demoScaffoldModelPreviewActions}`);
+  if (Number.isFinite(demoScaffoldModelPageSections)) parts.push(`demo_model_page_sections=${demoScaffoldModelPageSections}`);
+  if (Number.isFinite(demoScaffoldModelPageOps)) parts.push(`demo_model_page_ops=${demoScaffoldModelPageOps}`);
+  if (Number.isFinite(demoGoalPassed)) parts.push(`demo_goal_passed=${demoGoalPassed}`);
+  if (Number.isFinite(demoGoalFailed)) parts.push(`demo_goal_failed=${demoGoalFailed}`);
+  if (Number.isFinite(demoGoalBlockers)) parts.push(`demo_goal_blockers=${demoGoalBlockers}`);
+  if (Number.isFinite(freshModelActualEvidence)) parts.push(`fresh_actual_model=${freshModelActualEvidence}`);
+  if (Number.isFinite(freshModelAssistedEvidence)) parts.push(`fresh_assisted=${freshModelAssistedEvidence}`);
+  if (Number.isFinite(freshModelBlockers)) parts.push(`fresh_blockers=${freshModelBlockers}`);
+  if (freshModelReplacementPlan) parts.push(`fresh_replacement_plan=${freshModelReplacementPlan}`);
+  if (freshModelSourcesToReplace.length) parts.push(`fresh_replace_sources=${freshModelSourcesToReplace.join(",")}`);
+  if (source.fresh_model_replacement_required === true) parts.push(`fresh_replacement=${source.fresh_model_replacement_required === true ? "true" : "false"}`);
+  if (source.fresh_model_replacement_required === false) parts.push("fresh_replacement=false");
+  if (source.fresh_model_replacement_required_source_type) {
+    parts.push(`fresh_required_source=${source.fresh_model_replacement_required_source_type}`);
+  }
+  if (Number.isFinite(freshModelReplacementSteps)) parts.push(`fresh_replacement_steps=${freshModelReplacementSteps}`);
+  if (Number.isFinite(freshModelReplacementRunNow)) parts.push(`fresh_replacement_run_now=${freshModelReplacementRunNow}`);
+  if (Object.prototype.hasOwnProperty.call(source, "fresh_model_chain_accepted")) {
+    parts.push(`fresh_accepted=${source.fresh_model_chain_accepted === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "fresh_model_counts_as_final_goal_completion")) {
+    parts.push(`fresh_final=${source.fresh_model_counts_as_final_goal_completion === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "learning_demo_chain_can_be_demoed")) {
+    parts.push(`demo_chain=${source.learning_demo_chain_can_be_demoed === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "learning_demo_chain_final_complete")) {
+    parts.push(`demo_chain_final=${source.learning_demo_chain_final_complete === true ? "true" : "false"}`);
+  }
+  if (Number.isFinite(demoChainReadySteps) && Number.isFinite(demoChainTotalSteps)) {
+    parts.push(`demo_chain_steps=${demoChainReadySteps}/${demoChainTotalSteps}`);
+  }
+  if (Number.isFinite(demoChainMissingProofs)) parts.push(`demo_chain_missing_proofs=${demoChainMissingProofs}`);
+  if (Number.isFinite(demoChainBlockers)) parts.push(`demo_chain_blockers=${demoChainBlockers}`);
+  if (calibrationPreRunCheckedAt) parts.push(`calibration_pre_run_checked_at=${calibrationPreRunCheckedAt}`);
+  if (calibrationPreRunChecksumStatus) parts.push(`calibration_pre_run_checksum=${calibrationPreRunChecksumStatus}`);
+  if (Object.prototype.hasOwnProperty.call(source, "calibration_pre_run_model_ports_clear")) {
+    parts.push(`calibration_pre_run_model_ports_clear=${source.calibration_pre_run_model_ports_clear === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "calibration_pre_run_model_processes_clear")) {
+    parts.push(`calibration_pre_run_model_processes_clear=${source.calibration_pre_run_model_processes_clear === true ? "true" : "false"}`);
+  }
+  if (source.may_start_model_after_user_approval === true) parts.push("start_after_approval=true");
+  if (source.preflight_may_start_model_after_user_approval === true) parts.push("preflight_start_after_approval=true");
+  if (source.approval_packet_requires_explicit_user_approval === true) parts.push("approval_required=true");
+  if (Object.prototype.hasOwnProperty.call(source, "may_run_calibration_batch_now")) {
+    parts.push(`run_now=${source.may_run_calibration_batch_now === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "preflight_may_run_calibration_batch_now")) {
+    parts.push(`preflight_run_now=${source.preflight_may_run_calibration_batch_now === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "demo_readiness_may_run_calibration_batch_now")) {
+    parts.push(`demo_run_now=${source.demo_readiness_may_run_calibration_batch_now === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "approval_packet_may_run_calibration_batch_now")) {
+    parts.push(`approval_run_now=${source.approval_packet_may_run_calibration_batch_now === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "calibration_pre_run_may_run_calibration_batch_now")) {
+    parts.push(`calibration_pre_run_now=${source.calibration_pre_run_may_run_calibration_batch_now === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "pathgraph_integration_ready_for_audited_review")) {
+    parts.push(`pathgraph_audit_ready=${source.pathgraph_integration_ready_for_audited_review === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "pathgraph_integration_ready_for_runtime_promotion")) {
+    parts.push(`pathgraph_runtime_promotion=${source.pathgraph_integration_ready_for_runtime_promotion === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "current_evidence_packet_runtime_promotion")) {
+    parts.push(`current_packet_runtime_promotion=${source.current_evidence_packet_runtime_promotion === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "current_evidence_packet_model_started")) {
+    parts.push(`current_packet_model_started=${source.current_evidence_packet_model_started === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "precise_understanding_candidate_runtime_promotion")) {
+    parts.push(`precise_runtime_promotion=${source.precise_understanding_candidate_runtime_promotion === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "precise_understanding_candidate_model_started")) {
+    parts.push(`precise_model_started=${source.precise_understanding_candidate_model_started === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "page_detail_candidate_runtime_promotion")) {
+    parts.push(`page_detail_runtime_promotion=${source.page_detail_candidate_runtime_promotion === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "page_detail_candidate_model_started")) {
+    parts.push(`page_detail_model_started=${source.page_detail_candidate_model_started === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "learning_demo_scaffold_runtime_promotion")) {
+    parts.push(`demo_runtime_promotion=${source.learning_demo_scaffold_runtime_promotion === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "learning_demo_scaffold_model_started")) {
+    parts.push(`demo_model_started=${source.learning_demo_scaffold_model_started === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "learning_demo_scaffold_page_detail_ready")) {
+    parts.push(`demo_page_detail_ready=${source.learning_demo_scaffold_page_detail_ready === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "learning_demo_scaffold_fully_model_generated")) {
+    parts.push(`demo_fully_model_generated=${source.learning_demo_scaffold_fully_model_generated === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "learning_demo_scaffold_model_only_ready")) {
+    parts.push(`demo_model_only_ready=${source.learning_demo_scaffold_model_only_ready === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "learning_demo_goal_display_ready")) {
+    parts.push(`demo_goal_display=${source.learning_demo_goal_display_ready === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "learning_demo_goal_final_complete")) {
+    parts.push(`demo_goal_final=${source.learning_demo_goal_final_complete === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "learning_demo_goal_runtime_promotion")) {
+    parts.push(`demo_goal_runtime_promotion=${source.learning_demo_goal_runtime_promotion === true ? "true" : "false"}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(source, "learning_demo_goal_model_started")) {
+    parts.push(`demo_goal_model_started=${source.learning_demo_goal_model_started === true ? "true" : "false"}`);
+  }
+  if (Number.isFinite(runbookReady)) parts.push(`runbook_ready=${runbookReady}`);
+  if (source.post_batch_refresh_has_batch_plan === true) parts.push("refresh_gate=batch_plan");
+  if (source.refresh_blocks_before_future_rerun === true) parts.push("prebatch_refresh=blocked");
+  if (rerun) parts.push(`rerun=${rerun}`);
+  return parts.join(" · ");
+}
+
+function setRecommendedLearningDraftReviewSource(sources = []) {
+  const items = Array.isArray(sources) ? sources.filter((item) => item && typeof item === "object") : [];
+  const currentReviewPath = String($("learningDraftReviewSourcePath")?.value || "").trim();
+  if (currentReviewPath) return;
+  const recommended = preferredLearningDraftReviewSource(items);
+  const sourcePath = learningDraftSourceLoadPath(recommended);
+  if (!sourcePath) return;
+  setLearningDraftReviewSourcePath(sourcePath);
+}
+
+function setLearningPathGraphCandidatePaths(data = {}) {
+  if ($("learningPathGraphCandidatePath")) $("learningPathGraphCandidatePath").value = String(data.pathgraph_candidate_path || "");
+  if ($("learningPathGraphValidationPath")) $("learningPathGraphValidationPath").value = String(data.validation_report_path || "");
+  setLearningDetailObserveRequests(data.pending_detail_observe_requests || []);
+  if (!$("learningDraftReviewSourcePath")?.value && data.reviewed_template_candidate_path) {
+    setLearningDraftReviewSourcePath(data.reviewed_template_candidate_path);
+  }
+}
+
+function setLearningAssistedTemplatePackagePath(path) {
+  if ($("learningAssistedTemplatePackagePath")) $("learningAssistedTemplatePackagePath").value = String(path || "");
+}
+
+function setLearningAssistedTemplateAssetCandidatePath(path) {
+  if ($("learningAssistedTemplateAssetCandidatePath")) $("learningAssistedTemplateAssetCandidatePath").value = String(path || "");
+}
+
+function setLearningAssistedTemplateGraphDraftPath(path) {
+  if ($("learningAssistedTemplateGraphDraftPath")) $("learningAssistedTemplateGraphDraftPath").value = String(path || "");
+}
+
+function renderAssistedTemplateGraphDraftSummary(data = null) {
+  const target = $("learningAssistedTemplateGraphDraftSummary");
+  if (!target) return;
+  if (!data || typeof data !== "object") {
+    target.innerHTML = "";
+    return;
+  }
+  const summary = data.summary && typeof data.summary === "object" ? data.summary : {};
+  const validation = data.asset_validation_summary && typeof data.asset_validation_summary === "object" ? data.asset_validation_summary : {};
+  const states = learningDraftArray(data.states);
+  const regions = learningDraftArray(data.regions);
+  const actions = learningDraftArray(data.action_templates);
+  const transitions = learningDraftArray(data.transitions);
+  const chips = [
+    `graph=${data.graph_draft_status || "unknown"}`,
+    `validation=${validation.validation_status || summary.asset_validation_status || "not_evaluated"}`,
+    `states=${summary.state_count ?? 0}`,
+    `regions=${summary.region_count ?? 0}`,
+    `actions=${summary.action_template_count ?? 0}`,
+    `transitions=${summary.transition_count ?? 0}`,
+    `runtime_promotion=${data.ready_for_runtime_pathgraph_promotion === true}`,
+    `execute=${data.execute_binding_enabled === true}`,
+    `authorization=${data.artifact_is_authorization === true}`,
+  ];
+  target.innerHTML = `
+    <div class="learning-draft-detail-card">
+      <strong>${escapeHtml(t("learning_assisted_template_graph_draft_path"))}</strong>
+      <div class="learning-draft-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      <small>${escapeHtml(data.graph_draft_path || data.path || "")}</small>
+      ${states.length || regions.length || actions.length || transitions.length ? `
+        <div class="learning-draft-grid compact-grid">
+          ${renderAssistedGraphDraftList("states", states, "state_id")}
+          ${renderAssistedGraphDraftList("regions", regions, "region_id")}
+          ${renderAssistedGraphDraftList("actions", actions, "action_template_id")}
+          ${renderAssistedGraphDraftList("transitions", transitions, "transition_id")}
+        </div>` : ""}
+    </div>`;
+}
+
+function renderAssistedTemplatePromotionPreflight(data = null) {
+  const target = $("learningAssistedTemplatePromotionPreflightSummary");
+  if (!target) return;
+  if (!data || typeof data !== "object" || data.load_status === "missing_promotion_preflight") {
+    target.innerHTML = "";
+    return;
+  }
+  const counts = data.counts && typeof data.counts === "object" ? data.counts : {};
+  const checks = data.checks && typeof data.checks === "object" ? data.checks : {};
+  const blockers = learningDraftArray(data.blockers);
+  const blockerDetails = learningDraftArray(data.blocker_details);
+  const chips = [
+    `status=${data.preflight_status || data.load_status || "unknown"}`,
+    `accepted=${counts.accepted_review_items ?? 0}`,
+    `asset=${counts.exported_asset_items ?? 0}`,
+    `graph=${counts.graph_draft_items ?? 0}`,
+    `runtime_promotion=${data.ready_for_runtime_pathgraph_promotion === true}`,
+    `execute=${data.execute_binding_enabled === true}`,
+    `authorization=${data.artifact_is_authorization === true}`,
+  ];
+  const checkRows = Object.entries(checks);
+  target.innerHTML = `
+    <div class="learning-draft-detail-card">
+      <strong>${escapeHtml(t("learning_assisted_template_promotion_preflight"))}</strong>
+      <div class="learning-draft-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      ${blockers.length ? `<small>${escapeHtml(`blockers=${blockers.join(",")}`)}</small>` : `<small>${escapeHtml("audit_required_before_runtime_promotion=true")}</small>`}
+      ${blockerDetails.length ? `<ul>${blockerDetails.map((item) => `<li><strong>${escapeHtml(item.check_id || "")}</strong><span>${escapeHtml(`${item.reason || ""} recommended_action=${item.recommended_action || ""}`)}</span></li>`).join("")}</ul>` : ""}
+      ${checkRows.length ? `<ul>${checkRows.map(([key, value]) => `<li><strong>${escapeHtml(key)}</strong><span>${escapeHtml(value === true ? "passed" : "blocked")}</span></li>`).join("")}</ul>` : ""}
+    </div>`;
+}
+
+function renderAssistedTemplateAuditedPromotionRequest(data = null) {
+  const target = $("learningAssistedTemplateAuditedPromotionRequestSummary");
+  if (!target) return;
+  if (!data || typeof data !== "object" || data.load_status === "missing_audited_promotion_request") {
+    target.innerHTML = "";
+    return;
+  }
+  const auditItems = learningDraftArray(data.required_external_audit_items);
+  const chips = [
+    `status=${data.request_status || data.load_status || "unknown"}`,
+    `separate_path=${data.requires_separate_audited_promotion_path === true}`,
+    `runtime_promotion=${data.ready_for_runtime_pathgraph_promotion === true}`,
+    `execute=${data.execute_binding_enabled === true}`,
+    `authorization=${data.artifact_is_authorization === true}`,
+  ];
+  const refs = [
+    data.request_path || data.path || "",
+    data.preflight_path || "",
+    data.asset_candidate_path || "",
+    data.graph_draft_path || "",
+  ].filter(Boolean);
+  target.innerHTML = `
+    <div class="learning-draft-detail-card">
+      <strong>${escapeHtml(t("learning_assisted_template_audited_promotion_request"))}</strong>
+      <div class="learning-draft-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      ${refs.length ? `<small>${escapeHtml(refs.join(" · "))}</small>` : ""}
+      <small>${escapeHtml(data.interpretation || "preview only; Runtime promotion still requires a separate audited path")}</small>
+      ${auditItems.length ? `<ul>${auditItems.map((item) => `<li><strong>${escapeHtml(item)}</strong><span>${escapeHtml("required before any Runtime promotion design")}</span></li>`).join("")}</ul>` : ""}
+    </div>`;
+}
+
+function renderAssistedGraphDraftList(title, items = [], idField = "id") {
+  const list = learningDraftArray(items);
+  return `
+    <div>
+      <strong>${escapeHtml(title)}</strong>
+      ${list.length ? `<ul>${list.slice(0, 8).map((item) => {
+        const id = item[idField] || item.action_id || item.state_id || item.region_id || item.transition_id || "";
+        const label = item.label || item.semantic_action || item.transition_type || id;
+        const meta = [
+          item.semantic_action ? `action=${item.semantic_action}` : "",
+          item.target_entity ? `target=${item.target_entity}` : "",
+          item.from_state_id && item.to_state_id ? `${item.from_state_id}->${item.to_state_id}` : "",
+        ].filter(Boolean).join(" · ");
+        return `<li><strong>${escapeHtml(label || id)}</strong><small>${escapeHtml([id, meta].filter(Boolean).join(" · "))}</small></li>`;
+      }).join("")}</ul>` : `<p class="trace-idle">${escapeHtml(t("pending"))}</p>`}
+    </div>`;
+}
+
+function renderAssistedTemplateAcceptanceSuggestions(data = null) {
+  const target = $("learningAssistedTemplateSuggestionsSummary");
+  if (!target) return;
+  if (!data || typeof data !== "object" || data.load_status === "missing_acceptance_suggestions") {
+    assistedTemplateAcceptanceSuggestions = [];
+    target.innerHTML = "";
+    return;
+  }
+  const summary = data.summary && typeof data.summary === "object" ? data.summary : {};
+  const suggestions = learningDraftArray(data.suggestions);
+  assistedTemplateAcceptanceSuggestions = suggestions;
+  const chips = [
+    `suggestions=${summary.suggestion_count ?? suggestions.length}`,
+    `status=${data.suggestion_status || data.load_status || "unknown"}`,
+    `runtime_promotion=${data.ready_for_runtime_pathgraph_promotion === true}`,
+    `execute=${data.execute_binding_enabled === true}`,
+    `authorization=${data.artifact_is_authorization === true}`,
+  ];
+  target.innerHTML = `
+    <div class="learning-draft-detail-card">
+      <strong>${escapeHtml(t("learning_assisted_template_suggestions"))}</strong>
+      <div class="learning-draft-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      ${suggestions.length ? `<ul>${suggestions.slice(0, 8).map((suggestion) => {
+        const items = learningDraftArray(suggestion.items);
+        return `<li>
+          <strong>${escapeHtml(suggestion.label || suggestion.suggestion_id || "")}</strong>
+          <small>${escapeHtml([
+            suggestion.semantic_action ? `action=${suggestion.semantic_action}` : "",
+            suggestion.target_entity ? `target=${suggestion.target_entity}` : "",
+            `items=${items.length}`,
+          ].filter(Boolean).join(" · "))}</small>
+          <span>${escapeHtml(items.map((item) => `${item.item_type}:${item.item_id}`).join(", "))}</span>
+          <button type="button" data-assisted-template-suggestion-apply="${escapeHtml(suggestion.suggestion_id || "")}">${escapeHtml(t("learning_assisted_template_suggestion_apply"))}</button>
+        </li>`;
+      }).join("")}</ul>` : `<p class="trace-idle">${escapeHtml(t("pending"))}</p>`}
+    </div>`;
+  target.querySelectorAll("[data-assisted-template-suggestion-apply]").forEach((button) => {
+    button.addEventListener("click", () => applyAssistedTemplateSuggestion(button.dataset.assistedTemplateSuggestionApply || ""));
+  });
+}
+
+function applyAssistedTemplateSuggestion(suggestionId = "") {
+  const suggestion = assistedTemplateAcceptanceSuggestions.find((item) => String(item.suggestion_id || "") === String(suggestionId || ""));
+  if (!suggestion) {
+    renderResponse({ success: false, message: "assisted_template_suggestion_not_found" }, "Assisted template acceptance suggestions");
+    return null;
+  }
+  const applied = applyAssistedTemplateSuggestionToChecklist(suggestion);
+  renderResponse({
+    success: true,
+    message: "Assisted template suggestion applied to unsaved checklist controls",
+    data: {
+      suggestion_id: suggestionId,
+      applied_item_count: applied,
+      unsaved: true,
+      execute_binding_enabled: false,
+      artifact_is_authorization: false,
+      ready_for_runtime_pathgraph_promotion: false,
+    },
+  }, "Assisted template acceptance suggestions");
+  return { suggestion_id: suggestionId, applied_item_count: applied };
+}
+
+function applyAssistedTemplateSuggestionToChecklist(suggestion = {}) {
+  const items = learningDraftArray(suggestion.items);
+  let applied = 0;
+  items.forEach((item) => {
+    const itemType = String(item.item_type || "");
+    const itemId = String(item.item_id || "");
+    if (!itemType || !itemId) return;
+    const selector = `[data-assisted-template-decision][data-item-type="${cssEscapeValue(itemType)}"][data-item-id="${cssEscapeValue(itemId)}"]`;
+    const decision = document.querySelector(selector);
+    if (!decision) return;
+    decision.value = String(suggestion.recommended_decision || "accepted");
+    applied += 1;
+    const note = document.querySelector(`[data-assisted-template-note][data-item-type="${cssEscapeValue(itemType)}"][data-item-id="${cssEscapeValue(itemId)}"]`);
+    if (note && !String(note.value || "").trim()) {
+      note.value = String(suggestion.recommended_note || "");
+    }
+    if (itemType === "action" && suggestion.overrides && typeof suggestion.overrides === "object") {
+      ["label", "semantic_action", "target_entity"].forEach((field) => {
+        const input = document.querySelector(`[data-assisted-template-override="${field}"][data-item-type="${cssEscapeValue(itemType)}"][data-item-id="${cssEscapeValue(itemId)}"]`);
+        const value = String(suggestion.overrides[field] || "").trim();
+        if (input && value && !String(input.value || "").trim()) input.value = value;
+      });
+    }
+  });
+  return applied;
+}
+
+function applyAssistedTemplateAcceptanceSimulationToChecklist() {
+  const selectedIds = learningDraftArray(assistedTemplateAcceptanceSimulation?.selected_suggestion_ids);
+  if (!selectedIds.length) {
+    renderResponse({ success: false, message: "assisted_template_acceptance_simulation_has_no_selected_suggestions" }, "Assisted template acceptance simulation");
+    return null;
+  }
+  let applied = 0;
+  const missing = [];
+  selectedIds.forEach((suggestionId) => {
+    const suggestion = assistedTemplateAcceptanceSuggestions.find((item) => String(item.suggestion_id || "") === String(suggestionId || ""));
+    if (!suggestion) {
+      missing.push(String(suggestionId || ""));
+      return;
+    }
+    applied += applyAssistedTemplateSuggestionToChecklist(suggestion);
+  });
+  renderResponse({
+    success: true,
+    message: "simulation_applied_to_unsaved_checklist",
+    data: {
+      selected_suggestion_count: selectedIds.length,
+      applied_item_count: applied,
+      missing_suggestion_ids: missing,
+      simulation_only: true,
+      unsaved: true,
+      execute_binding_enabled: false,
+      artifact_is_authorization: false,
+      ready_for_runtime_pathgraph_promotion: false,
+    },
+  }, "Assisted template acceptance simulation");
+  return { selected_suggestion_count: selectedIds.length, applied_item_count: applied, missing_suggestion_ids: missing };
+}
+
+function renderAssistedTemplateAcceptanceSimulation(data = null) {
+  const target = $("learningAssistedTemplateAcceptanceSimulationSummary");
+  if (!target) return;
+  if (!data || typeof data !== "object" || data.load_status === "missing_acceptance_simulation") {
+    assistedTemplateAcceptanceSimulation = null;
+    target.innerHTML = "";
+    return;
+  }
+  assistedTemplateAcceptanceSimulation = data;
+  const summary = data.summary && typeof data.summary === "object"
+    ? data.summary
+    : (data.simulated_counts && typeof data.simulated_counts === "object" ? data.simulated_counts : {});
+  const preflight = data.simulated_preflight && typeof data.simulated_preflight === "object" ? data.simulated_preflight : {};
+  const blockers = learningDraftArray(preflight.blockers);
+  const chips = [
+    `status=${data.simulation_status || data.load_status || "unknown"}`,
+    `preflight=${preflight.preflight_status || "not_simulated"}`,
+    `suggestions=${summary.selected_suggestion_count ?? 0}`,
+    `accepted=${summary.accepted_review_items ?? 0}`,
+    `asset=${summary.exported_asset_items ?? 0}`,
+    `graph=${summary.graph_draft_items ?? 0}`,
+    `runtime_promotion=${data.ready_for_runtime_pathgraph_promotion === true}`,
+    `execute=${data.execute_binding_enabled === true}`,
+    `authorization=${data.artifact_is_authorization === true}`,
+  ];
+  target.innerHTML = `
+    <div class="learning-draft-detail-card">
+      <strong>${escapeHtml(t("learning_assisted_template_acceptance_simulation"))}</strong>
+      <div class="learning-draft-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      ${blockers.length ? `<small>${escapeHtml(`simulated blockers=${blockers.join(",")}`)}</small>` : `<small>${escapeHtml("simulation only · no review decisions were saved")}</small>`}
+      <small>${escapeHtml(data.simulation_path || data.path || "")}</small>
+      <button type="button" data-assisted-template-simulation-apply="true">${escapeHtml(t("learning_assisted_template_acceptance_simulation_apply"))}</button>
+    </div>`;
+  target.querySelector("[data-assisted-template-simulation-apply]")?.addEventListener("click", () => {
+    applyAssistedTemplateAcceptanceSimulationToChecklist();
+  });
+}
+
+function renderAssistedTemplateAssetCandidateSummary(data = null) {
+  const target = $("learningAssistedTemplateAssetCandidateSummary");
+  if (!target) return;
+  if (!data || typeof data !== "object") {
+    target.innerHTML = "";
+    return;
+  }
+  const summary = data.summary && typeof data.summary === "object" ? data.summary : {};
+  const validation = data.asset_validation_summary && typeof data.asset_validation_summary === "object"
+    ? data.asset_validation_summary
+    : {};
+  const issues = learningDraftArray(validation.issues);
+  const chips = [
+    `asset=${data.asset_candidate_status || "unknown"}`,
+    `validation=${validation.validation_status || summary.asset_validation_status || "not_evaluated"}`,
+    `errors=${validation.error_count ?? summary.asset_validation_error_count ?? 0}`,
+    `warnings=${validation.warning_count ?? summary.asset_validation_warning_count ?? 0}`,
+    `accepted=${summary.accepted_total_count ?? 0}`,
+    `states=${summary.accepted_state_count ?? 0}`,
+    `regions=${summary.accepted_region_count ?? 0}`,
+    `actions=${summary.accepted_action_template_count ?? 0}`,
+    `transitions=${summary.accepted_transition_count ?? 0}`,
+    `runtime_promotion=${data.ready_for_runtime_pathgraph_promotion === true}`,
+    `execute=${data.execute_binding_enabled === true}`,
+    `authorization=${data.artifact_is_authorization === true}`,
+  ];
+  target.innerHTML = `
+    <div class="learning-draft-detail-card">
+      <strong>${escapeHtml(t("learning_assisted_template_asset_candidate_path"))}</strong>
+      <div class="learning-draft-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      <small>${escapeHtml(data.asset_candidate_path || "")}</small>
+      ${renderAssistedTemplateCompletenessSummary(summary, validation)}
+      ${issues.length ? `<ul>${issues.slice(0, 8).map((issue) => `<li><strong>${escapeHtml(issue.check_id || "")}</strong><span>${escapeHtml(`${issue.item_type || ""}:${issue.item_id || ""}`)}</span></li>`).join("")}</ul>` : ""}
+    </div>`;
+}
+
+function renderAssistedTemplateCompletenessSummary(summary = {}, validation = {}) {
+  const issues = learningDraftArray(validation.issues);
+  const status = String(validation.validation_status || summary.asset_validation_status || "not_evaluated");
+  const acceptedTotal = Number(summary.accepted_total_count ?? 0);
+  const headline = status === "passed_manual_asset_checks"
+    ? t("learning_assisted_template_completeness_passed")
+    : t("learning_assisted_template_completeness_blocked");
+  const blockers = issues.map((issue) => {
+    const checkId = String(issue.check_id || "");
+    const severity = String(issue.severity || "error");
+    const target = [issue.item_type, issue.item_id].filter(Boolean).join(":");
+    return [severity, checkId, target].filter(Boolean).join(" · ");
+  });
+  if (!blockers.length && acceptedTotal <= 0) blockers.push("no_accepted_items");
+  const chips = [
+    `status=${status}`,
+    `accepted=${acceptedTotal}`,
+    `errors=${validation.error_count ?? summary.asset_validation_error_count ?? 0}`,
+    `warnings=${validation.warning_count ?? summary.asset_validation_warning_count ?? 0}`,
+  ];
+  return `
+    <div class="learning-draft-detail-card compact-card">
+      <strong>${escapeHtml(t("learning_assisted_template_completeness"))}</strong>
+      <div class="learning-draft-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      <small>${escapeHtml(headline)}</small>
+      ${blockers.length ? `<ul>${blockers.slice(0, 8).map((item) => `<li><span>${escapeHtml(item)}</span></li>`).join("")}</ul>` : ""}
+    </div>`;
+}
+
+function renderAssistedTemplateReviewToGraphDiff(reviewRecord = {}, assetCandidate = null, graphDraft = null) {
+  const decisions = learningDraftArray(reviewRecord.item_decisions);
+  const decisionSummary = reviewRecord.decision_summary && typeof reviewRecord.decision_summary === "object"
+    ? reviewRecord.decision_summary
+    : {};
+  const assetSummary = assetCandidate && assetCandidate.summary && typeof assetCandidate.summary === "object"
+    ? assetCandidate.summary
+    : {};
+  const graphSummary = graphDraft && graphDraft.summary && typeof graphDraft.summary === "object"
+    ? graphDraft.summary
+    : {};
+  const acceptedByType = { state: 0, region: 0, action: 0, transition: 0 };
+  decisions.forEach((item) => {
+    if (String(item.decision || "") !== "accepted") return;
+    const key = String(item.item_type || "");
+    if (Object.prototype.hasOwnProperty.call(acceptedByType, key)) acceptedByType[key] += 1;
+  });
+  const rows = [
+    ["state", acceptedByType.state, assetSummary.accepted_state_count ?? 0, graphSummary.state_count ?? 0],
+    ["region", acceptedByType.region, assetSummary.accepted_region_count ?? 0, graphSummary.region_count ?? 0],
+    ["action", acceptedByType.action, assetSummary.accepted_action_template_count ?? 0, graphSummary.action_template_count ?? 0],
+    ["transition", acceptedByType.transition, assetSummary.accepted_transition_count ?? 0, graphSummary.transition_count ?? 0],
+  ];
+  const chips = [
+    `record=${reviewRecord.load_status || "missing_review_record"}`,
+    `accepted=${decisionSummary.accepted ?? rows.reduce((total, row) => total + Number(row[1] || 0), 0)}`,
+    `asset=${assetCandidate?.load_status || "missing_asset_candidate"}`,
+    `graph=${graphDraft?.load_status || "missing_graph_draft"}`,
+  ];
+  return `
+    <div class="learning-draft-detail-card">
+      <strong>${escapeHtml(t("learning_assisted_template_review_to_graph_diff"))}</strong>
+      <div class="learning-draft-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      <ul>${rows.map(([label, accepted, exportedCount, graphCount]) => `<li><strong>${escapeHtml(label)}</strong><span>${escapeHtml(`accepted=${accepted} · asset=${exportedCount} · graph=${graphCount}`)}</span></li>`).join("")}</ul>
+    </div>`;
+}
+
+function renderAssistedTemplateReviewPackage(packageData = null) {
+  const target = $("learningAssistedTemplateChecklist");
+  if (!target) return;
+  if (!packageData || typeof packageData !== "object") {
+    target.innerHTML = `<p class="trace-idle">${escapeHtml(t("learning_assisted_template_empty"))}</p>`;
+    return;
+  }
+  const summary = packageData.summary && typeof packageData.summary === "object" ? packageData.summary : {};
+  const gate = packageData.promotion_review_gate && typeof packageData.promotion_review_gate === "object" ? packageData.promotion_review_gate : {};
+  const freshness = packageData.source_freshness_summary && typeof packageData.source_freshness_summary === "object" ? packageData.source_freshness_summary : {};
+  const attachments = learningDraftArray(packageData.detail_surface_attachments);
+  const checks = learningDraftArray(gate.checks);
+  const checklistItems = learningDraftArray(packageData.checklist_items);
+  const reviewRecord = packageData.review_record && typeof packageData.review_record === "object" ? packageData.review_record : {};
+  const itemDecisions = learningDraftArray(reviewRecord.item_decisions);
+  const decisionMap = new Map(itemDecisions.map((item) => [
+    `${String(item.item_type || "")}:${String(item.item_id || "")}`,
+    String(item.decision || "pending_review"),
+  ]));
+  const noteMap = new Map(itemDecisions.map((item) => [
+    `${String(item.item_type || "")}:${String(item.item_id || "")}`,
+    String(item.note || ""),
+  ]));
+  const overrideMap = new Map(itemDecisions.map((item) => [
+    `${String(item.item_type || "")}:${String(item.item_id || "")}`,
+    item.overrides && typeof item.overrides === "object" ? item.overrides : {},
+  ]));
+  const assetCandidate = packageData.asset_candidate && typeof packageData.asset_candidate === "object" ? packageData.asset_candidate : null;
+  const graphDraft = packageData.graph_draft && typeof packageData.graph_draft === "object" ? packageData.graph_draft : null;
+  const promotionPreflight = packageData.promotion_preflight && typeof packageData.promotion_preflight === "object"
+    ? packageData.promotion_preflight
+    : null;
+  const auditedPromotionRequest = packageData.audited_promotion_request && typeof packageData.audited_promotion_request === "object"
+    ? packageData.audited_promotion_request
+    : null;
+  const acceptanceSuggestions = packageData.acceptance_suggestions && typeof packageData.acceptance_suggestions === "object"
+    ? packageData.acceptance_suggestions
+    : null;
+  const acceptanceSimulation = packageData.acceptance_simulation && typeof packageData.acceptance_simulation === "object"
+    ? packageData.acceptance_simulation
+    : null;
+  if (acceptanceSuggestions?.load_status === "loaded") {
+    renderAssistedTemplateAcceptanceSuggestions({
+      suggestion_status: acceptanceSuggestions.suggestion_status || "unknown",
+      summary: acceptanceSuggestions.summary || {},
+      suggestions: acceptanceSuggestions.suggestions || [],
+      ready_for_runtime_pathgraph_promotion: acceptanceSuggestions.ready_for_runtime_pathgraph_promotion,
+      execute_binding_enabled: acceptanceSuggestions.execute_binding_enabled,
+      artifact_is_authorization: acceptanceSuggestions.artifact_is_authorization,
+    });
+  } else {
+    renderAssistedTemplateAcceptanceSuggestions(null);
+  }
+  if (acceptanceSimulation?.load_status === "loaded") {
+    renderAssistedTemplateAcceptanceSimulation({
+      simulation_path: acceptanceSimulation.path || acceptanceSimulation.simulation_path || "",
+      simulation_status: acceptanceSimulation.simulation_status || "unknown",
+      selected_suggestion_ids: acceptanceSimulation.selected_suggestion_ids || [],
+      summary: acceptanceSimulation.simulated_counts || acceptanceSimulation.summary || {},
+      simulated_preflight: acceptanceSimulation.simulated_preflight || {},
+      ready_for_runtime_pathgraph_promotion: acceptanceSimulation.ready_for_runtime_pathgraph_promotion,
+      execute_binding_enabled: acceptanceSimulation.execute_binding_enabled,
+      artifact_is_authorization: acceptanceSimulation.artifact_is_authorization,
+    });
+  } else {
+    renderAssistedTemplateAcceptanceSimulation(null);
+  }
+  if (assetCandidate?.load_status === "loaded") {
+    setLearningAssistedTemplateAssetCandidatePath(assetCandidate.path || assetCandidate.asset_candidate_path || "");
+    renderAssistedTemplateAssetCandidateSummary({
+      asset_candidate_path: assetCandidate.path || assetCandidate.asset_candidate_path || "",
+      asset_candidate_status: assetCandidate.asset_candidate_status || "unknown",
+      summary: assetCandidate.summary || {},
+      asset_validation_summary: assetCandidate.asset_validation_summary || {},
+      ready_for_runtime_pathgraph_promotion: assetCandidate.ready_for_runtime_pathgraph_promotion,
+      execute_binding_enabled: assetCandidate.execute_binding_enabled,
+      artifact_is_authorization: assetCandidate.artifact_is_authorization,
+    });
+  } else {
+    setLearningAssistedTemplateAssetCandidatePath("");
+    renderAssistedTemplateAssetCandidateSummary(null);
+  }
+  if (graphDraft?.load_status === "loaded") {
+    setLearningAssistedTemplateGraphDraftPath(graphDraft.path || graphDraft.graph_draft_path || "");
+    renderAssistedTemplateGraphDraftSummary({
+      graph_draft_path: graphDraft.path || graphDraft.graph_draft_path || "",
+      graph_draft_status: graphDraft.graph_draft_status || "unknown",
+      summary: graphDraft.summary || {},
+      asset_validation_summary: graphDraft.asset_validation_summary || {},
+      states: graphDraft.states || [],
+      regions: graphDraft.regions || [],
+      action_templates: graphDraft.action_templates || [],
+      transitions: graphDraft.transitions || [],
+      ready_for_runtime_pathgraph_promotion: graphDraft.ready_for_runtime_pathgraph_promotion,
+      execute_binding_enabled: graphDraft.execute_binding_enabled,
+      artifact_is_authorization: graphDraft.artifact_is_authorization,
+    });
+  } else {
+    setLearningAssistedTemplateGraphDraftPath("");
+    renderAssistedTemplateGraphDraftSummary(null);
+  }
+  if (promotionPreflight?.load_status === "loaded") {
+    renderAssistedTemplatePromotionPreflight({
+      preflight_status: promotionPreflight.preflight_status || "unknown",
+      counts: promotionPreflight.counts || {},
+      checks: promotionPreflight.checks || {},
+      blockers: promotionPreflight.blockers || [],
+      blocker_details: promotionPreflight.blocker_details || [],
+      ready_for_runtime_pathgraph_promotion: promotionPreflight.ready_for_runtime_pathgraph_promotion,
+      execute_binding_enabled: promotionPreflight.execute_binding_enabled,
+      artifact_is_authorization: promotionPreflight.artifact_is_authorization,
+    });
+  } else {
+    renderAssistedTemplatePromotionPreflight(null);
+  }
+  if (auditedPromotionRequest?.load_status === "loaded") {
+    renderAssistedTemplateAuditedPromotionRequest({
+      request_path: auditedPromotionRequest.path || auditedPromotionRequest.request_path || "",
+      request_status: auditedPromotionRequest.request_status || "unknown",
+      preflight_path: auditedPromotionRequest.preflight_path || "",
+      asset_candidate_path: auditedPromotionRequest.asset_candidate_path || "",
+      graph_draft_path: auditedPromotionRequest.graph_draft_path || "",
+      required_external_audit_items: auditedPromotionRequest.required_external_audit_items || [],
+      requires_separate_audited_promotion_path: auditedPromotionRequest.requires_separate_audited_promotion_path,
+      ready_for_runtime_pathgraph_promotion: auditedPromotionRequest.ready_for_runtime_pathgraph_promotion,
+      execute_binding_enabled: auditedPromotionRequest.execute_binding_enabled,
+      artifact_is_authorization: auditedPromotionRequest.artifact_is_authorization,
+      interpretation: auditedPromotionRequest.interpretation || "",
+    });
+  } else {
+    renderAssistedTemplateAuditedPromotionRequest(null);
+  }
+  const chips = [
+    `package=${packageData.package_status || "unknown"}`,
+    `decision=${packageData.review_decision || "prepare_for_review"}`,
+    `record=${reviewRecord.load_status || "missing_review_record"}`,
+    `gate=${gate.gate_status || summary.promotion_gate_status || "not_evaluated"}`,
+    `failed=${(summary.remaining_failed_checks || []).join(",") || "none"}`,
+    `runtime_promotion=${packageData.ready_for_runtime_pathgraph_promotion === true}`,
+    `execute=${packageData.execute_binding_enabled === true}`,
+    `authorization=${packageData.artifact_is_authorization === true}`,
+  ];
+  const counts = [
+    `states=${summary.state_count ?? 0}`,
+    `regions=${summary.region_count ?? 0}`,
+    `actions=${summary.action_template_count ?? 0}`,
+    `transitions=${summary.transition_count ?? 0}`,
+    `detail_attachments=${summary.detail_surface_attachment_count ?? attachments.length}`,
+  ];
+  target.innerHTML = `
+    <div class="learning-draft-detail-card">
+      <div class="learning-draft-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      <div class="learning-draft-chip-row">${counts.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      <small>${escapeHtml(packageData.package_path || "")}</small>
+    </div>
+    ${renderAssistedTemplateReviewToGraphDiff(reviewRecord, assetCandidate, graphDraft)}
+    <div class="learning-draft-detail-card">
+      <strong>${escapeHtml(t("learning_draft_source_freshness_summary"))}</strong>
+      <div class="learning-draft-chip-row">${[
+        `freshness=${freshness.freshness_status || "unknown"}`,
+        `checksum=${freshness.checksum_status || "unknown"}`,
+        `image=${freshness.source_image_status || "unknown"}`,
+      ].map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+    </div>
+    <div class="learning-draft-detail-card">
+      <strong>${escapeHtml(t("learning_draft_gate"))}</strong>
+      ${checks.length ? `<ul>${checks.map((check) => `<li><strong>${escapeHtml(check.check_id || "")}</strong><span>${escapeHtml(check.passed === true ? "passed" : "failed")}</span></li>`).join("")}</ul>` : `<p class="trace-idle">${escapeHtml(t("pending"))}</p>`}
+    </div>
+    <div class="learning-draft-detail-card">
+      <strong>${escapeHtml(t("learning_draft_detail_attachments"))}</strong>
+      ${attachments.length ? `<ul>${attachments.map((item) => `<li><strong>${escapeHtml(item.request_id || item.attachment_id || "")}</strong><span>${escapeHtml(item.target_state_id || "")}</span></li>`).join("")}</ul>` : `<p class="trace-idle">${escapeHtml(t("pending"))}</p>`}
+    </div>
+    <div class="learning-draft-detail-card">
+      <strong>${escapeHtml(t("learning_assisted_template_checklist"))}</strong>
+      ${checklistItems.length ? `<ul>${checklistItems.map((item) => {
+        const key = `${String(item.item_type || "")}:${String(item.item_id || "")}`;
+        return renderAssistedTemplateChecklistItem(item, decisionMap.get(key), noteMap.get(key), overrideMap.get(key));
+      }).join("")}</ul>` : `<p class="trace-idle">${escapeHtml(t("pending"))}</p>`}
+    </div>`;
+}
+
+function renderAssistedTemplateChecklistItem(item = {}, savedDecision = "pending_review", savedNote = "", savedOverrides = {}) {
+  const itemType = String(item.item_type || "");
+  const itemId = String(item.item_id || "");
+  const overrides = savedOverrides && typeof savedOverrides === "object" ? savedOverrides : {};
+  const decision = ["accepted", "needs_changes", "rejected", "pending_review"].includes(savedDecision)
+    ? savedDecision
+    : "pending_review";
+  const meta = [
+    itemType,
+    item.state_id ? `state=${item.state_id}` : "",
+    item.semantic_action ? `action=${item.semantic_action}` : "",
+    item.target_entity ? `target=${item.target_entity}` : "",
+  ].filter(Boolean).join(" · ");
+  return `
+    <li>
+      <strong>${escapeHtml(item.label || itemId)}</strong>
+      <small>${escapeHtml(meta)}</small>
+      <select data-assisted-template-decision="true" data-item-type="${escapeHtml(itemType)}" data-item-id="${escapeHtml(itemId)}">
+        <option value="pending_review"${decision === "pending_review" ? " selected" : ""}>pending_review</option>
+        <option value="accepted"${decision === "accepted" ? " selected" : ""}>accepted</option>
+        <option value="needs_changes"${decision === "needs_changes" ? " selected" : ""}>needs_changes</option>
+        <option value="rejected"${decision === "rejected" ? " selected" : ""}>rejected</option>
+      </select>
+      <textarea rows="2" data-assisted-template-note="true" data-item-type="${escapeHtml(itemType)}" data-item-id="${escapeHtml(itemId)}" placeholder="review note">${escapeHtml(savedNote || "")}</textarea>
+      <div class="form-grid compact-form-grid">
+        <input data-assisted-template-override="label" data-item-type="${escapeHtml(itemType)}" data-item-id="${escapeHtml(itemId)}" value="${escapeHtml(overrides.label || item.label || "")}" placeholder="label" />
+        <input data-assisted-template-override="semantic_action" data-item-type="${escapeHtml(itemType)}" data-item-id="${escapeHtml(itemId)}" value="${escapeHtml(overrides.semantic_action || item.semantic_action || "")}" placeholder="semantic_action" />
+        <input data-assisted-template-override="target_entity" data-item-type="${escapeHtml(itemType)}" data-item-id="${escapeHtml(itemId)}" value="${escapeHtml(overrides.target_entity || item.target_entity || "")}" placeholder="target_entity" />
+      </div>
+    </li>`;
+}
+
+function clearLearningDraftTrialArtifacts(reason = "") {
+  setLearningTrialResultPath("");
+  setLearningDraftReviewSourcePath("");
+  setLearningPathGraphCandidatePaths({});
+  setLearningAssistedTemplatePackagePath("");
+  setLearningAssistedTemplateAssetCandidatePath("");
+  setLearningAssistedTemplateGraphDraftPath("");
+  renderAssistedTemplateAssetCandidateSummary(null);
+  renderAssistedTemplateGraphDraftSummary(null);
+  renderAssistedTemplateAcceptanceSuggestions(null);
+  renderAssistedTemplateAcceptanceSimulation(null);
+  renderAssistedTemplatePromotionPreflight(null);
+  renderAssistedTemplateAuditedPromotionRequest(null);
+  renderAssistedTemplateReviewPackage(null);
+  clearLearningDraftReviewDisplay(reason);
+}
+
+function clearLearningDraftWorkspaceForNewRun(reason = "") {
+  clearLearningDraftTrialArtifacts(reason);
+}
+
+function activeStagePage() {
+  return document.querySelector(".stage-page.active")?.dataset.page || "";
+}
+
+function applyLearnReplaySubviewChrome(page = activeStagePage()) {
+  const draftActive = page === "learn_replay" && currentLearnReplaySubview === "draft";
+  document.body.classList.toggle("learn-replay-draft-subview", draftActive);
+  document.body.classList.toggle("learn-replay-template-subview", page === "learn_replay" && currentLearnReplaySubview === "template");
+}
+
+function setLearnReplaySubview(view = "template") {
+  const selected = view === "draft" ? "draft" : "template";
+  currentLearnReplaySubview = selected;
+  document.querySelectorAll("[data-learn-replay-view]").forEach((button) => {
+    const active = button.dataset.learnReplayView === selected;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  document.querySelectorAll("[data-learn-replay-panel]").forEach((panel) => {
+    panel.classList.toggle("active", panel.dataset.learnReplayPanel === selected);
+  });
+  applyLearnReplaySubviewChrome();
+  if (selected === "draft") hideSharedPathSurface();
+  else if (activeStagePage() === "learn_replay" && setSharedPathSurfaceVisibility("learn_replay")) renderNavPath();
+}
+
+function learningRecognitionTrialRequestPayload() {
+  const evidence = buildLearningDraftObservationEvidence();
+  return {
+    app_name: String($("learningTrialApp")?.value || $("observeApp")?.value || "unknown_app").trim() || "unknown_app",
+    state_hint: String($("learningTrialState")?.value || $("observeState")?.value || "").trim(),
+    summary: String($("learningTrialGoal")?.value || evidence.screen_summary || "learn a reusable UI workflow template from this screen").trim(),
+    observation_evidence: evidence,
+  };
+}
+
+async function captureLearningDraftWindow() {
+  clearScreenUnderstandingResidualDisplays("not_loaded · screen understanding started");
+  const profile = syncStageProvider("observe");
+  const profileId = profile?.profile_id || $("observeModelProfile")?.value || "";
+  if (!(await ensureStageModelReady("observe", profileId))) return null;
+  const payload = {
+    task: "observe_screen",
+    app_name: String($("learningTrialApp")?.value || $("observeApp")?.value || "").trim() || null,
+    state_hint: String($("learningTrialState")?.value || $("observeState")?.value || "").trim() || null,
+    provider_mode: profile?.provider_mode || $("observeProvider")?.value || null,
+    agent_mode: "learn",
+    learn_depth: "fast",
+    write_policy: { path_graph: false, element_memory: false, trace: true },
+    metadata: {
+      ...metadataWithPrompt("observe"),
+      learning_studio_draft_capture: true,
+      purpose: "learning_draft_trial_image",
+    },
+    capture_live: true,
+  };
+  const response = await api("POST", "/vision/observe_screen", payload, {
+    summary: "POST /vision/observe_screen learning draft capture",
+    workflowStep: "learning_draft_capture",
+    timeoutSeconds: requestTimeoutSeconds(),
+  });
+  if (!response?.success) return null;
+  const result = resultOf(response);
+  const imagePath = result.image_path
+    || nestedGet(response, ["data", "image_path"])
+    || nestedGet(result, ["live_capture", "image_path"])
+    || currentImagePath;
+  if (imagePath) {
+    setCurrentImage(imagePath);
+    setLearningTrialImagePath(imagePath);
+  }
+  lastLearningDraftObserveResponse = response;
+  lastLearningDraftObserveTracePath = result.trace_path || nestedGet(response, ["data", "trace_path"]) || "";
+  return response;
+}
+
+function setLearningInterfaceFlowStep(stepId, statusText = "") {
+  const stepIndex = LEARNING_INTERFACE_FLOW_STEPS.indexOf(stepId);
+  document.querySelectorAll("[data-learning-flow-step]").forEach((item) => {
+    const itemStep = String(item.getAttribute("data-learning-flow-step") || "");
+    const itemIndex = LEARNING_INTERFACE_FLOW_STEPS.indexOf(itemStep);
+    item.classList.toggle("is-active", itemStep === stepId);
+    item.classList.toggle("is-done", stepIndex >= 0 && itemIndex >= 0 && itemIndex < stepIndex);
+  });
+  const status = $("learningInterfaceFlowStatus");
+  if (status) {
+    status.textContent = statusText || t(`learning_flow_${stepId}`) || stepId || t("learning_interface_flow_idle");
+  }
+}
+
+function learningInterfaceTrialEvidenceSummary(trial = {}) {
+  const summary = trial && typeof trial === "object" && trial.summary && typeof trial.summary === "object"
+    ? trial.summary
+    : {};
+  const counts = summary.draft_section_counts && typeof summary.draft_section_counts === "object"
+    ? summary.draft_section_counts
+    : {};
+  const screenInventoryCount = Number(summary.screen_inventory_count || 0);
+  const acceptedForGroundingCount = Number(summary.accepted_for_grounding_count || 0);
+  const groundingValidationCount = Number(summary.grounding_validation_count || 0);
+  const regionCount = Number(counts.regions || 0);
+  const actionTemplateCount = Number(counts.action_templates || 0);
+  return {
+    screenInventoryCount,
+    acceptedForGroundingCount,
+    groundingValidationCount,
+    regionCount,
+    actionTemplateCount,
+    hasScreenUnderstandingEvidence: screenInventoryCount > 0 || regionCount > 0,
+    hasNumberedOverlayEvidence: acceptedForGroundingCount > 0 || groundingValidationCount > 0,
+    hasCalibratedEvidence: groundingValidationCount > 0,
+    hasPathGraphDraftEvidence: regionCount > 0 || actionTemplateCount > 0,
+  };
+}
+
+function learningInterfaceTrialEvidenceStatusText(evidence = {}) {
+  return [
+    `inventory=${Number(evidence.screenInventoryCount || 0)}`,
+    `regions=${Number(evidence.regionCount || 0)}`,
+    `grounding=${Number(evidence.groundingValidationCount || 0)}`,
+    `actions=${Number(evidence.actionTemplateCount || 0)}`,
+  ].join(" · ");
+}
+
+function learningDeepCalibrationEvidenceSummary(response = {}) {
+  const result = resultOf(response);
+  const targets = result?.learn_all_targets && typeof result.learn_all_targets === "object"
+    ? result.learn_all_targets
+    : {};
+  const targetCount = Number(targets.target_count || 0);
+  return {
+    status: String(targets.status || result?.location_status || "unknown"),
+    targetCount,
+    rawCandidateCount: Number(targets.raw_candidate_count || 0),
+    validatedCount: Number(targets.validated_count || 0),
+    invalidCount: Number(targets.invalid_count || 0),
+    filteredNonActionableCount: Number(targets.filtered_non_actionable_count || 0),
+    filteredBrowserChromeCount: Number(targets.filtered_browser_chrome_count || 0),
+    filteredNoiseCount: Number(targets.filtered_noise_count || 0),
+    filteredBlockedReviewOnlyCount: Number(targets.filtered_blocked_review_only_count || 0),
+    filteredUngroundedCount: Number(targets.filtered_ungrounded_count || 0),
+    hasTargets: targetCount > 0,
+  };
+}
+
+function learningDeepCalibrationOverlayPath(response = {}) {
+  const result = resultOf(response);
+  return String(
+    nestedGet(result, ["learn_all_targets", "overlay_path"])
+    || nestedGet(result, ["learn_all_targets", "overlay", "output_path"])
+    || result.coordinate_overlay_path
+    || result.overlay_path
+    || result.output_path
+    || ""
+  ).trim();
+}
+
+function learningDeepCalibrationEvidenceStatusText(evidence = {}) {
+  return [
+    `raw=${Number(evidence.rawCandidateCount || 0)}`,
+    `targets=${Number(evidence.targetCount || 0)}`,
+    `validated=${Number(evidence.validatedCount || 0)}`,
+    `filtered_non_actionable=${Number(evidence.filteredNonActionableCount || 0)}`,
+    `filtered_blocked=${Number(evidence.filteredBlockedReviewOnlyCount || 0)}`,
+    `filtered_chrome=${Number(evidence.filteredBrowserChromeCount || 0)}`,
+    `filtered_noise=${Number(evidence.filteredNoiseCount || 0)}`,
+  ].join(" · ");
+}
+
+async function runLearningDeepCalibration() {
+  const profile = syncStageProvider("locate");
+  const profileId = profile?.profile_id || $("locateModelProfile")?.value || "";
+  if (!(await ensureStageModelReady("locate", profileId))) return null;
+  const payload = payloadFromShared("locate");
+  const imagePath = String($("learningTrialImagePath")?.value || currentImagePath || "").trim();
+  if (imagePath) {
+    payload.capture_live = false;
+    payload.image_path = imagePath;
+  }
+  payload.dry_run = true;
+  payload.trace = true;
+  payload.metadata = {
+    ...(payload.metadata || {}),
+    learning_interface_flow: true,
+    no_live_click_authorization: true,
+  };
+  return api("POST", "/vision/locate_target", payload, {
+    summary: "POST /vision/locate_target · Learn Deep calibration",
+    workflowStep: "locate",
+    timeoutSeconds: requestTimeoutSeconds(),
+  });
+}
+
+function learningTwoStageUnderstandingPayload() {
+  const observeResult = resultOf(lastLearningDraftObserveResponse || lastResponse);
+  return {
+    app_name: String($("learningTrialApp")?.value || $("observeApp")?.value || "unknown_app").trim() || "unknown_app",
+    state_hint: String($("learningTrialState")?.value || $("observeState")?.value || "").trim(),
+    trace_path: String(lastLearningDraftObserveTracePath || observeResult.trace_path || "").trim() || null,
+    observe_result: observeResult || {},
+    require_stage1_gate: true,
+    stage2_region_strategy: "partitioned",
+  };
+}
+
+function learningTwoStageOverlayPath(response) {
+  const result = resultOf(response);
+  return result.coordinate_overlay_path
+    || result.full_screen_understanding_overlay_path
+    || nestedGet(result, ["learn_all_targets", "overlay_path"])
+    || nestedGet(result, ["summary", "overlay_path"])
+    || "";
+}
+
+function learningTwoStageAllowsDraftTrial(response) {
+  const result = resultOf(response);
+  const gateStatus = nestedGet(result, ["stage1_gate", "status"]) || result.status || "";
+  return gateStatus === "passed" && nestedGet(result, ["stage2_numbering_skipped"]) !== true;
+}
+
+async function runLearningTwoStageUnderstanding() {
+  const payload = learningTwoStageUnderstandingPayload();
+  const response = await api("POST", "/panel/run_learning_two_stage_understanding", payload, {
+    summary: "POST /panel/run_learning_two_stage_understanding",
+    workflowStep: "learning_two_stage_understanding",
+    timeoutSeconds: requestTimeoutSeconds(),
+  });
+  if (response?.success) {
+    const overlayPath = learningTwoStageOverlayPath(response);
+    if (overlayPath) {
+      setCurrentImage(overlayPath);
+      renderLearningDraftScreenshotPath(overlayPath, "learning two-stage fused overlay");
+    }
+  }
+  return response;
+}
+
+async function runLearningInterfaceFlow() {
+  const button = $("learningInterfaceRunBtn");
+  const previousDisabled = Boolean(button?.disabled);
+  if (button) button.disabled = true;
+  try {
+    clearLearningDraftWorkspaceForNewRun("not_loaded · new learning run started");
+    setLearningInterfaceFlowStep("bind_capture", `${t("learning_flow_bind_capture")} · no live click`);
+    const capture = await captureLearningDraftWindow();
+    if (!capture?.success) {
+      setLearningInterfaceFlowStep("bind_capture", "capture failed");
+      return null;
+    }
+
+    setLearningInterfaceFlowStep("screen_understanding", t("learning_flow_screen_understanding"));
+    const trial = await runLearningDraftTrial();
+    if (!trial) {
+      setLearningInterfaceFlowStep("screen_understanding", "learning draft generation failed");
+      return null;
+    }
+
+    const trialEvidence = learningInterfaceTrialEvidenceSummary(trial);
+    const evidenceStatus = learningInterfaceTrialEvidenceStatusText(trialEvidence);
+    if (!trialEvidence.hasScreenUnderstandingEvidence) {
+      setLearningInterfaceFlowStep("screen_understanding", `no usable screen inventory · ${evidenceStatus}`);
+      return trial;
+    }
+
+    setLearningInterfaceFlowStep("numbered_map", "Stage1 region gate + two-stage numbering");
+    const twoStage = await runLearningTwoStageUnderstanding();
+    if (!twoStage?.success) {
+      setLearningInterfaceFlowStep("numbered_map", `two-stage understanding failed · ${statusTextForResponse(twoStage || {})}`);
+      return trial;
+    }
+    const twoStageOverlayPath = learningTwoStageOverlayPath(twoStage);
+    if (twoStageOverlayPath) {
+      renderLearningDraftScreenshotPath(twoStageOverlayPath, "learning two-stage fused overlay");
+    }
+    if (!learningTwoStageAllowsDraftTrial(twoStage)) {
+      const status = nestedGet(resultOf(twoStage), ["stage1_gate", "status"]) || statusTextForResponse(twoStage);
+      setLearningInterfaceFlowStep("numbered_map", `Stage1 gate blocked Stage2 · ${status}`);
+      return trial;
+    }
+
+    setLearningInterfaceFlowStep("fusion", "two-stage boxes accepted for draft review");
+    const fusedTrial = await runLearningDraftTrial();
+    if (!fusedTrial) {
+      setLearningInterfaceFlowStep("fusion", "two-stage draft generation failed");
+      return await completeLearningInterfaceReadonlyFlow({
+        fallbackResult: trial,
+        statusNote: "two-stage draft generation failed; using initial draft",
+      });
+    }
+    if (twoStageOverlayPath) {
+      renderLearningDraftScreenshotPath(twoStageOverlayPath, "learning two-stage fused overlay");
+    }
+    return await completeLearningInterfaceReadonlyFlow({
+      fallbackResult: fusedTrial,
+      statusNote: "two-stage fused draft · Stage1 gate passed",
+    });
+  } finally {
+    if (button) button.disabled = previousDisabled;
+  }
+}
+
+async function completeLearningInterfaceReadonlyFlow({ fallbackResult = null, statusNote = "" } = {}) {
+  const note = String(statusNote || "").trim();
+  setLearningInterfaceFlowStep("page_details", `${t("learning_flow_page_details")}${note ? ` · ${note}` : ""}`);
+  const pageDetail = await createPageDetailCandidate();
+  if (!pageDetail) {
+    setLearningInterfaceFlowStep("page_details", "page detail candidate generation failed");
+    return fallbackResult;
+  }
+  setLearningInterfaceFlowStep("fusion", `${t("learning_flow_fusion")} · review only`);
+  const scaffold = await createLearningDemoScaffold();
+  if (!scaffold) {
+    setLearningInterfaceFlowStep("pathgraph_draft", "readonly scaffold generation failed");
+    return pageDetail || fallbackResult;
+  }
+  setLearningInterfaceFlowStep("pathgraph_draft", `${t("learning_flow_pathgraph_draft")} · review only`);
+  setLearningInterfaceFlowStep("complete", `${t("learning_flow_complete")} · draft only`);
+  return scaffold || pageDetail || fallbackResult;
+}
+
+async function runLearningDraftTrial() {
+  const payload = learningRecognitionTrialRequestPayload();
+  clearScreenUnderstandingResidualDisplays("not_loaded · generating learning draft");
+  const response = await api("POST", "/panel/run_learning_recognition_trial", payload, {
+    summary: "POST /panel/run_learning_recognition_trial",
+    workflowStep: "run_learning_recognition_trial",
+    skipRender: true,
+    timeoutSeconds: requestTimeoutSeconds(),
+  });
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "Learning draft trial failed" }, "Learning Studio draft trial");
+    return null;
+  }
+  const data = response.data || {};
+  const trialPath = String(data.trial_path || "").trim();
+  if (trialPath) {
+    setLearningTrialResultPath(trialPath);
+    setLearningDraftReviewSourcePath(trialPath);
+    await loadLearningDraftReview({ skipResponse: true });
+  }
+  renderResponse({
+    success: true,
+    message: "DraftGraph Preview generated as display-only learning draft",
+    data: {
+      ...data,
+      learning_draft_review_loaded: Boolean(trialPath),
+      template_replay_untouched: true,
+      no_click_authorization: true,
+      not_runtime_path_graph: true,
+    },
+  }, "Learning Studio draft trial");
+  return data;
+}
+
+function learningReviewLabel(item = {}, index = 0, fallback = "item") {
+  return String(
+    item.label
+      || item.name
+      || item.state_id
+      || item.region_id
+      || item.action_id
+      || item.action_template_id
+      || item.blocker_id
+      || item.rule_id
+      || item.type
+      || `${fallback}_${index + 1}`
+  );
+}
+
+function learningReviewItemId(item = {}, index = 0, fallback = "item") {
+  return String(
+    item.state_id
+      || item.region_id
+      || item.action_id
+      || item.action_template_id
+      || item.blocker_id
+      || item.rule_id
+      || `${fallback}_${index + 1}`
+  );
+}
+
+function learningDraftPreviewButton(item = {}, options = {}) {
+  const imagePath = String(options.imagePath || "").trim();
+  const editKind = String(options.editKind || "").trim();
+  const bbox = normalizeBBox(item.bbox);
+  if (!bbox && !(editKind && imagePath)) return "";
+  const point = normalizePoint(item.click_point || item.screen_point, bbox);
+  const itemId = learningReviewItemId(item, 0, options.idFallback || "item");
+  const attrs = [
+    `data-learning-draft-preview-bbox="1"`,
+    bbox ? `data-bbox-x="${escapeHtml(String(Math.round(bbox.x)))}"` : "",
+    bbox ? `data-bbox-y="${escapeHtml(String(Math.round(bbox.y)))}"` : "",
+    bbox ? `data-bbox-w="${escapeHtml(String(Math.round(bbox.width)))}"` : "",
+    bbox ? `data-bbox-h="${escapeHtml(String(Math.round(bbox.height)))}"` : "",
+    point ? `data-point-x="${escapeHtml(String(Math.round(point.x)))}"` : "",
+    point ? `data-point-y="${escapeHtml(String(Math.round(point.y)))}"` : "",
+    imagePath ? `data-image-path="${escapeHtml(imagePath)}"` : "",
+    editKind ? `data-edit-kind="${escapeHtml(editKind)}"` : "",
+    editKind ? `data-edit-id="${escapeHtml(itemId)}"` : "",
+  ].filter(Boolean).join(" ");
+  const label = editKind ? t("learning_draft_edit_bbox") : t("learning_draft_preview_bbox");
+  return `<button type="button" class="learning-review-preview-bbox" ${attrs}>${escapeHtml(label)}</button>`;
+}
+
+function previewLearningDraftBbox(button) {
+  if (!button) return;
+  const editContext = button.dataset.editKind && button.dataset.editId ? {
+    kind: button.dataset.editKind,
+    id: button.dataset.editId,
+  } : null;
+  const bbox = {
+    x: Number(button.dataset.bboxX || 0),
+    y: Number(button.dataset.bboxY || 0),
+    width: Number(button.dataset.bboxW || 0),
+    height: Number(button.dataset.bboxH || 0),
+  };
+  const hasBbox = [bbox.x, bbox.y, bbox.width, bbox.height].every(Number.isFinite) && bbox.width > 0 && bbox.height > 0;
+  if (!hasBbox && !editContext) {
+    renderResponse({ success: false, message: "Learning draft bbox is missing or invalid." }, "learning draft bbox preview");
+    return;
+  }
+  const imagePath = String(button.dataset.imagePath || "").trim();
+  if (imagePath) setCurrentImage(imagePath);
+  if (hasBbox) {
+    $("bboxX").value = Math.round(bbox.x);
+    $("bboxY").value = Math.round(bbox.y);
+    $("bboxW").value = Math.round(bbox.width);
+    $("bboxH").value = Math.round(bbox.height);
+    $("pointX").value = button.dataset.pointX ? Math.round(Number(button.dataset.pointX)) : Math.round(bbox.x + bbox.width / 2);
+    $("pointY").value = button.dataset.pointY ? Math.round(Number(button.dataset.pointY)) : Math.round(bbox.y + bbox.height / 2);
+    previewBox();
+  }
+  openImageInspector({
+    imagePath,
+    bbox: hasBbox ? bbox : null,
+    point: hasBbox ? { x: Number($("pointX").value || 0), y: Number($("pointY").value || 0) } : null,
+    title: t("learning_draft_image_inspector"),
+    editContext,
+  });
+}
+
+function applyImageInspectorSelectionToDraft() {
+  if (!imageInspectorEditContext || !imageInspectorSelection?.bbox || !learningDraftReview?.draft) return;
+  const kind = imageInspectorEditContext.kind === "action" ? "action" : "region";
+  const id = String(imageInspectorEditContext.id || "").trim();
+  if (!id) return;
+  const bbox = normalizeBbox(imageInspectorSelection.bbox);
+  if (!bbox) return;
+  const point = imageInspectorSelection.point || {
+    x: bbox.x + bbox.width / 2,
+    y: bbox.y + bbox.height / 2,
+  };
+  const patchValue = {
+    bbox: { x: Math.round(bbox.x), y: Math.round(bbox.y), w: Math.round(bbox.width), h: Math.round(bbox.height) },
+    click_point: { x: Math.round(Number(point.x || 0)), y: Math.round(Number(point.y || 0)) },
+    source: "human_review_full_image_inspector_v1",
+  };
+  const patchBucket = kind === "action" ? "actions" : "regions";
+  learningDraftReviewBboxEdits[patchBucket][id] = patchValue;
+  const items = kind === "action"
+    ? learningDraftArray(learningDraftReview.draft.action_templates)
+    : learningDraftArray(learningDraftReview.draft.regions);
+  const idKey = kind === "action" ? "action_template_id" : "region_id";
+  const item = items.find((candidate) => String(candidate[idKey] || candidate.action_id || "").trim() === id);
+  if (item) {
+    const previousBBox = item.human_review?.previous_bbox || (item.bbox && typeof item.bbox === "object" ? { ...item.bbox } : null);
+    const previousPoint = item.human_review?.previous_click_point || (item.click_point && typeof item.click_point === "object" ? { ...item.click_point } : null);
+    item.bbox = { ...patchValue.bbox };
+    item.click_point = { ...patchValue.click_point };
+    item.human_review = {
+      ...(item.human_review && typeof item.human_review === "object" ? item.human_review : {}),
+      bbox_edited: true,
+      bbox_edit_source: patchValue.source,
+      previous_bbox: previousBBox,
+      previous_click_point: previousPoint,
+      updated_bbox: { ...patchValue.bbox },
+      updated_click_point: { ...patchValue.click_point },
+    };
+  }
+  renderLearningDraftReview(learningDraftReview);
+  renderResponse({
+    success: true,
+    message: t("learning_draft_bbox_edit_saved"),
+    data: {
+      kind,
+      id,
+      bbox: patchValue.bbox,
+      click_point: patchValue.click_point,
+      execute_binding_enabled: false,
+      artifact_is_authorization: false,
+    },
+  }, "Learning draft bbox edit");
+}
+
+function bindImageInspectorEditDrag() {
+  const stage = $("imageInspectorStage");
+  const applyButton = $("imageInspectorApplyBoxBtn");
+  if (!stage || stage.dataset.dragBound === "1") return;
+  stage.dataset.dragBound = "1";
+  let dragStart = null;
+  stage.addEventListener("mousedown", (event) => {
+    if (!imageInspectorEditContext) return;
+    const start = imageInspectorEventPoint(event);
+    if (!start) return;
+    dragStart = start;
+    event.preventDefault();
+  });
+  window.addEventListener("mousemove", (event) => {
+    if (!dragStart || !imageInspectorEditContext) return;
+    const current = imageInspectorEventPoint(event);
+    const bbox = imageInspectorBoxFromPoints(dragStart, current);
+    if (!bbox) return;
+    const point = { x: bbox.x + bbox.width / 2, y: bbox.y + bbox.height / 2 };
+    imageInspectorSelection = { bbox, point };
+    drawImageInspectorSelection(bbox, point);
+    if (applyButton) applyButton.disabled = false;
+  });
+  window.addEventListener("mouseup", () => {
+    dragStart = null;
+  });
+  applyButton?.addEventListener("click", applyImageInspectorSelectionToDraft);
+}
+
+function bindLearningDraftPreviewButtons(container) {
+  const host = container || document;
+  host.querySelectorAll("[data-learning-draft-preview-bbox]").forEach((button) => {
+    button.addEventListener("click", () => previewLearningDraftBbox(button));
+  });
+}
+
+function renderLearningReviewItems(items, idFallback, options = {}) {
+  if (!Array.isArray(items) || !items.length) {
+    return `<p class="trace-idle">${escapeHtml(t("learning_review_empty"))}</p>`;
+  }
+  return `<ul class="learning-review-list">${items.map((item, index) => {
+    const itemId = learningReviewItemId(item, index, idFallback);
+    const label = learningReviewLabel(item, index, idFallback);
+    const type = [item.type || item.action_type || item.semantic_type || item.kind || item.item_type, item.role]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .join(" · ");
+    const region = String(item.region_id || item.target_region_id || item.target_entity || "").trim();
+    const bbox = item.bbox && typeof item.bbox === "object" ? item.bbox : null;
+    const point = item.click_point && typeof item.click_point === "object" ? item.click_point : null;
+    const sourceList = Array.isArray(item.source_evidence) ? item.source_evidence.filter(Boolean).join("+") : "";
+    const decision = item.decision && typeof item.decision === "object" ? item.decision : {};
+    const reason = String(decision.reason || item.grounding_block_reason || "").trim();
+    const evidenceRef = String(item.source_candidate_id || item.source_target_id || item.evidence_ref || item.source || sourceList || "").trim();
+    const transitionMeta = learningDraftActionTransitionMeta(item);
+    const humanReviewMeta = learningDraftHumanReviewMeta(item);
+    const meta = [
+      type,
+      region ? `region=${region}` : "",
+      bbox ? `bbox=${bbox.x},${bbox.y},${bbox.w},${bbox.h}` : "",
+      point ? `point=${point.x},${point.y}` : "",
+      evidenceRef ? `evidence=${evidenceRef}` : "",
+      reason ? `reason=${reason}` : "",
+      transitionMeta,
+      humanReviewMeta.text,
+    ].filter(Boolean).join(" · ");
+    return `<li><strong>${escapeHtml(label)}</strong><span>${escapeHtml(itemId)}</span>${humanReviewMeta.badge}${meta ? `<small>${escapeHtml(meta)}</small>` : ""}${options.previewBbox ? learningDraftPreviewButton(item, { ...options, idFallback }) : ""}</li>`;
+  }).join("")}</ul>`;
+}
+
+function learningReviewLines(items, fallback) {
+  if (!Array.isArray(items) || !items.length) return "";
+  return items.map((item, index) => learningReviewLabel(item, index, fallback)).join("\n");
+}
+
+function screenUnderstandingBboxText(item = {}) {
+  const bbox = item.bbox && typeof item.bbox === "object" ? item.bbox : null;
+  if (!bbox) return "";
+  return `bbox=${bbox.x},${bbox.y},${bbox.w},${bbox.h}`;
+}
+
+function screenUnderstandingEvidenceText(item = {}) {
+  const sources = Array.isArray(item.source_evidence) ? item.source_evidence.filter(Boolean).join("+") : "";
+  const evidence = String(item.evidence_level || "").trim();
+  const blockReason = String(item.grounding_block_reason || "").trim();
+  const policy = String(item.display_policy || "").trim();
+  const crossEvidence = item.cross_evidence && typeof item.cross_evidence === "object" ? item.cross_evidence : null;
+  const support = crossEvidence ? String(crossEvidence.support_item_id || "").trim() : "";
+  const overlap = crossEvidence && Number.isFinite(Number(crossEvidence.iou)) ? `iou=${Number(crossEvidence.iou).toFixed(2)}` : "";
+  return [
+    policy,
+    evidence,
+    sources ? `sources=${sources}` : "",
+    screenUnderstandingBboxText(item),
+    blockReason ? `blocked=${blockReason}` : "",
+    support ? `support=${support}` : "",
+    overlap,
+  ].filter(Boolean).join(" · ");
+}
+
+function renderScreenUnderstandingItems(items, fallback) {
+  if (!Array.isArray(items) || !items.length) {
+    return `<p class="trace-idle">${escapeHtml(t("screen_understanding_empty"))}</p>`;
+  }
+  return `<ul class="screen-understanding-list">${items.map((item, index) => {
+    const itemId = String(item.item_id || `${fallback}_${index + 1}`);
+    const label = String(item.label || item.text || itemId);
+    const type = [item.item_type, item.role].map((value) => String(value || "").trim()).filter(Boolean).join(" · ");
+    const meta = screenUnderstandingEvidenceText(item);
+    return `
+      <li>
+        <strong>${escapeHtml(label)}</strong>
+        <span>${escapeHtml(itemId)}</span>
+        ${type ? `<small>${escapeHtml(type)}</small>` : ""}
+        ${meta ? `<small>${escapeHtml(meta)}</small>` : ""}
+      </li>`;
+  }).join("")}</ul>`;
+}
+
+function renderScreenUnderstandingCalibrationBacklog(items) {
+  if (!Array.isArray(items) || !items.length) return "";
+  const visible = items.slice(0, 8);
+  return `
+    <div class="screen-understanding-column">
+      <strong>${escapeHtml(t("screen_understanding_calibration_backlog"))}</strong>
+      <ul class="screen-understanding-list">${visible.map((item, index) => {
+        const regionNo = item.region_no ?? index + 1;
+        const label = String(item.label || item.source_item_id || `region_${regionNo}`);
+        const action = String(item.suggested_semantic_action || "click_target");
+        const evidence = String(item.evidence_level || "");
+        return `
+          <li>
+            <strong>#${escapeHtml(regionNo)} ${escapeHtml(label)}</strong>
+            <span>${escapeHtml(action)}</span>
+            ${evidence ? `<small>${escapeHtml(evidence)}</small>` : ""}
+          </li>`;
+      }).join("")}</ul>
+    </div>`;
+}
+
+function renderScreenUnderstandingCalibrationBatchPlan(preview) {
+  const summary = preview.calibration_batch_plan_summary && typeof preview.calibration_batch_plan_summary === "object"
+    ? preview.calibration_batch_plan_summary
+    : {};
+  const readyNumbers = Array.isArray(preview.calibration_batch_ready_region_numbers)
+    ? preview.calibration_batch_ready_region_numbers
+    : [];
+  const reviewNumbers = Array.isArray(preview.calibration_batch_review_blocked_region_numbers)
+    ? preview.calibration_batch_review_blocked_region_numbers
+    : [];
+  const commandPreview = String(preview.calibration_batch_run_command_preview || "").trim();
+  const postBatchRefreshCommand = String(preview.post_batch_refresh_command_preview || "").trim();
+  if (!readyNumbers.length && !reviewNumbers.length && !commandPreview && !postBatchRefreshCommand) return "";
+  const readyCount = Number.isFinite(Number(summary.ready_for_execute_dry_run))
+    ? Number(summary.ready_for_execute_dry_run)
+    : readyNumbers.length;
+  const reviewCount = Number.isFinite(Number(summary.review_before_calibration))
+    ? Number(summary.review_before_calibration)
+    : reviewNumbers.length;
+  return `
+    <div class="screen-understanding-column">
+      <strong>${escapeHtml(t("screen_understanding_calibration_batch_plan"))}</strong>
+      <ul class="screen-understanding-list">
+        <li>
+          <strong>${escapeHtml(t("screen_understanding_calibration_batch_ready"))}: ${escapeHtml(readyCount)}</strong>
+          <span>${escapeHtml(readyNumbers.join(", ") || "-")}</span>
+        </li>
+        <li>
+          <strong>${escapeHtml(t("screen_understanding_calibration_batch_review"))}: ${escapeHtml(reviewCount)}</strong>
+          <span>${escapeHtml(reviewNumbers.join(", ") || "-")}</span>
+        </li>
+        <li>
+          <strong>command_executes_now=${escapeHtml(preview.calibration_batch_command_executes_now === true ? "true" : "false")}</strong>
+          ${commandPreview ? `<small>${escapeHtml(t("screen_understanding_calibration_batch_command"))}: ${escapeHtml(commandPreview)}</small>` : ""}
+          ${postBatchRefreshCommand ? `<small>${escapeHtml(t("screen_understanding_post_batch_refresh_command"))}: ${escapeHtml(postBatchRefreshCommand)}</small>` : ""}
+          ${postBatchRefreshCommand ? `<small>post_batch_refresh_command_executes_now=${escapeHtml(preview.post_batch_refresh_command_executes_now === true ? "true" : "false")}</small>` : ""}
+          ${postBatchRefreshCommand ? `<small>requires_completed_batch=${escapeHtml(preview.post_batch_refresh_requires_completed_batch === true ? "true" : "false")}</small>` : ""}
+        </li>
+      </ul>
+    </div>`;
+}
+
+function renderScreenUnderstandingCalibrationHandoff(preview) {
+  const report = preview.calibration_handoff_report && typeof preview.calibration_handoff_report === "object"
+    ? preview.calibration_handoff_report
+    : {};
+  const status = String(report.handoff_status || "").trim();
+  if (!status) return "";
+  const readyNumbers = Array.isArray(report.ready_region_numbers) ? report.ready_region_numbers : [];
+  const reviewNumbers = Array.isArray(report.review_blocked_region_numbers) ? report.review_blocked_region_numbers : [];
+  const futureOutputs = report.future_outputs && typeof report.future_outputs === "object" ? report.future_outputs : {};
+  const safety = report.safety && typeof report.safety === "object" ? report.safety : {};
+  const blockers = Array.isArray(report.blockers) ? report.blockers : [];
+  const warnings = Array.isArray(report.warnings) ? report.warnings : [];
+  return `
+    <div class="screen-understanding-column">
+      <strong>${escapeHtml(t("screen_understanding_calibration_handoff"))}</strong>
+      <ul class="screen-understanding-list">
+        <li>
+          <strong>${escapeHtml(status)}</strong>
+          <span>${escapeHtml(t("screen_understanding_handoff_ready"))}: ${escapeHtml(report.safe_to_start_after_user_approval === true ? "true" : "false")}</span>
+        </li>
+        <li>
+          <strong>${escapeHtml(t("screen_understanding_calibration_batch_ready"))}: ${escapeHtml(readyNumbers.length)}</strong>
+          <span>${escapeHtml(readyNumbers.join(", ") || "-")}</span>
+        </li>
+        <li>
+          <strong>${escapeHtml(t("screen_understanding_calibration_batch_review"))}: ${escapeHtml(reviewNumbers.length)}</strong>
+          <span>${escapeHtml(reviewNumbers.join(", ") || "-")}</span>
+        </li>
+        <li>
+          <strong>${escapeHtml(t("screen_understanding_handoff_rerun_status"))}</strong>
+          <span>${escapeHtml(String(futureOutputs.rerun_report_status || "-"))}</span>
+        </li>
+        <li>
+          <strong>${escapeHtml(t("screen_understanding_handoff_blockers"))}: ${escapeHtml(blockers.length)}</strong>
+          <span>${escapeHtml(blockers.join(", ") || "-")}</span>
+        </li>
+        <li>
+          <strong>${escapeHtml(t("screen_understanding_handoff_warnings"))}: ${escapeHtml(warnings.length)}</strong>
+          <span>${escapeHtml(warnings.join(", ") || "-")}</span>
+        </li>
+        <li>
+          <small>execute_binding_enabled=${escapeHtml(safety.execute_binding_enabled === true ? "true" : "false")}</small>
+          <small>artifact_is_authorization=${escapeHtml(safety.artifact_is_authorization === true ? "true" : "false")}</small>
+          <small>real_clicks=${escapeHtml(String(Number.isFinite(Number(safety.real_clicks)) ? Number(safety.real_clicks) : 0))}</small>
+          <small>live_fill=${escapeHtml(safety.live_fill === true ? "true" : "false")}</small>
+          <small>live_submit=${escapeHtml(safety.live_submit === true ? "true" : "false")}</small>
+        </li>
+      </ul>
+    </div>`;
+}
+
+function renderScreenUnderstandingCalibrationBatchAcceptance(preview) {
+  const report = preview.calibration_batch_acceptance_report && typeof preview.calibration_batch_acceptance_report === "object"
+    ? preview.calibration_batch_acceptance_report
+    : {};
+  const status = String(report.acceptance_status || "").trim();
+  if (!status) return "";
+  const coverage = report.coverage && typeof report.coverage === "object" ? report.coverage : {};
+  const safety = report.safety && typeof report.safety === "object" ? report.safety : {};
+  const blockers = Array.isArray(report.blockers) ? report.blockers : [];
+  const warnings = Array.isArray(report.warnings) ? report.warnings : [];
+  const expected = Array.isArray(coverage.expected_ready_region_numbers) ? coverage.expected_ready_region_numbers : [];
+  const accepted = Array.isArray(coverage.accepted_region_numbers) ? coverage.accepted_region_numbers : [];
+  const missing = Array.isArray(coverage.missing_ready_region_numbers) ? coverage.missing_ready_region_numbers : [];
+  const unexpected = Array.isArray(coverage.unexpected_region_numbers) ? coverage.unexpected_region_numbers : [];
+  const reviewBlocked = Array.isArray(coverage.review_blocked_region_numbers_in_rerun)
+    ? coverage.review_blocked_region_numbers_in_rerun
+    : [];
+  return `
+    <div class="screen-understanding-column">
+      <strong>${escapeHtml(t("screen_understanding_calibration_batch_acceptance"))}</strong>
+      <ul class="screen-understanding-list">
+        <li>
+          <strong>${escapeHtml(status)}</strong>
+          <span>ready_for_post_batch_refresh=${escapeHtml(report.ready_for_post_batch_refresh === true ? "true" : "false")}</span>
+        </li>
+        <li>
+          <strong>expected=${escapeHtml(expected.length)} · accepted=${escapeHtml(accepted.length)}</strong>
+          <span>${escapeHtml(accepted.join(", ") || "-")}</span>
+        </li>
+        <li>
+          <strong>missing=${escapeHtml(missing.length)} · unexpected=${escapeHtml(unexpected.length)} · review_blocked=${escapeHtml(reviewBlocked.length)}</strong>
+          <span>${escapeHtml([missing.length ? `missing:${missing.join(",")}` : "", unexpected.length ? `unexpected:${unexpected.join(",")}` : "", reviewBlocked.length ? `review:${reviewBlocked.join(",")}` : ""].filter(Boolean).join(" · ") || "-")}</span>
+        </li>
+        <li>
+          <strong>blockers=${escapeHtml(blockers.length)} · warnings=${escapeHtml(warnings.length)}</strong>
+          <span>${escapeHtml(blockers.join(", ") || warnings.join(", ") || "-")}</span>
+        </li>
+        <li>
+          <small>real_clicks=${escapeHtml(String(Number.isFinite(Number(safety.real_clicks)) ? Number(safety.real_clicks) : 0))}</small>
+          <small>execute_binding_enabled=${escapeHtml(safety.execute_binding_enabled === true ? "true" : "false")}</small>
+          <small>artifact_is_authorization=${escapeHtml(safety.artifact_is_authorization === true ? "true" : "false")}</small>
+        </li>
+      </ul>
+    </div>`;
+}
+
+function renderScreenUnderstandingHandoffConsistency(preview) {
+  const report = preview.calibration_handoff_consistency_report && typeof preview.calibration_handoff_consistency_report === "object"
+    ? preview.calibration_handoff_consistency_report
+    : {};
+  const status = String(report.consistency_status || "").trim();
+  if (!status) return "";
+  const summary = report.summary && typeof report.summary === "object" ? report.summary : {};
+  const checks = report.checks && typeof report.checks === "object" ? report.checks : {};
+  const safety = report.safety && typeof report.safety === "object" ? report.safety : {};
+  const blockers = Array.isArray(report.blockers) ? report.blockers : [];
+  const readyNumbers = Array.isArray(summary.ready_region_numbers) ? summary.ready_region_numbers : [];
+  const passedChecks = Object.values(checks).filter((value) => value === true).length;
+  const totalChecks = Object.keys(checks).length;
+  return `
+    <div class="screen-understanding-column">
+      <strong>${escapeHtml(t("screen_understanding_handoff_consistency"))}</strong>
+      <ul class="screen-understanding-list">
+        <li>
+          <strong>${escapeHtml(status)}</strong>
+          <span>checks=${escapeHtml(passedChecks)}/${escapeHtml(totalChecks)}</span>
+        </li>
+        <li>
+          <strong>readiness=${escapeHtml(String(summary.readiness_status || "-"))}</strong>
+          <span>handoff=${escapeHtml(String(summary.handoff_status || "-"))} · acceptance=${escapeHtml(String(summary.acceptance_status || "-"))}</span>
+        </li>
+        <li>
+          <strong>${escapeHtml(t("screen_understanding_calibration_batch_ready"))}: ${escapeHtml(readyNumbers.length)}</strong>
+          <span>${escapeHtml(readyNumbers.join(", ") || "-")}</span>
+        </li>
+        <li>
+          <strong>post_batch_refresh_has_batch_plan=${escapeHtml(summary.post_batch_refresh_has_batch_plan === true ? "true" : "false")}</strong>
+          <span>refresh_blocks_before_future_rerun=${escapeHtml(summary.refresh_blocks_before_future_rerun === true ? "true" : "false")}</span>
+        </li>
+        <li>
+          <strong>blockers=${escapeHtml(blockers.length)}</strong>
+          <span>${escapeHtml(blockers.join(", ") || "-")}</span>
+        </li>
+        <li>
+          <small>model_started=${escapeHtml(safety.model_started === true ? "true" : "false")}</small>
+          <small>live_clicks=${escapeHtml(String(Number.isFinite(Number(safety.live_clicks)) ? Number(safety.live_clicks) : 0))}</small>
+          <small>live_fills=${escapeHtml(String(Number.isFinite(Number(safety.live_fills)) ? Number(safety.live_fills) : 0))}</small>
+          <small>live_submits=${escapeHtml(String(Number.isFinite(Number(safety.live_submits)) ? Number(safety.live_submits) : 0))}</small>
+        </li>
+      </ul>
+    </div>`;
+}
+
+function renderScreenUnderstandingModelStartRunbook(preview) {
+  const runbook = preview.model_start_runbook && typeof preview.model_start_runbook === "object"
+    ? preview.model_start_runbook
+    : {};
+  const status = String(runbook.runbook_status || "").trim();
+  if (!status) return "";
+  const guards = runbook.guards && typeof runbook.guards === "object" ? runbook.guards : {};
+  const safety = runbook.safety && typeof runbook.safety === "object" ? runbook.safety : {};
+  const readyNumbers = Array.isArray(runbook.ready_region_numbers) ? runbook.ready_region_numbers : [];
+  const reviewNumbers = Array.isArray(runbook.review_blocked_region_numbers) ? runbook.review_blocked_region_numbers : [];
+  const blockers = Array.isArray(runbook.blockers) ? runbook.blockers : [];
+  return `
+    <div class="screen-understanding-column">
+      <strong>${escapeHtml(t("screen_understanding_model_start_runbook"))}</strong>
+      <ul class="screen-understanding-list">
+        <li>
+          <strong>${escapeHtml(status)}</strong>
+          <span>approval_required=${escapeHtml(runbook.approval_required === true ? "true" : "false")}</span>
+        </li>
+        <li>
+          <strong>may_start_after_approval=${escapeHtml(runbook.may_start_model_after_user_approval === true ? "true" : "false")}</strong>
+          <span>may_run_now=${escapeHtml(runbook.may_run_calibration_batch_now === true ? "true" : "false")}</span>
+        </li>
+        <li>
+          <strong>${escapeHtml(t("screen_understanding_calibration_batch_ready"))}: ${escapeHtml(readyNumbers.length)}</strong>
+          <span>${escapeHtml(readyNumbers.join(", ") || "-")}</span>
+        </li>
+        <li>
+          <strong>${escapeHtml(t("screen_understanding_calibration_batch_review"))}: ${escapeHtml(reviewNumbers.length)}</strong>
+          <span>${escapeHtml(reviewNumbers.join(", ") || "-")}</span>
+        </li>
+        <li>
+          <strong>refresh_gate=${escapeHtml(guards.post_batch_refresh_has_batch_plan === true ? "batch_plan" : "missing")}</strong>
+          <span>prebatch_refresh_block=${escapeHtml(guards.prebatch_refresh_blocks_before_future_rerun === true ? "true" : "false")}</span>
+        </li>
+        <li>
+          <strong>blockers=${escapeHtml(blockers.length)}</strong>
+          <span>${escapeHtml(blockers.join(", ") || runbook.next_manual_action || "-")}</span>
+        </li>
+        <li>
+          <small>model_started=${escapeHtml(safety.model_started === true ? "true" : "false")}</small>
+          <small>live_clicks=${escapeHtml(String(Number.isFinite(Number(safety.live_clicks)) ? Number(safety.live_clicks) : 0))}</small>
+          <small>live_fills=${escapeHtml(String(Number.isFinite(Number(safety.live_fills)) ? Number(safety.live_fills) : 0))}</small>
+          <small>live_submits=${escapeHtml(String(Number.isFinite(Number(safety.live_submits)) ? Number(safety.live_submits) : 0))}</small>
+        </li>
+      </ul>
+    </div>`;
+}
+
+function renderScreenUnderstandingEvidenceIntegrity(preview) {
+  const integrity = preview.evidence_integrity && typeof preview.evidence_integrity === "object"
+    ? preview.evidence_integrity
+    : {};
+  const integrityStatus = String(integrity.status || "").trim();
+  if (!integrityStatus) return "";
+  const evidenceKeys = [
+    "screenshot",
+    "full_screen_understanding_overlay",
+    "compiled_overlay",
+    "source_status_report",
+    "source_calibration_report",
+  ];
+  const rows = evidenceKeys
+    .map((key) => {
+      const item = integrity[key] && typeof integrity[key] === "object" ? integrity[key] : null;
+      if (!item) return "";
+      const path = String(item.path || item.declared_path || "");
+      const hash = String(item.sha256 || "");
+      return `
+        <li>
+          <strong>${escapeHtml(key)} · exists=${escapeHtml(item.exists === true ? "true" : "false")}</strong>
+          ${path ? `<span>${escapeHtml(path)}</span>` : ""}
+          ${hash ? `<small>sha256=${escapeHtml(hash.slice(0, 12))}</small>` : ""}
+        </li>`;
+    })
+    .filter(Boolean)
+    .join("");
+  const missing = Array.isArray(integrity.missing_declared_evidence)
+    ? integrity.missing_declared_evidence
+    : [];
+  return `
+    <div class="screen-understanding-column">
+      <strong>${escapeHtml(t("screen_understanding_evidence_integrity"))}</strong>
+      <ul class="screen-understanding-list">
+        <li>
+          <strong>${escapeHtml(integrityStatus)}</strong>
+          <span>required_for_pathgraph_review=${escapeHtml(integrity.required_for_pathgraph_review === true ? "true" : "false")}</span>
+        </li>
+        <li>
+          <strong>missing_declared_evidence=${escapeHtml(missing.length)}</strong>
+          <span>${escapeHtml(missing.join(", ") || "-")}</span>
+        </li>
+        ${rows}
+      </ul>
+    </div>`;
+}
+
+function renderScreenUnderstandingPreview(preview) {
+  const target = $("screenUnderstandingPreview");
+  const status = $("screenUnderstandingPreviewStatus");
+  if (!target) return;
+  if (!preview || preview.source_status !== "available") {
+    target.innerHTML = `<p class="trace-idle">${escapeHtml(t("screen_understanding_preview_not_available"))}</p>`;
+    if (status) status.textContent = t("screen_understanding_preview_not_available");
+    return;
+  }
+  const counts = preview.counts && typeof preview.counts === "object" ? preview.counts : {};
+  const fullOverlayPath = String(preview.full_screen_understanding_overlay_path || "").trim();
+  const fusionSummary = preview.fusion_summary && typeof preview.fusion_summary === "object" ? preview.fusion_summary : {};
+  const backlogSummary = preview.calibration_backlog_summary && typeof preview.calibration_backlog_summary === "object"
+    ? preview.calibration_backlog_summary
+    : {};
+  const calibrationBacklogItems = Array.isArray(preview.calibration_backlog_items) ? preview.calibration_backlog_items : [];
+  const batchPlanSummary = preview.calibration_batch_plan_summary && typeof preview.calibration_batch_plan_summary === "object"
+    ? preview.calibration_batch_plan_summary
+    : {};
+  const readinessSummary = preview.precise_understanding_readiness_summary && typeof preview.precise_understanding_readiness_summary === "object"
+    ? preview.precise_understanding_readiness_summary
+    : {};
+  const fusionChips = [
+    readinessSummary.readiness_status ? `readiness=${readinessSummary.readiness_status}` : "",
+    Number.isFinite(Number(readinessSummary.calibration_coverage_rate)) ? `coverage=${Number(readinessSummary.calibration_coverage_rate)}` : "",
+    Number.isFinite(Number(fusionSummary.total_locator_cards)) ? `cards=${Number(fusionSummary.total_locator_cards)}` : "",
+    Number.isFinite(Number(fusionSummary.calibrated_cases)) ? `calibrated=${Number(fusionSummary.calibrated_cases)}` : "",
+    Number.isFinite(Number(fusionSummary.uncalibrated_locator_cards)) ? `uncalibrated=${Number(fusionSummary.uncalibrated_locator_cards)}` : "",
+    Number.isFinite(Number(readinessSummary.pending_calibration_ready_count)) ? `pending_ready=${Number(readinessSummary.pending_calibration_ready_count)}` : "",
+    Number.isFinite(Number(readinessSummary.pending_calibration_review_count)) ? `pending_review=${Number(readinessSummary.pending_calibration_review_count)}` : "",
+    readinessSummary.pathgraph_status ? `pathgraph=${readinessSummary.pathgraph_status}` : "",
+    Number.isFinite(Number(backlogSummary.ready_for_execute_dry_run)) ? `backlog_ready=${Number(backlogSummary.ready_for_execute_dry_run)}` : "",
+    Number.isFinite(Number(backlogSummary.review_before_calibration)) ? `backlog_review=${Number(backlogSummary.review_before_calibration)}` : "",
+    Number.isFinite(Number(batchPlanSummary.ready_for_execute_dry_run)) ? `batch_ready=${Number(batchPlanSummary.ready_for_execute_dry_run)}` : "",
+    Number.isFinite(Number(batchPlanSummary.review_before_calibration)) ? `batch_review=${Number(batchPlanSummary.review_before_calibration)}` : "",
+    Object.prototype.hasOwnProperty.call(preview, "calibration_batch_command_executes_now")
+      ? `command_executes_now=${preview.calibration_batch_command_executes_now === true ? "true" : "false"}`
+      : "",
+    preview.fusion_not_accuracy === true ? "not_accuracy=true" : "",
+  ].filter(Boolean);
+  if (status) {
+    status.textContent = [
+      t("screen_understanding_available"),
+      `inventory=${counts.inventory_items ?? 0}`,
+      `review_only=${counts.review_only_regions ?? 0}`,
+      `grounding=${counts.grounding_candidates ?? 0}`,
+      `danger=${counts.danger_zones ?? 0}`,
+    ].join(" · ");
+  }
+  target.innerHTML = `
+    ${fullOverlayPath ? `
+      <div class="screen-understanding-overlay-toolbar">
+        <button type="button" class="secondary small" data-screen-understanding-overlay="${escapeAttr(fullOverlayPath)}">${escapeHtml(t("screen_understanding_full_overlay"))}</button>
+        ${fusionChips.length ? `<small>${escapeHtml(fusionChips.join(" · "))}</small>` : ""}
+      </div>` : ""}
+    <div class="screen-understanding-grid">
+      <div class="screen-understanding-column">
+        <strong>${escapeHtml(t("screen_understanding_review_only"))}</strong>
+        ${renderScreenUnderstandingItems(preview.review_only_regions, "review_only")}
+      </div>
+      <div class="screen-understanding-column">
+        <strong>${escapeHtml(t("screen_understanding_grounding_candidates"))}</strong>
+        ${renderScreenUnderstandingItems(preview.grounding_candidates, "grounding_candidate")}
+      </div>
+      <div class="screen-understanding-column danger">
+        <strong>${escapeHtml(t("screen_understanding_danger_zones"))}</strong>
+        ${renderScreenUnderstandingItems(preview.danger_zones, "danger_zone")}
+      </div>
+      ${renderScreenUnderstandingCalibrationBacklog(calibrationBacklogItems)}
+      ${renderScreenUnderstandingCalibrationBatchPlan(preview)}
+      ${renderScreenUnderstandingCalibrationHandoff(preview)}
+      ${renderScreenUnderstandingCalibrationBatchAcceptance(preview)}
+      ${renderScreenUnderstandingHandoffConsistency(preview)}
+      ${renderScreenUnderstandingModelStartRunbook(preview)}
+      ${renderScreenUnderstandingEvidenceIntegrity(preview)}
+    </div>`;
+  target.querySelectorAll("[data-screen-understanding-overlay]").forEach((button) => {
+    button.addEventListener("click", () => showScreenUnderstandingOverlay(button.dataset.screenUnderstandingOverlay || ""));
+  });
+}
+
+function showScreenUnderstandingOverlay(path) {
+  const imagePath = String(path || "").trim();
+  if (!imagePath) return;
+  setCurrentImage(imagePath);
+}
+
+function learningReviewTextareaItems(text, idKey, idPrefix) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((label, index) => ({
+      [idKey]: `${idPrefix}_${index + 1}`,
+      label,
+    }));
+}
+
+function learningDraftReviewPatch() {
+  return {
+    review_status: String($("learningDraftReviewStatusSelect")?.value || "needs_human_review"),
+    source_after_review: "mixed",
+    blockers: learningReviewTextareaItems($("learningDraftReviewBlockers")?.value || "", "blocker_id", "review_blocker"),
+    verification_rules: learningReviewTextareaItems($("learningDraftReviewVerificationRules")?.value || "", "rule_id", "review_rule"),
+    manual_edit: {
+      region_label: String($("learningDraftManualRegionLabel")?.value || "").trim(),
+      region_role: String($("learningDraftManualRegionRole")?.value || "").trim(),
+      region_section: String($("learningDraftManualRegionSection")?.value || "").trim(),
+      possible_operation: String($("learningDraftManualOperation")?.value || "").trim(),
+      may_enter_pathgraph_draft: $("learningDraftManualEnterPathGraph")?.checked === true,
+      needs_recalibration: $("learningDraftManualNeedsRecalibration")?.checked === true,
+      notes: String($("learningDraftManualNotes")?.value || "").trim(),
+    },
+    region_bbox_updates: learningDraftReviewBboxEdits.regions,
+    action_bbox_updates: learningDraftReviewBboxEdits.actions,
+  };
+}
+
+function learningDraftArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function learningDraftBboxText(bbox) {
+  const normalized = normalizeBbox(bbox);
+  if (!normalized) return "";
+  return `${Math.round(normalized.x)},${Math.round(normalized.y)},${Math.round(normalized.width)},${Math.round(normalized.height)}`;
+}
+
+function learningDraftHumanReviewMeta(item = {}) {
+  const humanReview = item.human_review && typeof item.human_review === "object" ? item.human_review : {};
+  if (humanReview.bbox_edited !== true) return { badge: "", text: "" };
+  const before = learningDraftBboxText(humanReview.previous_bbox);
+  const after = learningDraftBboxText(humanReview.updated_bbox || item.bbox);
+  return {
+    badge: `<span class="learning-review-edited-badge">${escapeHtml(t("learning_draft_bbox_edited"))}</span>`,
+    text: [before && after ? `bbox ${before} -> ${after}` : "", humanReview.bbox_edit_source ? `source=${humanReview.bbox_edit_source}` : ""]
+      .filter(Boolean)
+      .join(" · "),
+  };
+}
+
+function learningDraftManualBboxEditSummary(draft = {}, review = {}) {
+  const auditSummary = review?.audit?.manual_bbox_edit_summary;
+  if (auditSummary && typeof auditSummary === "object") return auditSummary;
+  const regions = learningDraftArray(draft.regions);
+  const actions = learningDraftArray(draft.action_templates);
+  const editedRegions = regions.filter((item) => item?.human_review?.bbox_edited === true);
+  const editedActions = actions.filter((item) => item?.human_review?.bbox_edited === true);
+  const editedItems = editedRegions.concat(editedActions);
+  let pointPassed = 0;
+  let pointFailed = 0;
+  let invalidGeometry = 0;
+  editedItems.forEach((item) => {
+    const bbox = normalizeBbox(item.bbox);
+    const point = normalizePoint(item.click_point || item.screen_point, bbox);
+    if (!bbox || !point) {
+      invalidGeometry += 1;
+      return;
+    }
+    const inside = point.x >= bbox.x && point.x <= bbox.x + bbox.width && point.y >= bbox.y && point.y <= bbox.y + bbox.height;
+    if (inside) pointPassed += 1;
+    else pointFailed += 1;
+  });
+  return {
+    contract_version: "manual_bbox_edit_summary_v1",
+    edited_region_count: editedRegions.length,
+    edited_action_count: editedActions.length,
+    edited_total: editedItems.length,
+    point_inside_bbox_passed: pointPassed,
+    point_inside_bbox_failed: pointFailed,
+    invalid_geometry_count: invalidGeometry,
+    execute_binding_enabled: false,
+    artifact_is_authorization: false,
+  };
+}
+
+function renderLearningDraftManualBboxEditSummary(summary = {}) {
+  if (!summary || Number(summary.edited_total || 0) <= 0) return "";
+  const items = [
+    `regions=${summary.edited_region_count ?? 0}`,
+    `actions=${summary.edited_action_count ?? 0}`,
+    `point_inside=${summary.point_inside_bbox_passed ?? 0}/${summary.edited_total ?? 0}`,
+    `point_failed=${summary.point_inside_bbox_failed ?? 0}`,
+    `invalid=${summary.invalid_geometry_count ?? 0}`,
+    `execute_binding_enabled=${summary.execute_binding_enabled === true}`,
+  ];
+  return `
+    <div class="learning-review-bbox-summary">
+      <strong>${escapeHtml(t("learning_draft_bbox_edit_summary"))}</strong>
+      ${items.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+    </div>`;
+}
+
+function learningDraftSourceFreshnessSummary(draft = {}, review = {}) {
+  const auditSummary = review?.audit?.source_freshness_summary || review?.source_freshness_summary;
+  if (auditSummary && typeof auditSummary === "object") return auditSummary;
+  const imagePath = learningDraftSourceImagePath(draft);
+  const checksum = learningDraftSourceImageSha256(draft);
+  const warnings = [];
+  if (!imagePath) warnings.push("missing_source_image");
+  if (!checksum) warnings.push("missing_source_image_sha256");
+  return {
+    contract_version: "source_freshness_summary_v1",
+    source_image_status: imagePath ? "available_unverified" : "missing",
+    checksum_status: checksum ? "present_unverified" : "missing",
+    freshness_status: warnings.length ? "warning" : "present_unverified",
+    warning_count: warnings.length,
+    warnings,
+    edited_geometry_requires_review: warnings.length > 0,
+    execute_binding_enabled: false,
+    artifact_is_authorization: false,
+  };
+}
+
+function renderLearningDraftSourceFreshnessSummary(summary = {}) {
+  if (!summary || typeof summary !== "object") return "";
+  const warnings = Array.isArray(summary.warnings) ? summary.warnings : [];
+  const items = [
+    `image=${summary.source_image_status || "unknown"}`,
+    `checksum=${summary.checksum_status || "unknown"}`,
+    `freshness=${summary.freshness_status || "unknown"}`,
+    `warnings=${summary.warning_count ?? warnings.length}`,
+    `requires_review=${summary.edited_geometry_requires_review === true}`,
+    `execute_binding_enabled=${summary.execute_binding_enabled === true}`,
+  ];
+  if (warnings.length) items.push(`warning_ids=${warnings.join(",")}`);
+  return `
+    <div class="learning-review-bbox-summary">
+      <strong>${escapeHtml(t("learning_draft_source_freshness_summary"))}</strong>
+      ${items.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+    </div>`;
+}
+
+function learningDraftSourceImagePath(draft = {}) {
+  const pageDetails = draft.page_details && typeof draft.page_details === "object" ? draft.page_details : {};
+  const screen = pageDetails.screen && typeof pageDetails.screen === "object" ? pageDetails.screen : {};
+  return String(
+    screen.source_image_path ||
+    screen.image_path ||
+    screen.screenshot_path ||
+    pageDetails.source_image_path ||
+    pageDetails.image_path ||
+    pageDetails.screenshot_path ||
+    draft.source_image_path ||
+    draft.image_path ||
+    draft.screenshot_path ||
+    ""
+  ).trim();
+}
+
+function learningDraftSourceImageSha256(draft = {}) {
+  const pageDetails = draft.page_details && typeof draft.page_details === "object" ? draft.page_details : {};
+  const screen = pageDetails.screen && typeof pageDetails.screen === "object" ? pageDetails.screen : {};
+  return String(
+    screen.source_image_sha256 ||
+    screen.image_sha256 ||
+    screen.screenshot_sha256 ||
+    pageDetails.source_image_sha256 ||
+    pageDetails.image_sha256 ||
+    pageDetails.screenshot_sha256 ||
+    draft.source_image_sha256 ||
+    draft.image_sha256 ||
+    draft.screenshot_sha256 ||
+    ""
+  ).trim();
+}
+
+function learningDraftStateId(state = {}, index = 0) {
+  return String(state.state_id || state.id || state.page_id || `draft_state_${index + 1}`);
+}
+
+function learningDraftDisplayStates(draft = {}) {
+  const actions = learningDraftArray(draft.action_templates);
+  const states = learningDraftArray(draft.states);
+  if (states.length) {
+    return learningDraftStatesWithActionHints(states.map((state, index) => ({
+      ...state,
+      state_id: learningDraftStateId(state, index),
+    })), actions);
+  }
+  const stateGuess = String(draft.state_guess || draft.page_type || "").trim();
+  const summary = String(draft.screen_summary || "").trim();
+  if (!stateGuess && !summary) return [];
+  return learningDraftStatesWithActionHints([{
+    state_id: "draft_state_1",
+    label: stateGuess || "draft_state_1",
+    summary,
+    page_type: draft.page_type || "",
+  }], actions);
+}
+
+function learningDraftRegionRefs(state = {}) {
+  const refs = state.region_ids || state.region_refs || state.required_regions || state.regions || [];
+  if (Array.isArray(refs)) return refs.map((ref) => String(ref?.region_id || ref?.id || ref || "").trim()).filter(Boolean);
+  if (typeof refs === "string") return refs.split(/[,\s]+/).map((ref) => ref.trim()).filter(Boolean);
+  return [];
+}
+
+function learningDraftActionRegionId(action = {}) {
+  return String(
+    action.region_id
+      || action.target_region_id
+      || action.target_entity
+      || action.target
+      || action.region
+      || ""
+  ).trim();
+}
+
+function learningDraftTransitionHintForAction(action = {}) {
+  const hint = action && typeof action.transition_hint === "object" ? action.transition_hint : {};
+  if (hint.contract_version !== "learn_open_detail_transition_hint_v1") return null;
+  return hint;
+}
+
+function learningDraftActionTransitionMeta(action = {}) {
+  const hint = learningDraftTransitionHintForAction(action);
+  if (!hint) return "";
+  const transitionType = String(hint.transition_type || action.semantic_action || "transition").trim();
+  const nextRole = String(hint.expected_next_state_role || "next_state").trim();
+  const executeEnabled = hint.execute_binding_enabled === true;
+  return `transition=${transitionType}->${nextRole} · candidate_only=${hint.candidate_only !== false} · execute_binding_enabled=${executeEnabled}`;
+}
+
+function learningDraftHintStateId(hint = {}) {
+  const role = String(hint.expected_next_state_role || "next_state").trim() || "next_state";
+  return `model_${role.toLowerCase().replace(/[^a-z0-9_.-]+/g, "_").replace(/^_+|_+$/g, "") || "next_state"}`;
+}
+
+function learningDraftStatesWithActionHints(states = [], actions = []) {
+  const result = [...states];
+  const existing = new Set(result.map((state) => String(state.state_id || "")));
+  actions.forEach((action) => {
+    const hint = learningDraftTransitionHintForAction(action);
+    if (!hint) return;
+    const stateId = learningDraftHintStateId(hint);
+    if (existing.has(stateId)) return;
+    existing.add(stateId);
+    const role = String(hint.expected_next_state_role || "detail_view").trim() || "detail_view";
+    result.push({
+      state_id: stateId,
+      label: role.replace(/_/g, " "),
+      page_type: role,
+      summary: `${String(hint.transition_type || "transition")} candidate · ${String(hint.target_surface || "")}`.trim(),
+      candidate_only: true,
+      artifact_is_authorization: false,
+      execute_binding_enabled: false,
+      derived_from_transition_hint: true,
+      transition_hint_source: hint.contract_version,
+    });
+  });
+  return result;
+}
+
+function learningDraftPrimaryStateCount(states = []) {
+  const count = states.filter((state) => !state.derived_from_transition_hint).length;
+  return count || states.length;
+}
+
+function learningDraftRegionsForState(state = {}, regions = [], stateCount = 0) {
+  if (state.derived_from_transition_hint) return [];
+  const refs = new Set(learningDraftRegionRefs(state));
+  if (refs.size) {
+    return regions.filter((region, index) => refs.has(learningReviewItemId(region, index, "region")));
+  }
+  const stateId = String(state.state_id || "");
+  const direct = regions.filter((region) => String(region.state_id || region.page_state_id || "").trim() === stateId);
+  if (direct.length) return direct;
+  return stateCount <= 1 ? regions : [];
+}
+
+function learningDraftActionsForState(state = {}, actions = [], regions = [], stateCount = 0) {
+  if (state.derived_from_transition_hint) return [];
+  const stateId = String(state.state_id || "");
+  const regionIds = new Set(regions.map((region, index) => learningReviewItemId(region, index, "region")));
+  const matched = actions.filter((action) => {
+    const actionStateId = String(action.state_id || action.page_state_id || "").trim();
+    if (actionStateId && actionStateId === stateId) return true;
+    const regionId = learningDraftActionRegionId(action);
+    return regionId && regionIds.has(regionId);
+  });
+  return matched.length || stateCount > 1 ? matched : actions;
+}
+
+function learningDraftTransitionLabel(state = {}, actions = []) {
+  const transition = learningDraftArray(state.transitions)[0] || learningDraftArray(state.next_states)[0] || null;
+  const transitionLabel = transition ? String(transition.label || transition.action || transition.to || transition.state_id || transition || "").trim() : "";
+  if (transitionLabel) return transitionLabel;
+  const hint = actions.map((action) => learningDraftTransitionHintForAction(action)).find(Boolean);
+  if (hint) {
+    return `${String(hint.transition_type || "transition")} -> ${String(hint.expected_next_state_role || "next_state")}`;
+  }
+  const action = actions[0] || {};
+  return learningReviewLabel(action, 0, "action");
+}
+
+function learningDraftStateTransitions(state = {}, actions = []) {
+  const stateId = String(state.state_id || "");
+  return actions.map((action, index) => {
+    const hint = learningDraftTransitionHintForAction(action);
+    if (!hint) return null;
+    return {
+      transition_id: `draft:transition:${learningReviewItemId(action, index, "action")}`,
+      from_state_id: stateId,
+      to_state_id: learningDraftHintStateId(hint),
+      action_template_id: learningReviewItemId(action, index, "action"),
+      label: `${String(hint.transition_type || "transition")} -> ${String(hint.expected_next_state_role || "next_state")}`,
+      target_surface: String(hint.target_surface || ""),
+      requires_post_action_observe: hint.requires_post_action_observe !== false,
+      candidate_only: true,
+      artifact_is_authorization: false,
+      execute_binding_enabled: false,
+    };
+  }).filter(Boolean);
+}
+
+function renderLearningDraftStateTransitions(state = {}, actions = []) {
+  const transitions = learningDraftStateTransitions(state, actions);
+  if (!transitions.length) return "";
+  return `
+    <div class="learning-draft-detail-card">
+      <strong>${escapeHtml(t("learning_draft_candidate_transitions"))}</strong>
+      <ul class="learning-review-list">
+        ${transitions.map((transition) => `
+          <li>
+            <strong>${escapeHtml(transition.label)}</strong>
+            <span>${escapeHtml(`${transition.from_state_id} -> ${transition.to_state_id}`)}</span>
+            <small>${escapeHtml([
+              `action=${transition.action_template_id}`,
+              transition.target_surface ? `surface=${transition.target_surface}` : "",
+              `post_observe=${transition.requires_post_action_observe}`,
+              `candidate_only=${transition.candidate_only}`,
+              "execute_binding_enabled=false",
+            ].filter(Boolean).join(" · "))}</small>
+          </li>`).join("")}
+      </ul>
+    </div>`;
+}
+
+function clearLearningDraftPathPreview(reason = "") {
+  selectedLearningDraftNodeId = "";
+  if ($("learningDraftPathMap")) {
+    $("learningDraftPathMap").innerHTML = `<p class="trace-idle">${escapeHtml(reason || t("learning_draft_no_path_nodes"))}</p>`;
+  }
+  if ($("learningDraftPathDetail")) {
+    $("learningDraftPathDetail").innerHTML = `<p class="trace-idle">${escapeHtml(reason || t("learning_draft_no_path_nodes"))}</p>`;
+  }
+  if ($("learningDraftPathPreviewStatus")) {
+    $("learningDraftPathPreviewStatus").textContent = t("learning_draft_not_executable");
+  }
+}
+
+function renderLearningDraftPipelineAudit(audit = {}) {
+  if (!audit || typeof audit !== "object" || !Object.keys(audit).length) return "";
+  const cleanup = audit.layout_cleanup && typeof audit.layout_cleanup === "object" ? audit.layout_cleanup : {};
+  const gate = audit.grounding_eligibility_gate && typeof audit.grounding_eligibility_gate === "object" ? audit.grounding_eligibility_gate : {};
+  const roi = audit.roi_grounding && typeof audit.roi_grounding === "object" ? audit.roi_grounding : {};
+  const reasonCounts = cleanup.suppression_reason_counts && typeof cleanup.suppression_reason_counts === "object" ? cleanup.suppression_reason_counts : {};
+  const reasonChips = Object.entries(reasonCounts)
+    .filter(([key, value]) => key && Number.isFinite(Number(value)))
+    .map(([key, value]) => `${key}=${Number(value)}`);
+  const cleanupChips = [
+    Number.isFinite(Number(cleanup.input_count)) ? `input=${Number(cleanup.input_count)}` : "",
+    Number.isFinite(Number(cleanup.output_count)) ? `output=${Number(cleanup.output_count)}` : "",
+    Number.isFinite(Number(cleanup.suppressed_count)) ? `suppressed=${Number(cleanup.suppressed_count)}` : "",
+    Number.isFinite(Number(cleanup.duplicates_merged)) ? `merged=${Number(cleanup.duplicates_merged)}` : "",
+    ...reasonChips,
+  ].filter(Boolean);
+  const gateChips = [
+    Number.isFinite(Number(gate.attempted)) ? `attempted=${Number(gate.attempted)}` : "",
+    Number.isFinite(Number(gate.eligible)) ? `eligible=${Number(gate.eligible)}` : "",
+    Number.isFinite(Number(gate.blocked)) ? `blocked=${Number(gate.blocked)}` : "",
+    Number.isFinite(Number(gate.non_actionable_leaked_to_grounding)) ? `leaks=${Number(gate.non_actionable_leaked_to_grounding)}` : "",
+    `not_accuracy=${gate.not_accuracy !== false}`,
+  ].filter(Boolean);
+  const roiChips = [
+    Number.isFinite(Number(roi.validation_count)) ? `validations=${Number(roi.validation_count)}` : "",
+    Number.isFinite(Number(roi.valid_candidate_count)) ? `valid=${Number(roi.valid_candidate_count)}` : "",
+  ].filter(Boolean);
+  const fusion = audit.precise_understanding_fusion_status && typeof audit.precise_understanding_fusion_status === "object"
+    ? audit.precise_understanding_fusion_status
+    : {};
+  const fusionSummary = fusion.summary && typeof fusion.summary === "object" ? fusion.summary : {};
+  const displayReadiness = fusion.display_readiness && typeof fusion.display_readiness === "object" ? fusion.display_readiness : {};
+  const pathgraphPrep = fusion.pathgraph_preparation && typeof fusion.pathgraph_preparation === "object" ? fusion.pathgraph_preparation : {};
+  const pointCounts = fusion.point_quality_counts && typeof fusion.point_quality_counts === "object" ? fusion.point_quality_counts : {};
+  const gateCounts = fusion.gate_safety_counts && typeof fusion.gate_safety_counts === "object" ? fusion.gate_safety_counts : {};
+  const gateDiagnosis = fusion.gate_rejection_diagnosis && typeof fusion.gate_rejection_diagnosis === "object"
+    ? fusion.gate_rejection_diagnosis
+    : {};
+  const gateDiagnosisSummary = gateDiagnosis.summary && typeof gateDiagnosis.summary === "object" ? gateDiagnosis.summary : {};
+  const gateDiagnosisClasses = gateDiagnosisSummary.classification_counts && typeof gateDiagnosisSummary.classification_counts === "object"
+    ? gateDiagnosisSummary.classification_counts
+    : {};
+  const pathgraphQueue = fusion.pathgraph_review_queue && typeof fusion.pathgraph_review_queue === "object"
+    ? fusion.pathgraph_review_queue
+    : {};
+  const pathgraphQueueSummary = pathgraphQueue.summary && typeof pathgraphQueue.summary === "object" ? pathgraphQueue.summary : {};
+  const preflightPlan = fusion.pathgraph_preflight_plan && typeof fusion.pathgraph_preflight_plan === "object"
+    ? fusion.pathgraph_preflight_plan
+    : {};
+  const preflightSummary = preflightPlan.summary && typeof preflightPlan.summary === "object" ? preflightPlan.summary : {};
+  const reviewPatchProposal = fusion.review_patch_proposal && typeof fusion.review_patch_proposal === "object"
+    ? fusion.review_patch_proposal
+    : {};
+  const reviewPatchSummary = reviewPatchProposal.summary && typeof reviewPatchProposal.summary === "object" ? reviewPatchProposal.summary : {};
+  const fusionChips = [
+    displayReadiness.status ? `display=${displayReadiness.status}` : "",
+    pathgraphPrep.status ? `pathgraph=${pathgraphPrep.status}` : "",
+    Number.isFinite(Number(fusionSummary.attempted)) ? `attempted=${Number(fusionSummary.attempted)}` : "",
+    Number.isFinite(Number(pathgraphPrep.promotable_item_count)) ? `promotable=${Number(pathgraphPrep.promotable_item_count)}` : "",
+    Number.isFinite(Number(fusionSummary.safe_intercepts)) ? `safe_intercepts=${Number(fusionSummary.safe_intercepts)}` : "",
+    Number.isFinite(Number(pointCounts.vista_point_inside_seed_bbox)) ? `point_in=${Number(pointCounts.vista_point_inside_seed_bbox)}` : "",
+    Number.isFinite(Number(pointCounts.vista_point_outside_seed_bbox)) ? `point_out=${Number(pointCounts.vista_point_outside_seed_bbox)}` : "",
+    Number.isFinite(Number(gateCounts.passed_rejected)) ? `gate_rejected=${Number(gateCounts.passed_rejected)}` : "",
+    Number.isFinite(Number(gateDiagnosisClasses.missing_open_detail_semantic_action)) ? `gate_diagnosis:open_detail=${Number(gateDiagnosisClasses.missing_open_detail_semantic_action)}` : "",
+    Number.isFinite(Number(gateDiagnosisClasses.non_actionable_region_correctly_rejected)) ? `gate_diagnosis:non_action=${Number(gateDiagnosisClasses.non_actionable_region_correctly_rejected)}` : "",
+    `not_accuracy=${fusion.not_accuracy !== false}`,
+  ].filter(Boolean);
+  const pathgraphQueueChips = [
+    Number.isFinite(Number(pathgraphQueueSummary.open_detail_candidate_review)) ? `pathgraph_queue:open_detail=${Number(pathgraphQueueSummary.open_detail_candidate_review)}` : "",
+    Number.isFinite(Number(pathgraphQueueSummary.same_screen_action_review)) ? `pathgraph_queue:same_screen=${Number(pathgraphQueueSummary.same_screen_action_review)}` : "",
+    Number.isFinite(Number(pathgraphQueueSummary.geometry_review_required)) ? `pathgraph_queue:geometry=${Number(pathgraphQueueSummary.geometry_review_required)}` : "",
+    Number.isFinite(Number(pathgraphQueueSummary.blocked_non_action)) ? `pathgraph_queue:blocked_non_action=${Number(pathgraphQueueSummary.blocked_non_action)}` : "",
+    `not_promotion=${pathgraphQueue.not_pathgraph_promotion !== false}`,
+  ].filter(Boolean);
+  const preflightChips = [
+    Number.isFinite(Number(preflightSummary.open_detail_transition_candidates)) ? `preflight:open_detail_transitions=${Number(preflightSummary.open_detail_transition_candidates)}` : "",
+    Number.isFinite(Number(preflightSummary.same_screen_action_candidates)) ? `preflight:same_screen_actions=${Number(preflightSummary.same_screen_action_candidates)}` : "",
+    Number.isFinite(Number(preflightSummary.geometry_blockers)) ? `preflight:geometry_blockers=${Number(preflightSummary.geometry_blockers)}` : "",
+    Number.isFinite(Number(preflightSummary.non_action_blockers)) ? `preflight:non_action_blockers=${Number(preflightSummary.non_action_blockers)}` : "",
+    Number.isFinite(Number(preflightSummary.pending_calibration_ready_count)) ? `preflight:pending_calibration_ready=${Number(preflightSummary.pending_calibration_ready_count)}` : "",
+    Number.isFinite(Number(preflightSummary.pending_calibration_review_count)) ? `preflight:pending_calibration_review=${Number(preflightSummary.pending_calibration_review_count)}` : "",
+    `runtime_promotion=${preflightSummary.ready_for_runtime_pathgraph_promotion === true}`,
+  ].filter(Boolean);
+  const reviewPatchChips = [
+    Number.isFinite(Number(reviewPatchSummary.state_additions)) ? `review_patch:states=${Number(reviewPatchSummary.state_additions)}` : "",
+    Number.isFinite(Number(reviewPatchSummary.action_template_additions)) ? `review_patch:actions=${Number(reviewPatchSummary.action_template_additions)}` : "",
+    Number.isFinite(Number(reviewPatchSummary.transition_additions)) ? `review_patch:transitions=${Number(reviewPatchSummary.transition_additions)}` : "",
+    Number.isFinite(Number(reviewPatchSummary.blockers)) ? `review_patch:blockers=${Number(reviewPatchSummary.blockers)}` : "",
+    `runtime_promotion=${reviewPatchSummary.ready_for_runtime_pathgraph_promotion === true}`,
+  ].filter(Boolean);
+  if (!cleanupChips.length && !gateChips.length && !roiChips.length && !fusionChips.length && !pathgraphQueueChips.length && !preflightChips.length && !reviewPatchChips.length) return "";
+  return `
+    <div class="learning-draft-detail-card">
+      <strong>${escapeHtml(t("learning_draft_pipeline_audit"))}</strong>
+      ${cleanupChips.length ? `<small>${escapeHtml(t("learning_draft_cleanup"))}</small><div class="learning-draft-chip-row">${cleanupChips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>` : ""}
+      ${gateChips.length ? `<small>${escapeHtml(t("learning_draft_gate"))}</small><div class="learning-draft-chip-row">${gateChips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>` : ""}
+      ${roiChips.length ? `<small>${escapeHtml(t("learning_draft_roi_grounding"))}</small><div class="learning-draft-chip-row">${roiChips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>` : ""}
+      ${fusionChips.length ? `<small>${escapeHtml(t("learning_draft_fusion_status"))}</small><div class="learning-draft-chip-row">${fusionChips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>` : ""}
+      ${pathgraphQueueChips.length ? `<small>${escapeHtml(t("learning_draft_pathgraph_review_queue"))}</small><div class="learning-draft-chip-row">${pathgraphQueueChips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>` : ""}
+      ${preflightChips.length ? `<small>${escapeHtml(t("learning_draft_pathgraph_preflight_plan"))}</small><div class="learning-draft-chip-row">${preflightChips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>` : ""}
+      ${reviewPatchChips.length ? `<small>${escapeHtml(t("learning_draft_review_patch_proposal"))}</small><div class="learning-draft-chip-row">${reviewPatchChips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>` : ""}
+    </div>`;
+}
+
+function renderLearningDraftPathgraphReviewQueue(pageDetails = {}) {
+  const audit = pageDetails.pipeline_audit && typeof pageDetails.pipeline_audit === "object" ? pageDetails.pipeline_audit : {};
+  const fusion = audit.precise_understanding_fusion_status && typeof audit.precise_understanding_fusion_status === "object"
+    ? audit.precise_understanding_fusion_status
+    : {};
+  const queue = fusion.pathgraph_review_queue && typeof fusion.pathgraph_review_queue === "object"
+    ? fusion.pathgraph_review_queue
+    : {};
+  const summary = queue.summary && typeof queue.summary === "object" ? queue.summary : {};
+  const items = Array.isArray(queue.queue_items) ? queue.queue_items : [];
+  if (!items.length && !Object.keys(summary).length) return "";
+  const chips = [
+    Number.isFinite(Number(summary.open_detail_candidate_review)) ? `open_detail=${Number(summary.open_detail_candidate_review)}` : "",
+    Number.isFinite(Number(summary.same_screen_action_review)) ? `same_screen=${Number(summary.same_screen_action_review)}` : "",
+    Number.isFinite(Number(summary.geometry_review_required)) ? `geometry=${Number(summary.geometry_review_required)}` : "",
+    Number.isFinite(Number(summary.blocked_non_action)) ? `blocked_non_action=${Number(summary.blocked_non_action)}` : "",
+    `execute_binding_enabled=${queue.execute_binding_enabled === true}`,
+  ].filter(Boolean);
+  const rows = items.slice(0, 12).map((item) => ({
+    ...item,
+    type: `review_bucket=${item.review_bucket || "unknown"}`,
+    region_id: item.source_item_id || item.region_no || "",
+    decision: { reason: (item.required_next_evidence || []).join(" + ") },
+    evidence_ref: item.candidate_semantic_action || item.gate_diagnosis_classification || "",
+  }));
+  return `
+    <div class="learning-draft-detail-card">
+      <strong>${escapeHtml(t("learning_draft_pathgraph_review_queue"))}</strong>
+      ${chips.length ? `<div class="learning-draft-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>` : ""}
+      ${renderLearningReviewItems(rows, "pathgraph_review_queue")}
+    </div>`;
+}
+
+function renderLearningDraftPathgraphPreflightPlan(pageDetails = {}) {
+  const audit = pageDetails.pipeline_audit && typeof pageDetails.pipeline_audit === "object" ? pageDetails.pipeline_audit : {};
+  const fusion = audit.precise_understanding_fusion_status && typeof audit.precise_understanding_fusion_status === "object"
+    ? audit.precise_understanding_fusion_status
+    : {};
+  const plan = fusion.pathgraph_preflight_plan && typeof fusion.pathgraph_preflight_plan === "object"
+    ? fusion.pathgraph_preflight_plan
+    : {};
+  const summary = plan.summary && typeof plan.summary === "object" ? plan.summary : {};
+  const pendingBatch = plan.pending_calibration_batch && typeof plan.pending_calibration_batch === "object"
+    ? plan.pending_calibration_batch
+    : {};
+  const transitions = Array.isArray(plan.proposed_transitions) ? plan.proposed_transitions : [];
+  const actionItems = Array.isArray(plan.review_action_items) ? plan.review_action_items : [];
+  const blockedItems = Array.isArray(plan.blocked_items) ? plan.blocked_items : [];
+  const pendingReadyNumbers = Array.isArray(pendingBatch.ready_region_numbers) ? pendingBatch.ready_region_numbers : [];
+  const pendingReviewNumbers = Array.isArray(pendingBatch.review_blocked_region_numbers) ? pendingBatch.review_blocked_region_numbers : [];
+  if (!transitions.length && !actionItems.length && !blockedItems.length && !Object.keys(summary).length && !pendingReadyNumbers.length && !pendingReviewNumbers.length) return "";
+  const chips = [
+    Number.isFinite(Number(summary.open_detail_transition_candidates)) ? `open_detail_transitions=${Number(summary.open_detail_transition_candidates)}` : "",
+    Number.isFinite(Number(summary.same_screen_action_candidates)) ? `same_screen_actions=${Number(summary.same_screen_action_candidates)}` : "",
+    Number.isFinite(Number(summary.geometry_blockers)) ? `geometry_blockers=${Number(summary.geometry_blockers)}` : "",
+    Number.isFinite(Number(summary.non_action_blockers)) ? `non_action_blockers=${Number(summary.non_action_blockers)}` : "",
+    Number.isFinite(Number(summary.pending_calibration_ready_count)) ? `pending_calibration_ready=${Number(summary.pending_calibration_ready_count)}` : "",
+    Number.isFinite(Number(summary.pending_calibration_review_count)) ? `pending_calibration_review=${Number(summary.pending_calibration_review_count)}` : "",
+    pendingReadyNumbers.length ? `pending_regions=${pendingReadyNumbers.join(",")}` : "",
+    pendingReviewNumbers.length ? `review_first=${pendingReviewNumbers.join(",")}` : "",
+    Object.keys(pendingBatch).length ? `command_executes_now=${pendingBatch.command_executes_now === true}` : "",
+    `runtime_promotion=${summary.ready_for_runtime_pathgraph_promotion === true}`,
+    `execute_binding_enabled=${plan.execute_binding_enabled === true}`,
+  ].filter(Boolean);
+  const transitionRows = transitions.map((item) => ({
+    ...item,
+    label: item.label || item.transition_id || "open_detail transition",
+    type: `transition_type=${item.transition_type || "unknown"}`,
+    region_id: item.source_item_id || item.source_region_no || "",
+    decision: { reason: item.requires_post_action_observe ? "requires_post_action_observe" : "" },
+    evidence_ref: `${item.from_state_id || ""}->${item.to_state_id || ""}`,
+  }));
+  return `
+    <div class="learning-draft-detail-card">
+      <strong>${escapeHtml(t("learning_draft_pathgraph_preflight_plan"))}</strong>
+      ${chips.length ? `<div class="learning-draft-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>` : ""}
+      ${transitions.length ? `<small>${escapeHtml("proposed transitions")}</small>${renderLearningReviewItems(transitionRows, "pathgraph_preflight_transition")}` : ""}
+      ${actionItems.length ? `<small>${escapeHtml("same-screen action review")}</small>${renderLearningReviewItems(actionItems.slice(0, 8), "pathgraph_preflight_action")}` : ""}
+      ${blockedItems.length ? `<small>${escapeHtml("blocked before wiring")}</small>${renderLearningReviewItems(blockedItems.slice(0, 8), "pathgraph_preflight_blocked")}` : ""}
+    </div>`;
+}
+
+function renderLearningDraftPageDetailCards(pageDetails = {}) {
+  if (!pageDetails || typeof pageDetails !== "object" || !Object.keys(pageDetails).length) return "";
+  const screen = pageDetails.screen && typeof pageDetails.screen === "object" ? pageDetails.screen : {};
+  const summary = String(screen.summary || "").trim();
+  const imagePath = String(screen.image_path || pageDetails.image_path || "").trim();
+  const inventory = pageDetails.inventory_summary && typeof pageDetails.inventory_summary === "object" ? pageDetails.inventory_summary : {};
+  const inventoryChips = [
+    Number.isFinite(Number(inventory.screen_inventory_count)) ? `inventory=${Number(inventory.screen_inventory_count)}` : "",
+    Number.isFinite(Number(inventory.accepted_for_grounding_count)) ? `accepted=${Number(inventory.accepted_for_grounding_count)}` : "",
+    Number.isFinite(Number(inventory.rejected_non_actionable_count)) ? `review_only=${Number(inventory.rejected_non_actionable_count)}` : "",
+    Number.isFinite(Number(inventory.grounding_validation_count)) ? `grounded=${Number(inventory.grounding_validation_count)}` : "",
+  ].filter(Boolean);
+  const reviewOnly = Array.isArray(pageDetails.review_only_regions) ? pageDetails.review_only_regions : [];
+  const grounding = Array.isArray(pageDetails.grounding_candidates) ? pageDetails.grounding_candidates : [];
+  const danger = Array.isArray(pageDetails.danger_zones) ? pageDetails.danger_zones : [];
+  return `
+    <div class="learning-draft-detail-card">
+      <strong>${escapeHtml(t("learning_draft_page_understanding"))}</strong>
+      ${summary ? `<small>${escapeHtml(summary)}</small>` : ""}
+      <div class="learning-draft-chip-row">${inventoryChips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+    </div>
+    ${renderLearningDraftPipelineAudit(pageDetails.pipeline_audit)}
+    ${renderLearningDraftPathgraphReviewQueue(pageDetails)}
+    ${renderLearningDraftPathgraphPreflightPlan(pageDetails)}
+    <div class="learning-draft-detail-card">
+      <strong>${escapeHtml(t("learning_draft_review_only_regions"))}</strong>
+      ${renderLearningReviewItems(reviewOnly.slice(0, 12), "review_region", { previewBbox: true, imagePath })}
+    </div>
+    <div class="learning-draft-detail-card">
+      <strong>${escapeHtml(t("learning_draft_grounding_candidates"))}</strong>
+      ${renderLearningReviewItems(grounding.slice(0, 12), "grounding_candidate", { previewBbox: true, imagePath })}
+    </div>
+    ${danger.length ? `
+      <div class="learning-draft-detail-card">
+        <strong>${escapeHtml(t("learning_draft_danger_zones"))}</strong>
+        ${renderLearningReviewItems(danger.slice(0, 8), "danger_zone", { previewBbox: true, imagePath })}
+      </div>` : ""}`;
+}
+
+function renderLearningPageDetailCandidate(review = {}) {
+  const candidateReview = review?.pathgraph_candidate_review && typeof review.pathgraph_candidate_review === "object"
+    ? review.pathgraph_candidate_review
+    : {};
+  const candidate = candidateReview.page_detail_candidate && typeof candidateReview.page_detail_candidate === "object"
+    ? candidateReview.page_detail_candidate
+    : {};
+  if (!candidate.contract_version) return "";
+  const summary = candidate.summary && typeof candidate.summary === "object" ? candidate.summary : {};
+  const layout = candidate.layout && typeof candidate.layout === "object" ? candidate.layout : {};
+  const regions = Array.isArray(layout.regions) ? layout.regions : [];
+  const sections = Array.isArray(layout.sections) ? layout.sections : [];
+  const displayGroups = Array.isArray(layout.display_groups) ? layout.display_groups : [];
+  const bounds = layout.bounds && typeof layout.bounds === "object" ? layout.bounds : {};
+  const chips = [
+    `status=${candidate.readiness_status || "unknown"}`,
+    Number.isFinite(Number(summary.region_count)) ? `regions=${Number(summary.region_count)}` : "",
+    Number.isFinite(Number(summary.section_count)) ? `sections=${Number(summary.section_count)}` : "",
+    Number.isFinite(Number(summary.display_group_count)) ? `groups=${Number(summary.display_group_count)}` : "",
+    Number.isFinite(Number(summary.possible_operation_count)) ? `possible_ops=${Number(summary.possible_operation_count)}` : "",
+    Number.isFinite(Number(summary.pending_calibration_count)) ? `pending=${Number(summary.pending_calibration_count)}` : "",
+    Number.isFinite(Number(summary.review_blocked_count)) ? `review_blocked=${Number(summary.review_blocked_count)}` : "",
+    `runtime_promotion=${summary.runtime_pathgraph_promotion === true}`,
+    `execute_binding=${candidate.execute_binding_enabled === true}`,
+  ].filter(Boolean);
+  return `
+    <div class="learning-draft-detail-card learning-page-detail-candidate">
+      <strong>${escapeHtml(t("learning_page_detail_candidate"))}</strong>
+      <div class="learning-draft-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      ${candidate.report_path ? `<small>${escapeHtml(`page_detail_candidate=${candidate.report_path}`)}</small>` : ""}
+      ${renderLearningPageDetailSpatialMap(regions, bounds, sections, displayGroups)}
+      ${renderLearningPageDetailSections(sections)}
+    </div>`;
+}
+
+function renderLearningDemoScaffold(review = {}) {
+  const candidateReview = review?.pathgraph_candidate_review && typeof review.pathgraph_candidate_review === "object"
+    ? review.pathgraph_candidate_review
+    : {};
+  const scaffold = candidateReview.learn_mode_demo_scaffold && typeof candidateReview.learn_mode_demo_scaffold === "object"
+    ? candidateReview.learn_mode_demo_scaffold
+    : {};
+  if (!scaffold.contract_version) return "";
+  const goalReadiness = candidateReview.learning_mode_demo_goal_readiness && typeof candidateReview.learning_mode_demo_goal_readiness === "object"
+    ? candidateReview.learning_mode_demo_goal_readiness
+    : {};
+  const summary = scaffold.summary && typeof scaffold.summary === "object" ? scaffold.summary : {};
+  const readiness = scaffold.display_readiness && typeof scaffold.display_readiness === "object" ? scaffold.display_readiness : {};
+  const provenance = scaffold.model_provenance_audit && typeof scaffold.model_provenance_audit === "object"
+    ? scaffold.model_provenance_audit
+    : {};
+  const modelPreview = scaffold.model_generated_pathgraph_preview && typeof scaffold.model_generated_pathgraph_preview === "object"
+    ? scaffold.model_generated_pathgraph_preview
+    : {};
+  const readonlyPreview = scaffold.page_detail_readonly_pathgraph_preview && typeof scaffold.page_detail_readonly_pathgraph_preview === "object"
+    ? scaffold.page_detail_readonly_pathgraph_preview
+    : {};
+  const correspondence = scaffold.page_detail_pathgraph_correspondence && typeof scaffold.page_detail_pathgraph_correspondence === "object"
+    ? scaffold.page_detail_pathgraph_correspondence
+    : {};
+  const modelPageDetail = modelPreview.page_detail_preview && typeof modelPreview.page_detail_preview === "object"
+    ? modelPreview.page_detail_preview
+    : {};
+  const readonlyPageDetail = readonlyPreview.page_detail_preview && typeof readonlyPreview.page_detail_preview === "object"
+    ? readonlyPreview.page_detail_preview
+    : {};
+  const modelOnlyReadiness = scaffold.model_only_demo_readiness && typeof scaffold.model_only_demo_readiness === "object"
+    ? scaffold.model_only_demo_readiness
+    : {};
+  const safety = scaffold.safety && typeof scaffold.safety === "object" ? scaffold.safety : {};
+  const flow = learningDraftArray(scaffold.flow);
+  const provenanceEvidence = learningDraftArray(provenance.evidence);
+  const chips = [
+    `artifacts=${summary.artifact_count ?? "n/a"}`,
+    `failures=${summary.failure_count ?? "n/a"}`,
+    `page_regions=${summary.page_detail_region_count ?? "n/a"}`,
+    `page_sections=${summary.page_detail_section_count ?? "n/a"}`,
+    `page_ops=${summary.page_detail_possible_operation_count ?? "n/a"}`,
+    `pending_calibration=${summary.precise_pending_calibration_count ?? "n/a"}`,
+    `page_detail_ready=${readiness.pathgraph_detail_can_show_page_detail === true}`,
+    `template_like_layout=${readiness.template_like_layout_available === true}`,
+    `model_origin=${provenance.status || "unknown"}`,
+    `actual_model_evidence=${provenance.actual_model_call_evidence_count ?? "n/a"}`,
+    `assisted_evidence=${provenance.assisted_or_human_review_evidence_count ?? "n/a"}`,
+    `fully_model_generated=${provenance.meets_fully_model_generated_demo_requirement === true}`,
+    `model_preview=${summary.model_generated_pathgraph_preview_status || "n/a"}`,
+    `model_preview_regions=${summary.model_generated_pathgraph_preview_region_count ?? "n/a"}`,
+    `model_preview_actions=${summary.model_generated_pathgraph_preview_action_count ?? "n/a"}`,
+    `model_page_sections=${summary.model_generated_page_detail_section_count ?? "n/a"}`,
+    `model_page_ops=${summary.model_generated_page_detail_possible_operation_count ?? "n/a"}`,
+    `readonly_preview=${summary.page_detail_readonly_pathgraph_preview_status || "n/a"}`,
+    `readonly_preview_regions=${summary.page_detail_readonly_pathgraph_preview_region_count ?? "n/a"}`,
+    `readonly_preview_groups=${summary.page_detail_readonly_pathgraph_preview_display_group_count ?? "n/a"}`,
+    `model_only_demo=${modelOnlyReadiness.status || "unknown"}`,
+    `model_only_ready=${modelOnlyReadiness.ready === true}`,
+    `model_started=${safety.model_started === true}`,
+    `runtime_promotion=${safety.runtime_pathgraph_promotion === true}`,
+  ];
+  return `
+    <div class="learning-draft-detail-card learning-demo-scaffold-card">
+      <strong>${escapeHtml(t("learning_demo_scaffold"))}</strong>
+      ${scaffold.report_path ? `<small>${escapeHtml(`demo_scaffold=${scaffold.report_path}`)}</small>` : ""}
+      <div class="learning-draft-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      ${flow.length ? `<div class="learning-demo-flow">${flow.map(renderLearningDemoFlowStep).join("")}</div>` : ""}
+      ${renderLearningDemoGoalReadiness(goalReadiness)}
+      ${renderLearningModelOnlyDemoReadiness(modelOnlyReadiness)}
+      ${provenanceEvidence.length ? `<div class="learning-demo-provenance">${provenanceEvidence.map(renderLearningDemoProvenanceEvidence).join("")}</div>` : ""}
+      ${renderLearningPageDetailPathGraphCorrespondence(correspondence)}
+      ${renderLearningModelGeneratedPageDetailPreview(modelPageDetail)}
+      ${renderLearningModelGeneratedPageDetailPreview(readonlyPageDetail, {
+        title: "Read-only PathGraph page detail preview",
+        contractLabel: readonlyPreview.contract_version || "page_detail_readonly_pathgraph_preview_v1",
+      })}
+      ${scaffold.interpretation ? `<small>${escapeHtml(scaffold.interpretation)}</small>` : ""}
+    </div>`;
+}
+
+function renderLearningPageDetailPathGraphCorrespondence(correspondence = {}) {
+  if (!correspondence.contract_version) return "";
+  const shared = learningDraftArray(correspondence.shared_section_ids);
+  const pageOnly = learningDraftArray(correspondence.page_detail_only_section_ids);
+  const graphOnly = learningDraftArray(correspondence.pathgraph_preview_only_section_ids);
+  const pageSections = learningDraftArray(correspondence.page_detail_sections);
+  const graphSections = learningDraftArray(correspondence.pathgraph_preview_sections);
+  const chips = [
+    `status=${correspondence.correspondence_status || "unknown"}`,
+    `shared=${shared.length ? shared.join(",") : "-"}`,
+    pageOnly.length ? `page_only=${pageOnly.join(",")}` : "",
+    graphOnly.length ? `pathgraph_only=${graphOnly.join(",")}` : "",
+    `page_detail=${correspondence.page_detail_candidate_available === true}`,
+    `pathgraph_preview=${correspondence.pathgraph_preview_available === true}`,
+    `section_bucket_correspondence=true`,
+    `not_geometry_equivalence=true`,
+    `execute=${correspondence.execute_binding_enabled === true}`,
+    `authorization=${correspondence.artifact_is_authorization === true}`,
+  ].filter(Boolean);
+  return `
+    <div class="learning-page-pathgraph-correspondence">
+      <strong>${escapeHtml("Page detail / PathGraph layout correspondence")}</strong>
+      <div class="learning-draft-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      ${pageSections.length ? `<small>${escapeHtml(`page_detail_sections=${pageSections.map((item) => item.section_id || "").filter(Boolean).join(",")}`)}</small>` : ""}
+      ${graphSections.length ? `<small>${escapeHtml(`pathgraph_sections=${graphSections.map((item) => item.section_id || "").filter(Boolean).join(",")}`)}</small>` : ""}
+      ${correspondence.interpretation ? `<small>${escapeHtml(correspondence.interpretation)}</small>` : ""}
+    </div>`;
+}
+
+function renderLearningDemoGoalReadiness(readiness = {}) {
+  if (!readiness.contract_version) return "";
+  const summary = readiness.summary && typeof readiness.summary === "object" ? readiness.summary : {};
+  const blockers = learningDraftArray(readiness.blocking_reasons);
+  const requirements = learningDraftArray(readiness.requirements);
+  const nextActions = learningDraftArray(readiness.next_actions);
+  const evidenceMap = learningDraftArray(readiness.demo_evidence_map);
+  const freshAcceptance = readiness.fresh_model_chain_acceptance && typeof readiness.fresh_model_chain_acceptance === "object"
+    ? readiness.fresh_model_chain_acceptance
+    : null;
+  const chainManifest = readiness.demo_chain_manifest && typeof readiness.demo_chain_manifest === "object"
+    ? readiness.demo_chain_manifest
+    : null;
+  const chips = [
+    `status=${readiness.demo_goal_status || "unknown"}`,
+    `next_action_status=${readiness.next_action_status || "unknown"}`,
+    `display_ready=${readiness.display_demo_ready === true}`,
+    `final_complete=${readiness.final_goal_complete === true}`,
+    `may_start_model_after_user_approval=${readiness.may_start_model_after_user_approval === true}`,
+    `may_run_without_user_approval=${readiness.may_run_without_user_approval === true}`,
+    `passed=${summary.passed_requirement_count ?? "n/a"}`,
+    `failed=${summary.failed_requirement_count ?? "n/a"}`,
+    `not_covered=${summary.not_covered_requirement_count ?? "n/a"}`,
+  ];
+  return `
+    <div class="learning-demo-goal-readiness">
+      <strong>${escapeHtml(t("learning_demo_goal_readiness"))}</strong>
+      ${readiness.report_path ? `<small>${escapeHtml(`demo_goal_report=${readiness.report_path}`)}</small>` : ""}
+      <div class="learning-draft-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      ${blockers.length ? `<small>${escapeHtml(`blockers=${blockers.join(" · ")}`)}</small>` : ""}
+      ${freshAcceptance ? renderLearningFreshModelChainAcceptance(freshAcceptance) : ""}
+      ${chainManifest ? renderLearningDemoChainManifest(chainManifest) : ""}
+      ${evidenceMap.length ? `<div class="learning-demo-evidence-map">${evidenceMap.map(renderLearningDemoEvidenceMapItem).join("")}</div>` : ""}
+      ${nextActions.length ? `<div class="learning-demo-next-actions">${nextActions.map(renderLearningDemoNextAction).join("")}</div>` : ""}
+      ${requirements.length ? `<div class="learning-demo-goal-requirements">${requirements.map(renderLearningDemoGoalRequirement).join("")}</div>` : ""}
+      ${readiness.interpretation ? `<small>${escapeHtml(readiness.interpretation)}</small>` : ""}
+    </div>`;
+}
+
+function renderLearningFreshModelChainAcceptance(acceptance = {}) {
+  if (!acceptance.contract_version) return "";
+  const blockers = learningDraftArray(acceptance.blocking_reasons);
+  const sourceBreakdown = acceptance.source_breakdown && typeof acceptance.source_breakdown === "object"
+    ? acceptance.source_breakdown
+    : {};
+  const replacementPlan = acceptance.replacement_plan && typeof acceptance.replacement_plan === "object"
+    ? acceptance.replacement_plan
+    : null;
+  const required = learningDraftArray(acceptance.required_for_acceptance);
+  const chips = [
+    `accepted=${acceptance.accepted === true}`,
+    `status=${acceptance.acceptance_status || "unknown"}`,
+    `counts_as_final_goal_completion=${acceptance.counts_as_final_goal_completion === true}`,
+    `actual_model_call=${acceptance.actual_model_call_evidence_count ?? 0}`,
+    `assisted_or_human=${acceptance.assisted_or_human_review_evidence_count ?? 0}`,
+    Object.keys(sourceBreakdown).length ? `source_breakdown=${Object.entries(sourceBreakdown).map(([key, value]) => `${key}:${value}`).join(",")}` : "",
+  ].filter(Boolean);
+  return `
+    <div class="learning-demo-fresh-acceptance">
+      <strong>${escapeHtml(acceptance.contract_version)}</strong>
+      <div class="learning-draft-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      ${blockers.length ? `<small>${escapeHtml(`blockers=${blockers.join(" · ")}`)}</small>` : ""}
+      ${required.length ? `<small>${escapeHtml(`required=${required.join(" · ")}`)}</small>` : ""}
+      ${replacementPlan ? renderLearningFreshModelReplacementPlan(replacementPlan) : ""}
+      ${acceptance.interpretation ? `<small>${escapeHtml(acceptance.interpretation)}</small>` : ""}
+    </div>`;
+}
+
+function renderLearningFreshModelReplacementPlan(plan = {}) {
+  if (!plan.contract_version) return "";
+  const sourceBreakdown = plan.current_source_breakdown && typeof plan.current_source_breakdown === "object"
+    ? plan.current_source_breakdown
+    : {};
+  const sourcesToReplace = learningDraftArray(plan.sources_to_replace);
+  const steps = learningDraftArray(plan.replacement_steps);
+  const chips = [
+    `replacement_required=${plan.replacement_required === true}`,
+    `plan_status=${plan.plan_status || "unknown"}`,
+    `required_source_type=${plan.required_source_type || "unknown"}`,
+    Object.keys(sourceBreakdown).length ? `current_sources=${Object.entries(sourceBreakdown).map(([key, value]) => `${key}:${value}`).join(",")}` : "",
+    sourcesToReplace.length ? `replace=${sourcesToReplace.join(",")}` : "",
+    `execute=${plan.execute_binding_enabled === true}`,
+    `authorization=${plan.artifact_is_authorization === true}`,
+  ].filter(Boolean);
+  return `
+    <div class="learning-demo-fresh-replacement-plan">
+      <strong>${escapeHtml(plan.contract_version)}</strong>
+      <div class="learning-draft-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      ${steps.length ? `<div class="learning-demo-next-actions">${steps.map(renderLearningFreshModelReplacementStep).join("")}</div>` : ""}
+      ${plan.interpretation ? `<small>${escapeHtml(plan.interpretation)}</small>` : ""}
+    </div>`;
+}
+
+function renderLearningFreshModelReplacementStep(step = {}) {
+  const fields = [
+    `step=${step.step_id || "unknown"}`,
+    `status=${step.status || "unknown"}`,
+    `approval=${step.requires_user_approval === true}`,
+    `run_now=${step.command_executes_now === true}`,
+    step.expected_source_type ? `expected_source=${step.expected_source_type}` : "",
+    Array.isArray(step.ready_region_numbers) ? `regions=${step.ready_region_numbers.join(",")}` : "",
+    step.expected_output ? `expected=${step.expected_output}` : "",
+    step.run_command_preview ? `command=${step.run_command_preview}` : "",
+  ].filter(Boolean);
+  return `<div class="learning-demo-next-action">${fields.map((field) => `<small>${escapeHtml(field)}</small>`).join("")}</div>`;
+}
+
+function renderLearningDemoChainManifest(manifest = {}) {
+  const steps = learningDraftArray(manifest.steps);
+  const chips = [
+    `chain_can_be_demoed=${manifest.chain_can_be_demoed === true}`,
+    `chain_is_final_goal_complete=${manifest.chain_is_final_goal_complete === true}`,
+    Array.isArray(manifest.final_goal_blockers) && manifest.final_goal_blockers.length
+      ? `final_goal_blockers=${manifest.final_goal_blockers.join(",")}`
+      : "",
+  ].filter(Boolean);
+  return `
+    <div class="learning-demo-chain-manifest">
+      <strong>${escapeHtml(manifest.contract_version || "learning_mode_demo_chain_manifest")}</strong>
+      ${chips.length ? `<small>${escapeHtml(chips.join(" · "))}</small>` : ""}
+      ${steps.length ? `<div class="learning-demo-chain-steps">${steps.map(renderLearningDemoChainStep).join("")}</div>` : ""}
+      ${manifest.interpretation ? `<small>${escapeHtml(manifest.interpretation)}</small>` : ""}
+    </div>`;
+}
+
+function renderLearningDemoChainStep(item = {}) {
+  const proofFields = Array.isArray(item.proof_fields) ? item.proof_fields : [];
+  const missingProofFields = Array.isArray(item.missing_proof_fields) ? item.missing_proof_fields : [];
+  const fields = [
+    `ordinal=${item.ordinal ?? "-"}`,
+    `stage_ready_for_display=${item.stage_ready_for_display === true}`,
+    `artifact_exists=${item.artifact_exists === true}`,
+    proofFields.length ? `proof_fields=${proofFields.join(",")}` : "",
+    missingProofFields.length ? `missing_proof_fields=${missingProofFields.join(",")}` : "",
+    `display_only=${item.display_only === true}`,
+    `execute_binding_enabled=${item.execute_binding_enabled === true}`,
+    `authorization=${item.artifact_is_authorization === true}`,
+  ].filter(Boolean);
+  return `
+    <div class="learning-demo-chain-step">
+      <span>${escapeHtml(item.stage_id || "stage")}</span>
+      <strong>${escapeHtml(item.status || "unknown")}</strong>
+      ${item.artifact_path ? `<small>${escapeHtml(`artifact=${item.artifact_path}`)}</small>` : ""}
+      ${fields.length ? `<small>${escapeHtml(fields.join(" · "))}</small>` : ""}
+    </div>`;
+}
+
+function renderLearningDemoEvidenceMapItem(item = {}) {
+  const stageId = String(item.stage_id || "stage").trim();
+  const status = String(item.status || "unknown").trim();
+  const fields = [
+    item.role ? `role=${item.role}` : "",
+    item.region_count !== undefined ? `regions=${item.region_count}` : "",
+    item.action_count !== undefined ? `actions=${item.action_count}` : "",
+    item.section_count !== undefined ? `sections=${item.section_count}` : "",
+    item.possible_operation_count !== undefined ? `operations=${item.possible_operation_count}` : "",
+    item.layout_mode ? `layout_mode=${item.layout_mode}` : "",
+    item.readiness_status ? `readiness_status=${item.readiness_status}` : "",
+    item.layout_section_count !== undefined ? `layout_section_count=${item.layout_section_count}` : "",
+    item.bbox_region_count !== undefined ? `bbox_regions=${item.bbox_region_count}` : "",
+    Array.isArray(item.operation_kinds) && item.operation_kinds.length ? `operation_kinds=${item.operation_kinds.join(",")}` : "",
+    item.artifact_exists !== undefined ? `artifact_exists=${item.artifact_exists === true}` : "",
+    item.artifact_sha256_prefix ? `artifact_sha256_prefix=${item.artifact_sha256_prefix}` : "",
+    `display_only=${item.display_only === true}`,
+    `authorization=${item.artifact_is_authorization === true}`,
+  ].filter(Boolean);
+  return `
+    <div class="learning-demo-evidence-item">
+      <span>${escapeHtml(stageId)}</span>
+      <strong>${escapeHtml(status)}</strong>
+      ${item.artifact_path ? `<small>${escapeHtml(`artifact=${item.artifact_path}`)}</small>` : ""}
+      ${item.artifact_resolved_path ? `<small>${escapeHtml(`resolved=${item.artifact_resolved_path}`)}</small>` : ""}
+      ${fields.length ? `<small>${escapeHtml(fields.join(" · "))}</small>` : ""}
+    </div>`;
+}
+
+function renderLearningDemoNextAction(item = {}) {
+  const actionId = String(item.action_id || "next_action").trim();
+  const status = String(item.status || "unknown").trim();
+  const readyRegions = Array.isArray(item.ready_region_numbers)
+    ? item.ready_region_numbers.filter((value) => value !== null && value !== undefined && value !== "").join(",")
+    : "";
+  const fields = [
+    `requires_user_approval=${item.requires_user_approval === true}`,
+    `may_run_without_user_approval=${item.may_run_without_user_approval === true}`,
+    readyRegions ? `ready_regions=${readyRegions}` : "",
+    item.pending_calibration_count !== undefined ? `pending_calibration_count=${item.pending_calibration_count}` : "",
+    item.expected_output ? `expected_output=${item.expected_output}` : "",
+    item.command_source_status ? `command_source_status=${item.command_source_status}` : "",
+    item.command_executes_now !== undefined ? `command_executes_now=${item.command_executes_now === true}` : "",
+    item.start_model_flag_included !== undefined ? `start_model_flag_included=${item.start_model_flag_included === true}` : "",
+    item.requires_user_or_runner_to_start_model !== undefined
+      ? `requires_user_or_runner_to_start_model=${item.requires_user_or_runner_to_start_model === true}`
+      : "",
+    item.requires_completed_batch_output !== undefined
+      ? `requires_completed_batch_output=${item.requires_completed_batch_output === true}`
+      : "",
+    item.expected_rerun_report_path ? `expected_rerun_report_path=${item.expected_rerun_report_path}` : "",
+    item.reason ? `reason=${item.reason}` : "",
+  ].filter(Boolean);
+  const safety = item.safety && typeof item.safety === "object" ? item.safety : {};
+  const safetyText = Object.entries(safety)
+    .filter(([, value]) => value !== null && value !== undefined && value !== "")
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join(" · ");
+  return `
+    <div class="learning-demo-next-action">
+      <span>${escapeHtml(actionId)}</span>
+      <strong>${escapeHtml(status)}</strong>
+      ${fields.length ? `<small>${escapeHtml(fields.join(" · "))}</small>` : ""}
+      ${item.run_command_preview ? `<small>${escapeHtml(`run_command_preview=${item.run_command_preview}`)}</small>` : ""}
+      ${safetyText ? `<small>${escapeHtml(`safety=${safetyText}`)}</small>` : ""}
+      ${item.interpretation ? `<small>${escapeHtml(item.interpretation)}</small>` : ""}
+    </div>`;
+}
+
+function renderLearningDemoGoalRequirement(item = {}) {
+  const requirementId = String(item.requirement_id || "requirement").trim();
+  const status = String(item.status || "unknown").trim();
+  const evidence = item.evidence && typeof item.evidence === "object" ? item.evidence : {};
+  const evidenceText = Object.entries(evidence)
+    .filter(([, value]) => value !== null && value !== undefined && value !== "")
+    .slice(0, 4)
+    .map(([key, value]) => `${key}=${Array.isArray(value) ? value.join("|") : String(value)}`)
+    .join(" · ");
+  return `
+    <div class="learning-demo-goal-requirement">
+      <span>${escapeHtml(requirementId)}</span>
+      <strong>${escapeHtml(status)}</strong>
+      ${evidenceText ? `<small>${escapeHtml(evidenceText)}</small>` : ""}
+    </div>`;
+}
+
+function renderLearningDemoFlowStep(step = {}) {
+  const stepId = String(step.step_id || "step").trim();
+  const status = String(step.status || "unknown").trim();
+  const artifactPath = String(step.artifact_path || "").trim();
+  return `
+    <div class="learning-demo-flow-step">
+      <span>${escapeHtml(stepId)}</span>
+      <strong>${escapeHtml(status)}</strong>
+      ${artifactPath ? `<small>${escapeHtml(artifactPath)}</small>` : ""}
+    </div>`;
+}
+
+function renderLearningModelOnlyDemoReadiness(readiness = {}) {
+  if (!readiness.contract_version) return "";
+  const blockers = learningDraftArray(readiness.blocking_reasons);
+  const chips = [
+    `status=${readiness.status || "unknown"}`,
+    `ready=${readiness.ready === true}`,
+    `actual_model=${readiness.actual_model_call_evidence_count ?? "n/a"}`,
+    `preview_regions=${readiness.model_preview_region_count ?? "n/a"}`,
+    `preview_actions=${readiness.model_preview_action_count ?? "n/a"}`,
+    `page_sections=${readiness.model_page_detail_section_count ?? "n/a"}`,
+    `page_ops=${readiness.model_page_detail_possible_operation_count ?? "n/a"}`,
+    `official_pure_model=${readiness.official_candidate_fully_model_generated === true}`,
+  ];
+  return `
+    <div class="learning-model-only-readiness">
+      <strong>${escapeHtml("Model-only demo readiness")}</strong>
+      <div class="learning-draft-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      ${blockers.length ? `<small>${escapeHtml(`blockers=${blockers.join(" · ")}`)}</small>` : ""}
+      ${readiness.interpretation ? `<small>${escapeHtml(readiness.interpretation)}</small>` : ""}
+    </div>`;
+}
+
+function renderLearningModelGeneratedPageDetailPreview(pageDetail = {}, options = {}) {
+  if (!pageDetail.contract_version) return "";
+  const layout = pageDetail.layout && typeof pageDetail.layout === "object" ? pageDetail.layout : {};
+  const summary = pageDetail.summary && typeof pageDetail.summary === "object" ? pageDetail.summary : {};
+  const regions = learningDraftArray(layout.regions);
+  const sections = learningDraftArray(layout.sections);
+  const displayGroups = learningDraftArray(layout.display_groups);
+  const chips = [
+    `${options.contractLabel ? "preview" : "model_page_detail"}=${options.contractLabel || pageDetail.contract_version}`,
+    `regions=${summary.region_count ?? regions.length}`,
+    `sections=${summary.section_count ?? sections.length}`,
+    `groups=${summary.display_group_count ?? displayGroups.length}`,
+    `ops=${summary.possible_operation_count ?? "n/a"}`,
+    `execute_binding_enabled=${pageDetail.execute_binding_enabled === true}`,
+    `artifact_is_authorization=${pageDetail.artifact_is_authorization === true}`,
+  ];
+  return `
+    <div class="learning-model-page-detail-preview">
+      <strong>${escapeHtml(options.title || "Model-only page detail preview")}</strong>
+      <div class="learning-draft-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      ${regions.length || displayGroups.length ? renderLearningPageDetailSpatialMap(regions, layout.bounds || {}, sections, displayGroups) : ""}
+      ${sections.length ? renderLearningPageDetailSections(sections) : ""}
+    </div>`;
+}
+
+function renderLearningDemoProvenanceEvidence(item = {}) {
+  const role = String(item.role || "artifact").trim();
+  const path = String(item.path || "").trim();
+  const sourceType = String(item.source_type || item.contract_version || "unknown").trim();
+  const actual = item.actual_model_call_in_this_run === true ? "actual_model=true" : "actual_model=false";
+  const review = item.reviewed_by_human === true || item.counts_as_pure_model_generated === false
+    ? "assisted_or_reviewed=true"
+    : "assisted_or_reviewed=false";
+  return `
+    <div class="learning-demo-provenance-row">
+      <strong>${escapeHtml(role)}</strong>
+      <span>${escapeHtml(sourceType)}</span>
+      <small>${escapeHtml([actual, review, path].filter(Boolean).join(" · "))}</small>
+    </div>`;
+}
+
+function renderLearningPageDetailSpatialMap(regions = [], bounds = {}, sections = [], displayGroups = []) {
+  const items = Array.isArray(regions) ? regions.filter((item) => item && typeof item === "object" && item.bbox && item.render_in_spatial_preview !== false) : [];
+  const sectionItems = Array.isArray(sections) ? sections.filter((item) => item && typeof item === "object" && item.bbox) : [];
+  const groupItems = Array.isArray(displayGroups) ? displayGroups.filter((item) => item && typeof item === "object" && item.bbox) : [];
+  const minX = Number(bounds.x);
+  const minY = Number(bounds.y);
+  const width = Number(bounds.w);
+  const height = Number(bounds.h);
+  if ((!items.length && !sectionItems.length && !groupItems.length) || !Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return "";
+  }
+  const sorted = items.slice().sort((a, b) => {
+    const aBox = a.bbox || {};
+    const bBox = b.bbox || {};
+    const areaA = Number(aBox.w || 1) * Number(aBox.h || 1);
+    const areaB = Number(bBox.w || 1) * Number(bBox.h || 1);
+    return areaB - areaA;
+  });
+  return `
+    <div class="learning-page-layout-map" style="aspect-ratio:${width}/${height};">
+      ${renderLearningPageDetailSpatialSections(sectionItems, { minX, minY, width, height })}
+      ${renderLearningPageDetailSpatialGroups(groupItems, { minX, minY, width, height })}
+      ${renderLearningPageDetailSpatialFooterConnectors(groupItems, { minX, minY, width, height })}
+      ${sorted.map((item, index) => renderLearningPageDetailSpatialRegion(item, { minX, minY, width, height, index })).join("")}
+    </div>`;
+}
+
+function renderLearningPageDetailSpatialSections(sections = [], layout = {}) {
+  const sorted = sections.slice().sort((a, b) => {
+    const aBox = a.bbox || {};
+    const bBox = b.bbox || {};
+    const areaA = Number(aBox.w || 1) * Number(aBox.h || 1);
+    const areaB = Number(bBox.w || 1) * Number(bBox.h || 1);
+    return areaB - areaA;
+  });
+  return sorted.map((section, index) => renderLearningPageDetailSpatialSection(section, { ...layout, index })).join("");
+}
+
+function renderLearningPageDetailSpatialSection(section = {}, layout = {}) {
+  const bbox = section.bbox || {};
+  const left = ((Number(bbox.x || 0) - layout.minX) / layout.width) * 100;
+  const top = ((Number(bbox.y || 0) - layout.minY) / layout.height) * 100;
+  const width = (Number(bbox.w || 1) / layout.width) * 100;
+  const height = (Number(bbox.h || 1) / layout.height) * 100;
+  const title = section.label || section.section_id || "Section";
+  const meta = [
+    section.layout_zone,
+    section.section_source,
+    `regions=${section.region_count ?? 0}`,
+  ].filter(Boolean).join(" · ");
+  return `
+    <article class="learning-page-layout-section" style="left:${left.toFixed(3)}%;top:${top.toFixed(3)}%;width:${width.toFixed(3)}%;height:${height.toFixed(3)}%;z-index:${1 + layout.index};">
+      <strong>${escapeHtml(title)}</strong>
+      <span>${escapeHtml(meta)}</span>
+    </article>`;
+}
+
+function renderLearningPageDetailSpatialGroups(groups = [], layout = {}) {
+  return groups.slice().sort((a, b) => {
+    const aBox = a.bbox || {};
+    const bBox = b.bbox || {};
+    const areaA = Number(aBox.w || 1) * Number(aBox.h || 1);
+    const areaB = Number(bBox.w || 1) * Number(bBox.h || 1);
+    return areaB - areaA;
+  }).map((group, index) => {
+    const bbox = group.bbox || {};
+    const left = ((Number(bbox.x || 0) - layout.minX) / layout.width) * 100;
+    const top = ((Number(bbox.y || 0) - layout.minY) / layout.height) * 100;
+    const width = (Number(bbox.w || 1) / layout.width) * 100;
+    const height = (Number(bbox.h || 1) / layout.height) * 100;
+    const title = `${group.role || "group"} · ${group.label || group.group_id || "Group"}`;
+    const members = Array.isArray(group.member_region_numbers) ? group.member_region_numbers.join(",") : group.member_count || "-";
+    return `
+      <article class="learning-page-layout-group" style="left:${left.toFixed(3)}%;top:${top.toFixed(3)}%;width:${width.toFixed(3)}%;height:${height.toFixed(3)}%;z-index:${6 + index};">
+        <strong>${escapeHtml(title)}</strong>
+        <span>${escapeHtml(`members=${members}`)}</span>
+      </article>`;
+  }).join("");
+}
+
+function renderLearningPageDetailSpatialFooterConnectors(groups = [], layout = {}) {
+  const connectors = [];
+  for (const group of groups) {
+    const groupConnectors = Array.isArray(group.footer_connectors) ? group.footer_connectors : [];
+    for (const connector of groupConnectors) {
+      if (!connector || typeof connector !== "object") continue;
+      const fromPoint = connector.from_point && typeof connector.from_point === "object" ? connector.from_point : {};
+      const toPoint = connector.to_point && typeof connector.to_point === "object" ? connector.to_point : {};
+      const x1 = ((Number(fromPoint.x || 0) - layout.minX) / layout.width) * 100;
+      const y1 = ((Number(fromPoint.y || 0) - layout.minY) / layout.height) * 100;
+      const x2 = ((Number(toPoint.x || 0) - layout.minX) / layout.width) * 100;
+      const y2 = ((Number(toPoint.y || 0) - layout.minY) / layout.height) * 100;
+      if (![x1, y1, x2, y2].every(Number.isFinite)) continue;
+      const labelX = Math.min(96, Math.max(x1, x2) + 0.4);
+      const labelY = Math.max(1, Math.min(y1, y2) - 1.4);
+      connectors.push(`
+        <g class="learning-page-layout-footer-connector">
+          <line x1="${x1.toFixed(3)}%" y1="${y1.toFixed(3)}%" x2="${x2.toFixed(3)}%" y2="${y2.toFixed(3)}%" />
+          <circle cx="${x2.toFixed(3)}%" cy="${y2.toFixed(3)}%" r="3" />
+          <text x="${labelX.toFixed(3)}%" y="${labelY.toFixed(3)}%">footer</text>
+        </g>`);
+    }
+  }
+  if (!connectors.length) return "";
+  return `
+    <svg class="learning-page-layout-connectors" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+      ${connectors.join("")}
+    </svg>`;
+}
+
+function renderLearningPageDetailSpatialRegion(item = {}, layout = {}) {
+  const bbox = item.bbox || {};
+  const left = ((Number(bbox.x || 0) - layout.minX) / layout.width) * 100;
+  const top = ((Number(bbox.y || 0) - layout.minY) / layout.height) * 100;
+  const width = (Number(bbox.w || 1) / layout.width) * 100;
+  const height = (Number(bbox.h || 1) / layout.height) * 100;
+  const operation = item.possible_operation && typeof item.possible_operation === "object" ? item.possible_operation : {};
+  const title = `#${item.region_no ?? "?"} ${item.label || item.region_id || "Region"}`;
+  const meta = [item.layout_zone, operation.kind, operation.readiness].filter(Boolean).join(" · ");
+  return `
+    <article class="learning-page-layout-region" style="left:${left.toFixed(3)}%;top:${top.toFixed(3)}%;width:${width.toFixed(3)}%;height:${height.toFixed(3)}%;z-index:${10 + layout.index};">
+      <strong>${escapeHtml(title)}</strong>
+      <span>${escapeHtml(meta)}</span>
+    </article>`;
+}
+
+function renderLearningPageDetailSections(sections = []) {
+  const items = Array.isArray(sections) ? sections.filter((item) => item && typeof item === "object") : [];
+  if (!items.length) return "";
+  return `
+    <div class="learning-page-detail-sections">
+      ${items.map((section) => {
+        const regions = Array.isArray(section.regions) ? section.regions : [];
+        const ops = Array.isArray(section.possible_operations) ? section.possible_operations : [];
+        return `
+          <section>
+            <strong>${escapeHtml(section.label || section.section_id || "Section")}</strong>
+            <small>${escapeHtml(`regions=${(section.region_numbers || []).join(",") || "-"} · ops=${ops.join(",") || "read_only"}`)}</small>
+            ${renderLearningPageDetailSectionSummary(section)}
+            ${renderLearningPageDetailOperationLinks(section.operation_links)}
+            ${regions.slice(0, 8).map((region) => renderLearningPageDetailSectionRegion(region)).join("")}
+          </section>`;
+      }).join("")}
+    </div>`;
+}
+
+function renderLearningPageDetailSectionSummary(section = {}) {
+  const bbox = section.bbox && typeof section.bbox === "object" ? section.bbox : {};
+  const summary = section.operation_summary && typeof section.operation_summary === "object" ? section.operation_summary : {};
+  const kindCounts = summary.kind_counts && typeof summary.kind_counts === "object" ? summary.kind_counts : {};
+  const readinessCounts = summary.readiness_counts && typeof summary.readiness_counts === "object" ? summary.readiness_counts : {};
+  const parts = [
+    Object.keys(bbox).length ? `bbox=${bbox.x ?? 0},${bbox.y ?? 0},${bbox.w ?? bbox.width ?? 0},${bbox.h ?? bbox.height ?? 0}` : "",
+    `region_count=${Number(section.region_count || 0) || (Array.isArray(section.regions) ? section.regions.length : 0)}`,
+    Object.keys(kindCounts).length ? `kind_counts=${learningCompactCounts(kindCounts)}` : "",
+    Object.keys(readinessCounts).length ? `readiness_counts=${learningCompactCounts(readinessCounts)}` : "",
+  ].filter(Boolean);
+  if (!parts.length) return "";
+  return `<div class="learning-page-detail-section-summary">${parts.map((part) => `<span>${escapeHtml(part)}</span>`).join("")}</div>`;
+}
+
+function renderLearningPageDetailOperationLinks(links = []) {
+  const items = Array.isArray(links) ? links.filter((item) => item && typeof item === "object") : [];
+  if (!items.length) return "";
+  return `
+    <div class="learning-page-detail-operation-links">
+      ${items.slice(0, 8).map((item) => {
+        const meta = [
+          item.operation_kind || "read_only",
+          item.readiness || "review_required",
+          item.candidate_point && typeof item.candidate_point === "object"
+            ? `point=${item.candidate_point.x ?? "?"},${item.candidate_point.y ?? "?"}`
+            : "",
+        ].filter(Boolean).join(" · ");
+        return `
+          <div>
+            <span>${escapeHtml(`#${item.region_no ?? "?"} ${item.label || item.region_id || "Region"}`)}</span>
+            <small>${escapeHtml(meta)}</small>
+          </div>`;
+      }).join("")}
+    </div>`;
+}
+
+function learningCompactCounts(counts = {}) {
+  return Object.entries(counts)
+    .filter(([key, value]) => key && Number.isFinite(Number(value)))
+    .map(([key, value]) => `${key}:${Number(value)}`)
+    .join(",");
+}
+
+function renderLearningPageDetailSectionRegion(region = {}) {
+  const operation = region.possible_operation && typeof region.possible_operation === "object" ? region.possible_operation : {};
+  const parts = [
+    `#${region.region_no ?? "?"}`,
+    region.role || "region",
+    operation.kind || "read_only",
+    operation.readiness || "review_required",
+    region.calibration_state || "",
+  ].filter(Boolean);
+  return `
+    <div class="learning-page-detail-region-row">
+      <span>${escapeHtml(region.label || region.region_id || "Region")}</span>
+      <small>${escapeHtml(parts.join(" · "))}</small>
+    </div>`;
+}
+
+function renderLearningDraftPathGraphReadiness(review = {}) {
+  const candidateReview = review?.pathgraph_candidate_review && typeof review.pathgraph_candidate_review === "object"
+    ? review.pathgraph_candidate_review
+    : {};
+  const summary = candidateReview.pathgraph_readiness_summary && typeof candidateReview.pathgraph_readiness_summary === "object"
+    ? candidateReview.pathgraph_readiness_summary
+    : {};
+  if (!Object.keys(summary).length) return "";
+  const promotionGate = summary.promotion_review_gate && typeof summary.promotion_review_gate === "object"
+    ? summary.promotion_review_gate
+    : {};
+  const runbook = pathgraphReadinessRunbook(candidateReview, summary);
+  const preflight = pathgraphReadinessPreflight(candidateReview, summary);
+  const demo = pathgraphReadinessDemo(candidateReview, summary);
+  const approvalPacket = pathgraphReadinessApprovalPacket(candidateReview, summary);
+  const calibrationPreRun = pathgraphReadinessCalibrationPreRun(candidateReview, summary);
+  const pathgraphIntegration = pathgraphReadinessIntegration(candidateReview, summary);
+  const currentEvidencePacket = pathgraphReadinessCurrentEvidencePacket(candidateReview, summary);
+  const preciseUnderstandingCandidate = pathgraphReadinessPreciseUnderstandingCandidate(candidateReview, summary);
+  const blockers = Array.isArray(summary.promotion_review_blockers) ? summary.promotion_review_blockers : [];
+  const failedChecks = Array.isArray(promotionGate.failed_check_ids) ? promotionGate.failed_check_ids : [];
+  const runbookCommands = runbook.commands && typeof runbook.commands === "object" ? runbook.commands : {};
+  const approvalPacketCommands = approvalPacket.commands && typeof approvalPacket.commands === "object"
+    ? approvalPacket.commands
+    : {};
+  const calibrationCommandPreview = String(runbookCommands.calibration_command_preview || "").trim();
+  const refreshCommandPreview = String(runbookCommands.post_batch_refresh_command_preview || "").trim();
+  const approvalCalibrationCommandPreview = String(approvalPacketCommands.calibration_command_preview || "").trim();
+  const approvalRefreshCommandPreview = String(approvalPacketCommands.post_batch_refresh_command_preview || "").trim();
+  const runbookChecklist = pathgraphReadinessRunbookChecklist(runbook);
+  const evidenceRequirements = pathgraphReadinessEvidenceRequirements(runbook);
+  const approvalPacketChecklist = pathgraphReadinessApprovalPacketChecklist(approvalPacket);
+  const approvalPacketEvidence = pathgraphReadinessApprovalPacketEvidence(approvalPacket);
+  const calibrationPreRunChecklist = pathgraphReadinessCalibrationPreRunChecklist(calibrationPreRun);
+  const calibrationPreRunEvidence = pathgraphReadinessCalibrationPreRunEvidence(calibrationPreRun);
+  const calibrationPreRunModelSnapshot = pathgraphReadinessCalibrationPreRunModelSnapshot(calibrationPreRun);
+  const pathgraphIntegrationChecklist = pathgraphReadinessIntegrationChecklist(pathgraphIntegration);
+  const pathgraphIntegrationReportPath = String(pathgraphIntegration.report_path || "").trim();
+  const currentEvidencePacketSummary = pathgraphReadinessCurrentEvidencePacketSummary(currentEvidencePacket);
+  const currentEvidencePacketReportPath = String(currentEvidencePacket.report_path || "").trim();
+  const preciseUnderstandingSummary = pathgraphReadinessPreciseUnderstandingCandidateSummary(preciseUnderstandingCandidate);
+  const preciseUnderstandingReportPath = String(preciseUnderstandingCandidate.report_path || "").trim();
+  const chips = [
+    `status=${summary.readiness_status || "unknown"}`,
+    `gate_status=${promotionGate.gate_status || "not_evaluated"}`,
+    `states=${summary.state_count ?? 0}`,
+    `regions=${summary.region_count ?? 0}`,
+    `actions=${summary.action_template_count ?? 0}`,
+    `attachments=${summary.detail_surface_attachment_count ?? 0}`,
+    `detail_regions=${summary.attached_detail_region_count ?? 0}`,
+    `detail_actions=${summary.attached_detail_action_count ?? 0}`,
+    runbook.runbook_status ? `runbook_status=${runbook.runbook_status}` : "",
+    preflight.preflight_status ? `preflight_status=${preflight.preflight_status}` : "",
+    demo.demo_readiness_status ? `demo_readiness=${demo.demo_readiness_status}` : "",
+    approvalPacket.approval_packet_status ? `approval_packet=${approvalPacket.approval_packet_status}` : "",
+    pathgraphReadinessCalibrationPreRunStatus(calibrationPreRun)
+      ? `calibration_pre_run=${pathgraphReadinessCalibrationPreRunStatus(calibrationPreRun)}`
+      : "",
+    pathgraphIntegration.integration_readiness_status
+      ? `pathgraph_integration=${pathgraphIntegration.integration_readiness_status}`
+      : "",
+    currentEvidencePacket.contract_version ? "current_evidence_packet=available" : "",
+    currentEvidencePacketSummary.integrationStatus
+      ? `current_packet_integration=${currentEvidencePacketSummary.integrationStatus}`
+      : "",
+    Number.isFinite(currentEvidencePacketSummary.coverage)
+      ? `current_packet_coverage=${currentEvidencePacketSummary.coverage}`
+      : "",
+    preciseUnderstandingCandidate.readiness_status
+      ? `precise_understanding=${preciseUnderstandingCandidate.readiness_status}`
+      : "",
+    Number.isFinite(preciseUnderstandingSummary.totalRegions)
+      ? `precise_regions=${preciseUnderstandingSummary.totalRegions}`
+      : "",
+    Number.isFinite(preciseUnderstandingSummary.pendingCalibration)
+      ? `precise_pending=${preciseUnderstandingSummary.pendingCalibration}`
+      : "",
+    Number.isFinite(preciseUnderstandingSummary.pathgraphReady)
+      ? `precise_pathgraph_ready=${preciseUnderstandingSummary.pathgraphReady}`
+      : "",
+    Object.prototype.hasOwnProperty.call(preflight, "may_start_model_after_user_approval")
+      ? `preflight_start_after_approval=${preflight.may_start_model_after_user_approval === true ? "true" : "false"}`
+      : "",
+    Object.prototype.hasOwnProperty.call(runbook, "may_run_calibration_batch_now")
+      ? `may_run_now=${runbook.may_run_calibration_batch_now === true ? "true" : "false"}`
+      : "",
+    `execute_binding_enabled=${summary.execute_binding_enabled === true}`,
+  ].filter(Boolean);
+  const runbookReady = Array.isArray(runbook.ready_region_numbers) ? runbook.ready_region_numbers : [];
+  return `
+    <div class="learning-draft-detail-card">
+      <strong>${escapeHtml(t("learning_draft_pathgraph_readiness"))}</strong>
+      <div class="learning-draft-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      ${runbook.runbook_status ? `<small>${escapeHtml(`runbook_ready=${runbookReady.join(", ") || "-"} · next=${runbook.next_manual_action || "-"}`)}</small>` : ""}
+      ${runbookChecklist.length ? `<small>${escapeHtml(`runbook_checklist=${runbookChecklist.join(" · ")}`)}</small>` : ""}
+      ${evidenceRequirements.length ? `<small>${escapeHtml(`evidence_requirements=${evidenceRequirements.join(" · ")}`)}</small>` : ""}
+      ${approvalPacketChecklist.length ? `<small>${escapeHtml(`approval_packet_checklist=${approvalPacketChecklist.join(" · ")}`)}</small>` : ""}
+      ${approvalPacketEvidence.length ? `<small>${escapeHtml(`approval_packet_evidence=${approvalPacketEvidence.join(" · ")}`)}</small>` : ""}
+      ${calibrationPreRunChecklist.length ? `<small>${escapeHtml(`calibration_pre_run_checklist=${calibrationPreRunChecklist.join(" · ")}`)}</small>` : ""}
+      ${calibrationPreRunEvidence.length ? `<small>${escapeHtml(`calibration_pre_run_evidence=${calibrationPreRunEvidence.join(" · ")}`)}</small>` : ""}
+      ${calibrationPreRunModelSnapshot.length ? `<small>${escapeHtml(`calibration_pre_run_model_snapshot=${calibrationPreRunModelSnapshot.join(" · ")}`)}</small>` : ""}
+      ${pathgraphIntegrationChecklist.length ? `<small>${escapeHtml(`pathgraph_integration_checklist=${pathgraphIntegrationChecklist.join(" · ")}`)}</small>` : ""}
+      ${pathgraphIntegrationReportPath ? `<small>${escapeHtml(`pathgraph_integration_report=${pathgraphIntegrationReportPath}`)}</small>` : ""}
+      ${currentEvidencePacketReportPath ? `<small>${escapeHtml(`current_evidence_packet=${currentEvidencePacketReportPath}`)}</small>` : ""}
+      ${currentEvidencePacketSummary.safety.length ? `<small>${escapeHtml(`current_evidence_packet_safety=${currentEvidencePacketSummary.safety.join(" · ")}`)}</small>` : ""}
+      ${preciseUnderstandingReportPath ? `<small>${escapeHtml(`precise_understanding_candidate=${preciseUnderstandingReportPath}`)}</small>` : ""}
+      ${preciseUnderstandingSummary.safety.length ? `<small>${escapeHtml(`precise_understanding_safety=${preciseUnderstandingSummary.safety.join(" · ")}`)}</small>` : ""}
+      ${calibrationCommandPreview ? `<small>${escapeHtml(`calibration_preview=${calibrationCommandPreview}`)}</small>` : ""}
+      ${refreshCommandPreview ? `<small>${escapeHtml(`refresh_preview=${refreshCommandPreview}`)}</small>` : ""}
+      ${approvalCalibrationCommandPreview ? `<small>${escapeHtml(`approval_packet_calibration_preview=${approvalCalibrationCommandPreview}`)}</small>` : ""}
+      ${approvalRefreshCommandPreview ? `<small>${escapeHtml(`approval_packet_refresh_preview=${approvalRefreshCommandPreview}`)}</small>` : ""}
+      ${failedChecks.length ? `<small>${escapeHtml(`failed_checks=${failedChecks.join(" · ")}`)}</small>` : ""}
+      ${blockers.length ? `<small>${escapeHtml(blockers.join(" · "))}</small>` : ""}
+    </div>`;
+}
+
+function pathgraphReadinessRunbook(candidateReview = {}, summary = {}) {
+  if (candidateReview.model_start_runbook && typeof candidateReview.model_start_runbook === "object") {
+    return candidateReview.model_start_runbook;
+  }
+  if (summary.model_start_runbook && typeof summary.model_start_runbook === "object") {
+    return summary.model_start_runbook;
+  }
+  return {};
+}
+
+function pathgraphReadinessPreflight(candidateReview = {}, summary = {}) {
+  if (candidateReview.model_start_preflight && typeof candidateReview.model_start_preflight === "object") {
+    return candidateReview.model_start_preflight;
+  }
+  if (summary.model_start_preflight && typeof summary.model_start_preflight === "object") {
+    return summary.model_start_preflight;
+  }
+  return {};
+}
+
+function pathgraphReadinessDemo(candidateReview = {}, summary = {}) {
+  if (candidateReview.demo_readiness && typeof candidateReview.demo_readiness === "object") {
+    return candidateReview.demo_readiness;
+  }
+  if (summary.demo_readiness && typeof summary.demo_readiness === "object") {
+    return summary.demo_readiness;
+  }
+  return {};
+}
+
+function pathgraphReadinessApprovalPacket(candidateReview = {}, summary = {}) {
+  if (candidateReview.model_start_approval_packet && typeof candidateReview.model_start_approval_packet === "object") {
+    return candidateReview.model_start_approval_packet;
+  }
+  if (summary.model_start_approval_packet && typeof summary.model_start_approval_packet === "object") {
+    return summary.model_start_approval_packet;
+  }
+  return {};
+}
+
+function pathgraphReadinessCalibrationPreRun(candidateReview = {}, summary = {}) {
+  if (candidateReview.calibration_pre_run_check && typeof candidateReview.calibration_pre_run_check === "object") {
+    return candidateReview.calibration_pre_run_check;
+  }
+  if (summary.calibration_pre_run_check && typeof summary.calibration_pre_run_check === "object") {
+    return summary.calibration_pre_run_check;
+  }
+  return {};
+}
+
+function pathgraphReadinessIntegration(candidateReview = {}, summary = {}) {
+  if (candidateReview.pathgraph_integration_readiness && typeof candidateReview.pathgraph_integration_readiness === "object") {
+    return candidateReview.pathgraph_integration_readiness;
+  }
+  if (summary.pathgraph_integration_readiness && typeof summary.pathgraph_integration_readiness === "object") {
+    return summary.pathgraph_integration_readiness;
+  }
+  return {};
+}
+
+function pathgraphReadinessCurrentEvidencePacket(candidateReview = {}, summary = {}) {
+  if (candidateReview.current_evidence_packet && typeof candidateReview.current_evidence_packet === "object") {
+    return candidateReview.current_evidence_packet;
+  }
+  if (summary.current_evidence_packet && typeof summary.current_evidence_packet === "object") {
+    return summary.current_evidence_packet;
+  }
+  return {};
+}
+
+function pathgraphReadinessPreciseUnderstandingCandidate(candidateReview = {}, summary = {}) {
+  if (candidateReview.precise_understanding_candidate && typeof candidateReview.precise_understanding_candidate === "object") {
+    return candidateReview.precise_understanding_candidate;
+  }
+  if (summary.precise_understanding_candidate && typeof summary.precise_understanding_candidate === "object") {
+    return summary.precise_understanding_candidate;
+  }
+  return {};
+}
+
+function pathgraphReadinessPreciseUnderstandingCandidateSummary(candidate = {}) {
+  if (!candidate || typeof candidate !== "object" || !candidate.contract_version) {
+    return { totalRegions: NaN, pendingCalibration: NaN, pathgraphReady: NaN, safety: [] };
+  }
+  const summary = candidate.summary && typeof candidate.summary === "object" ? candidate.summary : {};
+  const safety = candidate.safety && typeof candidate.safety === "object" ? candidate.safety : {};
+  return {
+    totalRegions: Number(summary.total_regions),
+    pendingCalibration: Number(summary.pending_calibration_count),
+    pathgraphReady: Number(summary.pathgraph_candidate_review_ready_count),
+    safety: [
+      `model_started:${safety.model_started === true ? "true" : "false"}`,
+      `live_clicks:${Number(safety.live_clicks || 0)}`,
+      `execute_binding:${safety.execute_binding_enabled === true ? "true" : "false"}`,
+      `runtime_promotion:${safety.runtime_pathgraph_promotion === true ? "true" : "false"}`,
+    ],
+  };
+}
+
+function pathgraphReadinessCurrentEvidencePacketSummary(packet = {}) {
+  if (!packet || typeof packet !== "object" || !packet.contract_version) {
+    return { coverage: NaN, integrationStatus: "", safety: [] };
+  }
+  const calibration = packet.calibration && typeof packet.calibration === "object" ? packet.calibration : {};
+  const readiness = calibration.readiness_summary && typeof calibration.readiness_summary === "object"
+    ? calibration.readiness_summary
+    : {};
+  const pathgraph = packet.pathgraph && typeof packet.pathgraph === "object" ? packet.pathgraph : {};
+  const safety = packet.safety && typeof packet.safety === "object" ? packet.safety : {};
+  return {
+    coverage: Number(readiness.calibration_coverage_rate),
+    integrationStatus: String(pathgraph.integration_readiness_status || "").trim(),
+    safety: [
+      `model_started:${safety.model_started === true ? "true" : "false"}`,
+      `live_clicks:${Number(safety.live_clicks || 0)}`,
+      `execute_binding:${safety.execute_binding_enabled === true ? "true" : "false"}`,
+      `runtime_promotion:${safety.runtime_pathgraph_promotion === true ? "true" : "false"}`,
+    ],
+  };
+}
+
+function pathgraphReadinessCalibrationPreRunStatus(report = {}) {
+  if (!report || typeof report !== "object") return "";
+  return String(report.effective_pre_run_status || report.pre_run_status || "").trim();
+}
+
+function pathgraphReadinessIntegrationChecklist(integration = {}) {
+  if (!integration || typeof integration !== "object" || !integration.integration_readiness_status) return [];
+  const blockers = Array.isArray(integration.blockers) ? integration.blockers : [];
+  return [
+    `audited_review:${integration.ready_for_audited_pathgraph_review === true ? "true" : "false"}`,
+    `runtime_promotion:${integration.ready_for_runtime_pathgraph_promotion === true ? "true" : "false"}`,
+    `blockers:${blockers.length}`,
+  ];
+}
+
+function pathgraphReadinessApprovalPacketChecklist(packet = {}) {
+  if (!packet || typeof packet !== "object" || !packet.approval_packet_status) return [];
+  return [
+    `requires_user_approval:${packet.requires_explicit_user_approval === true ? "true" : "false"}`,
+    `approval_does_not_execute:${packet.approval_does_not_execute === true ? "true" : "false"}`,
+    `may_start_after_approval:${packet.may_start_model_after_user_approval === true ? "true" : "false"}`,
+    `may_run_now:${packet.may_run_calibration_batch_now === true ? "true" : "false"}`,
+  ];
+}
+
+function pathgraphReadinessApprovalPacketEvidence(packet = {}) {
+  if (!packet || typeof packet !== "object" || !packet.approval_packet_status) return [];
+  const readyRegions = Array.isArray(packet.ready_region_numbers) ? packet.ready_region_numbers : [];
+  const reviewBlocked = Array.isArray(packet.review_blocked_region_numbers) ? packet.review_blocked_region_numbers : [];
+  const expectedOutputs = packet.expected_outputs && typeof packet.expected_outputs === "object"
+    ? packet.expected_outputs
+    : {};
+  const evidence = [
+    `ready_regions:${readyRegions.join(",") || "-"}`,
+    `review_blocked:${reviewBlocked.join(",") || "-"}`,
+    `future_rerun_report:${expectedOutputs.rerun_report_status || "unknown"}`,
+  ];
+  if (expectedOutputs.rerun_report_path) {
+    evidence.push(`rerun_path:${expectedOutputs.rerun_report_path}`);
+  }
+  return evidence;
+}
+
+function pathgraphReadinessCalibrationPreRunChecklist(report = {}) {
+  if (!report || typeof report !== "object" || !report.pre_run_status) return [];
+  const readyRegions = Array.isArray(report.ready_region_numbers) ? report.ready_region_numbers : [];
+  const commandRegions = Array.isArray(report.command_region_numbers) ? report.command_region_numbers : [];
+  const blockers = Array.isArray(report.blockers) ? report.blockers : [];
+  return [
+    `requires_user_approval:${report.requires_explicit_user_approval === true ? "true" : "false"}`,
+    `may_start_after_approval:${report.may_start_model_after_user_approval === true ? "true" : "false"}`,
+    `may_run_now:${report.may_run_calibration_batch_now === true ? "true" : "false"}`,
+    `ready_regions:${readyRegions.join(",") || "-"}`,
+    `command_regions:${commandRegions.join(",") || "-"}`,
+    `blockers:${blockers.length}`,
+  ];
+}
+
+function pathgraphReadinessCalibrationPreRunEvidence(report = {}) {
+  if (!report || typeof report !== "object" || !report.pre_run_status) return [];
+  const evidence = [
+    `tasks_path:${report.tasks_path || "-"}`,
+    `approval_packet_sha256:${report.approval_packet_sha256 || "-"}`,
+    `approval_packet_checksum_status:${report.approval_packet_checksum_status || "unknown"}`,
+    `approval_packet_current_sha256:${report.approval_packet_current_sha256 || "-"}`,
+    `batch_plan:${report.batch_plan_path || "-"}`,
+    `expected_rerun:${report.expected_rerun_report_path || "-"}`,
+    `refresh_rerun:${report.refresh_rerun_report_path || "-"}`,
+  ];
+  if (report.report_path) {
+    evidence.push(`report_path:${report.report_path}`);
+  }
+  return evidence;
+}
+
+function pathgraphReadinessCalibrationPreRunModelSnapshot(report = {}) {
+  if (!report || typeof report !== "object" || !report.pre_run_status) return [];
+  const snapshot = report.model_runtime_snapshot && typeof report.model_runtime_snapshot === "object"
+    ? report.model_runtime_snapshot
+    : {};
+  if (!Object.keys(snapshot).length) return [];
+  const listeningPorts = Array.isArray(snapshot.listening_ports) ? snapshot.listening_ports : [];
+  const suspectedProcesses = Array.isArray(snapshot.suspected_model_processes) ? snapshot.suspected_model_processes : [];
+  return [
+    `checked_at:${snapshot.checked_at || "-"}`,
+    `model_ports_clear:${snapshot.model_ports_clear === true ? "true" : "false"}`,
+    `model_processes_clear:${snapshot.model_processes_clear === true ? "true" : "false"}`,
+    `listening_ports:${listeningPorts.join(",") || "-"}`,
+    `suspected_processes:${suspectedProcesses.length}`,
+  ];
+}
+
+function pathgraphReadinessRunbookChecklist(runbook = {}) {
+  if (!runbook || typeof runbook !== "object" || !runbook.runbook_status) return [];
+  return [
+    `approval_required:${runbook.approval_required === true ? "true" : "false"}`,
+    `may_start_after_approval:${runbook.may_start_model_after_user_approval === true ? "true" : "false"}`,
+    `may_run_now:${runbook.may_run_calibration_batch_now === true ? "true" : "false"}`,
+    `display_only:${runbook.display_only === true ? "true" : "false"}`,
+    `execute_binding:${runbook.execute_binding_enabled === true ? "true" : "false"}`,
+    `authorization:${runbook.artifact_is_authorization === true ? "true" : "false"}`,
+  ];
+}
+
+function pathgraphReadinessEvidenceRequirements(runbook = {}) {
+  if (!runbook || typeof runbook !== "object" || !runbook.runbook_status) return [];
+  const readyRegions = Array.isArray(runbook.ready_region_numbers) ? runbook.ready_region_numbers : [];
+  const reviewBlocked = Array.isArray(runbook.review_blocked_region_numbers) ? runbook.review_blocked_region_numbers : [];
+  const expectedOutputs = runbook.expected_outputs && typeof runbook.expected_outputs === "object"
+    ? runbook.expected_outputs
+    : {};
+  const requirements = [
+    `future_rerun_report:${expectedOutputs.rerun_report_status || "unknown"}`,
+    `ready_regions:${readyRegions.join(",") || "-"}`,
+    `review_blocked:${reviewBlocked.join(",") || "-"}`,
+  ];
+  if (expectedOutputs.rerun_report_path) {
+    requirements.push(`rerun_path:${expectedOutputs.rerun_report_path}`);
+  }
+  return requirements;
+}
+
+function renderLearningDraftDetailAttachments(review = {}, stateId = "") {
+  const candidateReview = review?.pathgraph_candidate_review && typeof review.pathgraph_candidate_review === "object"
+    ? review.pathgraph_candidate_review
+    : {};
+  const attachments = learningDraftArray(candidateReview.detail_surface_attachments);
+  const pendingRequests = learningDraftArray(candidateReview.pending_detail_observe_requests);
+  const regions = learningDraftArray(candidateReview.attached_detail_regions);
+  const actions = learningDraftArray(candidateReview.attached_detail_actions);
+  if (!attachments.length && !pendingRequests.length && !regions.length && !actions.length) return "";
+  const selectedStateId = String(stateId || "");
+  const stateRegions = regions.filter((item) => {
+    const regionId = String(item.region_id || "");
+    return !selectedStateId || regionId.startsWith(`${selectedStateId}::`) || String(item.state_id || "") === selectedStateId;
+  });
+  const stateActions = actions.filter((item) => {
+    const actionId = String(item.action_template_id || "");
+    return !selectedStateId || actionId.startsWith(`${selectedStateId}::`) || String(item.state_id || "") === selectedStateId;
+  });
+  const chips = [
+    `attachments=${attachments.length}`,
+    `pending=${pendingRequests.length}`,
+    `detail_regions=${regions.length}`,
+    `detail_actions=${actions.length}`,
+    `no_dispatch=${candidateReview.no_dispatch !== false}`,
+    `execute_binding_enabled=${candidateReview.execute_binding_enabled === true}`,
+  ];
+  const attachmentRows = attachments.map((item) => ({
+    ...item,
+    label: item.attachment_id || item.request_id || "detail_surface_attachment",
+  }));
+  const requestRows = pendingRequests.map((item) => ({
+    ...item,
+    label: `${item.request_id || "detail_observe"} · ${item.status || "pending"}`,
+  }));
+  return `
+    <div class="learning-draft-detail-card">
+      <strong>${escapeHtml(t("learning_draft_detail_attachments"))}</strong>
+      <div class="learning-draft-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      ${renderLearningReviewItems(attachmentRows, "detail_attachment")}
+      ${renderLearningReviewItems(requestRows, "detail_request")}
+    </div>
+    ${stateRegions.length ? `
+      <div class="learning-draft-detail-card">
+        <strong>${escapeHtml(t("learning_draft_attached_detail_regions"))}</strong>
+        ${renderLearningReviewItems(stateRegions, "detail_region")}
+      </div>` : ""}
+    ${stateActions.length ? `
+      <div class="learning-draft-detail-card">
+        <strong>${escapeHtml(t("learning_draft_attached_detail_actions"))}</strong>
+        ${renderLearningReviewItems(stateActions, "detail_action")}
+      </div>` : ""}`;
+}
+
+function renderLearningDraftPathDetail(review, stateId) {
+  const draft = review?.draft || {};
+  const states = learningDraftDisplayStates(draft);
+  const primaryStateCount = learningDraftPrimaryStateCount(states);
+  const state = states.find((item) => String(item.state_id) === String(stateId)) || states[0] || {};
+  const regions = learningDraftRegionsForState(state, learningDraftArray(draft.regions), primaryStateCount);
+  const actions = learningDraftActionsForState(state, learningDraftArray(draft.action_templates), regions, primaryStateCount);
+  const blockers = learningDraftArray(draft.blockers);
+  const rules = learningDraftArray(draft.verification_rules);
+  const label = learningReviewLabel(state, 0, "state");
+  const summary = String(state.summary || state.description || draft.screen_summary || "").trim();
+  const type = String(state.page_type || state.type || draft.page_type || "").trim();
+  const source = review?.source && typeof review.source === "object" ? review.source : {};
+  const evidenceChips = [
+    `learning_source=${draft.learning_source || "observe_model"}`,
+    `source=${source.source_path || ""}`,
+    `attempt=${source.attempt_index ?? "n/a"}`,
+    `semantic_model=${$("observeModelProfile")?.value || "learn_fast"}`,
+    `coordinate_model=${$("locateModelProfile")?.value || "learn_deep"}`,
+  ].filter((item) => !item.endsWith("="));
+  const safetyChips = [
+    `candidate_only=true`,
+    `execute_binding_enabled=${review?.execute_binding_enabled === true}`,
+    `artifact_is_authorization=${review?.artifact_is_authorization === true}`,
+    `final_submit_forbidden=${review?.final_submit_forbidden !== false}`,
+  ];
+  if ($("learningDraftPathDetail")) {
+    $("learningDraftPathDetail").innerHTML = `
+      <div class="learning-draft-detail-stack">
+        <div class="learning-draft-detail-card">
+          <strong>${escapeHtml(t("learning_draft_node_detail"))}</strong>
+          <span>${escapeHtml(label)}</span>
+          <small>${escapeHtml([state.state_id, type].filter(Boolean).join(" · "))}</small>
+          ${summary ? `<small>${escapeHtml(summary)}</small>` : ""}
+          <div class="learning-draft-chip-row">${safetyChips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+        </div>
+        <div class="learning-draft-detail-card">
+          <strong>${escapeHtml(t("learning_draft_evidence_sources"))}</strong>
+          <div class="learning-draft-chip-row">${evidenceChips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+        </div>
+        ${renderLearningDraftPageDetailCards(draft.page_details)}
+        ${renderLearningDemoScaffold(review)}
+        ${renderLearningPageDetailCandidate(review)}
+        ${renderLearningDraftPathGraphReadiness(review)}
+        ${renderLearningDraftDetailAttachments(review, state.state_id)}
+        <div class="learning-draft-detail-card">
+          <strong>${escapeHtml(t("learning_draft_related_regions"))}</strong>
+          ${renderLearningReviewItems(regions, "region")}
+        </div>
+        <div class="learning-draft-detail-card">
+          <strong>${escapeHtml(t("learning_draft_related_actions"))}</strong>
+          ${renderLearningReviewItems(actions, "action")}
+        </div>
+        ${renderLearningDraftStateTransitions(state, actions)}
+        <div class="learning-draft-detail-card">
+          <strong>${escapeHtml(t("learning_draft_blockers"))}</strong>
+          ${renderLearningReviewItems(blockers, "blocker")}
+        </div>
+        <div class="learning-draft-detail-card">
+          <strong>${escapeHtml(t("learning_draft_verification_rules"))}</strong>
+          ${renderLearningReviewItems(rules, "rule")}
+        </div>
+      </div>`;
+    bindLearningDraftPreviewButtons($("learningDraftPathDetail"));
+  }
+}
+
+function bindLearningDraftPathPreview(review) {
+  document.querySelectorAll("[data-learning-draft-node]").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedLearningDraftNodeId = button.dataset.learningDraftNode || "";
+      renderLearningDraftPathPreview(review);
+    });
+  });
+}
+
+function clampLearningDraftPathSplit(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 32;
+  return Math.max(22, Math.min(58, Math.round(number)));
+}
+
+function applyLearningDraftPathSplit(value) {
+  const grid = document.querySelector(".learning-draft-path-grid");
+  if (!grid) return;
+  const percent = clampLearningDraftPathSplit(value);
+  grid.style.setProperty("--learning-draft-path-map-width", `${percent}%`);
+  const resizer = $("learningDraftPathResizer");
+  if (resizer) {
+    resizer.setAttribute("aria-valuemin", "22");
+    resizer.setAttribute("aria-valuemax", "58");
+    resizer.setAttribute("aria-valuenow", String(percent));
+  }
+}
+
+function savedLearningDraftPathSplit() {
+  try {
+    return clampLearningDraftPathSplit(localStorage.getItem(LEARNING_DRAFT_PATH_SPLIT_STORAGE_KEY));
+  } catch (_error) {
+    return 32;
+  }
+}
+
+function saveLearningDraftPathSplit(value) {
+  const percent = clampLearningDraftPathSplit(value);
+  try {
+    localStorage.setItem(LEARNING_DRAFT_PATH_SPLIT_STORAGE_KEY, String(percent));
+  } catch (_error) {
+    // 浏览器禁用 localStorage 时只保留当前会话布局。
+  }
+  applyLearningDraftPathSplit(percent);
+}
+
+function resetLearningDraftPathLayout() {
+  saveLearningDraftPathSplit(32);
+}
+
+function bindLearningDraftPathResize() {
+  applyLearningDraftPathSplit(savedLearningDraftPathSplit());
+  const grid = document.querySelector(".learning-draft-path-grid");
+  const resizer = $("learningDraftPathResizer");
+  if (!grid || !resizer) return;
+  let activePointerId = null;
+
+  const updateFromClientX = (clientX, shouldSave = false) => {
+    const rect = grid.getBoundingClientRect();
+    if (!rect.width) return;
+    const percent = clampLearningDraftPathSplit(((clientX - rect.left) / rect.width) * 100);
+    applyLearningDraftPathSplit(percent);
+    if (shouldSave) saveLearningDraftPathSplit(percent);
+  };
+
+  resizer.addEventListener("pointerdown", (event) => {
+    activePointerId = event.pointerId;
+    resizer.setPointerCapture?.(event.pointerId);
+    grid.classList.add("is-resizing");
+    updateFromClientX(event.clientX);
+  });
+  resizer.addEventListener("pointermove", (event) => {
+    if (activePointerId !== event.pointerId) return;
+    updateFromClientX(event.clientX);
+  });
+  const finishResize = (event) => {
+    if (activePointerId !== event.pointerId) return;
+    activePointerId = null;
+    grid.classList.remove("is-resizing");
+    updateFromClientX(event.clientX, true);
+  };
+  resizer.addEventListener("pointerup", finishResize);
+  resizer.addEventListener("pointercancel", finishResize);
+  resizer.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const current = savedLearningDraftPathSplit();
+    if (event.key === "Home") return saveLearningDraftPathSplit(22);
+    if (event.key === "End") return saveLearningDraftPathSplit(58);
+    saveLearningDraftPathSplit(current + (event.key === "ArrowRight" ? 4 : -4));
+  });
+}
+
+function renderLearningDraftPathPreview(review) {
+  const draft = review?.draft || {};
+  const states = learningDraftDisplayStates(draft);
+  if (!states.length) {
+    clearLearningDraftPathPreview();
+    return;
+  }
+  if (!states.some((state) => String(state.state_id) === selectedLearningDraftNodeId)) {
+    selectedLearningDraftNodeId = String(states[0].state_id);
+  }
+  const allRegions = learningDraftArray(draft.regions);
+  const allActions = learningDraftArray(draft.action_templates);
+  const primaryStateCount = learningDraftPrimaryStateCount(states);
+  const candidatePath = String($("learningPathGraphCandidatePath")?.value || "").trim();
+  if ($("learningDraftPathPreviewStatus")) {
+    $("learningDraftPathPreviewStatus").textContent = [
+      t("learning_draft_not_executable"),
+      `states=${states.length}`,
+      candidatePath ? "pathgraph_candidate=ready" : "pathgraph_candidate=not_generated",
+    ].join(" · ");
+  }
+  if ($("learningDraftPathMap")) {
+    $("learningDraftPathMap").innerHTML = `
+      <div class="learning-draft-node-list">
+        ${states.map((state, index) => {
+          const regions = learningDraftRegionsForState(state, allRegions, primaryStateCount);
+          const actions = learningDraftActionsForState(state, allActions, regions, primaryStateCount);
+          const active = String(state.state_id) === selectedLearningDraftNodeId;
+          const label = learningReviewLabel(state, index, "state");
+          const meta = [
+            String(state.state_id || ""),
+            `${t("learning_draft_regions")}: ${regions.length}`,
+            `${t("learning_draft_actions")}: ${actions.length}`,
+          ].filter(Boolean).join(" · ");
+          const edge = index < states.length - 1 ? learningDraftTransitionLabel(state, actions) : "";
+          return `
+            <button type="button" class="learning-draft-node${active ? " active" : ""}" data-learning-draft-node="${escapeHtml(String(state.state_id))}">
+              <strong>${escapeHtml(label)}</strong>
+              <span>${escapeHtml(meta)}</span>
+            </button>
+            ${edge ? `<span class="learning-draft-edge">↓ ${escapeHtml(edge)}</span>` : ""}`;
+        }).join("")}
+      </div>`;
+  }
+  renderLearningDraftPathDetail(review, selectedLearningDraftNodeId);
+  bindLearningDraftPathPreview(review);
+}
+
+function learningDraftNumberedMapImagePath(review = {}, draft = {}) {
+  const preview = review?.screen_understanding_preview && typeof review.screen_understanding_preview === "object"
+    ? review.screen_understanding_preview
+    : {};
+  const candidates = [
+    preview.compiled_overlay_path,
+    preview.full_screen_understanding_overlay_path,
+    preview.numbered_map_path,
+    preview.selection_map_path,
+    preview.overlay_path,
+    review.numbered_map_path,
+    review.selection_map_path,
+    draft.numbered_map_path,
+    draft.selection_map_path,
+    draft?.page_details?.precise_understanding_fusion_status?.compiled_overlay_path,
+    draft?.page_details?.precise_understanding_fusion_status?.full_screen_understanding_overlay_path,
+    draft?.page_details?.compiled_overlay_path,
+    draft?.page_details?.full_screen_understanding_overlay_path,
+    learningDraftSourceImagePath(draft),
+  ];
+  return String(candidates.find((value) => String(value || "").trim()) || "").trim();
+}
+
+function renderLearningDraftScreenshotPath(imagePath, label = "learning draft numbered screenshot", sourceImagePath = "", imageSha = "") {
+  const target = $("learningDraftScreenshotPreview");
+  if (!target) return;
+  const normalizedPath = String(imagePath || "").trim();
+  if (!normalizedPath) {
+    target.innerHTML = `<p class="trace-idle">${escapeHtml(t("learning_draft_screenshot_empty"))}</p>`;
+    return;
+  }
+  const normalizedSourcePath = String(sourceImagePath || "").trim();
+  const normalizedSha = String(imageSha || "").trim();
+  target.innerHTML = `
+    <div class="learning-draft-screenshot-frame">
+      ${panelImageHtml(normalizedPath, label, "learning-draft-screenshot-image")}
+    </div>
+    <div class="learning-draft-screenshot-meta">
+      <span>${escapeHtml(normalizedPath)}</span>
+      ${normalizedSourcePath && normalizedSourcePath !== normalizedPath ? `<span>${escapeHtml(normalizedSourcePath)}</span>` : ""}
+      ${normalizedSha ? `<code>${escapeHtml(normalizedSha.slice(0, 12))}</code>` : ""}
+    </div>`;
+}
+
+function renderLearningDraftScreenshotPanel(review) {
+  const target = $("learningDraftScreenshotPreview");
+  if (!target) return;
+  const draft = review?.draft || {};
+  const imagePath = learningDraftNumberedMapImagePath(review, draft);
+  if (!imagePath) {
+    target.innerHTML = `<p class="trace-idle">${escapeHtml(t("learning_draft_screenshot_empty"))}</p>`;
+    return;
+  }
+  const sourceImagePath = learningDraftSourceImagePath(draft);
+  const imageSha = learningDraftSourceImageSha256(draft);
+  renderLearningDraftScreenshotPath(imagePath, "learning draft numbered screenshot", sourceImagePath, imageSha);
+}
+
+function learningDraftManualCandidate(draft = {}) {
+  const actions = Array.isArray(draft.action_templates) ? draft.action_templates : [];
+  const regions = Array.isArray(draft.regions) ? draft.regions : [];
+  const pageDetails = draft.page_details && typeof draft.page_details === "object" ? draft.page_details : {};
+  const reviewOnlyRegions = Array.isArray(pageDetails.review_only_regions) ? pageDetails.review_only_regions : [];
+  const action = actions[0] || null;
+  const region = regions.find((item) => String(item.region_id || "") === String(action?.region_id || "")) || regions[0] || reviewOnlyRegions[0] || {};
+  return {
+    label: action?.label || action?.action_template_id || region.label || region.region_id || "",
+    role: region.role || region.region_type || action?.action_type || "review_only",
+    section: region.section_id || region.parent_region_id || region.section || "",
+    operation: action?.action_type || region.semantic_action || "read_only",
+    notes: region.description || action?.description || "",
+  };
+}
+
+function setSelectValueIfPresent(select, value) {
+  if (!select) return;
+  const text = String(value || "").trim();
+  if (!text) return;
+  const hasOption = Array.from(select.options || []).some((option) => option.value === text);
+  if (hasOption) select.value = text;
+}
+
+function renderLearningDraftManualEditPanel(review) {
+  const draft = review?.draft || {};
+  const candidate = learningDraftManualCandidate(draft);
+  if ($("learningDraftManualRegionLabel")) $("learningDraftManualRegionLabel").value = String(candidate.label || "");
+  setSelectValueIfPresent($("learningDraftManualRegionRole"), candidate.role);
+  if ($("learningDraftManualRegionSection")) $("learningDraftManualRegionSection").value = String(candidate.section || "");
+  setSelectValueIfPresent($("learningDraftManualOperation"), candidate.operation);
+  if ($("learningDraftManualEnterPathGraph")) $("learningDraftManualEnterPathGraph").checked = false;
+  if ($("learningDraftManualNeedsRecalibration")) $("learningDraftManualNeedsRecalibration").checked = true;
+  if ($("learningDraftManualNotes")) $("learningDraftManualNotes").value = String(candidate.notes || "");
+}
+
+function clearLearningDraftSimpleReviewPanels(reason = "") {
+  if ($("learningDraftScreenshotPreview")) {
+    $("learningDraftScreenshotPreview").innerHTML = `<p class="trace-idle">${escapeHtml(reason || t("learning_draft_screenshot_empty"))}</p>`;
+  }
+  ["learningDraftManualRegionLabel", "learningDraftManualRegionSection", "learningDraftManualNotes"].forEach((id) => {
+    if ($(id)) $(id).value = "";
+  });
+  if ($("learningDraftManualRegionRole")) $("learningDraftManualRegionRole").value = "review_only";
+  if ($("learningDraftManualOperation")) $("learningDraftManualOperation").value = "read_only";
+  if ($("learningDraftManualEnterPathGraph")) $("learningDraftManualEnterPathGraph").checked = false;
+  if ($("learningDraftManualNeedsRecalibration")) $("learningDraftManualNeedsRecalibration").checked = true;
+}
+
+function renderLearningDraftReview(review) {
+  learningDraftReview = review || null;
+  const draft = review?.draft || {};
+  const states = Array.isArray(draft.states) ? draft.states : [];
+  const regions = Array.isArray(draft.regions) ? draft.regions : [];
+  const actions = Array.isArray(draft.action_templates) ? draft.action_templates : [];
+  const blockers = Array.isArray(draft.blockers) ? draft.blockers : [];
+  const rules = Array.isArray(draft.verification_rules) ? draft.verification_rules : [];
+  const draftImagePath = learningDraftSourceImagePath(draft);
+  if ($("learningDraftReviewSummary")) {
+    const counts = [
+      `${t("learning_draft_states")}: ${states.length}`,
+      `${t("learning_draft_regions")}: ${regions.length}`,
+      `${t("learning_draft_actions")}: ${actions.length}`,
+      `${t("learning_draft_blockers")}: ${blockers.length}`,
+      `${t("learning_draft_verification_rules")}: ${rules.length}`,
+    ].join(" · ");
+    const summary = String(draft.screen_summary || "").trim();
+    const stateGuess = String(draft.state_guess || "").trim();
+    $("learningDraftReviewSummary").innerHTML = `
+      <strong>${escapeHtml(t("learning_draft_summary"))}</strong>
+      <span>${escapeHtml([stateGuess, counts].filter(Boolean).join(" · "))}</span>
+      ${summary ? `<span>${escapeHtml(summary)}</span>` : ""}`;
+  }
+  if ($("learningDraftReviewStates")) $("learningDraftReviewStates").innerHTML = renderLearningReviewItems(states, "state");
+  if ($("learningDraftReviewRegions")) $("learningDraftReviewRegions").innerHTML = renderLearningReviewItems(regions, "region", {
+    previewBbox: true,
+    imagePath: draftImagePath,
+    editKind: "region",
+  });
+  if ($("learningDraftReviewActions")) $("learningDraftReviewActions").innerHTML = renderLearningReviewItems(actions, "action", {
+    previewBbox: true,
+    imagePath: draftImagePath,
+    editKind: "action",
+  });
+  if ($("learningDraftReviewBlockers")) $("learningDraftReviewBlockers").value = learningReviewLines(blockers, "blocker");
+  if ($("learningDraftReviewVerificationRules")) $("learningDraftReviewVerificationRules").value = learningReviewLines(rules, "rule");
+  const status = String(review?.review_status || "needs_human_review");
+  if ($("learningDraftReviewStatus")) {
+    $("learningDraftReviewStatus").textContent = `${status} · no_click_authorization=${review?.no_click_authorization === true}`;
+  }
+  if ($("learningDraftReviewStatusSelect")) $("learningDraftReviewStatusSelect").value = status;
+  const safety = review?.safety || {};
+  const manualBboxSummary = learningDraftManualBboxEditSummary(draft, review);
+  const sourceFreshnessSummary = learningDraftSourceFreshnessSummary(draft, review);
+  if ($("learningDraftReviewSafety")) {
+    const safetyItems = [
+      ["draft_only", review?.draft_only],
+      ["execute_binding_enabled", review?.execute_binding_enabled],
+      ["artifact_is_authorization", review?.artifact_is_authorization],
+      ["final_submit_forbidden", review?.final_submit_forbidden],
+      ["real_action_requires_gate", review?.real_action_requires_gate],
+      ["source_after_review", review?.source_after_review],
+      ["authorization_scope", review?.authorization_scope],
+      ["safety.final_submit_forbidden", safety.final_submit_forbidden],
+    ];
+    $("learningDraftReviewSafety").innerHTML = `${renderLearningDraftManualBboxEditSummary(manualBboxSummary)}${renderLearningDraftSourceFreshnessSummary(sourceFreshnessSummary)}<div class="learning-review-safety">${safetyItems.map(([key, value]) => (
+      `<span><strong>${escapeHtml(key)}</strong>${escapeHtml(String(value))}</span>`
+    )).join("")}</div>`;
+  }
+  renderScreenUnderstandingPreview(review?.screen_understanding_preview);
+  renderLearningDraftScreenshotPanel(review);
+  renderLearningDraftManualEditPanel(review);
+  renderLearningDraftPathPreview(review);
+}
+
+function clearLearningDraftReviewDisplay(reason = "") {
+  learningDraftReview = null;
+  learningDraftReviewBboxEdits = { regions: {}, actions: {} };
+  if ($("learningDraftReviewStates")) $("learningDraftReviewStates").innerHTML = `<p class="trace-idle">${escapeHtml(t("pending"))}</p>`;
+  if ($("learningDraftReviewRegions")) $("learningDraftReviewRegions").innerHTML = `<p class="trace-idle">${escapeHtml(t("pending"))}</p>`;
+  if ($("learningDraftReviewActions")) $("learningDraftReviewActions").innerHTML = `<p class="trace-idle">${escapeHtml(t("pending"))}</p>`;
+  if ($("learningDraftReviewBlockers")) $("learningDraftReviewBlockers").value = "";
+  if ($("learningDraftReviewVerificationRules")) $("learningDraftReviewVerificationRules").value = "";
+  if ($("learningDraftReviewSafety")) $("learningDraftReviewSafety").innerHTML = "";
+  if ($("learningDraftReviewSummary")) $("learningDraftReviewSummary").innerHTML = "";
+  if ($("learningDraftReviewStatus")) {
+    $("learningDraftReviewStatus").textContent = reason || "not_loaded · no_click_authorization=true";
+  }
+  if ($("learningDraftReviewStatusSelect")) $("learningDraftReviewStatusSelect").value = "needs_human_review";
+  clearLearningDraftSimpleReviewPanels(reason);
+  renderScreenUnderstandingPreview(null);
+  clearLearningDraftPathPreview(reason);
+}
+
+async function loadLearningDraftReview(options = {}) {
+  const sourcePath = learningDraftReviewSourcePath();
+  if (!sourcePath) {
+    const response = { success: false, message: "learning_draft_review_source_path is required" };
+    if (!options.skipResponse) renderResponse(response, "Learning draft review");
+    return null;
+  }
+  const response = await api("POST", "/panel/load_learning_draft_review", {
+    source_path: sourcePath,
+  }, { summary: "POST /panel/load_learning_draft_review", workflowStep: "load_learning_draft_review", skipRender: true });
+  if (!response?.success) {
+    if (!options.skipResponse) renderResponse(response || { success: false, message: "Learning draft review load failed" }, "Learning draft review");
+    return null;
+  }
+  const data = response.data || {};
+  learningDraftReviewBboxEdits = { regions: {}, actions: {} };
+  renderLearningDraftReview(data);
+  if (!options.skipResponse) {
+    renderResponse({
+      success: true,
+      message: "Learning draft review loaded as display-only candidate",
+      data,
+    }, "Learning draft review");
+  }
+  return data;
+}
+
+async function saveLearningDraftReview() {
+  const sourcePath = learningDraftReviewSourcePath();
+  if (!sourcePath) {
+    renderResponse({ success: false, message: "learning_draft_review_source_path is required" }, "Learning draft review");
+    return null;
+  }
+  const reviewPatch = learningDraftReviewPatch();
+  const response = await api("POST", "/panel/save_learning_draft_review", {
+    source_path: sourcePath,
+    review_patch: reviewPatch,
+  }, { summary: "POST /panel/save_learning_draft_review", workflowStep: "save_learning_draft_review", skipRender: true });
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "Learning draft review save failed" }, "Learning draft review");
+    return null;
+  }
+  renderResponse({
+    success: true,
+    message: "Reviewed template candidate saved without execute authorization",
+    data: response.data || {},
+  }, "Learning draft review");
+  return response.data || {};
+}
+
+async function generatePathGraphCandidate() {
+  const sourcePath = learningDraftReviewSourcePath();
+  if (!sourcePath) {
+    renderResponse({ success: false, message: "learning_draft_review_source_path is required" }, "PathGraph candidate");
+    return null;
+  }
+  const response = await api("POST", "/panel/generate_pathgraph_candidate", {
+    source_path: sourcePath,
+    review_patch: learningDraftReviewPatch(),
+  }, { summary: "POST /panel/generate_pathgraph_candidate", workflowStep: "generate_pathgraph_candidate", skipRender: true });
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "PathGraph candidate generation failed" }, "PathGraph candidate");
+    return null;
+  }
+  const data = response.data || {};
+  setLearningPathGraphCandidatePaths(data);
+  if ($("learningDetailObserveCandidatePath") && data.pathgraph_candidate_path) {
+    $("learningDetailObserveCandidatePath").value = String(data.pathgraph_candidate_path);
+  }
+  if (data.reviewed_template_candidate_path) {
+    setLearningDraftReviewSourcePath(data.reviewed_template_candidate_path);
+    await loadLearningDraftReview({ skipResponse: true });
+  } else if (learningDraftReview) {
+    renderLearningDraftPathPreview(learningDraftReview);
+  }
+  renderResponse({
+    success: true,
+    message: "PathGraph candidate generated as non-executable candidate",
+    data: {
+      ...data,
+      candidate_only: true,
+      not_executable: true,
+      no_click_authorization: true,
+      template_replay_untouched: true,
+    },
+  }, "PathGraph candidate");
+  return data;
+}
+
+async function createModelStartApprovalPacket() {
+  const candidatePath = String($("learningPathGraphCandidatePath")?.value || $("learningDetailObserveCandidatePath")?.value || "").trim();
+  if (!candidatePath) {
+    renderResponse({ success: false, message: "pathgraph_candidate_path is required" }, "Model-start approval packet");
+    return null;
+  }
+  const response = await api("POST", "/panel/create_model_start_approval_packet", {
+    candidate_path: candidatePath,
+  }, { summary: "POST /panel/create_model_start_approval_packet", workflowStep: "create_model_start_approval_packet", skipRender: true });
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "Model-start approval packet creation failed" }, "Model-start approval packet");
+    return null;
+  }
+  const data = response.data || {};
+  setLearningDraftReviewSourcePath(candidatePath);
+  await loadLearningDraftReview({ skipResponse: true });
+  renderResponse({
+    success: true,
+    message: "Model-start approval packet created without starting models or running calibration",
+    data: {
+      ...data,
+      candidate_only: true,
+      not_executable: true,
+      no_click_authorization: true,
+      model_started: false,
+      may_run_calibration_batch_now: false,
+      execute_binding_enabled: false,
+      artifact_is_authorization: false,
+    },
+  }, "Model-start approval packet");
+  return data;
+}
+
+async function createCalibrationPreRunCheck() {
+  const candidatePath = String($("learningPathGraphCandidatePath")?.value || $("learningDetailObserveCandidatePath")?.value || "").trim();
+  if (!candidatePath) {
+    renderResponse({ success: false, message: "pathgraph_candidate_path is required" }, "Calibration pre-run check");
+    return null;
+  }
+  const response = await api("POST", "/panel/create_calibration_pre_run_check", {
+    candidate_path: candidatePath,
+  }, { summary: "POST /panel/create_calibration_pre_run_check", workflowStep: "create_calibration_pre_run_check", skipRender: true });
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "Calibration pre-run check creation failed" }, "Calibration pre-run check");
+    return null;
+  }
+  const data = response.data || {};
+  setLearningDraftReviewSourcePath(candidatePath);
+  await loadLearningDraftReview({ skipResponse: true });
+  renderResponse({
+    success: true,
+    message: "Calibration pre-run check created without starting models or running calibration",
+    data: {
+      ...data,
+      candidate_only: true,
+      not_executable: true,
+      no_click_authorization: true,
+      model_started: false,
+      may_run_calibration_batch_now: false,
+      execute_binding_enabled: false,
+      artifact_is_authorization: false,
+    },
+  }, "Calibration pre-run check");
+  return data;
+}
+
+async function createPathgraphIntegrationReadiness() {
+  const candidatePath = String($("learningPathGraphCandidatePath")?.value || $("learningDetailObserveCandidatePath")?.value || "").trim();
+  if (!candidatePath) {
+    renderResponse({ success: false, message: "pathgraph_candidate_path is required" }, "PathGraph integration readiness");
+    return null;
+  }
+  const response = await api("POST", "/panel/create_pathgraph_integration_readiness", {
+    candidate_path: candidatePath,
+  }, { summary: "POST /panel/create_pathgraph_integration_readiness", workflowStep: "create_pathgraph_integration_readiness", skipRender: true });
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "PathGraph integration readiness creation failed" }, "PathGraph integration readiness");
+    return null;
+  }
+  const data = response.data || {};
+  setLearningDraftReviewSourcePath(candidatePath);
+  await loadLearningDraftReview({ skipResponse: true });
+  renderResponse({
+    success: true,
+    message: "PathGraph integration readiness created without Runtime PathGraph promotion",
+    data: {
+      ...data,
+      candidate_only: true,
+      not_executable: true,
+      no_click_authorization: true,
+      ready_for_runtime_pathgraph_promotion: false,
+      execute_binding_enabled: false,
+      artifact_is_authorization: false,
+    },
+  }, "PathGraph integration readiness");
+  return data;
+}
+
+async function createCurrentEvidencePacket() {
+  const sourcePath = String(
+    $("learningPathGraphCandidatePath")?.value
+    || $("learningDetailObserveCandidatePath")?.value
+    || learningDraftReviewSourcePath()
+    || ""
+  ).trim();
+  if (!sourcePath) {
+    renderResponse({ success: false, message: "source_path or pathgraph_candidate_path is required" }, "Current evidence packet");
+    return null;
+  }
+  const response = await api("POST", "/panel/create_current_evidence_packet", {
+    source_path: sourcePath,
+  }, { summary: "POST /panel/create_current_evidence_packet", workflowStep: "create_current_evidence_packet", skipRender: true });
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "Current evidence packet creation failed" }, "Current evidence packet");
+    return null;
+  }
+  const data = response.data || {};
+  setLearningDraftReviewSourcePath(sourcePath);
+  await loadLearningDraftReview({ skipResponse: true });
+  renderResponse({
+    success: true,
+    message: "Current evidence packet created without starting models or enabling Execute",
+    data: {
+      ...data,
+      candidate_only: true,
+      not_executable: true,
+      no_click_authorization: true,
+      model_started: false,
+      live_clicks: 0,
+      live_fills: 0,
+      live_submits: 0,
+      execute_binding_enabled: false,
+      artifact_is_authorization: false,
+      runtime_pathgraph_promotion: false,
+    },
+  }, "Current evidence packet");
+  return data;
+}
+
+async function createPreciseUnderstandingCandidate() {
+  const sourcePath = String(
+    $("learningPathGraphCandidatePath")?.value
+    || $("learningDetailObserveCandidatePath")?.value
+    || learningDraftReviewSourcePath()
+    || ""
+  ).trim();
+  if (!sourcePath) {
+    renderResponse({ success: false, message: "source_path or pathgraph_candidate_path is required" }, "Precise understanding candidate");
+    return null;
+  }
+  const response = await api("POST", "/panel/create_precise_understanding_candidate", {
+    source_path: sourcePath,
+  }, { summary: "POST /panel/create_precise_understanding_candidate", workflowStep: "create_precise_understanding_candidate", skipRender: true });
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "Precise understanding candidate creation failed" }, "Precise understanding candidate");
+    return null;
+  }
+  const data = response.data || {};
+  setLearningDraftReviewSourcePath(sourcePath);
+  await loadLearningDraftReview({ skipResponse: true });
+  renderResponse({
+    success: true,
+    message: "Precise understanding candidate created without starting models or enabling Execute",
+    data: {
+      ...data,
+      candidate_only: true,
+      not_executable: true,
+      no_click_authorization: true,
+      model_started: false,
+      live_clicks: 0,
+      live_fills: 0,
+      live_submits: 0,
+      execute_binding_enabled: false,
+      artifact_is_authorization: false,
+      runtime_pathgraph_promotion: false,
+    },
+  }, "Precise understanding candidate");
+  return data;
+}
+
+async function createPageDetailCandidate() {
+  const sourcePath = String(
+    $("learningPathGraphCandidatePath")?.value
+    || $("learningDetailObserveCandidatePath")?.value
+    || learningDraftReviewSourcePath()
+    || ""
+  ).trim();
+  if (!sourcePath) {
+    renderResponse({ success: false, message: "source_path or pathgraph_candidate_path is required" }, "Page detail candidate");
+    return null;
+  }
+  const response = await api("POST", "/panel/create_page_detail_candidate", {
+    source_path: sourcePath,
+  }, { summary: "POST /panel/create_page_detail_candidate", workflowStep: "create_page_detail_candidate", skipRender: true });
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "Page detail candidate creation failed" }, "Page detail candidate");
+    return null;
+  }
+  const data = response.data || {};
+  const candidateSourcePath = String(data.report_path || data.page_detail_candidate_path || sourcePath || "").trim();
+  setLearningDraftReviewSourcePath(candidateSourcePath);
+  await loadLearningDraftReview({ skipResponse: true });
+  renderResponse({
+    success: true,
+    message: "Page detail candidate created without starting models or enabling Execute",
+    data: {
+      ...data,
+      candidate_only: true,
+      not_executable: true,
+      no_click_authorization: true,
+      model_started: false,
+      live_clicks: 0,
+      live_fills: 0,
+      live_submits: 0,
+      execute_binding_enabled: false,
+      artifact_is_authorization: false,
+      runtime_pathgraph_promotion: false,
+    },
+  }, "Page detail candidate");
+  return data;
+}
+
+async function createLearningDemoScaffold() {
+  const sourcePath = String(
+    $("learningPathGraphCandidatePath")?.value
+    || $("learningDetailObserveCandidatePath")?.value
+    || learningDraftReviewSourcePath()
+    || ""
+  ).trim();
+  if (!sourcePath) {
+    renderResponse({ success: false, message: "source_path or pathgraph_candidate_path is required" }, "Learning demo scaffold");
+    return null;
+  }
+  const response = await api("POST", "/panel/create_learning_demo_scaffold", {
+    source_path: sourcePath,
+  }, { summary: "POST /panel/create_learning_demo_scaffold", workflowStep: "create_learning_demo_scaffold", skipRender: true });
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "Learning demo scaffold creation failed" }, "Learning demo scaffold");
+    return null;
+  }
+  const data = response.data || {};
+  const scaffoldSourcePath = String(data.report_path || data.learn_mode_demo_scaffold_path || sourcePath || "").trim();
+  setLearningDraftReviewSourcePath(scaffoldSourcePath);
+  await loadLearningDraftReview({ skipResponse: true });
+  renderResponse({
+    success: true,
+    message: "Learning demo scaffold created without starting models or enabling Execute",
+    data: {
+      ...data,
+      candidate_only: true,
+      not_executable: true,
+      no_click_authorization: true,
+      model_started: false,
+      live_clicks: 0,
+      live_fills: 0,
+      live_submits: 0,
+      execute_binding_enabled: false,
+      artifact_is_authorization: false,
+      runtime_pathgraph_promotion: false,
+    },
+  }, "Learning demo scaffold");
+  return data;
+}
+
+async function createLearningDemoGoalReadiness() {
+  const scaffoldPath = String(
+    $("learningDemoScaffoldPath")?.value
+    || ""
+  ).trim();
+  const fallbackPath = String(
+    learningDraftReview?.pathgraph_candidate_review?.learn_mode_demo_scaffold?.report_path
+    || ""
+  ).trim();
+  const path = scaffoldPath || fallbackPath;
+  if (!path) {
+    renderResponse({ success: false, message: "learn_mode_demo_scaffold.json is required; create the demo scaffold first" }, "Learning demo goal readiness");
+    return null;
+  }
+  const response = await api("POST", "/panel/create_learning_demo_goal_readiness", {
+    scaffold_path: path,
+  }, { summary: "POST /panel/create_learning_demo_goal_readiness", workflowStep: "create_learning_demo_goal_readiness", skipRender: true });
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "Learning demo goal readiness creation failed" }, "Learning demo goal readiness");
+    return null;
+  }
+  const data = response.data || {};
+  await loadLearningDraftReview({ skipResponse: true });
+  renderResponse({
+    success: true,
+    message: "Learning demo goal readiness created without starting models or enabling Execute",
+    data: {
+      ...data,
+      candidate_only: true,
+      not_executable: true,
+      no_click_authorization: true,
+      model_started: false,
+      live_clicks: 0,
+      live_fills: 0,
+      live_submits: 0,
+      execute_binding_enabled: false,
+      artifact_is_authorization: false,
+      runtime_pathgraph_promotion: false,
+    },
+  }, "Learning demo goal readiness");
+  return data;
+}
+
+async function attachLearningDetailObserveResult() {
+  const candidatePath = String($("learningDetailObserveCandidatePath")?.value || $("learningPathGraphCandidatePath")?.value || "").trim();
+  const requestId = String($("learningDetailObserveRequestId")?.value || "").trim();
+  const detailSourcePath = String($("learningDetailObserveSourcePath")?.value || "").trim();
+  if (!candidatePath || !requestId || !detailSourcePath) {
+    renderResponse({
+      success: false,
+      message: "candidate_path, request_id, and detail_source_path are required",
+      data: { candidate_path: candidatePath, request_id: requestId, detail_source_path: detailSourcePath },
+    }, "Detail observe attachment");
+    return null;
+  }
+  const response = await api("POST", "/panel/attach_detail_observe_result", {
+    candidate_path: candidatePath,
+    request_id: requestId,
+    detail_source_path: detailSourcePath,
+  }, { summary: "POST /panel/attach_detail_observe_result", workflowStep: "attach_detail_observe_result", skipRender: true });
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "Detail observe attachment failed" }, "Detail observe attachment");
+    return null;
+  }
+  const data = response.data || {};
+  setLearningPathGraphCandidatePaths(data);
+  if ($("learningDetailObserveCandidatePath") && data.pathgraph_candidate_path) {
+    $("learningDetailObserveCandidatePath").value = String(data.pathgraph_candidate_path);
+  }
+  if (data.pathgraph_candidate_path) {
+    setLearningDraftReviewSourcePath(data.pathgraph_candidate_path);
+    await loadLearningDraftReview({ skipResponse: true });
+  } else if (learningDraftReview) {
+    renderLearningDraftPathPreview(learningDraftReview);
+  }
+  renderResponse({
+    success: true,
+    message: "Detail observe result attached as review-only candidate data",
+    data: {
+      ...data,
+      candidate_only: true,
+      no_dispatch: true,
+      not_executable: true,
+      no_click_authorization: true,
+    },
+  }, "Detail observe attachment");
+  return data;
+}
+
+async function createAssistedTemplateReviewPackage() {
+  const candidatePath = String($("learningPathGraphCandidatePath")?.value || $("learningDetailObserveCandidatePath")?.value || "").trim();
+  if (!candidatePath) {
+    renderResponse({ success: false, message: "pathgraph_candidate_path is required" }, "Assisted template review package");
+    return null;
+  }
+  const reviewStatus = String($("learningDraftReviewStatusSelect")?.value || "needs_human_review");
+  const reviewDecision = reviewStatus === "approved_as_assisted_template"
+    ? "approved_for_assisted_template_asset"
+    : "prepare_for_review";
+  const response = await api("POST", "/panel/create_assisted_template_review_package", {
+    candidate_path: candidatePath,
+    review_decision: reviewDecision,
+    reviewer_note: "Created from Learning Draft Review panel",
+  }, { summary: "POST /panel/create_assisted_template_review_package", workflowStep: "create_assisted_template_review_package", skipRender: true });
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "Assisted template review package creation failed" }, "Assisted template review package");
+    return null;
+  }
+  const data = response.data || {};
+  setLearningAssistedTemplatePackagePath(data.package_path || "");
+  if (data.package_path) {
+    await loadAssistedTemplateReviewPackage({ skipResponse: true });
+  }
+  renderResponse({
+    success: true,
+    message: "Assisted template review package created without execute authorization",
+    data: {
+      ...data,
+      candidate_only: true,
+      not_executable: true,
+      no_click_authorization: true,
+      ready_for_runtime_pathgraph_promotion: false,
+    },
+  }, "Assisted template review package");
+  return data;
+}
+
+async function loadAssistedTemplateReviewPackage(options = {}) {
+  const packagePath = String($("learningAssistedTemplatePackagePath")?.value || "").trim();
+  if (!packagePath) {
+    const response = { success: false, message: "assisted_template_review_package_path is required" };
+    if (!options.skipResponse) renderResponse(response, "Assisted template review package");
+    return null;
+  }
+  const response = await api("POST", "/panel/load_assisted_template_review_package", {
+    package_path: packagePath,
+  }, { summary: "POST /panel/load_assisted_template_review_package", workflowStep: "load_assisted_template_review_package", skipRender: true });
+  if (!response?.success) {
+    if (!options.skipResponse) renderResponse(response || { success: false, message: "Assisted template review package load failed" }, "Assisted template review package");
+    return null;
+  }
+  const data = response.data || {};
+  setLearningAssistedTemplatePackagePath(data.package_path || packagePath);
+  renderAssistedTemplateReviewPackage(data);
+  if (!options.skipResponse) {
+    renderResponse({
+      success: true,
+      message: "Assisted template review package loaded as checklist",
+      data: {
+        package_path: data.package_path,
+        package_status: data.package_status,
+        review_decision: data.review_decision,
+        ready_for_runtime_pathgraph_promotion: data.ready_for_runtime_pathgraph_promotion,
+        execute_binding_enabled: data.execute_binding_enabled,
+        artifact_is_authorization: data.artifact_is_authorization,
+      },
+    }, "Assisted template review package");
+  }
+  return data;
+}
+
+async function createAssistedTemplateAcceptanceSuggestions() {
+  const packagePath = String($("learningAssistedTemplatePackagePath")?.value || "").trim();
+  if (!packagePath) {
+    renderResponse({ success: false, message: "assisted_template_review_package_path is required" }, "Assisted template acceptance suggestions");
+    return null;
+  }
+  const response = await api("POST", "/panel/create_assisted_template_acceptance_suggestions", {
+    package_path: packagePath,
+  }, { summary: "POST /panel/create_assisted_template_acceptance_suggestions", workflowStep: "create_assisted_template_acceptance_suggestions", skipRender: true });
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "Assisted template acceptance suggestions failed" }, "Assisted template acceptance suggestions");
+    return null;
+  }
+  const data = response.data || {};
+  renderAssistedTemplateAcceptanceSuggestions(data);
+  renderResponse({
+    success: true,
+    message: "Assisted template acceptance suggestions created for human review only",
+    data: {
+      ...data,
+      candidate_only: true,
+      not_executable: true,
+      no_click_authorization: true,
+      ready_for_runtime_pathgraph_promotion: false,
+    },
+  }, "Assisted template acceptance suggestions");
+  return data;
+}
+
+async function createAssistedTemplateAcceptanceSimulation() {
+  const packagePath = String($("learningAssistedTemplatePackagePath")?.value || "").trim();
+  if (!packagePath) {
+    renderResponse({ success: false, message: "assisted_template_review_package_path is required" }, "Assisted template acceptance simulation");
+    return null;
+  }
+  const response = await api("POST", "/panel/create_assisted_template_acceptance_simulation", {
+    package_path: packagePath,
+  }, { summary: "POST /panel/create_assisted_template_acceptance_simulation", workflowStep: "create_assisted_template_acceptance_simulation", skipRender: true });
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "Assisted template acceptance simulation failed" }, "Assisted template acceptance simulation");
+    return null;
+  }
+  const data = response.data || {};
+  renderAssistedTemplateAcceptanceSimulation(data);
+  renderResponse({
+    success: true,
+    message: "Assisted template acceptance simulation created without saving review decisions",
+    data: {
+      ...data,
+      simulation_only: true,
+      candidate_only: true,
+      not_executable: true,
+      no_click_authorization: true,
+      ready_for_runtime_pathgraph_promotion: false,
+      execute_binding_enabled: false,
+      artifact_is_authorization: false,
+    },
+  }, "Assisted template acceptance simulation");
+  return data;
+}
+
+async function saveAssistedTemplateReviewDecisions() {
+  const packagePath = String($("learningAssistedTemplatePackagePath")?.value || "").trim();
+  if (!packagePath) {
+    renderResponse({ success: false, message: "assisted_template_review_package_path is required" }, "Assisted template review decisions");
+    return null;
+  }
+  const decisions = Array.from(document.querySelectorAll("[data-assisted-template-decision]"))
+    .map((select) => ({
+      item_type: String(select.dataset.itemType || ""),
+      item_id: String(select.dataset.itemId || ""),
+      decision: String(select.value || "pending_review"),
+    }))
+    .filter((item) => item.item_type && item.item_id);
+  const noteMap = new Map(Array.from(document.querySelectorAll("[data-assisted-template-note]"))
+    .map((input) => [
+      `${String(input.dataset.itemType || "")}:${String(input.dataset.itemId || "")}`,
+      String(input.value || ""),
+    ]));
+  decisions.forEach((item) => {
+    item.note = noteMap.get(`${item.item_type}:${item.item_id}`) || "";
+  });
+  const overrideInputs = Array.from(document.querySelectorAll("[data-assisted-template-override]"));
+  const overrideMap = new Map();
+  overrideInputs.forEach((input) => {
+    const itemType = String(input.dataset.itemType || "");
+    const itemId = String(input.dataset.itemId || "");
+    const field = String(input.dataset.assistedTemplateOverride || "");
+    if (!itemType || !itemId || !["label", "semantic_action", "target_entity"].includes(field)) return;
+    const key = `${itemType}:${itemId}`;
+    const existing = overrideMap.get(key) || {};
+    existing[field] = String(input.value || "");
+    overrideMap.set(key, existing);
+  });
+  decisions.forEach((item) => {
+    item.overrides = overrideMap.get(`${item.item_type}:${item.item_id}`) || {};
+  });
+  const accepted = decisions.filter((item) => item.decision === "accepted").length;
+  const needsChanges = decisions.filter((item) => item.decision === "needs_changes").length;
+  const rejected = decisions.filter((item) => item.decision === "rejected").length;
+  const overallDecision = rejected > 0 ? "rejected" : needsChanges > 0 ? "needs_changes" : accepted > 0 ? "accepted_for_assisted_template_review" : "needs_changes";
+  const response = await api("POST", "/panel/save_assisted_template_review_decisions", {
+    package_path: packagePath,
+    overall_decision: overallDecision,
+    reviewer_note: "Saved from Learning Draft assisted-template checklist",
+    decisions,
+  }, { summary: "POST /panel/save_assisted_template_review_decisions", workflowStep: "save_assisted_template_review_decisions", skipRender: true });
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "Assisted template review decisions save failed" }, "Assisted template review decisions");
+    return null;
+  }
+  renderResponse({
+    success: true,
+    message: "Assisted template review decisions saved without promotion",
+    data: {
+      ...(response.data || {}),
+      not_executable: true,
+      no_click_authorization: true,
+      ready_for_runtime_pathgraph_promotion: false,
+    },
+  }, "Assisted template review decisions");
+  return response.data || {};
+}
+
+async function saveAssistedTemplateReviewDecisionsAndExport() {
+  const saved = await saveAssistedTemplateReviewDecisions();
+  if (!saved) return null;
+  return createAssistedTemplateAssetCandidate();
+}
+
+async function saveAssistedTemplateReviewDecisionsAndBuildGraphDraft() {
+  const asset = await saveAssistedTemplateReviewDecisionsAndExport();
+  if (!asset) return null;
+  const graph = await createAssistedTemplateGraphDraft();
+  if (!graph) return null;
+  renderResponse({
+    success: true,
+    message: "Assisted template graph draft preview rebuilt without Runtime promotion",
+    data: {
+      review_asset_candidate_path: asset.asset_candidate_path,
+      graph_draft_path: graph.graph_draft_path,
+      graph_draft_status: graph.graph_draft_status,
+      asset_validation_summary: graph.asset_validation_summary || asset.asset_validation_summary || {},
+      candidate_only: true,
+      not_executable: true,
+      no_click_authorization: true,
+      ready_for_runtime_pathgraph_promotion: false,
+      execute_binding_enabled: false,
+      artifact_is_authorization: false,
+    },
+  }, "Assisted template graph draft preview");
+  return { asset, graph };
+}
+
+async function saveAssistedTemplateReviewDecisionsAndBuildAuditPreview() {
+  const built = await saveAssistedTemplateReviewDecisionsAndBuildGraphDraft();
+  if (!built) return null;
+  const preflight = await createAssistedTemplatePromotionPreflight();
+  if (!preflight) return null;
+  if (preflight.preflight_status !== "ready_for_audited_runtime_promotion_review") {
+    renderResponse({
+      success: false,
+      message: "Assisted template preflight is not ready for audit request preview",
+      data: {
+        preflight_status: preflight.preflight_status,
+        blockers: preflight.blockers || [],
+        blocker_details: preflight.blocker_details || [],
+        candidate_only: true,
+        not_executable: true,
+        no_click_authorization: true,
+        ready_for_runtime_pathgraph_promotion: false,
+        execute_binding_enabled: false,
+        artifact_is_authorization: false,
+      },
+    }, "Assisted template audit preview");
+    return null;
+  }
+  const auditRequest = await createAssistedTemplateAuditedPromotionRequest();
+  if (!auditRequest) return null;
+  renderResponse({
+    success: true,
+    message: "Assisted template audit request preview rebuilt without Runtime promotion",
+    data: {
+      review_asset_candidate_path: built.asset.asset_candidate_path,
+      graph_draft_path: built.graph.graph_draft_path,
+      preflight_status: preflight.preflight_status,
+      audit_request_preview_path: auditRequest.request_path,
+      audit_request_status: auditRequest.request_status,
+      candidate_only: true,
+      not_executable: true,
+      no_click_authorization: true,
+      ready_for_runtime_pathgraph_promotion: false,
+      execute_binding_enabled: false,
+      artifact_is_authorization: false,
+    },
+  }, "Assisted template audit preview");
+  return { ...built, preflight, auditRequest };
+}
+
+async function createAssistedTemplateAssetCandidate() {
+  const packagePath = String($("learningAssistedTemplatePackagePath")?.value || "").trim();
+  if (!packagePath) {
+    renderResponse({ success: false, message: "assisted_template_review_package_path is required" }, "Assisted template asset candidate");
+    return null;
+  }
+  const response = await api("POST", "/panel/create_assisted_template_asset_candidate", {
+    package_path: packagePath,
+  }, { summary: "POST /panel/create_assisted_template_asset_candidate", workflowStep: "create_assisted_template_asset_candidate", skipRender: true });
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "Assisted template asset candidate creation failed" }, "Assisted template asset candidate");
+    return null;
+  }
+  const data = response.data || {};
+  setLearningAssistedTemplateAssetCandidatePath(data.asset_candidate_path || "");
+  renderAssistedTemplateAssetCandidateSummary(data);
+  renderResponse({
+    success: true,
+    message: "Assisted template asset candidate created without Execute authorization",
+    data: {
+      ...data,
+      candidate_only: true,
+      not_executable: true,
+      no_click_authorization: true,
+      ready_for_runtime_pathgraph_promotion: false,
+    },
+  }, "Assisted template asset candidate");
+  return data;
+}
+
+async function createAssistedTemplateGraphDraft() {
+  const assetCandidatePath = String($("learningAssistedTemplateAssetCandidatePath")?.value || "").trim();
+  if (!assetCandidatePath) {
+    renderResponse({ success: false, message: "assisted_template_asset_candidate_path is required" }, "Assisted template graph draft");
+    return null;
+  }
+  const response = await api("POST", "/panel/create_assisted_template_graph_draft", {
+    asset_candidate_path: assetCandidatePath,
+  }, { summary: "POST /panel/create_assisted_template_graph_draft", workflowStep: "create_assisted_template_graph_draft", skipRender: true });
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "Assisted template graph draft creation failed" }, "Assisted template graph draft");
+    return null;
+  }
+  const data = response.data || {};
+  setLearningAssistedTemplateGraphDraftPath(data.graph_draft_path || "");
+  renderAssistedTemplateGraphDraftSummary(data);
+  renderResponse({
+    success: true,
+    message: "Assisted template graph draft created without Runtime promotion",
+    data: {
+      ...data,
+      candidate_only: true,
+      not_executable: true,
+      no_click_authorization: true,
+      ready_for_runtime_pathgraph_promotion: false,
+    },
+  }, "Assisted template graph draft");
+  return data;
+}
+
+async function createAssistedTemplatePromotionPreflight() {
+  const packagePath = String($("learningAssistedTemplatePackagePath")?.value || "").trim();
+  if (!packagePath) {
+    renderResponse({ success: false, message: "assisted_template_review_package_path is required" }, "Assisted template promotion preflight");
+    return null;
+  }
+  const response = await api("POST", "/panel/create_assisted_template_promotion_preflight", {
+    package_path: packagePath,
+  }, { summary: "POST /panel/create_assisted_template_promotion_preflight", workflowStep: "create_assisted_template_promotion_preflight", skipRender: true });
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "Assisted template promotion preflight failed" }, "Assisted template promotion preflight");
+    return null;
+  }
+  const data = response.data || {};
+  renderAssistedTemplatePromotionPreflight(data);
+  renderResponse({
+    success: true,
+    message: "Assisted template promotion preflight created without Runtime promotion",
+    data: {
+      ...data,
+      candidate_only: true,
+      not_executable: true,
+      no_click_authorization: true,
+      ready_for_runtime_pathgraph_promotion: false,
+      execute_binding_enabled: false,
+      artifact_is_authorization: false,
+    },
+  }, "Assisted template promotion preflight");
+  return data;
+}
+
+async function createAssistedTemplateAuditedPromotionRequest() {
+  const packagePath = String($("learningAssistedTemplatePackagePath")?.value || "").trim();
+  if (!packagePath) {
+    renderResponse({ success: false, message: "assisted_template_review_package_path is required" }, "Assisted template audited promotion request");
+    return null;
+  }
+  const response = await api("POST", "/panel/create_assisted_template_audited_promotion_request", {
+    package_path: packagePath,
+  }, { summary: "POST /panel/create_assisted_template_audited_promotion_request", workflowStep: "create_assisted_template_audited_promotion_request", skipRender: true });
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "Assisted template audited promotion request failed" }, "Assisted template audited promotion request");
+    return null;
+  }
+  const data = response.data || {};
+  renderAssistedTemplateAuditedPromotionRequest(data);
+  renderResponse({
+    success: true,
+    message: "Assisted template audited promotion request preview created without Runtime promotion",
+    data: {
+      ...data,
+      candidate_only: true,
+      not_executable: true,
+      no_click_authorization: true,
+      requires_separate_audited_promotion_path: true,
+      ready_for_runtime_pathgraph_promotion: false,
+      execute_binding_enabled: false,
+      artifact_is_authorization: false,
+    },
+  }, "Assisted template audited promotion request");
+  return data;
+}
+
+async function loadLearningDetailObserveSources() {
+  const response = await api("GET", "/panel/learning_draft_sources", null, {
+    summary: "GET /panel/learning_draft_sources",
+    workflowStep: "learning_draft_sources",
+    skipRender: true,
+  });
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "Learning draft source list failed" }, "Learning draft sources");
+    return null;
+  }
+  const data = response.data || {};
+  setLearningDetailObserveSourceOptions(data.sources || []);
+  renderResponse(response, "Learning draft sources");
+  return data;
+}
+
+async function preloadLearningDraftFromQuery() {
+  const sourcePath = panelQueryValue("draft_source", "learning_draft_source", "learningDraftReviewSourcePath");
+  const loadRecommendedDemoChain = panelQueryFlag("demo_chain") || panelQueryFlag("demoChain");
+  if (!sourcePath && loadRecommendedDemoChain) {
+    setLearnReplaySubview("draft");
+    const data = await loadRecommendedLearningDraftReview();
+    if (!data) return;
+    renderResponse({
+      success: true,
+      message: "Learning demo chain preloaded from recommended source",
+      data: {
+        draft_only: true,
+        no_click_authorization: true,
+        execute_binding_enabled: false,
+        template_replay_untouched: true,
+        demo_chain_query: true,
+      },
+    }, "Learning draft review");
+    return;
+  }
+  if (!sourcePath) return;
+  setLearnReplaySubview("draft");
+  setLearningDraftReviewSourcePath(sourcePath);
+  const loaded = await loadLearningDraftReview({ skipResponse: true });
+  if (!loaded) return;
+  const autoGenerate = panelQueryFlag("generate_pathgraph_candidate") || panelQueryFlag("generatePathGraphCandidate");
+  if (autoGenerate) {
+    await generatePathGraphCandidate();
+    return;
+  }
+  renderResponse({
+    success: true,
+    message: "Learning draft preloaded from panel query as display-only candidate",
+    data: {
+      source_path: sourcePath,
+      draft_only: true,
+      no_click_authorization: true,
+      execute_binding_enabled: false,
+      template_replay_untouched: true,
+    },
+  }, "Learning draft review");
+}
+
+async function loadReplayModelArtifact() {
+  const trialPath = String($("replayModelArtifactPath")?.value || "").trim();
+  if (!trialPath) {
+    renderResponse({ success: false, message: "model_artifact_trial_path is required" }, "Model artifact");
+    return null;
+  }
+  const response = await api("POST", "/panel/load_model_artifact", {
+    trial_path: trialPath,
+  }, { summary: "POST /panel/load_model_artifact", workflowStep: "load_model_artifact", skipRender: true });
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "Model artifact load failed" }, "Model artifact");
+    return null;
+  }
+  const data = response.data || {};
+  setLearningDraftReviewSourcePath(trialPath);
+  if ($("replayGraphPath") && data.runtime_graph_path) $("replayGraphPath").value = data.runtime_graph_path;
+  if ($("replayInterfaceMapPath") && data.interface_map_path) $("replayInterfaceMapPath").value = data.interface_map_path;
+  replayInterfaceCalibrationReport = null;
+  replayInterfaceCalibrationPath = "";
+  if ($("replayInterfaceCalibrationPath")) $("replayInterfaceCalibrationPath").value = "";
+  await loadReplayArtifact();
+  const firstStateId = Array.isArray(replayArtifact?.states) && replayArtifact.states[0] ? String(replayArtifact.states[0].state_id || "") : "";
+  if ($("replayTaskTemplate")) $("replayTaskTemplate").value = "model_artifact_single_step";
+  if ($("taskRunTemplate")) $("taskRunTemplate").value = "model_artifact_single_step";
+  if ($("replayStateId") && firstStateId) $("replayStateId").value = firstStateId;
+  if ($("taskRunGraphPath") && data.runtime_graph_path) $("taskRunGraphPath").value = data.runtime_graph_path;
+  if (data.interface_map_path) {
+    await loadReplayInterfaceMap();
+  }
+  clearLearningDraftReviewDisplay("not_loaded · source path prepared; click Load learning draft");
+  renderResponse({
+    success: true,
+    message: "Model artifact loaded as read-only derived replay artifacts",
+    data: {
+      ...data,
+      learning_draft_review_auto_loaded: false,
+      learning_draft_review_source_prefilled: true,
+      next_manual_step: "Click Load learning draft in Learning Studio to inspect the raw draft.",
+    },
+  }, "Model artifact");
+  return data;
+}
+
 async function loadReplayAppProfile(options = {}) {
   const appId = String($("replayAppProfileId")?.value || replayArtifact?.app_id || "").trim();
   if (!appId) {
@@ -8035,6 +14281,7 @@ async function ensureReplayInterfaceMapForRuntimeGraph(graph = {}, graphPath = "
 }
 
 function inferInterfaceMapPresetForGraph(graph = {}, graphPath = "") {
+  if (isModelLoadedRuntimePathGraph(graph)) return null;
   if (isSeekRuntimePathGraph(graph) || String(graphPath || "").toLowerCase().includes("seek")) {
     return {
       mapPath: DEFAULT_SEEK_INTERFACE_MAP_PATH,
@@ -8042,6 +14289,10 @@ function inferInterfaceMapPresetForGraph(graph = {}, graphPath = "") {
     };
   }
   return null;
+}
+
+function isModelLoadedRuntimePathGraph(graph = {}) {
+  return String(graph?.loader?.contract_version || "") === "model_learning_artifact_loader_v1";
 }
 
 async function loadReplayInterfaceMap() {
@@ -8433,14 +14684,17 @@ function createTaskRunState() {
     ? replayStateId
     : template === "input_dry_run_demo"
       ? "demo_input_form"
+      : template === "model_artifact_single_step"
+        ? String(runtimePathGraphView?.graph?.states?.[0]?.state_id || "")
       : (template === "read_article_page" ? "wikipedia_article" : (template === "read_issue_thread" ? "github_issues_list" : ""));
+  const isModelArtifactTaskRun = template === "model_artifact_single_step";
   return {
     contract_version: "agent_task_run_v1",
     goal: String($("taskRunGoal")?.value || "").trim(),
     task_template: template,
     runtime_graph_path: graphPath,
     current_state_id: currentStateId,
-    mode: template === "input_dry_run_demo" ? "demo_dry_run" : "read_only",
+    mode: template === "input_dry_run_demo" || isModelArtifactTaskRun ? "demo_dry_run" : "read_only",
     status: "running",
     current_item_open: false,
     current_detail_read: false,
@@ -8462,6 +14716,9 @@ function createTaskRunState() {
 }
 
 function chooseTaskRunAction(actions, state) {
+  if (state.task_template === "model_artifact_single_step") {
+    return actions.find((action) => action?.safety?.final_submit !== true) || actions[0] || null;
+  }
   if (state.task_template === "input_dry_run_demo") {
     return actions.find((action) => String(action.low_level_action_type || "").toLowerCase() === "input") || actions[0] || null;
   }
@@ -8486,6 +14743,7 @@ function chooseTaskRunAction(actions, state) {
 }
 
 function taskRunActionIntent(action, state) {
+  if (state.task_template === "model_artifact_single_step") return "preview model artifact action without dispatch";
   if (state.task_template === "input_dry_run_demo") return "preview input skill without typing";
   if (state.task_template === "read_article_page") return "read article page by scrolling";
   if (state.task_template === "read_issue_thread") return state.current_item_open ? "read issue thread by page scrolling" : "open issue row from list";
@@ -8544,11 +14802,12 @@ async function executeTaskRunNextStep() {
   }
   const selectedAction = {
     ...action,
-    input_text: taskRunState.task_template === "input_dry_run_demo" ? String($("taskRunInputText")?.value || "") : undefined,
+    input_text: taskRunState.task_template === "input_dry_run_demo" || taskRunState.task_template === "model_artifact_single_step" ? String($("taskRunInputText")?.value || "") : undefined,
   };
   const currentStateBeforeStep = taskRunState.current_state_id || action.from_state_id || runtimePathGraphView?.currentStateId || "";
   const isInputDemo = taskRunState.task_template === "input_dry_run_demo";
-  const dispatchLowLevel = !isInputDemo;
+  const isModelArtifactTaskRun = taskRunState.task_template === "model_artifact_single_step";
+  const dispatchLowLevel = !isInputDemo && !isModelArtifactTaskRun;
   const stepResponse = await api(
     "POST",
     "/execute/step",
@@ -8594,13 +14853,13 @@ async function executeTaskRunNextStep() {
     available_actions_trace_path: tracePathFromResponse(availableResponse),
     execute_step_trace_path: tracePathFromResponse(stepResponse),
     result: {
-      status: isInputDemo ? "planned_not_executed" : (success ? "success" : "failed"),
+      status: isInputDemo || isModelArtifactTaskRun ? "planned_not_executed" : (success ? "success" : "failed"),
       dispatch_low_level: dispatchLowLevel,
       type_text_called: lowLevel === "input" && dispatchLowLevel,
       verification_passed: nestedGet(stepResponse, ["data", "verification", "low_level_success"]) ?? null,
     },
   });
-  if (isInputDemo || taskRunState.summary.items_read >= maxItems) taskRunState.status = "complete";
+  if (isInputDemo || isModelArtifactTaskRun || taskRunState.summary.items_read >= maxItems) taskRunState.status = "complete";
   updateTaskRunView();
 }
 
@@ -8631,6 +14890,9 @@ async function ensureImagePath() {
 }
 
 async function callAnalyzeApi() {
+  setSharedPathSurfaceVisibility("observe");
+  resetSharedPathForScreenUnderstanding($("observeApp").value || $("locateApp").value || "");
+  clearScreenUnderstandingResidualDisplays("not_loaded · screen understanding started");
   const imagePath = await ensureImagePath();
   if (!imagePath) {
     renderResponse({ success: false, message: "Missing image path." }, "missing image");
@@ -8707,7 +14969,7 @@ function bindEvents() {
   document.querySelectorAll(".language-option").forEach((button) => {
     button.addEventListener("click", () => applyLanguage(button.dataset.language));
   });
-  on("agentModeLearnBtn", "click", () => showStage("observe"));
+  on("agentModeLearnBtn", "click", () => showStage("learn_interface"));
   on("agentModeExecuteBtn", "click", () => showStage("execute_actions"));
   on("settingsBtn", "click", () => showStage("model_test"));
   on("resetLayoutBtn", "click", resetCardLayout);
@@ -8718,54 +14980,90 @@ function bindEvents() {
   on("appUrl", "input", () => syncWindowAppAndState());
   on("appCatalogSelect", "change", applySelectedCatalogApp);
 
-  on("listAppsBtn", "click", async () => {
-    const response = await api("GET", "/apps", null, { summary: "GET /apps", workflowStep: "open" });
-    setAppCatalog(nestedGet(response, ["data", "catalog", "apps"]) || []);
-    setWindowCandidates(nestedGet(response, ["data", "running_windows"]) || []);
-  });
-  on("openAppBtn", "click", () => {
-    api("POST", "/apps/open", {
-      app_id: $("appId").value || null,
-      url: $("appUrl").value || null,
-      bind_after_open: true,
-    wait_seconds: 1.5,
-    }, { summary: "POST /apps/open", workflowStep: "open" }).then((response) => {
-      setWindowCandidates(nestedGet(response, ["data", "running_windows"]) || []);
-      const app = nestedGet(response, ["data", "app"]);
-      if (app && !appCatalog.some((item) => item.app_id === app.app_id)) {
-        setAppCatalog([app, ...appCatalog]);
-      }
-      syncWindowAppAndState();
-    });
-  });
+  on("listAppsBtn", "click", listAppsAndWindows);
+  on("openAppBtn", "click", openSelectedApp);
   on("listWindowsBtn", "click", () => refreshWindows(true));
   on("windowSelect", "change", applySelectedWindow);
-  on("bindWindowBtn", "click", () => {
-    syncWindowAppAndState(selectedWindowCandidate());
-    if (navPathAppName) {
-      const restored = restorePathGraph(navPathAppName);
-      if (!restored) updatePathAppLabel();
-    }
-    api("POST", "/session/bind_window", {
-      process_name: $("bindProcess").value || null,
-      title: $("bindTitle").value || null,
-    }, { summary: "POST /session/bind_window", workflowStep: "open" });
-  });
+  on("bindWindowBtn", "click", bindSelectedWindow);
 
-  on("captureBtn", "click", () => {
-    const payload = { save_image: $("captureSave").checked };
-    const roi = roiPayload();
-    if (roi) payload.roi = roi;
-    api("POST", "/state/capture_window", payload, { summary: "POST /state/capture_window", workflowStep: "capture" });
-  });
+  on("captureBtn", "click", captureBoundWindow);
   on("useImagePathBtn", "click", () => setCurrentImage($("imagePath").value.trim()));
+  on("learningInterfaceAppCatalogSelect", "change", () => {
+    syncLearningInterfacePrepToSharedControls();
+    syncLearningInterfacePrepFromSharedControls();
+  });
+  on("learningInterfaceWindowSelect", "change", () => {
+    syncLearningInterfacePrepToSharedControls();
+    syncLearningInterfacePrepFromSharedControls();
+  });
+  on("learningInterfaceListAppsBtn", "click", learningInterfaceListApps);
+  on("learningInterfaceOpenAppBtn", "click", learningInterfaceOpenApp);
+  on("learningInterfaceListWindowsBtn", "click", learningInterfaceListWindows);
+  on("learningInterfaceBindWindowBtn", "click", learningInterfaceBindWindow);
+  on("learningInterfaceCaptureBtn", "click", learningInterfaceCapture);
+  on("imageInspectorCloseBtn", "click", closeImageInspector);
+  $("imageInspectorOverlay")?.addEventListener("click", (event) => {
+    if (event.target === $("imageInspectorOverlay")) closeImageInspector();
+  });
+  bindImageInspectorEditDrag();
   on("executeObserveBtn", "click", callExecuteObserve);
   on("availableActionsBtn", "click", callAvailableActions);
   on("learnValidationPlanBtn", "click", generateLearnValidationPlan);
   on("learnValidationPreviewBtn", "click", () => runLearnValidationStep({ previewOnly: true }));
   on("learnValidationStepBtn", "click", () => runLearnValidationStep({ previewOnly: false }));
   on("learnValidationResetBtn", "click", resetLearnValidation);
+  document.querySelectorAll("[data-learn-replay-view]").forEach((button) => {
+    button.addEventListener("click", () => setLearnReplaySubview(button.dataset.learnReplayView || "template"));
+  });
   on("replayPreset", "change", applyReplayPreset);
+  on("replayModelArtifactLoadBtn", "click", loadReplayModelArtifact);
+  on("learningInterfaceRunBtn", "click", runLearningInterfaceFlow);
+  on("learningDraftPathLayoutResetBtn", "click", resetLearningDraftPathLayout);
+  bindLearningDraftPathResize();
+  on("learningTrialCaptureBtn", "click", captureLearningDraftWindow);
+  on("learningTrialRunBtn", "click", runLearningDraftTrial);
+  on("learningDraftReviewLoadBtn", "click", loadLearningDraftReview);
+  on("learningDraftRecommendedLoadBtn", "click", loadRecommendedLearningDraftReview);
+  on("learningDraftFreshnessDemoBtn", "click", loadLearningDraftFreshnessDemo);
+  on("learningDraftReviewSaveBtn", "click", saveLearningDraftReview);
+  on("learningDraftManualSaveBtn", "click", saveLearningDraftReview);
+  on("learningPathGraphCandidateBtn", "click", generatePathGraphCandidate);
+  on("learningModelStartApprovalPacketBtn", "click", createModelStartApprovalPacket);
+  on("learningCalibrationPreRunCheckBtn", "click", createCalibrationPreRunCheck);
+  on("learningPathGraphIntegrationReadinessBtn", "click", createPathgraphIntegrationReadiness);
+  on("learningCurrentEvidencePacketBtn", "click", createCurrentEvidencePacket);
+  on("learningPreciseUnderstandingCandidateBtn", "click", createPreciseUnderstandingCandidate);
+  on("learningPageDetailCandidateBtn", "click", createPageDetailCandidate);
+  on("learningDemoScaffoldBtn", "click", createLearningDemoScaffold);
+  on("learningDemoGoalReadinessBtn", "click", createLearningDemoGoalReadiness);
+  on("learningAssistedTemplatePackageBtn", "click", createAssistedTemplateReviewPackage);
+  on("learningAssistedTemplatePackageLoadBtn", "click", loadAssistedTemplateReviewPackage);
+  on("learningAssistedTemplateSuggestionsBtn", "click", createAssistedTemplateAcceptanceSuggestions);
+  on("learningAssistedTemplateAcceptanceSimulationBtn", "click", createAssistedTemplateAcceptanceSimulation);
+  on("learningAssistedTemplateDecisionsSaveBtn", "click", saveAssistedTemplateReviewDecisions);
+  on("learningAssistedTemplateDecisionsSaveExportBtn", "click", saveAssistedTemplateReviewDecisionsAndExport);
+  on("learningAssistedTemplateDecisionsSaveGraphPreviewBtn", "click", saveAssistedTemplateReviewDecisionsAndBuildGraphDraft);
+  on("learningAssistedTemplateDecisionsSaveAuditPreviewBtn", "click", saveAssistedTemplateReviewDecisionsAndBuildAuditPreview);
+  on("learningAssistedTemplateAssetCandidateBtn", "click", createAssistedTemplateAssetCandidate);
+  on("learningAssistedTemplateGraphDraftBtn", "click", createAssistedTemplateGraphDraft);
+  on("learningAssistedTemplatePromotionPreflightBtn", "click", createAssistedTemplatePromotionPreflight);
+  on("learningAssistedTemplateAuditedPromotionRequestBtn", "click", createAssistedTemplateAuditedPromotionRequest);
+  on("learningDetailObserveRequestSelect", "change", () => {
+    if ($("learningDetailObserveRequestId")) {
+      $("learningDetailObserveRequestId").value = $("learningDetailObserveRequestSelect")?.value || "";
+    }
+  });
+  on("learningDetailObserveSourceSelect", "change", () => {
+    const selectedSourcePath = $("learningDetailObserveSourceSelect")?.value || "";
+    if ($("learningDetailObserveSourcePath")) {
+      $("learningDetailObserveSourcePath").value = selectedSourcePath;
+    }
+    if (selectedSourcePath) {
+      setLearningDraftReviewSourcePath(selectedSourcePath);
+    }
+  });
+  on("learningDetailObserveSourcesBtn", "click", loadLearningDetailObserveSources);
+  on("learningDetailObserveAttachBtn", "click", attachLearningDetailObserveResult);
   on("replayLoadBtn", "click", loadReplayArtifact);
   on("replayAppProfileLoadBtn", "click", loadReplayAppProfile);
   on("replayAgentPromptLoadBtn", "click", loadReplayAgentPrompt);
@@ -8816,6 +15114,9 @@ function bindEvents() {
   }
 
   on("observeBtn", "click", async () => {
+    setSharedPathSurfaceVisibility("observe");
+    resetSharedPathForScreenUnderstanding($("observeApp").value || "");
+    clearScreenUnderstandingResidualDisplays("not_loaded · screen understanding started");
     const profile = syncStageProvider("observe");
     if (!(await ensureStageModelReady("observe", profile?.profile_id || $("observeModelProfile").value))) return;
     const payload = savedImagePayload({
@@ -9021,6 +15322,7 @@ async function boot() {
   startPathResizeObserver();
   const response = await api("GET", "/health", null, { summary: "GET /health" });
   setRuntimeState(response.success ? "runtime_ready" : "runtime_unavailable", response.success);
+  await preloadLearningDraftFromQuery();
   if (!panelQueryFlag("skip_boot_models")) {
     await refreshModels();
   }

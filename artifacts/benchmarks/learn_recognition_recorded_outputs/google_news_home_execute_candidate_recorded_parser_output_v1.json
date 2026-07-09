@@ -1,0 +1,142 @@
+{
+  "contract_version": "recorded_parser_output_v1",
+  "provider": "execute_recognition_plan_candidate_result",
+  "source_type": "recorded_parser_output",
+  "recorded_output_origin": "existing_execute_recognition_plan_trace",
+  "actual_model_call_in_this_run": false,
+  "trace_path": "logs/traces/vision/20260703-174837-304844__execute-mode-recognition-plan__google-news.json",
+  "image_path": "C:\\Users\\DesolateJix\\AppData\\Local\\Temp\\pytest-of-DesolateJix\\pytest-1705\\test_vision_recognition_plan_u1\\capture.png",
+  "goal": "click Home",
+  "surface": "google_news_home",
+  "observe_bundle": {
+    "contract_version": "learn_observe_bundle_v1",
+    "screen_size": {
+      "width": 500,
+      "height": 260
+    },
+    "sources": {
+      "execute_candidate_result": {
+        "source_trace_path": "logs/traces/vision/20260703-174837-304844__execute-mode-recognition-plan__google-news.json",
+        "goal": "click Home",
+        "candidates": [
+          {
+            "candidate_id": "path_graph_home",
+            "rank": 1,
+            "element_id": "path_graph_home",
+            "label": "Home",
+            "role": "nav text action",
+            "text": "Home",
+            "score": 0.92,
+            "eligible": true,
+            "reasons": [
+              "path_graph_recall",
+              "label_matches_goal",
+              "semantic_context_matches_goal",
+              "vista_point_inside_candidate_bbox"
+            ],
+            "score_breakdown": {
+              "text_similarity": 0.92,
+              "role_score": 0.85,
+              "policy_score": 0.7,
+              "confidence_score": 0.92,
+              "state_score": 0.4,
+              "screen_reading_score": 0.25,
+              "ad_penalty": 0.0,
+              "blocked_penalty": 0.0,
+              "total": 0.7974
+            },
+            "element": {
+              "element_id": "path_graph_home",
+              "label": "Home",
+              "role": "nav text action",
+              "interaction_type": "click",
+              "description": "home opens",
+              "text": "Home",
+              "bbox": {
+                "x": 30,
+                "y": 120,
+                "w": 80,
+                "h": 60
+              },
+              "semantic_bbox": null,
+              "click_point": {
+                "x": 56,
+                "y": 150
+              },
+              "click_strategy": "path_graph_recall_then_local_ocr",
+              "possible_destinations": [
+                "home opens"
+              ],
+              "verification_hints": {
+                "expected_changes": [
+                  "home opens"
+                ],
+                "target_scope": "local"
+              },
+              "interaction_policy": {
+                "allowed": true,
+                "zone_type": "general_action",
+                "priority": "path_graph_recall",
+                "ad_risk": 0.0,
+                "reasons": [
+                  "path_graph_recall_policy",
+                  "risk_class:safe_click_allowed",
+                  "risk_class_safe_click_allowed"
+                ]
+              },
+              "fusion_confidence": 0.92,
+              "coordinate_confidence": "path_graph_observation_hint",
+              "memory_key": "path_graph:home",
+              "sources": [
+                "path_graph_recall_v1"
+              ],
+              "source_region_ids": [],
+              "source_text_ids": [],
+              "evidence": {
+                "path_graph_recall": {
+                  "contract_version": "path_graph_recall_candidate_v1",
+                  "candidate_id": "home",
+                  "source_rank": 1,
+                  "label": "Home",
+                  "role": "nav text action",
+                  "section_id": "top_navigation",
+                  "bbox": {
+                    "x": 30,
+                    "y": 120,
+                    "w": 80,
+                    "h": 60
+                  },
+                  "click_point": {
+                    "x": 56,
+                    "y": 150
+                  },
+                  "local_ocr_roi": {
+                    "x": 6,
+                    "y": 96,
+                    "w": 128,
+                    "h": 108
+                  },
+                  "risk_class": "safe_click_allowed",
+                  "expected_effect": "home opens",
+                  "source": "screen_map",
+                  "score": 0.92,
+                  "score_reasons": [
+                    "label_matches_goal",
+                    "semantic_context_matches_goal"
+                  ]
+                }
+              }
+            },
+            "refined_bbox": {
+              "x": 30,
+              "y": 120,
+              "w": 80,
+              "h": 60
+            },
+            "bbox_refine_reason": "path_graph_recall_bbox"
+          }
+        ]
+      }
+    }
+  }
+}

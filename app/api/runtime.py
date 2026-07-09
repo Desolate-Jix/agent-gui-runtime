@@ -7,6 +7,7 @@ from app.core.runtime_artifacts import RuntimeTimer, write_trace
 from app.gate.contracts import build_gate_contract_catalog
 from app.api.models.request import ModelServerRequest, RuntimePrepareRequest
 from app.api.models.response import APIResponse, ErrorModel
+from app.learn.model_trial import build_learning_model_trial
 from app.operation.skills import build_operation_skill_catalog
 from app.agent.prompts import (
     PromptRollbackRequest,
@@ -328,6 +329,58 @@ def app_profile(app_id: str) -> APIResponse:
             message="App profile load failed",
             data={"app_id": app_id},
             error=ErrorModel(code="app_profile_load_failed", details=str(exc)),
+        )
+
+
+@router.get("/learning/model_trial", response_model=APIResponse)
+def learning_model_trial(
+    image_path: str = Query(min_length=1),
+    app_name: str = Query(default="unknown_app"),
+    state_hint: str = Query(default=""),
+    goal: str = Query(default="learn a reusable UI workflow template from this screen"),
+    validation_mode: str = Query(default="strict_blind"),
+    max_attempts: int = Query(default=3, ge=1, le=5),
+    max_output_tokens: int = Query(default=768, ge=256, le=8192),
+    temperature: float = Query(default=0.0, ge=0.0, le=2.0),
+    timeout_seconds: int = Query(default=180, ge=1, le=600),
+    learning_image_max_edge: int = Query(default=256, ge=128, le=1280),
+    allow_fast_profile_fallback: bool = Query(default=False),
+) -> APIResponse:
+    try:
+        result = build_learning_model_trial(
+            image_path=image_path,
+            app_name=app_name,
+            state_hint=state_hint,
+            goal=goal,
+            validation_mode=validation_mode,
+            max_attempts=max_attempts,
+            learning_parameter_overrides={
+                "max_output_tokens": max_output_tokens,
+                "temperature": temperature,
+                "timeout_seconds": timeout_seconds,
+                "learning_image_max_edge": learning_image_max_edge,
+                "allow_fast_profile_fallback": allow_fast_profile_fallback,
+            },
+        )
+        return APIResponse(
+            success=True,
+            message="Learning model trial completed",
+            data=result,
+            error=None,
+        )
+    except FileNotFoundError as exc:
+        return APIResponse(
+            success=False,
+            message="Learning model trial image not found",
+            data={"image_path": image_path},
+            error=ErrorModel(code="learning_trial_image_not_found", details=str(exc)),
+        )
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Learning model trial failed",
+            data={"image_path": image_path, "app_name": app_name},
+            error=ErrorModel(code="learning_model_trial_failed", details=str(exc)),
         )
 
 

@@ -1,0 +1,39 @@
+{
+  "contract_version": "chatgpt_visual_audit_result_v1",
+  "run_id": "stage1_5_v81",
+  "display_only": true,
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "not_accuracy": true,
+  "submission": {
+    "chatgpt_url": "https://chatgpt.com/c/6a313e9c-e2d4-83e8-b487-83e69eb0ff58",
+    "method": "framework_clicked_gpt_composer_then_framework_clipboard_image_paste",
+    "draft_image_count_before_send": 3,
+    "latest_user_message_img_count_after_send": 3,
+    "note": "Earlier bridge/file-input attempts were discarded because ChatGPT reported missing images; this audit is from the retried message whose latest user message contained exactly three images."
+  },
+  "inputs": {
+    "qq_stage1_5_overlay": "artifacts/review-overlays/qq__observe-screen__qq__full-window__20260706-185700-021296__stage1-5-partition__20260708-173828-436670.png",
+    "applemusic_stage1_overlay": "artifacts/review-overlays/apple-music__observe-screen__applemusic__full-window__20260706-200734-125573__stage1-region-localization__20260708-173828-407168.png",
+    "python_stage1_5_overlay": "artifacts/review-overlays/welcome-to-python-org-microsoft-edge__observe-screen__python-org__full-window__20260703-173928-663164__stage1-5-partition__20260708-173828-503641.png"
+  },
+  "chatgpt_result": {
+    "qq": {
+      "status": "PASS",
+      "summary": "Color-separated Stage1.5 overlay made the three panes clear. The prior bottom_composer horizontal-overwide concern was mainly an overlay same-color boundary misread. Geometry is basically valid for continuing, provided later numbering stays inside the three subregions."
+    },
+    "applemusic": {
+      "status": "CONDITIONAL PASS",
+      "summary": "No new QQ-strategy pollution is visible, but the primary/main content right boundary is still too narrow and cuts into visible right-side cards. Do not report AppleMusic as fully geometry-ready until this generic boundary issue is fixed."
+    },
+    "python_org": {
+      "status": "CONDITIONAL PASS",
+      "summary": "Stage1 chrome/header/primary split and Stage1.5 content_column remain appropriate. Later numbering must target content_column, not the whole primary region."
+    }
+  },
+  "required_generic_followups": [
+    "Main content right boundary must not shrink into visible content; AppleMusic is the current evidence.",
+    "Broad primary areas and numbered subcolumns must remain separate responsibilities; Python.org numbering should target content_column.",
+    "Adjacent Stage1.5 subregions must remain visually distinguishable in review overlays."
+  ]
+}

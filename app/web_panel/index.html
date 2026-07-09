@@ -35,16 +35,15 @@
         <nav class="stage-nav" aria-label="Workflow workspaces">
           <div class="nav-group nav-group-system" data-workflow="system">
             <div class="nav-group-title" data-i18n="nav_group_system">Session / System</div>
-            <button class="stage active" data-stage="open_bind" data-step="S" data-i18n="nav_open_bind">Open / Bind</button>
-            <button class="stage" data-stage="capture" data-step="S" data-i18n="nav_capture">Capture</button>
-            <button class="stage" data-stage="trace" data-step="S" data-i18n="nav_trace_audit">Trace Audit</button>
+            <button class="stage" data-stage="open_bind" data-step="1" data-i18n="nav_open_bind">Open / Bind</button>
+            <button class="stage" data-stage="capture" data-step="2" data-i18n="nav_capture">Capture</button>
           </div>
           <div class="nav-group nav-group-learn" data-workflow="learn">
             <div class="nav-group-title" data-i18n="nav_group_learn">Learn Mode</div>
-            <p class="nav-group-subtitle" data-i18n="nav_group_learn_flow">Observe -> calibrate coordinates -> write PathGraph</p>
-            <button class="stage" data-stage="observe" data-step="1" data-i18n="nav_learn_observe">Learn Fast</button>
-            <button class="stage" data-stage="learn_locate" data-step="2" data-i18n="nav_learn_locate">Learn Deep</button>
-            <button class="stage" data-stage="learn_replay" data-step="3" data-i18n="nav_learn_replay">Artifact Replay</button>
+            <p class="nav-group-subtitle" data-i18n="nav_group_learn_flow">Bind and screenshot inside Learn interface, then review template, Trace, and safety validation</p>
+            <button class="stage active" data-stage="learn_interface" data-step="1" data-i18n="nav_learn_interface">Learn interface</button>
+            <button class="stage" data-stage="template_display" data-step="2" data-i18n="nav_template_display">Template display</button>
+            <button class="stage" data-stage="trace" data-step="3" data-i18n="nav_trace_audit">Trace Audit</button>
             <button class="stage" data-stage="learn_validation" data-step="4" data-i18n="nav_learn_validation">PathGraph Validation</button>
           </div>
           <div class="nav-group nav-group-execute" data-workflow="execute">
@@ -138,7 +137,7 @@
               </div>
             </section>
 
-            <section class="panel stage-page active" data-page="open_bind">
+            <section class="panel stage-page" data-page="open_bind">
               <h3 data-i18n="open_bind">Open / Bind</h3>
               <div class="form-grid">
                 <label>
@@ -415,10 +414,19 @@
               <div class="run-timeline" id="learnValidationTimeline"></div>
             </section>
 
-            <section class="panel stage-page" data-page="learn_replay">
+            <section class="panel stage-page active" data-page="learn_replay">
               <h3 data-i18n="learn_replay_title">Artifact Replay / PathGraph Validation</h3>
               <div class="mode-help mode-help-learn" data-mode-scope="learn" data-i18n="learn_replay_hint">Load a learned runtime PathGraph, inspect its structure, then reuse the same single-step Execute APIs for safe validation and task timeline replay.</div>
+              <div class="learn-replay-subnav" role="tablist" aria-label="Learn replay subviews">
+                <button class="learn-replay-tab active" type="button" data-learn-replay-view="template" data-i18n="template_subinterface">Template</button>
+                <button class="learn-replay-tab" type="button" data-learn-replay-view="draft" data-i18n="learning_draft_subinterface">Learning draft</button>
+              </div>
+              <section class="learn-replay-subview active" data-learn-replay-panel="template">
               <div class="form-grid">
+                <div class="form-section-label wide-control">
+                  <strong data-i18n="template_replay_section">Template Replay</strong>
+                  <span data-i18n="template_replay_section_hint">Load runtime PathGraph and Interface Map artifacts only. Learning drafts are reviewed separately.</span>
+                </div>
                 <label>
                   <span data-i18n="artifact_preset">Artifact preset</span>
                   <select id="replayPreset">
@@ -443,6 +451,10 @@
                   <input id="replayInterfaceCalibrationPath" value="artifacts/visual-match-smoke/live_seek_20260624/visual_asset_calibration_report.json" />
                 </label>
                 <label class="wide-control">
+                  <span data-i18n="model_artifact_trial_path">Model artifact trial path</span>
+                  <input id="replayModelArtifactPath" value="" placeholder="artifacts/learning-runs/.../trial_result.json" />
+                </label>
+                <label class="wide-control">
                   <span data-i18n="interface_map_save_name">Edited Interface Map file</span>
                   <input id="replayInterfaceMapSaveName" value="learned_interface_map_edited.json" />
                 </label>
@@ -453,6 +465,7 @@
                     <option value="read_article_page">read_article_page</option>
                     <option value="read_issue_thread">read_issue_thread</option>
                     <option value="input_dry_run_demo">input_dry_run_demo</option>
+                    <option value="model_artifact_single_step">model_artifact_single_step</option>
                   </select>
                 </label>
                 <label>
@@ -480,24 +493,33 @@
                   <input id="replayAgentPromptCompareVersion" value="2026-06-29.base" />
                 </label>
               </div>
-              <div class="button-row">
+              <div class="button-row replay-template-actions">
                 <button id="replayLoadBtn" data-i18n="load_artifact">Load artifact</button>
-                <button id="replayAppProfileLoadBtn" data-i18n="load_app_profile">Load app profile</button>
-                <button id="replayAgentPromptLoadBtn" data-i18n="load_agent_prompt">Load agent prompt</button>
-                <button id="replayAgentPromptVersionsBtn" data-i18n="load_agent_prompt_versions">Load versions</button>
-                <button id="replayAgentPromptLoadVersionBtn" data-i18n="load_agent_prompt_version">Load selected version</button>
-                <button id="replayAgentPromptDiffBtn" data-i18n="diff_agent_prompt_versions">Diff versions</button>
-                <button id="replayAgentPromptSaveBtn" data-i18n="save_agent_prompt_version">Save prompt version</button>
-                <button id="replayAgentPromptRollbackBtn" data-i18n="rollback_agent_prompt_version">Rollback as new version</button>
-                <button id="replayUseCurrentAppMapBtn" data-i18n="use_current_app_map">Use current app map</button>
                 <button id="replayInterfaceMapLoadBtn" data-i18n="load_interface_map">Load interface map</button>
                 <button id="replayInterfaceCalibrationLoadBtn" data-i18n="load_interface_calibration">Load calibration</button>
-                <button id="replayInterfaceMapSaveBtn" data-i18n="save_interface_map">Save interface map</button>
                 <button id="replayUseValidationBtn" data-i18n="use_for_safe_validation">Use for safe validation</button>
                 <button id="replayUseTaskBtn" data-i18n="use_for_task_run">Use for task run</button>
-                <button id="replayValidationPlanBtn" data-i18n="generate_validation_plan">Generate validation plan</button>
-                <button id="replayTaskStepBtn" data-i18n="execute_next_step">Execute next step</button>
               </div>
+              <details class="replay-action-disclosure">
+                <summary>
+                  <span data-i18n="replay_advanced_actions">Advanced actions</span>
+                  <small data-i18n="replay_advanced_actions_hint">Prompt, profile, save, and debug-run tools.</small>
+                </summary>
+                <div class="button-row replay-template-advanced-actions">
+                  <button id="replayModelArtifactLoadBtn" data-i18n="load_model_artifact">Load model artifact</button>
+                  <button id="replayAppProfileLoadBtn" data-i18n="load_app_profile">Load app profile</button>
+                  <button id="replayAgentPromptLoadBtn" data-i18n="load_agent_prompt">Load agent prompt</button>
+                  <button id="replayAgentPromptVersionsBtn" data-i18n="load_agent_prompt_versions">Load versions</button>
+                  <button id="replayAgentPromptLoadVersionBtn" data-i18n="load_agent_prompt_version">Load selected version</button>
+                  <button id="replayAgentPromptDiffBtn" data-i18n="diff_agent_prompt_versions">Diff versions</button>
+                  <button id="replayAgentPromptSaveBtn" data-i18n="save_agent_prompt_version">Save prompt version</button>
+                  <button id="replayAgentPromptRollbackBtn" data-i18n="rollback_agent_prompt_version">Rollback as new version</button>
+                  <button id="replayUseCurrentAppMapBtn" data-i18n="use_current_app_map">Use current app map</button>
+                  <button id="replayInterfaceMapSaveBtn" data-i18n="save_interface_map">Save interface map</button>
+                  <button id="replayValidationPlanBtn" data-i18n="generate_validation_plan">Generate validation plan</button>
+                  <button id="replayTaskStepBtn" data-i18n="execute_next_step">Execute next step</button>
+                </div>
+              </details>
               <div class="artifact-summary" id="replayGraphSummary"></div>
               <div class="run-summary app-profile-summary" id="replayAppProfileSummary"></div>
               <div class="run-summary agent-prompt-summary" id="replayAgentPromptSummary"></div>
@@ -505,6 +527,340 @@
               <pre id="replayAgentPromptDiff" class="agent-prompt-diff"></pre>
               <div class="interface-map-panel" id="replayInterfaceMapPanel"></div>
               <div class="action-table" id="replayGraphActions"></div>
+              </section>
+              <section class="learn-replay-subview" data-learn-replay-panel="draft">
+              <section class="learning-interface-prep-card" id="learningInterfacePrepCard" aria-label="Learning interface preparation">
+                <div>
+                  <strong data-i18n="learning_interface_prep_title">Open, bind, and screenshot</strong>
+                  <p data-i18n="learning_interface_prep_hint">Use the same bound-window and screenshot controls here before learning. This step only prepares evidence; it does not click the target app.</p>
+                </div>
+                <div class="form-grid learning-interface-prep-grid">
+                  <label>
+                    <span data-i18n="learning_interface_app_catalog">Launch target</span>
+                    <select id="learningInterfaceAppCatalogSelect"></select>
+                  </label>
+                  <label>
+                    <span data-i18n="learning_interface_window">Target window</span>
+                    <select id="learningInterfaceWindowSelect"></select>
+                  </label>
+                  <label class="wide-control">
+                    <span data-i18n="learning_interface_image_path">Latest screenshot</span>
+                    <input id="learningInterfaceImagePath" value="" readonly placeholder="capture bound window first" />
+                  </label>
+                </div>
+                <div class="button-row learning-interface-prep-actions">
+                  <button id="learningInterfaceListAppsBtn" type="button" data-i18n="list_apps">List apps</button>
+                  <button id="learningInterfaceOpenAppBtn" type="button" data-i18n="open_app">Open app</button>
+                  <button id="learningInterfaceListWindowsBtn" type="button" data-i18n="list_windows">List windows</button>
+                  <button id="learningInterfaceBindWindowBtn" type="button" data-i18n="bind_window">Bind window</button>
+                  <button id="learningInterfaceCaptureBtn" type="button" data-i18n="capture_bound_window">Capture window</button>
+                  <span id="learningInterfacePrepStatus" class="learning-interface-flow-status" data-i18n="learning_interface_prep_idle">ready · no live click</span>
+                </div>
+              </section>
+              <section class="learning-interface-flow-card" aria-label="Learning interface workflow">
+                <div>
+                  <strong data-i18n="learning_interface_flow_title">Learn current interface</strong>
+                  <p data-i18n="learning_interface_flow_hint">Bind and screenshot, understand the full screen, number regions, calibrate with the execute locator chain, then output a fused draft and read-only PathGraph.</p>
+                </div>
+                <div class="button-row learning-interface-flow-actions">
+                  <button id="learningInterfaceRunBtn" type="button" class="primary" data-i18n="learning_interface_run">Learn current interface</button>
+                  <span id="learningInterfaceFlowStatus" class="learning-interface-flow-status" data-i18n="learning_interface_flow_idle">idle · no live click</span>
+                </div>
+                <ol class="learning-interface-flow-progress" id="learningInterfaceFlowProgress">
+                  <li data-learning-flow-step="bind_capture"><span>1</span><strong data-i18n="learning_flow_bind_capture">Bind / screenshot</strong></li>
+                  <li data-learning-flow-step="screen_understanding"><span>2</span><strong data-i18n="learning_flow_screen_understanding">Full-screen understanding</strong></li>
+                  <li data-learning-flow-step="numbered_map"><span>3</span><strong data-i18n="learning_flow_numbered_map">Numbered selection map</strong></li>
+                  <li data-learning-flow-step="page_details"><span>4</span><strong data-i18n="learning_flow_page_details">Interface details</strong></li>
+                  <li data-learning-flow-step="precise_calibration"><span>5</span><strong data-i18n="learning_flow_precise_calibration">Precise calibration</strong></li>
+                  <li data-learning-flow-step="fusion"><span>6</span><strong data-i18n="learning_flow_fusion">Fusion</strong></li>
+                  <li data-learning-flow-step="pathgraph_draft"><span>7</span><strong data-i18n="learning_flow_pathgraph_draft">PathGraph draft</strong></li>
+                  <li data-learning-flow-step="complete"><span>8</span><strong data-i18n="learning_flow_complete">Complete</strong></li>
+                </ol>
+              </section>
+              <details class="replay-action-disclosure" id="learningDraftAdvancedDiagnostics">
+                <summary>
+                  <span data-i18n="learning_draft_advanced_diagnostics">Advanced diagnostics</span>
+                  <small data-i18n="learning_draft_advanced_diagnostics_hint">Old split-step tools and artifact paths; keep closed for demo.</small>
+                </summary>
+                <div class="learning-draft-advanced-body">
+              <div class="form-grid">
+                <div class="form-section-label wide-control learning-studio-section-label">
+                  <strong data-i18n="learning_studio_section">Learning Studio</strong>
+                  <span data-i18n="learning_studio_section_hint">Load and edit the model learning draft as a non-executable reviewed candidate.</span>
+                </div>
+                <label>
+                  <span data-i18n="learning_trial_app">Learning app</span>
+                  <input id="learningTrialApp" value="" placeholder="optional app id" />
+                </label>
+                <label>
+                  <span data-i18n="learning_trial_state">Learning state</span>
+                  <input id="learningTrialState" value="" placeholder="optional state hint" />
+                </label>
+                <label>
+                  <span data-i18n="learning_trial_max_attempts">Trial attempts</span>
+                  <input id="learningTrialMaxAttempts" type="number" min="1" max="5" value="2" />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="learning_trial_goal">Learning trial goal</span>
+                  <input id="learningTrialGoal" value="learn a reusable UI workflow template from this screen" />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="learning_trial_image_path">Learning trial image</span>
+                  <input id="learningTrialImagePath" value="" placeholder="capture bound window or use current image" />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="learning_trial_result_path">Latest learning trial result</span>
+                  <input id="learningTrialResultPath" value="" placeholder="artifacts/learning-runs/.../trial_result.json" readonly />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="learning_draft_review_source_path">Learning draft review source</span>
+                  <input id="learningDraftReviewSourcePath" value="" placeholder="artifacts/learning-runs/.../trial_result.json" />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="learning_draft_freshness_demo_case">Freshness demo case</span>
+                  <select id="learningDraftFreshnessDemoCase">
+                    <option value="freshness_matched">checksum matched</option>
+                    <option value="freshness_missing_file">source file missing</option>
+                    <option value="freshness_checksum_mismatch">checksum mismatch</option>
+                  </select>
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="learning_pathgraph_candidate_path">PathGraph candidate</span>
+                  <input id="learningPathGraphCandidatePath" value="" placeholder="artifacts/.../pathgraph_candidate.json" readonly />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="learning_pathgraph_validation_path">Candidate validation report</span>
+                  <input id="learningPathGraphValidationPath" value="" placeholder="artifacts/.../promotion_validation_report.json" readonly />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="learning_assisted_template_package_path">Assisted template review package</span>
+                  <input id="learningAssistedTemplatePackagePath" value="" placeholder="artifacts/.../assisted_template_review_package.json" readonly />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="learning_assisted_template_asset_candidate_path">Assisted template asset candidate</span>
+                  <input id="learningAssistedTemplateAssetCandidatePath" value="" placeholder="artifacts/.../assisted_template_asset_candidate.json" readonly />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="learning_assisted_template_graph_draft_path">Assisted template graph draft</span>
+                  <input id="learningAssistedTemplateGraphDraftPath" value="" placeholder="artifacts/.../assisted_template_graph_draft.json" readonly />
+                </label>
+              </div>
+              <div class="button-row replay-learning-actions">
+                <button id="learningTrialCaptureBtn" data-i18n="learning_trial_capture">Capture for draft</button>
+                <button id="learningTrialRunBtn" data-i18n="learning_trial_run">Run draft trial</button>
+                <button id="learningDraftReviewLoadBtn" data-i18n="learning_draft_review">Load learning draft review</button>
+                <button id="learningDraftRecommendedLoadBtn" class="secondary" data-i18n="learning_draft_recommended_load">Load recommended current draft</button>
+                <button id="learningDraftFreshnessDemoBtn" data-i18n="learning_draft_load_freshness_demo">Load freshness demo</button>
+                <button id="learningDraftReviewSaveBtn" data-i18n="learning_draft_review_save">Save reviewed candidate</button>
+                <button id="learningPathGraphCandidateBtn" data-i18n="learning_pathgraph_candidate_generate">Generate PathGraph candidate</button>
+                <button id="learningModelStartApprovalPacketBtn" class="secondary" data-i18n="learning_model_start_approval_packet_create">Create model-start approval packet</button>
+                <button id="learningCalibrationPreRunCheckBtn" class="secondary" data-i18n="learning_calibration_pre_run_check_create">Create calibration pre-run check</button>
+                <button id="learningPathGraphIntegrationReadinessBtn" class="secondary" data-i18n="learning_pathgraph_integration_readiness_create">Create integration readiness</button>
+                <button id="learningCurrentEvidencePacketBtn" class="secondary" data-i18n="learning_current_evidence_packet_create">Create current evidence packet</button>
+                <button id="learningPreciseUnderstandingCandidateBtn" class="secondary" data-i18n="learning_precise_understanding_candidate_create">Create precise understanding candidate</button>
+                <button id="learningPageDetailCandidateBtn" class="secondary" data-i18n="learning_page_detail_candidate_create">Create page detail candidate</button>
+                <button id="learningDemoScaffoldBtn" class="secondary" data-i18n="learning_demo_scaffold_create">Create demo scaffold</button>
+                <button id="learningDemoGoalReadinessBtn" class="secondary" data-i18n="learning_demo_goal_readiness_create">Create demo goal audit</button>
+                <button id="learningAssistedTemplatePackageBtn" data-i18n="learning_assisted_template_package_create">Create review package</button>
+                <button id="learningAssistedTemplatePackageLoadBtn" data-i18n="learning_assisted_template_package_load">Load review package</button>
+                <button id="learningAssistedTemplateSuggestionsBtn" data-i18n="learning_assisted_template_suggestions_create">Create acceptance suggestions</button>
+                <button id="learningAssistedTemplateAcceptanceSimulationBtn" data-i18n="learning_assisted_template_acceptance_simulation_create">Simulate accepted suggestions</button>
+                <button id="learningAssistedTemplateAssetCandidateBtn" data-i18n="learning_assisted_template_asset_candidate_create">Create asset candidate</button>
+                <button id="learningAssistedTemplateGraphDraftBtn" data-i18n="learning_assisted_template_graph_draft_create">Create graph draft</button>
+                <button id="learningAssistedTemplatePromotionPreflightBtn" data-i18n="learning_assisted_template_promotion_preflight_create">Create promotion preflight</button>
+                <button id="learningAssistedTemplateAuditedPromotionRequestBtn" data-i18n="learning_assisted_template_audited_promotion_request_create">Create audit request preview</button>
+              </div>
+                </div>
+              </details>
+              <section class="learning-draft-review-workspace" aria-label="Learning draft replay workspace">
+                <section class="learning-review-section learning-draft-history-panel">
+                  <strong data-i18n="learning_draft_history_title">History learning drafts</strong>
+                  <div id="learningDraftHistoryList">
+                    <p class="trace-idle" data-i18n="learning_draft_history_empty">Load recent drafts or run learning to show history.</p>
+                  </div>
+                </section>
+                <section class="learning-review-section learning-draft-screenshot-panel" id="learningDraftScreenshotPanel">
+                  <strong data-i18n="learning_draft_screenshot_title">Screenshot / numbered map</strong>
+                  <div id="learningDraftScreenshotPreview">
+                    <p class="trace-idle" data-i18n="learning_draft_screenshot_empty">No learning screenshot loaded.</p>
+                  </div>
+                </section>
+              <section class="learning-review-panel" id="learningDraftReviewPanel">
+                <div class="panel-header compact">
+                  <h4 data-i18n="learning_draft_review_title">Learning draft review</h4>
+                  <span id="learningDraftReviewStatus">needs_human_review</span>
+                </div>
+                <div class="mode-help" data-i18n="learning_draft_review_hint">Display and edit the learning draft as a reviewed template candidate. This never authorizes clicks or Execute binding.</div>
+                <div class="learning-review-summary" id="learningDraftReviewSummary"></div>
+                <section class="learning-review-section learning-screen-preview-section">
+                  <div class="panel-header compact">
+                    <strong data-i18n="screen_understanding_preview_title">Screen Understanding Preview</strong>
+                    <span id="screenUnderstandingPreviewStatus" data-i18n="screen_understanding_preview_not_available">not available</span>
+                  </div>
+                  <div class="mode-help" data-i18n="screen_understanding_preview_hint">Read-only parser/classifier preview. Review-only regions are not clickable; grounded candidates still require ROI grounding and Gate.</div>
+                  <div class="screen-understanding-preview" id="screenUnderstandingPreview"></div>
+                </section>
+                <section class="learning-review-section learning-draft-manual-edit-panel" id="learningDraftManualEditPanel">
+                  <strong data-i18n="learning_draft_manual_edit_title">Manual draft edit</strong>
+                  <div class="form-grid">
+                    <label>
+                      <span data-i18n="learning_draft_manual_region_label">Region label</span>
+                      <input id="learningDraftManualRegionLabel" value="" placeholder="search bar / result card / detail area" />
+                    </label>
+                    <label>
+                      <span data-i18n="learning_draft_manual_region_role">Role</span>
+                      <select id="learningDraftManualRegionRole">
+                        <option value="review_only">review_only</option>
+                        <option value="input">input</option>
+                        <option value="button">button</option>
+                        <option value="card">card</option>
+                        <option value="filter">filter</option>
+                        <option value="detail">detail</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span data-i18n="learning_draft_manual_region_section">Section</span>
+                      <input id="learningDraftManualRegionSection" value="" placeholder="header / results / detail / form" />
+                    </label>
+                    <label>
+                      <span data-i18n="learning_draft_manual_operation">Possible operation</span>
+                      <select id="learningDraftManualOperation">
+                        <option value="read_only">read_only</option>
+                        <option value="fill_field">fill_field</option>
+                        <option value="submit_search">submit_search</option>
+                        <option value="open_detail">open_detail</option>
+                        <option value="open_filter">open_filter</option>
+                        <option value="open_apply_flow">open_apply_flow</option>
+                      </select>
+                    </label>
+                    <label class="checkline">
+                      <input id="learningDraftManualEnterPathGraph" type="checkbox" />
+                      <span data-i18n="learning_draft_manual_enter_pathgraph">May enter PathGraph draft</span>
+                    </label>
+                    <label class="checkline">
+                      <input id="learningDraftManualNeedsRecalibration" type="checkbox" checked />
+                      <span data-i18n="learning_draft_manual_needs_recalibration">Needs recalibration</span>
+                    </label>
+                    <label class="wide-control">
+                      <span data-i18n="learning_draft_manual_notes">Notes</span>
+                      <textarea id="learningDraftManualNotes" rows="3" placeholder="why this region should be changed"></textarea>
+                    </label>
+                  </div>
+                  <div class="button-row">
+                    <button id="learningDraftManualSaveBtn" type="button" data-i18n="learning_draft_manual_save">Save manual edit</button>
+                  </div>
+                </section>
+                <details class="learning-draft-raw-details">
+                  <summary data-i18n="learning_draft_raw_details">Raw draft fields</summary>
+                <div class="learning-review-grid">
+                  <div class="learning-review-section">
+                    <strong data-i18n="learning_draft_states">states</strong>
+                    <div id="learningDraftReviewStates"></div>
+                  </div>
+                  <div class="learning-review-section">
+                    <strong data-i18n="learning_draft_regions">regions</strong>
+                    <div id="learningDraftReviewRegions"></div>
+                  </div>
+                  <div class="learning-review-section">
+                    <strong data-i18n="learning_draft_actions">action_templates</strong>
+                    <div id="learningDraftReviewActions"></div>
+                  </div>
+                  <div class="learning-review-section">
+                    <strong data-i18n="learning_draft_blockers">blockers</strong>
+                    <textarea id="learningDraftReviewBlockers" rows="4" placeholder="one blocker per line"></textarea>
+                  </div>
+                  <div class="learning-review-section">
+                    <strong data-i18n="learning_draft_verification_rules">verification_rules</strong>
+                    <textarea id="learningDraftReviewVerificationRules" rows="4" placeholder="one verification rule per line"></textarea>
+                  </div>
+                  <div class="learning-review-section">
+                    <strong data-i18n="learning_draft_safety_status">safety/status</strong>
+                    <div id="learningDraftReviewSafety"></div>
+                    <label>
+                      <span data-i18n="learning_draft_review_status">Review status</span>
+                      <select id="learningDraftReviewStatusSelect">
+                        <option value="needs_human_review">needs_human_review</option>
+                        <option value="approved_as_assisted_template">approved_as_assisted_template (candidate only, not executable)</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+                </details>
+              </section>
+              <section class="learning-draft-pathgraph-panel" id="learningDraftPathGraphPanel">
+              <section class="learning-draft-path-preview" id="learningDraftPathPreview">
+                <div class="panel-header compact">
+                  <h4 data-i18n="learning_draft_path_preview_title">Draft PathGraph preview</h4>
+                  <div class="learning-draft-path-header-actions">
+                    <button id="learningDraftPathLayoutResetBtn" type="button" class="secondary">Reset layout</button>
+                    <span id="learningDraftPathPreviewStatus" data-i18n="learning_draft_not_executable">candidate / not executable</span>
+                  </div>
+                </div>
+                <div class="mode-help" data-i18n="learning_draft_path_preview_hint">Read-only preview generated from the learning draft. It does not load Template Replay, Execute, or click authorization.</div>
+                <div class="learning-draft-path-grid">
+                  <div class="learning-draft-path-map" id="learningDraftPathMap"></div>
+                  <div
+                    class="learning-draft-path-resizer"
+                    id="learningDraftPathResizer"
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="Resize draft PathGraph preview"
+                    tabindex="0"
+                  ></div>
+                  <div class="learning-draft-interface-detail-panel" id="learningDraftInterfaceDetailPanel">
+                    <div class="learning-draft-path-detail" id="learningDraftPathDetail"></div>
+                  </div>
+                </div>
+                <div class="form-grid">
+                  <label class="wide-control">
+                    <span data-i18n="learning_detail_observe_candidate_path">PathGraph candidate</span>
+                    <input id="learningDetailObserveCandidatePath" value="" placeholder="artifacts/learning-draft-review/.../pathgraph_candidate.json" />
+                  </label>
+                  <label>
+                    <span data-i18n="learning_detail_observe_request_select">Pending request</span>
+                    <select id="learningDetailObserveRequestSelect">
+                      <option value="">--</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span data-i18n="learning_detail_observe_request_id">Detail observe request</span>
+                    <input id="learningDetailObserveRequestId" value="" placeholder="detail_observe:action_1" />
+                  </label>
+                  <label class="wide-control">
+                    <span data-i18n="learning_detail_observe_source_select">Recent detail draft</span>
+                    <select id="learningDetailObserveSourceSelect">
+                      <option value="">--</option>
+                    </select>
+                  </label>
+                  <label class="wide-control">
+                    <span data-i18n="learning_detail_observe_source_path">Detail draft source</span>
+                    <input id="learningDetailObserveSourcePath" value="" placeholder="artifacts/learning-runs/.../trial_result.json" />
+                  </label>
+                </div>
+                <div class="button-row">
+                  <button id="learningDetailObserveSourcesBtn" data-i18n="learning_detail_observe_sources">Load recent drafts</button>
+                  <button id="learningDetailObserveAttachBtn" data-i18n="learning_detail_observe_attach">Attach detail observe</button>
+                  <button id="learningAssistedTemplateDecisionsSaveBtn" data-i18n="learning_assisted_template_decisions_save">Save checklist decisions</button>
+                  <button id="learningAssistedTemplateDecisionsSaveExportBtn" data-i18n="learning_assisted_template_decisions_save_export">Save + create asset candidate</button>
+                  <button id="learningAssistedTemplateDecisionsSaveGraphPreviewBtn" data-i18n="learning_assisted_template_decisions_save_graph_preview">Save + build graph draft preview</button>
+                  <button id="learningAssistedTemplateDecisionsSaveAuditPreviewBtn" data-i18n="learning_assisted_template_decisions_save_audit_preview">Save + build audit preview</button>
+                </div>
+                <section class="learning-review-section" id="learningAssistedTemplatePackagePanel">
+                  <strong data-i18n="learning_assisted_template_checklist">Assisted template checklist</strong>
+                  <div id="learningAssistedTemplateSuggestionsSummary"></div>
+                  <div id="learningAssistedTemplateAcceptanceSimulationSummary"></div>
+                  <div id="learningAssistedTemplateAssetCandidateSummary"></div>
+                  <div id="learningAssistedTemplateGraphDraftSummary"></div>
+                  <div id="learningAssistedTemplatePromotionPreflightSummary"></div>
+                  <div id="learningAssistedTemplateAuditedPromotionRequestSummary"></div>
+                  <div id="learningAssistedTemplateChecklist">
+                    <p class="trace-idle" data-i18n="learning_assisted_template_empty">No review package loaded.</p>
+                  </div>
+                </section>
+              </section>
+              </section>
+              </section>
+              </section>
               <details class="replay-advanced-tools">
                 <summary>
                   <span data-i18n="learn_replay_advanced_tools">Advanced diagnostics</span>
@@ -595,6 +951,7 @@
                     <option value="read_article_page">read_article_page</option>
                     <option value="read_issue_thread">read_issue_thread</option>
                     <option value="input_dry_run_demo">input_dry_run_demo</option>
+                    <option value="model_artifact_single_step">model_artifact_single_step</option>
                   </select>
                 </label>
                 <label>
@@ -818,6 +1175,28 @@
         <div class="save-as-actions">
           <button id="saveAsCancelBtn" data-i18n="cancel">Cancel</button>
           <button id="saveAsConfirmBtn" class="primary" data-i18n="save">Save</button>
+        </div>
+      </div>
+    </div>
+    <div class="image-inspector-overlay" id="imageInspectorOverlay" style="display:none">
+      <div class="image-inspector-dialog" role="dialog" aria-modal="true" aria-label="Image inspector">
+        <div class="image-inspector-header">
+          <div>
+            <strong id="imageInspectorTitle">Image preview</strong>
+            <span id="imageInspectorMeta"></span>
+          </div>
+          <button id="imageInspectorCloseBtn" type="button" data-i18n="close">Close</button>
+        </div>
+        <div class="image-inspector-body" id="imageInspectorBody">
+          <div class="image-inspector-stage" id="imageInspectorStage">
+            <img id="imageInspectorImage" alt="" />
+            <div class="image-inspector-box" id="imageInspectorBox"></div>
+            <div class="image-inspector-point" id="imageInspectorPoint"></div>
+          </div>
+        </div>
+        <div class="image-inspector-footer" id="imageInspectorFooter" style="display:none">
+          <span id="imageInspectorEditHint"></span>
+          <button id="imageInspectorApplyBoxBtn" type="button" data-i18n="learning_draft_apply_selected_bbox">Use selected box</button>
         </div>
       </div>
     </div>

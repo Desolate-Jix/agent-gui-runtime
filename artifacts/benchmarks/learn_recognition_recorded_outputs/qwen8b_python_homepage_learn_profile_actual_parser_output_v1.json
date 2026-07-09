@@ -1,0 +1,2563 @@
+{
+  "contract_version": "actual_parser_output_v1",
+  "source_type": "actual_parser_call",
+  "actual_model_call_in_this_run": true,
+  "screenshot_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png",
+  "model_config": {
+    "endpoint": "http://127.0.0.1:1240/v1/chat/completions",
+    "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+    "model_profile_id": "learn_mode_qwen3_vl_8b",
+    "model_profile": {
+      "profile_id": "learn_mode_qwen3_vl_8b",
+      "model_id": "Qwen/Qwen3-VL-8B-Instruct",
+      "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+      "model_family": "Qwen3-VL",
+      "provider_mode": "local_understanding",
+      "mode_scope": "learn_only",
+      "max_parameters_b": 8.8,
+      "download_status": "available_local_baseline",
+      "launchable": true,
+      "endpoint": "http://127.0.0.1:1240/v1/chat/completions",
+      "model_path": "models/qwen3-vl-8b-instruct-q4_k_m-gguf/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false
+    },
+    "timeout_seconds": 90.0,
+    "app_name": "python.org",
+    "goal": "produce semantic UI parser evidence",
+    "state_hint": "python homepage",
+    "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png"
+  },
+  "model_profile": {
+    "profile_id": "learn_mode_qwen3_vl_8b",
+    "model_id": "Qwen/Qwen3-VL-8B-Instruct",
+    "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+    "model_family": "Qwen3-VL",
+    "provider_mode": "local_understanding",
+    "mode_scope": "learn_only",
+    "max_parameters_b": 8.8,
+    "download_status": "available_local_baseline",
+    "launchable": true,
+    "endpoint": "http://127.0.0.1:1240/v1/chat/completions",
+    "model_path": "models/qwen3-vl-8b-instruct-q4_k_m-gguf/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false
+  },
+  "observe_bundle": {
+    "contract_version": "learn_observe_bundle_v1",
+    "source_type": "actual_parser_call",
+    "screen_size": {
+      "width": 2540,
+      "height": 1380
+    },
+    "image_size": {
+      "width": 2540,
+      "height": 1380
+    },
+    "screenshot_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png",
+    "model_config": {
+      "endpoint": "http://127.0.0.1:1240/v1/chat/completions",
+      "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+      "model_profile_id": "learn_mode_qwen3_vl_8b",
+      "model_profile": {
+        "profile_id": "learn_mode_qwen3_vl_8b",
+        "model_id": "Qwen/Qwen3-VL-8B-Instruct",
+        "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+        "model_family": "Qwen3-VL",
+        "provider_mode": "local_understanding",
+        "mode_scope": "learn_only",
+        "max_parameters_b": 8.8,
+        "download_status": "available_local_baseline",
+        "launchable": true,
+        "endpoint": "http://127.0.0.1:1240/v1/chat/completions",
+        "model_path": "models/qwen3-vl-8b-instruct-q4_k_m-gguf/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false
+      },
+      "timeout_seconds": 90.0,
+      "app_name": "python.org",
+      "goal": "produce semantic UI parser evidence",
+      "state_hint": "python homepage",
+      "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png"
+    },
+    "sources": {
+      "vision": {
+        "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+        "contract_version": "vision_regions_v1",
+        "screen_summary": "Python.org homepage with navigation and content sections",
+        "state_guess": "python homepage",
+        "regions": [
+          {
+            "region_id": "c1",
+            "label": "Search",
+            "role": "input",
+            "bbox": {
+              "x": 1125,
+              "y": 244,
+              "w": 199,
+              "h": 44
+            },
+            "diagonal": {
+              "x1": 1125,
+              "y1": 244,
+              "x2": 1324,
+              "y2": 288
+            },
+            "normalized_diagonal": {
+              "nx1": 0.4429,
+              "ny1": 0.1768,
+              "nx2": 0.5213,
+              "ny2": 0.2087
+            },
+            "description": "Search input field",
+            "ocr_text": "",
+            "text_lines": [],
+            "possible_destinations": [],
+            "anchor_relations": [],
+            "grounding_constraints": {},
+            "confidence": 0.98,
+            "layout_key": "f4ac4871a95f0018",
+            "content_key": "f04bd41817cc9e73",
+            "match_key": "f4ac4871a95f0018:f04bd41817cc9e73"
+          },
+          {
+            "region_id": "c2",
+            "label": "GO",
+            "role": "button",
+            "bbox": {
+              "x": 1324,
+              "y": 244,
+              "w": 55,
+              "h": 44
+            },
+            "diagonal": {
+              "x1": 1324,
+              "y1": 244,
+              "x2": 1379,
+              "y2": 288
+            },
+            "normalized_diagonal": {
+              "nx1": 0.5213,
+              "ny1": 0.1768,
+              "nx2": 0.5429,
+              "ny2": 0.2087
+            },
+            "description": "Search submit button",
+            "ocr_text": "",
+            "text_lines": [],
+            "possible_destinations": [],
+            "anchor_relations": [],
+            "grounding_constraints": {},
+            "confidence": 0.98,
+            "layout_key": "29896de185b2e2a9",
+            "content_key": "64311c12649fd72d",
+            "match_key": "29896de185b2e2a9:64311c12649fd72d"
+          },
+          {
+            "region_id": "c3",
+            "label": "About",
+            "role": "link",
+            "bbox": {
+              "x": 661,
+              "y": 357,
+              "w": 67,
+              "h": 40
+            },
+            "diagonal": {
+              "x1": 661,
+              "y1": 357,
+              "x2": 728,
+              "y2": 397
+            },
+            "normalized_diagonal": {
+              "nx1": 0.2602,
+              "ny1": 0.2587,
+              "nx2": 0.2866,
+              "ny2": 0.2877
+            },
+            "description": "About section link",
+            "ocr_text": "",
+            "text_lines": [],
+            "possible_destinations": [],
+            "anchor_relations": [],
+            "grounding_constraints": {},
+            "confidence": 0.97,
+            "layout_key": "81be4574247fed21",
+            "content_key": "b23bae4ce09d73bb",
+            "match_key": "81be4574247fed21:b23bae4ce09d73bb"
+          },
+          {
+            "region_id": "c4",
+            "label": "Downloads",
+            "role": "link",
+            "bbox": {
+              "x": 768,
+              "y": 357,
+              "w": 119,
+              "h": 40
+            },
+            "diagonal": {
+              "x1": 768,
+              "y1": 357,
+              "x2": 887,
+              "y2": 397
+            },
+            "normalized_diagonal": {
+              "nx1": 0.3024,
+              "ny1": 0.2587,
+              "nx2": 0.3492,
+              "ny2": 0.2877
+            },
+            "description": "Downloads section link",
+            "ocr_text": "",
+            "text_lines": [],
+            "possible_destinations": [],
+            "anchor_relations": [],
+            "grounding_constraints": {},
+            "confidence": 0.97,
+            "layout_key": "501cdbc923dedcc4",
+            "content_key": "89bf950abb3cb9d4",
+            "match_key": "501cdbc923dedcc4:89bf950abb3cb9d4"
+          },
+          {
+            "region_id": "c5",
+            "label": "Documentation",
+            "role": "link",
+            "bbox": {
+              "x": 907,
+              "y": 357,
+              "w": 119,
+              "h": 40
+            },
+            "diagonal": {
+              "x1": 907,
+              "y1": 357,
+              "x2": 1026,
+              "y2": 397
+            },
+            "normalized_diagonal": {
+              "nx1": 0.3571,
+              "ny1": 0.2587,
+              "nx2": 0.4039,
+              "ny2": 0.2877
+            },
+            "description": "Documentation section link",
+            "ocr_text": "",
+            "text_lines": [],
+            "possible_destinations": [],
+            "anchor_relations": [],
+            "grounding_constraints": {},
+            "confidence": 0.97,
+            "layout_key": "abb45ef8a8107aa4",
+            "content_key": "8d30fa69ce32d1ac",
+            "match_key": "abb45ef8a8107aa4:8d30fa69ce32d1ac"
+          },
+          {
+            "region_id": "c6",
+            "label": "Community",
+            "role": "link",
+            "bbox": {
+              "x": 1046,
+              "y": 357,
+              "w": 119,
+              "h": 40
+            },
+            "diagonal": {
+              "x1": 1046,
+              "y1": 357,
+              "x2": 1165,
+              "y2": 397
+            },
+            "normalized_diagonal": {
+              "nx1": 0.4118,
+              "ny1": 0.2587,
+              "nx2": 0.4587,
+              "ny2": 0.2877
+            },
+            "description": "Community section link",
+            "ocr_text": "",
+            "text_lines": [],
+            "possible_destinations": [],
+            "anchor_relations": [],
+            "grounding_constraints": {},
+            "confidence": 0.97,
+            "layout_key": "c5709aadf585a0d1",
+            "content_key": "2a0e5e846d8e95ae",
+            "match_key": "c5709aadf585a0d1:2a0e5e846d8e95ae"
+          },
+          {
+            "region_id": "c7",
+            "label": "Success Stories",
+            "role": "link",
+            "bbox": {
+              "x": 1185,
+              "y": 357,
+              "w": 158,
+              "h": 40
+            },
+            "diagonal": {
+              "x1": 1185,
+              "y1": 357,
+              "x2": 1343,
+              "y2": 397
+            },
+            "normalized_diagonal": {
+              "nx1": 0.4665,
+              "ny1": 0.2587,
+              "nx2": 0.5287,
+              "ny2": 0.2877
+            },
+            "description": "Success Stories section link",
+            "ocr_text": "",
+            "text_lines": [],
+            "possible_destinations": [],
+            "anchor_relations": [],
+            "grounding_constraints": {},
+            "confidence": 0.97,
+            "layout_key": "26c4be8cb13c0137",
+            "content_key": "bd2d30595f9cd8e3",
+            "match_key": "26c4be8cb13c0137:bd2d30595f9cd8e3"
+          },
+          {
+            "region_id": "c8",
+            "label": "News",
+            "role": "link",
+            "bbox": {
+              "x": 1363,
+              "y": 357,
+              "w": 40,
+              "h": 40
+            },
+            "diagonal": {
+              "x1": 1363,
+              "y1": 357,
+              "x2": 1403,
+              "y2": 397
+            },
+            "normalized_diagonal": {
+              "nx1": 0.5366,
+              "ny1": 0.2587,
+              "nx2": 0.5524,
+              "ny2": 0.2877
+            },
+            "description": "News section link",
+            "ocr_text": "",
+            "text_lines": [],
+            "possible_destinations": [],
+            "anchor_relations": [],
+            "grounding_constraints": {},
+            "confidence": 0.97,
+            "layout_key": "9673cec33982eafd",
+            "content_key": "b17301cd33c44a37",
+            "match_key": "9673cec33982eafd:b17301cd33c44a37"
+          },
+          {
+            "region_id": "c9",
+            "label": "Events",
+            "role": "link",
+            "bbox": {
+              "x": 1423,
+              "y": 357,
+              "w": 79,
+              "h": 40
+            },
+            "diagonal": {
+              "x1": 1423,
+              "y1": 357,
+              "x2": 1502,
+              "y2": 397
+            },
+            "normalized_diagonal": {
+              "nx1": 0.5602,
+              "ny1": 0.2587,
+              "nx2": 0.5913,
+              "ny2": 0.2877
+            },
+            "description": "Events section link",
+            "ocr_text": "",
+            "text_lines": [],
+            "possible_destinations": [],
+            "anchor_relations": [],
+            "grounding_constraints": {},
+            "confidence": 0.97,
+            "layout_key": "4de2f346ecd545ec",
+            "content_key": "91954b776dacf19e",
+            "match_key": "4de2f346ecd545ec:91954b776dacf19e"
+          },
+          {
+            "region_id": "c10",
+            "label": "Learn More",
+            "role": "link",
+            "bbox": {
+              "x": 1105,
+              "y": 874,
+              "w": 100,
+              "h": 39
+            },
+            "diagonal": {
+              "x1": 1105,
+              "y1": 874,
+              "x2": 1205,
+              "y2": 913
+            },
+            "normalized_diagonal": {
+              "nx1": 0.435,
+              "ny1": 0.6333,
+              "nx2": 0.4744,
+              "ny2": 0.6616
+            },
+            "description": "Learn More link",
+            "ocr_text": "",
+            "text_lines": [],
+            "possible_destinations": [],
+            "anchor_relations": [],
+            "grounding_constraints": {},
+            "confidence": 0.97,
+            "layout_key": "479c62b341ab6221",
+            "content_key": "6c073b9a4d2df152",
+            "match_key": "479c62b341ab6221:6c073b9a4d2df152"
+          },
+          {
+            "region_id": "c11",
+            "label": "Get Started",
+            "role": "link",
+            "bbox": {
+              "x": 570,
+              "y": 1072,
+              "w": 99,
+              "h": 40
+            },
+            "diagonal": {
+              "x1": 570,
+              "y1": 1072,
+              "x2": 669,
+              "y2": 1112
+            },
+            "normalized_diagonal": {
+              "nx1": 0.2244,
+              "ny1": 0.7768,
+              "nx2": 0.2634,
+              "ny2": 0.8058
+            },
+            "description": "Get Started link",
+            "ocr_text": "",
+            "text_lines": [],
+            "possible_destinations": [],
+            "anchor_relations": [],
+            "grounding_constraints": {},
+            "confidence": 0.97,
+            "layout_key": "e531badbc902a3a8",
+            "content_key": "04442a6dc574e620",
+            "match_key": "e531badbc902a3a8:04442a6dc574e620"
+          },
+          {
+            "region_id": "c12",
+            "label": "Download",
+            "role": "link",
+            "bbox": {
+              "x": 808,
+              "y": 1072,
+              "w": 99,
+              "h": 40
+            },
+            "diagonal": {
+              "x1": 808,
+              "y1": 1072,
+              "x2": 907,
+              "y2": 1112
+            },
+            "normalized_diagonal": {
+              "nx1": 0.3181,
+              "ny1": 0.7768,
+              "nx2": 0.3571,
+              "ny2": 0.8058
+            },
+            "description": "Download link",
+            "ocr_text": "",
+            "text_lines": [],
+            "possible_destinations": [],
+            "anchor_relations": [],
+            "grounding_constraints": {},
+            "confidence": 0.97,
+            "layout_key": "430edbf1716baf72",
+            "content_key": "f5a9d817382bc9c8",
+            "match_key": "430edbf1716baf72:f5a9d817382bc9c8"
+          }
+        ],
+        "targets": [],
+        "raw_response": {
+          "contract_version": "provider_model_trace_v1",
+          "provider": "local",
+          "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png",
+          "raw_text": "{\n  \"contract_version\": \"vision_regions_v1\",\n  \"image_size\": {\n    \"width\": 1280,\n    \"height\": 695\n  },\n  \"screen_summary\": \"Python.org homepage with navigation and content sections\",\n  \"state_guess\": \"python homepage\",\n  \"regions\": [\n    {\n      \"region_id\": \"c1\",\n      \"label\": \"Search\",\n      \"role\": \"input\",\n      \"diagonal\": {\n        \"x1\": 567,\n        \"y1\": 123,\n        \"x2\": 667,\n        \"y2\": 145\n      },\n      \"description\": \"Search input field\",\n      \"confidence\": 0.98\n    },\n    {\n      \"region_id\": \"c2\",\n      \"label\": \"GO\",\n      \"role\": \"button\",\n      \"diagonal\": {\n        \"x1\": 667,\n        \"y1\": 123,\n        \"x2\": 695,\n        \"y2\": 145\n      },\n      \"description\": \"Search submit button\",\n      \"confidence\": 0.98\n    },\n    {\n      \"region_id\": \"c3\",\n      \"label\": \"About\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 333,\n        \"y1\": 180,\n        \"x2\": 367,\n        \"y2\": 200\n      },\n      \"description\": \"About section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c4\",\n      \"label\": \"Downloads\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 387,\n        \"y1\": 180,\n        \"x2\": 447,\n        \"y2\": 200\n      },\n      \"description\": \"Downloads section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c5\",\n      \"label\": \"Documentation\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 457,\n        \"y1\": 180,\n        \"x2\": 517,\n        \"y2\": 200\n      },\n      \"description\": \"Documentation section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c6\",\n      \"label\": \"Community\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 527,\n        \"y1\": 180,\n        \"x2\": 587,\n        \"y2\": 200\n      },\n      \"description\": \"Community section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c7\",\n      \"label\": \"Success Stories\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 597,\n        \"y1\": 180,\n        \"x2\": 677,\n        \"y2\": 200\n      },\n      \"description\": \"Success Stories section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c8\",\n      \"label\": \"News\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 687,\n        \"y1\": 180,\n        \"x2\": 707,\n        \"y2\": 200\n      },\n      \"description\": \"News section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c9\",\n      \"label\": \"Events\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 717,\n        \"y1\": 180,\n        \"x2\": 757,\n        \"y2\": 200\n      },\n      \"description\": \"Events section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c10\",\n      \"label\": \"Learn More\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 557,\n        \"y1\": 440,\n        \"x2\": 607,\n        \"y2\": 460\n      },\n      \"description\": \"Learn More link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c11\",\n      \"label\": \"Get Started\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 287,\n        \"y1\": 540,\n        \"x2\": 337,\n        \"y2\": 560\n      },\n      \"description\": \"Get Started link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c12\",\n      \"label\": \"Download\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 407,\n        \"y1\": 540,\n        \"x2\": 457,\n        \"y2\": 560\n      },\n      \"description\": \"Download link\",\n      \"confidence\": 0.97\n    }\n  ],\n  \"targets\": [],\n  \"observers\": [],\n  \"notes\": []\n}",
+          "model_json": {
+            "contract_version": "vision_regions_v1",
+            "image_size": {
+              "width": 2540,
+              "height": 1380
+            },
+            "screen_summary": "Python.org homepage with navigation and content sections",
+            "state_guess": "python homepage",
+            "regions": [
+              {
+                "region_id": "c1",
+                "label": "Search",
+                "role": "input",
+                "diagonal": {
+                  "x1": 1125,
+                  "y1": 244,
+                  "x2": 1324,
+                  "y2": 288
+                },
+                "description": "Search input field",
+                "confidence": 0.98
+              },
+              {
+                "region_id": "c2",
+                "label": "GO",
+                "role": "button",
+                "diagonal": {
+                  "x1": 1324,
+                  "y1": 244,
+                  "x2": 1379,
+                  "y2": 288
+                },
+                "description": "Search submit button",
+                "confidence": 0.98
+              },
+              {
+                "region_id": "c3",
+                "label": "About",
+                "role": "link",
+                "diagonal": {
+                  "x1": 661,
+                  "y1": 357,
+                  "x2": 728,
+                  "y2": 397
+                },
+                "description": "About section link",
+                "confidence": 0.97
+              },
+              {
+                "region_id": "c4",
+                "label": "Downloads",
+                "role": "link",
+                "diagonal": {
+                  "x1": 768,
+                  "y1": 357,
+                  "x2": 887,
+                  "y2": 397
+                },
+                "description": "Downloads section link",
+                "confidence": 0.97
+              },
+              {
+                "region_id": "c5",
+                "label": "Documentation",
+                "role": "link",
+                "diagonal": {
+                  "x1": 907,
+                  "y1": 357,
+                  "x2": 1026,
+                  "y2": 397
+                },
+                "description": "Documentation section link",
+                "confidence": 0.97
+              },
+              {
+                "region_id": "c6",
+                "label": "Community",
+                "role": "link",
+                "diagonal": {
+                  "x1": 1046,
+                  "y1": 357,
+                  "x2": 1165,
+                  "y2": 397
+                },
+                "description": "Community section link",
+                "confidence": 0.97
+              },
+              {
+                "region_id": "c7",
+                "label": "Success Stories",
+                "role": "link",
+                "diagonal": {
+                  "x1": 1185,
+                  "y1": 357,
+                  "x2": 1343,
+                  "y2": 397
+                },
+                "description": "Success Stories section link",
+                "confidence": 0.97
+              },
+              {
+                "region_id": "c8",
+                "label": "News",
+                "role": "link",
+                "diagonal": {
+                  "x1": 1363,
+                  "y1": 357,
+                  "x2": 1403,
+                  "y2": 397
+                },
+                "description": "News section link",
+                "confidence": 0.97
+              },
+              {
+                "region_id": "c9",
+                "label": "Events",
+                "role": "link",
+                "diagonal": {
+                  "x1": 1423,
+                  "y1": 357,
+                  "x2": 1502,
+                  "y2": 397
+                },
+                "description": "Events section link",
+                "confidence": 0.97
+              },
+              {
+                "region_id": "c10",
+                "label": "Learn More",
+                "role": "link",
+                "diagonal": {
+                  "x1": 1105,
+                  "y1": 874,
+                  "x2": 1205,
+                  "y2": 913
+                },
+                "description": "Learn More link",
+                "confidence": 0.97
+              },
+              {
+                "region_id": "c11",
+                "label": "Get Started",
+                "role": "link",
+                "diagonal": {
+                  "x1": 570,
+                  "y1": 1072,
+                  "x2": 669,
+                  "y2": 1112
+                },
+                "description": "Get Started link",
+                "confidence": 0.97
+              },
+              {
+                "region_id": "c12",
+                "label": "Download",
+                "role": "link",
+                "diagonal": {
+                  "x1": 808,
+                  "y1": 1072,
+                  "x2": 907,
+                  "y2": 1112
+                },
+                "description": "Download link",
+                "confidence": 0.97
+              }
+            ],
+            "targets": [],
+            "observers": [],
+            "notes": [],
+            "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+          },
+          "endpoint_response": {
+            "choices": [
+              {
+                "finish_reason": "stop",
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "{\n  \"contract_version\": \"vision_regions_v1\",\n  \"image_size\": {\n    \"width\": 1280,\n    \"height\": 695\n  },\n  \"screen_summary\": \"Python.org homepage with navigation and content sections\",\n  \"state_guess\": \"python homepage\",\n  \"regions\": [\n    {\n      \"region_id\": \"c1\",\n      \"label\": \"Search\",\n      \"role\": \"input\",\n      \"diagonal\": {\n        \"x1\": 567,\n        \"y1\": 123,\n        \"x2\": 667,\n        \"y2\": 145\n      },\n      \"description\": \"Search input field\",\n      \"confidence\": 0.98\n    },\n    {\n      \"region_id\": \"c2\",\n      \"label\": \"GO\",\n      \"role\": \"button\",\n      \"diagonal\": {\n        \"x1\": 667,\n        \"y1\": 123,\n        \"x2\": 695,\n        \"y2\": 145\n      },\n      \"description\": \"Search submit button\",\n      \"confidence\": 0.98\n    },\n    {\n      \"region_id\": \"c3\",\n      \"label\": \"About\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 333,\n        \"y1\": 180,\n        \"x2\": 367,\n        \"y2\": 200\n      },\n      \"description\": \"About section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c4\",\n      \"label\": \"Downloads\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 387,\n        \"y1\": 180,\n        \"x2\": 447,\n        \"y2\": 200\n      },\n      \"description\": \"Downloads section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c5\",\n      \"label\": \"Documentation\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 457,\n        \"y1\": 180,\n        \"x2\": 517,\n        \"y2\": 200\n      },\n      \"description\": \"Documentation section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c6\",\n      \"label\": \"Community\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 527,\n        \"y1\": 180,\n        \"x2\": 587,\n        \"y2\": 200\n      },\n      \"description\": \"Community section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c7\",\n      \"label\": \"Success Stories\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 597,\n        \"y1\": 180,\n        \"x2\": 677,\n        \"y2\": 200\n      },\n      \"description\": \"Success Stories section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c8\",\n      \"label\": \"News\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 687,\n        \"y1\": 180,\n        \"x2\": 707,\n        \"y2\": 200\n      },\n      \"description\": \"News section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c9\",\n      \"label\": \"Events\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 717,\n        \"y1\": 180,\n        \"x2\": 757,\n        \"y2\": 200\n      },\n      \"description\": \"Events section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c10\",\n      \"label\": \"Learn More\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 557,\n        \"y1\": 440,\n        \"x2\": 607,\n        \"y2\": 460\n      },\n      \"description\": \"Learn More link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c11\",\n      \"label\": \"Get Started\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 287,\n        \"y1\": 540,\n        \"x2\": 337,\n        \"y2\": 560\n      },\n      \"description\": \"Get Started link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c12\",\n      \"label\": \"Download\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 407,\n        \"y1\": 540,\n        \"x2\": 457,\n        \"y2\": 560\n      },\n      \"description\": \"Download link\",\n      \"confidence\": 0.97\n    }\n  ],\n  \"targets\": [],\n  \"observers\": [],\n  \"notes\": []\n}"
+                }
+              }
+            ],
+            "created": 1783085963,
+            "model": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            "system_fingerprint": "b8892-0d0764dfd",
+            "object": "chat.completion",
+            "usage": {
+              "completion_tokens": 1222,
+              "prompt_tokens": 1691,
+              "total_tokens": 2913,
+              "prompt_tokens_details": {
+                "cached_tokens": 1690
+              }
+            },
+            "id": "chatcmpl-4GqjTpTg3D97iK2dXfFbdFAVAX4HUYwk",
+            "timings": {
+              "cache_n": 1690,
+              "prompt_n": 1,
+              "prompt_ms": 3230.084,
+              "prompt_per_token_ms": 3230.084,
+              "prompt_per_second": 0.3095894719765802,
+              "predicted_n": 1222,
+              "predicted_ms": 18417.249,
+              "predicted_per_token_ms": 15.07139852700491,
+              "predicted_per_second": 66.3508431688142
+            }
+          },
+          "attempts": [
+            {
+              "tag": "fast_observation",
+              "compact_prompt": true,
+              "max_regions": 12,
+              "requested_max_edge": 1280,
+              "inference_image_size": {
+                "width": 1280,
+                "height": 695
+              },
+              "original_image_size": {
+                "width": 2540,
+                "height": 1380
+              },
+              "model_io": {
+                "contract_version": "model_io_attempt_v1",
+                "status": "success",
+                "provider": "local",
+                "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                "endpoint": "http://127.0.0.1:1240/v1/chat/completions",
+                "task": "observe_screen",
+                "app_name": "python.org",
+                "goal": "produce semantic UI parser evidence",
+                "state_hint": "python homepage",
+                "provider_mode": "local_understanding",
+                "attempt": {
+                  "tag": "fast_observation",
+                  "compact_prompt": true,
+                  "max_regions": 12,
+                  "requested_max_edge": 1280
+                },
+                "input": {
+                  "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png",
+                  "inference_image_path": "C:\\Users\\DesolateJix\\AppData\\Local\\Temp\\vision-inference-e4ua9fsl\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036__1280.png",
+                  "original_image_size": {
+                    "width": 2540,
+                    "height": 1380
+                  },
+                  "inference_image_size": {
+                    "width": 1280,
+                    "height": 695
+                  },
+                  "max_tokens": 2048,
+                  "temperature": 0.0,
+                  "prompt": "You are the fast screen-understanding stage for a desktop automation agent.\n\nGoal:\n- briefly identify what the interface is for\n- return a short index of visible controls the agent may choose to locate precisely later\n- do not perform precise target grounding or choose a click\n\nScreenshot:\n- app_name: python.org\n- state_hint: python homepage\n- coordinate size: width=1280, height=695\n- diagonals use pixel integers: {\"x1\": left, \"y1\": top, \"x2\": right, \"y2\": bottom}\n\nReturn JSON only with this compact shape:\n{\n  \"contract_version\": \"vision_regions_v1\",\n  \"image_size\": {\"width\": 1280, \"height\": 695},\n  \"screen_summary\": \"short purpose\",\n  \"state_guess\": \"short localization state hint\",\n  \"regions\": [\n    {\"region_id\": \"c1\", \"label\": \"visible label or icon name\", \"role\": \"button|icon|input|tab|nav|menu_item|link|toggle|other\", \"diagonal\": {\"x1\": 0, \"y1\": 0, \"x2\": 1, \"y2\": 1}, \"description\": \"likely action\", \"confidence\": 0.0}\n  ],\n  \"targets\": [],\n  \"observers\": [],\n  \"notes\": []\n}\n\nRules:\n- before returning, mentally validate that the response is parseable JSON: every object field and array item has a comma separator, all keys are double-quoted, any quote inside a string is escaped as \\\", raw newlines inside strings are escaped as \\n, and there are no trailing commas\n- return at most 12 independently clickable candidate controls, not large containing panels\n- prioritize navigation, icon-only buttons, primary buttons, tabs, inputs, toggles, menus, and title-bar controls\n- keep screen_summary and state_guess under 12 words each\n- state_guess must be the best concise hint to pass into a later POST /vision/locate_target state_hint field\n- prefer spatial/functional area phrases such as \"top navigation bar\", \"job results list\", \"chat title bar\", \"left sidebar\", \"settings dialog\", or \"main content list\"\n- keep label and description short; description is at most 6 words\n- do not emit ocr_text, text_lines, possible_destinations, anchor_relations, or grounding_constraints\n- do not repeat OCR anchors or their coordinates in the response; the runtime already owns them\n- for text controls, bbox may include the visible clickable label; for icon-only controls, bbox should cover only the icon pixels\n- if a control is uncertain, include it with lower confidence instead of explaining uncertainty at length"
+                },
+                "output": {
+                  "raw_text": "{\n  \"contract_version\": \"vision_regions_v1\",\n  \"image_size\": {\n    \"width\": 1280,\n    \"height\": 695\n  },\n  \"screen_summary\": \"Python.org homepage with navigation and content sections\",\n  \"state_guess\": \"python homepage\",\n  \"regions\": [\n    {\n      \"region_id\": \"c1\",\n      \"label\": \"Search\",\n      \"role\": \"input\",\n      \"diagonal\": {\n        \"x1\": 567,\n        \"y1\": 123,\n        \"x2\": 667,\n        \"y2\": 145\n      },\n      \"description\": \"Search input field\",\n      \"confidence\": 0.98\n    },\n    {\n      \"region_id\": \"c2\",\n      \"label\": \"GO\",\n      \"role\": \"button\",\n      \"diagonal\": {\n        \"x1\": 667,\n        \"y1\": 123,\n        \"x2\": 695,\n        \"y2\": 145\n      },\n      \"description\": \"Search submit button\",\n      \"confidence\": 0.98\n    },\n    {\n      \"region_id\": \"c3\",\n      \"label\": \"About\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 333,\n        \"y1\": 180,\n        \"x2\": 367,\n        \"y2\": 200\n      },\n      \"description\": \"About section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c4\",\n      \"label\": \"Downloads\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 387,\n        \"y1\": 180,\n        \"x2\": 447,\n        \"y2\": 200\n      },\n      \"description\": \"Downloads section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c5\",\n      \"label\": \"Documentation\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 457,\n        \"y1\": 180,\n        \"x2\": 517,\n        \"y2\": 200\n      },\n      \"description\": \"Documentation section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c6\",\n      \"label\": \"Community\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 527,\n        \"y1\": 180,\n        \"x2\": 587,\n        \"y2\": 200\n      },\n      \"description\": \"Community section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c7\",\n      \"label\": \"Success Stories\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 597,\n        \"y1\": 180,\n        \"x2\": 677,\n        \"y2\": 200\n      },\n      \"description\": \"Success Stories section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c8\",\n      \"label\": \"News\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 687,\n        \"y1\": 180,\n        \"x2\": 707,\n        \"y2\": 200\n      },\n      \"description\": \"News section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c9\",\n      \"label\": \"Events\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 717,\n        \"y1\": 180,\n        \"x2\": 757,\n        \"y2\": 200\n      },\n      \"description\": \"Events section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c10\",\n      \"label\": \"Learn More\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 557,\n        \"y1\": 440,\n        \"x2\": 607,\n        \"y2\": 460\n      },\n      \"description\": \"Learn More link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c11\",\n      \"label\": \"Get Started\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 287,\n        \"y1\": 540,\n        \"x2\": 337,\n        \"y2\": 560\n      },\n      \"description\": \"Get Started link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c12\",\n      \"label\": \"Download\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 407,\n        \"y1\": 540,\n        \"x2\": 457,\n        \"y2\": 560\n      },\n      \"description\": \"Download link\",\n      \"confidence\": 0.97\n    }\n  ],\n  \"targets\": [],\n  \"observers\": [],\n  \"notes\": []\n}",
+                  "raw_response": {
+                    "choices": [
+                      {
+                        "finish_reason": "stop",
+                        "index": 0,
+                        "message": {
+                          "role": "assistant",
+                          "content": "{\n  \"contract_version\": \"vision_regions_v1\",\n  \"image_size\": {\n    \"width\": 1280,\n    \"height\": 695\n  },\n  \"screen_summary\": \"Python.org homepage with navigation and content sections\",\n  \"state_guess\": \"python homepage\",\n  \"regions\": [\n    {\n      \"region_id\": \"c1\",\n      \"label\": \"Search\",\n      \"role\": \"input\",\n      \"diagonal\": {\n        \"x1\": 567,\n        \"y1\": 123,\n        \"x2\": 667,\n        \"y2\": 145\n      },\n      \"description\": \"Search input field\",\n      \"confidence\": 0.98\n    },\n    {\n      \"region_id\": \"c2\",\n      \"label\": \"GO\",\n      \"role\": \"button\",\n      \"diagonal\": {\n        \"x1\": 667,\n        \"y1\": 123,\n        \"x2\": 695,\n        \"y2\": 145\n      },\n      \"description\": \"Search submit button\",\n      \"confidence\": 0.98\n    },\n    {\n      \"region_id\": \"c3\",\n      \"label\": \"About\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 333,\n        \"y1\": 180,\n        \"x2\": 367,\n        \"y2\": 200\n      },\n      \"description\": \"About section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c4\",\n      \"label\": \"Downloads\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 387,\n        \"y1\": 180,\n        \"x2\": 447,\n        \"y2\": 200\n      },\n      \"description\": \"Downloads section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c5\",\n      \"label\": \"Documentation\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 457,\n        \"y1\": 180,\n        \"x2\": 517,\n        \"y2\": 200\n      },\n      \"description\": \"Documentation section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c6\",\n      \"label\": \"Community\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 527,\n        \"y1\": 180,\n        \"x2\": 587,\n        \"y2\": 200\n      },\n      \"description\": \"Community section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c7\",\n      \"label\": \"Success Stories\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 597,\n        \"y1\": 180,\n        \"x2\": 677,\n        \"y2\": 200\n      },\n      \"description\": \"Success Stories section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c8\",\n      \"label\": \"News\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 687,\n        \"y1\": 180,\n        \"x2\": 707,\n        \"y2\": 200\n      },\n      \"description\": \"News section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c9\",\n      \"label\": \"Events\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 717,\n        \"y1\": 180,\n        \"x2\": 757,\n        \"y2\": 200\n      },\n      \"description\": \"Events section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c10\",\n      \"label\": \"Learn More\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 557,\n        \"y1\": 440,\n        \"x2\": 607,\n        \"y2\": 460\n      },\n      \"description\": \"Learn More link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c11\",\n      \"label\": \"Get Started\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 287,\n        \"y1\": 540,\n        \"x2\": 337,\n        \"y2\": 560\n      },\n      \"description\": \"Get Started link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c12\",\n      \"label\": \"Download\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 407,\n        \"y1\": 540,\n        \"x2\": 457,\n        \"y2\": 560\n      },\n      \"description\": \"Download link\",\n      \"confidence\": 0.97\n    }\n  ],\n  \"targets\": [],\n  \"observers\": [],\n  \"notes\": []\n}"
+                        }
+                      }
+                    ],
+                    "created": 1783085963,
+                    "model": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                    "system_fingerprint": "b8892-0d0764dfd",
+                    "object": "chat.completion",
+                    "usage": {
+                      "completion_tokens": 1222,
+                      "prompt_tokens": 1691,
+                      "total_tokens": 2913,
+                      "prompt_tokens_details": {
+                        "cached_tokens": 1690
+                      }
+                    },
+                    "id": "chatcmpl-4GqjTpTg3D97iK2dXfFbdFAVAX4HUYwk",
+                    "timings": {
+                      "cache_n": 1690,
+                      "prompt_n": 1,
+                      "prompt_ms": 3230.084,
+                      "prompt_per_token_ms": 3230.084,
+                      "prompt_per_second": 0.3095894719765802,
+                      "predicted_n": 1222,
+                      "predicted_ms": 18417.249,
+                      "predicted_per_token_ms": 15.07139852700491,
+                      "predicted_per_second": 66.3508431688142
+                    }
+                  },
+                  "parsed_model_json": {
+                    "contract_version": "vision_regions_v1",
+                    "image_size": {
+                      "width": 2540,
+                      "height": 1380
+                    },
+                    "screen_summary": "Python.org homepage with navigation and content sections",
+                    "state_guess": "python homepage",
+                    "regions": [
+                      {
+                        "region_id": "c1",
+                        "label": "Search",
+                        "role": "input",
+                        "diagonal": {
+                          "x1": 1125,
+                          "y1": 244,
+                          "x2": 1324,
+                          "y2": 288
+                        },
+                        "description": "Search input field",
+                        "confidence": 0.98
+                      },
+                      {
+                        "region_id": "c2",
+                        "label": "GO",
+                        "role": "button",
+                        "diagonal": {
+                          "x1": 1324,
+                          "y1": 244,
+                          "x2": 1379,
+                          "y2": 288
+                        },
+                        "description": "Search submit button",
+                        "confidence": 0.98
+                      },
+                      {
+                        "region_id": "c3",
+                        "label": "About",
+                        "role": "link",
+                        "diagonal": {
+                          "x1": 661,
+                          "y1": 357,
+                          "x2": 728,
+                          "y2": 397
+                        },
+                        "description": "About section link",
+                        "confidence": 0.97
+                      },
+                      {
+                        "region_id": "c4",
+                        "label": "Downloads",
+                        "role": "link",
+                        "diagonal": {
+                          "x1": 768,
+                          "y1": 357,
+                          "x2": 887,
+                          "y2": 397
+                        },
+                        "description": "Downloads section link",
+                        "confidence": 0.97
+                      },
+                      {
+                        "region_id": "c5",
+                        "label": "Documentation",
+                        "role": "link",
+                        "diagonal": {
+                          "x1": 907,
+                          "y1": 357,
+                          "x2": 1026,
+                          "y2": 397
+                        },
+                        "description": "Documentation section link",
+                        "confidence": 0.97
+                      },
+                      {
+                        "region_id": "c6",
+                        "label": "Community",
+                        "role": "link",
+                        "diagonal": {
+                          "x1": 1046,
+                          "y1": 357,
+                          "x2": 1165,
+                          "y2": 397
+                        },
+                        "description": "Community section link",
+                        "confidence": 0.97
+                      },
+                      {
+                        "region_id": "c7",
+                        "label": "Success Stories",
+                        "role": "link",
+                        "diagonal": {
+                          "x1": 1185,
+                          "y1": 357,
+                          "x2": 1343,
+                          "y2": 397
+                        },
+                        "description": "Success Stories section link",
+                        "confidence": 0.97
+                      },
+                      {
+                        "region_id": "c8",
+                        "label": "News",
+                        "role": "link",
+                        "diagonal": {
+                          "x1": 1363,
+                          "y1": 357,
+                          "x2": 1403,
+                          "y2": 397
+                        },
+                        "description": "News section link",
+                        "confidence": 0.97
+                      },
+                      {
+                        "region_id": "c9",
+                        "label": "Events",
+                        "role": "link",
+                        "diagonal": {
+                          "x1": 1423,
+                          "y1": 357,
+                          "x2": 1502,
+                          "y2": 397
+                        },
+                        "description": "Events section link",
+                        "confidence": 0.97
+                      },
+                      {
+                        "region_id": "c10",
+                        "label": "Learn More",
+                        "role": "link",
+                        "diagonal": {
+                          "x1": 1105,
+                          "y1": 874,
+                          "x2": 1205,
+                          "y2": 913
+                        },
+                        "description": "Learn More link",
+                        "confidence": 0.97
+                      },
+                      {
+                        "region_id": "c11",
+                        "label": "Get Started",
+                        "role": "link",
+                        "diagonal": {
+                          "x1": 570,
+                          "y1": 1072,
+                          "x2": 669,
+                          "y2": 1112
+                        },
+                        "description": "Get Started link",
+                        "confidence": 0.97
+                      },
+                      {
+                        "region_id": "c12",
+                        "label": "Download",
+                        "role": "link",
+                        "diagonal": {
+                          "x1": 808,
+                          "y1": 1072,
+                          "x2": 907,
+                          "y2": 1112
+                        },
+                        "description": "Download link",
+                        "confidence": 0.97
+                      }
+                    ],
+                    "targets": [],
+                    "observers": [],
+                    "notes": [],
+                    "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                    "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+                  },
+                  "runtime_normalized_json": {
+                    "contract_version": "vision_regions_v1",
+                    "image_size": {
+                      "width": 2540,
+                      "height": 1380
+                    },
+                    "screen_summary": "Python.org homepage with navigation and content sections",
+                    "state_guess": "python homepage",
+                    "regions": [
+                      {
+                        "region_id": "c1",
+                        "label": "Search",
+                        "role": "input",
+                        "diagonal": {
+                          "x1": 1125,
+                          "y1": 244,
+                          "x2": 1324,
+                          "y2": 288
+                        },
+                        "description": "Search input field",
+                        "confidence": 0.98
+                      },
+                      {
+                        "region_id": "c2",
+                        "label": "GO",
+                        "role": "button",
+                        "diagonal": {
+                          "x1": 1324,
+                          "y1": 244,
+                          "x2": 1379,
+                          "y2": 288
+                        },
+                        "description": "Search submit button",
+                        "confidence": 0.98
+                      },
+                      {
+                        "region_id": "c3",
+                        "label": "About",
+                        "role": "link",
+                        "diagonal": {
+                          "x1": 661,
+                          "y1": 357,
+                          "x2": 728,
+                          "y2": 397
+                        },
+                        "description": "About section link",
+                        "confidence": 0.97
+                      },
+                      {
+                        "region_id": "c4",
+                        "label": "Downloads",
+                        "role": "link",
+                        "diagonal": {
+                          "x1": 768,
+                          "y1": 357,
+                          "x2": 887,
+                          "y2": 397
+                        },
+                        "description": "Downloads section link",
+                        "confidence": 0.97
+                      },
+                      {
+                        "region_id": "c5",
+                        "label": "Documentation",
+                        "role": "link",
+                        "diagonal": {
+                          "x1": 907,
+                          "y1": 357,
+                          "x2": 1026,
+                          "y2": 397
+                        },
+                        "description": "Documentation section link",
+                        "confidence": 0.97
+                      },
+                      {
+                        "region_id": "c6",
+                        "label": "Community",
+                        "role": "link",
+                        "diagonal": {
+                          "x1": 1046,
+                          "y1": 357,
+                          "x2": 1165,
+                          "y2": 397
+                        },
+                        "description": "Community section link",
+                        "confidence": 0.97
+                      },
+                      {
+                        "region_id": "c7",
+                        "label": "Success Stories",
+                        "role": "link",
+                        "diagonal": {
+                          "x1": 1185,
+                          "y1": 357,
+                          "x2": 1343,
+                          "y2": 397
+                        },
+                        "description": "Success Stories section link",
+                        "confidence": 0.97
+                      },
+                      {
+                        "region_id": "c8",
+                        "label": "News",
+                        "role": "link",
+                        "diagonal": {
+                          "x1": 1363,
+                          "y1": 357,
+                          "x2": 1403,
+                          "y2": 397
+                        },
+                        "description": "News section link",
+                        "confidence": 0.97
+                      },
+                      {
+                        "region_id": "c9",
+                        "label": "Events",
+                        "role": "link",
+                        "diagonal": {
+                          "x1": 1423,
+                          "y1": 357,
+                          "x2": 1502,
+                          "y2": 397
+                        },
+                        "description": "Events section link",
+                        "confidence": 0.97
+                      },
+                      {
+                        "region_id": "c10",
+                        "label": "Learn More",
+                        "role": "link",
+                        "diagonal": {
+                          "x1": 1105,
+                          "y1": 874,
+                          "x2": 1205,
+                          "y2": 913
+                        },
+                        "description": "Learn More link",
+                        "confidence": 0.97
+                      },
+                      {
+                        "region_id": "c11",
+                        "label": "Get Started",
+                        "role": "link",
+                        "diagonal": {
+                          "x1": 570,
+                          "y1": 1072,
+                          "x2": 669,
+                          "y2": 1112
+                        },
+                        "description": "Get Started link",
+                        "confidence": 0.97
+                      },
+                      {
+                        "region_id": "c12",
+                        "label": "Download",
+                        "role": "link",
+                        "diagonal": {
+                          "x1": 808,
+                          "y1": 1072,
+                          "x2": 907,
+                          "y2": 1112
+                        },
+                        "description": "Download link",
+                        "confidence": 0.97
+                      }
+                    ],
+                    "targets": [],
+                    "observers": [],
+                    "notes": [],
+                    "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                    "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+                  },
+                  "parse_error": null
+                },
+                "raw_text": "{\n  \"contract_version\": \"vision_regions_v1\",\n  \"image_size\": {\n    \"width\": 1280,\n    \"height\": 695\n  },\n  \"screen_summary\": \"Python.org homepage with navigation and content sections\",\n  \"state_guess\": \"python homepage\",\n  \"regions\": [\n    {\n      \"region_id\": \"c1\",\n      \"label\": \"Search\",\n      \"role\": \"input\",\n      \"diagonal\": {\n        \"x1\": 567,\n        \"y1\": 123,\n        \"x2\": 667,\n        \"y2\": 145\n      },\n      \"description\": \"Search input field\",\n      \"confidence\": 0.98\n    },\n    {\n      \"region_id\": \"c2\",\n      \"label\": \"GO\",\n      \"role\": \"button\",\n      \"diagonal\": {\n        \"x1\": 667,\n        \"y1\": 123,\n        \"x2\": 695,\n        \"y2\": 145\n      },\n      \"description\": \"Search submit button\",\n      \"confidence\": 0.98\n    },\n    {\n      \"region_id\": \"c3\",\n      \"label\": \"About\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 333,\n        \"y1\": 180,\n        \"x2\": 367,\n        \"y2\": 200\n      },\n      \"description\": \"About section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c4\",\n      \"label\": \"Downloads\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 387,\n        \"y1\": 180,\n        \"x2\": 447,\n        \"y2\": 200\n      },\n      \"description\": \"Downloads section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c5\",\n      \"label\": \"Documentation\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 457,\n        \"y1\": 180,\n        \"x2\": 517,\n        \"y2\": 200\n      },\n      \"description\": \"Documentation section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c6\",\n      \"label\": \"Community\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 527,\n        \"y1\": 180,\n        \"x2\": 587,\n        \"y2\": 200\n      },\n      \"description\": \"Community section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c7\",\n      \"label\": \"Success Stories\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 597,\n        \"y1\": 180,\n        \"x2\": 677,\n        \"y2\": 200\n      },\n      \"description\": \"Success Stories section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c8\",\n      \"label\": \"News\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 687,\n        \"y1\": 180,\n        \"x2\": 707,\n        \"y2\": 200\n      },\n      \"description\": \"News section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c9\",\n      \"label\": \"Events\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 717,\n        \"y1\": 180,\n        \"x2\": 757,\n        \"y2\": 200\n      },\n      \"description\": \"Events section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c10\",\n      \"label\": \"Learn More\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 557,\n        \"y1\": 440,\n        \"x2\": 607,\n        \"y2\": 460\n      },\n      \"description\": \"Learn More link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c11\",\n      \"label\": \"Get Started\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 287,\n        \"y1\": 540,\n        \"x2\": 337,\n        \"y2\": 560\n      },\n      \"description\": \"Get Started link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c12\",\n      \"label\": \"Download\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 407,\n        \"y1\": 540,\n        \"x2\": 457,\n        \"y2\": 560\n      },\n      \"description\": \"Download link\",\n      \"confidence\": 0.97\n    }\n  ],\n  \"targets\": [],\n  \"observers\": [],\n  \"notes\": []\n}",
+                "raw_text_preview": "{ \"contract_version\": \"vision_regions_v1\", \"image_size\": { \"width\": 1280, \"height\": 695 }, \"screen_summary\": \"Python.org homepage with navigation and content sections\", \"state_guess\": \"python homepage\", \"regions\": [ { \"region_id\": \"c1\", \"label\": \"Search\", \"role\": \"input\", \"diagonal\": { \"x1\": 567, \"y...",
+                "raw_response": {
+                  "choices": [
+                    {
+                      "finish_reason": "stop",
+                      "index": 0,
+                      "message": {
+                        "role": "assistant",
+                        "content": "{\n  \"contract_version\": \"vision_regions_v1\",\n  \"image_size\": {\n    \"width\": 1280,\n    \"height\": 695\n  },\n  \"screen_summary\": \"Python.org homepage with navigation and content sections\",\n  \"state_guess\": \"python homepage\",\n  \"regions\": [\n    {\n      \"region_id\": \"c1\",\n      \"label\": \"Search\",\n      \"role\": \"input\",\n      \"diagonal\": {\n        \"x1\": 567,\n        \"y1\": 123,\n        \"x2\": 667,\n        \"y2\": 145\n      },\n      \"description\": \"Search input field\",\n      \"confidence\": 0.98\n    },\n    {\n      \"region_id\": \"c2\",\n      \"label\": \"GO\",\n      \"role\": \"button\",\n      \"diagonal\": {\n        \"x1\": 667,\n        \"y1\": 123,\n        \"x2\": 695,\n        \"y2\": 145\n      },\n      \"description\": \"Search submit button\",\n      \"confidence\": 0.98\n    },\n    {\n      \"region_id\": \"c3\",\n      \"label\": \"About\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 333,\n        \"y1\": 180,\n        \"x2\": 367,\n        \"y2\": 200\n      },\n      \"description\": \"About section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c4\",\n      \"label\": \"Downloads\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 387,\n        \"y1\": 180,\n        \"x2\": 447,\n        \"y2\": 200\n      },\n      \"description\": \"Downloads section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c5\",\n      \"label\": \"Documentation\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 457,\n        \"y1\": 180,\n        \"x2\": 517,\n        \"y2\": 200\n      },\n      \"description\": \"Documentation section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c6\",\n      \"label\": \"Community\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 527,\n        \"y1\": 180,\n        \"x2\": 587,\n        \"y2\": 200\n      },\n      \"description\": \"Community section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c7\",\n      \"label\": \"Success Stories\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 597,\n        \"y1\": 180,\n        \"x2\": 677,\n        \"y2\": 200\n      },\n      \"description\": \"Success Stories section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c8\",\n      \"label\": \"News\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 687,\n        \"y1\": 180,\n        \"x2\": 707,\n        \"y2\": 200\n      },\n      \"description\": \"News section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c9\",\n      \"label\": \"Events\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 717,\n        \"y1\": 180,\n        \"x2\": 757,\n        \"y2\": 200\n      },\n      \"description\": \"Events section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c10\",\n      \"label\": \"Learn More\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 557,\n        \"y1\": 440,\n        \"x2\": 607,\n        \"y2\": 460\n      },\n      \"description\": \"Learn More link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c11\",\n      \"label\": \"Get Started\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 287,\n        \"y1\": 540,\n        \"x2\": 337,\n        \"y2\": 560\n      },\n      \"description\": \"Get Started link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c12\",\n      \"label\": \"Download\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 407,\n        \"y1\": 540,\n        \"x2\": 457,\n        \"y2\": 560\n      },\n      \"description\": \"Download link\",\n      \"confidence\": 0.97\n    }\n  ],\n  \"targets\": [],\n  \"observers\": [],\n  \"notes\": []\n}"
+                      }
+                    }
+                  ],
+                  "created": 1783085963,
+                  "model": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                  "system_fingerprint": "b8892-0d0764dfd",
+                  "object": "chat.completion",
+                  "usage": {
+                    "completion_tokens": 1222,
+                    "prompt_tokens": 1691,
+                    "total_tokens": 2913,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 1690
+                    }
+                  },
+                  "id": "chatcmpl-4GqjTpTg3D97iK2dXfFbdFAVAX4HUYwk",
+                  "timings": {
+                    "cache_n": 1690,
+                    "prompt_n": 1,
+                    "prompt_ms": 3230.084,
+                    "prompt_per_token_ms": 3230.084,
+                    "prompt_per_second": 0.3095894719765802,
+                    "predicted_n": 1222,
+                    "predicted_ms": 18417.249,
+                    "predicted_per_token_ms": 15.07139852700491,
+                    "predicted_per_second": 66.3508431688142
+                  }
+                },
+                "parsed_model_json": {
+                  "contract_version": "vision_regions_v1",
+                  "image_size": {
+                    "width": 2540,
+                    "height": 1380
+                  },
+                  "screen_summary": "Python.org homepage with navigation and content sections",
+                  "state_guess": "python homepage",
+                  "regions": [
+                    {
+                      "region_id": "c1",
+                      "label": "Search",
+                      "role": "input",
+                      "diagonal": {
+                        "x1": 1125,
+                        "y1": 244,
+                        "x2": 1324,
+                        "y2": 288
+                      },
+                      "description": "Search input field",
+                      "confidence": 0.98
+                    },
+                    {
+                      "region_id": "c2",
+                      "label": "GO",
+                      "role": "button",
+                      "diagonal": {
+                        "x1": 1324,
+                        "y1": 244,
+                        "x2": 1379,
+                        "y2": 288
+                      },
+                      "description": "Search submit button",
+                      "confidence": 0.98
+                    },
+                    {
+                      "region_id": "c3",
+                      "label": "About",
+                      "role": "link",
+                      "diagonal": {
+                        "x1": 661,
+                        "y1": 357,
+                        "x2": 728,
+                        "y2": 397
+                      },
+                      "description": "About section link",
+                      "confidence": 0.97
+                    },
+                    {
+                      "region_id": "c4",
+                      "label": "Downloads",
+                      "role": "link",
+                      "diagonal": {
+                        "x1": 768,
+                        "y1": 357,
+                        "x2": 887,
+                        "y2": 397
+                      },
+                      "description": "Downloads section link",
+                      "confidence": 0.97
+                    },
+                    {
+                      "region_id": "c5",
+                      "label": "Documentation",
+                      "role": "link",
+                      "diagonal": {
+                        "x1": 907,
+                        "y1": 357,
+                        "x2": 1026,
+                        "y2": 397
+                      },
+                      "description": "Documentation section link",
+                      "confidence": 0.97
+                    },
+                    {
+                      "region_id": "c6",
+                      "label": "Community",
+                      "role": "link",
+                      "diagonal": {
+                        "x1": 1046,
+                        "y1": 357,
+                        "x2": 1165,
+                        "y2": 397
+                      },
+                      "description": "Community section link",
+                      "confidence": 0.97
+                    },
+                    {
+                      "region_id": "c7",
+                      "label": "Success Stories",
+                      "role": "link",
+                      "diagonal": {
+                        "x1": 1185,
+                        "y1": 357,
+                        "x2": 1343,
+                        "y2": 397
+                      },
+                      "description": "Success Stories section link",
+                      "confidence": 0.97
+                    },
+                    {
+                      "region_id": "c8",
+                      "label": "News",
+                      "role": "link",
+                      "diagonal": {
+                        "x1": 1363,
+                        "y1": 357,
+                        "x2": 1403,
+                        "y2": 397
+                      },
+                      "description": "News section link",
+                      "confidence": 0.97
+                    },
+                    {
+                      "region_id": "c9",
+                      "label": "Events",
+                      "role": "link",
+                      "diagonal": {
+                        "x1": 1423,
+                        "y1": 357,
+                        "x2": 1502,
+                        "y2": 397
+                      },
+                      "description": "Events section link",
+                      "confidence": 0.97
+                    },
+                    {
+                      "region_id": "c10",
+                      "label": "Learn More",
+                      "role": "link",
+                      "diagonal": {
+                        "x1": 1105,
+                        "y1": 874,
+                        "x2": 1205,
+                        "y2": 913
+                      },
+                      "description": "Learn More link",
+                      "confidence": 0.97
+                    },
+                    {
+                      "region_id": "c11",
+                      "label": "Get Started",
+                      "role": "link",
+                      "diagonal": {
+                        "x1": 570,
+                        "y1": 1072,
+                        "x2": 669,
+                        "y2": 1112
+                      },
+                      "description": "Get Started link",
+                      "confidence": 0.97
+                    },
+                    {
+                      "region_id": "c12",
+                      "label": "Download",
+                      "role": "link",
+                      "diagonal": {
+                        "x1": 808,
+                        "y1": 1072,
+                        "x2": 907,
+                        "y2": 1112
+                      },
+                      "description": "Download link",
+                      "confidence": 0.97
+                    }
+                  ],
+                  "targets": [],
+                  "observers": [],
+                  "notes": [],
+                  "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                  "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+                },
+                "runtime_normalized_json": {
+                  "contract_version": "vision_regions_v1",
+                  "image_size": {
+                    "width": 2540,
+                    "height": 1380
+                  },
+                  "screen_summary": "Python.org homepage with navigation and content sections",
+                  "state_guess": "python homepage",
+                  "regions": [
+                    {
+                      "region_id": "c1",
+                      "label": "Search",
+                      "role": "input",
+                      "diagonal": {
+                        "x1": 1125,
+                        "y1": 244,
+                        "x2": 1324,
+                        "y2": 288
+                      },
+                      "description": "Search input field",
+                      "confidence": 0.98
+                    },
+                    {
+                      "region_id": "c2",
+                      "label": "GO",
+                      "role": "button",
+                      "diagonal": {
+                        "x1": 1324,
+                        "y1": 244,
+                        "x2": 1379,
+                        "y2": 288
+                      },
+                      "description": "Search submit button",
+                      "confidence": 0.98
+                    },
+                    {
+                      "region_id": "c3",
+                      "label": "About",
+                      "role": "link",
+                      "diagonal": {
+                        "x1": 661,
+                        "y1": 357,
+                        "x2": 728,
+                        "y2": 397
+                      },
+                      "description": "About section link",
+                      "confidence": 0.97
+                    },
+                    {
+                      "region_id": "c4",
+                      "label": "Downloads",
+                      "role": "link",
+                      "diagonal": {
+                        "x1": 768,
+                        "y1": 357,
+                        "x2": 887,
+                        "y2": 397
+                      },
+                      "description": "Downloads section link",
+                      "confidence": 0.97
+                    },
+                    {
+                      "region_id": "c5",
+                      "label": "Documentation",
+                      "role": "link",
+                      "diagonal": {
+                        "x1": 907,
+                        "y1": 357,
+                        "x2": 1026,
+                        "y2": 397
+                      },
+                      "description": "Documentation section link",
+                      "confidence": 0.97
+                    },
+                    {
+                      "region_id": "c6",
+                      "label": "Community",
+                      "role": "link",
+                      "diagonal": {
+                        "x1": 1046,
+                        "y1": 357,
+                        "x2": 1165,
+                        "y2": 397
+                      },
+                      "description": "Community section link",
+                      "confidence": 0.97
+                    },
+                    {
+                      "region_id": "c7",
+                      "label": "Success Stories",
+                      "role": "link",
+                      "diagonal": {
+                        "x1": 1185,
+                        "y1": 357,
+                        "x2": 1343,
+                        "y2": 397
+                      },
+                      "description": "Success Stories section link",
+                      "confidence": 0.97
+                    },
+                    {
+                      "region_id": "c8",
+                      "label": "News",
+                      "role": "link",
+                      "diagonal": {
+                        "x1": 1363,
+                        "y1": 357,
+                        "x2": 1403,
+                        "y2": 397
+                      },
+                      "description": "News section link",
+                      "confidence": 0.97
+                    },
+                    {
+                      "region_id": "c9",
+                      "label": "Events",
+                      "role": "link",
+                      "diagonal": {
+                        "x1": 1423,
+                        "y1": 357,
+                        "x2": 1502,
+                        "y2": 397
+                      },
+                      "description": "Events section link",
+                      "confidence": 0.97
+                    },
+                    {
+                      "region_id": "c10",
+                      "label": "Learn More",
+                      "role": "link",
+                      "diagonal": {
+                        "x1": 1105,
+                        "y1": 874,
+                        "x2": 1205,
+                        "y2": 913
+                      },
+                      "description": "Learn More link",
+                      "confidence": 0.97
+                    },
+                    {
+                      "region_id": "c11",
+                      "label": "Get Started",
+                      "role": "link",
+                      "diagonal": {
+                        "x1": 570,
+                        "y1": 1072,
+                        "x2": 669,
+                        "y2": 1112
+                      },
+                      "description": "Get Started link",
+                      "confidence": 0.97
+                    },
+                    {
+                      "region_id": "c12",
+                      "label": "Download",
+                      "role": "link",
+                      "diagonal": {
+                        "x1": 808,
+                        "y1": 1072,
+                        "x2": 907,
+                        "y2": 1112
+                      },
+                      "description": "Download link",
+                      "confidence": 0.97
+                    }
+                  ],
+                  "targets": [],
+                  "observers": [],
+                  "notes": [],
+                  "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                  "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+                },
+                "parse_error": null
+              },
+              "coordinate_remap": {
+                "from": {
+                  "width": 1280,
+                  "height": 695
+                },
+                "to": {
+                  "width": 2540,
+                  "height": 1380
+                }
+              },
+              "status": "success"
+            }
+          ]
+        },
+        "raw_text": "{\n  \"contract_version\": \"vision_regions_v1\",\n  \"image_size\": {\n    \"width\": 1280,\n    \"height\": 695\n  },\n  \"screen_summary\": \"Python.org homepage with navigation and content sections\",\n  \"state_guess\": \"python homepage\",\n  \"regions\": [\n    {\n      \"region_id\": \"c1\",\n      \"label\": \"Search\",\n      \"role\": \"input\",\n      \"diagonal\": {\n        \"x1\": 567,\n        \"y1\": 123,\n        \"x2\": 667,\n        \"y2\": 145\n      },\n      \"description\": \"Search input field\",\n      \"confidence\": 0.98\n    },\n    {\n      \"region_id\": \"c2\",\n      \"label\": \"GO\",\n      \"role\": \"button\",\n      \"diagonal\": {\n        \"x1\": 667,\n        \"y1\": 123,\n        \"x2\": 695,\n        \"y2\": 145\n      },\n      \"description\": \"Search submit button\",\n      \"confidence\": 0.98\n    },\n    {\n      \"region_id\": \"c3\",\n      \"label\": \"About\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 333,\n        \"y1\": 180,\n        \"x2\": 367,\n        \"y2\": 200\n      },\n      \"description\": \"About section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c4\",\n      \"label\": \"Downloads\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 387,\n        \"y1\": 180,\n        \"x2\": 447,\n        \"y2\": 200\n      },\n      \"description\": \"Downloads section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c5\",\n      \"label\": \"Documentation\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 457,\n        \"y1\": 180,\n        \"x2\": 517,\n        \"y2\": 200\n      },\n      \"description\": \"Documentation section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c6\",\n      \"label\": \"Community\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 527,\n        \"y1\": 180,\n        \"x2\": 587,\n        \"y2\": 200\n      },\n      \"description\": \"Community section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c7\",\n      \"label\": \"Success Stories\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 597,\n        \"y1\": 180,\n        \"x2\": 677,\n        \"y2\": 200\n      },\n      \"description\": \"Success Stories section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c8\",\n      \"label\": \"News\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 687,\n        \"y1\": 180,\n        \"x2\": 707,\n        \"y2\": 200\n      },\n      \"description\": \"News section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c9\",\n      \"label\": \"Events\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 717,\n        \"y1\": 180,\n        \"x2\": 757,\n        \"y2\": 200\n      },\n      \"description\": \"Events section link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c10\",\n      \"label\": \"Learn More\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 557,\n        \"y1\": 440,\n        \"x2\": 607,\n        \"y2\": 460\n      },\n      \"description\": \"Learn More link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c11\",\n      \"label\": \"Get Started\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 287,\n        \"y1\": 540,\n        \"x2\": 337,\n        \"y2\": 560\n      },\n      \"description\": \"Get Started link\",\n      \"confidence\": 0.97\n    },\n    {\n      \"region_id\": \"c12\",\n      \"label\": \"Download\",\n      \"role\": \"link\",\n      \"diagonal\": {\n        \"x1\": 407,\n        \"y1\": 540,\n        \"x2\": 457,\n        \"y2\": 560\n      },\n      \"description\": \"Download link\",\n      \"confidence\": 0.97\n    }\n  ],\n  \"targets\": [],\n  \"observers\": [],\n  \"notes\": []\n}"
+      }
+    },
+    "safety": {
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "real_action_requires_gate": true,
+      "real_clicks_performed": 0,
+      "final_submit_forbidden": true
+    }
+  },
+  "screen_inventory": [
+    {
+      "contract_version": "screen_inventory_item_v2",
+      "item_id": "c1",
+      "label": "Search",
+      "item_type": "layout",
+      "role": "input",
+      "bbox": {
+        "x": 1125,
+        "y": 244,
+        "w": 199,
+        "h": 44
+      },
+      "text": "Search",
+      "source_evidence": [
+        "vision"
+      ],
+      "interactable_evidence": {
+        "uia_invokable": false,
+        "dom_clickable": false,
+        "omniparser_interactable": false,
+        "calibrated_target_validated": false,
+        "execute_candidate_ranked": false,
+        "cross_evidence_overlap": false,
+        "vision_claim": false
+      },
+      "click_candidate": false,
+      "risk_hint": "low",
+      "evidence_level": "semantic_region_only",
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "real_action_requires_gate": true,
+      "metadata": {
+        "source": "vision"
+      }
+    },
+    {
+      "contract_version": "screen_inventory_item_v2",
+      "item_id": "c2",
+      "label": "GO",
+      "item_type": "layout",
+      "role": "button",
+      "bbox": {
+        "x": 1324,
+        "y": 244,
+        "w": 55,
+        "h": 44
+      },
+      "text": "GO",
+      "source_evidence": [
+        "vision"
+      ],
+      "interactable_evidence": {
+        "uia_invokable": false,
+        "dom_clickable": false,
+        "omniparser_interactable": false,
+        "calibrated_target_validated": false,
+        "execute_candidate_ranked": false,
+        "cross_evidence_overlap": false,
+        "vision_claim": false
+      },
+      "click_candidate": false,
+      "risk_hint": "low",
+      "evidence_level": "semantic_region_only",
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "real_action_requires_gate": true,
+      "metadata": {
+        "source": "vision"
+      }
+    },
+    {
+      "contract_version": "screen_inventory_item_v2",
+      "item_id": "c3",
+      "label": "About",
+      "item_type": "layout",
+      "role": "link",
+      "bbox": {
+        "x": 661,
+        "y": 357,
+        "w": 67,
+        "h": 40
+      },
+      "text": "About",
+      "source_evidence": [
+        "vision"
+      ],
+      "interactable_evidence": {
+        "uia_invokable": false,
+        "dom_clickable": false,
+        "omniparser_interactable": false,
+        "calibrated_target_validated": false,
+        "execute_candidate_ranked": false,
+        "cross_evidence_overlap": false,
+        "vision_claim": false
+      },
+      "click_candidate": false,
+      "risk_hint": "low",
+      "evidence_level": "semantic_region_only",
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "real_action_requires_gate": true,
+      "metadata": {
+        "source": "vision"
+      }
+    },
+    {
+      "contract_version": "screen_inventory_item_v2",
+      "item_id": "c4",
+      "label": "Downloads",
+      "item_type": "layout",
+      "role": "link",
+      "bbox": {
+        "x": 768,
+        "y": 357,
+        "w": 119,
+        "h": 40
+      },
+      "text": "Downloads",
+      "source_evidence": [
+        "vision"
+      ],
+      "interactable_evidence": {
+        "uia_invokable": false,
+        "dom_clickable": false,
+        "omniparser_interactable": false,
+        "calibrated_target_validated": false,
+        "execute_candidate_ranked": false,
+        "cross_evidence_overlap": false,
+        "vision_claim": false
+      },
+      "click_candidate": false,
+      "risk_hint": "low",
+      "evidence_level": "semantic_region_only",
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "real_action_requires_gate": true,
+      "metadata": {
+        "source": "vision"
+      }
+    },
+    {
+      "contract_version": "screen_inventory_item_v2",
+      "item_id": "c5",
+      "label": "Documentation",
+      "item_type": "layout",
+      "role": "link",
+      "bbox": {
+        "x": 907,
+        "y": 357,
+        "w": 119,
+        "h": 40
+      },
+      "text": "Documentation",
+      "source_evidence": [
+        "vision"
+      ],
+      "interactable_evidence": {
+        "uia_invokable": false,
+        "dom_clickable": false,
+        "omniparser_interactable": false,
+        "calibrated_target_validated": false,
+        "execute_candidate_ranked": false,
+        "cross_evidence_overlap": false,
+        "vision_claim": false
+      },
+      "click_candidate": false,
+      "risk_hint": "low",
+      "evidence_level": "semantic_region_only",
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "real_action_requires_gate": true,
+      "metadata": {
+        "source": "vision"
+      }
+    },
+    {
+      "contract_version": "screen_inventory_item_v2",
+      "item_id": "c6",
+      "label": "Community",
+      "item_type": "layout",
+      "role": "link",
+      "bbox": {
+        "x": 1046,
+        "y": 357,
+        "w": 119,
+        "h": 40
+      },
+      "text": "Community",
+      "source_evidence": [
+        "vision"
+      ],
+      "interactable_evidence": {
+        "uia_invokable": false,
+        "dom_clickable": false,
+        "omniparser_interactable": false,
+        "calibrated_target_validated": false,
+        "execute_candidate_ranked": false,
+        "cross_evidence_overlap": false,
+        "vision_claim": false
+      },
+      "click_candidate": false,
+      "risk_hint": "low",
+      "evidence_level": "semantic_region_only",
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "real_action_requires_gate": true,
+      "metadata": {
+        "source": "vision"
+      }
+    },
+    {
+      "contract_version": "screen_inventory_item_v2",
+      "item_id": "c7",
+      "label": "Success Stories",
+      "item_type": "layout",
+      "role": "link",
+      "bbox": {
+        "x": 1185,
+        "y": 357,
+        "w": 158,
+        "h": 40
+      },
+      "text": "Success Stories",
+      "source_evidence": [
+        "vision"
+      ],
+      "interactable_evidence": {
+        "uia_invokable": false,
+        "dom_clickable": false,
+        "omniparser_interactable": false,
+        "calibrated_target_validated": false,
+        "execute_candidate_ranked": false,
+        "cross_evidence_overlap": false,
+        "vision_claim": false
+      },
+      "click_candidate": false,
+      "risk_hint": "low",
+      "evidence_level": "semantic_region_only",
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "real_action_requires_gate": true,
+      "metadata": {
+        "source": "vision"
+      }
+    },
+    {
+      "contract_version": "screen_inventory_item_v2",
+      "item_id": "c8",
+      "label": "News",
+      "item_type": "layout",
+      "role": "link",
+      "bbox": {
+        "x": 1363,
+        "y": 357,
+        "w": 40,
+        "h": 40
+      },
+      "text": "News",
+      "source_evidence": [
+        "vision"
+      ],
+      "interactable_evidence": {
+        "uia_invokable": false,
+        "dom_clickable": false,
+        "omniparser_interactable": false,
+        "calibrated_target_validated": false,
+        "execute_candidate_ranked": false,
+        "cross_evidence_overlap": false,
+        "vision_claim": false
+      },
+      "click_candidate": false,
+      "risk_hint": "low",
+      "evidence_level": "semantic_region_only",
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "real_action_requires_gate": true,
+      "metadata": {
+        "source": "vision"
+      }
+    },
+    {
+      "contract_version": "screen_inventory_item_v2",
+      "item_id": "c9",
+      "label": "Events",
+      "item_type": "layout",
+      "role": "link",
+      "bbox": {
+        "x": 1423,
+        "y": 357,
+        "w": 79,
+        "h": 40
+      },
+      "text": "Events",
+      "source_evidence": [
+        "vision"
+      ],
+      "interactable_evidence": {
+        "uia_invokable": false,
+        "dom_clickable": false,
+        "omniparser_interactable": false,
+        "calibrated_target_validated": false,
+        "execute_candidate_ranked": false,
+        "cross_evidence_overlap": false,
+        "vision_claim": false
+      },
+      "click_candidate": false,
+      "risk_hint": "low",
+      "evidence_level": "semantic_region_only",
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "real_action_requires_gate": true,
+      "metadata": {
+        "source": "vision"
+      }
+    },
+    {
+      "contract_version": "screen_inventory_item_v2",
+      "item_id": "c10",
+      "label": "Learn More",
+      "item_type": "layout",
+      "role": "link",
+      "bbox": {
+        "x": 1105,
+        "y": 874,
+        "w": 100,
+        "h": 39
+      },
+      "text": "Learn More",
+      "source_evidence": [
+        "vision"
+      ],
+      "interactable_evidence": {
+        "uia_invokable": false,
+        "dom_clickable": false,
+        "omniparser_interactable": false,
+        "calibrated_target_validated": false,
+        "execute_candidate_ranked": false,
+        "cross_evidence_overlap": false,
+        "vision_claim": false
+      },
+      "click_candidate": false,
+      "risk_hint": "low",
+      "evidence_level": "semantic_region_only",
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "real_action_requires_gate": true,
+      "metadata": {
+        "source": "vision"
+      }
+    },
+    {
+      "contract_version": "screen_inventory_item_v2",
+      "item_id": "c11",
+      "label": "Get Started",
+      "item_type": "layout",
+      "role": "link",
+      "bbox": {
+        "x": 570,
+        "y": 1072,
+        "w": 99,
+        "h": 40
+      },
+      "text": "Get Started",
+      "source_evidence": [
+        "vision"
+      ],
+      "interactable_evidence": {
+        "uia_invokable": false,
+        "dom_clickable": false,
+        "omniparser_interactable": false,
+        "calibrated_target_validated": false,
+        "execute_candidate_ranked": false,
+        "cross_evidence_overlap": false,
+        "vision_claim": false
+      },
+      "click_candidate": false,
+      "risk_hint": "low",
+      "evidence_level": "semantic_region_only",
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "real_action_requires_gate": true,
+      "metadata": {
+        "source": "vision"
+      }
+    },
+    {
+      "contract_version": "screen_inventory_item_v2",
+      "item_id": "c12",
+      "label": "Download",
+      "item_type": "layout",
+      "role": "link",
+      "bbox": {
+        "x": 808,
+        "y": 1072,
+        "w": 99,
+        "h": 40
+      },
+      "text": "Download",
+      "source_evidence": [
+        "vision"
+      ],
+      "interactable_evidence": {
+        "uia_invokable": false,
+        "dom_clickable": false,
+        "omniparser_interactable": false,
+        "calibrated_target_validated": false,
+        "execute_candidate_ranked": false,
+        "cross_evidence_overlap": false,
+        "vision_claim": false
+      },
+      "click_candidate": false,
+      "risk_hint": "low",
+      "evidence_level": "semantic_region_only",
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "real_action_requires_gate": true,
+      "metadata": {
+        "source": "vision"
+      }
+    }
+  ],
+  "classification": {
+    "contract_version": "learn_candidate_classification_v1",
+    "accepted_for_grounding": [],
+    "rejected_non_actionable": [
+      {
+        "contract_version": "screen_inventory_item_v2",
+        "item_id": "c1",
+        "label": "Search",
+        "item_type": "layout",
+        "role": "input",
+        "bbox": {
+          "x": 1125,
+          "y": 244,
+          "w": 199,
+          "h": 44
+        },
+        "text": "Search",
+        "source_evidence": [
+          "vision"
+        ],
+        "interactable_evidence": {
+          "uia_invokable": false,
+          "dom_clickable": false,
+          "omniparser_interactable": false,
+          "calibrated_target_validated": false,
+          "execute_candidate_ranked": false,
+          "cross_evidence_overlap": false,
+          "vision_claim": false
+        },
+        "click_candidate": false,
+        "risk_hint": "low",
+        "evidence_level": "semantic_region_only",
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "real_action_requires_gate": true,
+        "metadata": {
+          "source": "vision"
+        },
+        "classification_decision": {
+          "outcome": "rejected_non_actionable",
+          "reason": "semantic_region_only_without_grounding_evidence",
+          "grounding_eligible": false,
+          "review_only": true,
+          "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+        },
+        "grounding_eligible": false,
+        "review_only": true,
+        "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+      },
+      {
+        "contract_version": "screen_inventory_item_v2",
+        "item_id": "c2",
+        "label": "GO",
+        "item_type": "layout",
+        "role": "button",
+        "bbox": {
+          "x": 1324,
+          "y": 244,
+          "w": 55,
+          "h": 44
+        },
+        "text": "GO",
+        "source_evidence": [
+          "vision"
+        ],
+        "interactable_evidence": {
+          "uia_invokable": false,
+          "dom_clickable": false,
+          "omniparser_interactable": false,
+          "calibrated_target_validated": false,
+          "execute_candidate_ranked": false,
+          "cross_evidence_overlap": false,
+          "vision_claim": false
+        },
+        "click_candidate": false,
+        "risk_hint": "low",
+        "evidence_level": "semantic_region_only",
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "real_action_requires_gate": true,
+        "metadata": {
+          "source": "vision"
+        },
+        "classification_decision": {
+          "outcome": "rejected_non_actionable",
+          "reason": "semantic_region_only_without_grounding_evidence",
+          "grounding_eligible": false,
+          "review_only": true,
+          "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+        },
+        "grounding_eligible": false,
+        "review_only": true,
+        "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+      },
+      {
+        "contract_version": "screen_inventory_item_v2",
+        "item_id": "c3",
+        "label": "About",
+        "item_type": "layout",
+        "role": "link",
+        "bbox": {
+          "x": 661,
+          "y": 357,
+          "w": 67,
+          "h": 40
+        },
+        "text": "About",
+        "source_evidence": [
+          "vision"
+        ],
+        "interactable_evidence": {
+          "uia_invokable": false,
+          "dom_clickable": false,
+          "omniparser_interactable": false,
+          "calibrated_target_validated": false,
+          "execute_candidate_ranked": false,
+          "cross_evidence_overlap": false,
+          "vision_claim": false
+        },
+        "click_candidate": false,
+        "risk_hint": "low",
+        "evidence_level": "semantic_region_only",
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "real_action_requires_gate": true,
+        "metadata": {
+          "source": "vision"
+        },
+        "classification_decision": {
+          "outcome": "rejected_non_actionable",
+          "reason": "semantic_region_only_without_grounding_evidence",
+          "grounding_eligible": false,
+          "review_only": true,
+          "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+        },
+        "grounding_eligible": false,
+        "review_only": true,
+        "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+      },
+      {
+        "contract_version": "screen_inventory_item_v2",
+        "item_id": "c4",
+        "label": "Downloads",
+        "item_type": "layout",
+        "role": "link",
+        "bbox": {
+          "x": 768,
+          "y": 357,
+          "w": 119,
+          "h": 40
+        },
+        "text": "Downloads",
+        "source_evidence": [
+          "vision"
+        ],
+        "interactable_evidence": {
+          "uia_invokable": false,
+          "dom_clickable": false,
+          "omniparser_interactable": false,
+          "calibrated_target_validated": false,
+          "execute_candidate_ranked": false,
+          "cross_evidence_overlap": false,
+          "vision_claim": false
+        },
+        "click_candidate": false,
+        "risk_hint": "low",
+        "evidence_level": "semantic_region_only",
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "real_action_requires_gate": true,
+        "metadata": {
+          "source": "vision"
+        },
+        "classification_decision": {
+          "outcome": "rejected_non_actionable",
+          "reason": "semantic_region_only_without_grounding_evidence",
+          "grounding_eligible": false,
+          "review_only": true,
+          "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+        },
+        "grounding_eligible": false,
+        "review_only": true,
+        "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+      },
+      {
+        "contract_version": "screen_inventory_item_v2",
+        "item_id": "c5",
+        "label": "Documentation",
+        "item_type": "layout",
+        "role": "link",
+        "bbox": {
+          "x": 907,
+          "y": 357,
+          "w": 119,
+          "h": 40
+        },
+        "text": "Documentation",
+        "source_evidence": [
+          "vision"
+        ],
+        "interactable_evidence": {
+          "uia_invokable": false,
+          "dom_clickable": false,
+          "omniparser_interactable": false,
+          "calibrated_target_validated": false,
+          "execute_candidate_ranked": false,
+          "cross_evidence_overlap": false,
+          "vision_claim": false
+        },
+        "click_candidate": false,
+        "risk_hint": "low",
+        "evidence_level": "semantic_region_only",
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "real_action_requires_gate": true,
+        "metadata": {
+          "source": "vision"
+        },
+        "classification_decision": {
+          "outcome": "rejected_non_actionable",
+          "reason": "semantic_region_only_without_grounding_evidence",
+          "grounding_eligible": false,
+          "review_only": true,
+          "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+        },
+        "grounding_eligible": false,
+        "review_only": true,
+        "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+      },
+      {
+        "contract_version": "screen_inventory_item_v2",
+        "item_id": "c6",
+        "label": "Community",
+        "item_type": "layout",
+        "role": "link",
+        "bbox": {
+          "x": 1046,
+          "y": 357,
+          "w": 119,
+          "h": 40
+        },
+        "text": "Community",
+        "source_evidence": [
+          "vision"
+        ],
+        "interactable_evidence": {
+          "uia_invokable": false,
+          "dom_clickable": false,
+          "omniparser_interactable": false,
+          "calibrated_target_validated": false,
+          "execute_candidate_ranked": false,
+          "cross_evidence_overlap": false,
+          "vision_claim": false
+        },
+        "click_candidate": false,
+        "risk_hint": "low",
+        "evidence_level": "semantic_region_only",
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "real_action_requires_gate": true,
+        "metadata": {
+          "source": "vision"
+        },
+        "classification_decision": {
+          "outcome": "rejected_non_actionable",
+          "reason": "semantic_region_only_without_grounding_evidence",
+          "grounding_eligible": false,
+          "review_only": true,
+          "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+        },
+        "grounding_eligible": false,
+        "review_only": true,
+        "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+      },
+      {
+        "contract_version": "screen_inventory_item_v2",
+        "item_id": "c7",
+        "label": "Success Stories",
+        "item_type": "layout",
+        "role": "link",
+        "bbox": {
+          "x": 1185,
+          "y": 357,
+          "w": 158,
+          "h": 40
+        },
+        "text": "Success Stories",
+        "source_evidence": [
+          "vision"
+        ],
+        "interactable_evidence": {
+          "uia_invokable": false,
+          "dom_clickable": false,
+          "omniparser_interactable": false,
+          "calibrated_target_validated": false,
+          "execute_candidate_ranked": false,
+          "cross_evidence_overlap": false,
+          "vision_claim": false
+        },
+        "click_candidate": false,
+        "risk_hint": "low",
+        "evidence_level": "semantic_region_only",
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "real_action_requires_gate": true,
+        "metadata": {
+          "source": "vision"
+        },
+        "classification_decision": {
+          "outcome": "rejected_non_actionable",
+          "reason": "semantic_region_only_without_grounding_evidence",
+          "grounding_eligible": false,
+          "review_only": true,
+          "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+        },
+        "grounding_eligible": false,
+        "review_only": true,
+        "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+      },
+      {
+        "contract_version": "screen_inventory_item_v2",
+        "item_id": "c8",
+        "label": "News",
+        "item_type": "layout",
+        "role": "link",
+        "bbox": {
+          "x": 1363,
+          "y": 357,
+          "w": 40,
+          "h": 40
+        },
+        "text": "News",
+        "source_evidence": [
+          "vision"
+        ],
+        "interactable_evidence": {
+          "uia_invokable": false,
+          "dom_clickable": false,
+          "omniparser_interactable": false,
+          "calibrated_target_validated": false,
+          "execute_candidate_ranked": false,
+          "cross_evidence_overlap": false,
+          "vision_claim": false
+        },
+        "click_candidate": false,
+        "risk_hint": "low",
+        "evidence_level": "semantic_region_only",
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "real_action_requires_gate": true,
+        "metadata": {
+          "source": "vision"
+        },
+        "classification_decision": {
+          "outcome": "rejected_non_actionable",
+          "reason": "semantic_region_only_without_grounding_evidence",
+          "grounding_eligible": false,
+          "review_only": true,
+          "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+        },
+        "grounding_eligible": false,
+        "review_only": true,
+        "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+      },
+      {
+        "contract_version": "screen_inventory_item_v2",
+        "item_id": "c9",
+        "label": "Events",
+        "item_type": "layout",
+        "role": "link",
+        "bbox": {
+          "x": 1423,
+          "y": 357,
+          "w": 79,
+          "h": 40
+        },
+        "text": "Events",
+        "source_evidence": [
+          "vision"
+        ],
+        "interactable_evidence": {
+          "uia_invokable": false,
+          "dom_clickable": false,
+          "omniparser_interactable": false,
+          "calibrated_target_validated": false,
+          "execute_candidate_ranked": false,
+          "cross_evidence_overlap": false,
+          "vision_claim": false
+        },
+        "click_candidate": false,
+        "risk_hint": "low",
+        "evidence_level": "semantic_region_only",
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "real_action_requires_gate": true,
+        "metadata": {
+          "source": "vision"
+        },
+        "classification_decision": {
+          "outcome": "rejected_non_actionable",
+          "reason": "semantic_region_only_without_grounding_evidence",
+          "grounding_eligible": false,
+          "review_only": true,
+          "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+        },
+        "grounding_eligible": false,
+        "review_only": true,
+        "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+      },
+      {
+        "contract_version": "screen_inventory_item_v2",
+        "item_id": "c10",
+        "label": "Learn More",
+        "item_type": "layout",
+        "role": "link",
+        "bbox": {
+          "x": 1105,
+          "y": 874,
+          "w": 100,
+          "h": 39
+        },
+        "text": "Learn More",
+        "source_evidence": [
+          "vision"
+        ],
+        "interactable_evidence": {
+          "uia_invokable": false,
+          "dom_clickable": false,
+          "omniparser_interactable": false,
+          "calibrated_target_validated": false,
+          "execute_candidate_ranked": false,
+          "cross_evidence_overlap": false,
+          "vision_claim": false
+        },
+        "click_candidate": false,
+        "risk_hint": "low",
+        "evidence_level": "semantic_region_only",
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "real_action_requires_gate": true,
+        "metadata": {
+          "source": "vision"
+        },
+        "classification_decision": {
+          "outcome": "rejected_non_actionable",
+          "reason": "semantic_region_only_without_grounding_evidence",
+          "grounding_eligible": false,
+          "review_only": true,
+          "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+        },
+        "grounding_eligible": false,
+        "review_only": true,
+        "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+      },
+      {
+        "contract_version": "screen_inventory_item_v2",
+        "item_id": "c11",
+        "label": "Get Started",
+        "item_type": "layout",
+        "role": "link",
+        "bbox": {
+          "x": 570,
+          "y": 1072,
+          "w": 99,
+          "h": 40
+        },
+        "text": "Get Started",
+        "source_evidence": [
+          "vision"
+        ],
+        "interactable_evidence": {
+          "uia_invokable": false,
+          "dom_clickable": false,
+          "omniparser_interactable": false,
+          "calibrated_target_validated": false,
+          "execute_candidate_ranked": false,
+          "cross_evidence_overlap": false,
+          "vision_claim": false
+        },
+        "click_candidate": false,
+        "risk_hint": "low",
+        "evidence_level": "semantic_region_only",
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "real_action_requires_gate": true,
+        "metadata": {
+          "source": "vision"
+        },
+        "classification_decision": {
+          "outcome": "rejected_non_actionable",
+          "reason": "semantic_region_only_without_grounding_evidence",
+          "grounding_eligible": false,
+          "review_only": true,
+          "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+        },
+        "grounding_eligible": false,
+        "review_only": true,
+        "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+      },
+      {
+        "contract_version": "screen_inventory_item_v2",
+        "item_id": "c12",
+        "label": "Download",
+        "item_type": "layout",
+        "role": "link",
+        "bbox": {
+          "x": 808,
+          "y": 1072,
+          "w": 99,
+          "h": 40
+        },
+        "text": "Download",
+        "source_evidence": [
+          "vision"
+        ],
+        "interactable_evidence": {
+          "uia_invokable": false,
+          "dom_clickable": false,
+          "omniparser_interactable": false,
+          "calibrated_target_validated": false,
+          "execute_candidate_ranked": false,
+          "cross_evidence_overlap": false,
+          "vision_claim": false
+        },
+        "click_candidate": false,
+        "risk_hint": "low",
+        "evidence_level": "semantic_region_only",
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "real_action_requires_gate": true,
+        "metadata": {
+          "source": "vision"
+        },
+        "classification_decision": {
+          "outcome": "rejected_non_actionable",
+          "reason": "semantic_region_only_without_grounding_evidence",
+          "grounding_eligible": false,
+          "review_only": true,
+          "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+        },
+        "grounding_eligible": false,
+        "review_only": true,
+        "grounding_block_reason": "semantic_region_only_without_interactable_evidence"
+      }
+    ],
+    "needs_human_review": [],
+    "danger_zones": [],
+    "summary": {
+      "input_count": 12,
+      "accepted_for_grounding_count": 0,
+      "rejected_non_actionable_count": 12,
+      "needs_human_review_count": 0,
+      "danger_zone_count": 0
+    }
+  },
+  "grounding_eligibility": {
+    "grounding_eligible": 0,
+    "review_only": 12,
+    "blocked_reasons": {
+      "semantic_region_only_without_interactable_evidence": 12
+    },
+    "interpretation": "semantic-only parser regions are review evidence only until cross-evidence makes them grounding eligible"
+  },
+  "learning_draft": {
+    "contract_version": "learning_template_draft_v1",
+    "screen_summary": "Python.org homepage with navigation and content sections",
+    "state_guess": "python homepage",
+    "states": [
+      {
+        "state_id": "python_homepage",
+        "label": "python homepage",
+        "summary": "Python.org homepage with navigation and content sections"
+      }
+    ],
+    "regions": [],
+    "action_templates": [],
+    "blockers": [],
+    "verification_rules": [],
+    "agent_decision_points": [],
+    "operation_skills": [],
+    "gate_contracts": [],
+    "learning_source": "learn_recognition_pipeline_v2",
+    "evidence_refs": {
+      "screen_inventory_count": 12,
+      "accepted_for_grounding_count": 0,
+      "grounding_validation_count": 0,
+      "source_contract": "learn_observe_bundle_v1"
+    },
+    "safety": {
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "real_action_requires_gate": true,
+      "final_submit_forbidden": true
+    },
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "real_action_requires_gate": true,
+    "final_submit_forbidden": true
+  },
+  "interpretation": "fresh actual parser smoke output; replaying this file later is recorded parser evidence, not a fresh actual model call"
+}

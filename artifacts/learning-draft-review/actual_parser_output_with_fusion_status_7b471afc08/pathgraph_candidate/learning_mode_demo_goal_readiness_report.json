@@ -1,0 +1,616 @@
+{
+  "contract_version": "learning_mode_demo_goal_readiness_v1",
+  "source_scaffold_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_7b471afc08/pathgraph_candidate/learn_mode_demo_scaffold.json",
+  "demo_goal_status": "display_demo_ready_official_goal_blocked",
+  "display_demo_ready": true,
+  "final_goal_complete": false,
+  "demo_evidence_map": [
+    {
+      "stage_id": "full_screen_understanding_numbered_regions",
+      "status": "available",
+      "role": "whole-screen numbered-region overlay",
+      "artifact_path": "logs/benchmarks/learn_full_screen_understanding_backlog_triage_preview_20260706/full_screen_understanding_overlay.png",
+      "artifact_resolved_path": "D:\\agent-gui-runtime\\logs\\benchmarks\\learn_full_screen_understanding_backlog_triage_preview_20260706\\full_screen_understanding_overlay.png",
+      "artifact_exists": true,
+      "display_only": true,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false,
+      "artifact_sha256_prefix": "317632d716d6"
+    },
+    {
+      "stage_id": "selection_map_precise_understanding",
+      "status": "available",
+      "role": "selection map / precise-understanding candidate",
+      "artifact_path": "logs/benchmarks/learn_locator_card_execute_calibration_seek_full_20260705/numbered_region_calibration_overlay.png",
+      "artifact_resolved_path": "D:\\agent-gui-runtime\\logs\\benchmarks\\learn_locator_card_execute_calibration_seek_full_20260705\\numbered_region_calibration_overlay.png",
+      "artifact_exists": true,
+      "display_only": true,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false,
+      "artifact_sha256_prefix": "baedf7b003b2",
+      "region_count": 10
+    },
+    {
+      "stage_id": "pathgraph_model_preview",
+      "status": "model_generated_preview_ready",
+      "role": "model-only PathGraph preview",
+      "artifact_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_7b471afc08/pathgraph_candidate/model_generated_pathgraph_preview/runtime_path_graph_model_preview.json",
+      "artifact_resolved_path": "D:\\agent-gui-runtime\\artifacts\\learning-draft-review\\actual_parser_output_with_fusion_status_7b471afc08\\pathgraph_candidate\\model_generated_pathgraph_preview\\runtime_path_graph_model_preview.json",
+      "artifact_exists": true,
+      "display_only": true,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false,
+      "artifact_sha256_prefix": "2380d3862b97",
+      "region_count": 10,
+      "action_count": 10
+    },
+    {
+      "stage_id": "template_like_page_detail",
+      "status": "available",
+      "role": "template-like page detail preview",
+      "artifact_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_7b471afc08/pathgraph_candidate/learn_page_detail_candidate.json",
+      "artifact_resolved_path": "D:\\agent-gui-runtime\\artifacts\\learning-draft-review\\actual_parser_output_with_fusion_status_7b471afc08\\pathgraph_candidate\\learn_page_detail_candidate.json",
+      "artifact_exists": true,
+      "display_only": true,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false,
+      "artifact_sha256_prefix": "6c259da7204d",
+      "section_count": 4,
+      "possible_operation_count": 10,
+      "layout_mode": "spatial_bbox_order",
+      "readiness_status": "needs_pending_calibration",
+      "layout_section_count": 4,
+      "bbox_region_count": 10,
+      "operation_kinds": [
+        "fill_field",
+        "open_detail",
+        "open_filter",
+        "read_only",
+        "submit_search"
+      ],
+      "layout_section_summaries": [
+        {
+          "section_id": "top_search_and_filters",
+          "bbox": {
+            "x": 656,
+            "y": 186,
+            "w": 840,
+            "h": 108
+          },
+          "region_count": 2,
+          "possible_operations": [
+            "fill_field",
+            "open_filter"
+          ],
+          "operation_summary": {
+            "kind_counts": {
+              "fill_field": 1,
+              "open_filter": 1
+            },
+            "readiness_counts": {
+              "blocked_pending_calibration": 2
+            }
+          }
+        },
+        {
+          "section_id": "left_results_list",
+          "bbox": {
+            "x": 656,
+            "y": 336,
+            "w": 470,
+            "h": 1008
+          },
+          "region_count": 4,
+          "possible_operations": [
+            "open_detail",
+            "read_only",
+            "submit_search"
+          ],
+          "operation_summary": {
+            "kind_counts": {
+              "open_detail": 2,
+              "read_only": 1,
+              "submit_search": 1
+            },
+            "readiness_counts": {
+              "blocked_manual_review": 1,
+              "blocked_pending_calibration": 1,
+              "review_required": 2
+            }
+          }
+        },
+        {
+          "section_id": "right_detail_panel",
+          "bbox": {
+            "x": 1178,
+            "y": 186,
+            "w": 742,
+            "h": 710
+          },
+          "region_count": 3,
+          "possible_operations": [
+            "fill_field",
+            "read_only",
+            "submit_search"
+          ],
+          "operation_summary": {
+            "kind_counts": {
+              "fill_field": 1,
+              "read_only": 1,
+              "submit_search": 1
+            },
+            "readiness_counts": {
+              "blocked_manual_review": 1,
+              "blocked_pending_calibration": 2
+            }
+          }
+        },
+        {
+          "section_id": "middle_controls",
+          "bbox": {
+            "x": 998,
+            "y": 434,
+            "w": 102,
+            "h": 42
+          },
+          "region_count": 1,
+          "possible_operations": [
+            "open_filter"
+          ],
+          "operation_summary": {
+            "kind_counts": {
+              "open_filter": 1
+            },
+            "readiness_counts": {
+              "blocked_pending_calibration": 1
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "fresh_model_chain_acceptance": {
+    "contract_version": "learning_mode_fresh_model_chain_acceptance_v1",
+    "accepted": false,
+    "acceptance_status": "blocked_mixed_or_assisted_evidence",
+    "counts_as_final_goal_completion": false,
+    "actual_model_call_evidence_count": 1,
+    "assisted_or_human_review_evidence_count": 2,
+    "source_breakdown": {
+      "actual_model_call": 1,
+      "assisted_or_human_review": 2,
+      "fixture_only": 0,
+      "recorded_model_output": 0
+    },
+    "blocking_reasons": [
+      "contains_assisted_or_human_review_evidence",
+      "provenance_does_not_meet_fully_model_generated_requirement",
+      "pending_calibration_remaining",
+      "official_candidate_not_fully_system_model_generated"
+    ],
+    "required_for_acceptance": [
+      "actual_model_call_evidence_count > 0",
+      "assisted_or_human_review_evidence_count == 0",
+      "meets_fully_model_generated_demo_requirement == true",
+      "pending_calibration_resolved",
+      "no_execute_no_submit_safety"
+    ],
+    "interpretation": "Strict acceptance gate for the final Learning Mode demo goal. Display-ready model-only previews are useful, but final completion requires a fresh system/model-generated chain with no assisted or human-curated evidence.",
+    "replacement_plan": {
+      "contract_version": "learning_mode_fresh_model_chain_replacement_plan_v1",
+      "replacement_required": true,
+      "plan_status": "blocked_until_explicit_model_start_approval",
+      "current_source_breakdown": {
+        "actual_model_call": 1,
+        "assisted_or_human_review": 2,
+        "fixture_only": 0,
+        "recorded_model_output": 0
+      },
+      "sources_to_replace": [
+        "assisted_or_human_review"
+      ],
+      "required_source_type": "actual_model_call",
+      "counts_as_model_ability_when_complete": true,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false,
+      "live_clicks_allowed": false,
+      "live_fills_allowed": false,
+      "live_submits_allowed": false,
+      "replacement_steps": [
+        {
+          "step_id": "obtain_explicit_model_start_approval",
+          "status": "required",
+          "requires_user_approval": true,
+          "may_run_without_user_approval": false,
+          "interpretation": "User approval is required before starting the locate/model calibration path."
+        },
+        {
+          "step_id": "run_fresh_numbered_region_calibration",
+          "status": "blocked_until_user_approval",
+          "requires_user_approval": true,
+          "may_run_without_user_approval": false,
+          "ready_region_numbers": [
+            1,
+            2,
+            3,
+            6,
+            8,
+            9
+          ],
+          "expected_source_type": "actual_model_call",
+          "expected_output": "numbered_region_calibration_report.json",
+          "command_source_status": "ready",
+          "run_command_args": [
+            "uv",
+            "run",
+            "python",
+            "scripts\\run_numbered_region_calibration_probe.py",
+            "--tasks",
+            "D:\\agent-gui-runtime\\logs\\benchmarks\\learn_locator_card_execute_calibration_seek_full_20260705\\generated_numbered_region_tasks.json",
+            "--out",
+            "next_numbered_region_calibration",
+            "--regions",
+            "1,2,3,6,8,9"
+          ],
+          "run_command_preview": "uv run python scripts\\run_numbered_region_calibration_probe.py --tasks D:\\agent-gui-runtime\\logs\\benchmarks\\learn_locator_card_execute_calibration_seek_full_20260705\\generated_numbered_region_tasks.json --out next_numbered_region_calibration --regions 1,2,3,6,8,9",
+          "command_executes_now": false,
+          "requires_user_or_runner_to_start_model": true,
+          "start_model_flag_included": false,
+          "next_output_dir": "next_numbered_region_calibration"
+        },
+        {
+          "step_id": "refresh_model_generated_scaffold",
+          "status": "blocked_until_fresh_calibration_output",
+          "requires_user_approval": false,
+          "may_run_without_user_approval": false,
+          "expected_source_type": "actual_model_call",
+          "must_replace_source_types": [
+            "assisted_or_human_review"
+          ],
+          "expected_outputs": [
+            "learn_precise_understanding_candidate.json",
+            "learn_page_detail_candidate.json",
+            "learn_mode_demo_scaffold.json"
+          ],
+          "command_source_status": "ready",
+          "run_command_args": [
+            "uv",
+            "run",
+            "python",
+            "scripts\\refresh_learn_fusion_after_calibration_batch.py",
+            "--trial",
+            "logs/benchmarks/learn_pathgraph_readiness_with_handoff_20260706/actual_parser_output_with_fusion_status.json",
+            "--base-status",
+            "logs/benchmarks/learn_pathgraph_readiness_with_refresh_plan_20260706/refresh_base/learn_fusion_refresh_base_status.json",
+            "--rerun-report",
+            "next_numbered_region_calibration\\numbered_region_calibration_report.json",
+            "--out",
+            "post_batch_refresh"
+          ],
+          "run_command_preview": "uv run python scripts\\refresh_learn_fusion_after_calibration_batch.py --trial logs/benchmarks/learn_pathgraph_readiness_with_handoff_20260706/actual_parser_output_with_fusion_status.json --base-status logs/benchmarks/learn_pathgraph_readiness_with_refresh_plan_20260706/refresh_base/learn_fusion_refresh_base_status.json --rerun-report next_numbered_region_calibration\\numbered_region_calibration_report.json --out post_batch_refresh",
+          "command_executes_now": false,
+          "requires_completed_batch_output": true,
+          "start_model_flag_included": false,
+          "requires_user_or_runner_to_start_model": false,
+          "expected_rerun_report_path": "next_numbered_region_calibration\\numbered_region_calibration_report.json",
+          "next_output_dir": "post_batch_refresh"
+        },
+        {
+          "step_id": "rerun_goal_readiness_audit",
+          "status": "blocked_until_scaffold_refresh",
+          "requires_user_approval": false,
+          "may_run_without_user_approval": false,
+          "expected_output": "learning_mode_demo_goal_readiness_report.json"
+        }
+      ],
+      "interpretation": "Read-only plan for turning the display-ready mixed chain into a final fresh system/model-generated chain. The plan describes required replacement evidence only; it does not start models, click, fill, submit, or promote Runtime PathGraph."
+    }
+  },
+  "demo_chain_manifest": {
+    "contract_version": "learning_mode_demo_chain_manifest_v1",
+    "demo_stage_order": [
+      "full_screen_understanding_numbered_regions",
+      "selection_map_precise_understanding",
+      "pathgraph_model_preview",
+      "template_like_page_detail"
+    ],
+    "chain_can_be_demoed": true,
+    "chain_is_final_goal_complete": false,
+    "final_goal_blockers": [
+      "official_candidate_not_fully_system_model_generated",
+      "pending_calibration_remaining"
+    ],
+    "steps": [
+      {
+        "ordinal": 1,
+        "stage_id": "full_screen_understanding_numbered_regions",
+        "status": "available",
+        "artifact_path": "logs/benchmarks/learn_full_screen_understanding_backlog_triage_preview_20260706/full_screen_understanding_overlay.png",
+        "artifact_exists": true,
+        "stage_ready_for_display": true,
+        "proof_fields": [
+          "artifact_sha256_prefix"
+        ],
+        "missing_proof_fields": [],
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "ordinal": 2,
+        "stage_id": "selection_map_precise_understanding",
+        "status": "available",
+        "artifact_path": "logs/benchmarks/learn_locator_card_execute_calibration_seek_full_20260705/numbered_region_calibration_overlay.png",
+        "artifact_exists": true,
+        "stage_ready_for_display": true,
+        "proof_fields": [
+          "artifact_sha256_prefix",
+          "region_count"
+        ],
+        "missing_proof_fields": [],
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "ordinal": 3,
+        "stage_id": "pathgraph_model_preview",
+        "status": "model_generated_preview_ready",
+        "artifact_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_7b471afc08/pathgraph_candidate/model_generated_pathgraph_preview/runtime_path_graph_model_preview.json",
+        "artifact_exists": true,
+        "stage_ready_for_display": true,
+        "proof_fields": [
+          "action_count",
+          "artifact_sha256_prefix",
+          "region_count"
+        ],
+        "missing_proof_fields": [],
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "ordinal": 4,
+        "stage_id": "template_like_page_detail",
+        "status": "available",
+        "artifact_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_7b471afc08/pathgraph_candidate/learn_page_detail_candidate.json",
+        "artifact_exists": true,
+        "stage_ready_for_display": true,
+        "proof_fields": [
+          "artifact_sha256_prefix",
+          "bbox_region_count",
+          "layout_mode",
+          "layout_section_count",
+          "operation_kinds",
+          "readiness_status"
+        ],
+        "missing_proof_fields": [],
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      }
+    ],
+    "interpretation": "Display-chain manifest for the interview demo. It proves the requested visual review chain is present and display-only; it does not authorize Execute, clicks, fills, submit, or Runtime PathGraph promotion."
+  },
+  "blocking_reasons": [
+    "official_candidate_not_fully_system_model_generated",
+    "pending_calibration_remaining"
+  ],
+  "next_action_status": "awaiting_explicit_model_start_approval",
+  "may_start_model_after_user_approval": true,
+  "may_run_without_user_approval": false,
+  "next_actions": [
+    {
+      "action_id": "request_explicit_model_start_approval",
+      "status": "required",
+      "reason": "pending_calibration_remaining",
+      "requires_user_approval": true,
+      "may_run_without_user_approval": false,
+      "ready_region_numbers": [
+        1,
+        2,
+        3,
+        6,
+        8,
+        9
+      ],
+      "pending_calibration_count": 6,
+      "safety": {
+        "starts_model_after_approval": true,
+        "live_clicks_allowed": false,
+        "live_fills_allowed": false,
+        "live_submits_allowed": false,
+        "execute_binding_enabled": false
+      }
+    },
+    {
+      "action_id": "run_pending_numbered_region_calibration_batch",
+      "status": "blocked_until_user_approval",
+      "requires_user_approval": true,
+      "may_run_without_user_approval": false,
+      "ready_region_numbers": [
+        1,
+        2,
+        3,
+        6,
+        8,
+        9
+      ],
+      "expected_output": "numbered_region_calibration_report.json",
+      "command_source_status": "ready",
+      "run_command_args": [
+        "uv",
+        "run",
+        "python",
+        "scripts\\run_numbered_region_calibration_probe.py",
+        "--tasks",
+        "D:\\agent-gui-runtime\\logs\\benchmarks\\learn_locator_card_execute_calibration_seek_full_20260705\\generated_numbered_region_tasks.json",
+        "--out",
+        "next_numbered_region_calibration",
+        "--regions",
+        "1,2,3,6,8,9"
+      ],
+      "run_command_preview": "uv run python scripts\\run_numbered_region_calibration_probe.py --tasks D:\\agent-gui-runtime\\logs\\benchmarks\\learn_locator_card_execute_calibration_seek_full_20260705\\generated_numbered_region_tasks.json --out next_numbered_region_calibration --regions 1,2,3,6,8,9",
+      "command_executes_now": false,
+      "requires_user_or_runner_to_start_model": true,
+      "start_model_flag_included": false,
+      "next_output_dir": "next_numbered_region_calibration",
+      "interpretation": "Run only after explicit approval to start the locate model; keep real clicks/fills/submits at zero."
+    },
+    {
+      "action_id": "refresh_scaffold_after_calibration",
+      "status": "blocked_until_calibration_output",
+      "requires_user_approval": false,
+      "may_run_without_user_approval": false,
+      "input_after_previous_step": "numbered_region_calibration_report.json",
+      "generated_artifacts_to_refresh": [
+        "precise_understanding_candidate",
+        "page_detail_candidate",
+        "model_generated_pathgraph_preview",
+        "learn_mode_demo_scaffold"
+      ],
+      "command_source_status": "ready",
+      "run_command_args": [
+        "uv",
+        "run",
+        "python",
+        "scripts\\refresh_learn_fusion_after_calibration_batch.py",
+        "--trial",
+        "logs/benchmarks/learn_pathgraph_readiness_with_handoff_20260706/actual_parser_output_with_fusion_status.json",
+        "--base-status",
+        "logs/benchmarks/learn_pathgraph_readiness_with_refresh_plan_20260706/refresh_base/learn_fusion_refresh_base_status.json",
+        "--rerun-report",
+        "next_numbered_region_calibration\\numbered_region_calibration_report.json",
+        "--out",
+        "post_batch_refresh"
+      ],
+      "run_command_preview": "uv run python scripts\\refresh_learn_fusion_after_calibration_batch.py --trial logs/benchmarks/learn_pathgraph_readiness_with_handoff_20260706/actual_parser_output_with_fusion_status.json --base-status logs/benchmarks/learn_pathgraph_readiness_with_refresh_plan_20260706/refresh_base/learn_fusion_refresh_base_status.json --rerun-report next_numbered_region_calibration\\numbered_region_calibration_report.json --out post_batch_refresh",
+      "command_executes_now": false,
+      "requires_completed_batch_output": true,
+      "start_model_flag_included": false,
+      "requires_user_or_runner_to_start_model": false,
+      "expected_rerun_report_path": "next_numbered_region_calibration\\numbered_region_calibration_report.json",
+      "next_output_dir": "post_batch_refresh"
+    },
+    {
+      "action_id": "replace_assisted_official_candidate_with_fresh_model_chain",
+      "status": "blocked_until_fresh_model_scaffold",
+      "requires_user_approval": true,
+      "may_run_without_user_approval": false,
+      "current_blocker": "mixed_actual_model_and_assisted_review_evidence",
+      "source_scaffold_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_7b471afc08/pathgraph_candidate/model_generated_pathgraph_preview/model_generated_pathgraph_preview.json",
+      "interpretation": "The model-only preview can be shown in demo, but the official candidate remains mixed until a fresh model chain replaces assisted/reviewed artifacts."
+    },
+    {
+      "action_id": "rerun_goal_readiness_audit",
+      "status": "blocked_until_scaffold_refresh",
+      "requires_user_approval": false,
+      "may_run_without_user_approval": false,
+      "expected_output": "learning_mode_demo_goal_readiness_report.json"
+    }
+  ],
+  "summary": {
+    "passed_requirement_count": 7,
+    "failed_requirement_count": 2,
+    "not_covered_requirement_count": 0
+  },
+  "requirements": [
+    {
+      "requirement_id": "full_screen_understanding_numbered_regions",
+      "status": "passed",
+      "evidence": {
+        "flow_status": "available"
+      }
+    },
+    {
+      "requirement_id": "selection_map_available",
+      "status": "passed",
+      "evidence": {
+        "precise_understanding_candidate_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_7b471afc08/pathgraph_candidate/learn_precise_understanding_candidate.json",
+        "pending_calibration_count": 6
+      }
+    },
+    {
+      "requirement_id": "pathgraph_preview_available",
+      "status": "passed",
+      "evidence": {
+        "preview_status": "model_generated_preview_ready",
+        "region_count": 10,
+        "action_count": 10
+      }
+    },
+    {
+      "requirement_id": "pathgraph_opens_page_detail",
+      "status": "passed",
+      "evidence": {
+        "pathgraph_detail_can_show_page_detail": true
+      }
+    },
+    {
+      "requirement_id": "template_like_page_detail_layout",
+      "status": "passed",
+      "evidence": {
+        "page_detail_section_count": 4,
+        "page_detail_possible_operation_count": 10,
+        "model_generated_page_detail_section_count": 4,
+        "model_generated_page_detail_possible_operation_count": 10,
+        "model_only_page_detail_section_count": 4,
+        "model_only_page_detail_possible_operation_count": 10
+      }
+    },
+    {
+      "requirement_id": "model_only_demo_chain_ready",
+      "status": "passed",
+      "evidence": {
+        "status": "model_only_demo_ready",
+        "preview_regions": 10,
+        "preview_actions": 10,
+        "page_sections": 4,
+        "page_ops": 10
+      }
+    },
+    {
+      "requirement_id": "official_candidate_fully_system_model_generated",
+      "status": "failed",
+      "evidence": {
+        "provenance_status": "mixed_actual_model_and_assisted_review_evidence",
+        "actual_model_call_evidence_count": 1,
+        "assisted_or_human_review_evidence_count": 2,
+        "blocking_reasons": [
+          "contains_assisted_or_human_review_evidence"
+        ]
+      }
+    },
+    {
+      "requirement_id": "pending_calibration_resolved",
+      "status": "failed",
+      "evidence": {
+        "precise_pending_calibration_count": 6
+      }
+    },
+    {
+      "requirement_id": "no_execute_no_submit_safety",
+      "status": "passed",
+      "evidence": {
+        "model_started": false,
+        "live_clicks": 0,
+        "live_fills": 0,
+        "live_submits": 0,
+        "execute_binding_enabled": false,
+        "runtime_pathgraph_promotion": false
+      }
+    }
+  ],
+  "safety": {
+    "display_only": true,
+    "model_started": false,
+    "live_clicks": 0,
+    "live_fills": 0,
+    "live_submits": 0,
+    "execute_binding_enabled": false,
+    "runtime_pathgraph_promotion": false,
+    "artifact_is_authorization": false
+  },
+  "interpretation": "Goal-level demo readiness audit. A display-ready model-only PathGraph/page-detail preview is useful for demo review, but the final Learning Mode goal is not complete until the official candidate chain is fully system-model generated, pending calibration is resolved, and safety remains no-execute/no-submit.",
+  "report_path": "D:\\agent-gui-runtime\\artifacts\\learning-draft-review\\actual_parser_output_with_fusion_status_7b471afc08\\pathgraph_candidate\\learning_mode_demo_goal_readiness_report.json"
+}

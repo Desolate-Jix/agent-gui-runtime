@@ -15,9 +15,9 @@
       "model_path": "models/vista-4b-safetensors"
     },
     "local_understanding": {
-      "model_name": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
-      "endpoint": "http://127.0.0.1:1241/v1/chat/completions",
-      "profile_id": "qwen3_vl_4b_q4_k_m"
+      "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+      "endpoint": "http://127.0.0.1:1240/v1/chat/completions",
+      "profile_id": "qwen3_vl_8b_q4_k_m"
     },
     "local_grounding": {
       "model_name": "inclusionAI/VISTA-4B",

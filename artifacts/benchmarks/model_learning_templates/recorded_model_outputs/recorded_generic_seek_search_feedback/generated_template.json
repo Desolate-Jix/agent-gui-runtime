@@ -1,0 +1,63 @@
+{
+  "contract_version": "learning_template_draft_v1",
+  "image_size": {
+    "width": 460,
+    "height": 78
+  },
+  "learning_source": "observe_model",
+  "screen_summary": "A job search input bar with placeholder text 'All jobs • All Auckland' and a magnifying glass icon.",
+  "state_guess": "search input crop",
+  "workflow_draft": {
+    "states": [
+      {
+        "state_id": "s1",
+        "label": "search input surface",
+        "page_type": "job_search"
+      }
+    ],
+    "transitions": [],
+    "action_templates": [
+      {
+        "action_template_id": "a1",
+        "label": "enter search query",
+        "semantic_action": "type_text",
+        "risk_level": "low",
+        "requires_gate": true,
+        "expected_effect": "populate search field with user input"
+      }
+    ],
+    "path_patterns": []
+  },
+  "interface_draft": {
+    "regions": [
+      {
+        "region_id": "r1",
+        "label": "search input bar",
+        "role": "job search field"
+      }
+    ],
+    "visual_assets": [],
+    "dynamic_areas": [],
+    "danger_zones": []
+  },
+  "agent_decision_points": [],
+  "operation_skills": [],
+  "gate_contracts": [],
+  "safety": {
+    "observation_only": true,
+    "promotion_allowed": false,
+    "final_submit_blocked": true,
+    "real_clicks_performed": 0
+  },
+  "notes": [],
+  "provider": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+  "regions": [],
+  "targets": [],
+  "observers": [],
+  "model_name": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+  "_source_tracking": {
+    "template_source": "recorded_model_output",
+    "model_generated": true,
+    "source_trial_path": "artifacts/learning-runs/generic_model_trial_feedback_20260701-192334/trial_result.json"
+  }
+}

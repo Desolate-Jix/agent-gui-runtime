@@ -1,0 +1,44 @@
+{
+  "contract_version": "learning_template_draft_v1",
+  "image_size": {"width": 256, "height": 43},
+  "learning_source": "observe_model",
+  "screen_summary": "A job search input field showing 'All jobs • All Auckland' with a magnifying glass icon.",
+  "state_guess": "job_search_initial",
+  "workflow_draft": {
+    "states": [{"state_id":"s1","label":"job_search_initial","page_type":"search_page"}],
+    "transitions": [],
+    "action_templates": [
+      {
+        "action_template_id":"a1",
+        "label":"type_job_query",
+        "semantic_action":"type_text",
+        "risk_level":"low",
+        "requires_gate":true,
+        "expected_effect":"populate search field with job query"
+      }
+    ],
+    "path_patterns": []
+  },
+  "interface_draft": {
+    "regions": [
+      {
+        "region_id":"r1",
+        "label":"search_input_field",
+        "role":"text_input"
+      }
+    ],
+    "visual_assets": [],
+    "dynamic_areas": [],
+    "danger_zones": []
+  },
+  "agent_decision_points": [],
+  "operation_skills": [],
+  "gate_contracts": [],
+  "safety": {
+    "observation_only": true,
+    "promotion_allowed": false,
+    "final_submit_blocked": true,
+    "real_clicks_performed": 0
+  },
+  "notes": []
+}

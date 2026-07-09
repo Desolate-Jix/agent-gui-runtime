@@ -1,0 +1,751 @@
+{
+  "dry_run": false,
+  "delivery_status": "send_click_attempted_unverified",
+  "send_click_attempted": true,
+  "sent": false,
+  "sent_field_semantics": "true only after an external post-send verification; fixed-point click alone is not sent",
+  "post_send_verification": {
+    "post_send_verified": false,
+    "verification_required": true,
+    "expected_latest_user_image_count": 2,
+    "verification_methods": [
+      "ChatGPT DOM latest user message contains the prompt token and expected image count",
+      "visible ChatGPT thread shows the newly submitted user message"
+    ],
+    "false_positive_guard": "A calibrated send click is not proof that GPT received the message; do not treat send_click_attempted as reviewed or delivered without a post-send check."
+  },
+  "window": {
+    "handle": 1115686,
+    "title": "Codex",
+    "process_id": 4728,
+    "process_name": "Codex.exe",
+    "rect": {
+      "left": 1027,
+      "top": 128,
+      "right": 2395,
+      "bottom": 1300
+    },
+    "is_active": true
+  },
+  "prompt_length": 2934,
+  "image_count": 2,
+  "flow_preset": "codex_split_20260708",
+  "fixed_flow_steps": [
+    "bind visible Codex window",
+    "framework click GPT composer before any paste",
+    "clear stale text and attachment slots",
+    "framework click GPT composer again",
+    "paste prompt text through InputController.type_text without hidden retargeting",
+    "for each image: framework click GPT composer, then paste image through InputController.paste_image",
+    "framework click calibrated GPT send button and mark send_click_attempted only"
+  ],
+  "planned_action_sequence": [
+    {
+      "step": "click_gpt_composer_before_prompt",
+      "target": "gpt_composer",
+      "required_before": "paste_prompt_text"
+    },
+    {
+      "step": "clear_existing_attachment_slots",
+      "target": "attachment_remove_slots",
+      "order": "right_to_left"
+    },
+    {
+      "step": "click_gpt_composer_after_attachment_clear",
+      "target": "gpt_composer",
+      "required_before": "paste_prompt_text"
+    },
+    {
+      "step": "paste_prompt_text",
+      "target": "current_focus",
+      "hidden_click_before_typing": false,
+      "must_follow": "click_gpt_composer_before_prompt"
+    },
+    {
+      "step": "click_gpt_composer_before_image",
+      "target": "gpt_composer",
+      "image_index": 1,
+      "required_before": "paste_image"
+    },
+    {
+      "step": "paste_image",
+      "target": "current_focus",
+      "image_index": 1,
+      "focus_bound_window": false,
+      "must_follow": "click_gpt_composer_before_image"
+    },
+    {
+      "step": "click_gpt_composer_before_image",
+      "target": "gpt_composer",
+      "image_index": 2,
+      "required_before": "paste_image"
+    },
+    {
+      "step": "paste_image",
+      "target": "current_focus",
+      "image_index": 2,
+      "focus_bound_window": false,
+      "must_follow": "click_gpt_composer_before_image"
+    },
+    {
+      "step": "click_gpt_send",
+      "target": "gpt_send_button",
+      "post_send_verified": false
+    }
+  ],
+  "actual_action_sequence": [
+    {
+      "step": "click_gpt_composer_before_prompt",
+      "target": "gpt_composer"
+    },
+    {
+      "step": "clear_existing_attachment_slot",
+      "target": "attachment_remove_slot",
+      "point": {
+        "x": 1221,
+        "y": 598
+      }
+    },
+    {
+      "step": "clear_existing_attachment_slot",
+      "target": "attachment_remove_slot",
+      "point": {
+        "x": 1157,
+        "y": 598
+      }
+    },
+    {
+      "step": "clear_existing_attachment_slot",
+      "target": "attachment_remove_slot",
+      "point": {
+        "x": 1093,
+        "y": 598
+      }
+    },
+    {
+      "step": "clear_existing_attachment_slot",
+      "target": "attachment_remove_slot",
+      "point": {
+        "x": 1029,
+        "y": 598
+      }
+    },
+    {
+      "step": "click_gpt_composer_after_attachment_clear",
+      "target": "gpt_composer"
+    },
+    {
+      "step": "paste_prompt_text",
+      "target": "current_focus",
+      "hidden_click_before_typing": false
+    },
+    {
+      "step": "click_gpt_composer_before_image",
+      "target": "gpt_composer",
+      "image_index": 1
+    },
+    {
+      "step": "paste_image",
+      "target": "current_focus",
+      "image_index": 1,
+      "focus_bound_window": false,
+      "image_path": "artifacts\\review-overlays\\apple-music__observe-screen__applemusic__full-window__20260709-213451-850178__two-stage-understanding__20260709-213518-795451.png"
+    },
+    {
+      "step": "click_gpt_composer_before_image",
+      "target": "gpt_composer",
+      "image_index": 2
+    },
+    {
+      "step": "paste_image",
+      "target": "current_focus",
+      "image_index": 2,
+      "focus_bound_window": false,
+      "image_path": "logs\\benchmarks\\learn_panel_flow_completion_fix_applemusic_page_detail\\learn_page_detail_candidate_preview.png"
+    },
+    {
+      "step": "click_gpt_send",
+      "target": "gpt_send_button",
+      "post_send_verified": false
+    }
+  ],
+  "actions": [
+    {
+      "step": "focus_composer_before_prompt",
+      "result": {
+        "clicked": true,
+        "input_backend": "SendInput",
+        "window_point": {
+          "x": 1105,
+          "y": 1117
+        },
+        "screen_point": {
+          "x": 2132,
+          "y": 1245
+        },
+        "window_handle": 1115686,
+        "window_title": "Codex",
+        "button": "left",
+        "foreground_before": 1115686,
+        "foreground_after": 1115686,
+        "set_foreground_ok": true,
+        "cursor_before": {
+          "x": 1883,
+          "y": 871
+        },
+        "cursor_after": {
+          "x": 2132,
+          "y": 1245
+        },
+        "move_before_click": true,
+        "settle_ms": 250,
+        "hold_ms": 80,
+        "move": {
+          "performed": true,
+          "cursor_after_move": {
+            "x": 2132,
+            "y": 1245
+          }
+        },
+        "down": {
+          "button": "left",
+          "state": "down",
+          "cursor": {
+            "x": 2132,
+            "y": 1245
+          }
+        },
+        "up": {
+          "button": "left",
+          "state": "up",
+          "cursor": {
+            "x": 2132,
+            "y": 1245
+          }
+        }
+      }
+    },
+    {
+      "step": "remove_attachment_slot",
+      "point": {
+        "x": 1221,
+        "y": 598
+      },
+      "result": {
+        "clicked": true,
+        "input_backend": "SendInput",
+        "window_point": {
+          "x": 1221,
+          "y": 598
+        },
+        "screen_point": {
+          "x": 2248,
+          "y": 726
+        },
+        "window_handle": 1115686,
+        "window_title": "Codex",
+        "button": "left",
+        "foreground_before": 1115686,
+        "foreground_after": 1115686,
+        "set_foreground_ok": true,
+        "cursor_before": {
+          "x": 2132,
+          "y": 1245
+        },
+        "cursor_after": {
+          "x": 2248,
+          "y": 726
+        },
+        "move_before_click": true,
+        "settle_ms": 250,
+        "hold_ms": 60,
+        "move": {
+          "performed": true,
+          "cursor_after_move": {
+            "x": 2248,
+            "y": 726
+          }
+        },
+        "down": {
+          "button": "left",
+          "state": "down",
+          "cursor": {
+            "x": 2248,
+            "y": 726
+          }
+        },
+        "up": {
+          "button": "left",
+          "state": "up",
+          "cursor": {
+            "x": 2248,
+            "y": 726
+          }
+        }
+      }
+    },
+    {
+      "step": "remove_attachment_slot",
+      "point": {
+        "x": 1157,
+        "y": 598
+      },
+      "result": {
+        "clicked": true,
+        "input_backend": "SendInput",
+        "window_point": {
+          "x": 1157,
+          "y": 598
+        },
+        "screen_point": {
+          "x": 2184,
+          "y": 726
+        },
+        "window_handle": 1115686,
+        "window_title": "Codex",
+        "button": "left",
+        "foreground_before": 1115686,
+        "foreground_after": 1115686,
+        "set_foreground_ok": true,
+        "cursor_before": {
+          "x": 2248,
+          "y": 726
+        },
+        "cursor_after": {
+          "x": 2184,
+          "y": 726
+        },
+        "move_before_click": true,
+        "settle_ms": 250,
+        "hold_ms": 60,
+        "move": {
+          "performed": true,
+          "cursor_after_move": {
+            "x": 2184,
+            "y": 726
+          }
+        },
+        "down": {
+          "button": "left",
+          "state": "down",
+          "cursor": {
+            "x": 2184,
+            "y": 726
+          }
+        },
+        "up": {
+          "button": "left",
+          "state": "up",
+          "cursor": {
+            "x": 2184,
+            "y": 726
+          }
+        }
+      }
+    },
+    {
+      "step": "remove_attachment_slot",
+      "point": {
+        "x": 1093,
+        "y": 598
+      },
+      "result": {
+        "clicked": true,
+        "input_backend": "SendInput",
+        "window_point": {
+          "x": 1093,
+          "y": 598
+        },
+        "screen_point": {
+          "x": 2120,
+          "y": 726
+        },
+        "window_handle": 1115686,
+        "window_title": "Codex",
+        "button": "left",
+        "foreground_before": 1115686,
+        "foreground_after": 1115686,
+        "set_foreground_ok": true,
+        "cursor_before": {
+          "x": 2184,
+          "y": 726
+        },
+        "cursor_after": {
+          "x": 2120,
+          "y": 726
+        },
+        "move_before_click": true,
+        "settle_ms": 250,
+        "hold_ms": 60,
+        "move": {
+          "performed": true,
+          "cursor_after_move": {
+            "x": 2120,
+            "y": 726
+          }
+        },
+        "down": {
+          "button": "left",
+          "state": "down",
+          "cursor": {
+            "x": 2120,
+            "y": 726
+          }
+        },
+        "up": {
+          "button": "left",
+          "state": "up",
+          "cursor": {
+            "x": 2120,
+            "y": 726
+          }
+        }
+      }
+    },
+    {
+      "step": "remove_attachment_slot",
+      "point": {
+        "x": 1029,
+        "y": 598
+      },
+      "result": {
+        "clicked": true,
+        "input_backend": "SendInput",
+        "window_point": {
+          "x": 1029,
+          "y": 598
+        },
+        "screen_point": {
+          "x": 2056,
+          "y": 726
+        },
+        "window_handle": 1115686,
+        "window_title": "Codex",
+        "button": "left",
+        "foreground_before": 1115686,
+        "foreground_after": 1115686,
+        "set_foreground_ok": true,
+        "cursor_before": {
+          "x": 2120,
+          "y": 726
+        },
+        "cursor_after": {
+          "x": 2056,
+          "y": 726
+        },
+        "move_before_click": true,
+        "settle_ms": 250,
+        "hold_ms": 60,
+        "move": {
+          "performed": true,
+          "cursor_after_move": {
+            "x": 2056,
+            "y": 726
+          }
+        },
+        "down": {
+          "button": "left",
+          "state": "down",
+          "cursor": {
+            "x": 2056,
+            "y": 726
+          }
+        },
+        "up": {
+          "button": "left",
+          "state": "up",
+          "cursor": {
+            "x": 2056,
+            "y": 726
+          }
+        }
+      }
+    },
+    {
+      "step": "refocus_composer_after_attachment_clear",
+      "result": {
+        "clicked": true,
+        "input_backend": "SendInput",
+        "window_point": {
+          "x": 1105,
+          "y": 1117
+        },
+        "screen_point": {
+          "x": 2132,
+          "y": 1245
+        },
+        "window_handle": 1115686,
+        "window_title": "Codex",
+        "button": "left",
+        "foreground_before": 1115686,
+        "foreground_after": 1115686,
+        "set_foreground_ok": true,
+        "cursor_before": {
+          "x": 2056,
+          "y": 726
+        },
+        "cursor_after": {
+          "x": 2132,
+          "y": 1245
+        },
+        "move_before_click": true,
+        "settle_ms": 250,
+        "hold_ms": 80,
+        "move": {
+          "performed": true,
+          "cursor_after_move": {
+            "x": 2132,
+            "y": 1245
+          }
+        },
+        "down": {
+          "button": "left",
+          "state": "down",
+          "cursor": {
+            "x": 2132,
+            "y": 1245
+          }
+        },
+        "up": {
+          "button": "left",
+          "state": "up",
+          "cursor": {
+            "x": 2132,
+            "y": 1245
+          }
+        }
+      }
+    },
+    {
+      "step": "paste_prompt_after_framework_composer_click",
+      "result": {
+        "typed": true,
+        "input_backend": "SendInput+clipboard",
+        "window_handle": 1115686,
+        "window_title": "Codex",
+        "text_length": 2934,
+        "click_before_typing": false,
+        "click_result": null,
+        "clear_existing": true,
+        "submit": false,
+        "restore_clipboard": false,
+        "clipboard_verified_before_paste": true,
+        "clipboard_verify_attempts": 1,
+        "clipboard_paste_settle_ms": 150
+      }
+    },
+    {
+      "step": "refocus_composer_before_image",
+      "image_index": 1,
+      "result": {
+        "clicked": true,
+        "input_backend": "SendInput",
+        "window_point": {
+          "x": 1105,
+          "y": 1117
+        },
+        "screen_point": {
+          "x": 2132,
+          "y": 1245
+        },
+        "window_handle": 1115686,
+        "window_title": "Codex",
+        "button": "left",
+        "foreground_before": 1115686,
+        "foreground_after": 1115686,
+        "set_foreground_ok": true,
+        "cursor_before": {
+          "x": 2132,
+          "y": 1245
+        },
+        "cursor_after": {
+          "x": 2132,
+          "y": 1245
+        },
+        "move_before_click": true,
+        "settle_ms": 250,
+        "hold_ms": 80,
+        "move": {
+          "performed": true,
+          "cursor_after_move": {
+            "x": 2132,
+            "y": 1245
+          }
+        },
+        "down": {
+          "button": "left",
+          "state": "down",
+          "cursor": {
+            "x": 2132,
+            "y": 1245
+          }
+        },
+        "up": {
+          "button": "left",
+          "state": "up",
+          "cursor": {
+            "x": 2132,
+            "y": 1245
+          }
+        }
+      }
+    },
+    {
+      "step": "paste_image",
+      "image_index": 1,
+      "image_path": "artifacts\\review-overlays\\apple-music__observe-screen__applemusic__full-window__20260709-213451-850178__two-stage-understanding__20260709-213518-795451.png",
+      "result": {
+        "pasted": true,
+        "input_backend": "SendInput+clipboard_image",
+        "image_path": "artifacts\\review-overlays\\apple-music__observe-screen__applemusic__full-window__20260709-213451-850178__two-stage-understanding__20260709-213518-795451.png",
+        "image_bytes": 579653,
+        "dib_bytes": 3481360,
+        "focus_bound_window": false,
+        "window_handle": null,
+        "window_title": null,
+        "restore_clipboard_text": false,
+        "clipboard_format": "CF_DIB",
+        "clipboard_paste_settle_ms": 1500
+      }
+    },
+    {
+      "step": "refocus_composer_before_image",
+      "image_index": 2,
+      "result": {
+        "clicked": true,
+        "input_backend": "SendInput",
+        "window_point": {
+          "x": 1105,
+          "y": 1117
+        },
+        "screen_point": {
+          "x": 2132,
+          "y": 1245
+        },
+        "window_handle": 1115686,
+        "window_title": "Codex",
+        "button": "left",
+        "foreground_before": 1115686,
+        "foreground_after": 1115686,
+        "set_foreground_ok": true,
+        "cursor_before": {
+          "x": 2132,
+          "y": 1245
+        },
+        "cursor_after": {
+          "x": 2132,
+          "y": 1245
+        },
+        "move_before_click": true,
+        "settle_ms": 250,
+        "hold_ms": 80,
+        "move": {
+          "performed": true,
+          "cursor_after_move": {
+            "x": 2132,
+            "y": 1245
+          }
+        },
+        "down": {
+          "button": "left",
+          "state": "down",
+          "cursor": {
+            "x": 2132,
+            "y": 1245
+          }
+        },
+        "up": {
+          "button": "left",
+          "state": "up",
+          "cursor": {
+            "x": 2132,
+            "y": 1245
+          }
+        }
+      }
+    },
+    {
+      "step": "paste_image",
+      "image_index": 2,
+      "image_path": "logs\\benchmarks\\learn_panel_flow_completion_fix_applemusic_page_detail\\learn_page_detail_candidate_preview.png",
+      "result": {
+        "pasted": true,
+        "input_backend": "SendInput+clipboard_image",
+        "image_path": "logs\\benchmarks\\learn_panel_flow_completion_fix_applemusic_page_detail\\learn_page_detail_candidate_preview.png",
+        "image_bytes": 20676,
+        "dib_bytes": 2432488,
+        "focus_bound_window": false,
+        "window_handle": null,
+        "window_title": null,
+        "restore_clipboard_text": false,
+        "clipboard_format": "CF_DIB",
+        "clipboard_paste_settle_ms": 1500
+      }
+    },
+    {
+      "step": "click_send",
+      "result": {
+        "clicked": true,
+        "input_backend": "SendInput",
+        "window_point": {
+          "x": 1310,
+          "y": 1108
+        },
+        "screen_point": {
+          "x": 2337,
+          "y": 1236
+        },
+        "window_handle": 1115686,
+        "window_title": "Codex",
+        "button": "left",
+        "foreground_before": 1115686,
+        "foreground_after": 1115686,
+        "set_foreground_ok": true,
+        "cursor_before": {
+          "x": 2132,
+          "y": 1245
+        },
+        "cursor_after": {
+          "x": 2337,
+          "y": 1236
+        },
+        "move_before_click": true,
+        "settle_ms": 250,
+        "hold_ms": 80,
+        "move": {
+          "performed": true,
+          "cursor_after_move": {
+            "x": 2337,
+            "y": 1236
+          }
+        },
+        "down": {
+          "button": "left",
+          "state": "down",
+          "cursor": {
+            "x": 2337,
+            "y": 1236
+          }
+        },
+        "up": {
+          "button": "left",
+          "state": "up",
+          "cursor": {
+            "x": 2337,
+            "y": 1236
+          }
+        }
+      }
+    }
+  ],
+  "postcondition": "Use ChatGPT DOM/status check to verify latest user message prompt token and image count. This script handles fixed-point click/paste/send-click flow only.",
+  "focus_contract": {
+    "strict_composer_focus": true,
+    "prompt": "framework_click_composer_then_clipboard_paste_text",
+    "prompt_hidden_click_before_typing": false,
+    "images": "framework_click_composer_before_each_clipboard_image_paste",
+    "fixed_flow_refocus_before_each_image_forced": true,
+    "send": "explicit_calibrated_send_point_required",
+    "delivery": "send_click_attempted_requires_external_chatgpt_dom_or_visible_thread_verification"
+  }
+}

@@ -129,6 +129,8 @@ def _score_element(
     text_similarity = max(base_text_similarity, screen_text_similarity)
     explicit_label_match = _goal_explicitly_requests_element_label(goal, element)
     negated_label_match = _goal_negates_element_label(goal, element)
+    goal_action_terms = _explicit_goal_action_terms(goal)
+    element_action_terms = _element_action_terms(element)
     role_score = _role_score(element)
     policy_score = _policy_score(element)
     confidence_score = _confidence_score(element)
@@ -157,6 +159,18 @@ def _score_element(
     elif explicit_label_match:
         text_similarity = max(text_similarity, 0.9)
         reasons.append("goal_explicitly_mentions_candidate_label")
+
+    if goal_action_terms:
+        if element_action_terms & goal_action_terms:
+            text_similarity = max(text_similarity, 0.95)
+            role_score = max(role_score, 0.95)
+            policy_score = max(policy_score, 0.85)
+            screen_reading_score = max(screen_reading_score, 0.65)
+            reasons.append("explicit_action_target_match")
+        else:
+            text_similarity = min(text_similarity, 0.36)
+            screen_reading_score = min(screen_reading_score, 0.35)
+            reasons.append("explicit_action_target_mismatch")
 
     if text_entry_goal:
         if _is_text_entry_element(element):
@@ -238,6 +252,55 @@ def _goal_requests_text_entry(goal: str) -> bool:
             "\u5b57\u6bb5",
         )
     )
+
+
+def _explicit_goal_action_terms(goal: str) -> set[str]:
+    goal_text = _normalize_text(goal)
+    term_groups = {
+        "apply": ["apply", "quick apply", "申请"],
+        "continue": ["continue", "next", "下一步", "继续"],
+        "submit": ["submit", "send", "confirm", "提交", "发送", "确认"],
+        "save": ["save", "saved", "保存", "收藏"],
+        "search": ["search", "find", "搜索", "查找"],
+        "filter": ["filter", "refine", "pay", "date listed", "classification", "筛选"],
+    }
+    terms: set[str] = set()
+    for canonical, values in term_groups.items():
+        for value in values:
+            term = _normalize_text(value)
+            if not term:
+                continue
+            for match in re.finditer(rf"(?<!\w){re.escape(term)}(?!\w)", goal_text):
+                before = goal_text[max(0, match.start() - 90) : match.start()].strip()
+                if not _negates_action_term(before):
+                    terms.add(canonical)
+                    break
+    return terms
+
+
+def _negates_action_term(preceding_text: str) -> bool:
+    if _negates_next_click_target(preceding_text):
+        return True
+    words = preceding_text.split()
+    tail = " ".join(words[-14:])
+    return bool(re.search(r"\b(do not|don t|dont|never|not|avoid|exclude|excluding|forbid|forbidden)\b", tail))
+
+
+def _element_action_terms(element: PageElement) -> set[str]:
+    text = _normalize_text(" ".join(_element_text_values(element)))
+    term_groups = {
+        "apply": ["apply", "quick apply", "申请"],
+        "continue": ["continue", "next", "下一步", "继续"],
+        "submit": ["submit", "send", "confirm", "提交", "发送", "确认"],
+        "save": ["save", "saved", "保存", "收藏"],
+        "search": ["search", "find", "搜索", "查找"],
+        "filter": ["filter", "refine", "pay", "date listed", "classification", "筛选"],
+    }
+    terms: set[str] = set()
+    for canonical, values in term_groups.items():
+        if any(_normalize_text(value) in text for value in values):
+            terms.add(canonical)
+    return terms
 
 
 def _is_text_entry_element(element: PageElement) -> bool:

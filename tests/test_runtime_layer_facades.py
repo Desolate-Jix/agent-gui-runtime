@@ -62,17 +62,61 @@ def test_operation_layer_catalog_maps_seek_profile_skills() -> None:
     catalog = build_operation_skill_catalog("seek")
     skills = {item["skill_id"]: item for item in catalog["skills"]}
 
-    assert catalog["contract_version"] == "operation_skill_catalog_v1"
+    assert catalog["contract_version"] == "operation_skill_catalog_v2"
+    assert catalog["skill_contract_version"] == "operation_skill_v2"
+    assert catalog["decision_model"] == "agent_decides_gate_authorizes_operation_executes"
+    assert catalog["path_graph_policy"] == "guidance_only_not_authorization"
     assert catalog["app_id"] == "seek"
     assert skills["open_apply_entry"]["base_skill_id"] == "open_apply_flow"
+    assert skills["open_apply_entry"]["profile_skill_id"] == "open_apply_entry"
+    assert "open_apply_flow" in skills["open_apply_entry"]["semantic_actions"]
+    assert "open_apply_entry" in skills["open_apply_entry"]["semantic_actions"]
+    assert skills["open_apply_entry"]["authorization_contract"]["requires_gate_decision_id"] is True
+    assert "job_suitability" in skills["open_apply_entry"]["decision_boundary"]["skill_must_not_decide"]
+    assert "final_submit_approval" in skills["open_apply_entry"]["decision_boundary"]["skill_must_not_decide"]
     assert skills["read_full_job_detail"]["base_skill_id"] == "read_full_page"
     assert skills["observe_screen"]["requires_gate"] is False
 
 
 def test_operation_layer_base_catalog_contains_framework_skills() -> None:
-    skills = {item["skill_id"] for item in list_operation_skills()}
+    skills = {item["skill_id"]: item for item in list_operation_skills()}
 
     assert {"observe_screen", "locate_element", "click_target", "type_text", "scroll_region", "read_region"}.issubset(skills)
+    assert all(item["contract_version"] == "operation_skill_v2" for item in skills.values())
+    assert all(item["input_contract"]["freshness_policy"] == "current_capture_required_for_coordinates" for item in skills.values())
+    assert "POST /session/bind_window" in skills["bind_window"]["maps_to_apis"]
+    assert "POST /vision/ocr_region" in skills["read_region"]["maps_to_apis"]
+
+
+def test_operation_layer_click_skill_requires_current_capture_gate_and_trace() -> None:
+    skills = {item["skill_id"]: item for item in list_operation_skills()}
+    click = skills["click_target"]
+
+    assert click["side_effect_class"] == "navigation"
+    assert click["requires_gate"] is True
+    assert {"authorized_intent_id", "gate_decision_id", "capture_id", "viewport_size", "window_binding_id"}.issubset(
+        set(click["input_contract"]["required_fields"])
+    )
+    assert click["authorization_contract"]["requires_authorized_intent_id"] is True
+    assert click["authorization_contract"]["requires_gate_decision_id"] is True
+    assert "click_authorization" in click["authorization_contract"]["path_graph_must_not_provide"]
+    assert {"gate_decision_id", "capture_id", "window_binding_id"}.issubset(
+        set(click["trace_contract"]["required_event_fields"])
+    )
+
+
+def test_operation_layer_observe_skill_is_read_only_without_gate_decision() -> None:
+    skills = {item["skill_id"]: item for item in list_operation_skills()}
+    observe = skills["observe_screen"]
+
+    assert observe["side_effect_class"] == "read_only"
+    assert observe["requires_gate"] is False
+    assert observe["authorization_contract"]["requires_authorized_intent_id"] is True
+    assert observe["authorization_contract"]["requires_gate_decision_id"] is False
+    assert "gate_decision_id" not in observe["trace_contract"]["required_event_fields"]
+    assert {"capture_id", "viewport_size", "screen_summary", "screen_inventory"}.issubset(
+        set(observe["output_contract"]["required_fields"])
+    )
 
 
 def test_operation_layer_runs_region_click_without_action_api_dependency(tmp_path, monkeypatch) -> None:
@@ -249,7 +293,8 @@ def test_runtime_architecture_and_operation_skill_routes() -> None:
     assert skills_response.status_code == 200
     skills_payload = skills_response.json()
     assert skills_payload["success"] is True
-    assert skills_payload["data"]["contract_version"] == "operation_skill_catalog_v1"
+    assert skills_payload["data"]["contract_version"] == "operation_skill_catalog_v2"
+    assert skills_payload["data"]["decision_model"] == "agent_decides_gate_authorizes_operation_executes"
     assert any(item["skill_id"] == "open_apply_entry" for item in skills_payload["data"]["skills"])
 
     gates_response = client.get("/runtime/gate_contracts", params={"app_id": "seek"})

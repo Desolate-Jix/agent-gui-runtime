@@ -1,0 +1,24 @@
+{
+  "contract_version": "chatgpt_visual_audit_result_v1",
+  "source": "chatgpt_in_app_browser_dom_verified",
+  "thread_url": "https://chatgpt.com/c/6a313e9c-e2d4-83e8-b487-83e69eb0ff58",
+  "latest_user_index": 101,
+  "latest_user_image_count": 3,
+  "assistant_index": 102,
+  "audit_target": "learn_two_stage_v98_page_detail_sections",
+  "verdicts": {
+    "applemusic": "PASS",
+    "qq": "CONDITIONAL PASS",
+    "python": "CONDITIONAL PASS"
+  },
+  "allowed_next_step": "panel page_details / read-only PathGraph preview display-only integration",
+  "constraints": [
+    "display-only / review-only",
+    "no accuracy claim",
+    "no Runtime PathGraph executable claim",
+    "no Execute authorization",
+    "no click safety or E2E success claim"
+  ],
+  "summary": "GPT accepted AppleMusic as a protection sample, accepted QQ/Python conditionally for display-only preview, and noted Python Hero overlap still needs future cleanup.",
+  "raw_reply_excerpt": "AppleMusic: PASS; QQ: CONDITIONAL PASS; Python: CONDITIONAL PASS. Allowed to enter panel page_details / read-only PathGraph preview only as display-only / review-only."
+}

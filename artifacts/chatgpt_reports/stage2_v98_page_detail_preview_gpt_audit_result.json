@@ -1,0 +1,38 @@
+{
+  "contract_version": "chatgpt_visual_audit_result_v1",
+  "audit_id": "stage2_v98_page_detail_preview_gpt_audit",
+  "saved_at": "2026-07-09T06:40:49.825Z",
+  "chatgpt_url": "https://chatgpt.com/c/6a313e9c-e2d4-83e8-b487-83e69eb0ff58",
+  "chatgpt_title": "Windows GUI agent 滚动方案",
+  "latest_user_message": {
+    "idx": 101,
+    "imageCount": 3,
+    "role": "user",
+    "text": "请审核这三张 Learning Mode v98 page-detail/path-preview 图。它们不是执行授权，也不是准确率宣传，只用于检查学习草稿的界面详情/只读路径图预览是否继承了栏定位和内容精修结果。\n\n审核目标：\n1. 栏 section 框是否能表达页面结构：左栏/顶栏/主栏/右栏等位置是否对应原界面布局。\n2. 内容 region 是否落在对应栏 section 内，是否还有明显越界或父子关系错误。\n3. AppleMusic 是否保住之前识别完整的卡片和左/顶/主栏结构，没有被 Python/QQ 修复污染。\n4. QQ 最右群友栏是否仍然覆盖到底部成员，至少能看到 Ad astra / ADaChi / Aeonoo / Airhead 等后段成员。\n5. Python 是否比之前少了大面积互相遮挡，page-detail 预览是否已经继承 fusion 清理结果，而不是重新显示 raw stage2 的所有细碎文本框。\n6. 这三张图是否可以继续接入学习草稿的界面详情和只读 PathGraph 预览展示。\n\n请按下面格式输出：\n- AppleMusic: PASS / CONDITIONAL PASS / FAIL，原因和剩余问题\n- QQ: PASS / CONDITIONAL PASS / FAIL，原因和剩余问题\n- Python: PASS / CONDITIONAL PASS / FAIL，原因和剩余问题\n- 是否允许进入下一步：接入面板里的 page_details / read-only PathGraph preview\n- 不允许宣传：不要说准确率、不要说 Runtime PathGraph 已可执行、不要说 Execute 授权\n展开"
+  },
+  "latest_assistant_message": {
+    "idx": 102,
+    "imageCount": 0,
+    "role": "assistant",
+    "text": "AppleMusic: PASS\n\n原因\n\n左侧栏、顶栏、主内容区的结构关系保住了。\n\n顶栏 controls 仍在顶栏内，没有压进主内容。\n\n左侧栏 nav / sidebar background 没有明显跑进主区。\n\n主内容里第一排、第二排 media card row 都还在对应 section 内。\n\n红星 / Favorite Songs 卡片已经作为完整 card slot 显示，不再是明显 incomplete 小框。\n\n底部 partial visible cards 仍保持 partial 状态，没有误提升成完整卡片。\n\n剩余问题\n\n这是抽象 page-detail/path-preview 风格图，实际图片内容被网格/占位表达后，可读性不如真实 overlay。\n\n左侧 sidebar background 仍很长，但没有越界。\n\n顶栏控件仍偏密，但不阻塞 page-detail 草稿展示。\n\n结论\n\nAppleMusic 可以作为当前 page_details / read-only PathGraph preview 的保护集展示样本。\n\nQQ: CONDITIONAL PASS\n\n原因\n\n左侧导航、会话列表、消息线程、右侧公告/成员栏、底部工具区的整体结构基本保住。\n\n右侧群友栏明显覆盖到后段成员，包括 Ad astra / ADaChi / Aeonoo / Airhead，比之前只到中段成员更完整。\n\n公告区域和成员列表区域没有明显完全混成一个大框。\n\n消息区主体仍在中间栏内，没有明显压进右侧栏。\n\n剩余问题\n\n右侧公告区和成员列表之间仍有 transition / boundary review 感，层级不够干净。\n\n成员行已经完整很多，但头像、昵称、身份标记仍是很碎的 display item。\n\n中间消息区 message / card / bubble 结构仍偏密。\n\n底部工具区和消息区的关系可以看懂，但仍应保持 review-only。\n\n结论\n\nQQ 可以继续接入 panel 的 display-only page_details / read-only PathGraph preview，但要标为 conditional / review-only。不能说它是干净结构完成。\n\nPython: CONDITIONAL PASS\n\n原因\n\n相比之前密集 raw stage2 文本框，Python.org 这张已经明显更像 fusion 后的 page-detail 预览。\n\nLatest News / Events 不再是大量互相压叠的细碎文本框，列表行结构更可读。\n\nGet Started / Download / Docs / Jobs 区域比之前干净，没有看到大面积重复 partial-card 叠框。\n\n没有明显把整块 wide primary 直接当作所有内容编号目标；中间内容列仍是主要展示区域。\n\n剩余问题\n\nHero 区仍有明显父子/兄弟框重叠：hero text panel 和 hero code panel 的边界仍互相压住，层级不够清楚。\n\n顶部 header/nav 的框仍偏粗，部分控件区域过高或过宽。\n\nLatest News / Events 虽然改善，但仍是 review/display 级别，不是干净最终 page detail。\n\n底部 Success Stories / Use Python for... 区域仍有 partial / incomplete 展示，不能当完整结构完成。\n\n结论\n\nPython 可以接入 read-only preview 展示，但必须保持 conditional。\n不能说“内容遮挡已完全修复”，只能说“已经比 raw stage2 密集叠框明显改善，可继续做 display-only page-detail 审查”。\n\n是否允许进入下一步：接入面板里的 page_details / read-only PathGraph preview\n\n允许，但只限 display-only / review-only。\n\n建议口径：\n\nAppleMusic: 可作为保护集展示样本\nQQ: 可接入，但标 conditional / review-only\nPython: 可接入，但标 conditional / review-only，Hero overlap 仍需后续清理\n不允许宣传\n\n不能说：\n\n识别准确率提升\nRuntime PathGraph 已可执行\nExecute 授权\n点击安全\nE2E 成功\ndemo complete\n\n这三张图只能证明：当前 page-detail / read-only preview scaffold 已经具备可审查的显示基础，但仍然是学习草稿证据。"
+  },
+  "delivery_verification": {
+    "prompt_token_present": true,
+    "expected_image_count": 3,
+    "latest_user_image_count": 3,
+    "latest_user_has_expected_image_count": true,
+    "sent_verified_by_dom": true
+  },
+  "verdict_summary": {
+    "applemusic": "PASS",
+    "qq": "CONDITIONAL PASS",
+    "python": "CONDITIONAL PASS",
+    "allowed_next_step": "display_only_page_details_and_read_only_pathgraph_preview",
+    "limitations": [
+      "not_accuracy_claim",
+      "not_runtime_pathgraph_executable",
+      "not_execute_authorization",
+      "not_e2e_success"
+    ]
+  }
+}

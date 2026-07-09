@@ -1,0 +1,61 @@
+{
+  "contract_version": "learning_pattern_template_v1",
+  "pattern_id": "long_detail_reading",
+  "display_name": "Long Detail Reading",
+  "purpose": "Learn how to read long detail content through scoped batch reads and scoped scrolling.",
+  "applies_when": [
+    "Important content is longer than the visible viewport.",
+    "A bounded content region can be identified.",
+    "Downstream Agent decisions require complete text rather than snippets."
+  ],
+  "states": [
+    "detail_header_visible",
+    "detail_body_reading",
+    "detail_body_progressing",
+    "detail_read_complete"
+  ],
+  "regions": [
+    "detail_header",
+    "detail_body",
+    "scroll_container"
+  ],
+  "operation_skills": [
+    "read_region",
+    "scroll_region",
+    "verify_change"
+  ],
+  "semantic_actions": [
+    "read_region_batch",
+    "scroll_region",
+    "merge_detail_text"
+  ],
+  "gate_contracts": [
+    "scroll_scope_v1",
+    "latest_detail_snapshot_v1"
+  ],
+  "trace_requirements": [
+    "Record each ROI capture or OCR batch.",
+    "Record unique text-line growth.",
+    "Record no-new-content and boundary evidence.",
+    "Record wrong-scope checks."
+  ],
+  "success_conditions": [
+    "Required content sections are found or bottom/no-new-content is proven.",
+    "Merged text is stored as the latest detail snapshot.",
+    "No wrong-scope scroll is detected."
+  ],
+  "stop_conditions": [
+    "no_new_content_threshold_reached",
+    "bottom_reached",
+    "wrong_scope_detected",
+    "ocr_or_capture_failed"
+  ],
+  "seek_source": {
+    "profile_id": "seek",
+    "source_assets": [
+      "logs/smoke/seek_speed_demo_20260623_fresh7_absolute"
+    ],
+    "lesson": "SEEK job descriptions should be read with region batch evidence and latest-detail dataflow, not with tiny ad hoc scroll loops."
+  },
+  "authorization": "guidance_only"
+}

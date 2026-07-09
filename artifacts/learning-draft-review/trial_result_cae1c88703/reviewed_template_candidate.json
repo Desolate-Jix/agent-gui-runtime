@@ -1,0 +1,122 @@
+{
+  "contract_version": "reviewed_template_candidate_v1",
+  "source": {
+    "source_path": "artifacts/learning-runs/new_site_python_org_20260702_after_similarity_fix/trial_result.json",
+    "source_trial_path": "artifacts/learning-runs/new_site_python_org_20260702_after_similarity_fix/trial_result.json",
+    "original_draft_path": "artifacts/learning-runs/new_site_python_org_20260702_after_similarity_fix/trial_result.json",
+    "sha256": "cae1c8870372f31837570120b21c24a67ae843cabc56fe2939b7cb8762ee9cec",
+    "attempt_index": 0,
+    "readonly": true
+  },
+  "source_after_review": "mixed",
+  "counts_as_pure_model_generated": false,
+  "artifact_is_authorization": false,
+  "draft_only": false,
+  "reviewed_by_human": true,
+  "review_status": "needs_human_review",
+  "final_submit_forbidden": true,
+  "real_action_requires_gate": true,
+  "execute_binding_enabled": false,
+  "authorization_scope": "display_and_review_only",
+  "draft": {
+    "contract_version": "learning_template_draft_v1",
+    "screen_summary": "Python.org homepage with navigation menu, search bar, and sections for downloads, documentation, and community resources.",
+    "state_guess": "homepage",
+    "states": [
+      {
+        "state_id": "s1",
+        "label": "Python.org Home",
+        "page_type": "homepage"
+      }
+    ],
+    "regions": [
+      {
+        "region_id": "r1",
+        "label": "Search Input",
+        "role": "text_input"
+      },
+      {
+        "region_id": "r2",
+        "label": "Downloads Section",
+        "role": "navigation_link"
+      },
+      {
+        "region_id": "r3",
+        "label": "Documentation Section",
+        "role": "navigation_link"
+      }
+    ],
+    "action_templates": [
+      {
+        "action_template_id": "a1",
+        "label": "Search for Python content",
+        "semantic_action": "type_text",
+        "risk_level": "low",
+        "requires_gate": true,
+        "expected_effect": "Search query entered into search field"
+      },
+      {
+        "action_template_id": "a2",
+        "label": "Navigate to Downloads",
+        "semantic_action": "open_detail",
+        "risk_level": "low",
+        "requires_gate": true,
+        "expected_effect": "Opens Downloads section"
+      },
+      {
+        "action_template_id": "a3",
+        "label": "Navigate to Documentation",
+        "semantic_action": "open_detail",
+        "risk_level": "low",
+        "requires_gate": true,
+        "expected_effect": "Opens Documentation section"
+      }
+    ],
+    "blockers": [
+      {
+        "blocker_id": "b1",
+        "label": "Final submit / send / complete actions remain blocked",
+        "linked_action_template_id": "a1"
+      },
+      {
+        "blocker_id": "b2",
+        "label": "Candidate is display-only until human review promotes it"
+      }
+    ],
+    "verification_rules": [
+      {
+        "rule_id": "v1",
+        "label": "Search/input region must be visible before action selection"
+      },
+      {
+        "rule_id": "v2",
+        "label": "No real click or text entry is authorized by this draft"
+      }
+    ],
+    "safety": {
+      "observation_only": true,
+      "promotion_allowed": false,
+      "final_submit_blocked": true,
+      "real_clicks_performed": 0
+    }
+  },
+  "safety": {
+    "artifact_is_authorization": false,
+    "final_submit_allowed": false,
+    "final_submit_forbidden": true,
+    "real_action_requires_gate": true,
+    "execute_binding_enabled": false,
+    "authorization_scope": "display_and_review_only"
+  },
+  "audit": {
+    "source_trial_path": "artifacts/learning-runs/new_site_python_org_20260702_after_similarity_fix/trial_result.json",
+    "original_draft_path": "artifacts/learning-runs/new_site_python_org_20260702_after_similarity_fix/trial_result.json",
+    "reviewed_at": "2026-07-03T15:37:45.648285",
+    "changes_summary": [
+      "blockers:2",
+      "verification_rules:2"
+    ],
+    "review_status": "needs_human_review",
+    "authorization_scope": "display_and_review_only"
+  }
+}

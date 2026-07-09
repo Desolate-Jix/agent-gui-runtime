@@ -1,0 +1,223 @@
+{
+  "contract_version": "recorded_parser_output_v1",
+  "source_type": "recorded_parser_output",
+  "source_trace_path": "logs\\traces\\vision\\20260703-174008-737067__learn-mode-deep-locate__python-org.json",
+  "source_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png",
+  "screenshot_sha256": "028e4283781159ceb811d99ae059eaf896523e8eceb3df0d046afd41712bf0ef",
+  "source_overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\state-b8bed884c84100e8-learn-targets__learn-target-coordinates__20260703-174008-660067.png",
+  "interpretation": "Derived from a real learn-mode-deep-locate trace with coordinate_validation; parser evidence only, not execute authorization.",
+  "observe_bundle": {
+    "contract_version": "learn_observe_bundle_v1",
+    "screen_size": {
+      "width": 2540,
+      "height": 1380
+    },
+    "sources": {
+      "calibrated_targets": {
+        "source_trace_path": "logs\\traces\\vision\\20260703-174008-737067__learn-mode-deep-locate__python-org.json",
+        "source_image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png",
+        "source_overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\state-b8bed884c84100e8-learn-targets__learn-target-coordinates__20260703-174008-660067.png",
+        "targets": [
+          {
+            "candidate_id": "element_search_input_field_e7d36c1c",
+            "label": "Search input field",
+            "role": "text_input",
+            "bbox": {
+              "x": 1137,
+              "y": 244,
+              "w": 185,
+              "h": 46
+            },
+            "click_point": {
+              "x": 1230,
+              "y": 267
+            },
+            "confidence": 0.637,
+            "source": "top_level.ui.elements",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 2540,
+                "height": 1380
+              },
+              "reasons": []
+            }
+          },
+          {
+            "candidate_id": "element_search_button_7ce6e760",
+            "label": "Search button",
+            "role": "button",
+            "bbox": {
+              "x": 1322,
+              "y": 244,
+              "w": 57,
+              "h": 46
+            },
+            "click_point": {
+              "x": 1350,
+              "y": 267
+            },
+            "confidence": 0.637,
+            "source": "top_level.ui.elements",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 2540,
+                "height": 1380
+              },
+              "reasons": []
+            }
+          },
+          {
+            "candidate_id": "element_downloads_link_fe68f0de",
+            "label": "Downloads link",
+            "role": "menu_item",
+            "bbox": {
+              "x": 766,
+              "y": 363,
+              "w": 99,
+              "h": 30
+            },
+            "click_point": {
+              "x": 816,
+              "y": 378
+            },
+            "confidence": 0.6305,
+            "source": "top_level.ui.elements",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 2540,
+                "height": 1380
+              },
+              "reasons": []
+            }
+          },
+          {
+            "candidate_id": "element_documentation_link_9381d9f3",
+            "label": "Documentation link",
+            "role": "menu_item",
+            "bbox": {
+              "x": 885,
+              "y": 363,
+              "w": 99,
+              "h": 30
+            },
+            "click_point": {
+              "x": 934,
+              "y": 378
+            },
+            "confidence": 0.6305,
+            "source": "top_level.ui.elements",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 2540,
+                "height": 1380
+              },
+              "reasons": []
+            }
+          },
+          {
+            "candidate_id": "element_get_started_button_81109b8d",
+            "label": "Get Started button",
+            "role": "button",
+            "bbox": {
+              "x": 568,
+              "y": 1072,
+              "w": 99,
+              "h": 30
+            },
+            "click_point": {
+              "x": 618,
+              "y": 1087
+            },
+            "confidence": 0.624,
+            "source": "top_level.ui.elements",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 2540,
+                "height": 1380
+              },
+              "reasons": []
+            }
+          },
+          {
+            "candidate_id": "element_download_button_3b6c566f",
+            "label": "Download button",
+            "role": "button",
+            "bbox": {
+              "x": 806,
+              "y": 1072,
+              "w": 99,
+              "h": 30
+            },
+            "click_point": {
+              "x": 856,
+              "y": 1087
+            },
+            "confidence": 0.624,
+            "source": "top_level.ui.elements",
+            "coordinate_source": "screen_map_v1.candidates",
+            "location_status": "coordinate_verified",
+            "coordinate_validation": {
+              "contract_version": "learn_target_coordinate_validation_v1",
+              "status": "valid",
+              "bbox_present": true,
+              "click_point_present": true,
+              "bbox_inside_image": true,
+              "click_point_inside_image": true,
+              "click_point_inside_bbox": true,
+              "image_size": {
+                "width": 2540,
+                "height": 1380
+              },
+              "reasons": []
+            }
+          }
+        ]
+      }
+    }
+  }
+}

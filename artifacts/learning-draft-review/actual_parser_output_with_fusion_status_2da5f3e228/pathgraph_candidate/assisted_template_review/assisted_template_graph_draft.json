@@ -1,0 +1,44 @@
+{
+  "contract_version": "assisted_template_graph_draft_v1",
+  "graph_draft_status": "no_accepted_items",
+  "source_tracking": "assisted_generation",
+  "counts_as_pure_model_generated": false,
+  "created_at": "2026-07-05T23:20:22.075293",
+  "asset_candidate_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_2da5f3e228/pathgraph_candidate/assisted_template_review/assisted_template_asset_candidate.json",
+  "asset_candidate_sha256": "055c9920a7e1f6765ac59b0bae8c1e27b4a2d41bdbc93f893fe13abf82c1134c",
+  "asset_validation_summary": {
+    "contract_version": "assisted_template_asset_validation_summary_v1",
+    "validation_status": "no_accepted_items",
+    "error_count": 0,
+    "warning_count": 0,
+    "issues": [],
+    "checks": {
+      "accepted_state_count": 0,
+      "accepted_region_count": 0,
+      "accepted_action_template_count": 0,
+      "accepted_transition_count": 0
+    },
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "ready_for_runtime_pathgraph_promotion": false
+  },
+  "states": [],
+  "regions": [],
+  "action_templates": [],
+  "transitions": [],
+  "summary": {
+    "state_count": 0,
+    "region_count": 0,
+    "action_template_count": 0,
+    "transition_count": 0,
+    "asset_validation_status": "no_accepted_items",
+    "asset_validation_error_count": 0,
+    "asset_validation_warning_count": 0
+  },
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "ready_for_runtime_pathgraph_promotion": false,
+  "final_submit_forbidden": true,
+  "authorization_scope": "display_and_review_only",
+  "interpretation": "read-only graph-shaped assisted-template draft for manual PathGraph review; this does not promote Runtime PathGraph or authorize Execute"
+}

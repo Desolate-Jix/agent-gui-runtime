@@ -68,17 +68,30 @@ def _vista_prompt(instruction: str) -> str:
     )
 
 
-def _point_payload(text: str) -> dict[str, Any]:
+def _point_payload(text: str, *, instruction: str = "") -> dict[str, Any]:
     match = re.search(r"\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]", text)
     point = None
     if match:
-        point = {"x": float(match.group(1)), "y": float(match.group(2)), "coordinate_space": "normalized_0_1000"}
+        point = {
+            "x": float(match.group(1)),
+            "y": float(match.group(2)),
+            "coordinate_space": _requested_coordinate_space(instruction),
+        }
     return {
         "contract_version": "vista_point_v1",
         "status": "ready" if point else "unparsed",
         "point": point,
         "raw_text": text,
     }
+
+
+def _requested_coordinate_space(instruction: str) -> str:
+    text = str(instruction or "").casefold()
+    if "coordinate_space=roi_local_point" in text or "roi_local_point" in text:
+        return "roi_local_point"
+    if "coordinate_space=normalized_0_1" in text or "normalized_0_1" in text:
+        return "normalized_0_1"
+    return "normalized_0_1000"
 
 
 def _generate(messages: list[dict[str, Any]], *, max_tokens: int, temperature: float) -> str:
@@ -186,13 +199,15 @@ class VistaHandler(BaseHTTPRequestHandler):
                 "client": self.client_address[0] if self.client_address else None,
                 "max_tokens": int(payload.get("max_tokens") or MAX_NEW_TOKENS),
             }
+            messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+            instruction, _ = _message_text_and_image(messages)
             text = _generate(
-                payload.get("messages") if isinstance(payload.get("messages"), list) else [],
+                messages,
                 max_tokens=int(payload.get("max_tokens") or MAX_NEW_TOKENS),
                 temperature=float(payload.get("temperature") or 0.0),
             )
             wants_json = (payload.get("response_format") or {}).get("type") == "json_object"
-            content = json.dumps(_point_payload(text), ensure_ascii=False) if wants_json else text
+            content = json.dumps(_point_payload(text, instruction=instruction), ensure_ascii=False) if wants_json else text
             self._send_json(
                 200,
                 {

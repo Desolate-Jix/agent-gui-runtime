@@ -1,0 +1,59 @@
+{
+  "contract_version": "learning_pattern_template_v1",
+  "pattern_id": "agent_full_content_review",
+  "display_name": "Agent Full Content Review",
+  "purpose": "Route complete content and user constraints to the Agent for a structured suitability or decision review.",
+  "applies_when": [
+    "A content decision depends on user profile, constraints, or nuanced requirements.",
+    "Local keyword rules are too weak or risky.",
+    "The full content has already been read and snapshotted."
+  ],
+  "states": [
+    "full_content_ready",
+    "agent_review_pending",
+    "agent_review_passed",
+    "agent_review_rejected",
+    "agent_review_needs_user"
+  ],
+  "regions": [
+    "source_content",
+    "decision_context"
+  ],
+  "operation_skills": [
+    "read_region",
+    "read_full_page"
+  ],
+  "semantic_actions": [
+    "prepare_agent_review",
+    "review_full_content",
+    "record_structured_verdict"
+  ],
+  "gate_contracts": [
+    "latest_detail_snapshot_v1"
+  ],
+  "trace_requirements": [
+    "Record full content text or a bounded summary with source refs.",
+    "Record user constraints/profile refs used by the Agent.",
+    "Record structured Agent verdict and reasons.",
+    "Record whether user review is required."
+  ],
+  "success_conditions": [
+    "Agent receives full content, not list snippets.",
+    "Agent returns a structured pass/reject/need_user_review verdict.",
+    "Downstream entry actions are blocked unless verdict allows them."
+  ],
+  "stop_conditions": [
+    "full_content_missing",
+    "agent_verdict_missing",
+    "need_user_review",
+    "source_identity_unverified"
+  ],
+  "seek_source": {
+    "profile_id": "seek",
+    "source_assets": [
+      "artifacts/app_profiles/seek_app_profile_v1.json"
+    ],
+    "lesson": "Real SEEK job screening must pass full job detail text to the Agent; local keyword screening must not decide suitability."
+  },
+  "authorization": "decision_support_only"
+}

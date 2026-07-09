@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import json
 import re
 import tempfile
@@ -163,10 +164,17 @@ class LocalVisionProvider:
         normalized.notes.extend([note for note in notes if note not in normalized.notes])
         return normalized
 
-    def _call_openai_compatible_endpoint(self, image_path: Path, prompt: str, *, max_tokens: int = 2048) -> dict[str, Any]:
+    def _call_openai_compatible_endpoint(
+        self,
+        image_path: Path,
+        prompt: str,
+        *,
+        max_tokens: int = 2048,
+        temperature: float = 0.1,
+    ) -> dict[str, Any]:
         payload = {
             "model": self.model_name,
-            "temperature": 0.1,
+            "temperature": temperature,
             "max_tokens": max_tokens,
             "response_format": {"type": "json_object"},
             "messages": [
@@ -489,6 +497,15 @@ class LocalVisionProvider:
                     max_regions=8,
                 ),
             ]
+        if task in {"learn_pattern_draft", "learn_template_draft"}:
+            return [
+                _InferenceAttempt(
+                    tag="learning_draft",
+                    max_edge=1280 if max_dim > 1280 else None,
+                    compact_prompt=False,
+                    max_regions=8,
+                )
+            ]
         attempts = [
             _InferenceAttempt(
                 tag="default",
@@ -550,6 +567,20 @@ class LocalVisionProvider:
             attempt_notes.append(f"grid_overlay_spacing={grid_spacing}px")
         if attempt.compact_prompt:
             attempt_notes.append("compact_prompt_mode=true")
+        metadata = req.metadata or {}
+        learning_max_edge = metadata.get("learning_image_max_edge") if req.task in {"learn_template_draft"} else None
+        if learning_max_edge is not None:
+            try:
+                requested_edge = max(128, min(1280, int(learning_max_edge)))
+            except (TypeError, ValueError):
+                requested_edge = 0
+            if requested_edge and max(inference_size.width, inference_size.height) > requested_edge:
+                if temp_dir is None:
+                    temp_dir = tempfile.TemporaryDirectory(prefix="vision-inference-")
+                resized_path = Path(temp_dir.name) / f"{inference_path.stem}__learn-{requested_edge}.png"
+                inference_size = self._resize_image_for_inference(inference_path, resized_path, requested_edge)
+                inference_path = resized_path
+                attempt_notes.append(f"learning_image_scaled_to_max_edge={requested_edge}")
 
         prompt_req = self._request_for_inference_prompt(req, original_image_size=original_image_size, inference_size=inference_size)
         prompt = build_region_analysis_prompt(
@@ -561,11 +592,36 @@ class LocalVisionProvider:
         )
         try:
             max_tokens = self._max_output_tokens(req)
-            raw_response = self._call_openai_compatible_endpoint(
-                inference_path,
-                prompt,
-                max_tokens=max_tokens,
-            )
+            temperature = self._temperature(req)
+            try:
+                raw_response = self._call_openai_compatible_endpoint(
+                    inference_path,
+                    prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
+            except Exception as exc:
+                error = RuntimeError(str(exc))
+                error.diagnostics = {
+                    "model_io": self._model_io_attempt_payload(
+                        req=req,
+                        prompt=prompt,
+                        image_path=image_path,
+                        inference_path=inference_path,
+                        inference_size=inference_size,
+                        original_image_size=original_image_size,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        raw_text="",
+                        raw_response=None,
+                        parsed_model_json=None,
+                        runtime_normalized_json=None,
+                        parse_status="request_failed",
+                        parse_error=str(exc),
+                        attempt=attempt,
+                    ),
+                }
+                raise error from exc
             raw_text = self._extract_message_text(raw_response)
             try:
                 parsed_model_json = self._parse_json_object(raw_text)
@@ -581,6 +637,7 @@ class LocalVisionProvider:
                         inference_size=inference_size,
                         original_image_size=original_image_size,
                         max_tokens=max_tokens,
+                        temperature=temperature,
                         raw_text=raw_text,
                         raw_response=raw_response,
                         parsed_model_json=None,
@@ -591,10 +648,17 @@ class LocalVisionProvider:
                     ),
                 }
                 raise error from exc
-            parsed = self._remap_to_original_image(parsed_model_json, inference_size, original_image_size)
+            raw_parsed_model_json = copy.deepcopy(parsed_model_json)
+            parsed, coordinate_recovery = self._remap_to_original_image(
+                copy.deepcopy(parsed_model_json),
+                inference_size,
+                original_image_size,
+                allow_implicit_normalized_1000=self._allow_implicit_normalized_1000_recovery(req),
+            )
             attempt_meta = {
                 "inference_image_size": inference_size.to_dict(),
                 "original_image_size": original_image_size.to_dict(),
+                "coordinate_recovery": coordinate_recovery,
                 "model_io": self._model_io_attempt_payload(
                     req=req,
                     prompt=prompt,
@@ -603,10 +667,12 @@ class LocalVisionProvider:
                     inference_size=inference_size,
                     original_image_size=original_image_size,
                     max_tokens=max_tokens,
+                    temperature=temperature,
                     raw_text=raw_text,
                     raw_response=raw_response,
-                    parsed_model_json=parsed_model_json,
+                    parsed_model_json=raw_parsed_model_json,
                     runtime_normalized_json=parsed,
+                    coordinate_recovery=coordinate_recovery,
                     parse_status="success",
                     parse_error=None,
                     attempt=attempt,
@@ -659,6 +725,7 @@ class LocalVisionProvider:
         inference_size: ImageSize,
         original_image_size: ImageSize,
         max_tokens: int,
+        temperature: float,
         raw_text: str,
         raw_response: dict[str, Any] | None,
         parsed_model_json: dict[str, Any] | None,
@@ -666,6 +733,7 @@ class LocalVisionProvider:
         parse_status: str,
         parse_error: str | None,
         attempt: _InferenceAttempt,
+        coordinate_recovery: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return {
             "contract_version": "model_io_attempt_v1",
@@ -690,6 +758,7 @@ class LocalVisionProvider:
                 "original_image_size": original_image_size.to_dict(),
                 "inference_image_size": inference_size.to_dict(),
                 "max_tokens": max_tokens,
+                "temperature": temperature,
                 "prompt": prompt,
             },
             "output": {
@@ -697,6 +766,7 @@ class LocalVisionProvider:
                 "raw_response": raw_response,
                 "parsed_model_json": parsed_model_json,
                 "runtime_normalized_json": runtime_normalized_json,
+                "coordinate_recovery": coordinate_recovery,
                 "parse_error": parse_error,
             },
             "raw_text": raw_text,
@@ -704,6 +774,7 @@ class LocalVisionProvider:
             "raw_response": raw_response,
             "parsed_model_json": parsed_model_json,
             "runtime_normalized_json": runtime_normalized_json,
+            "coordinate_recovery": coordinate_recovery,
             "parse_error": parse_error,
         }
 
@@ -712,10 +783,28 @@ class LocalVisionProvider:
         configured = metadata.get("max_output_tokens")
         if configured is not None:
             try:
-                return max(256, min(4096, int(configured)))
+                max_allowed = 8192 if req.task in {"learn_pattern_draft", "learn_template_draft"} else 4096
+                return max(256, min(max_allowed, int(configured)))
             except (TypeError, ValueError):
                 pass
         return 2048 if req.task == "observe_screen" else 2048
+
+    def _temperature(self, req: VisionAnalyzeRequest) -> float:
+        metadata = req.metadata or {}
+        configured = metadata.get("temperature")
+        if configured is not None:
+            try:
+                return max(0.0, min(2.0, float(configured)))
+            except (TypeError, ValueError):
+                pass
+        return 0.1
+
+    def _allow_implicit_normalized_1000_recovery(self, req: VisionAnalyzeRequest) -> bool:
+        metadata = req.metadata or {}
+        recovery = metadata.get("coordinate_recovery")
+        if not isinstance(recovery, dict):
+            return False
+        return bool(recovery.get("implicit_normalized_1000") or recovery.get("implicit_normalized_0_1000"))
 
     def _request_for_inference_prompt(
         self,
@@ -784,15 +873,36 @@ class LocalVisionProvider:
         parsed: dict[str, Any],
         inference_size: ImageSize,
         original_image_size: ImageSize,
-    ) -> dict[str, Any]:
-        recovered_count = self._recover_normalized_1000_items(parsed, inference_size)
+        *,
+        allow_implicit_normalized_1000: bool = False,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        recovered_count = self._recover_normalized_1000_items(
+            parsed,
+            inference_size,
+            allow_implicit_normalized_1000=allow_implicit_normalized_1000,
+        )
+        coordinate_recovery = {
+            "contract_version": "coordinate_recovery_v1",
+            "enabled": True,
+            "implicit_normalized_1000_enabled": bool(allow_implicit_normalized_1000),
+            "applied": recovered_count > 0,
+            "method": "normalized_1000_to_inference_image" if recovered_count else "none",
+            "inference_image_size": inference_size.to_dict(),
+            "original_image_size": original_image_size.to_dict(),
+            "scale_x": float(inference_size.width) / 1000.0,
+            "scale_y": float(inference_size.height) / 1000.0,
+            "recovered_coordinate_count": recovered_count,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+            "interpretation": "coordinate recovery is parser evidence normalization only; it does not authorize clicks",
+        }
         if recovered_count:
             notes = parsed.setdefault("notes", [])
             if isinstance(notes, list):
                 notes.append(f"coordinate_space_recovered=normalized_1000;items={recovered_count}")
         if inference_size == original_image_size:
             parsed["image_size"] = original_image_size.to_dict()
-            return parsed
+            return parsed, coordinate_recovery
         scale_x = float(original_image_size.width) / float(inference_size.width)
         scale_y = float(original_image_size.height) / float(inference_size.height)
         for collection_name in ("regions", "targets", "observers"):
@@ -819,9 +929,15 @@ class LocalVisionProvider:
                         max_height=original_image_size.height,
                     )
         parsed["image_size"] = original_image_size.to_dict()
-        return parsed
+        return parsed, coordinate_recovery
 
-    def _recover_normalized_1000_items(self, parsed: dict[str, Any], image_size: ImageSize) -> int:
+    def _recover_normalized_1000_items(
+        self,
+        parsed: dict[str, Any],
+        image_size: ImageSize,
+        *,
+        allow_implicit_normalized_1000: bool = False,
+    ) -> int:
         recovered_count = 0
         for collection_name in ("regions", "targets", "observers"):
             items = parsed.get(collection_name) or []
@@ -831,7 +947,11 @@ class LocalVisionProvider:
                 if not isinstance(item, dict):
                     continue
                 diagonal = item.get("diagonal")
-                if isinstance(diagonal, dict) and self._diagonal_is_normalized_1000(diagonal, image_size):
+                if isinstance(diagonal, dict) and self._diagonal_is_normalized_1000(
+                    diagonal,
+                    image_size,
+                    allow_implicit=allow_implicit_normalized_1000,
+                ):
                     item["diagonal"] = self._scale_diagonal(
                         diagonal,
                         scale_x=float(image_size.width) / 1000.0,
@@ -841,7 +961,11 @@ class LocalVisionProvider:
                     )
                     recovered_count += 1
                 bbox = item.get("bbox")
-                if isinstance(bbox, dict) and self._bbox_is_normalized_1000(bbox, image_size):
+                if isinstance(bbox, dict) and self._bbox_is_normalized_1000(
+                    bbox,
+                    image_size,
+                    allow_implicit=allow_implicit_normalized_1000,
+                ):
                     item["bbox"] = self._scale_bbox(
                         bbox,
                         scale_x=float(image_size.width) / 1000.0,
@@ -852,23 +976,42 @@ class LocalVisionProvider:
                     recovered_count += 1
         return recovered_count
 
-    def _diagonal_is_normalized_1000(self, diagonal: dict[str, Any], image_size: ImageSize) -> bool:
+    def _diagonal_is_normalized_1000(
+        self,
+        diagonal: dict[str, Any],
+        image_size: ImageSize,
+        *,
+        allow_implicit: bool = False,
+    ) -> bool:
         values = self._float_coordinates(diagonal, ("x1", "y1", "x2", "y2"))
         if values is None:
             return False
         x1, y1, x2, y2 = values
         exceeds_pixel_bounds = max(x1, x2) > image_size.width or max(y1, y2) > image_size.height
         within_normalized_bounds = all(0.0 <= value <= 1000.0 for value in values)
-        return exceeds_pixel_bounds and within_normalized_bounds
+        if exceeds_pixel_bounds and within_normalized_bounds:
+            return True
+        return bool(allow_implicit and within_normalized_bounds and self._image_size_is_not_1000_space(image_size))
 
-    def _bbox_is_normalized_1000(self, bbox: dict[str, Any], image_size: ImageSize) -> bool:
+    def _bbox_is_normalized_1000(
+        self,
+        bbox: dict[str, Any],
+        image_size: ImageSize,
+        *,
+        allow_implicit: bool = False,
+    ) -> bool:
         values = self._float_coordinates(bbox, ("x", "y", "w", "h"))
         if values is None:
             return False
         x, y, w, h = values
         exceeds_pixel_bounds = x + w > image_size.width or y + h > image_size.height
         within_normalized_bounds = all(0.0 <= value <= 1000.0 for value in values)
-        return exceeds_pixel_bounds and within_normalized_bounds
+        if exceeds_pixel_bounds and within_normalized_bounds:
+            return True
+        return bool(allow_implicit and within_normalized_bounds and self._image_size_is_not_1000_space(image_size))
+
+    def _image_size_is_not_1000_space(self, image_size: ImageSize) -> bool:
+        return image_size.width != 1000 or image_size.height != 1000
 
     def _float_coordinates(self, values: dict[str, Any], keys: tuple[str, ...]) -> tuple[float, ...] | None:
         try:

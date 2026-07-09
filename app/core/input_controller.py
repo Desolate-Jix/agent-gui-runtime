@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ctypes
+from io import BytesIO
+from pathlib import Path
 import time
 from typing import Any, Optional
 
@@ -43,6 +45,7 @@ VK_CONTROL = 0x11
 VK_A = 0x41
 VK_RETURN = 0x0D
 VK_V = 0x56
+CF_DIB = 8
 SM_CXSCREEN = 0
 SM_CYSCREEN = 1
 CLIPBOARD_PASTE_SETTLE_SECONDS = 0.15
@@ -265,6 +268,45 @@ class InputController:
             "clipboard_paste_settle_ms": int(CLIPBOARD_PASTE_SETTLE_SECONDS * 1000),
         }
 
+    def paste_image(
+        self,
+        image_path: str,
+        *,
+        focus_bound_window: bool = True,
+        restore_clipboard_text: bool = False,
+        settle_ms: int | None = None,
+    ) -> dict[str, Any]:
+        """Paste an image file into the current focused target using CF_DIB + Ctrl+V."""
+        self._ensure_windows_input()
+        bound = None
+        if focus_bound_window:
+            bound = self._require_bound_window()
+            self._focus_window(bound.handle)
+
+        image_file = Path(image_path)
+        clipboard_before = self._get_clipboard_text() if restore_clipboard_text else None
+        dib_bytes = self._image_path_to_cf_dib(image_file)
+        self._set_clipboard_image_dib(dib_bytes)
+        self._press_chord([VK_CONTROL, VK_V])
+        paste_settle = CLIPBOARD_PASTE_SETTLE_SECONDS if settle_ms is None else max(0, int(settle_ms)) / 1000.0
+        time.sleep(paste_settle)
+        if restore_clipboard_text:
+            self._set_clipboard_text(clipboard_before or "")
+
+        return {
+            "pasted": True,
+            "input_backend": "SendInput+clipboard_image",
+            "image_path": str(image_file),
+            "image_bytes": int(image_file.stat().st_size),
+            "dib_bytes": len(dib_bytes),
+            "focus_bound_window": bool(focus_bound_window),
+            "window_handle": int(bound.handle) if bound is not None else None,
+            "window_title": bound.title if bound is not None else None,
+            "restore_clipboard_text": bool(restore_clipboard_text),
+            "clipboard_format": "CF_DIB",
+            "clipboard_paste_settle_ms": int(paste_settle * 1000),
+        }
+
     def scroll_window(
         self,
         *,
@@ -436,6 +478,36 @@ class InputController:
         finally:
             if opened:
                 win32clipboard.CloseClipboard()  # type: ignore[union-attr]
+
+    def _set_clipboard_image_dib(self, dib_bytes: bytes) -> None:
+        if win32clipboard is None:
+            raise RuntimeError("win32clipboard is unavailable; cannot paste image")
+        opened = False
+        self._open_clipboard()
+        opened = True
+        try:
+            win32clipboard.EmptyClipboard()  # type: ignore[union-attr]
+            win32clipboard.SetClipboardData(CF_DIB, dib_bytes)  # type: ignore[union-attr]
+        finally:
+            if opened:
+                win32clipboard.CloseClipboard()  # type: ignore[union-attr]
+
+    def _image_path_to_cf_dib(self, image_path: Path) -> bytes:
+        if not image_path.exists():
+            raise FileNotFoundError(f"Image path does not exist: {image_path}")
+        try:
+            from PIL import Image
+        except Exception as exc:  # pragma: no cover - depends on optional runtime imaging support
+            raise RuntimeError("Pillow is required to paste image clipboard data") from exc
+
+        with Image.open(image_path) as image:
+            output = BytesIO()
+            image.convert("RGB").save(output, "BMP")
+        bmp_bytes = output.getvalue()
+        # CF_DIB expects the BMP payload without the 14-byte BITMAPFILEHEADER.
+        if len(bmp_bytes) <= 14:
+            raise RuntimeError(f"Invalid BMP conversion for image: {image_path}")
+        return bmp_bytes[14:]
 
     def _open_clipboard(self) -> None:
         if win32clipboard is None:

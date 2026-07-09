@@ -1,0 +1,66 @@
+{
+  "contract_version": "learn_actual_parser_case_manifest_v1",
+  "description": "Small fixed-screenshot batch for fresh Learn Fast parser actual-call experiments. This manifest is for parser coverage expansion only; it is not a reliability or 90% claim.",
+  "app_name": "learn_recognition",
+  "goal": "produce semantic UI parser evidence for display-only learning drafts",
+  "state_hint": "unknown",
+  "cases": [
+    {
+      "case_id": "python_homepage_saved_template_screenshot",
+      "surface": "python_homepage",
+      "screenshot_path": "artifacts/learning-runs/new_site_python_org_20260702/python_org_home.png",
+      "app_name": "python.org",
+      "state_hint": "homepage",
+      "goal": "Parse python.org homepage search, navigation, download, readonly text, and article/card regions."
+    },
+    {
+      "case_id": "python_homepage_full_observe_20260703",
+      "surface": "python_homepage_full_window",
+      "screenshot_path": "artifacts/screenshots/welcome-to-python-org-microsoft-edge__observe-screen__python-org__full-window__20260703-173928-663164.png",
+      "app_name": "python.org",
+      "state_hint": "homepage_full_window",
+      "goal": "Parse full-window python.org homepage controls and distinguish clickable navigation from readonly content."
+    },
+    {
+      "case_id": "python_homepage_locate_trace_support_20260703",
+      "surface": "python_homepage_locate_trace_full_window",
+      "screenshot_path": "artifacts/screenshots/welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png",
+      "supplemental_sources_path": "artifacts/benchmarks/learn_recognition_recorded_outputs/python_homepage_calibrated_targets_recorded_parser_output_v1.json",
+      "app_name": "python.org",
+      "state_hint": "homepage_locate_trace",
+      "goal": "Parse the python.org screenshot that owns the calibrated target support and keep source freshness provable."
+    },
+    {
+      "case_id": "seek_results_header_initial",
+      "surface": "seek_results_header",
+      "screenshot_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-3-microsoft-edge__capture__full-window__20260702-235056-413441.png",
+      "app_name": "seek",
+      "state_hint": "results_page",
+      "goal": "Parse SEEK results header search field, search button, filters, job cards, and readonly result text."
+    },
+    {
+      "case_id": "seek_results_header_later_capture",
+      "surface": "seek_results_header",
+      "screenshot_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-3-microsoft-edge__capture__full-window__20260702-235058-162442.png",
+      "app_name": "seek",
+      "state_hint": "results_page_later_capture",
+      "goal": "Parse a second SEEK results screenshot to check parser stability across repeated captures."
+    },
+  {
+   "case_id": "seek_results_observe_screen",
+   "surface": "seek_results_observe_screen",
+   "screenshot_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+   "supplemental_sources_path": "artifacts/benchmarks/learn_recognition_recorded_outputs/seek_results_header_uia_support_observe_screen_20260702_v1.json",
+   "app_name": "seek",
+   "state_hint": "results_page_observe",
+   "goal": "Parse the SEEK observe-screen capture and separate actionable search/filter/card regions from static text."
+  }
+  ],
+  "safety": {
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "real_clicks_performed": 0,
+    "final_submit_forbidden": true
+  },
+  "interpretation": "Batch actual parser calls may increase actual_parser_call coverage, but passing this manifest does not prove 90% quality, Execute stability, live safe fill, or submit safety."
+}

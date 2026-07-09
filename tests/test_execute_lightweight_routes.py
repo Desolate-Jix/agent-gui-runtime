@@ -37,6 +37,10 @@ def test_execute_observe_seek_detects_review_and_submit_danger() -> None:
     assert data["page_state"] == "review_before_submit"
     assert data["danger_actions"][0]["text"] == "Submit application"
     assert data["safety_blockers"][0]["kind"] == "final_submit_visible"
+    assert data["operation_context"]["skill_id"] == "observe_screen"
+    assert data["operation_context"]["requires_gate"] is False
+    assert data["operation_context"]["gate_decision_id"] is None
+    assert data["operation_trace_link"]["result_status"] == "success"
     assert data["trace_path"]
 
 
@@ -67,6 +71,8 @@ def test_execute_verify_diff_returns_changed_bbox(tmp_path: Path) -> None:
     assert data["contract_version"] == "ui_diff_verification_v1"
     assert data["verification_status"] == "pass"
     assert data["diff_bboxes"]
+    assert data["operation_context"]["skill_id"] == "verify_change"
+    assert data["operation_context"]["requires_gate"] is False
     assert data["trace_path"]
 
 
@@ -93,6 +99,8 @@ def test_execute_read_region_batch_merges_ocr_lines() -> None:
     assert data["contract_version"] == "read_region_batch_v1"
     assert data["merged_text_lines"] == ["Title", "React", "AI workflow"]
     assert data["unique_line_count"] == 3
+    assert data["operation_context"]["skill_id"] == "read_region"
+    assert data["operation_trace_link"]["capture_id"]
     assert data["trace_path"]
 
 
@@ -139,4 +147,6 @@ def test_execute_form_inventory_seek_exposes_fields_and_danger_actions() -> None
     assert [field["field_id"] for field in data["fields"]] == ["cover_letter", "q_country"]
     assert data["continue_action"]["text"] == "Continue"
     assert data["danger_actions"][0]["text"] == "Submit application"
+    assert data["operation_context"]["skill_id"] == "detect_form"
+    assert data["operation_context"]["requires_gate"] is False
     assert data["trace_path"]

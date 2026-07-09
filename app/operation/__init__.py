@@ -5,6 +5,12 @@ from app.operation.path_graph import AVAILABLE_ACTIONS_CONTRACT, build_available
 from app.operation.mousetester import should_verify_mouse_tester_semantics, target_bbox_from_recommended, verify_mouse_tester_post_click_semantics
 from app.operation.reading import build_read_region_batch_report, extract_ocr_text_lines
 from app.operation.region_click import run_region_click
+from app.operation.runtime_context import (
+    OperationRuntimeContext,
+    build_operation_runtime_context,
+    operation_trace_link,
+    validate_operation_runtime_context,
+)
 from app.operation.step import (
     EXECUTE_STEP_RESPONSE_CONTRACT,
     PATH_GRAPH_ACTION_CONTEXT_CONTRACT,
@@ -18,19 +24,23 @@ __all__ = [
     "AVAILABLE_ACTIONS_CONTRACT",
     "EXECUTE_STEP_RESPONSE_CONTRACT",
     "OperationSkill",
+    "OperationRuntimeContext",
     "PATH_GRAPH_ACTION_CONTEXT_CONTRACT",
     "VISUAL_ASSET_MATCH_CONTRACT",
     "build_available_actions",
     "build_execute_step_plan",
     "build_operation_skill_catalog",
+    "build_operation_runtime_context",
     "build_path_graph_action_context",
     "build_read_region_batch_report",
     "build_ui_diff_verification",
     "extract_ocr_text_lines",
     "list_operation_skills",
     "match_visual_asset",
+    "operation_trace_link",
     "run_region_click",
     "should_verify_mouse_tester_semantics",
     "target_bbox_from_recommended",
     "verify_mouse_tester_post_click_semantics",
+    "validate_operation_runtime_context",
 ]

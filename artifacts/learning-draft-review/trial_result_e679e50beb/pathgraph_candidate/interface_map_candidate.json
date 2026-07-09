@@ -1,0 +1,332 @@
+{
+  "contract_version": "learned_interface_map_v1",
+  "app_id": "artifacts_learning-runs_panel_20260706-180006-702_python_org_trial_result.json",
+  "page_type": "python_homepage",
+  "source": {
+    "trial_path": "artifacts/learning-draft-review/trial_result_e679e50beb/reviewed_template_candidate.json",
+    "reviewed_candidate_path": "artifacts/learning-draft-review/trial_result_e679e50beb/reviewed_template_candidate.json",
+    "source_trial_path": "artifacts/learning-runs/panel_20260706-180006-702_python_org/trial_result.json",
+    "sha256": "99c8428c2831b543df010a0640bffbb1122d44f7729a335ed48b9b8bd4e728b4",
+    "attempt_index": null,
+    "readonly": true,
+    "posthoc_optimization_allowed": false,
+    "candidate_mode": true
+  },
+  "loader": {
+    "contract_version": "model_learning_artifact_loader_v1",
+    "source_trial_path": "artifacts/learning-draft-review/trial_result_e679e50beb/reviewed_template_candidate.json",
+    "source_sha256": "99c8428c2831b543df010a0640bffbb1122d44f7729a335ed48b9b8bd4e728b4",
+    "source_attempt_index": null,
+    "source_artifact_readonly": true,
+    "posthoc_optimization_allowed": false,
+    "candidate_mode": true
+  },
+  "screen_summary": "Python homepage with a search input.",
+  "page_details": {
+    "contract_version": "learning_draft_page_details_v1",
+    "display_only": true,
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "screen": {
+      "app_name": "python_org",
+      "state_hint": "python_homepage",
+      "image_path": "artifacts/screenshots/sample_python_homepage.png",
+      "screen_size": {
+        "width": 1200,
+        "height": 800
+      },
+      "summary": "Python homepage with a search input."
+    },
+    "model_roles": {},
+    "layout_graph": {
+      "contract_version": "learn_layout_graph_v1",
+      "display_only": true,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "node_count": 1,
+      "zone_count": 1,
+      "zones": {
+        "browser_chrome": {
+          "zone_id": "browser_chrome",
+          "item_ids": []
+        },
+        "page_header": {
+          "zone_id": "page_header",
+          "item_ids": [
+            "search_input"
+          ]
+        },
+        "main_content": {
+          "zone_id": "main_content",
+          "item_ids": []
+        },
+        "lower_content": {
+          "zone_id": "lower_content",
+          "item_ids": []
+        },
+        "floating_overlay": {
+          "zone_id": "floating_overlay",
+          "item_ids": []
+        },
+        "unknown": {
+          "zone_id": "unknown",
+          "item_ids": []
+        }
+      },
+      "nodes": {
+        "search_input": {
+          "item_id": "search_input",
+          "label": "Search input",
+          "role": "input",
+          "item_type": "form_field",
+          "surface_zone": "page_header",
+          "bbox": {
+            "x": 800,
+            "y": 120,
+            "w": 240,
+            "h": 36
+          },
+          "review_only": false,
+          "grounding_eligible": false,
+          "split_roi_required": false,
+          "parent_ids": [],
+          "child_ids": []
+        }
+      },
+      "reading_order": [
+        "search_input"
+      ],
+      "overlap_clusters": [],
+      "interpretation": "layout graph groups parser candidates for review and ROI planning only; it is not click permission, Execute authorization, or a recognition accuracy metric"
+    },
+    "locator_task_cards": {
+      "contract_version": "learn_locator_task_cards_v1",
+      "display_only": true,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "cards": [
+        {
+          "contract_version": "learn_locator_task_card_v1",
+          "source_item_id": "search_input",
+          "target_name": "Search input",
+          "target_role": "input",
+          "target_visible_text": "Search input",
+          "item_type": "form_field",
+          "evidence_level": "calibrated_target",
+          "source_evidence": [
+            "calibrated_target"
+          ],
+          "rough_bbox_hint": {
+            "x": 800,
+            "y": 120,
+            "w": 240,
+            "h": 36
+          },
+          "rough_bbox_policy": "hint_only_can_be_replaced",
+          "visual_description": "editable input control for Search input",
+          "text_lines": [
+            "Search input"
+          ],
+          "boundary_definition": "visible input body boundary, excluding clear icons and surrounding header",
+          "clickable_area_hint": "inside the input body for Search input",
+          "neighbor_context": {
+            "left": null,
+            "right": null,
+            "above": null,
+            "below": null
+          },
+          "uia_control_type": null,
+          "uia_patterns": [],
+          "parser_candidate": {
+            "schema_version": "parser_candidate_v1",
+            "source_type": "calibrated_target",
+            "source_run_id": "",
+            "screenshot_sha256": "",
+            "coordinate_space": "image",
+            "image_size": {
+              "width": 1200,
+              "height": 800
+            },
+            "window_rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0
+            },
+            "candidate_id": "search_input",
+            "bbox": {
+              "x": 800,
+              "y": 120,
+              "w": 240,
+              "h": 36
+            },
+            "text": "Search input",
+            "label": "Search input",
+            "role_hint": "input",
+            "evidence_kind": "calibrated_interactable",
+            "is_interactable_evidence": true,
+            "review_only": false,
+            "grounding_eligible": true,
+            "grounding_block_reason": "",
+            "raw_payload_path": "",
+            "freshness": {
+              "same_screenshot": false,
+              "capture_time": "",
+              "stale": false
+            },
+            "artifact_is_authorization": false,
+            "execute_binding_enabled": false
+          },
+          "interaction_target": "click inside the input body for Search input, not the clear icon or surrounding header",
+          "must_not_click": [
+            "browser toolbar",
+            "clear icon",
+            "final submit",
+            "send",
+            "confirm",
+            "payment"
+          ],
+          "expected_precise_output": "tight visible target bbox and safe interior point in full screenshot coordinates",
+          "review_policy": {
+            "semantic_only_requires_human_review": false,
+            "requires_cross_evidence_before_promotion": false,
+            "interpretation": "Semantic-only regions remain review-only until OCR/UIA/DOM/calibrated support confirms the target."
+          },
+          "display_only": true,
+          "artifact_is_authorization": false,
+          "execute_binding_enabled": false
+        }
+      ],
+      "interpretation": "Locator task cards enrich screen-understanding output for later dry-run grounding review; they are not click authorization and do not make semantic-only regions executable."
+    },
+    "pipeline_audit": {
+      "contract_version": "learning_draft_pipeline_audit_v1",
+      "display_only": true,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "layout_cleanup": {
+        "contract_version": "learn_layout_cleanup_report_v1",
+        "input_count": 1,
+        "output_count": 1,
+        "suppressed_count": 0,
+        "duplicates_merged": 0,
+        "suppression_reason_counts": {},
+        "interpretation": "BBox Cleanup summary for display/review; candidate suppression is not model accuracy."
+      },
+      "grounding_eligibility_gate": {
+        "contract_version": "learn_grounding_eligibility_gate_report_v1",
+        "attempted": 1,
+        "eligible": 1,
+        "blocked": 0,
+        "non_actionable_leaked_to_grounding": 0,
+        "not_accuracy": true,
+        "interpretation": "Grounding Eligibility Gate decides which candidates may enter ROI grounding for learning evidence; it does not authorize clicks."
+      },
+      "roi_grounding": {
+        "validation_count": 1,
+        "valid_candidate_count": 1,
+        "interpretation": "ROI grounding evidence is display/review only until a later Gate authorizes real action."
+      },
+      "interpretation": "Pipeline audit explains parser cleanup, eligibility gating, and ROI validation for human review; it is not click authorization or a recognition accuracy metric."
+    },
+    "inventory_summary": {
+      "input_count": 1,
+      "accepted_for_grounding_count": 1,
+      "rejected_non_actionable_count": 0,
+      "needs_human_review_count": 0,
+      "danger_zone_count": 0,
+      "screen_inventory_count": 1,
+      "grounding_validation_count": 1
+    },
+    "review_only_regions": [],
+    "grounding_candidates": [
+      {
+        "item_id": "search_input",
+        "label": "Search input",
+        "item_type": "form_field",
+        "role": "input",
+        "bbox": {
+          "x": 800,
+          "y": 120,
+          "w": 240,
+          "h": 36
+        },
+        "source_evidence": [
+          "calibrated_target"
+        ],
+        "evidence_level": "calibrated_target",
+        "decision": {
+          "outcome": "accepted_for_grounding",
+          "reason": "actionable_with_grounding_evidence",
+          "grounding_eligible": true,
+          "review_only": false
+        },
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false
+      }
+    ],
+    "danger_zones": [],
+    "interpretation": "Read-only page understanding details; not a PathGraph, not click authorization, and not Execute binding.",
+    "candidate_only": true
+  },
+  "states": [
+    {
+      "state_id": "python_homepage",
+      "label": "python_homepage",
+      "page_type": "python_homepage",
+      "region_refs": [
+        "region_1"
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "model:transition:action_1",
+      "from_state_id": "python_homepage",
+      "to_state_id": "python_homepage",
+      "action_template_id": "action_1",
+      "default_available": true,
+      "verification_refs": []
+    }
+  ],
+  "regions": [
+    {
+      "region_id": "region_1",
+      "label": "Search input",
+      "role": "input",
+      "bbox": {
+        "x": 800,
+        "y": 120,
+        "w": 240,
+        "h": 36
+      },
+      "source_item_id": "search_input",
+      "grounding_status": "validated",
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "region_type": "input",
+      "source_artifact_readonly": true
+    }
+  ],
+  "fixed_visual_assets": [],
+  "dynamic_areas": [],
+  "danger_zones": [],
+  "editor_policy": {
+    "source_artifact_editable": false,
+    "derived_artifact_editable": false,
+    "save_as_required_for_manual_changes": true,
+    "candidate_only": true,
+    "execute_binding_enabled": false
+  },
+  "summary": {
+    "state_count": 1,
+    "region_count": 1,
+    "fixed_visual_asset_count": 0,
+    "dynamic_area_count": 0,
+    "danger_zone_count": 0
+  },
+  "candidate_mode": true,
+  "candidate_contract_version": "interface_map_candidate_v1",
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false
+}

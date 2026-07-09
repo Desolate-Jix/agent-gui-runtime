@@ -1,0 +1,69 @@
+{
+  "contract_version": "assisted_template_promotion_preflight_v1",
+  "preflight_status": "blocked_before_runtime_promotion_review",
+  "created_at": "2026-07-05T23:51:18.604699",
+  "package_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_2da5f3e228/pathgraph_candidate/assisted_template_review/assisted_template_review_package.json",
+  "package_sha256": "7b49097eef1faa3fd74eed58ab242b2c23e4e15189880c3b47ad61eb66f7aac5",
+  "review_record_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_2da5f3e228/pathgraph_candidate/assisted_template_review/assisted_template_review_record.json",
+  "asset_candidate_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_2da5f3e228/pathgraph_candidate/assisted_template_review/assisted_template_asset_candidate.json",
+  "graph_draft_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_2da5f3e228/pathgraph_candidate/assisted_template_review/assisted_template_graph_draft.json",
+  "counts": {
+    "accepted_review_items": 0,
+    "exported_asset_items": 0,
+    "graph_draft_items": 0
+  },
+  "checks": {
+    "review_record_saved": true,
+    "accepted_items_present": false,
+    "asset_candidate_created": true,
+    "asset_validation_passed": false,
+    "graph_draft_created": true,
+    "graph_draft_ready": false,
+    "accepted_items_exported_to_graph": false,
+    "no_execute_binding": true,
+    "no_authorization_artifact": true
+  },
+  "blockers": [
+    "accepted_items_present",
+    "asset_validation_passed",
+    "graph_draft_ready",
+    "accepted_items_exported_to_graph"
+  ],
+  "blocker_details": [
+    {
+      "check_id": "accepted_items_present",
+      "severity": "blocking",
+      "reason": "No checklist items are accepted yet.",
+      "recommended_action": "Accept at least one coherent state/region/action/transition set, then rebuild the asset candidate.",
+      "runtime_promotion_allowed": false
+    },
+    {
+      "check_id": "asset_validation_passed",
+      "severity": "blocking",
+      "reason": "The asset candidate failed manual asset validation.",
+      "recommended_action": "Fix accepted item linkage, final-submit safety, action semantics, and target regions, then rebuild.",
+      "runtime_promotion_allowed": false
+    },
+    {
+      "check_id": "graph_draft_ready",
+      "severity": "blocking",
+      "reason": "The graph draft is not ready for manual PathGraph review.",
+      "recommended_action": "Resolve asset validation blockers, then rebuild the graph draft preview.",
+      "runtime_promotion_allowed": false
+    },
+    {
+      "check_id": "accepted_items_exported_to_graph",
+      "severity": "blocking",
+      "reason": "Accepted review items were not fully reflected in the asset candidate and graph draft.",
+      "recommended_action": "Regenerate the asset candidate and graph draft after saving review decisions.",
+      "runtime_promotion_allowed": false
+    }
+  ],
+  "audit_required_before_runtime_promotion": true,
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "ready_for_runtime_pathgraph_promotion": false,
+  "final_submit_forbidden": true,
+  "authorization_scope": "manual_preflight_only",
+  "interpretation": "manual promotion preflight only; this does not promote Runtime PathGraph, enable Execute, dispatch clicks, fill forms, or submit"
+}

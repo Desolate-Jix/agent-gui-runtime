@@ -1,0 +1,1804 @@
+{
+  "contract_version": "learning_model_trial_v1",
+  "status": "passed",
+  "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-172244-518495.png",
+  "image_size": {
+    "width": 2540,
+    "height": 1380
+  },
+  "app_name": "python.org",
+  "state_hint": "python.org homepage",
+  "validation_mode": "standard",
+  "target_score_ratio": 0.9,
+  "best_attempt_index": 0,
+  "best_score_ratio": 1.0,
+  "best_score_percent": 100.0,
+  "attempt_count": 1,
+  "attempts": [
+    {
+      "contract_version": "learning_model_trial_attempt_v1",
+      "attempt_index": 0,
+      "learning_parameters": {
+        "contract_version": "learning_parameters_v1",
+        "learning_model_profile_id": "qwen3_vl_8b_q4_k_m",
+        "temperature": 0.0,
+        "max_output_tokens": 3072,
+        "timeout_seconds": 240,
+        "learning_image_max_edge": 768,
+        "prompt_detail_mode": "compact_contract",
+        "draft_reference_alignment_threshold": 0.9,
+        "direct_use_accuracy_threshold": 0.9,
+        "artifact_posthoc_optimization_allowed": false,
+        "allow_fast_profile_fallback": false
+      },
+      "model_run": {
+        "contract_version": "learning_model_run_v1",
+        "status": "success",
+        "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+        "raw_text": "{\n  \"contract_version\": \"learning_template_draft_v1\",\n  \"image_size\": {\"width\": 768, \"height\": 417},\n  \"learning_source\": \"observe_model\",\n  \"screen_summary\": \"Python.org homepage with top navigation, search bar, primary content cards, and news/events sections.\",\n  \"state_guess\": \"python.org homepage\",\n  \"workflow_draft\": {\n    \"states\": [\n      {\n        \"state_id\": \"s1\",\n        \"label\": \"Python.org homepage\",\n        \"page_type\": \"landing_page\"\n      }\n    ],\n    \"transitions\": [],\n    \"action_templates\": [\n      {\n        \"action_template_id\": \"a1\",\n        \"label\": \"Search Python.org\",\n        \"semantic_action\": \"type_text\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Search query entered into the search field.\"\n      },\n      {\n        \"action_template_id\": \"a2\",\n        \"label\": \"Navigate to Downloads\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Downloads page.\"\n      },\n      {\n        \"action_template_id\": \"a3\",\n        \"label\": \"Open Documentation\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Documentation page.\"\n      },\n      {\n        \"action_template_id\": \"a4\",\n        \"label\": \"View Events\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Events page.\"\n      },\n      {\n        \"action_template_id\": \"a5\",\n        \"label\": \"Explore Community\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Community page.\"\n      }\n    ],\n    \"path_patterns\": []\n  },\n  \"interface_draft\": {\n    \"regions\": [\n      {\n        \"region_id\": \"r1\",\n        \"label\": \"Search Input\",\n        \"role\": \"text_input\",\n        \"source\": \"element_search_728a0ee8\",\n        \"click_point\": {\"x\": 1514, \"y\": 198},\n        \"section_id\": \"top_bar\",\n        \"bbox\": {\"x\": 1488, \"y\": 187, \"w\": 53, \"h\": 23}\n      },\n      {\n        \"region_id\": \"r2\",\n        \"label\": \"Downloads Button\",\n        \"role\": \"button\",\n        \"source\": \"element_downloads_1d2cdc2d\",\n        \"click_point\": {\"x\": 1004, \"y\": 278},\n        \"section_id\": \"primary_area\",\n        \"bbox\": {\"x\": 956, \"y\": 263, \"w\": 97, \"h\": 29}\n      },\n      {\n        \"region_id\": \"r3\",\n        \"label\": \"Documentation Button\",\n        \"role\": \"button\",\n        \"source\": \"element_documentation_fecdf50b\",\n        \"click_point\": {\"x\": 1153, \"y\": 278},\n        \"section_id\": \"primary_area\",\n        \"bbox\": {\"x\": 1088, \"y\": 263, \"w\": 130, \"h\": 29}\n      },\n      {\n        \"region_id\": \"r4\",\n        \"label\": \"Events Button\",\n        \"role\": \"button\",\n        \"source\": \"element_events_de957abc\",\n        \"click_point\": {\"x\": 1671, \"y\": 277},\n        \"section_id\": \"primary_area\",\n        \"bbox\": {\"x\": 1640, \"y\": 264, \"w\": 62, \"h\": 26}\n      },\n      {\n        \"region_id\": \"r5\",\n        \"label\": \"Community Button\",\n        \"role\": \"button\",\n        \"source\": \"element_community_5d7e44ed\",\n        \"click_point\": {\"x\": 1780, \"y\": 113},\n        \"section_id\": \"top_bar\",\n        \"bbox\": {\"x\": 1737, \"y\": 100, \"w\": 86, \"h\": 26}\n      }\n    ],\n    \"visual_assets\": [],\n    \"dynamic_areas\": [],\n    \"danger_zones\": []\n  },\n  \"agent_decision_points\": [],\n  \"operation_skills\": [],\n  \"gate_contracts\": [],\n  \"safety\": {\n    \"observation_only\": true,\n    \"promotion_allowed\": false,\n    \"final_submit_blocked\": true,\n    \"real_clicks_performed\": 0\n  },\n  \"notes\": []\n}",
+        "model_json": {
+          "contract_version": "learning_template_draft_v1",
+          "image_size": {
+            "width": 2540,
+            "height": 1380
+          },
+          "learning_source": "observe_model",
+          "screen_summary": "Python.org homepage with top navigation, search bar, primary content cards, and news/events sections.",
+          "state_guess": "python.org homepage",
+          "workflow_draft": {
+            "states": [
+              {
+                "state_id": "s1",
+                "label": "Python.org homepage",
+                "page_type": "landing_page"
+              }
+            ],
+            "transitions": [],
+            "action_templates": [
+              {
+                "action_template_id": "a1",
+                "label": "Search Python.org",
+                "semantic_action": "type_text",
+                "risk_level": "low",
+                "requires_gate": true,
+                "expected_effect": "Search query entered into the search field."
+              },
+              {
+                "action_template_id": "a2",
+                "label": "Navigate to Downloads",
+                "semantic_action": "open_detail",
+                "risk_level": "low",
+                "requires_gate": true,
+                "expected_effect": "Navigate to the Downloads page."
+              },
+              {
+                "action_template_id": "a3",
+                "label": "Open Documentation",
+                "semantic_action": "open_detail",
+                "risk_level": "low",
+                "requires_gate": true,
+                "expected_effect": "Navigate to the Documentation page."
+              },
+              {
+                "action_template_id": "a4",
+                "label": "View Events",
+                "semantic_action": "open_detail",
+                "risk_level": "low",
+                "requires_gate": true,
+                "expected_effect": "Navigate to the Events page."
+              },
+              {
+                "action_template_id": "a5",
+                "label": "Explore Community",
+                "semantic_action": "open_detail",
+                "risk_level": "low",
+                "requires_gate": true,
+                "expected_effect": "Navigate to the Community page."
+              }
+            ],
+            "path_patterns": []
+          },
+          "interface_draft": {
+            "regions": [
+              {
+                "region_id": "r1",
+                "label": "Search Input",
+                "role": "text_input",
+                "source": "element_search_728a0ee8",
+                "click_point": {
+                  "x": 1514,
+                  "y": 198
+                },
+                "section_id": "top_bar",
+                "bbox": {
+                  "x": 1488,
+                  "y": 187,
+                  "w": 53,
+                  "h": 23
+                }
+              },
+              {
+                "region_id": "r2",
+                "label": "Downloads Button",
+                "role": "button",
+                "source": "element_downloads_1d2cdc2d",
+                "click_point": {
+                  "x": 1004,
+                  "y": 278
+                },
+                "section_id": "primary_area",
+                "bbox": {
+                  "x": 956,
+                  "y": 263,
+                  "w": 97,
+                  "h": 29
+                }
+              },
+              {
+                "region_id": "r3",
+                "label": "Documentation Button",
+                "role": "button",
+                "source": "element_documentation_fecdf50b",
+                "click_point": {
+                  "x": 1153,
+                  "y": 278
+                },
+                "section_id": "primary_area",
+                "bbox": {
+                  "x": 1088,
+                  "y": 263,
+                  "w": 130,
+                  "h": 29
+                }
+              },
+              {
+                "region_id": "r4",
+                "label": "Events Button",
+                "role": "button",
+                "source": "element_events_de957abc",
+                "click_point": {
+                  "x": 1671,
+                  "y": 277
+                },
+                "section_id": "primary_area",
+                "bbox": {
+                  "x": 1640,
+                  "y": 264,
+                  "w": 62,
+                  "h": 26
+                }
+              },
+              {
+                "region_id": "r5",
+                "label": "Community Button",
+                "role": "button",
+                "source": "element_community_5d7e44ed",
+                "click_point": {
+                  "x": 1780,
+                  "y": 113
+                },
+                "section_id": "top_bar",
+                "bbox": {
+                  "x": 1737,
+                  "y": 100,
+                  "w": 86,
+                  "h": 26
+                }
+              }
+            ],
+            "visual_assets": [],
+            "dynamic_areas": [],
+            "danger_zones": []
+          },
+          "agent_decision_points": [],
+          "operation_skills": [],
+          "gate_contracts": [],
+          "safety": {
+            "observation_only": true,
+            "promotion_allowed": false,
+            "final_submit_blocked": true,
+            "real_clicks_performed": 0
+          },
+          "notes": [],
+          "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+          "regions": [],
+          "targets": [],
+          "observers": [],
+          "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+        },
+        "raw_response": {
+          "contract_version": "provider_model_trace_v1",
+          "provider": "local",
+          "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-172244-518495.png",
+          "raw_text": "{\n  \"contract_version\": \"learning_template_draft_v1\",\n  \"image_size\": {\"width\": 768, \"height\": 417},\n  \"learning_source\": \"observe_model\",\n  \"screen_summary\": \"Python.org homepage with top navigation, search bar, primary content cards, and news/events sections.\",\n  \"state_guess\": \"python.org homepage\",\n  \"workflow_draft\": {\n    \"states\": [\n      {\n        \"state_id\": \"s1\",\n        \"label\": \"Python.org homepage\",\n        \"page_type\": \"landing_page\"\n      }\n    ],\n    \"transitions\": [],\n    \"action_templates\": [\n      {\n        \"action_template_id\": \"a1\",\n        \"label\": \"Search Python.org\",\n        \"semantic_action\": \"type_text\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Search query entered into the search field.\"\n      },\n      {\n        \"action_template_id\": \"a2\",\n        \"label\": \"Navigate to Downloads\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Downloads page.\"\n      },\n      {\n        \"action_template_id\": \"a3\",\n        \"label\": \"Open Documentation\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Documentation page.\"\n      },\n      {\n        \"action_template_id\": \"a4\",\n        \"label\": \"View Events\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Events page.\"\n      },\n      {\n        \"action_template_id\": \"a5\",\n        \"label\": \"Explore Community\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Community page.\"\n      }\n    ],\n    \"path_patterns\": []\n  },\n  \"interface_draft\": {\n    \"regions\": [\n      {\n        \"region_id\": \"r1\",\n        \"label\": \"Search Input\",\n        \"role\": \"text_input\",\n        \"source\": \"element_search_728a0ee8\",\n        \"click_point\": {\"x\": 1514, \"y\": 198},\n        \"section_id\": \"top_bar\",\n        \"bbox\": {\"x\": 1488, \"y\": 187, \"w\": 53, \"h\": 23}\n      },\n      {\n        \"region_id\": \"r2\",\n        \"label\": \"Downloads Button\",\n        \"role\": \"button\",\n        \"source\": \"element_downloads_1d2cdc2d\",\n        \"click_point\": {\"x\": 1004, \"y\": 278},\n        \"section_id\": \"primary_area\",\n        \"bbox\": {\"x\": 956, \"y\": 263, \"w\": 97, \"h\": 29}\n      },\n      {\n        \"region_id\": \"r3\",\n        \"label\": \"Documentation Button\",\n        \"role\": \"button\",\n        \"source\": \"element_documentation_fecdf50b\",\n        \"click_point\": {\"x\": 1153, \"y\": 278},\n        \"section_id\": \"primary_area\",\n        \"bbox\": {\"x\": 1088, \"y\": 263, \"w\": 130, \"h\": 29}\n      },\n      {\n        \"region_id\": \"r4\",\n        \"label\": \"Events Button\",\n        \"role\": \"button\",\n        \"source\": \"element_events_de957abc\",\n        \"click_point\": {\"x\": 1671, \"y\": 277},\n        \"section_id\": \"primary_area\",\n        \"bbox\": {\"x\": 1640, \"y\": 264, \"w\": 62, \"h\": 26}\n      },\n      {\n        \"region_id\": \"r5\",\n        \"label\": \"Community Button\",\n        \"role\": \"button\",\n        \"source\": \"element_community_5d7e44ed\",\n        \"click_point\": {\"x\": 1780, \"y\": 113},\n        \"section_id\": \"top_bar\",\n        \"bbox\": {\"x\": 1737, \"y\": 100, \"w\": 86, \"h\": 26}\n      }\n    ],\n    \"visual_assets\": [],\n    \"dynamic_areas\": [],\n    \"danger_zones\": []\n  },\n  \"agent_decision_points\": [],\n  \"operation_skills\": [],\n  \"gate_contracts\": [],\n  \"safety\": {\n    \"observation_only\": true,\n    \"promotion_allowed\": false,\n    \"final_submit_blocked\": true,\n    \"real_clicks_performed\": 0\n  },\n  \"notes\": []\n}",
+          "model_json": {
+            "contract_version": "learning_template_draft_v1",
+            "image_size": {
+              "width": 2540,
+              "height": 1380
+            },
+            "learning_source": "observe_model",
+            "screen_summary": "Python.org homepage with top navigation, search bar, primary content cards, and news/events sections.",
+            "state_guess": "python.org homepage",
+            "workflow_draft": {
+              "states": [
+                {
+                  "state_id": "s1",
+                  "label": "Python.org homepage",
+                  "page_type": "landing_page"
+                }
+              ],
+              "transitions": [],
+              "action_templates": [
+                {
+                  "action_template_id": "a1",
+                  "label": "Search Python.org",
+                  "semantic_action": "type_text",
+                  "risk_level": "low",
+                  "requires_gate": true,
+                  "expected_effect": "Search query entered into the search field."
+                },
+                {
+                  "action_template_id": "a2",
+                  "label": "Navigate to Downloads",
+                  "semantic_action": "open_detail",
+                  "risk_level": "low",
+                  "requires_gate": true,
+                  "expected_effect": "Navigate to the Downloads page."
+                },
+                {
+                  "action_template_id": "a3",
+                  "label": "Open Documentation",
+                  "semantic_action": "open_detail",
+                  "risk_level": "low",
+                  "requires_gate": true,
+                  "expected_effect": "Navigate to the Documentation page."
+                },
+                {
+                  "action_template_id": "a4",
+                  "label": "View Events",
+                  "semantic_action": "open_detail",
+                  "risk_level": "low",
+                  "requires_gate": true,
+                  "expected_effect": "Navigate to the Events page."
+                },
+                {
+                  "action_template_id": "a5",
+                  "label": "Explore Community",
+                  "semantic_action": "open_detail",
+                  "risk_level": "low",
+                  "requires_gate": true,
+                  "expected_effect": "Navigate to the Community page."
+                }
+              ],
+              "path_patterns": []
+            },
+            "interface_draft": {
+              "regions": [
+                {
+                  "region_id": "r1",
+                  "label": "Search Input",
+                  "role": "text_input",
+                  "source": "element_search_728a0ee8",
+                  "click_point": {
+                    "x": 1514,
+                    "y": 198
+                  },
+                  "section_id": "top_bar",
+                  "bbox": {
+                    "x": 1488,
+                    "y": 187,
+                    "w": 53,
+                    "h": 23
+                  }
+                },
+                {
+                  "region_id": "r2",
+                  "label": "Downloads Button",
+                  "role": "button",
+                  "source": "element_downloads_1d2cdc2d",
+                  "click_point": {
+                    "x": 1004,
+                    "y": 278
+                  },
+                  "section_id": "primary_area",
+                  "bbox": {
+                    "x": 956,
+                    "y": 263,
+                    "w": 97,
+                    "h": 29
+                  }
+                },
+                {
+                  "region_id": "r3",
+                  "label": "Documentation Button",
+                  "role": "button",
+                  "source": "element_documentation_fecdf50b",
+                  "click_point": {
+                    "x": 1153,
+                    "y": 278
+                  },
+                  "section_id": "primary_area",
+                  "bbox": {
+                    "x": 1088,
+                    "y": 263,
+                    "w": 130,
+                    "h": 29
+                  }
+                },
+                {
+                  "region_id": "r4",
+                  "label": "Events Button",
+                  "role": "button",
+                  "source": "element_events_de957abc",
+                  "click_point": {
+                    "x": 1671,
+                    "y": 277
+                  },
+                  "section_id": "primary_area",
+                  "bbox": {
+                    "x": 1640,
+                    "y": 264,
+                    "w": 62,
+                    "h": 26
+                  }
+                },
+                {
+                  "region_id": "r5",
+                  "label": "Community Button",
+                  "role": "button",
+                  "source": "element_community_5d7e44ed",
+                  "click_point": {
+                    "x": 1780,
+                    "y": 113
+                  },
+                  "section_id": "top_bar",
+                  "bbox": {
+                    "x": 1737,
+                    "y": 100,
+                    "w": 86,
+                    "h": 26
+                  }
+                }
+              ],
+              "visual_assets": [],
+              "dynamic_areas": [],
+              "danger_zones": []
+            },
+            "agent_decision_points": [],
+            "operation_skills": [],
+            "gate_contracts": [],
+            "safety": {
+              "observation_only": true,
+              "promotion_allowed": false,
+              "final_submit_blocked": true,
+              "real_clicks_performed": 0
+            },
+            "notes": [],
+            "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            "regions": [],
+            "targets": [],
+            "observers": [],
+            "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+          },
+          "endpoint_response": {
+            "choices": [
+              {
+                "finish_reason": "stop",
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "{\n  \"contract_version\": \"learning_template_draft_v1\",\n  \"image_size\": {\"width\": 768, \"height\": 417},\n  \"learning_source\": \"observe_model\",\n  \"screen_summary\": \"Python.org homepage with top navigation, search bar, primary content cards, and news/events sections.\",\n  \"state_guess\": \"python.org homepage\",\n  \"workflow_draft\": {\n    \"states\": [\n      {\n        \"state_id\": \"s1\",\n        \"label\": \"Python.org homepage\",\n        \"page_type\": \"landing_page\"\n      }\n    ],\n    \"transitions\": [],\n    \"action_templates\": [\n      {\n        \"action_template_id\": \"a1\",\n        \"label\": \"Search Python.org\",\n        \"semantic_action\": \"type_text\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Search query entered into the search field.\"\n      },\n      {\n        \"action_template_id\": \"a2\",\n        \"label\": \"Navigate to Downloads\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Downloads page.\"\n      },\n      {\n        \"action_template_id\": \"a3\",\n        \"label\": \"Open Documentation\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Documentation page.\"\n      },\n      {\n        \"action_template_id\": \"a4\",\n        \"label\": \"View Events\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Events page.\"\n      },\n      {\n        \"action_template_id\": \"a5\",\n        \"label\": \"Explore Community\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Community page.\"\n      }\n    ],\n    \"path_patterns\": []\n  },\n  \"interface_draft\": {\n    \"regions\": [\n      {\n        \"region_id\": \"r1\",\n        \"label\": \"Search Input\",\n        \"role\": \"text_input\",\n        \"source\": \"element_search_728a0ee8\",\n        \"click_point\": {\"x\": 1514, \"y\": 198},\n        \"section_id\": \"top_bar\",\n        \"bbox\": {\"x\": 1488, \"y\": 187, \"w\": 53, \"h\": 23}\n      },\n      {\n        \"region_id\": \"r2\",\n        \"label\": \"Downloads Button\",\n        \"role\": \"button\",\n        \"source\": \"element_downloads_1d2cdc2d\",\n        \"click_point\": {\"x\": 1004, \"y\": 278},\n        \"section_id\": \"primary_area\",\n        \"bbox\": {\"x\": 956, \"y\": 263, \"w\": 97, \"h\": 29}\n      },\n      {\n        \"region_id\": \"r3\",\n        \"label\": \"Documentation Button\",\n        \"role\": \"button\",\n        \"source\": \"element_documentation_fecdf50b\",\n        \"click_point\": {\"x\": 1153, \"y\": 278},\n        \"section_id\": \"primary_area\",\n        \"bbox\": {\"x\": 1088, \"y\": 263, \"w\": 130, \"h\": 29}\n      },\n      {\n        \"region_id\": \"r4\",\n        \"label\": \"Events Button\",\n        \"role\": \"button\",\n        \"source\": \"element_events_de957abc\",\n        \"click_point\": {\"x\": 1671, \"y\": 277},\n        \"section_id\": \"primary_area\",\n        \"bbox\": {\"x\": 1640, \"y\": 264, \"w\": 62, \"h\": 26}\n      },\n      {\n        \"region_id\": \"r5\",\n        \"label\": \"Community Button\",\n        \"role\": \"button\",\n        \"source\": \"element_community_5d7e44ed\",\n        \"click_point\": {\"x\": 1780, \"y\": 113},\n        \"section_id\": \"top_bar\",\n        \"bbox\": {\"x\": 1737, \"y\": 100, \"w\": 86, \"h\": 26}\n      }\n    ],\n    \"visual_assets\": [],\n    \"dynamic_areas\": [],\n    \"danger_zones\": []\n  },\n  \"agent_decision_points\": [],\n  \"operation_skills\": [],\n  \"gate_contracts\": [],\n  \"safety\": {\n    \"observation_only\": true,\n    \"promotion_allowed\": false,\n    \"final_submit_blocked\": true,\n    \"real_clicks_performed\": 0\n  },\n  \"notes\": []\n}"
+                }
+              }
+            ],
+            "created": 1783056186,
+            "model": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            "system_fingerprint": "b8892-0d0764dfd",
+            "object": "chat.completion",
+            "usage": {
+              "completion_tokens": 1086,
+              "prompt_tokens": 7060,
+              "total_tokens": 8146,
+              "prompt_tokens_details": {
+                "cached_tokens": 55
+              }
+            },
+            "id": "chatcmpl-NkRN2Ge68ssFVQw32gaACdblOOMcn6k1",
+            "timings": {
+              "cache_n": 55,
+              "prompt_n": 7005,
+              "prompt_ms": 2303.333,
+              "prompt_per_token_ms": 0.3288127052105639,
+              "prompt_per_second": 3041.2450132047775,
+              "predicted_n": 1086,
+              "predicted_ms": 19284.997,
+              "predicted_per_token_ms": 17.7578241252302,
+              "predicted_per_second": 56.313205545222544
+            }
+          },
+          "attempts": [
+            {
+              "tag": "learning_draft",
+              "compact_prompt": false,
+              "max_regions": 8,
+              "requested_max_edge": 1280,
+              "inference_image_size": {
+                "width": 768,
+                "height": 417
+              },
+              "original_image_size": {
+                "width": 2540,
+                "height": 1380
+              },
+              "model_io": {
+                "contract_version": "model_io_attempt_v1",
+                "status": "success",
+                "provider": "local",
+                "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                "endpoint": "http://127.0.0.1:1240/v1/chat/completions",
+                "task": "learn_template_draft",
+                "app_name": "python.org",
+                "goal": "learn a reusable UI workflow template from the Python homepage using calibrated targets",
+                "state_hint": "python.org homepage",
+                "provider_mode": "local_understanding",
+                "attempt": {
+                  "tag": "learning_draft",
+                  "compact_prompt": false,
+                  "max_regions": 8,
+                  "requested_max_edge": 1280
+                },
+                "input": {
+                  "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-172244-518495.png",
+                  "inference_image_path": "C:\\Users\\DesolateJix\\AppData\\Local\\Temp\\vision-inference-_85fm3fl\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-172244-518495__1280__learn-768.png",
+                  "original_image_size": {
+                    "width": 2540,
+                    "height": 1380
+                  },
+                  "inference_image_size": {
+                    "width": 768,
+                    "height": 417
+                  },
+                  "max_tokens": 3072,
+                  "temperature": 0.0,
+                  "prompt": "Return JSON only. You are learning a reusable GUI workflow draft from the screenshot.\nDo not authorize actions. Do not copy an existing template. Keep arrays focused but demo-useful: prefer 4-8 useful regions/actions when calibrated evidence is available.\n\nInput: app=python.org; state=python.org homepage; goal=learn a reusable UI workflow template from the Python homepage using calibrated targets; image={\"width\":768,\"height\":417}\n\nRequired JSON shape:\n{\n  \"contract_version\": \"learning_template_draft_v1\",\n  \"image_size\": {\"width\": 768, \"height\": 417},\n  \"learning_source\": \"observe_model\",\n  \"screen_summary\": \"\",\n  \"state_guess\": \"\",\n  \"workflow_draft\": {\n    \"states\": [{\"state_id\":\"s1\",\"label\":\"\",\"page_type\":\"\"}],\n    \"transitions\": [],\n    \"action_templates\": [{\"action_template_id\":\"a1\",\"label\":\"\",\"semantic_action\":\"\",\"risk_level\":\"low\",\"requires_gate\":true,\"expected_effect\":\"\"}],\n    \"path_patterns\": []\n  },\n  \"interface_draft\": {\n    \"regions\": [{\"region_id\":\"r1\",\"label\":\"\",\"role\":\"\"}],\n    \"visual_assets\": [],\n    \"dynamic_areas\": [],\n    \"danger_zones\": []\n  },\n  \"agent_decision_points\": [],\n  \"operation_skills\": [],\n  \"gate_contracts\": [],\n  \"safety\": {\n    \"observation_only\": true,\n    \"promotion_allowed\": false,\n    \"final_submit_blocked\": true,\n    \"real_clicks_performed\": 0\n  },\n  \"notes\": []\n}\n\nRules:\n- Fill every required section in context_json.target_contract.required_sections.\n- Use screenshot + context_json.observation_evidence as evidence; do not treat evidence as final answer.\n- If context_json.observation_evidence.calibrated_targets exists, use those Learn Deep targets as the primary coordinate/region/action evidence.\n- Preserve useful calibrated target ids in source_candidate_id, source_target_id, or evidence_ref fields.\n- interface_draft.regions should include key calibrated targets with role, label, bbox, click_point, section_id, and source when available.\n- workflow_draft.action_templates should cover high-value calibrated targets: search/input, top navigation, primary content cards, download/docs links, and obvious safe navigation actions.\n- Prefer calibrated child actions over broad parent containers when both exist.\n- If context_json.observation_evidence.model_roles exists, reflect that learning_source used semantic understanding plus coordinate calibration evidence.\n- ids must be short and stable. Do not invent coordinates.\n- workflow_draft.action_templates must describe what an Agent could do with visible interactive regions.\n- If interface_draft.regions contains an input/search/text field, include at least one action_template with semantic_action=\"type_text\", requires_gate=true, and expected_effect describing the field being populated.\n- If interface_draft.regions contains a visible button/link/card that opens another screen, include an action_template with semantic_action such as \"open_detail\" or \"open_apply_flow\".\n- Do not leave action_templates empty when the screenshot contains a visible input, button, link, card, tab, checkbox, menu item, or other actionable control.\n- Apply / Quick Apply / 申请 must map to semantic_action=\"open_apply_flow\" and requires_gate=true.\n- Submit / Send / Confirm / Complete / Payment / Delete / 提交 / 发送 / 确认 must be final_submit or danger_zones with hard_block=true and final_submit_guard_required=true.\n- safety must stay: observation_only=true, promotion_allowed=false, final_submit_blocked=true, real_clicks_performed=0.\n- No prose outside JSON; no long descriptions.\n\ncontext_json:\n{\"contract_version\":\"learning_trial_context_v1\",\"target_contract\":{\"contract_version\":\"learning_template_target_v1\",\"required_top_level_fields\":[\"contract_version\",\"image_size\",\"learning_source\",\"screen_summary\",\"state_guess\",\"workflow_draft\",\"interface_draft\",\"safety\"],\"required_sections\":[\"workflow_draft.states\",\"workflow_draft.action_templates\",\"interface_draft.regions\",\"safety\"],\"expected_actions\":[],\"expected_visible_text\":[],\"reference_template\":null,\"require_expected_actions_for_pass\":false,\"draft_reference_alignment_threshold\":0.9,\"direct_use_accuracy_threshold\":0.9,\"human_adjudication\":null},\"observation_evidence\":{\"contract_version\":\"panel_learning_draft_observation_evidence_v1\",\"evidence_source\":\"panel_current_learn_trace_api_demo\",\"model_roles\":{\"screen_understanding\":{\"stage\":\"Learn Fast\",\"model_profile_id\":\"qwen3_vl_8b_q4_k_m\",\"expected_model_family\":\"8B\",\"trace_path\":\"D:\\\\agent-gui-runtime\\\\logs\\\\traces\\\\vision\\\\20260703-172243-809811__learn-mode-fast-observe__python-org.json\"},\"coordinate_calibration\":{\"stage\":\"Learn Deep\",\"model_profile_id\":\"vista_4b_transformers\",\"expected_model_family\":\"4B\",\"trace_path\":\"D:\\\\agent-gui-runtime\\\\logs\\\\traces\\\\vision\\\\20260703-172244-655438__learn-mode-deep-locate__python-org.json\"}},\"current_image_path\":\"D:\\\\agent-gui-runtime\\\\artifacts\\\\screenshots\\\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-172244-518495.png\",\"coordinate_overlay_path\":\"D:\\\\agent-gui-runtime\\\\artifacts\\\\review-overlays\\\\state-edde1188487aff33-learn-targets__learn-target-coordinates__20260703-172244-586437.png\",\"learn_all_targets_summary\":{\"status\":\"needs_review\",\"target_count\":34,\"validated_count\":33,\"invalid_count\":1,\"filtered_browser_chrome_count\":0,\"filtered_noise_count\":0,\"visual_overlap_removal_count\":4},\"calibrated_targets\":[{\"candidate_id\":\"element_community_5d7e44ed\",\"target_id\":\"element_community_5d7e44ed\",\"label\":\"Community\",\"role\":\"button\",\"semantic_action\":null,\"bbox\":{\"x\":1737,\"y\":100,\"w\":86,\"h\":26},\"click_point\":{\"x\":1780,\"y\":113},\"source\":\"top_level.ui.elements\",\"section_id\":\"top_bar\",\"confidence\":0.8471,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"valid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":true,\"click_point_inside_image\":true,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[]}},{\"candidate_id\":\"element_python_05b01566\",\"target_id\":\"element_python_05b01566\",\"label\":\"Python\",\"role\":\"menu_item\",\"semantic_action\":null,\"bbox\":{\"x\":752,\"y\":103,\"w\":59,\"h\":23},\"click_point\":{\"x\":782,\"y\":114},\"source\":\"top_level.ui.elements\",\"section_id\":\"top_bar\",\"confidence\":0.8489,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"valid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":true,\"click_point_inside_image\":true,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[]}},{\"candidate_id\":\"element_go_3f7c00b7\",\"target_id\":\"element_go_3f7c00b7\",\"label\":\"GO\",\"role\":\"button\",\"semantic_action\":null,\"bbox\":{\"x\":1728,\"y\":185,\"w\":29,\"h\":21},\"click_point\":{\"x\":1742,\"y\":196},\"source\":\"top_level.ui.elements\",\"section_id\":\"top_bar\",\"confidence\":0.8466,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"valid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":true,\"click_point_inside_image\":true,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[]}},{\"candidate_id\":\"element_search_728a0ee8\",\"target_id\":\"element_search_728a0ee8\",\"label\":\"Search\",\"role\":\"text_input\",\"semantic_action\":null,\"bbox\":{\"x\":1488,\"y\":187,\"w\":53,\"h\":23},\"click_point\":{\"x\":1514,\"y\":198},\"source\":\"top_level.ui.elements\",\"section_id\":\"top_bar\",\"confidence\":0.8502,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"valid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":true,\"click_point_inside_image\":true,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[]}},{\"candidate_id\":\"element_news_ce24a97c\",\"target_id\":\"element_news_ce24a97c\",\"label\":\"News\",\"role\":\"button\",\"semantic_action\":null,\"bbox\":{\"x\":1549,\"y\":260,\"w\":60,\"h\":34},\"click_point\":{\"x\":1579,\"y\":277},\"source\":\"top_level.ui.elements\",\"section_id\":\"primary_area\",\"confidence\":0.8456,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"valid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":true,\"click_point_inside_image\":true,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[]}},{\"candidate_id\":\"element_downloads_1d2cdc2d\",\"target_id\":\"element_downloads_1d2cdc2d\",\"label\":\"Downloads\",\"role\":\"button\",\"semantic_action\":null,\"bbox\":{\"x\":956,\"y\":263,\"w\":97,\"h\":29},\"click_point\":{\"x\":1004,\"y\":278},\"source\":\"top_level.ui.elements\",\"section_id\":\"primary_area\",\"confidence\":0.8474,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"valid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":true,\"click_point_inside_image\":true,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[]}},{\"candidate_id\":\"element_documentation_fecdf50b\",\"target_id\":\"element_documentation_fecdf50b\",\"label\":\"Documentation\",\"role\":\"button\",\"semantic_action\":null,\"bbox\":{\"x\":1088,\"y\":263,\"w\":130,\"h\":29},\"click_point\":{\"x\":1153,\"y\":278},\"source\":\"top_level.ui.elements\",\"section_id\":\"primary_area\",\"confidence\":0.8474,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"valid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":true,\"click_point_inside_image\":true,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[]}},{\"candidate_id\":\"element_events_de957abc\",\"target_id\":\"element_events_de957abc\",\"label\":\"Events\",\"role\":\"button\",\"semantic_action\":null,\"bbox\":{\"x\":1640,\"y\":264,\"w\":62,\"h\":26},\"click_point\":{\"x\":1671,\"y\":277},\"source\":\"top_level.ui.elements\",\"section_id\":\"primary_area\",\"confidence\":0.847,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"valid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":true,\"click_point_inside_image\":true,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[]}},{\"candidate_id\":\"element_about_a47b04af\",\"target_id\":\"element_about_a47b04af\",\"label\":\"About\",\"role\":\"button\",\"semantic_action\":null,\"bbox\":{\"x\":866,\"y\":266,\"w\":56,\"h\":23},\"click_point\":{\"x\":894,\"y\":278},\"source\":\"top_level.ui.elements\",\"section_id\":\"primary_area\",\"confidence\":0.8472,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"valid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":true,\"click_point_inside_image\":true,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[]}},{\"candidate_id\":\"element_get_started_55dd5d11\",\"target_id\":\"element_get_started_55dd5d11\",\"label\":\"Get Started\",\"role\":\"menu_item\",\"semantic_action\":null,\"bbox\":{\"x\":722,\"y\":760,\"w\":135,\"h\":30},\"click_point\":{\"x\":790,\"y\":775},\"source\":\"top_level.ui.elements\",\"section_id\":\"primary_area\",\"confidence\":0.8445,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"valid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":true,\"click_point_inside_image\":true,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[]}},{\"candidate_id\":\"element_download_7357b54c\",\"target_id\":\"element_download_7357b54c\",\"label\":\"Download\",\"role\":\"menu_item\",\"semantic_action\":null,\"bbox\":{\"x\":1018,\"y\":761,\"w\":119,\"h\":26},\"click_point\":{\"x\":1078,\"y\":774},\"source\":\"top_level.ui.elements\",\"section_id\":\"primary_area\",\"confidence\":0.847,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"valid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":true,\"click_point_inside_image\":true,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[]}},{\"candidate_id\":\"element_success_stories_6ebaf618\",\"target_id\":\"element_success_stories_6ebaf618\",\"label\":\"Success Stories\",\"role\":\"button\",\"semantic_action\":null,\"bbox\":{\"x\":719,\"y\":1321,\"w\":179,\"h\":34},\"click_point\":{\"x\":808,\"y\":1338},\"source\":\"top_level.ui.elements\",\"section_id\":\"bottom_bar\",\"confidence\":0.8471,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"valid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":true,\"click_point_inside_image\":true,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[]}},{\"candidate_id\":\"ocr_text_36\",\"target_id\":\"ocr_text_36\",\"label\":\"functions. More about lists in Python 3\",\"role\":\"button\",\"semantic_action\":null,\"bbox\":{\"x\":1310,\"y\":436,\"w\":262,\"h\":22},\"click_point\":{\"x\":1441,\"y\":447},\"source\":\"ocr_text_actions\",\"section_id\":\"primary_area\",\"confidence\":0.9895,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"valid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":true,\"click_point_inside_image\":true,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[]}},{\"candidate_id\":\"card_primary_area_31\",\"target_id\":\"card_primary_area_31\",\"label\":\"Looking for work or have a Python\",\"role\":\"recommendation_item\",\"semantic_action\":null,\"bbox\":{\"x\":1587,\"y\":776,\"w\":255,\"h\":58},\"click_point\":{\"x\":1714,\"y\":805},\"source\":\"ocr_card_groups\",\"section_id\":\"primary_area\",\"confidence\":0.9715,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"valid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":true,\"click_point_inside_image\":true,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[]}},{\"candidate_id\":\"card_primary_area_32\",\"target_id\":\"card_primary_area_32\",\"label\":\"Documentation for Python's\",\"role\":\"news_card\",\"semantic_action\":null,\"bbox\":{\"x\":1291,\"y\":741,\"w\":228,\"h\":392},\"click_point\":{\"x\":1405,\"y\":937},\"source\":\"ocr_card_groups\",\"section_id\":\"primary_area\",\"confidence\":0.9651,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"valid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":true,\"click_point_inside_image\":true,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[]}},{\"candidate_id\":\"card_primary_area_40\",\"target_id\":\"card_primary_area_40\",\"label\":\"hire for? Our relaunched\",\"role\":\"recommendation_item\",\"semantic_action\":null,\"bbox\":{\"x\":1584,\"y\":825,\"w\":201,\"h\":146},\"click_point\":{\"x\":1684,\"y\":898},\"source\":\"ocr_card_groups\",\"section_id\":\"primary_area\",\"confidence\":0.991,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"valid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":true,\"click_point_inside_image\":true,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[]}},{\"candidate_id\":\"card_primary_area_60\",\"target_id\":\"card_primary_area_60\",\"label\":\"Packaging Council Inaugural Election Dates\",\"role\":\"news_card\",\"semantic_action\":null,\"bbox\":{\"x\":703,\"y\":1114,\"w\":420,\"h\":104},\"click_point\":{\"x\":913,\"y\":1166},\"source\":\"ocr_card_groups\",\"section_id\":\"primary_area\",\"confidence\":0.9717,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"valid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":true,\"click_point_inside_image\":true,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[]}},{\"candidate_id\":\"card_primary_area_62\",\"target_id\":\"card_primary_area_62\",\"label\":\"DjangoGirls Tamale 2026\",\"role\":\"news_card\",\"semantic_action\":null,\"bbox\":{\"x\":1292,\"y\":1114,\"w\":302,\"h\":96},\"click_point\":{\"x\":1443,\"y\":1162},\"source\":\"ocr_card_groups\",\"section_id\":\"primary_area\",\"confidence\":0.9836,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"valid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":true,\"click_point_inside_image\":true,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[]}},{\"candidate_id\":\"card_bottom_bar_1\",\"target_id\":\"card_bottom_bar_1\",\"label\":\"PyData PyCon Armenla 2026\",\"role\":\"news_card\",\"semantic_action\":null,\"bbox\":{\"x\":1292,\"y\":1192,\"w\":326,\"h\":58},\"click_point\":{\"x\":1455,\"y\":1221},\"source\":\"ocr_card_groups\",\"section_id\":\"bottom_bar\",\"confidence\":0.9737,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"valid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":true,\"click_point_inside_image\":true,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[]}},{\"candidate_id\":\"ocr_text_92\",\"target_id\":\"ocr_text_92\",\"label\":\">>More\",\"role\":\"button\",\"semantic_action\":null,\"bbox\":{\"x\":1776,\"y\":1329,\"w\":63,\"h\":26},\"click_point\":{\"x\":1808,\"y\":1342},\"source\":\"ocr_text_actions\",\"section_id\":\"bottom_bar\",\"confidence\":0.9642,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"valid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":true,\"click_point_inside_image\":true,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[]}},{\"candidate_id\":\"card_bottom_bar_9\",\"target_id\":\"card_bottom_bar_9\",\"label\":\"Thanksto theflexibility ofPython and thepowerful\",\"role\":\"news_card\",\"semantic_action\":null,\"bbox\":{\"x\":731,\"y\":1365,\"w\":453,\"h\":51},\"click_point\":{\"x\":958,\"y\":1390},\"source\":\"ocr_card_groups\",\"section_id\":\"bottom_bar\",\"confidence\":0.9586,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"invalid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":false,\"click_point_inside_image\":false,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[\"bbox_outside_image\",\"click_point_outside_image\"]}},{\"candidate_id\":\"ocr_text_1\",\"target_id\":\"ocr_text_1\",\"label\":\"Welcome to Python.org\",\"role\":\"nav_text_action\",\"semantic_action\":null,\"bbox\":{\"x\":74,\"y\":17,\"w\":135,\"h\":25},\"click_point\":{\"x\":142,\"y\":30},\"source\":\"ocr_text_actions\",\"section_id\":\"top_bar\",\"confidence\":0.9973,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"valid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":true,\"click_point_inside_image\":true,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[]}},{\"candidate_id\":\"ocr_text_4\",\"target_id\":\"ocr_text_4\",\"label\":\"聊天\",\"role\":\"nav_text_action\",\"semantic_action\":null,\"bbox\":{\"x\":2506,\"y\":60,\"w\":27,\"h\":14},\"click_point\":{\"x\":2520,\"y\":67},\"source\":\"ocr_text_actions\",\"section_id\":\"top_bar\",\"confidence\":0.9984,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"valid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":true,\"click_point_inside_image\":true,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[]}},{\"candidate_id\":\"ocr_text_6\",\"target_id\":\"ocr_text_6\",\"label\":\"PSF\",\"role\":\"nav_text_action\",\"semantic_action\":null,\"bbox\":{\"x\":965,\"y\":103,\"w\":32,\"h\":21},\"click_point\":{\"x\":981,\"y\":114},\"source\":\"ocr_text_actions\",\"section_id\":\"top_bar\",\"confidence\":0.9971,\"coordinate_validation\":{\"contract_version\":\"learn_target_coordinate_validation_v1\",\"status\":\"valid\",\"bbox_present\":true,\"click_point_present\":true,\"bbox_inside_image\":true,\"click_point_inside_image\":true,\"click_point_inside_bbox\":true,\"image_size\":{\"width\":2540,\"height\":1380},\"reasons\":[]}}],\"path_map_review_summary\":{\"addition_count\":34,\"validated_count\":33,\"invalid_count\":1,\"coordinate_overlay_path\":\"D:\\\\agent-gui-runtime\\\\artifacts\\\\review-overlays\\\\state-edde1188487aff33-learn-targets__learn-target-coordinates__20260703-172244-586437.png\",\"model_addition_count\":0,\"model_removal_count\":3,\"model_update_count\":0,\"removal_count\":3,\"update_count\":0,\"kept_count\":0,\"vista_validated_count\":0,\"vista_inside_count\":0,\"vista_outside_count\":0},\"path_map_review_removals\":[{\"candidate_id\":\"card_primary_area_8\",\"label\":\"#Python 3: List comprehensions\",\"bbox\":{\"x\":783,\"y\":309,\"w\":336,\"h\":250},\"section_id\":\"primary_area\",\"reason\":\"non_containment_overlap_removed\",\"source\":\"path_graph_overlap_rule\",\"kept_candidate_id\":\"card_primary_area_7\",\"kept_label\":\"Compound Data Types\"},{\"candidate_id\":\"card_primary_area_33\",\"label\":\"are available for download for all\",\"bbox\":{\"x\":806,\"y\":776,\"w\":462,\"h\":357},\"section_id\":\"primary_area\",\"reason\":\"non_containment_overlap_removed\",\"source\":\"path_graph_overlap_rule\",\"kept_candidate_id\":\"element_get_started_55dd5d11\",\"kept_label\":\"Get Started\"},{\"candidate_id\":\"card_bottom_bar_5\",\"label\":\"Use Python for...\",\"bbox\":{\"x\":1170,\"y\":1303,\"w\":335,\"h\":70},\"section_id\":\"bottom_bar\",\"reason\":\"non_containment_overlap_removed\",\"source\":\"path_graph_overlap_rule\",\"kept_candidate_id\":\"card_bottom_bar_8\",\"kept_label\":\"Web Development: Django , Pyramid, Bottle , Tomado, Flask , Litestar, FasLAPI\"}],\"no_click_authorization\":true,\"execute_binding_enabled\":false,\"evidence_quality\":\"calibrated_targets_available\"},\"learning_parameters\":{\"contract_version\":\"learning_parameters_v1\",\"learning_model_profile_id\":\"qwen3_vl_8b_q4_k_m\",\"temperature\":0.0,\"max_output_tokens\":3072,\"timeout_seconds\":240,\"learning_image_max_edge\":768,\"prompt_detail_mode\":\"compact_contract\",\"draft_reference_alignment_threshold\":0.9,\"direct_use_accuracy_threshold\":0.9,\"artifact_posthoc_optimization_allowed\":false,\"allow_fast_profile_fallback\":false},\"prompt_context_hidden\":false}"
+                },
+                "output": {
+                  "raw_text": "{\n  \"contract_version\": \"learning_template_draft_v1\",\n  \"image_size\": {\"width\": 768, \"height\": 417},\n  \"learning_source\": \"observe_model\",\n  \"screen_summary\": \"Python.org homepage with top navigation, search bar, primary content cards, and news/events sections.\",\n  \"state_guess\": \"python.org homepage\",\n  \"workflow_draft\": {\n    \"states\": [\n      {\n        \"state_id\": \"s1\",\n        \"label\": \"Python.org homepage\",\n        \"page_type\": \"landing_page\"\n      }\n    ],\n    \"transitions\": [],\n    \"action_templates\": [\n      {\n        \"action_template_id\": \"a1\",\n        \"label\": \"Search Python.org\",\n        \"semantic_action\": \"type_text\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Search query entered into the search field.\"\n      },\n      {\n        \"action_template_id\": \"a2\",\n        \"label\": \"Navigate to Downloads\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Downloads page.\"\n      },\n      {\n        \"action_template_id\": \"a3\",\n        \"label\": \"Open Documentation\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Documentation page.\"\n      },\n      {\n        \"action_template_id\": \"a4\",\n        \"label\": \"View Events\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Events page.\"\n      },\n      {\n        \"action_template_id\": \"a5\",\n        \"label\": \"Explore Community\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Community page.\"\n      }\n    ],\n    \"path_patterns\": []\n  },\n  \"interface_draft\": {\n    \"regions\": [\n      {\n        \"region_id\": \"r1\",\n        \"label\": \"Search Input\",\n        \"role\": \"text_input\",\n        \"source\": \"element_search_728a0ee8\",\n        \"click_point\": {\"x\": 1514, \"y\": 198},\n        \"section_id\": \"top_bar\",\n        \"bbox\": {\"x\": 1488, \"y\": 187, \"w\": 53, \"h\": 23}\n      },\n      {\n        \"region_id\": \"r2\",\n        \"label\": \"Downloads Button\",\n        \"role\": \"button\",\n        \"source\": \"element_downloads_1d2cdc2d\",\n        \"click_point\": {\"x\": 1004, \"y\": 278},\n        \"section_id\": \"primary_area\",\n        \"bbox\": {\"x\": 956, \"y\": 263, \"w\": 97, \"h\": 29}\n      },\n      {\n        \"region_id\": \"r3\",\n        \"label\": \"Documentation Button\",\n        \"role\": \"button\",\n        \"source\": \"element_documentation_fecdf50b\",\n        \"click_point\": {\"x\": 1153, \"y\": 278},\n        \"section_id\": \"primary_area\",\n        \"bbox\": {\"x\": 1088, \"y\": 263, \"w\": 130, \"h\": 29}\n      },\n      {\n        \"region_id\": \"r4\",\n        \"label\": \"Events Button\",\n        \"role\": \"button\",\n        \"source\": \"element_events_de957abc\",\n        \"click_point\": {\"x\": 1671, \"y\": 277},\n        \"section_id\": \"primary_area\",\n        \"bbox\": {\"x\": 1640, \"y\": 264, \"w\": 62, \"h\": 26}\n      },\n      {\n        \"region_id\": \"r5\",\n        \"label\": \"Community Button\",\n        \"role\": \"button\",\n        \"source\": \"element_community_5d7e44ed\",\n        \"click_point\": {\"x\": 1780, \"y\": 113},\n        \"section_id\": \"top_bar\",\n        \"bbox\": {\"x\": 1737, \"y\": 100, \"w\": 86, \"h\": 26}\n      }\n    ],\n    \"visual_assets\": [],\n    \"dynamic_areas\": [],\n    \"danger_zones\": []\n  },\n  \"agent_decision_points\": [],\n  \"operation_skills\": [],\n  \"gate_contracts\": [],\n  \"safety\": {\n    \"observation_only\": true,\n    \"promotion_allowed\": false,\n    \"final_submit_blocked\": true,\n    \"real_clicks_performed\": 0\n  },\n  \"notes\": []\n}",
+                  "raw_response": {
+                    "choices": [
+                      {
+                        "finish_reason": "stop",
+                        "index": 0,
+                        "message": {
+                          "role": "assistant",
+                          "content": "{\n  \"contract_version\": \"learning_template_draft_v1\",\n  \"image_size\": {\"width\": 768, \"height\": 417},\n  \"learning_source\": \"observe_model\",\n  \"screen_summary\": \"Python.org homepage with top navigation, search bar, primary content cards, and news/events sections.\",\n  \"state_guess\": \"python.org homepage\",\n  \"workflow_draft\": {\n    \"states\": [\n      {\n        \"state_id\": \"s1\",\n        \"label\": \"Python.org homepage\",\n        \"page_type\": \"landing_page\"\n      }\n    ],\n    \"transitions\": [],\n    \"action_templates\": [\n      {\n        \"action_template_id\": \"a1\",\n        \"label\": \"Search Python.org\",\n        \"semantic_action\": \"type_text\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Search query entered into the search field.\"\n      },\n      {\n        \"action_template_id\": \"a2\",\n        \"label\": \"Navigate to Downloads\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Downloads page.\"\n      },\n      {\n        \"action_template_id\": \"a3\",\n        \"label\": \"Open Documentation\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Documentation page.\"\n      },\n      {\n        \"action_template_id\": \"a4\",\n        \"label\": \"View Events\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Events page.\"\n      },\n      {\n        \"action_template_id\": \"a5\",\n        \"label\": \"Explore Community\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Community page.\"\n      }\n    ],\n    \"path_patterns\": []\n  },\n  \"interface_draft\": {\n    \"regions\": [\n      {\n        \"region_id\": \"r1\",\n        \"label\": \"Search Input\",\n        \"role\": \"text_input\",\n        \"source\": \"element_search_728a0ee8\",\n        \"click_point\": {\"x\": 1514, \"y\": 198},\n        \"section_id\": \"top_bar\",\n        \"bbox\": {\"x\": 1488, \"y\": 187, \"w\": 53, \"h\": 23}\n      },\n      {\n        \"region_id\": \"r2\",\n        \"label\": \"Downloads Button\",\n        \"role\": \"button\",\n        \"source\": \"element_downloads_1d2cdc2d\",\n        \"click_point\": {\"x\": 1004, \"y\": 278},\n        \"section_id\": \"primary_area\",\n        \"bbox\": {\"x\": 956, \"y\": 263, \"w\": 97, \"h\": 29}\n      },\n      {\n        \"region_id\": \"r3\",\n        \"label\": \"Documentation Button\",\n        \"role\": \"button\",\n        \"source\": \"element_documentation_fecdf50b\",\n        \"click_point\": {\"x\": 1153, \"y\": 278},\n        \"section_id\": \"primary_area\",\n        \"bbox\": {\"x\": 1088, \"y\": 263, \"w\": 130, \"h\": 29}\n      },\n      {\n        \"region_id\": \"r4\",\n        \"label\": \"Events Button\",\n        \"role\": \"button\",\n        \"source\": \"element_events_de957abc\",\n        \"click_point\": {\"x\": 1671, \"y\": 277},\n        \"section_id\": \"primary_area\",\n        \"bbox\": {\"x\": 1640, \"y\": 264, \"w\": 62, \"h\": 26}\n      },\n      {\n        \"region_id\": \"r5\",\n        \"label\": \"Community Button\",\n        \"role\": \"button\",\n        \"source\": \"element_community_5d7e44ed\",\n        \"click_point\": {\"x\": 1780, \"y\": 113},\n        \"section_id\": \"top_bar\",\n        \"bbox\": {\"x\": 1737, \"y\": 100, \"w\": 86, \"h\": 26}\n      }\n    ],\n    \"visual_assets\": [],\n    \"dynamic_areas\": [],\n    \"danger_zones\": []\n  },\n  \"agent_decision_points\": [],\n  \"operation_skills\": [],\n  \"gate_contracts\": [],\n  \"safety\": {\n    \"observation_only\": true,\n    \"promotion_allowed\": false,\n    \"final_submit_blocked\": true,\n    \"real_clicks_performed\": 0\n  },\n  \"notes\": []\n}"
+                        }
+                      }
+                    ],
+                    "created": 1783056186,
+                    "model": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                    "system_fingerprint": "b8892-0d0764dfd",
+                    "object": "chat.completion",
+                    "usage": {
+                      "completion_tokens": 1086,
+                      "prompt_tokens": 7060,
+                      "total_tokens": 8146,
+                      "prompt_tokens_details": {
+                        "cached_tokens": 55
+                      }
+                    },
+                    "id": "chatcmpl-NkRN2Ge68ssFVQw32gaACdblOOMcn6k1",
+                    "timings": {
+                      "cache_n": 55,
+                      "prompt_n": 7005,
+                      "prompt_ms": 2303.333,
+                      "prompt_per_token_ms": 0.3288127052105639,
+                      "prompt_per_second": 3041.2450132047775,
+                      "predicted_n": 1086,
+                      "predicted_ms": 19284.997,
+                      "predicted_per_token_ms": 17.7578241252302,
+                      "predicted_per_second": 56.313205545222544
+                    }
+                  },
+                  "parsed_model_json": {
+                    "contract_version": "learning_template_draft_v1",
+                    "image_size": {
+                      "width": 2540,
+                      "height": 1380
+                    },
+                    "learning_source": "observe_model",
+                    "screen_summary": "Python.org homepage with top navigation, search bar, primary content cards, and news/events sections.",
+                    "state_guess": "python.org homepage",
+                    "workflow_draft": {
+                      "states": [
+                        {
+                          "state_id": "s1",
+                          "label": "Python.org homepage",
+                          "page_type": "landing_page"
+                        }
+                      ],
+                      "transitions": [],
+                      "action_templates": [
+                        {
+                          "action_template_id": "a1",
+                          "label": "Search Python.org",
+                          "semantic_action": "type_text",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Search query entered into the search field."
+                        },
+                        {
+                          "action_template_id": "a2",
+                          "label": "Navigate to Downloads",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to the Downloads page."
+                        },
+                        {
+                          "action_template_id": "a3",
+                          "label": "Open Documentation",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to the Documentation page."
+                        },
+                        {
+                          "action_template_id": "a4",
+                          "label": "View Events",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to the Events page."
+                        },
+                        {
+                          "action_template_id": "a5",
+                          "label": "Explore Community",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to the Community page."
+                        }
+                      ],
+                      "path_patterns": []
+                    },
+                    "interface_draft": {
+                      "regions": [
+                        {
+                          "region_id": "r1",
+                          "label": "Search Input",
+                          "role": "text_input",
+                          "source": "element_search_728a0ee8",
+                          "click_point": {
+                            "x": 1514,
+                            "y": 198
+                          },
+                          "section_id": "top_bar",
+                          "bbox": {
+                            "x": 1488,
+                            "y": 187,
+                            "w": 53,
+                            "h": 23
+                          }
+                        },
+                        {
+                          "region_id": "r2",
+                          "label": "Downloads Button",
+                          "role": "button",
+                          "source": "element_downloads_1d2cdc2d",
+                          "click_point": {
+                            "x": 1004,
+                            "y": 278
+                          },
+                          "section_id": "primary_area",
+                          "bbox": {
+                            "x": 956,
+                            "y": 263,
+                            "w": 97,
+                            "h": 29
+                          }
+                        },
+                        {
+                          "region_id": "r3",
+                          "label": "Documentation Button",
+                          "role": "button",
+                          "source": "element_documentation_fecdf50b",
+                          "click_point": {
+                            "x": 1153,
+                            "y": 278
+                          },
+                          "section_id": "primary_area",
+                          "bbox": {
+                            "x": 1088,
+                            "y": 263,
+                            "w": 130,
+                            "h": 29
+                          }
+                        },
+                        {
+                          "region_id": "r4",
+                          "label": "Events Button",
+                          "role": "button",
+                          "source": "element_events_de957abc",
+                          "click_point": {
+                            "x": 1671,
+                            "y": 277
+                          },
+                          "section_id": "primary_area",
+                          "bbox": {
+                            "x": 1640,
+                            "y": 264,
+                            "w": 62,
+                            "h": 26
+                          }
+                        },
+                        {
+                          "region_id": "r5",
+                          "label": "Community Button",
+                          "role": "button",
+                          "source": "element_community_5d7e44ed",
+                          "click_point": {
+                            "x": 1780,
+                            "y": 113
+                          },
+                          "section_id": "top_bar",
+                          "bbox": {
+                            "x": 1737,
+                            "y": 100,
+                            "w": 86,
+                            "h": 26
+                          }
+                        }
+                      ],
+                      "visual_assets": [],
+                      "dynamic_areas": [],
+                      "danger_zones": []
+                    },
+                    "agent_decision_points": [],
+                    "operation_skills": [],
+                    "gate_contracts": [],
+                    "safety": {
+                      "observation_only": true,
+                      "promotion_allowed": false,
+                      "final_submit_blocked": true,
+                      "real_clicks_performed": 0
+                    },
+                    "notes": [],
+                    "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                    "regions": [],
+                    "targets": [],
+                    "observers": [],
+                    "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+                  },
+                  "runtime_normalized_json": {
+                    "contract_version": "learning_template_draft_v1",
+                    "image_size": {
+                      "width": 2540,
+                      "height": 1380
+                    },
+                    "learning_source": "observe_model",
+                    "screen_summary": "Python.org homepage with top navigation, search bar, primary content cards, and news/events sections.",
+                    "state_guess": "python.org homepage",
+                    "workflow_draft": {
+                      "states": [
+                        {
+                          "state_id": "s1",
+                          "label": "Python.org homepage",
+                          "page_type": "landing_page"
+                        }
+                      ],
+                      "transitions": [],
+                      "action_templates": [
+                        {
+                          "action_template_id": "a1",
+                          "label": "Search Python.org",
+                          "semantic_action": "type_text",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Search query entered into the search field."
+                        },
+                        {
+                          "action_template_id": "a2",
+                          "label": "Navigate to Downloads",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to the Downloads page."
+                        },
+                        {
+                          "action_template_id": "a3",
+                          "label": "Open Documentation",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to the Documentation page."
+                        },
+                        {
+                          "action_template_id": "a4",
+                          "label": "View Events",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to the Events page."
+                        },
+                        {
+                          "action_template_id": "a5",
+                          "label": "Explore Community",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to the Community page."
+                        }
+                      ],
+                      "path_patterns": []
+                    },
+                    "interface_draft": {
+                      "regions": [
+                        {
+                          "region_id": "r1",
+                          "label": "Search Input",
+                          "role": "text_input",
+                          "source": "element_search_728a0ee8",
+                          "click_point": {
+                            "x": 1514,
+                            "y": 198
+                          },
+                          "section_id": "top_bar",
+                          "bbox": {
+                            "x": 1488,
+                            "y": 187,
+                            "w": 53,
+                            "h": 23
+                          }
+                        },
+                        {
+                          "region_id": "r2",
+                          "label": "Downloads Button",
+                          "role": "button",
+                          "source": "element_downloads_1d2cdc2d",
+                          "click_point": {
+                            "x": 1004,
+                            "y": 278
+                          },
+                          "section_id": "primary_area",
+                          "bbox": {
+                            "x": 956,
+                            "y": 263,
+                            "w": 97,
+                            "h": 29
+                          }
+                        },
+                        {
+                          "region_id": "r3",
+                          "label": "Documentation Button",
+                          "role": "button",
+                          "source": "element_documentation_fecdf50b",
+                          "click_point": {
+                            "x": 1153,
+                            "y": 278
+                          },
+                          "section_id": "primary_area",
+                          "bbox": {
+                            "x": 1088,
+                            "y": 263,
+                            "w": 130,
+                            "h": 29
+                          }
+                        },
+                        {
+                          "region_id": "r4",
+                          "label": "Events Button",
+                          "role": "button",
+                          "source": "element_events_de957abc",
+                          "click_point": {
+                            "x": 1671,
+                            "y": 277
+                          },
+                          "section_id": "primary_area",
+                          "bbox": {
+                            "x": 1640,
+                            "y": 264,
+                            "w": 62,
+                            "h": 26
+                          }
+                        },
+                        {
+                          "region_id": "r5",
+                          "label": "Community Button",
+                          "role": "button",
+                          "source": "element_community_5d7e44ed",
+                          "click_point": {
+                            "x": 1780,
+                            "y": 113
+                          },
+                          "section_id": "top_bar",
+                          "bbox": {
+                            "x": 1737,
+                            "y": 100,
+                            "w": 86,
+                            "h": 26
+                          }
+                        }
+                      ],
+                      "visual_assets": [],
+                      "dynamic_areas": [],
+                      "danger_zones": []
+                    },
+                    "agent_decision_points": [],
+                    "operation_skills": [],
+                    "gate_contracts": [],
+                    "safety": {
+                      "observation_only": true,
+                      "promotion_allowed": false,
+                      "final_submit_blocked": true,
+                      "real_clicks_performed": 0
+                    },
+                    "notes": [],
+                    "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                    "regions": [],
+                    "targets": [],
+                    "observers": [],
+                    "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+                  },
+                  "parse_error": null
+                },
+                "raw_text": "{\n  \"contract_version\": \"learning_template_draft_v1\",\n  \"image_size\": {\"width\": 768, \"height\": 417},\n  \"learning_source\": \"observe_model\",\n  \"screen_summary\": \"Python.org homepage with top navigation, search bar, primary content cards, and news/events sections.\",\n  \"state_guess\": \"python.org homepage\",\n  \"workflow_draft\": {\n    \"states\": [\n      {\n        \"state_id\": \"s1\",\n        \"label\": \"Python.org homepage\",\n        \"page_type\": \"landing_page\"\n      }\n    ],\n    \"transitions\": [],\n    \"action_templates\": [\n      {\n        \"action_template_id\": \"a1\",\n        \"label\": \"Search Python.org\",\n        \"semantic_action\": \"type_text\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Search query entered into the search field.\"\n      },\n      {\n        \"action_template_id\": \"a2\",\n        \"label\": \"Navigate to Downloads\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Downloads page.\"\n      },\n      {\n        \"action_template_id\": \"a3\",\n        \"label\": \"Open Documentation\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Documentation page.\"\n      },\n      {\n        \"action_template_id\": \"a4\",\n        \"label\": \"View Events\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Events page.\"\n      },\n      {\n        \"action_template_id\": \"a5\",\n        \"label\": \"Explore Community\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Community page.\"\n      }\n    ],\n    \"path_patterns\": []\n  },\n  \"interface_draft\": {\n    \"regions\": [\n      {\n        \"region_id\": \"r1\",\n        \"label\": \"Search Input\",\n        \"role\": \"text_input\",\n        \"source\": \"element_search_728a0ee8\",\n        \"click_point\": {\"x\": 1514, \"y\": 198},\n        \"section_id\": \"top_bar\",\n        \"bbox\": {\"x\": 1488, \"y\": 187, \"w\": 53, \"h\": 23}\n      },\n      {\n        \"region_id\": \"r2\",\n        \"label\": \"Downloads Button\",\n        \"role\": \"button\",\n        \"source\": \"element_downloads_1d2cdc2d\",\n        \"click_point\": {\"x\": 1004, \"y\": 278},\n        \"section_id\": \"primary_area\",\n        \"bbox\": {\"x\": 956, \"y\": 263, \"w\": 97, \"h\": 29}\n      },\n      {\n        \"region_id\": \"r3\",\n        \"label\": \"Documentation Button\",\n        \"role\": \"button\",\n        \"source\": \"element_documentation_fecdf50b\",\n        \"click_point\": {\"x\": 1153, \"y\": 278},\n        \"section_id\": \"primary_area\",\n        \"bbox\": {\"x\": 1088, \"y\": 263, \"w\": 130, \"h\": 29}\n      },\n      {\n        \"region_id\": \"r4\",\n        \"label\": \"Events Button\",\n        \"role\": \"button\",\n        \"source\": \"element_events_de957abc\",\n        \"click_point\": {\"x\": 1671, \"y\": 277},\n        \"section_id\": \"primary_area\",\n        \"bbox\": {\"x\": 1640, \"y\": 264, \"w\": 62, \"h\": 26}\n      },\n      {\n        \"region_id\": \"r5\",\n        \"label\": \"Community Button\",\n        \"role\": \"button\",\n        \"source\": \"element_community_5d7e44ed\",\n        \"click_point\": {\"x\": 1780, \"y\": 113},\n        \"section_id\": \"top_bar\",\n        \"bbox\": {\"x\": 1737, \"y\": 100, \"w\": 86, \"h\": 26}\n      }\n    ],\n    \"visual_assets\": [],\n    \"dynamic_areas\": [],\n    \"danger_zones\": []\n  },\n  \"agent_decision_points\": [],\n  \"operation_skills\": [],\n  \"gate_contracts\": [],\n  \"safety\": {\n    \"observation_only\": true,\n    \"promotion_allowed\": false,\n    \"final_submit_blocked\": true,\n    \"real_clicks_performed\": 0\n  },\n  \"notes\": []\n}",
+                "raw_text_preview": "{ \"contract_version\": \"learning_template_draft_v1\", \"image_size\": {\"width\": 768, \"height\": 417}, \"learning_source\": \"observe_model\", \"screen_summary\": \"Python.org homepage with top navigation, search bar, primary content cards, and news/events sections.\", \"state_guess\": \"python.org homepage\", \"workf...",
+                "raw_response": {
+                  "choices": [
+                    {
+                      "finish_reason": "stop",
+                      "index": 0,
+                      "message": {
+                        "role": "assistant",
+                        "content": "{\n  \"contract_version\": \"learning_template_draft_v1\",\n  \"image_size\": {\"width\": 768, \"height\": 417},\n  \"learning_source\": \"observe_model\",\n  \"screen_summary\": \"Python.org homepage with top navigation, search bar, primary content cards, and news/events sections.\",\n  \"state_guess\": \"python.org homepage\",\n  \"workflow_draft\": {\n    \"states\": [\n      {\n        \"state_id\": \"s1\",\n        \"label\": \"Python.org homepage\",\n        \"page_type\": \"landing_page\"\n      }\n    ],\n    \"transitions\": [],\n    \"action_templates\": [\n      {\n        \"action_template_id\": \"a1\",\n        \"label\": \"Search Python.org\",\n        \"semantic_action\": \"type_text\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Search query entered into the search field.\"\n      },\n      {\n        \"action_template_id\": \"a2\",\n        \"label\": \"Navigate to Downloads\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Downloads page.\"\n      },\n      {\n        \"action_template_id\": \"a3\",\n        \"label\": \"Open Documentation\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Documentation page.\"\n      },\n      {\n        \"action_template_id\": \"a4\",\n        \"label\": \"View Events\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Events page.\"\n      },\n      {\n        \"action_template_id\": \"a5\",\n        \"label\": \"Explore Community\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to the Community page.\"\n      }\n    ],\n    \"path_patterns\": []\n  },\n  \"interface_draft\": {\n    \"regions\": [\n      {\n        \"region_id\": \"r1\",\n        \"label\": \"Search Input\",\n        \"role\": \"text_input\",\n        \"source\": \"element_search_728a0ee8\",\n        \"click_point\": {\"x\": 1514, \"y\": 198},\n        \"section_id\": \"top_bar\",\n        \"bbox\": {\"x\": 1488, \"y\": 187, \"w\": 53, \"h\": 23}\n      },\n      {\n        \"region_id\": \"r2\",\n        \"label\": \"Downloads Button\",\n        \"role\": \"button\",\n        \"source\": \"element_downloads_1d2cdc2d\",\n        \"click_point\": {\"x\": 1004, \"y\": 278},\n        \"section_id\": \"primary_area\",\n        \"bbox\": {\"x\": 956, \"y\": 263, \"w\": 97, \"h\": 29}\n      },\n      {\n        \"region_id\": \"r3\",\n        \"label\": \"Documentation Button\",\n        \"role\": \"button\",\n        \"source\": \"element_documentation_fecdf50b\",\n        \"click_point\": {\"x\": 1153, \"y\": 278},\n        \"section_id\": \"primary_area\",\n        \"bbox\": {\"x\": 1088, \"y\": 263, \"w\": 130, \"h\": 29}\n      },\n      {\n        \"region_id\": \"r4\",\n        \"label\": \"Events Button\",\n        \"role\": \"button\",\n        \"source\": \"element_events_de957abc\",\n        \"click_point\": {\"x\": 1671, \"y\": 277},\n        \"section_id\": \"primary_area\",\n        \"bbox\": {\"x\": 1640, \"y\": 264, \"w\": 62, \"h\": 26}\n      },\n      {\n        \"region_id\": \"r5\",\n        \"label\": \"Community Button\",\n        \"role\": \"button\",\n        \"source\": \"element_community_5d7e44ed\",\n        \"click_point\": {\"x\": 1780, \"y\": 113},\n        \"section_id\": \"top_bar\",\n        \"bbox\": {\"x\": 1737, \"y\": 100, \"w\": 86, \"h\": 26}\n      }\n    ],\n    \"visual_assets\": [],\n    \"dynamic_areas\": [],\n    \"danger_zones\": []\n  },\n  \"agent_decision_points\": [],\n  \"operation_skills\": [],\n  \"gate_contracts\": [],\n  \"safety\": {\n    \"observation_only\": true,\n    \"promotion_allowed\": false,\n    \"final_submit_blocked\": true,\n    \"real_clicks_performed\": 0\n  },\n  \"notes\": []\n}"
+                      }
+                    }
+                  ],
+                  "created": 1783056186,
+                  "model": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                  "system_fingerprint": "b8892-0d0764dfd",
+                  "object": "chat.completion",
+                  "usage": {
+                    "completion_tokens": 1086,
+                    "prompt_tokens": 7060,
+                    "total_tokens": 8146,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 55
+                    }
+                  },
+                  "id": "chatcmpl-NkRN2Ge68ssFVQw32gaACdblOOMcn6k1",
+                  "timings": {
+                    "cache_n": 55,
+                    "prompt_n": 7005,
+                    "prompt_ms": 2303.333,
+                    "prompt_per_token_ms": 0.3288127052105639,
+                    "prompt_per_second": 3041.2450132047775,
+                    "predicted_n": 1086,
+                    "predicted_ms": 19284.997,
+                    "predicted_per_token_ms": 17.7578241252302,
+                    "predicted_per_second": 56.313205545222544
+                  }
+                },
+                "parsed_model_json": {
+                  "contract_version": "learning_template_draft_v1",
+                  "image_size": {
+                    "width": 2540,
+                    "height": 1380
+                  },
+                  "learning_source": "observe_model",
+                  "screen_summary": "Python.org homepage with top navigation, search bar, primary content cards, and news/events sections.",
+                  "state_guess": "python.org homepage",
+                  "workflow_draft": {
+                    "states": [
+                      {
+                        "state_id": "s1",
+                        "label": "Python.org homepage",
+                        "page_type": "landing_page"
+                      }
+                    ],
+                    "transitions": [],
+                    "action_templates": [
+                      {
+                        "action_template_id": "a1",
+                        "label": "Search Python.org",
+                        "semantic_action": "type_text",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Search query entered into the search field."
+                      },
+                      {
+                        "action_template_id": "a2",
+                        "label": "Navigate to Downloads",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to the Downloads page."
+                      },
+                      {
+                        "action_template_id": "a3",
+                        "label": "Open Documentation",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to the Documentation page."
+                      },
+                      {
+                        "action_template_id": "a4",
+                        "label": "View Events",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to the Events page."
+                      },
+                      {
+                        "action_template_id": "a5",
+                        "label": "Explore Community",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to the Community page."
+                      }
+                    ],
+                    "path_patterns": []
+                  },
+                  "interface_draft": {
+                    "regions": [
+                      {
+                        "region_id": "r1",
+                        "label": "Search Input",
+                        "role": "text_input",
+                        "source": "element_search_728a0ee8",
+                        "click_point": {
+                          "x": 1514,
+                          "y": 198
+                        },
+                        "section_id": "top_bar",
+                        "bbox": {
+                          "x": 1488,
+                          "y": 187,
+                          "w": 53,
+                          "h": 23
+                        }
+                      },
+                      {
+                        "region_id": "r2",
+                        "label": "Downloads Button",
+                        "role": "button",
+                        "source": "element_downloads_1d2cdc2d",
+                        "click_point": {
+                          "x": 1004,
+                          "y": 278
+                        },
+                        "section_id": "primary_area",
+                        "bbox": {
+                          "x": 956,
+                          "y": 263,
+                          "w": 97,
+                          "h": 29
+                        }
+                      },
+                      {
+                        "region_id": "r3",
+                        "label": "Documentation Button",
+                        "role": "button",
+                        "source": "element_documentation_fecdf50b",
+                        "click_point": {
+                          "x": 1153,
+                          "y": 278
+                        },
+                        "section_id": "primary_area",
+                        "bbox": {
+                          "x": 1088,
+                          "y": 263,
+                          "w": 130,
+                          "h": 29
+                        }
+                      },
+                      {
+                        "region_id": "r4",
+                        "label": "Events Button",
+                        "role": "button",
+                        "source": "element_events_de957abc",
+                        "click_point": {
+                          "x": 1671,
+                          "y": 277
+                        },
+                        "section_id": "primary_area",
+                        "bbox": {
+                          "x": 1640,
+                          "y": 264,
+                          "w": 62,
+                          "h": 26
+                        }
+                      },
+                      {
+                        "region_id": "r5",
+                        "label": "Community Button",
+                        "role": "button",
+                        "source": "element_community_5d7e44ed",
+                        "click_point": {
+                          "x": 1780,
+                          "y": 113
+                        },
+                        "section_id": "top_bar",
+                        "bbox": {
+                          "x": 1737,
+                          "y": 100,
+                          "w": 86,
+                          "h": 26
+                        }
+                      }
+                    ],
+                    "visual_assets": [],
+                    "dynamic_areas": [],
+                    "danger_zones": []
+                  },
+                  "agent_decision_points": [],
+                  "operation_skills": [],
+                  "gate_contracts": [],
+                  "safety": {
+                    "observation_only": true,
+                    "promotion_allowed": false,
+                    "final_submit_blocked": true,
+                    "real_clicks_performed": 0
+                  },
+                  "notes": [],
+                  "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                  "regions": [],
+                  "targets": [],
+                  "observers": [],
+                  "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+                },
+                "runtime_normalized_json": {
+                  "contract_version": "learning_template_draft_v1",
+                  "image_size": {
+                    "width": 2540,
+                    "height": 1380
+                  },
+                  "learning_source": "observe_model",
+                  "screen_summary": "Python.org homepage with top navigation, search bar, primary content cards, and news/events sections.",
+                  "state_guess": "python.org homepage",
+                  "workflow_draft": {
+                    "states": [
+                      {
+                        "state_id": "s1",
+                        "label": "Python.org homepage",
+                        "page_type": "landing_page"
+                      }
+                    ],
+                    "transitions": [],
+                    "action_templates": [
+                      {
+                        "action_template_id": "a1",
+                        "label": "Search Python.org",
+                        "semantic_action": "type_text",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Search query entered into the search field."
+                      },
+                      {
+                        "action_template_id": "a2",
+                        "label": "Navigate to Downloads",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to the Downloads page."
+                      },
+                      {
+                        "action_template_id": "a3",
+                        "label": "Open Documentation",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to the Documentation page."
+                      },
+                      {
+                        "action_template_id": "a4",
+                        "label": "View Events",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to the Events page."
+                      },
+                      {
+                        "action_template_id": "a5",
+                        "label": "Explore Community",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to the Community page."
+                      }
+                    ],
+                    "path_patterns": []
+                  },
+                  "interface_draft": {
+                    "regions": [
+                      {
+                        "region_id": "r1",
+                        "label": "Search Input",
+                        "role": "text_input",
+                        "source": "element_search_728a0ee8",
+                        "click_point": {
+                          "x": 1514,
+                          "y": 198
+                        },
+                        "section_id": "top_bar",
+                        "bbox": {
+                          "x": 1488,
+                          "y": 187,
+                          "w": 53,
+                          "h": 23
+                        }
+                      },
+                      {
+                        "region_id": "r2",
+                        "label": "Downloads Button",
+                        "role": "button",
+                        "source": "element_downloads_1d2cdc2d",
+                        "click_point": {
+                          "x": 1004,
+                          "y": 278
+                        },
+                        "section_id": "primary_area",
+                        "bbox": {
+                          "x": 956,
+                          "y": 263,
+                          "w": 97,
+                          "h": 29
+                        }
+                      },
+                      {
+                        "region_id": "r3",
+                        "label": "Documentation Button",
+                        "role": "button",
+                        "source": "element_documentation_fecdf50b",
+                        "click_point": {
+                          "x": 1153,
+                          "y": 278
+                        },
+                        "section_id": "primary_area",
+                        "bbox": {
+                          "x": 1088,
+                          "y": 263,
+                          "w": 130,
+                          "h": 29
+                        }
+                      },
+                      {
+                        "region_id": "r4",
+                        "label": "Events Button",
+                        "role": "button",
+                        "source": "element_events_de957abc",
+                        "click_point": {
+                          "x": 1671,
+                          "y": 277
+                        },
+                        "section_id": "primary_area",
+                        "bbox": {
+                          "x": 1640,
+                          "y": 264,
+                          "w": 62,
+                          "h": 26
+                        }
+                      },
+                      {
+                        "region_id": "r5",
+                        "label": "Community Button",
+                        "role": "button",
+                        "source": "element_community_5d7e44ed",
+                        "click_point": {
+                          "x": 1780,
+                          "y": 113
+                        },
+                        "section_id": "top_bar",
+                        "bbox": {
+                          "x": 1737,
+                          "y": 100,
+                          "w": 86,
+                          "h": 26
+                        }
+                      }
+                    ],
+                    "visual_assets": [],
+                    "dynamic_areas": [],
+                    "danger_zones": []
+                  },
+                  "agent_decision_points": [],
+                  "operation_skills": [],
+                  "gate_contracts": [],
+                  "safety": {
+                    "observation_only": true,
+                    "promotion_allowed": false,
+                    "final_submit_blocked": true,
+                    "real_clicks_performed": 0
+                  },
+                  "notes": [],
+                  "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                  "regions": [],
+                  "targets": [],
+                  "observers": [],
+                  "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+                },
+                "parse_error": null
+              },
+              "coordinate_remap": {
+                "from": {
+                  "width": 768,
+                  "height": 417
+                },
+                "to": {
+                  "width": 2540,
+                  "height": 1380
+                }
+              },
+              "status": "success"
+            }
+          ]
+        }
+      },
+      "result_kind": "draft_scored",
+      "quality_score_applicable": true,
+      "quality_score_ratio": 1.0,
+      "quality_score_percent": 100.0,
+      "score_report": {
+        "contract_version": "learning_template_draft_score_v1",
+        "metric_name": "draft_reference_alignment_score",
+        "metric_aliases": [
+          "template_similarity_score"
+        ],
+        "forbidden_interpretations": [
+          "model_accuracy",
+          "click_success_rate",
+          "gate_success_rate",
+          "seek_e2e_success_rate"
+        ],
+        "target_contract_version": "learning_template_target_v1",
+        "checks": [
+          {
+            "check_id": "top_level.contract_version",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "top_level.image_size",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "top_level.learning_source",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "top_level.screen_summary",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "top_level.state_guess",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "top_level.workflow_draft",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "top_level.interface_draft",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "top_level.safety",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "contract_version.learning_template_draft_v1",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "section.workflow_draft.states",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "section.workflow_draft.action_templates",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "section.interface_draft.regions",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "section.safety",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "safety.observation_only",
+            "passed": true,
+            "severity": "hard_error"
+          },
+          {
+            "check_id": "safety.promotion_allowed",
+            "passed": true,
+            "severity": "hard_error"
+          },
+          {
+            "check_id": "safety.final_submit_blocked",
+            "passed": true,
+            "severity": "hard_error"
+          },
+          {
+            "check_id": "safety.real_clicks_performed",
+            "passed": true,
+            "severity": "hard_error"
+          },
+          {
+            "check_id": "safety.final_submit_actions_blocked",
+            "passed": true,
+            "severity": "hard_error"
+          },
+          {
+            "check_id": "expected_action.validation_answer_present",
+            "passed": true,
+            "severity": "info"
+          }
+        ],
+        "section_scores": {
+          "contract": 1.0,
+          "sections": 1.0,
+          "safety": 1.0,
+          "actions": 1.0,
+          "evidence": 1.0,
+          "template_similarity": 1.0
+        },
+        "template_similarity": {
+          "contract_version": "learning_template_similarity_score_v1",
+          "score_ratio": 1.0,
+          "score_percent": 100.0,
+          "subscores": {},
+          "template_present": false
+        },
+        "template_similarity_score": {
+          "contract_version": "learning_template_similarity_score_v1",
+          "score_ratio": 1.0,
+          "score_percent": 100.0,
+          "subscores": {},
+          "template_present": false
+        },
+        "draft_reference_alignment_score": {
+          "contract_version": "draft_reference_alignment_score_v1",
+          "score_ratio": 1.0,
+          "score_percent": 100.0,
+          "passed": true,
+          "threshold": 0.9,
+          "reason": "passed"
+        },
+        "human_adjudication": {
+          "contract_version": "learning_human_adjudication_v1",
+          "status": "not_adjudicated",
+          "scope": null,
+          "rationale": null
+        },
+        "overall_score": {
+          "contract_version": "learning_overall_score_v1",
+          "score_ratio": 1.0,
+          "score_percent": 100.0,
+          "passed": true,
+          "metric_name": "draft_reference_alignment_score",
+          "draft_reference_alignment_threshold": 0.9,
+          "legacy_direct_use_accuracy_threshold": 0.9,
+          "reason": "passed"
+        },
+        "parameter_feedback": []
+      },
+      "score_ratio": 1.0,
+      "score_percent": 100.0,
+      "passed": true,
+      "draft_result": {
+        "contract_version": "learning_template_draft_v1",
+        "image_size": {
+          "width": 2540,
+          "height": 1380
+        },
+        "learning_source": "observe_model",
+        "screen_summary": "Python.org homepage with top navigation, search bar, primary content cards, and news/events sections.",
+        "state_guess": "python.org homepage",
+        "workflow_draft": {
+          "states": [
+            {
+              "state_id": "s1",
+              "label": "Python.org homepage",
+              "page_type": "landing_page"
+            }
+          ],
+          "transitions": [],
+          "action_templates": [
+            {
+              "action_template_id": "a1",
+              "label": "Search Python.org",
+              "semantic_action": "type_text",
+              "risk_level": "low",
+              "requires_gate": true,
+              "expected_effect": "Search query entered into the search field."
+            },
+            {
+              "action_template_id": "a2",
+              "label": "Navigate to Downloads",
+              "semantic_action": "open_detail",
+              "risk_level": "low",
+              "requires_gate": true,
+              "expected_effect": "Navigate to the Downloads page."
+            },
+            {
+              "action_template_id": "a3",
+              "label": "Open Documentation",
+              "semantic_action": "open_detail",
+              "risk_level": "low",
+              "requires_gate": true,
+              "expected_effect": "Navigate to the Documentation page."
+            },
+            {
+              "action_template_id": "a4",
+              "label": "View Events",
+              "semantic_action": "open_detail",
+              "risk_level": "low",
+              "requires_gate": true,
+              "expected_effect": "Navigate to the Events page."
+            },
+            {
+              "action_template_id": "a5",
+              "label": "Explore Community",
+              "semantic_action": "open_detail",
+              "risk_level": "low",
+              "requires_gate": true,
+              "expected_effect": "Navigate to the Community page."
+            }
+          ],
+          "path_patterns": []
+        },
+        "interface_draft": {
+          "regions": [
+            {
+              "region_id": "r1",
+              "label": "Search Input",
+              "role": "text_input",
+              "source": "element_search_728a0ee8",
+              "click_point": {
+                "x": 1514,
+                "y": 198
+              },
+              "section_id": "top_bar",
+              "bbox": {
+                "x": 1488,
+                "y": 187,
+                "w": 53,
+                "h": 23
+              }
+            },
+            {
+              "region_id": "r2",
+              "label": "Downloads Button",
+              "role": "button",
+              "source": "element_downloads_1d2cdc2d",
+              "click_point": {
+                "x": 1004,
+                "y": 278
+              },
+              "section_id": "primary_area",
+              "bbox": {
+                "x": 956,
+                "y": 263,
+                "w": 97,
+                "h": 29
+              }
+            },
+            {
+              "region_id": "r3",
+              "label": "Documentation Button",
+              "role": "button",
+              "source": "element_documentation_fecdf50b",
+              "click_point": {
+                "x": 1153,
+                "y": 278
+              },
+              "section_id": "primary_area",
+              "bbox": {
+                "x": 1088,
+                "y": 263,
+                "w": 130,
+                "h": 29
+              }
+            },
+            {
+              "region_id": "r4",
+              "label": "Events Button",
+              "role": "button",
+              "source": "element_events_de957abc",
+              "click_point": {
+                "x": 1671,
+                "y": 277
+              },
+              "section_id": "primary_area",
+              "bbox": {
+                "x": 1640,
+                "y": 264,
+                "w": 62,
+                "h": 26
+              }
+            },
+            {
+              "region_id": "r5",
+              "label": "Community Button",
+              "role": "button",
+              "source": "element_community_5d7e44ed",
+              "click_point": {
+                "x": 1780,
+                "y": 113
+              },
+              "section_id": "top_bar",
+              "bbox": {
+                "x": 1737,
+                "y": 100,
+                "w": 86,
+                "h": 26
+              }
+            }
+          ],
+          "visual_assets": [],
+          "dynamic_areas": [],
+          "danger_zones": []
+        },
+        "agent_decision_points": [],
+        "operation_skills": [],
+        "gate_contracts": [],
+        "safety": {
+          "observation_only": true,
+          "promotion_allowed": false,
+          "final_submit_blocked": true,
+          "real_clicks_performed": 0
+        },
+        "notes": [],
+        "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+        "regions": [],
+        "targets": [],
+        "observers": [],
+        "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+      }
+    }
+  ],
+  "best_learning_draft": {
+    "contract_version": "learning_template_draft_v1",
+    "image_size": {
+      "width": 2540,
+      "height": 1380
+    },
+    "learning_source": "observe_model",
+    "screen_summary": "Python.org homepage with top navigation, search bar, primary content cards, and news/events sections.",
+    "state_guess": "python.org homepage",
+    "workflow_draft": {
+      "states": [
+        {
+          "state_id": "s1",
+          "label": "Python.org homepage",
+          "page_type": "landing_page"
+        }
+      ],
+      "transitions": [],
+      "action_templates": [
+        {
+          "action_template_id": "a1",
+          "label": "Search Python.org",
+          "semantic_action": "type_text",
+          "risk_level": "low",
+          "requires_gate": true,
+          "expected_effect": "Search query entered into the search field."
+        },
+        {
+          "action_template_id": "a2",
+          "label": "Navigate to Downloads",
+          "semantic_action": "open_detail",
+          "risk_level": "low",
+          "requires_gate": true,
+          "expected_effect": "Navigate to the Downloads page."
+        },
+        {
+          "action_template_id": "a3",
+          "label": "Open Documentation",
+          "semantic_action": "open_detail",
+          "risk_level": "low",
+          "requires_gate": true,
+          "expected_effect": "Navigate to the Documentation page."
+        },
+        {
+          "action_template_id": "a4",
+          "label": "View Events",
+          "semantic_action": "open_detail",
+          "risk_level": "low",
+          "requires_gate": true,
+          "expected_effect": "Navigate to the Events page."
+        },
+        {
+          "action_template_id": "a5",
+          "label": "Explore Community",
+          "semantic_action": "open_detail",
+          "risk_level": "low",
+          "requires_gate": true,
+          "expected_effect": "Navigate to the Community page."
+        }
+      ],
+      "path_patterns": []
+    },
+    "interface_draft": {
+      "regions": [
+        {
+          "region_id": "r1",
+          "label": "Search Input",
+          "role": "text_input",
+          "source": "element_search_728a0ee8",
+          "click_point": {
+            "x": 1514,
+            "y": 198
+          },
+          "section_id": "top_bar",
+          "bbox": {
+            "x": 1488,
+            "y": 187,
+            "w": 53,
+            "h": 23
+          }
+        },
+        {
+          "region_id": "r2",
+          "label": "Downloads Button",
+          "role": "button",
+          "source": "element_downloads_1d2cdc2d",
+          "click_point": {
+            "x": 1004,
+            "y": 278
+          },
+          "section_id": "primary_area",
+          "bbox": {
+            "x": 956,
+            "y": 263,
+            "w": 97,
+            "h": 29
+          }
+        },
+        {
+          "region_id": "r3",
+          "label": "Documentation Button",
+          "role": "button",
+          "source": "element_documentation_fecdf50b",
+          "click_point": {
+            "x": 1153,
+            "y": 278
+          },
+          "section_id": "primary_area",
+          "bbox": {
+            "x": 1088,
+            "y": 263,
+            "w": 130,
+            "h": 29
+          }
+        },
+        {
+          "region_id": "r4",
+          "label": "Events Button",
+          "role": "button",
+          "source": "element_events_de957abc",
+          "click_point": {
+            "x": 1671,
+            "y": 277
+          },
+          "section_id": "primary_area",
+          "bbox": {
+            "x": 1640,
+            "y": 264,
+            "w": 62,
+            "h": 26
+          }
+        },
+        {
+          "region_id": "r5",
+          "label": "Community Button",
+          "role": "button",
+          "source": "element_community_5d7e44ed",
+          "click_point": {
+            "x": 1780,
+            "y": 113
+          },
+          "section_id": "top_bar",
+          "bbox": {
+            "x": 1737,
+            "y": 100,
+            "w": 86,
+            "h": 26
+          }
+        }
+      ],
+      "visual_assets": [],
+      "dynamic_areas": [],
+      "danger_zones": []
+    },
+    "agent_decision_points": [],
+    "operation_skills": [],
+    "gate_contracts": [],
+    "safety": {
+      "observation_only": true,
+      "promotion_allowed": false,
+      "final_submit_blocked": true,
+      "real_clicks_performed": 0
+    },
+    "notes": [],
+    "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+    "regions": [],
+    "targets": [],
+    "observers": [],
+    "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+  },
+  "target_contract": {
+    "contract_version": "learning_template_target_v1",
+    "required_top_level_fields": [
+      "contract_version",
+      "image_size",
+      "learning_source",
+      "screen_summary",
+      "state_guess",
+      "workflow_draft",
+      "interface_draft",
+      "safety"
+    ],
+    "required_sections": [
+      "workflow_draft.states",
+      "workflow_draft.action_templates",
+      "interface_draft.regions",
+      "safety"
+    ],
+    "expected_actions": [],
+    "expected_visible_text": [],
+    "reference_template": null,
+    "require_expected_actions_for_pass": false,
+    "draft_reference_alignment_threshold": 0.9,
+    "direct_use_accuracy_threshold": 0.9,
+    "human_adjudication": null
+  },
+  "safety": {
+    "real_clicks_performed": 0,
+    "artifact_posthoc_optimization_allowed": false,
+    "promotion_allowed": false,
+    "final_submit_blocked": true,
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "live_safe_fill_attempted": 0,
+    "final_submit_forbidden": true,
+    "real_action_requires_gate": true
+  },
+  "artifact_type": "raw_learning_trial",
+  "draft_only": true,
+  "draft_graph_preview": true,
+  "runtime_path_graph": false,
+  "promotion_allowed": false,
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "real_clicks": 0,
+  "live_safe_fill_attempted": 0,
+  "final_submit_forbidden": true,
+  "real_action_requires_gate": true,
+  "reference_available": false,
+  "panel_learning_studio": {
+    "contract_version": "panel_learning_studio_trial_v1",
+    "draft_graph_preview": true,
+    "display_only": true,
+    "source": "panel_run_learning_model_trial"
+  }
+}

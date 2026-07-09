@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from app.api import session as session_api
 from app.core.window_manager import BoundWindow, WindowRect
-from app.api.models.request import ResizeBoundWindowRequest
+from app.api.models.request import BindWindowRequest, ResizeBoundWindowRequest
 
 
 def _bound(title: str = "Demo") -> BoundWindow:
@@ -46,6 +46,19 @@ def test_resize_bound_window_route_returns_before_and_after(monkeypatch) -> None
     assert response.data["before"]["window_title"] == "Before"
     assert response.data["after"]["window_title"] == "After"
     assert response.data["after"]["rect"] == {"left": 20, "top": 30, "right": 1120, "bottom": 930}
+
+
+def test_bind_window_route_returns_operation_context(monkeypatch) -> None:
+    bound = _bound("Bound")
+    monkeypatch.setattr(session_api.window_manager, "list_visible_windows", lambda: [{"handle": 123, "title": "Bound"}])
+    monkeypatch.setattr(session_api.window_manager, "bind_window", lambda process_name, title: bound)
+
+    response = session_api.bind_window(BindWindowRequest(process_name="msedge.exe", title="Bound"))
+
+    assert response.success is True
+    assert response.data["operation_context"]["skill_id"] == "bind_window"
+    assert response.data["operation_context"]["window_binding_id"] == "window:123"
+    assert response.data["operation_trace_link"]["result_status"] == "success"
 
 
 def test_resize_bound_window_route_reports_failure(monkeypatch) -> None:

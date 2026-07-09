@@ -1835,7 +1835,7 @@ def test_learned_quick_apply_visual_match_does_not_require_prior_text_evidence(t
     assert "quick_apply_text_evidence_missing_visual_match_used" in verification["warnings"]
 
 
-def test_execute_apply_entry_blocks_standard_apply_before_click(monkeypatch) -> None:
+def test_execute_apply_entry_allows_standard_apply_to_external_flow(monkeypatch) -> None:
     calls: list[tuple[str, dict]] = []
 
     monkeypatch.setattr(
@@ -1869,9 +1869,46 @@ def test_execute_apply_entry_blocks_standard_apply_before_click(monkeypatch) -> 
         calls.append((endpoint, payload))
         if endpoint == "/action/scroll":
             return _scroll_response()
-        raise AssertionError(f"standard Apply must not create an action plan: {endpoint}")
+        if endpoint == "/action/execute_confirmed_point":
+            return {
+                "success": True,
+                "message": "ok",
+                "data": {
+                    "result": {
+                        "trace_path": "logs/traces/actions/apply.json",
+                        "execution_path": {"action_executed": not payload.get("dry_run"), "dry_run": payload.get("dry_run")},
+                    }
+                },
+                "error": None,
+            }
+        raise AssertionError(f"unexpected endpoint: {endpoint}")
 
     monkeypatch.setattr(runner, "_post_json", fake_post)
+    monkeypatch.setattr(
+        runner,
+        "_read_bound_browser_current_url",
+        lambda *_args, **_kwargs: {
+            "contract_version": "current_browser_url_snapshot_v1",
+            "status": "ok",
+            "url": "https://heartland.wd3.myworkdayjobs.com/en-US/External/apply",
+            "source": "test",
+        },
+    )
+    monkeypatch.setattr(
+        runner,
+        "_observe",
+        lambda *_args, **_kwargs: {
+            "screen_inventory": {
+                "available_actions": [{"label": "Create Account"}],
+                "page_elements": [
+                    {"text": "Create Account"},
+                    {"text": "Email Address"},
+                    {"text": "Password Requirements"},
+                    {"text": "I consent to Heartland's Privacy Statement"},
+                ],
+            }
+        },
+    )
 
     attempt = runner._execute_apply_entry(
         "http://runtime",
@@ -1901,13 +1938,16 @@ def test_execute_apply_entry_blocks_standard_apply_before_click(monkeypatch) -> 
         timeout=5,
     )
 
-    assert attempt["status"] == "skipped"
-    assert attempt["executed"] is False
-    assert attempt["application_flow_started"] is False
-    assert attempt["stop_reason"] == "seek_standard_apply_is_external_use_quick_apply_only"
-    assert attempt["external_apply_guard"]["decision"] == "skip_before_expensive_apply_verification"
+    assert attempt["status"] == "blocked_need_user_or_gpt_decision"
+    assert attempt["executed"] is True
+    assert attempt["application_flow_started"] is True
+    assert attempt["stop_reason"] == "account_or_privacy_approval_required"
+    assert attempt["application_flow_state"]["state_type"] == "account_or_privacy_approval_required"
+    assert attempt["apply_flow_decision"]["state_type"] == "account_or_privacy_approval_required_blocked"
+    assert attempt["external_apply_guard"]["decision"] == "allow_open_external_apply_flow"
     assert attempt["external_apply_guard"]["observed_label"] == "Apply"
-    assert calls == []
+    assert attempt["url_after_apply_click"]["url"].startswith("https://heartland.wd3.myworkdayjobs.com/")
+    assert [endpoint for endpoint, _payload in calls].count("/action/execute_confirmed_point") == 2
     assert all(endpoint != "/action/execute_recognition_plan" for endpoint, _payload in calls)
 
 

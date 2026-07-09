@@ -6,13 +6,15 @@ param(
 $ErrorActionPreference = "Stop"
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
+$explicitPort = $PSBoundParameters.ContainsKey("Port")
+$explicitPidFile = $PSBoundParameters.ContainsKey("PidFile") -and $PidFile
 $pidPaths = @()
 if ($PidFile) {
     $pidPaths += if ([System.IO.Path]::IsPathRooted($PidFile)) { $PidFile } else { Join-Path $root $PidFile }
 }
 $profilePorts = @()
 $profileDir = Join-Path $root "configs\model_profiles"
-if (Test-Path $profileDir) {
+if (-not $explicitPidFile -and (Test-Path $profileDir)) {
     Get-ChildItem -Path $profileDir -Filter "*.json" -File | ForEach-Object {
         try {
             $profile = Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json
@@ -31,11 +33,13 @@ if (Test-Path $profileDir) {
         }
     }
 }
-$pidPaths += @(
-    (Join-Path $root "logs\internvl3_5-server.pid"),
-    (Join-Path $root "logs\qwen3-vl-server.pid"),
-    (Join-Path $root "logs\*-server.pid")
-)
+if (-not $explicitPidFile) {
+    $pidPaths += @(
+        (Join-Path $root "logs\internvl3_5-server.pid"),
+        (Join-Path $root "logs\qwen3-vl-server.pid"),
+        (Join-Path $root "logs\*-server.pid")
+    )
+}
 
 $stopped = $false
 foreach ($pidPath in ($pidPaths | Select-Object -Unique)) {
@@ -55,7 +59,11 @@ foreach ($pidPath in ($pidPaths | Select-Object -Unique)) {
     }
 }
 
-$ports = @($Port) + $profilePorts | Select-Object -Unique
+$ports = if ($explicitPort) {
+    @($Port)
+} else {
+    @($Port) + $profilePorts | Select-Object -Unique
+}
 foreach ($currentPort in $ports) {
     $connections = Get-NetTCPConnection -LocalPort $currentPort -State Listen -ErrorAction SilentlyContinue
     if (-not $connections) {

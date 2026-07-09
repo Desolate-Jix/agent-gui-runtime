@@ -1,0 +1,108 @@
+{
+  "contract_version": "reviewed_template_candidate_v1",
+  "source": {
+    "source_path": "artifacts/learn-recognition-benchmark/pathgraph_candidate_validation_ok/learning_draft.json",
+    "source_trial_path": null,
+    "original_draft_path": "artifacts/learn-recognition-benchmark/pathgraph_candidate_validation_ok/learning_draft.json",
+    "sha256": "3390aa396a3e066f20951c7a370771db75b147b0451e9ace984f9b5173c7742b",
+    "attempt_index": null,
+    "readonly": true
+  },
+  "source_after_review": "mixed",
+  "counts_as_pure_model_generated": false,
+  "artifact_is_authorization": false,
+  "draft_only": false,
+  "reviewed_by_human": true,
+  "review_status": "approved_as_assisted_template",
+  "final_submit_forbidden": true,
+  "real_action_requires_gate": true,
+  "execute_binding_enabled": false,
+  "authorization_scope": "display_and_review_only",
+  "draft": {
+    "contract_version": "learning_template_draft_v1",
+    "screen_summary": "Validate a recognized draft can enter the reviewed pathgraph candidate safety path.",
+    "state_guess": "python_homepage",
+    "states": [
+      {
+        "state_id": "python_homepage",
+        "label": "python_homepage",
+        "summary": "Validate a recognized draft can enter the reviewed pathgraph candidate safety path."
+      }
+    ],
+    "regions": [
+      {
+        "region_id": "region_1",
+        "label": "Search",
+        "role": "button",
+        "bbox": {
+          "x": 980,
+          "y": 140,
+          "w": 92,
+          "h": 36
+        },
+        "source_item_id": "uia_control_1"
+      }
+    ],
+    "action_templates": [
+      {
+        "action_template_id": "action_1",
+        "label": "Search",
+        "target_entity": "region_1",
+        "semantic_action": "activate",
+        "source_item_id": "uia_control_1",
+        "bbox": {
+          "x": 980,
+          "y": 140,
+          "w": 92,
+          "h": 36
+        },
+        "click_point": {
+          "x": 1024,
+          "y": 158
+        }
+      }
+    ],
+    "blockers": [
+      {
+        "blocker_id": "final_submit",
+        "label": "Final submit remains blocked"
+      }
+    ],
+    "verification_rules": [
+      {
+        "rule_id": "search_visible",
+        "label": "Search button remains visible"
+      }
+    ],
+    "agent_decision_points": [],
+    "operation_skills": [],
+    "gate_contracts": [],
+    "learning_source": "learn_recognition_pipeline_v2",
+    "notes": [],
+    "safety": {
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "real_action_requires_gate": true,
+      "final_submit_forbidden": true
+    }
+  },
+  "safety": {
+    "artifact_is_authorization": false,
+    "final_submit_allowed": false,
+    "final_submit_forbidden": true,
+    "real_action_requires_gate": true,
+    "execute_binding_enabled": false,
+    "authorization_scope": "display_and_review_only"
+  },
+  "audit": {
+    "source_trial_path": "artifacts/learn-recognition-benchmark/pathgraph_candidate_validation_ok/learning_draft.json",
+    "original_draft_path": "artifacts/learn-recognition-benchmark/pathgraph_candidate_validation_ok/learning_draft.json",
+    "reviewed_at": "2026-07-04T01:52:00.960223",
+    "changes_summary": [
+      "blockers:1",
+      "verification_rules:1"
+    ],
+    "review_status": "approved_as_assisted_template",
+    "authorization_scope": "display_and_review_only"
+  }
+}

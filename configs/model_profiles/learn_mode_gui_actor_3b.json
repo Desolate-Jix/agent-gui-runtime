@@ -1,0 +1,30 @@
+{
+  "profile_id": "learn_mode_gui_actor_3b",
+  "label": "Learn Mode GUI-Actor 3B candidate",
+  "mode_scope": "learn_only",
+  "role": [
+    "learn_recognition_candidate",
+    "action_region_grounding"
+  ],
+  "intended_pipeline_stage": "grounding_verifier",
+  "provider_mode": "metadata_only",
+  "model_family": "GUI-Actor",
+  "model_id": "microsoft/GUI-Actor-3B",
+  "max_parameters_b": 3.0,
+  "experiment_priority": 5,
+  "input_contract": "roi_crop_plus_target_referring_expression",
+  "output_contract": "action_region_verification_v1",
+  "coordinate_output": "region_or_point_requires_validator",
+  "parser_role": "none",
+  "grounding_role": "action_region_verifier",
+  "recommended_use": "Coordinate-free action-region proposal/verifier experiment for difficult ROI grounding cases.",
+  "candidate_source_url": "https://github.com/microsoft/GUI-Actor",
+  "download_status": "not_downloaded",
+  "model_path": "",
+  "launchable": false,
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "real_action_requires_gate": true,
+  "final_submit_forbidden": true,
+  "notes": "Metadata-only Learn Mode candidate. Exact artifact/model id must be verified before download."
+}

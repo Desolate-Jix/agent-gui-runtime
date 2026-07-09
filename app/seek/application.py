@@ -20,6 +20,8 @@ FINAL_SUBMIT_TERMS = {
 }
 
 LOGIN_TERMS = {"sign in", "log in", "login", "create account", "register"}
+ACCOUNT_CREATION_TERMS = {"create account", "register", "verify new password", "password requirements"}
+PRIVACY_CONSENT_TERMS = {"privacy statement", "privacy policy", "i consent", "consent to", "personal information"}
 CAPTCHA_TERMS = {"captcha", "recaptcha", "i'm not a robot", "verification code"}
 REVIEW_STEP_TERMS = {"review and submit", "review your application", "review application", "application review"}
 THIRD_PARTY_ATS_TERMS = {
@@ -96,6 +98,7 @@ SEEK_INTERNAL_BLOCKED_STATES = {
     "risky_application_questions",
 }
 HARD_BLOCKED_STATES = {
+    "account_or_privacy_approval_required",
     "login_required",
     "captcha_or_verification",
     "unknown_after_apply",
@@ -133,11 +136,20 @@ def assess_seek_application_flow_state(
     )
     final_submit_blocker = _final_submit_visible_blocker(items, active_flow_started=active_flow_started)
 
+    account_or_privacy_boundary = _contains_any(haystack, PRIVACY_CONSENT_TERMS) or (
+        _contains_any(haystack, ACCOUNT_CREATION_TERMS) and _contains_any(haystack, {"email address", "password"})
+    )
+
     if final_submit_blocker["blocked"]:
         state_type = "final_submit_visible"
         stop_reason = "final_submit_visible_stop_before_submission"
         flags.append("final_submit_visible")
         detected_states.append("final_submit_detected")
+    elif account_or_privacy_boundary:
+        state_type = "account_or_privacy_approval_required"
+        stop_reason = "account_or_privacy_approval_required"
+        flags.append("account_or_privacy_approval_required")
+        detected_states.append("account_or_privacy_approval_required")
     elif _contains_any(haystack, LOGIN_TERMS):
         state_type = "login_required"
         stop_reason = "login_required"
@@ -237,7 +249,13 @@ def build_seek_apply_flow_decision(application_flow_state: dict[str, Any] | None
     evidence = flow.get("evidence") if isinstance(flow.get("evidence"), dict) else {}
     texts = [str(item) for item in evidence.get("texts") or [] if str(item or "").strip()]
 
-    if source_state_type == "third_party_ats":
+    if source_state_type == "account_or_privacy_approval_required":
+        state_type = "account_or_privacy_approval_required_blocked"
+        decision = "stop"
+        reason = "account_or_privacy_approval_required"
+        allowed_next_steps = ["capture", "user_account_privacy_approval", "back_to_seek", "match"]
+        blocked_downstream = _blocked_downstream(all_blocked=True)
+    elif source_state_type == "third_party_ats":
         state_type = "third_party_ats_deferred"
         decision = "stop"
         reason = "third_party_ats_deferred"

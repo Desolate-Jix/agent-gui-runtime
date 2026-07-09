@@ -102,6 +102,30 @@ def test_rank_candidates_does_not_promote_negated_button_labels_over_requested_r
     assert continue_candidate.score < result.candidates[0].score
 
 
+def test_rank_candidates_promotes_explicit_apply_action_over_social_share_buttons() -> None:
+    structure = _structure(
+        [
+            _element("linkedin", "分享 LinkedIn", role="button"),
+            _element("apply", "申请此职位", role="button"),
+            _element("twitter", "分享至 Twitter", role="button"),
+        ]
+    )
+
+    result = rank_candidates(
+        CandidateRankRequest(
+            goal="Open the visible application entry button labeled 申请此职位 or Apply for this job.",
+            page_structure=structure,
+            top_k=3,
+        )
+    )
+
+    assert result.candidates[0].element_id == "apply"
+    assert result.margin_to_second is not None
+    assert result.margin_to_second >= 0.06
+    assert "explicit_action_target_match" in result.candidates[0].reasons
+    assert "explicit_action_target_mismatch" in result.candidates[1].reasons
+
+
 def test_rank_candidates_rejects_blocked_ad_like_element() -> None:
     structure = _structure(
         [

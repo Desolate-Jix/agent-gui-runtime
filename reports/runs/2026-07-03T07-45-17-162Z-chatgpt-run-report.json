@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-07-03T07:45:17.162Z",
+  "includeContent": false,
+  "summary": {
+    "ok": false,
+    "status": "partial",
+    "warnings": [],
+    "blocker": {
+      "kind": "[redacted:26 chars]",
+      "message": "[redacted:258 chars]",
+      "code": "[redacted:31 chars]",
+      "remediation": [
+        {
+          "label": "[redacted:14 chars]",
+          "instruction": "[redacted:162 chars]",
+          "userActionRequired": false
+        },
+        {
+          "label": "[redacted:22 chars]",
+          "instruction": "[redacted:243 chars]",
+          "userActionRequired": false
+        },
+        {
+          "label": "[redacted:18 chars]",
+          "instruction": "[redacted:236 chars]",
+          "userActionRequired": false
+        },
+        {
+          "label": "[redacted:22 chars]",
+          "instruction": "[redacted:176 chars]",
+          "userActionRequired": true
+        }
+      ]
+    },
+    "error": {
+      "name": "[redacted:29 chars]",
+      "message": "[redacted:258 chars]",
+      "recoverable": true
+    },
+    "context": {
+      "timestamp": "2026-07-03T07:45:17.162Z"
+    }
+  },
+  "steps": [
+    {
+      "id": "bootstrap",
+      "command": "session.bootstrap",
+      "status": "blocked",
+      "ok": false,
+      "startedAt": "2026-07-03T07:45:17.161Z",
+      "endedAt": "2026-07-03T07:45:17.162Z",
+      "warnings": []
+    }
+  ],
+  "data": {}
+}

@@ -1,0 +1,43 @@
+{
+  "contract_version": "learn_fusion_model_start_preflight_v1",
+  "preflight_status": "ready_for_explicit_model_start",
+  "may_start_model_after_user_approval": true,
+  "may_run_calibration_batch_now": false,
+  "runbook_path": "logs/benchmarks/learn_fusion_model_start_runbook_20260706/learn_fusion_model_start_runbook.json",
+  "pathgraph_candidate_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_7b471afc08/pathgraph_candidate/pathgraph_candidate.json",
+  "validation_report_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_7b471afc08/pathgraph_candidate/promotion_validation_report.json",
+  "runbook_status": "awaiting_explicit_model_start_approval",
+  "candidate_validation_status": "blocked_pending_calibration",
+  "ready_region_numbers": [
+    1,
+    2,
+    3,
+    6,
+    8,
+    9
+  ],
+  "review_blocked_region_numbers": [
+    7,
+    10
+  ],
+  "future_rerun_report_status": "awaiting_future_calibration_output",
+  "future_rerun_report_path": "D:\\agent-gui-runtime\\logs\\benchmarks\\numbered_region_calibration_batch_plan_with_refresh_seek_20260706\\next_numbered_region_calibration\\numbered_region_calibration_report.json",
+  "commands": {
+    "calibration_command_preview": "uv run python scripts\\run_numbered_region_calibration_probe.py --tasks D:\\agent-gui-runtime\\logs\\benchmarks\\learn_locator_card_open_detail_multi_probe_20260705\\generated_numbered_region_tasks.json --out D:\\agent-gui-runtime\\logs\\benchmarks\\numbered_region_calibration_batch_plan_with_refresh_seek_20260706\\next_numbered_region_calibration --regions 1,2,3,6,8,9",
+    "post_batch_refresh_command_preview": "uv run python scripts\\refresh_learn_fusion_after_calibration_batch.py --trial logs\\benchmarks\\learn_pathgraph_readiness_with_handoff_20260706\\actual_parser_output_with_fusion_status.json --base-status logs\\benchmarks\\learn_pathgraph_readiness_with_refresh_plan_20260706\\refresh_base\\learn_fusion_refresh_base_status.json --rerun-report D:\\agent-gui-runtime\\logs\\benchmarks\\numbered_region_calibration_batch_plan_with_refresh_seek_20260706\\next_numbered_region_calibration\\numbered_region_calibration_report.json --batch-plan D:\\agent-gui-runtime\\logs\\benchmarks\\numbered_region_calibration_batch_plan_with_refresh_seek_20260706\\numbered_region_calibration_batch_plan.json --out D:\\agent-gui-runtime\\logs\\benchmarks\\numbered_region_calibration_batch_plan_with_refresh_seek_20260706\\post_batch_refresh",
+    "command_executes_now": false,
+    "post_batch_refresh_command_executes_now": false
+  },
+  "safety": {
+    "model_started": false,
+    "live_clicks": 0,
+    "live_fills": 0,
+    "live_submits": 0,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false,
+    "display_only": true
+  },
+  "blockers": [],
+  "interpretation": "Offline preflight for the next explicitly approved learn-fusion calibration batch. It does not start models, click, fill, submit, refresh, merge, or promote Runtime PathGraph.",
+  "report_path": "D:\\agent-gui-runtime\\artifacts\\learning-draft-review\\actual_parser_output_with_fusion_status_7b471afc08\\pathgraph_candidate\\learn_fusion_model_start_preflight_report.json"
+}

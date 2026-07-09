@@ -1,0 +1,1772 @@
+{
+  "contract_version": "reviewed_template_candidate_v1",
+  "source": {
+    "source_path": "logs/benchmarks/pathgraph_candidate_source_freshness_bind_seek_20260705/reviewed_template_candidate_with_source_freshness.json",
+    "source_trial_path": null,
+    "original_draft_path": "logs/benchmarks/pathgraph_candidate_source_freshness_bind_seek_20260705/reviewed_template_candidate_with_source_freshness.json",
+    "sha256": "af4ceeb7fa3bec61fdd7797b7fc4f268207ed01b8070e103d8388323b49a001a",
+    "attempt_index": null,
+    "readonly": true
+  },
+  "source_after_review": "assisted_generation",
+  "counts_as_pure_model_generated": false,
+  "artifact_is_authorization": false,
+  "draft_only": false,
+  "reviewed_by_human": true,
+  "review_status": "approved_as_assisted_template",
+  "final_submit_forbidden": true,
+  "real_action_requires_gate": true,
+  "execute_binding_enabled": false,
+  "authorization_scope": "display_and_review_only",
+  "draft": {
+    "contract_version": "learning_template_draft_v1",
+    "screen_summary": "Job search results page for Auckland, showing job listings and filters",
+    "state_guess": "seek_results",
+    "states": [
+      {
+        "state_id": "seek_results",
+        "label": "seek_results",
+        "summary": "Job search results page for Auckland, showing job listings and filters"
+      }
+    ],
+    "regions": [
+      {
+        "region_id": "region_1",
+        "label": "Job listing card",
+        "role": "card",
+        "bbox": {
+          "x": 656,
+          "y": 518,
+          "w": 470,
+          "h": 378
+        },
+        "source_item_id": "c4",
+        "grounding_status": "validated",
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false
+      },
+      {
+        "region_id": "region_2",
+        "label": "Job listing card",
+        "role": "card",
+        "bbox": {
+          "x": 656,
+          "y": 896,
+          "w": 470,
+          "h": 238
+        },
+        "source_item_id": "c5",
+        "grounding_status": "validated",
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false
+      }
+    ],
+    "action_templates": [
+      {
+        "action_template_id": "action_1",
+        "label": "Job listing card",
+        "target_entity": "region_1",
+        "target_region_id": "region_1",
+        "semantic_action": "open_detail",
+        "action_kind": "open_detail",
+        "low_level_action_type": "click",
+        "source_item_id": "c4",
+        "bbox": {
+          "x": 656,
+          "y": 518,
+          "w": 470,
+          "h": 378
+        },
+        "click_point": {
+          "x": 735,
+          "y": 580
+        },
+        "requires_gate": true,
+        "candidate_freshness_required": true,
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "verification_rule_ids": [
+          "target_region_still_visible",
+          "point_inside_validated_region",
+          "no_final_submit_surface"
+        ],
+        "transition_hint": {
+          "contract_version": "learn_open_detail_transition_hint_v1",
+          "transition_type": "open_detail",
+          "source_region_id": "region_1",
+          "expected_next_state_role": "detail_view",
+          "target_surface": "detail_pane_or_detail_page",
+          "requires_post_action_observe": true,
+          "candidate_only": true,
+          "artifact_is_authorization": false,
+          "execute_binding_enabled": false
+        }
+      },
+      {
+        "action_template_id": "action_2",
+        "label": "Job listing card",
+        "target_entity": "region_2",
+        "target_region_id": "region_2",
+        "semantic_action": "open_detail",
+        "action_kind": "open_detail",
+        "low_level_action_type": "click",
+        "source_item_id": "c5",
+        "bbox": {
+          "x": 656,
+          "y": 896,
+          "w": 470,
+          "h": 238
+        },
+        "click_point": {
+          "x": 891,
+          "y": 1014
+        },
+        "requires_gate": true,
+        "candidate_freshness_required": true,
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "verification_rule_ids": [
+          "target_region_still_visible",
+          "point_inside_validated_region",
+          "no_final_submit_surface"
+        ],
+        "transition_hint": {
+          "contract_version": "learn_open_detail_transition_hint_v1",
+          "transition_type": "open_detail",
+          "source_region_id": "region_2",
+          "expected_next_state_role": "detail_view",
+          "target_surface": "detail_pane_or_detail_page",
+          "requires_post_action_observe": true,
+          "candidate_only": true,
+          "artifact_is_authorization": false,
+          "execute_binding_enabled": false
+        }
+      }
+    ],
+    "blockers": [
+      {
+        "blocker_id": "final_submit_guard",
+        "label": "Block final submit/send/confirm/payment actions",
+        "blocked_terms": [
+          "submit",
+          "send",
+          "complete",
+          "confirm",
+          "payment"
+        ],
+        "scope": "active_application_or_form_surface",
+        "severity": "hard_block"
+      },
+      {
+        "blocker_id": "stale_or_unverified_grounding",
+        "label": "Block stale screenshots or unverified coordinate transforms",
+        "requires": [
+          "fresh_capture",
+          "coordinate_transform_replay",
+          "point_inside_validated_region"
+        ],
+        "severity": "hard_block"
+      }
+    ],
+    "verification_rules": [
+      {
+        "rule_id": "target_region_still_visible",
+        "label": "Target region must still be visible in the current capture",
+        "required": true
+      },
+      {
+        "rule_id": "point_inside_validated_region",
+        "label": "Resolved point must remain inside the validated region bbox",
+        "required": true
+      },
+      {
+        "rule_id": "no_final_submit_surface",
+        "label": "Do not execute if the candidate is a final submit/send/confirm/payment control",
+        "required": true
+      }
+    ],
+    "agent_decision_points": [],
+    "operation_skills": [
+      "click_target",
+      "locate_element",
+      "observe_screen"
+    ],
+    "gate_contracts": [
+      {
+        "contract_id": "pre_click_decision_v1",
+        "required": true,
+        "checks": [
+          "fresh_capture_id",
+          "point_inside_bbox",
+          "candidate_score_margin",
+          "danger_zone_rejection"
+        ]
+      },
+      {
+        "contract_id": "final_submit_guard_v1",
+        "required": true,
+        "blocked_actions": [
+          "final_submit",
+          "send",
+          "confirm",
+          "payment"
+        ]
+      }
+    ],
+    "learning_source": "learn_recognition_pipeline_v2",
+    "page_details": {
+      "contract_version": "learning_draft_page_details_v1",
+      "display_only": true,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "screen": {
+        "app_name": "",
+        "state_hint": "",
+        "image_path": "",
+        "screen_size": {
+          "width": 2560,
+          "height": 1400
+        },
+        "summary": "Job search results page for Auckland, showing job listings and filters",
+        "source_image_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+        "source_image_sha256": "4ad07148c25da7935c8845a8455346c167d7fbb3056f15c7ab50be004d12283b",
+        "source_freshness_binding": {
+          "contract_version": "source_freshness_binding_v1",
+          "source_type": "source_trial_screenshot",
+          "source_trial_path": "logs/benchmarks/learn_locator_card_open_detail_multi_replay_transition_v1_20260705/actual_parser_output_v1.json",
+          "bound_at_stage": "pathgraph_candidate_review",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        }
+      },
+      "model_roles": {},
+      "layout_graph": {
+        "contract_version": "learn_layout_graph_v1",
+        "display_only": true,
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "node_count": 10,
+        "zone_count": 3,
+        "zones": {
+          "browser_chrome": {
+            "zone_id": "browser_chrome",
+            "item_ids": []
+          },
+          "page_header": {
+            "zone_id": "page_header",
+            "item_ids": [
+              "c1",
+              "c2",
+              "c3",
+              "c10",
+              "c11",
+              "c8",
+              "c9"
+            ]
+          },
+          "main_content": {
+            "zone_id": "main_content",
+            "item_ids": [
+              "c4",
+              "c5"
+            ]
+          },
+          "lower_content": {
+            "zone_id": "lower_content",
+            "item_ids": [
+              "c7"
+            ]
+          },
+          "floating_overlay": {
+            "zone_id": "floating_overlay",
+            "item_ids": []
+          },
+          "unknown": {
+            "zone_id": "unknown",
+            "item_ids": []
+          }
+        },
+        "nodes": {
+          "c1": {
+            "item_id": "c1",
+            "label": "Job search bar",
+            "role": "input",
+            "item_type": "layout",
+            "surface_zone": "page_header",
+            "bbox": {
+              "x": 656,
+              "y": 186,
+              "w": 840,
+              "h": 42
+            },
+            "review_only": false,
+            "grounding_eligible": false,
+            "split_roi_required": false,
+            "parent_ids": [],
+            "child_ids": []
+          },
+          "c2": {
+            "item_id": "c2",
+            "label": "Location filter",
+            "role": "input",
+            "item_type": "layout",
+            "surface_zone": "page_header",
+            "bbox": {
+              "x": 1496,
+              "y": 186,
+              "w": 296,
+              "h": 42
+            },
+            "review_only": false,
+            "grounding_eligible": false,
+            "split_roi_required": false,
+            "parent_ids": [],
+            "child_ids": []
+          },
+          "c3": {
+            "item_id": "c3",
+            "label": "Search button",
+            "role": "button",
+            "item_type": "layout",
+            "surface_zone": "page_header",
+            "bbox": {
+              "x": 1792,
+              "y": 186,
+              "w": 128,
+              "h": 42
+            },
+            "review_only": false,
+            "grounding_eligible": false,
+            "split_roi_required": false,
+            "parent_ids": [],
+            "child_ids": []
+          },
+          "c10": {
+            "item_id": "c10",
+            "label": "Job filters",
+            "role": "menu_item",
+            "item_type": "layout",
+            "surface_zone": "page_header",
+            "bbox": {
+              "x": 656,
+              "y": 252,
+              "w": 572,
+              "h": 42
+            },
+            "review_only": false,
+            "grounding_eligible": false,
+            "split_roi_required": false,
+            "parent_ids": [],
+            "child_ids": []
+          },
+          "c11": {
+            "item_id": "c11",
+            "label": "Job count indicator",
+            "role": "other",
+            "item_type": "layout",
+            "surface_zone": "page_header",
+            "bbox": {
+              "x": 656,
+              "y": 336,
+              "w": 112,
+              "h": 42
+            },
+            "review_only": false,
+            "grounding_eligible": false,
+            "split_roi_required": false,
+            "parent_ids": [],
+            "child_ids": []
+          },
+          "c8": {
+            "item_id": "c8",
+            "label": "Job details placeholder",
+            "role": "other",
+            "item_type": "layout",
+            "surface_zone": "page_header",
+            "bbox": {
+              "x": 1178,
+              "y": 336,
+              "w": 716,
+              "h": 560
+            },
+            "review_only": false,
+            "grounding_eligible": false,
+            "split_roi_required": false,
+            "parent_ids": [],
+            "child_ids": []
+          },
+          "c9": {
+            "item_id": "c9",
+            "label": "Filter toggle",
+            "role": "toggle",
+            "item_type": "layout",
+            "surface_zone": "page_header",
+            "bbox": {
+              "x": 998,
+              "y": 434,
+              "w": 102,
+              "h": 42
+            },
+            "review_only": false,
+            "grounding_eligible": false,
+            "split_roi_required": false,
+            "parent_ids": [],
+            "child_ids": []
+          },
+          "c4": {
+            "item_id": "c4",
+            "label": "Job listing card",
+            "role": "card",
+            "item_type": "actionable",
+            "surface_zone": "main_content",
+            "bbox": {
+              "x": 656,
+              "y": 518,
+              "w": 470,
+              "h": 378
+            },
+            "review_only": false,
+            "grounding_eligible": false,
+            "split_roi_required": false,
+            "parent_ids": [],
+            "child_ids": []
+          },
+          "c5": {
+            "item_id": "c5",
+            "label": "Job listing card",
+            "role": "card",
+            "item_type": "actionable",
+            "surface_zone": "main_content",
+            "bbox": {
+              "x": 656,
+              "y": 896,
+              "w": 470,
+              "h": 238
+            },
+            "review_only": false,
+            "grounding_eligible": false,
+            "split_roi_required": false,
+            "parent_ids": [],
+            "child_ids": []
+          },
+          "c7": {
+            "item_id": "c7",
+            "label": "Save search button",
+            "role": "button",
+            "item_type": "layout",
+            "surface_zone": "lower_content",
+            "bbox": {
+              "x": 768,
+              "y": 1302,
+              "w": 204,
+              "h": 42
+            },
+            "review_only": false,
+            "grounding_eligible": false,
+            "split_roi_required": false,
+            "parent_ids": [],
+            "child_ids": []
+          }
+        },
+        "reading_order": [
+          "c1",
+          "c2",
+          "c3",
+          "c10",
+          "c11",
+          "c8",
+          "c9",
+          "c4",
+          "c5",
+          "c7"
+        ],
+        "overlap_clusters": [],
+        "interpretation": "layout graph groups parser candidates for review and ROI planning only; it is not click permission, Execute authorization, or a recognition accuracy metric"
+      },
+      "locator_task_cards": {
+        "contract_version": "learn_locator_task_cards_v1",
+        "display_only": true,
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "cards": [
+          {
+            "contract_version": "learn_locator_task_card_v1",
+            "source_item_id": "c1",
+            "target_name": "Job search bar",
+            "target_role": "input",
+            "target_visible_text": "Job search bar",
+            "item_type": "layout",
+            "evidence_level": "semantic_region_only",
+            "source_evidence": [
+              "vision"
+            ],
+            "rough_bbox_hint": {
+              "x": 656,
+              "y": 186,
+              "w": 840,
+              "h": 42
+            },
+            "rough_bbox_policy": "hint_only_can_be_replaced",
+            "visual_description": "Search input field for job roles, industries, or skills",
+            "text_lines": [
+              "Describe what you're looking for (role, industry, skills...)"
+            ],
+            "boundary_definition": "visible input body boundary, excluding clear icons and surrounding header",
+            "clickable_area_hint": "inside the input body for Job search bar",
+            "neighbor_context": {
+              "left": "Job filters",
+              "right": "Location filter",
+              "above": null,
+              "below": "Job filters"
+            },
+            "uia_control_type": null,
+            "uia_patterns": [],
+            "parser_candidate": {
+              "schema_version": "parser_candidate_v1",
+              "source_type": "qwen_vlm",
+              "source_run_id": "",
+              "screenshot_sha256": "4ad07148c25da7935c8845a8455346c167d7fbb3056f15c7ab50be004d12283b",
+              "coordinate_space": "image",
+              "image_size": {
+                "width": 2560,
+                "height": 1400
+              },
+              "window_rect": {
+                "x": 0,
+                "y": 0,
+                "w": 0,
+                "h": 0
+              },
+              "candidate_id": "c1",
+              "bbox": {
+                "x": 656,
+                "y": 186,
+                "w": 840,
+                "h": 42
+              },
+              "text": "Job search bar",
+              "label": "Job search bar",
+              "role_hint": "input",
+              "evidence_kind": "semantic_region",
+              "is_interactable_evidence": false,
+              "review_only": true,
+              "grounding_eligible": false,
+              "grounding_block_reason": "semantic_region_only_without_interactable_evidence",
+              "raw_payload_path": "",
+              "freshness": {
+                "same_screenshot": true,
+                "capture_time": "",
+                "stale": false
+              },
+              "artifact_is_authorization": false,
+              "execute_binding_enabled": false
+            },
+            "interaction_target": "click inside the input body for Job search bar, not the clear icon or surrounding header",
+            "must_not_click": [
+              "browser toolbar",
+              "clear icon",
+              "final submit",
+              "send",
+              "confirm",
+              "payment"
+            ],
+            "expected_precise_output": "tight visible target bbox and safe interior point in full screenshot coordinates",
+            "review_policy": {
+              "semantic_only_requires_human_review": true,
+              "requires_cross_evidence_before_promotion": true,
+              "interpretation": "Semantic-only regions remain review-only until OCR/UIA/DOM/calibrated support confirms the target."
+            },
+            "display_only": true,
+            "artifact_is_authorization": false,
+            "execute_binding_enabled": false
+          },
+          {
+            "contract_version": "learn_locator_task_card_v1",
+            "source_item_id": "c2",
+            "target_name": "Location filter",
+            "target_role": "input",
+            "target_visible_text": "Location filter",
+            "item_type": "layout",
+            "evidence_level": "semantic_region_only",
+            "source_evidence": [
+              "vision"
+            ],
+            "rough_bbox_hint": {
+              "x": 1496,
+              "y": 186,
+              "w": 296,
+              "h": 42
+            },
+            "rough_bbox_policy": "hint_only_can_be_replaced",
+            "visual_description": "Location filter set to 'All Auckland'",
+            "text_lines": [
+              "All Auckland"
+            ],
+            "boundary_definition": "visible input body boundary, excluding clear icons and surrounding header",
+            "clickable_area_hint": "inside the input body for Location filter",
+            "neighbor_context": {
+              "left": "Job search bar",
+              "right": "Search button",
+              "above": null,
+              "below": "Job details placeholder"
+            },
+            "uia_control_type": null,
+            "uia_patterns": [],
+            "parser_candidate": {
+              "schema_version": "parser_candidate_v1",
+              "source_type": "qwen_vlm",
+              "source_run_id": "",
+              "screenshot_sha256": "4ad07148c25da7935c8845a8455346c167d7fbb3056f15c7ab50be004d12283b",
+              "coordinate_space": "image",
+              "image_size": {
+                "width": 2560,
+                "height": 1400
+              },
+              "window_rect": {
+                "x": 0,
+                "y": 0,
+                "w": 0,
+                "h": 0
+              },
+              "candidate_id": "c2",
+              "bbox": {
+                "x": 1496,
+                "y": 186,
+                "w": 296,
+                "h": 42
+              },
+              "text": "Location filter",
+              "label": "Location filter",
+              "role_hint": "input",
+              "evidence_kind": "semantic_region",
+              "is_interactable_evidence": false,
+              "review_only": true,
+              "grounding_eligible": false,
+              "grounding_block_reason": "semantic_region_only_without_interactable_evidence",
+              "raw_payload_path": "",
+              "freshness": {
+                "same_screenshot": true,
+                "capture_time": "",
+                "stale": false
+              },
+              "artifact_is_authorization": false,
+              "execute_binding_enabled": false
+            },
+            "interaction_target": "click inside the input body for Location filter, not the clear icon or surrounding header",
+            "must_not_click": [
+              "browser toolbar",
+              "clear icon",
+              "final submit",
+              "send",
+              "confirm",
+              "payment"
+            ],
+            "expected_precise_output": "tight visible target bbox and safe interior point in full screenshot coordinates",
+            "review_policy": {
+              "semantic_only_requires_human_review": true,
+              "requires_cross_evidence_before_promotion": true,
+              "interpretation": "Semantic-only regions remain review-only until OCR/UIA/DOM/calibrated support confirms the target."
+            },
+            "display_only": true,
+            "artifact_is_authorization": false,
+            "execute_binding_enabled": false
+          },
+          {
+            "contract_version": "learn_locator_task_card_v1",
+            "source_item_id": "c3",
+            "target_name": "Search button",
+            "target_role": "button",
+            "target_visible_text": "Search button",
+            "item_type": "layout",
+            "evidence_level": "semantic_region_only",
+            "source_evidence": [
+              "vision"
+            ],
+            "rough_bbox_hint": {
+              "x": 1792,
+              "y": 186,
+              "w": 128,
+              "h": 42
+            },
+            "rough_bbox_policy": "hint_only_can_be_replaced",
+            "visual_description": "Pink button to execute job search",
+            "text_lines": [
+              "SEEK"
+            ],
+            "boundary_definition": "tight visible button boundary, excluding neighboring text or controls",
+            "clickable_area_hint": "visual center of the button labeled Search button",
+            "neighbor_context": {
+              "left": "Location filter",
+              "right": null,
+              "above": null,
+              "below": null
+            },
+            "uia_control_type": null,
+            "uia_patterns": [],
+            "parser_candidate": {
+              "schema_version": "parser_candidate_v1",
+              "source_type": "qwen_vlm",
+              "source_run_id": "",
+              "screenshot_sha256": "4ad07148c25da7935c8845a8455346c167d7fbb3056f15c7ab50be004d12283b",
+              "coordinate_space": "image",
+              "image_size": {
+                "width": 2560,
+                "height": 1400
+              },
+              "window_rect": {
+                "x": 0,
+                "y": 0,
+                "w": 0,
+                "h": 0
+              },
+              "candidate_id": "c3",
+              "bbox": {
+                "x": 1792,
+                "y": 186,
+                "w": 128,
+                "h": 42
+              },
+              "text": "Search button",
+              "label": "Search button",
+              "role_hint": "button",
+              "evidence_kind": "semantic_region",
+              "is_interactable_evidence": false,
+              "review_only": true,
+              "grounding_eligible": false,
+              "grounding_block_reason": "semantic_region_only_without_interactable_evidence",
+              "raw_payload_path": "",
+              "freshness": {
+                "same_screenshot": true,
+                "capture_time": "",
+                "stale": false
+              },
+              "artifact_is_authorization": false,
+              "execute_binding_enabled": false
+            },
+            "interaction_target": "click the visible button body labeled Search button, preferably near the visual center",
+            "must_not_click": [
+              "browser toolbar",
+              "clear icon",
+              "final submit",
+              "send",
+              "confirm",
+              "payment"
+            ],
+            "expected_precise_output": "tight visible target bbox and safe interior point in full screenshot coordinates",
+            "review_policy": {
+              "semantic_only_requires_human_review": true,
+              "requires_cross_evidence_before_promotion": true,
+              "interpretation": "Semantic-only regions remain review-only until OCR/UIA/DOM/calibrated support confirms the target."
+            },
+            "display_only": true,
+            "artifact_is_authorization": false,
+            "execute_binding_enabled": false
+          },
+          {
+            "contract_version": "learn_locator_task_card_v1",
+            "source_item_id": "c4",
+            "target_name": "Job listing card",
+            "target_role": "card",
+            "target_visible_text": "Job listing card",
+            "item_type": "actionable",
+            "evidence_level": "cross_evidence_grounded",
+            "source_evidence": [
+              "calibrated_target",
+              "vision"
+            ],
+            "rough_bbox_hint": {
+              "x": 656,
+              "y": 518,
+              "w": 470,
+              "h": 378
+            },
+            "rough_bbox_policy": "hint_only_can_be_replaced",
+            "visual_description": "Job card for 'Software Engineer Specialist - Integration' at AIA New Zealand",
+            "text_lines": [
+              "Software Engineer Specialist - Integration",
+              "AIA New Zealand",
+              "Takapuna, Auckland"
+            ],
+            "boundary_definition": "smallest visible module boundary, excluding neighboring modules",
+            "clickable_area_hint": "safe interior point away from neighboring controls",
+            "neighbor_context": {
+              "left": "Job count indicator",
+              "right": "Job filters",
+              "above": "Filter toggle",
+              "below": "Job listing card"
+            },
+            "uia_control_type": null,
+            "uia_patterns": [],
+            "parser_candidate": {
+              "schema_version": "parser_candidate_v1",
+              "source_type": "mixed",
+              "source_run_id": "",
+              "screenshot_sha256": "4ad07148c25da7935c8845a8455346c167d7fbb3056f15c7ab50be004d12283b",
+              "coordinate_space": "image",
+              "image_size": {
+                "width": 2560,
+                "height": 1400
+              },
+              "window_rect": {
+                "x": 0,
+                "y": 0,
+                "w": 0,
+                "h": 0
+              },
+              "candidate_id": "c4",
+              "bbox": {
+                "x": 656,
+                "y": 518,
+                "w": 470,
+                "h": 378
+              },
+              "text": "Job listing card",
+              "label": "Job listing card",
+              "role_hint": "card",
+              "evidence_kind": "cross_evidence_interactable",
+              "is_interactable_evidence": true,
+              "review_only": false,
+              "grounding_eligible": true,
+              "grounding_block_reason": "",
+              "raw_payload_path": "",
+              "freshness": {
+                "same_screenshot": true,
+                "capture_time": "",
+                "stale": false
+              },
+              "artifact_is_authorization": false,
+              "execute_binding_enabled": false
+            },
+            "interaction_target": "locate the visible target area for Job listing card; avoid nested unrelated controls",
+            "must_not_click": [
+              "browser toolbar",
+              "clear icon",
+              "final submit",
+              "send",
+              "confirm",
+              "payment"
+            ],
+            "expected_precise_output": "tight visible target bbox and safe interior point in full screenshot coordinates",
+            "review_policy": {
+              "semantic_only_requires_human_review": false,
+              "requires_cross_evidence_before_promotion": false,
+              "interpretation": "Semantic-only regions remain review-only until OCR/UIA/DOM/calibrated support confirms the target."
+            },
+            "display_only": true,
+            "artifact_is_authorization": false,
+            "execute_binding_enabled": false
+          },
+          {
+            "contract_version": "learn_locator_task_card_v1",
+            "source_item_id": "c5",
+            "target_name": "Job listing card",
+            "target_role": "card",
+            "target_visible_text": "Job listing card",
+            "item_type": "actionable",
+            "evidence_level": "cross_evidence_grounded",
+            "source_evidence": [
+              "calibrated_target",
+              "vision"
+            ],
+            "rough_bbox_hint": {
+              "x": 656,
+              "y": 896,
+              "w": 470,
+              "h": 238
+            },
+            "rough_bbox_policy": "hint_only_can_be_replaced",
+            "visual_description": "Job card for 'Intermediate Software Engineer (TypeScript, Node.js, React)' at Aderant",
+            "text_lines": [
+              "Intermediate Software Engineer (TypeScript, Node.js, React)",
+              "Aderant",
+              "Albany, Auckland (Hybrid)"
+            ],
+            "boundary_definition": "smallest visible module boundary, excluding neighboring modules",
+            "clickable_area_hint": "safe interior point away from neighboring controls",
+            "neighbor_context": {
+              "left": "Save search button",
+              "right": null,
+              "above": "Job listing card",
+              "below": "Save search button"
+            },
+            "uia_control_type": null,
+            "uia_patterns": [],
+            "parser_candidate": {
+              "schema_version": "parser_candidate_v1",
+              "source_type": "mixed",
+              "source_run_id": "",
+              "screenshot_sha256": "4ad07148c25da7935c8845a8455346c167d7fbb3056f15c7ab50be004d12283b",
+              "coordinate_space": "image",
+              "image_size": {
+                "width": 2560,
+                "height": 1400
+              },
+              "window_rect": {
+                "x": 0,
+                "y": 0,
+                "w": 0,
+                "h": 0
+              },
+              "candidate_id": "c5",
+              "bbox": {
+                "x": 656,
+                "y": 896,
+                "w": 470,
+                "h": 238
+              },
+              "text": "Job listing card",
+              "label": "Job listing card",
+              "role_hint": "card",
+              "evidence_kind": "cross_evidence_interactable",
+              "is_interactable_evidence": true,
+              "review_only": false,
+              "grounding_eligible": true,
+              "grounding_block_reason": "",
+              "raw_payload_path": "",
+              "freshness": {
+                "same_screenshot": true,
+                "capture_time": "",
+                "stale": false
+              },
+              "artifact_is_authorization": false,
+              "execute_binding_enabled": false
+            },
+            "interaction_target": "locate the visible target area for Job listing card; avoid nested unrelated controls",
+            "must_not_click": [
+              "browser toolbar",
+              "clear icon",
+              "final submit",
+              "send",
+              "confirm",
+              "payment"
+            ],
+            "expected_precise_output": "tight visible target bbox and safe interior point in full screenshot coordinates",
+            "review_policy": {
+              "semantic_only_requires_human_review": false,
+              "requires_cross_evidence_before_promotion": false,
+              "interpretation": "Semantic-only regions remain review-only until OCR/UIA/DOM/calibrated support confirms the target."
+            },
+            "display_only": true,
+            "artifact_is_authorization": false,
+            "execute_binding_enabled": false
+          },
+          {
+            "contract_version": "learn_locator_task_card_v1",
+            "source_item_id": "c7",
+            "target_name": "Save search button",
+            "target_role": "button",
+            "target_visible_text": "Save search button",
+            "item_type": "layout",
+            "evidence_level": "semantic_region_only",
+            "source_evidence": [
+              "vision"
+            ],
+            "rough_bbox_hint": {
+              "x": 768,
+              "y": 1302,
+              "w": 204,
+              "h": 42
+            },
+            "rough_bbox_policy": "hint_only_can_be_replaced",
+            "visual_description": "Button to save the current job search",
+            "text_lines": [
+              "Save this search"
+            ],
+            "boundary_definition": "tight visible button boundary, excluding neighboring text or controls",
+            "clickable_area_hint": "visual center of the button labeled Save search button",
+            "neighbor_context": {
+              "left": null,
+              "right": null,
+              "above": "Job listing card",
+              "below": null
+            },
+            "uia_control_type": null,
+            "uia_patterns": [],
+            "parser_candidate": {
+              "schema_version": "parser_candidate_v1",
+              "source_type": "qwen_vlm",
+              "source_run_id": "",
+              "screenshot_sha256": "4ad07148c25da7935c8845a8455346c167d7fbb3056f15c7ab50be004d12283b",
+              "coordinate_space": "image",
+              "image_size": {
+                "width": 2560,
+                "height": 1400
+              },
+              "window_rect": {
+                "x": 0,
+                "y": 0,
+                "w": 0,
+                "h": 0
+              },
+              "candidate_id": "c7",
+              "bbox": {
+                "x": 768,
+                "y": 1302,
+                "w": 204,
+                "h": 42
+              },
+              "text": "Save search button",
+              "label": "Save search button",
+              "role_hint": "button",
+              "evidence_kind": "semantic_region",
+              "is_interactable_evidence": false,
+              "review_only": true,
+              "grounding_eligible": false,
+              "grounding_block_reason": "semantic_region_only_without_interactable_evidence",
+              "raw_payload_path": "",
+              "freshness": {
+                "same_screenshot": true,
+                "capture_time": "",
+                "stale": false
+              },
+              "artifact_is_authorization": false,
+              "execute_binding_enabled": false
+            },
+            "interaction_target": "click the visible button body labeled Save search button, preferably near the visual center",
+            "must_not_click": [
+              "browser toolbar",
+              "clear icon",
+              "final submit",
+              "send",
+              "confirm",
+              "payment"
+            ],
+            "expected_precise_output": "tight visible target bbox and safe interior point in full screenshot coordinates",
+            "review_policy": {
+              "semantic_only_requires_human_review": true,
+              "requires_cross_evidence_before_promotion": true,
+              "interpretation": "Semantic-only regions remain review-only until OCR/UIA/DOM/calibrated support confirms the target."
+            },
+            "display_only": true,
+            "artifact_is_authorization": false,
+            "execute_binding_enabled": false
+          },
+          {
+            "contract_version": "learn_locator_task_card_v1",
+            "source_item_id": "c8",
+            "target_name": "Job details placeholder",
+            "target_role": "other",
+            "target_visible_text": "Job details placeholder",
+            "item_type": "layout",
+            "evidence_level": "semantic_region_only",
+            "source_evidence": [
+              "vision"
+            ],
+            "rough_bbox_hint": {
+              "x": 1178,
+              "y": 336,
+              "w": 716,
+              "h": 560
+            },
+            "rough_bbox_policy": "hint_only_can_be_replaced",
+            "visual_description": "Placeholder area for job details to be displayed",
+            "text_lines": [
+              "Select a job",
+              "Display details here"
+            ],
+            "boundary_definition": "smallest visible module boundary, excluding neighboring modules",
+            "clickable_area_hint": "safe interior point away from neighboring controls",
+            "neighbor_context": {
+              "left": "Job search bar",
+              "right": "Location filter",
+              "above": "Filter toggle",
+              "below": null
+            },
+            "uia_control_type": null,
+            "uia_patterns": [],
+            "parser_candidate": {
+              "schema_version": "parser_candidate_v1",
+              "source_type": "qwen_vlm",
+              "source_run_id": "",
+              "screenshot_sha256": "4ad07148c25da7935c8845a8455346c167d7fbb3056f15c7ab50be004d12283b",
+              "coordinate_space": "image",
+              "image_size": {
+                "width": 2560,
+                "height": 1400
+              },
+              "window_rect": {
+                "x": 0,
+                "y": 0,
+                "w": 0,
+                "h": 0
+              },
+              "candidate_id": "c8",
+              "bbox": {
+                "x": 1178,
+                "y": 336,
+                "w": 716,
+                "h": 560
+              },
+              "text": "Job details placeholder",
+              "label": "Job details placeholder",
+              "role_hint": "other",
+              "evidence_kind": "semantic_region",
+              "is_interactable_evidence": false,
+              "review_only": true,
+              "grounding_eligible": false,
+              "grounding_block_reason": "semantic_region_only_without_interactable_evidence",
+              "raw_payload_path": "",
+              "freshness": {
+                "same_screenshot": true,
+                "capture_time": "",
+                "stale": false
+              },
+              "artifact_is_authorization": false,
+              "execute_binding_enabled": false
+            },
+            "interaction_target": "locate the visible target area for Job details placeholder; avoid nested unrelated controls",
+            "must_not_click": [
+              "browser toolbar",
+              "clear icon",
+              "final submit",
+              "send",
+              "confirm",
+              "payment"
+            ],
+            "expected_precise_output": "tight visible target bbox and safe interior point in full screenshot coordinates",
+            "review_policy": {
+              "semantic_only_requires_human_review": true,
+              "requires_cross_evidence_before_promotion": true,
+              "interpretation": "Semantic-only regions remain review-only until OCR/UIA/DOM/calibrated support confirms the target."
+            },
+            "display_only": true,
+            "artifact_is_authorization": false,
+            "execute_binding_enabled": false
+          },
+          {
+            "contract_version": "learn_locator_task_card_v1",
+            "source_item_id": "c9",
+            "target_name": "Filter toggle",
+            "target_role": "toggle",
+            "target_visible_text": "Filter toggle",
+            "item_type": "layout",
+            "evidence_level": "semantic_region_only",
+            "source_evidence": [
+              "vision"
+            ],
+            "rough_bbox_hint": {
+              "x": 998,
+              "y": 434,
+              "w": 102,
+              "h": 42
+            },
+            "rough_bbox_policy": "hint_only_can_be_replaced",
+            "visual_description": "Toggle to show 'Strong applicant jobs'",
+            "text_lines": [
+              "Strong applicant jobs"
+            ],
+            "boundary_definition": "smallest visible module boundary, excluding neighboring modules",
+            "clickable_area_hint": "safe interior point away from neighboring controls",
+            "neighbor_context": {
+              "left": null,
+              "right": null,
+              "above": "Job filters",
+              "below": "Job listing card"
+            },
+            "uia_control_type": null,
+            "uia_patterns": [],
+            "parser_candidate": {
+              "schema_version": "parser_candidate_v1",
+              "source_type": "qwen_vlm",
+              "source_run_id": "",
+              "screenshot_sha256": "4ad07148c25da7935c8845a8455346c167d7fbb3056f15c7ab50be004d12283b",
+              "coordinate_space": "image",
+              "image_size": {
+                "width": 2560,
+                "height": 1400
+              },
+              "window_rect": {
+                "x": 0,
+                "y": 0,
+                "w": 0,
+                "h": 0
+              },
+              "candidate_id": "c9",
+              "bbox": {
+                "x": 998,
+                "y": 434,
+                "w": 102,
+                "h": 42
+              },
+              "text": "Filter toggle",
+              "label": "Filter toggle",
+              "role_hint": "toggle",
+              "evidence_kind": "semantic_region",
+              "is_interactable_evidence": false,
+              "review_only": true,
+              "grounding_eligible": false,
+              "grounding_block_reason": "semantic_region_only_without_interactable_evidence",
+              "raw_payload_path": "",
+              "freshness": {
+                "same_screenshot": true,
+                "capture_time": "",
+                "stale": false
+              },
+              "artifact_is_authorization": false,
+              "execute_binding_enabled": false
+            },
+            "interaction_target": "locate the visible target area for Filter toggle; avoid nested unrelated controls",
+            "must_not_click": [
+              "browser toolbar",
+              "clear icon",
+              "final submit",
+              "send",
+              "confirm",
+              "payment"
+            ],
+            "expected_precise_output": "tight visible target bbox and safe interior point in full screenshot coordinates",
+            "review_policy": {
+              "semantic_only_requires_human_review": true,
+              "requires_cross_evidence_before_promotion": true,
+              "interpretation": "Semantic-only regions remain review-only until OCR/UIA/DOM/calibrated support confirms the target."
+            },
+            "display_only": true,
+            "artifact_is_authorization": false,
+            "execute_binding_enabled": false
+          },
+          {
+            "contract_version": "learn_locator_task_card_v1",
+            "source_item_id": "c10",
+            "target_name": "Job filters",
+            "target_role": "menu_item",
+            "target_visible_text": "Job filters",
+            "item_type": "layout",
+            "evidence_level": "semantic_region_only",
+            "source_evidence": [
+              "vision"
+            ],
+            "rough_bbox_hint": {
+              "x": 656,
+              "y": 252,
+              "w": 572,
+              "h": 42
+            },
+            "rough_bbox_policy": "hint_only_can_be_replaced",
+            "visual_description": "Job filters including Pay, Type, Remote, Classification, and Listing time",
+            "text_lines": [
+              "Pay",
+              "Type",
+              "Remote",
+              "Classification",
+              "Listing time"
+            ],
+            "boundary_definition": "smallest visible module boundary, excluding neighboring modules",
+            "clickable_area_hint": "safe interior point away from neighboring controls",
+            "neighbor_context": {
+              "left": null,
+              "right": "Job search bar",
+              "above": "Job search bar",
+              "below": "Job count indicator"
+            },
+            "uia_control_type": null,
+            "uia_patterns": [],
+            "parser_candidate": {
+              "schema_version": "parser_candidate_v1",
+              "source_type": "qwen_vlm",
+              "source_run_id": "",
+              "screenshot_sha256": "4ad07148c25da7935c8845a8455346c167d7fbb3056f15c7ab50be004d12283b",
+              "coordinate_space": "image",
+              "image_size": {
+                "width": 2560,
+                "height": 1400
+              },
+              "window_rect": {
+                "x": 0,
+                "y": 0,
+                "w": 0,
+                "h": 0
+              },
+              "candidate_id": "c10",
+              "bbox": {
+                "x": 656,
+                "y": 252,
+                "w": 572,
+                "h": 42
+              },
+              "text": "Job filters",
+              "label": "Job filters",
+              "role_hint": "menu_item",
+              "evidence_kind": "semantic_region",
+              "is_interactable_evidence": false,
+              "review_only": true,
+              "grounding_eligible": false,
+              "grounding_block_reason": "semantic_region_only_without_interactable_evidence",
+              "raw_payload_path": "",
+              "freshness": {
+                "same_screenshot": true,
+                "capture_time": "",
+                "stale": false
+              },
+              "artifact_is_authorization": false,
+              "execute_binding_enabled": false
+            },
+            "interaction_target": "locate the visible target area for Job filters; avoid nested unrelated controls",
+            "must_not_click": [
+              "browser toolbar",
+              "clear icon",
+              "final submit",
+              "send",
+              "confirm",
+              "payment"
+            ],
+            "expected_precise_output": "tight visible target bbox and safe interior point in full screenshot coordinates",
+            "review_policy": {
+              "semantic_only_requires_human_review": true,
+              "requires_cross_evidence_before_promotion": true,
+              "interpretation": "Semantic-only regions remain review-only until OCR/UIA/DOM/calibrated support confirms the target."
+            },
+            "display_only": true,
+            "artifact_is_authorization": false,
+            "execute_binding_enabled": false
+          },
+          {
+            "contract_version": "learn_locator_task_card_v1",
+            "source_item_id": "c11",
+            "target_name": "Job count indicator",
+            "target_role": "other",
+            "target_visible_text": "Job count indicator",
+            "item_type": "layout",
+            "evidence_level": "semantic_region_only",
+            "source_evidence": [
+              "vision"
+            ],
+            "rough_bbox_hint": {
+              "x": 656,
+              "y": 336,
+              "w": 112,
+              "h": 42
+            },
+            "rough_bbox_policy": "hint_only_can_be_replaced",
+            "visual_description": "Indicator showing total number of jobs available",
+            "text_lines": [
+              "7,573 jobs"
+            ],
+            "boundary_definition": "smallest visible module boundary, excluding neighboring modules",
+            "clickable_area_hint": "safe interior point away from neighboring controls",
+            "neighbor_context": {
+              "left": null,
+              "right": null,
+              "above": null,
+              "below": "Save search button"
+            },
+            "uia_control_type": null,
+            "uia_patterns": [],
+            "parser_candidate": {
+              "schema_version": "parser_candidate_v1",
+              "source_type": "qwen_vlm",
+              "source_run_id": "",
+              "screenshot_sha256": "4ad07148c25da7935c8845a8455346c167d7fbb3056f15c7ab50be004d12283b",
+              "coordinate_space": "image",
+              "image_size": {
+                "width": 2560,
+                "height": 1400
+              },
+              "window_rect": {
+                "x": 0,
+                "y": 0,
+                "w": 0,
+                "h": 0
+              },
+              "candidate_id": "c11",
+              "bbox": {
+                "x": 656,
+                "y": 336,
+                "w": 112,
+                "h": 42
+              },
+              "text": "Job count indicator",
+              "label": "Job count indicator",
+              "role_hint": "other",
+              "evidence_kind": "semantic_region",
+              "is_interactable_evidence": false,
+              "review_only": true,
+              "grounding_eligible": false,
+              "grounding_block_reason": "semantic_region_only_without_interactable_evidence",
+              "raw_payload_path": "",
+              "freshness": {
+                "same_screenshot": true,
+                "capture_time": "",
+                "stale": false
+              },
+              "artifact_is_authorization": false,
+              "execute_binding_enabled": false
+            },
+            "interaction_target": "locate the visible target area for Job count indicator; avoid nested unrelated controls",
+            "must_not_click": [
+              "browser toolbar",
+              "clear icon",
+              "final submit",
+              "send",
+              "confirm",
+              "payment"
+            ],
+            "expected_precise_output": "tight visible target bbox and safe interior point in full screenshot coordinates",
+            "review_policy": {
+              "semantic_only_requires_human_review": true,
+              "requires_cross_evidence_before_promotion": true,
+              "interpretation": "Semantic-only regions remain review-only until OCR/UIA/DOM/calibrated support confirms the target."
+            },
+            "display_only": true,
+            "artifact_is_authorization": false,
+            "execute_binding_enabled": false
+          }
+        ],
+        "interpretation": "Locator task cards enrich screen-understanding output for later dry-run grounding review; they are not click authorization and do not make semantic-only regions executable."
+      },
+      "pipeline_audit": {
+        "contract_version": "learning_draft_pipeline_audit_v1",
+        "display_only": true,
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "layout_cleanup": {
+          "contract_version": "learn_layout_cleanup_report_v1",
+          "input_count": 13,
+          "output_count": 10,
+          "suppressed_count": 3,
+          "duplicates_merged": 2,
+          "suppression_reason_counts": {
+            "cross_evidence_support_duplicate": 2,
+            "semantic_container_overlaps_interactable_children": 1
+          },
+          "interpretation": "BBox Cleanup summary for display/review; candidate suppression is not model accuracy."
+        },
+        "grounding_eligibility_gate": {
+          "contract_version": "learn_grounding_eligibility_gate_report_v1",
+          "attempted": 10,
+          "eligible": 2,
+          "blocked": 8,
+          "non_actionable_leaked_to_grounding": 2,
+          "not_accuracy": true,
+          "interpretation": "Grounding Eligibility Gate decides which candidates may enter ROI grounding for learning evidence; it does not authorize clicks."
+        },
+        "roi_grounding": {
+          "validation_count": 2,
+          "valid_candidate_count": 2,
+          "interpretation": "ROI grounding evidence is display/review only until a later Gate authorizes real action."
+        },
+        "interpretation": "Pipeline audit explains parser cleanup, eligibility gating, and ROI validation for human review; it is not click authorization or a recognition accuracy metric."
+      },
+      "inventory_summary": {
+        "input_count": 10,
+        "accepted_for_grounding_count": 2,
+        "rejected_non_actionable_count": 8,
+        "needs_human_review_count": 0,
+        "danger_zone_count": 0,
+        "screen_inventory_count": 10,
+        "grounding_validation_count": 2
+      },
+      "review_only_regions": [
+        {
+          "item_id": "c1",
+          "label": "Job search bar",
+          "item_type": "layout",
+          "role": "input",
+          "bbox": {
+            "x": 656,
+            "y": 186,
+            "w": 840,
+            "h": 42
+          },
+          "source_evidence": [
+            "vision"
+          ],
+          "evidence_level": "semantic_region_only",
+          "decision": {
+            "outcome": "rejected_non_actionable",
+            "reason": "semantic_region_only_without_grounding_evidence",
+            "grounding_eligible": false,
+            "review_only": true
+          },
+          "artifact_is_authorization": false,
+          "execute_binding_enabled": false
+        },
+        {
+          "item_id": "c2",
+          "label": "Location filter",
+          "item_type": "layout",
+          "role": "input",
+          "bbox": {
+            "x": 1496,
+            "y": 186,
+            "w": 296,
+            "h": 42
+          },
+          "source_evidence": [
+            "vision"
+          ],
+          "evidence_level": "semantic_region_only",
+          "decision": {
+            "outcome": "rejected_non_actionable",
+            "reason": "semantic_region_only_without_grounding_evidence",
+            "grounding_eligible": false,
+            "review_only": true
+          },
+          "artifact_is_authorization": false,
+          "execute_binding_enabled": false
+        },
+        {
+          "item_id": "c3",
+          "label": "Search button",
+          "item_type": "layout",
+          "role": "button",
+          "bbox": {
+            "x": 1792,
+            "y": 186,
+            "w": 128,
+            "h": 42
+          },
+          "source_evidence": [
+            "vision"
+          ],
+          "evidence_level": "semantic_region_only",
+          "decision": {
+            "outcome": "rejected_non_actionable",
+            "reason": "semantic_region_only_without_grounding_evidence",
+            "grounding_eligible": false,
+            "review_only": true
+          },
+          "artifact_is_authorization": false,
+          "execute_binding_enabled": false
+        },
+        {
+          "item_id": "c7",
+          "label": "Save search button",
+          "item_type": "layout",
+          "role": "button",
+          "bbox": {
+            "x": 768,
+            "y": 1302,
+            "w": 204,
+            "h": 42
+          },
+          "source_evidence": [
+            "vision"
+          ],
+          "evidence_level": "semantic_region_only",
+          "decision": {
+            "outcome": "rejected_non_actionable",
+            "reason": "semantic_region_only_without_grounding_evidence",
+            "grounding_eligible": false,
+            "review_only": true
+          },
+          "artifact_is_authorization": false,
+          "execute_binding_enabled": false
+        },
+        {
+          "item_id": "c8",
+          "label": "Job details placeholder",
+          "item_type": "layout",
+          "role": "other",
+          "bbox": {
+            "x": 1178,
+            "y": 336,
+            "w": 716,
+            "h": 560
+          },
+          "source_evidence": [
+            "vision"
+          ],
+          "evidence_level": "semantic_region_only",
+          "decision": {
+            "outcome": "rejected_non_actionable",
+            "reason": "semantic_region_only_without_grounding_evidence",
+            "grounding_eligible": false,
+            "review_only": true
+          },
+          "artifact_is_authorization": false,
+          "execute_binding_enabled": false
+        },
+        {
+          "item_id": "c9",
+          "label": "Filter toggle",
+          "item_type": "layout",
+          "role": "toggle",
+          "bbox": {
+            "x": 998,
+            "y": 434,
+            "w": 102,
+            "h": 42
+          },
+          "source_evidence": [
+            "vision"
+          ],
+          "evidence_level": "semantic_region_only",
+          "decision": {
+            "outcome": "rejected_non_actionable",
+            "reason": "semantic_region_only_without_grounding_evidence",
+            "grounding_eligible": false,
+            "review_only": true
+          },
+          "artifact_is_authorization": false,
+          "execute_binding_enabled": false
+        },
+        {
+          "item_id": "c10",
+          "label": "Job filters",
+          "item_type": "layout",
+          "role": "menu_item",
+          "bbox": {
+            "x": 656,
+            "y": 252,
+            "w": 572,
+            "h": 42
+          },
+          "source_evidence": [
+            "vision"
+          ],
+          "evidence_level": "semantic_region_only",
+          "decision": {
+            "outcome": "rejected_non_actionable",
+            "reason": "semantic_region_only_without_grounding_evidence",
+            "grounding_eligible": false,
+            "review_only": true
+          },
+          "artifact_is_authorization": false,
+          "execute_binding_enabled": false
+        },
+        {
+          "item_id": "c11",
+          "label": "Job count indicator",
+          "item_type": "layout",
+          "role": "other",
+          "bbox": {
+            "x": 656,
+            "y": 336,
+            "w": 112,
+            "h": 42
+          },
+          "source_evidence": [
+            "vision"
+          ],
+          "evidence_level": "semantic_region_only",
+          "decision": {
+            "outcome": "rejected_non_actionable",
+            "reason": "semantic_region_only_without_grounding_evidence",
+            "grounding_eligible": false,
+            "review_only": true
+          },
+          "artifact_is_authorization": false,
+          "execute_binding_enabled": false
+        }
+      ],
+      "grounding_candidates": [
+        {
+          "item_id": "c4",
+          "label": "Job listing card",
+          "item_type": "actionable",
+          "role": "card",
+          "bbox": {
+            "x": 656,
+            "y": 518,
+            "w": 470,
+            "h": 378
+          },
+          "source_evidence": [
+            "calibrated_target",
+            "vision"
+          ],
+          "evidence_level": "cross_evidence_grounded",
+          "decision": {
+            "outcome": "accepted_for_grounding",
+            "reason": "open_detail_card_with_grounding_evidence",
+            "grounding_eligible": true,
+            "review_only": false
+          },
+          "artifact_is_authorization": false,
+          "execute_binding_enabled": false
+        },
+        {
+          "item_id": "c5",
+          "label": "Job listing card",
+          "item_type": "actionable",
+          "role": "card",
+          "bbox": {
+            "x": 656,
+            "y": 896,
+            "w": 470,
+            "h": 238
+          },
+          "source_evidence": [
+            "calibrated_target",
+            "vision"
+          ],
+          "evidence_level": "cross_evidence_grounded",
+          "decision": {
+            "outcome": "accepted_for_grounding",
+            "reason": "open_detail_card_with_grounding_evidence",
+            "grounding_eligible": true,
+            "review_only": false
+          },
+          "artifact_is_authorization": false,
+          "execute_binding_enabled": false
+        }
+      ],
+      "danger_zones": [],
+      "interpretation": "Read-only page understanding details; not a PathGraph, not click authorization, and not Execute binding."
+    },
+    "notes": [],
+    "safety": {
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "real_action_requires_gate": true,
+      "final_submit_forbidden": true
+    }
+  },
+  "safety": {
+    "artifact_is_authorization": false,
+    "final_submit_allowed": false,
+    "final_submit_forbidden": true,
+    "real_action_requires_gate": true,
+    "execute_binding_enabled": false,
+    "authorization_scope": "display_and_review_only"
+  },
+  "audit": {
+    "source_trial_path": "logs/benchmarks/pathgraph_candidate_source_freshness_bind_seek_20260705/reviewed_template_candidate_with_source_freshness.json",
+    "original_draft_path": "logs/benchmarks/pathgraph_candidate_source_freshness_bind_seek_20260705/reviewed_template_candidate_with_source_freshness.json",
+    "reviewed_at": "2026-07-05T16:56:23.719722",
+    "changes_summary": [],
+    "manual_bbox_edit_summary": {
+      "contract_version": "manual_bbox_edit_summary_v1",
+      "edited_region_count": 0,
+      "edited_action_count": 0,
+      "edited_total": 0,
+      "point_inside_bbox_passed": 0,
+      "point_inside_bbox_failed": 0,
+      "invalid_geometry_count": 0,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false
+    },
+    "source_freshness_summary": {
+      "contract_version": "source_freshness_summary_v1",
+      "source_image_status": "available",
+      "checksum_status": "matched",
+      "freshness_status": "verified",
+      "warning_count": 0,
+      "warnings": [],
+      "edited_geometry_requires_review": false,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false
+    },
+    "precise_understanding_summary": {
+      "contract_version": "precise_understanding_summary_v1",
+      "state_count": 1,
+      "region_count": 2,
+      "bbox_region_count": 2,
+      "action_template_count": 2,
+      "action_click_point_count": 2,
+      "open_detail_transition_hint_count": 2,
+      "blocker_count": 2,
+      "verification_rule_count": 3,
+      "semantic_actions": [
+        "open_detail"
+      ],
+      "candidate_only": true,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "final_submit_forbidden": true,
+      "interpretation": "review-only precise understanding summary; not Execute authorization"
+    },
+    "review_status": "approved_as_assisted_template",
+    "authorization_scope": "display_and_review_only"
+  }
+}

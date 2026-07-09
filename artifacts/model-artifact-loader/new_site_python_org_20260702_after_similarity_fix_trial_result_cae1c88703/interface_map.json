@@ -1,0 +1,98 @@
+{
+  "contract_version": "learned_interface_map_v1",
+  "app_id": "python.org",
+  "page_type": "homepage",
+  "source": {
+    "trial_path": "artifacts/learning-runs/new_site_python_org_20260702_after_similarity_fix/trial_result.json",
+    "sha256": "cae1c8870372f31837570120b21c24a67ae843cabc56fe2939b7cb8762ee9cec",
+    "attempt_index": 0,
+    "readonly": true,
+    "posthoc_optimization_allowed": false,
+    "loaded_at": "2026-07-02T03:29:06.451906"
+  },
+  "loader": {
+    "contract_version": "model_learning_artifact_loader_v1",
+    "source_trial_path": "artifacts/learning-runs/new_site_python_org_20260702_after_similarity_fix/trial_result.json",
+    "source_sha256": "cae1c8870372f31837570120b21c24a67ae843cabc56fe2939b7cb8762ee9cec",
+    "source_attempt_index": 0,
+    "source_artifact_readonly": true,
+    "posthoc_optimization_allowed": false
+  },
+  "screen_summary": "Python.org homepage with navigation menu, search bar, and sections for downloads, documentation, and community resources.",
+  "states": [
+    {
+      "state_id": "s1",
+      "label": "Python.org Home",
+      "page_type": "homepage",
+      "region_refs": [
+        "r1",
+        "r2",
+        "r3"
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "model:transition:a1",
+      "from_state_id": "s1",
+      "to_state_id": "s1",
+      "action_template_id": "a1",
+      "default_available": true,
+      "verification_refs": []
+    },
+    {
+      "transition_id": "model:transition:a2",
+      "from_state_id": "s1",
+      "to_state_id": "s1",
+      "action_template_id": "a2",
+      "default_available": true,
+      "verification_refs": []
+    },
+    {
+      "transition_id": "model:transition:a3",
+      "from_state_id": "s1",
+      "to_state_id": "s1",
+      "action_template_id": "a3",
+      "default_available": true,
+      "verification_refs": []
+    }
+  ],
+  "regions": [
+    {
+      "region_id": "r1",
+      "label": "Search Input",
+      "role": "text_input",
+      "region_type": "text_input",
+      "source_artifact_readonly": true
+    },
+    {
+      "region_id": "r2",
+      "label": "Downloads Section",
+      "role": "navigation_link",
+      "region_type": "navigation_link",
+      "source_artifact_readonly": true
+    },
+    {
+      "region_id": "r3",
+      "label": "Documentation Section",
+      "role": "navigation_link",
+      "region_type": "navigation_link",
+      "source_artifact_readonly": true
+    }
+  ],
+  "fixed_visual_assets": [],
+  "dynamic_areas": [],
+  "danger_zones": [],
+  "editor_policy": {
+    "source_artifact_editable": false,
+    "derived_artifact_editable": false,
+    "save_as_required_for_manual_changes": true
+  },
+  "summary": {
+    "state_count": 1,
+    "region_count": 3,
+    "fixed_visual_asset_count": 0,
+    "dynamic_area_count": 0,
+    "danger_zone_count": 0
+  }
+}

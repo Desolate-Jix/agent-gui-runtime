@@ -196,7 +196,7 @@ def test_station_internal_apply_rejects_third_party_ats_even_if_flow_started() -
     assert _external_apply_flow_started(execute_apply) is True
 
 
-def test_speed_demo_recovers_to_seek_after_external_ats_and_continues(tmp_path, monkeypatch) -> None:
+def test_speed_demo_safe_stops_after_external_ats_login_required(tmp_path, monkeypatch) -> None:
     cards = [
         {"title": "Software Engineer Integration", "company": "AIA", "location": "Auckland"},
         {"title": "Graduate Software Developer", "company": "Local Co", "location": "Auckland"},
@@ -219,15 +219,11 @@ def test_speed_demo_recovers_to_seek_after_external_ats_and_continues(tmp_path, 
             "post_apply_wait": {
                 "application_flow_state": {
                     "application_flow_started": False,
-                    "state_type": "third_party_ats",
-                    "stop_reason": "third_party_ats_requires_user_review",
-                    "risk_flags": ["third_party_ats"],
+                    "state_type": "login_required",
+                    "stop_reason": "login_required",
+                    "risk_flags": ["third_party_ats", "login_required"],
                 }
             },
-        },
-        {
-            "status": "blocked_need_user_or_gpt_decision",
-            "apply_entry": {"application_flow_started": True},
         },
     ]
     calls: list[tuple[str, list[str] | None]] = []
@@ -280,11 +276,16 @@ def test_speed_demo_recovers_to_seek_after_external_ats_and_continues(tmp_path, 
     result = runner.run_speed_demo(args)
 
     assert result["job_attempts"][0]["status"] == "skipped_apply_entry_execute"
-    assert result["job_attempts"][0]["apply_entry_state_type"] == "third_party_ats"
-    assert result["job_attempts"][0]["external_apply_recovery"]["status"] == "ok"
-    assert result["job_attempts"][1]["status"] == "application_started"
-    assert [step for step, _ in calls].count("open") == 2
-    assert [step for step, _ in calls].count("execute_apply_entry") == 2
+    assert result["job_attempts"][0]["apply_entry_state_type"] == "login_required"
+    assert result["status"] == "safe_stop"
+    assert result["stop_reason"] == "external_ats_login_required_safe_stop"
+    assert result["safe_stop"]["reason"] == "external_ats_login_required"
+    assert result["state_machine_failure"]["category"] == "surface_drift_prevented"
+    assert [step for step, _ in calls].count("open") == 1
+    assert [step for step, _ in calls].count("execute_apply_entry") == 1
+    executed_steps = [step for step, _ in calls]
+    after_apply_steps = executed_steps[executed_steps.index("execute_apply_entry") + 1 :]
+    assert "extract_cards" not in after_apply_steps
     assert "dry_run_card" not in [step for step, _ in calls]
     assert "dry_run_apply_entry" not in [step for step, _ in calls]
     assert (tmp_path / "speed_demo_report.json").exists()

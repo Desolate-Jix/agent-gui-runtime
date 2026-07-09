@@ -185,7 +185,7 @@
 | 字段 | 类型 | 默认值 | 作用 |
 | --- | --- | --- | --- |
 | `start_models` | boolean | true | 是否自动启动不可达的模型服务。为 false 时只做状态检查。 |
-| `stages` | array | `["observe","locate"]` | 要检查的阶段。`observe` 默认对应整屏理解小模型，`locate` 默认对应精准定位大模型。 |
+| `stages` | array | `["observe","locate"]` | 要检查的阶段。`observe` 默认对应学习/整屏理解模型，当前为 8B；`locate` 默认对应精准定位模型。 |
 | `wait_until_ready` | boolean | false | 启动模型后是否等待 `/v1/models` 变为可用。 |
 | `wait_seconds` | number | 0 | 最大等待秒数，范围 `0..180`。 |
 
@@ -487,7 +487,7 @@
 
 ## POST /vision/observe_screen
 
-设计目的：整屏理解入口。它可以实时截图或读取图片，用小模型快速理解当前界面，并给下一步精准定位提供 `suggested_state_hint`。
+设计目的：整屏理解入口。它可以实时截图或读取图片，用学习/观察模型理解当前界面，并给下一步精准定位提供 `suggested_state_hint`。当前默认 `local_understanding` 使用 8B；需要更快反馈时可手动切换 4B profile。
 
 请求字段：
 
@@ -617,6 +617,10 @@
 | `pre_click_decision.allowed` | boolean | 是否允许点击。 |
 | `pre_click_decision.selected_click_point` | object/null | 允许点击时的最终点。 |
 | `pre_click_decision.reasons` | array | 拒绝或允许的原因。 |
+| `pre_click_decision.summary.raw_top_margin_ok` | boolean | 原始 top1/top2 分数间距是否达标。 |
+| `pre_click_decision.summary.equivalent_duplicate_margin_override_used` | boolean | 是否因为 top1/top2 是同文本、重叠 bbox、不同 element id 的等价重复候选而允许继续。只适用于同一目标重复识别，不会放行非等价近邻文本。 |
+| `pre_click_decision.candidate_decisions[].reasons[]` | array | 单候选原因。`candidate_goal_action_mismatch` 表示 goal 有明确 Apply/Save/Search/Filter/Continue/Submit 等动作目标，但该候选只是品牌词、上下文词或其他非目标动作。 |
+| `candidate_result.candidates[].reasons[]` | array | 排序层原因。`explicit_action_target_match` 表示 goal 明确请求 Apply/Continue/Submit/Save/Search/Filter 等动作且候选本身匹配该动作；`explicit_action_target_mismatch` 表示候选只是分享按钮、品牌词或其他非目标动作。该排序增强不把泛化词 `application` 当作 Apply。 |
 
 使用注意：这个接口不点击。它是执行接口内部会调用的计划生成阶段。
 
@@ -706,6 +710,7 @@
 | `top_k` | integer | 5 | 候选数量上限。 |
 | `image_path` | string/null | null | `capture_live=false` 时使用的图片。 |
 | `observe_trace_path` | string/null | null | 可选。传入最新 Observe trace 后，会透传给内部 recognition plan，用于 OCR anchors 复用和 PathGraph recall。 |
+| `auto_observe_learning_artifacts` | boolean | false | 为 true 且未传 `observe_trace_path` 时，执行接口会先用同一张截图做一次只读 Learn-fast Observe，生成带学习 PathGraph / Interface Map / visual assets 的 trace，再传给内部 recognition plan。也可用 `metadata.learning_artifacts.auto_observe=true` 开启。 |
 | `capture_live` | boolean | true | 是否从绑定窗口实时截图。 |
 | `allow_saved_image_execution` | boolean | false | 是否允许对保存图片执行真实点击。默认禁止。 |
 | `enable_post_click_verification` | boolean | true | 点击后是否验证。 |
@@ -727,6 +732,7 @@
 | `goal` | string | 本次目标。 |
 | `image_path` | string | 实际分析图片。 |
 | `live_capture` | object/null | 实时截图信息。 |
+| `auto_observe_trace` | object/null | 自动 Observe 装载学习产物的结果。成功时包含 `trace_path`，失败时接口返回 `auto_observe_learning_artifacts_failed`，不会静默退回无学习产物路径。 |
 | `recognition_plan` | object | 内部 no-click 识别计划。 |
 | `recognition_plan_trace_path` | string/null | 计划 trace。 |
 | `recognition_plan_overlay` | object/null | 自动生成的复核 overlay。 |
@@ -1429,6 +1435,56 @@ CLI 外层合同为 `seek_profile_readiness_cli_report_v1`，其中 `readiness` 
 - Learn Fast: `{path_graph: true, element_memory: false, trace: true}`
 - Learn Deep: `{path_graph: true, element_memory: true, trace: true}`
 - Execute: `{path_graph: false, element_memory: true, trace: true}`
+
+## Removed Learning Draft APIs
+
+以下学习入口已从 runtime surface 删除：
+
+- `GET /runtime/learning/seek/draft`
+- `GET /runtime/learning/seek/tune`
+- `GET /runtime/learning/fixtures/{fixture_id}/draft`
+- `GET /runtime/learning/generalization`
+
+删除原因：这些入口容易把现有 SEEK 资产、结构化 fixture 或 hidden-template 评分当成学习产物本身。新的 Learning Mode 需要重新从 Operation/Observe 层开始：当前屏幕证据进入模型，模型按参考格式输出草稿，再验证 raw output 是否能被 Agent 直接使用，不能对评分后的产物做补丁。
+
+## GET /runtime/learning/model_trial
+
+实验性通用学习试验入口。它不读取 SEEK 模板作为答案，不自动 promote，不写回 Profile / PathGraph。调用路径是：
+
+```text
+image_path
+-> Observe model task learn_template_draft
+-> raw learning_template_draft_v1
+-> score_learning_template_draft()
+-> parameter_feedback
+```
+
+Query：
+
+| 字段 | 类型 | 作用 |
+| --- | --- | --- |
+| `image_path` | string | 必填。当前学习截图路径。 |
+| `app_name` | string | 应用名，仅作为模型上下文。 |
+| `state_hint` | string | 当前界面状态提示。 |
+| `goal` | string | 本次学习目标。 |
+| `max_attempts` | integer | 1-5。每轮重新调用模型并评分 raw output，不修补上一轮产物。 |
+| `max_output_tokens` | integer | 模型输出预算，范围 256-8192。 |
+| `temperature` | number | 模型温度，范围 0-2。 |
+| `timeout_seconds` | integer | 单次模型请求预算，范围 1-600；超时会进入 `model_run.status=model_error` 并参与评分。 |
+| `learning_image_max_edge` | integer | 学习推理图的最长边，范围 128-1280；用于降低本地视觉模型图像处理成本。 |
+
+主要返回：
+
+| 字段 | 作用 |
+| --- | --- |
+| `contract_version=learning_model_trial_v1` | 试验结果合同。 |
+| `status` | `passed` 或 `needs_more_learning`。当前通过标准是分数达到 `target_score_ratio` 且无 hard safety error。 |
+| `attempts[]` | 每轮 `learning_parameters`、`model_run`、`draft_result` 和 `score_report`。 |
+| `score_report.contract_version=learning_template_draft_score_v1` | 评分器输出，覆盖合同字段、必需 section、安全和 action 语义。 |
+| `parameter_feedback[]` | 下一轮 prompt/参数建议，例如提高 `prompt_detail_mode` 或 `max_output_tokens`。 |
+| `safety` | 固定声明：不真实点击、不允许 posthoc artifact 优化、不允许 promote、final submit blocked。 |
+
+当前最小真实证据：`artifacts\learning-runs\generic_model_trial_feedback_20260701-192334\trial_result.json`。第 1 轮 Qwen3VL-8B 因 `timeout_seconds=1` 结构化失败并得分 21%；反馈切换到 Qwen3VL-4B、提高 timeout、保持低分辨率学习图；第 2 轮返回 raw `learning_template_draft_v1` 并得分 100%。这是小界面裁剪图级别的闭环证据，不代表完整网站学习已经完成。
 
 ## POST /action/click_mouse_tester_left_region
 

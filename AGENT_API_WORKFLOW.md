@@ -680,7 +680,7 @@ Agent decision:
 - `nav_text_action` candidates are intentionally generated from valid OCR text in the top navigation section so missed navigation labels still appear in the map.
 - The observe trace preserves `screen_map_v1`; `/panel/inspect_trace` renders it as a `Path Map` stage so trace review can inspect the same path candidates, bbox hints, and click-point evidence.
 - Execute/RecognitionPlan requests should carry the latest matching `observe_trace_path` when available. The runtime will reuse OCR anchors and emit `path_graph_recall_v1` before full candidate ranking, then merge eligible recalled map candidates into `candidate_result` so local OCR grounding and `pre_click_decision_v1` can verify them.
-- Prefer `provider_mode: local_understanding` here. It is intended for the smaller local model that summarizes the whole screen for agent planning.
+- Prefer `provider_mode: local_understanding` here. In Learn Mode this now maps by default to the higher-quality 8B understanding profile so template, PathGraph, and interface-detail learning are not capped by the fast 4B profile; 4B remains available when speed matters more than learning quality.
 - Use `suggested_state_hint` as the next precise-localization `state_hint` default. It comes from the observation model's concise `state_guess`.
 - When a concrete candidate is chosen, pass its label/goal hint plus the current `screen_map.state_id` context into the precise localization step.
 - Do not click from this response.

@@ -15,6 +15,7 @@ from app.core.runtime_artifacts import ARTIFACTS_DIR, RuntimeTimer, build_review
 from app.core.screenshot import screenshot_service
 from app.gate.candidates import validate_action_candidate_freshness
 from app.operation.path_graph import build_available_actions
+from app.operation.runtime_context import build_operation_runtime_context, operation_trace_link
 from app.operation.visual_asset_matching import match_visual_asset
 from app.learn.interface_map import build_learned_interface_map
 from app.learn.path_graph_resolver import resolve_runtime_path_graph
@@ -1454,7 +1455,9 @@ def _bbox_around_point(point: dict[str, int], *, image_size: ImageSize, size: in
 
 def _is_browser_app_name(app_name: str | None) -> bool:
     normalized = str(app_name or "").strip().lower()
-    return normalized in {"edge", "chrome", "browser", "msedge", "msedge.exe", "chrome.exe"}
+    if normalized in {"edge", "chrome", "browser", "msedge", "msedge.exe", "chrome.exe", "firefox", "brave"}:
+        return True
+    return any(token in normalized for token in ("edge", "chrome", "firefox", "brave", "browser", "msedge"))
 
 
 def _point_in_browser_chrome(point: dict[str, int], *, image_size: ImageSize, app_name: str | None) -> bool:
@@ -2562,16 +2565,58 @@ def _visual_asset_relevant_to_goal(asset: dict[str, Any], goal: str | None) -> b
         return True
     label = str(asset.get("label") or "").casefold()
     semantic_action = str(asset.get("semantic_action") or "").casefold()
-    tokens = [token for token in label.replace("/", " ").split() if len(token) >= 3]
-    if any(token in goal_text for token in tokens):
-        return True
     action_terms = {
-        "open_apply_flow": ("apply", "quick apply", "application", "申请", "快速申请"),
+        "open_apply_flow": ("apply", "quick apply", "申请", "快速申请"),
         "continue_next_step": ("continue", "next", "下一步", "继续"),
         "final_submit": ("submit", "send", "confirm", "提交", "发送", "确认"),
-        "click": ("click", "press", "点击"),
+        "save": ("save", "saved", "保存", "收藏"),
+        "search": ("search", "find", "搜索", "查找"),
+        "filter": ("filter", "refine", "pay", "date listed", "classification", "筛选"),
     }
-    return any(term in goal_text for term in action_terms.get(semantic_action, (semantic_action,)))
+    label_terms = _visual_asset_goal_label_terms(label)
+    goal_action_terms = _visual_asset_goal_action_terms(goal_text, action_terms)
+    if goal_action_terms:
+        semantic_terms = set(action_terms.get(semantic_action, (semantic_action,)))
+        if semantic_terms & goal_action_terms:
+            return True
+        return bool(label_terms & goal_action_terms)
+    if any(token in goal_text for token in label_terms):
+        return True
+    if semantic_action and semantic_action not in {"click", "press"}:
+        return semantic_action in goal_text
+    return False
+
+
+def _visual_asset_goal_label_terms(label: str) -> set[str]:
+    stop_terms = {
+        "seek",
+        "jobs",
+        "job",
+        "page",
+        "detail",
+        "details",
+        "area",
+        "top",
+        "selected",
+        "results",
+        "result",
+    }
+    return {
+        token
+        for token in re.sub(r"[^0-9a-z\u4e00-\u9fff]+", " ", label.casefold()).split()
+        if len(token) >= 3 and token not in stop_terms
+    }
+
+
+def _visual_asset_goal_action_terms(goal_text: str, action_terms: dict[str, tuple[str, ...]]) -> set[str]:
+    terms: set[str] = set()
+    for semantic_action, values in action_terms.items():
+        if semantic_action == "final_submit" and not _looks_like_final_submit_action_text(goal_text):
+            continue
+        for term in values:
+            if term and term in goal_text:
+                terms.add(term)
+    return terms
 
 
 def _visual_asset_min_score(asset: dict[str, Any]) -> float:
@@ -2732,6 +2777,16 @@ def _anchor_text_similarity(a: str, b: str) -> float:
 def ocr_region(request: OCRRegionRequest) -> APIResponse:
     try:
         capture = screenshot_service.capture_window(roi=request.roi, save_image=True, purpose="ocr_region")
+        operation_context = build_operation_runtime_context(
+            request=request,
+            skill_id="read_region",
+            semantic_action="read_region",
+            side_effect_class="read_only",
+            requires_gate=False,
+            capture_id=capture.get("image_path"),
+            viewport_size=capture.get("window_size") if isinstance(capture.get("window_size"), dict) else None,
+            evidence_refs=[str(capture.get("image_path"))] if capture.get("image_path") else [],
+        )
         result = ocr_service.scan_image(capture["image_path"])
         result.metadata.update(
             {
@@ -2748,6 +2803,8 @@ def ocr_region(request: OCRRegionRequest) -> APIResponse:
                 "coordinate_source": "ocr_bbox",
             },
             "ocr_result": result.to_dict(),
+            "operation_context": operation_context,
+            "operation_trace_link": operation_trace_link(operation_context, result_status="success"),
         }
         result_payload["trace_path"] = write_trace(
             category="vision",
@@ -3005,6 +3062,16 @@ def observe_screen(request: VisionObserveScreenRequestModel) -> APIResponse:
                 purpose="observe_screen",
                 app_name=request.app_name,
             )
+        operation_context = build_operation_runtime_context(
+            request=request,
+            skill_id="observe_screen",
+            semantic_action="observe_screen",
+            side_effect_class="read_only",
+            requires_gate=False,
+            capture_id=image_path,
+            viewport_size=_image_size_payload(image_path=image_path, live_capture=live_capture),
+            evidence_refs=[image_path],
+        )
         screen_request = VisionAnalyzeRequestModel(
             image_path=image_path,
             task=request.task,
@@ -3021,6 +3088,7 @@ def observe_screen(request: VisionObserveScreenRequestModel) -> APIResponse:
                 if isinstance((request.metadata or {}).get("ocr_anchors"), dict)
                 else (request.metadata or {}).get("ocr_anchors", {"enabled": True, "max_anchors": "all"}),
             },
+            operation_context=operation_context,
         )
         with timer.step("screen_reading"):
             response = screen_reading(screen_request)
@@ -3037,6 +3105,8 @@ def observe_screen(request: VisionObserveScreenRequestModel) -> APIResponse:
         result["contract_version"] = "screen_observation_v1"
         result.update(_mode_payload(request, fallback_contract="screen_observation_v1"))
         result["live_capture"] = live_capture
+        result["operation_context"] = operation_context
+        result["operation_trace_link"] = operation_trace_link(operation_context, result_status="success", evidence_refs=[image_path])
         result["suggested_state_hint"] = _suggested_state_hint_from_observation(result)
         result["screen_map"] = _build_screen_map_from_observation(result, request=request, image_path=image_path)
         result["screen_map"] = _apply_learned_path_graph_to_screen_map(
@@ -4332,6 +4402,25 @@ def _path_candidate_overlap_priority(candidate: dict[str, Any]) -> tuple[float, 
     return (role_priority, confidence, -area)
 
 
+def _path_overlap_decision(
+    *,
+    removed: dict[str, Any],
+    kept_candidate: dict[str, Any],
+    reason: str,
+    source: str,
+) -> dict[str, Any]:
+    return {
+        "candidate_id": removed.get("candidate_id") or removed.get("id"),
+        "label": removed.get("label"),
+        "bbox": removed.get("bbox"),
+        "section_id": removed.get("section_id"),
+        "reason": reason,
+        "source": source,
+        "kept_candidate_id": kept_candidate.get("candidate_id") or kept_candidate.get("id"),
+        "kept_label": kept_candidate.get("label"),
+    }
+
+
 def _prune_non_containment_overlaps(candidates: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     kept: list[dict[str, Any]] = []
     removals: list[dict[str, Any]] = []
@@ -4352,16 +4441,90 @@ def _prune_non_containment_overlaps(candidates: list[dict[str, Any]]) -> tuple[l
             removed = candidate
             kept_candidate = existing
         removals.append(
-            {
-                "candidate_id": removed.get("candidate_id") or removed.get("id"),
-                "label": removed.get("label"),
-                "bbox": removed.get("bbox"),
-                "section_id": removed.get("section_id"),
-                "reason": "non_containment_overlap_removed",
-                "source": "path_graph_overlap_rule",
-                "kept_candidate_id": kept_candidate.get("candidate_id") or kept_candidate.get("id"),
-                "kept_label": kept_candidate.get("label"),
-            }
+            _path_overlap_decision(
+                removed=removed,
+                kept_candidate=kept_candidate,
+                reason="non_containment_overlap_removed",
+                source="path_graph_overlap_rule",
+            )
+        )
+    return kept, removals
+
+
+def _learn_target_visual_priority(target: dict[str, Any]) -> tuple[float, float, float]:
+    role = str(target.get("role") or "").casefold()
+    role_priority = {
+        "text_input": 94.0,
+        "input": 94.0,
+        "button": 90.0,
+        "icon_button": 88.0,
+        "text_action": 86.0,
+        "nav_text_action": 84.0,
+        "menu_item": 82.0,
+        "recommendation_item": 66.0,
+        "news_card": 62.0,
+        "card": 60.0,
+        "group": 48.0,
+        "section": 42.0,
+    }.get(role, 55.0)
+    confidence = float(_bounded_float(target.get("confidence")) or 0.0)
+    bbox = _normalize_map_bbox(target.get("bbox"))
+    area = float(bbox["w"] * bbox["h"]) if bbox else 0.0
+    return (role_priority, confidence, -area)
+
+
+def _learn_target_visual_conflict(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    left_bbox = _normalize_map_bbox(left.get("bbox"))
+    right_bbox = _normalize_map_bbox(right.get("bbox"))
+    if not left_bbox or not right_bbox:
+        return False
+    left_section = str(left.get("section_id") or "").strip()
+    right_section = str(right.get("section_id") or "").strip()
+    if left_section and right_section and left_section != right_section:
+        return False
+    if _path_candidate_contains(left, right) or _path_candidate_contains(right, left):
+        return True
+    overlap = _bbox_overlap_area(left_bbox, right_bbox)
+    if overlap <= 16:
+        return False
+    smaller = min(left_bbox["w"] * left_bbox["h"], right_bbox["w"] * right_bbox["h"])
+    return smaller > 0 and overlap / smaller >= 0.15
+
+
+def _learn_target_visual_removal_reason(removed: dict[str, Any], kept_candidate: dict[str, Any]) -> str:
+    if _path_candidate_contains(removed, kept_candidate):
+        return "contained_visual_parent_removed"
+    if _path_candidate_contains(kept_candidate, removed):
+        return "contained_visual_child_removed"
+    return "visual_overlap_removed"
+
+
+def _prune_learn_target_visual_overlaps(targets: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    kept: list[dict[str, Any]] = []
+    removals: list[dict[str, Any]] = []
+    for target in targets:
+        conflict_index = next(
+            (index for index, existing in enumerate(kept) if _learn_target_visual_conflict(target, existing)),
+            None,
+        )
+        if conflict_index is None:
+            kept.append(target)
+            continue
+        existing = kept[conflict_index]
+        if _learn_target_visual_priority(target) > _learn_target_visual_priority(existing):
+            kept[conflict_index] = target
+            removed = existing
+            kept_candidate = target
+        else:
+            removed = target
+            kept_candidate = existing
+        removals.append(
+            _path_overlap_decision(
+                removed=removed,
+                kept_candidate=kept_candidate,
+                reason=_learn_target_visual_removal_reason(removed, kept_candidate),
+                source="learn_target_visual_overlap_rule",
+            )
         )
     return kept, removals
 
@@ -5125,7 +5288,7 @@ def _card_bbox_for_seed(
     x1, x2 = _card_column_bounds(seed_bbox=seed_bbox, seed_boxes=seed_boxes, fallback_x1=x1, fallback_x2=x2, section_bbox=section_bbox)
     y1 = max(section_bbox["y"], seed_bbox["y"] - 24)
     y2 = min(section_bbox["y"] + section_bbox["h"], seed_bbox["y"] + max(120, int(section_bbox["h"] * 0.34)))
-    cluster: list[dict[str, int]] = [seed_bbox]
+    candidate_rows: list[dict[str, Any]] = []
     for text_item in texts:
         bbox = _normalize_map_bbox(text_item.get("bbox"))
         if not bbox:
@@ -5133,7 +5296,35 @@ def _card_bbox_for_seed(
         cx = bbox["x"] + bbox["w"] / 2
         cy = bbox["y"] + bbox["h"] / 2
         if x1 <= cx <= x2 and y1 <= cy <= y2:
-            cluster.append(bbox)
+            candidate_rows.append({"bbox": bbox, "cy": cy})
+    candidate_rows.sort(key=lambda item: (item["cy"], item["bbox"]["x"]))
+    seed_cy = seed_bbox["y"] + seed_bbox["h"] / 2
+    seed_index = next(
+        (
+            index
+            for index, item in enumerate(candidate_rows)
+            if _bbox_overlap_area(item["bbox"], seed_bbox) > 0
+        ),
+        None,
+    )
+    if seed_index is None:
+        candidate_rows.append({"bbox": seed_bbox, "cy": seed_cy})
+        candidate_rows.sort(key=lambda item: (item["cy"], item["bbox"]["x"]))
+        seed_index = next(index for index, item in enumerate(candidate_rows) if item["bbox"] == seed_bbox)
+    cluster = [candidate_rows[seed_index]["bbox"]]
+    max_gap = 46
+    previous_cy = candidate_rows[seed_index]["cy"]
+    for item in reversed(candidate_rows[:seed_index]):
+        if previous_cy - item["cy"] > max_gap:
+            break
+        cluster.append(item["bbox"])
+        previous_cy = item["cy"]
+    previous_cy = candidate_rows[seed_index]["cy"]
+    for item in candidate_rows[seed_index + 1 :]:
+        if item["cy"] - previous_cy > max_gap:
+            break
+        cluster.append(item["bbox"])
+        previous_cy = item["cy"]
     bbox = _bbox_union(cluster)
     if not bbox:
         return None
@@ -5290,6 +5481,12 @@ def _execution_allowed_for_risk_class(*, label: str, role: str, risk_class: str)
     risk_text = " ".join([label, role, normalized_risk]).casefold()
     if normalized_risk == "safe_open_apply_flow" and not _looks_like_final_submit_action_text(risk_text):
         return True, "risk_class_safe_open_apply_flow"
+    if (
+        normalized_risk == "safe_click_allowed"
+        and _looks_like_apply_entry_action_text(risk_text)
+        and not _looks_like_final_submit_action_text(risk_text)
+    ):
+        return True, "risk_class_safe_apply_entry"
     if _looks_like_high_risk_action_text(risk_text):
         return False, "potential_side_effect_action"
     if normalized_risk == "safe_click_allowed":
@@ -5323,6 +5520,19 @@ def _looks_like_final_submit_action_text(text: str) -> bool:
 
 def _looks_like_high_risk_action_text(text: str) -> bool:
     normalized = str(text or "").casefold()
+    tokens = set(re.findall(r"[a-z0-9]+", normalized))
+    if "pay" in tokens and "filter" in tokens and not any(
+        phrase in normalized
+        for phrase in [
+            "pay now",
+            "pay invoice",
+            "make payment",
+            "payment",
+            "checkout",
+            "purchase",
+        ]
+    ):
+        return False
     dangerous_phrases = [
         "quick apply",
         "submit application",
@@ -5346,9 +5556,18 @@ def _looks_like_high_risk_action_text(text: str) -> bool:
     ]
     if any(term in normalized for term in dangerous_phrases):
         return True
-    tokens = set(re.findall(r"[a-z0-9]+", normalized))
     dangerous_tokens = {"delete", "remove", "purchase", "send", "submit", "apply", "authorize", "permission", "upload", "pay", "payment"}
     return bool(tokens & dangerous_tokens)
+
+
+def _looks_like_apply_entry_action_text(text: str) -> bool:
+    normalized = str(text or "").casefold()
+    if _looks_like_final_submit_action_text(normalized):
+        return False
+    tokens = set(re.findall(r"[a-z0-9]+", normalized))
+    if "apply" in tokens:
+        return True
+    return "quick apply" in normalized or "申请" in normalized
 
 
 def _looks_like_low_risk_navigation_candidate(*, label: str, role: str, extra_text: str = "") -> bool:
@@ -5584,6 +5803,341 @@ def _screen_map_candidate_to_learn_target(candidate: dict[str, Any], index: int)
         "coordinate_source": "screen_map_v1.candidates",
         "location_status": "coordinate_ready" if point else "bbox_missing_click_point",
     }
+
+
+def _screen_map_candidate_to_learn_review_box(candidate: dict[str, Any], index: int, *, review_status: str) -> dict[str, Any] | None:
+    bbox = _normalize_map_bbox(candidate.get("bbox") or candidate.get("bounding_box") or candidate.get("bounds"))
+    point = _normalize_map_point(candidate.get("click_point") or candidate.get("clickPoint"), bbox)
+    label = _first_compact_text(candidate.get("label"), candidate.get("text"), candidate.get("name"), candidate.get("description"))
+    if not label and not bbox:
+        return None
+    evidence = candidate.get("evidence") if isinstance(candidate.get("evidence"), dict) else {}
+    policy = evidence.get("interaction_policy") if isinstance(evidence.get("interaction_policy"), dict) else {}
+    reasons = policy.get("reasons") if isinstance(policy.get("reasons"), list) else []
+    children = _normalize_learn_review_children(candidate.get("children"))
+    return {
+        "contract_version": "learn_review_box_v1",
+        "candidate_id": _first_compact_text(candidate.get("candidate_id"), candidate.get("id"), f"learn_review_box_{index}"),
+        "label": label or f"review box {index + 1}",
+        "role": _first_compact_text(candidate.get("role"), candidate.get("type"), candidate.get("kind"), "review_only"),
+        "bbox": bbox,
+        "click_point": point,
+        "section_id": _first_compact_text(candidate.get("section_id"), candidate.get("section")),
+        "source": _first_compact_text(candidate.get("source"), "screen_map"),
+        "confidence": _bounded_float(candidate.get("confidence")),
+        "review_status": review_status,
+        "review_reason": "; ".join(str(item) for item in reasons if str(item or "").strip())[:240],
+        "coordinate_source": "screen_map_v1.candidates",
+        "children": children,
+        "execute_binding_enabled": False,
+        "artifact_is_authorization": False,
+    }
+
+
+def _normalize_learn_review_children(value: Any) -> list[dict[str, Any]]:
+    children: list[dict[str, Any]] = []
+    for index, item in enumerate(_as_list(value)):
+        if not isinstance(item, dict):
+            continue
+        label = _normalize_ocr_candidate_label(_first_compact_text(item.get("label"), item.get("text"), item.get("name")))
+        bbox = _normalize_map_bbox(item.get("bbox") or item.get("bounding_box") or item.get("bounds"))
+        if not label and not bbox:
+            continue
+        children.append(
+            {
+                "child_id": _first_compact_text(item.get("child_id"), item.get("id"), item.get("text_id"), f"child_{index + 1}"),
+                "label": label or f"child {index + 1}",
+                "role": _first_compact_text(item.get("role"), item.get("type"), "text"),
+                "bbox": bbox,
+                "source": _first_compact_text(item.get("source"), "screen_map_child"),
+            }
+        )
+    return children
+
+
+def _ocr_text_to_learn_review_box(text_item: dict[str, Any], index: int) -> dict[str, Any] | None:
+    label = _normalize_ocr_candidate_label(_first_compact_text(text_item.get("text"), text_item.get("label")))
+    bbox = _normalize_map_bbox(text_item.get("bbox") or text_item.get("bounding_box") or text_item.get("bounds"))
+    if not label or not bbox:
+        return None
+    if _learn_review_ocr_text_is_noise(label, bbox=bbox, confidence=_bounded_float(text_item.get("confidence"))):
+        return None
+    text_id = _first_compact_text(text_item.get("id"), f"ocr_text_{index}")
+    return {
+        "contract_version": "learn_review_box_v1",
+        "candidate_id": f"learn_ocr_text_{text_id}",
+        "label": label,
+        "role": "ocr_text_review_only",
+        "bbox": bbox,
+        "click_point": _normalize_map_point(None, bbox),
+        "section_id": _first_compact_text(text_item.get("section_id"), text_item.get("section")),
+        "source": _first_compact_text(text_item.get("source"), "observe_result.texts"),
+        "confidence": _bounded_float(text_item.get("confidence")),
+        "review_status": "ocr_text_review_only",
+        "review_reason": "ocr_text_detail_for_learning_interface",
+        "coordinate_source": "observe_result.texts",
+        "execute_binding_enabled": False,
+        "artifact_is_authorization": False,
+    }
+
+
+def _learn_review_ocr_text_is_noise(label: str, *, bbox: dict[str, int], confidence: float | None) -> bool:
+    text = str(label or "").strip()
+    if _screen_map_text_is_noise(text, allow_short=True):
+        return True
+    if confidence is not None and confidence < 0.45:
+        return True
+    if bbox["y"] < 64:
+        return True
+    alnum_count = sum(1 for char in text if char.isalnum())
+    digit_count = sum(1 for char in text if char.isdigit())
+    alpha_count = sum(1 for char in text if char.isalpha())
+    if len(text) <= 1:
+        return True
+    if digit_count and digit_count >= max(1, alpha_count) and len(text) <= 6:
+        return True
+    return alnum_count <= 1 and len(text) <= 3
+
+
+def _learn_review_child_identity(review_boxes: list[dict[str, Any]]) -> tuple[set[str], set[str]]:
+    child_ids: set[str] = set()
+    child_box_keys: set[str] = set()
+    for review_box in review_boxes:
+        for child in _as_list(review_box.get("children")):
+            if not isinstance(child, dict):
+                continue
+            child_id = _first_compact_text(child.get("child_id"), child.get("id"), child.get("text_id"))
+            if child_id:
+                child_ids.add(child_id)
+            label = _normalize_ocr_candidate_label(_first_compact_text(child.get("label"), child.get("text"), child.get("name")))
+            bbox = _normalize_map_bbox(child.get("bbox"))
+            if label and bbox:
+                child_box_keys.add(f"{label}|{bbox}")
+    return child_ids, child_box_keys
+
+
+def _learn_nav_rail_review_boxes_from_image(image_path: str, *, existing_count: int = 0) -> list[dict[str, Any]]:
+    source_image = Path(image_path)
+    if not source_image.exists():
+        return []
+    try:
+        with Image.open(source_image) as image:
+            rgb = image.convert("RGB")
+            width, height = rgb.size
+            if width <= 0 or height <= 0:
+                return []
+            strip_w = min(96, max(44, round(width * 0.075)))
+            y_min = max(48, round(height * 0.05))
+            y_max = max(y_min, height - max(16, round(height * 0.02)))
+            pixels = rgb.load()
+            active_rows: list[tuple[int, int, int]] = []
+            for y in range(y_min, y_max):
+                xs: list[int] = []
+                for x in range(0, strip_w):
+                    r, g, b = pixels[x, y]
+                    lum = (int(r) + int(g) + int(b)) / 3
+                    saturation = max(r, g, b) - min(r, g, b)
+                    if lum < 120 or (saturation >= 70 and lum < 235):
+                        xs.append(x)
+                if len(xs) >= 3:
+                    active_rows.append((y, min(xs), max(xs)))
+    except Exception:
+        return []
+
+    runs: list[dict[str, int]] = []
+    current: dict[str, int] | None = None
+    for y, min_x, max_x in active_rows:
+        if current is None or y > current["bottom"] + 5:
+            if current is not None:
+                runs.append(current)
+            current = {"top": y, "bottom": y, "min_x": min_x, "max_x": max_x}
+            continue
+        current["bottom"] = y
+        current["min_x"] = min(current["min_x"], min_x)
+        current["max_x"] = max(current["max_x"], max_x)
+    if current is not None:
+        runs.append(current)
+
+    boxes: list[dict[str, Any]] = []
+    for run in runs:
+        x = max(0, run["min_x"] - 4)
+        y = max(0, run["top"] - 4)
+        w = min(strip_w - x, run["max_x"] - run["min_x"] + 9)
+        h = run["bottom"] - run["top"] + 9
+        if w < 6 or h < 6 or h > 56 or w > 56:
+            continue
+        boxes.append(
+            {
+                "contract_version": "learn_review_box_v1",
+                "candidate_id": f"learn_nav_rail_icon_{existing_count + len(boxes) + 1}",
+                "label": f"Left nav icon {len(boxes) + 1}",
+                "role": "nav_rail_icon_review_only",
+                "bbox": {"x": int(x), "y": int(y), "w": int(w), "h": int(h)},
+                "click_point": {"x": int(x + w / 2), "y": int(y + h / 2)},
+                "section_id": "left_nav_rail",
+                "source": "image_left_nav_rail_scan",
+                "confidence": None,
+                "review_status": "nav_rail_review_only",
+                "review_reason": "left_nav_rail_visual_icon_without_ocr_or_uia",
+                "coordinate_source": "screenshot_left_nav_rail_scan",
+                "children": [],
+                "execute_binding_enabled": False,
+                "artifact_is_authorization": False,
+            }
+        )
+        if len(boxes) >= 16:
+            break
+    return boxes
+
+
+def _learn_target_candidate_is_tiny_noise(candidate: dict[str, Any]) -> bool:
+    bbox = _normalize_map_bbox(candidate.get("bbox") or candidate.get("bounding_box") or candidate.get("bounds"))
+    if not bbox:
+        return True
+    return bbox["w"] < 4 or bbox["h"] < 4 or bbox["w"] * bbox["h"] < 64
+
+
+def _learn_target_candidate_is_browser_chrome(candidate: dict[str, Any], *, image_size: dict[str, int], screen_map: dict[str, Any]) -> bool:
+    if _path_graph_candidate_is_browser_chrome(candidate):
+        return True
+    app_name = _first_compact_text(screen_map.get("app_name"), screen_map.get("state_hint"), screen_map.get("state_id"))
+    browser_surface = _is_browser_app_name(app_name) or _looks_like_web_app_name(app_name) or _screen_map_looks_like_browser_surface(screen_map)
+    bbox = _normalize_map_bbox(candidate.get("bbox") or candidate.get("bounding_box") or candidate.get("bounds"))
+    if not bbox:
+        return False
+    if not browser_surface:
+        return False
+    if _learn_target_candidate_is_os_taskbar(candidate, bbox=bbox, image_size=image_size):
+        return True
+    chrome_bottom = min(int(image_size.get("height") or 0), max(72, round(int(image_size.get("height") or 0) * 0.065)))
+    if bbox["y"] > chrome_bottom:
+        return False
+    text = " ".join(
+        part
+        for part in [
+            _first_compact_text(candidate.get("label"), candidate.get("text"), candidate.get("description")),
+            _first_compact_text(candidate.get("role"), candidate.get("type")),
+        ]
+        if part
+    ).casefold()
+    chrome_tokens = ("http://", "https://", "www.", ".com", ".org", "address", "tab", "new tab", "back", "reload")
+    return bbox["y"] <= 56 or any(token in text for token in chrome_tokens)
+
+
+def _learn_target_candidate_is_non_actionable_content(candidate: dict[str, Any]) -> bool:
+    source = str(candidate.get("source") or "").casefold()
+    evidence = candidate.get("evidence") if isinstance(candidate.get("evidence"), dict) else {}
+    policy = evidence.get("interaction_policy") if isinstance(evidence.get("interaction_policy"), dict) else {}
+    if policy.get("allowed") is True:
+        if source != "ocr_text_actions":
+            return False
+    if source == "ocr_text_actions":
+        evidence_level = str(evidence.get("evidence_level") or "").casefold()
+        if evidence_level != "ocr_text_only":
+            return False
+        role = str(candidate.get("role") or "").casefold()
+        bbox = _normalize_map_bbox(candidate.get("bbox") or candidate.get("bounding_box") or candidate.get("bounds")) or {}
+        label = _first_compact_text(candidate.get("label"), candidate.get("text"), candidate.get("description")).casefold()
+        screen_map_rule = str(candidate.get("screen_map_rule") or evidence.get("screen_map_rule") or "").casefold()
+        clear_button_rule = screen_map_rule in {"more_text_is_button", "explicit_button_text", "submit_text_is_button"}
+        clear_button_text = bool(re.search(r"(^|\\b)(more|learn more|download|apply|next|continue|go|search)(\\b|$)", label))
+        if role == "button" and (clear_button_rule or clear_button_text) and int(bbox.get("w") or 0) <= 180 and int(bbox.get("h") or 0) <= 72:
+            return False
+        return True
+    if source != "ocr_card_groups":
+        return False
+    role = str(candidate.get("role") or "").casefold()
+    risk_class = str(candidate.get("risk_class") or "").casefold()
+    screen_map_rule = str(candidate.get("screen_map_rule") or "").casefold()
+    content_roles = {"card", "news_card", "recommendation_item", "section", "group"}
+    if risk_class in {"safe_dry_run_only", "safe_review_only"} and role in content_roles:
+        return True
+    return screen_map_rule == "card_texts_grouped_as_single_candidate" and role in content_roles
+
+
+def _learn_target_candidate_is_blocked_review_only(candidate: dict[str, Any]) -> bool:
+    risk_class = str(candidate.get("risk_class") or "").casefold()
+    evidence = candidate.get("evidence") if isinstance(candidate.get("evidence"), dict) else {}
+    policy = evidence.get("interaction_policy") if isinstance(evidence.get("interaction_policy"), dict) else {}
+    return risk_class == "blocked" or policy.get("allowed") is False
+
+
+def _learn_blocked_candidate_should_be_suppressed_from_review(candidate: dict[str, Any]) -> bool:
+    source = str(candidate.get("source") or "").casefold()
+    role = str(candidate.get("role") or candidate.get("type") or "").casefold()
+    section_id = str(candidate.get("section_id") or candidate.get("section") or "").casefold()
+    bbox = _normalize_map_bbox(candidate.get("bbox") or candidate.get("bounding_box") or candidate.get("bounds"))
+    if not bbox:
+        return False
+    if section_id in {"left_nav_rail", "left_nav", "left_sidebar"} and role in {"icon_button", "button", "icon"}:
+        return True
+    return source == "top_level.ui.elements" and role in {"icon_button", "icon"} and bbox["x"] <= 96
+
+
+def _learn_target_candidate_is_ungrounded_semantic_region(candidate: dict[str, Any]) -> bool:
+    evidence = candidate.get("evidence") if isinstance(candidate.get("evidence"), dict) else {}
+    evidence_level = str(candidate.get("evidence_level") or evidence.get("evidence_level") or "").casefold()
+    if evidence_level != "semantic_region_only":
+        return False
+    coordinate_confidence = str(candidate.get("coordinate_confidence") or evidence.get("coordinate_confidence") or "").casefold()
+    if coordinate_confidence == "high":
+        return False
+    if _first_compact_text(candidate.get("source_text_id"), evidence.get("source_text_id")):
+        return False
+    return True
+
+
+def _looks_like_web_app_name(value: str | None) -> bool:
+    text = str(value or "").strip().casefold()
+    return bool(re.search(r"\b[a-z0-9-]+\.(com|org|net|io|co|nz|dev|app)\b", text))
+
+
+def _screen_map_looks_like_browser_surface(screen_map: dict[str, Any]) -> bool:
+    haystack = " ".join(
+        _first_compact_text(item.get("label"), item.get("text"), item.get("name"), item.get("description"))
+        for item in screen_map.get("candidates") or []
+        if isinstance(item, dict)
+    ).casefold()
+    if any(token in haystack for token in ("http://", "https://", "www.", ".com", ".org", "address bar", "new tab", "reload")):
+        return True
+    for item in screen_map.get("candidates") or []:
+        if not isinstance(item, dict):
+            continue
+        bbox = _normalize_map_bbox(item.get("bbox") or item.get("bounding_box") or item.get("bounds"))
+        if not bbox or bbox["y"] > 86:
+            continue
+        text = _first_compact_text(item.get("label"), item.get("text"), item.get("name"), item.get("description")).casefold()
+        if any(token in text for token in ("tab", "http", "www.", ".org", ".com", "back", "reload")):
+            return True
+    return False
+
+
+def _learn_target_candidate_is_os_taskbar(candidate: dict[str, Any], *, bbox: dict[str, int], image_size: dict[str, int]) -> bool:
+    height = int(image_size.get("height") or 0)
+    if height <= 0 or bbox["y"] < max(0, height - 96):
+        return False
+    text = " ".join(
+        part
+        for part in [
+            _first_compact_text(candidate.get("label"), candidate.get("text"), candidate.get("name"), candidate.get("description")),
+            _first_compact_text(candidate.get("role"), candidate.get("type"), candidate.get("source")),
+        ]
+        if part
+    ).casefold()
+    taskbar_tokens = (
+        "taskbar",
+        "start",
+        "steam",
+        "codex",
+        "edge",
+        "microsoft edge",
+        "explorer",
+        "system tray",
+        "search",
+        "好友列表",
+        "搜索",
+    )
+    return any(token in text for token in taskbar_tokens) or bbox["h"] <= 36
 
 
 def _learn_target_image_size(image_path: str) -> dict[str, int]:
@@ -5836,7 +6390,14 @@ def _draw_learn_target_overlay_label(
     draw.text((x + 4, y0 + 2), label, fill=(255, 255, 255), font=font)
 
 
-def _render_learn_all_targets_overlay(*, image_path: str, targets: list[dict[str, Any]], name_hint: str | None) -> dict[str, Any]:
+def _render_learn_all_targets_overlay(
+    *,
+    image_path: str,
+    targets: list[dict[str, Any]],
+    name_hint: str | None,
+    review_boxes: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    review_boxes = review_boxes or []
     source_image = Path(image_path)
     if not source_image.exists():
         return {
@@ -5844,6 +6405,8 @@ def _render_learn_all_targets_overlay(*, image_path: str, targets: list[dict[str
             "status": "skipped",
             "reason": "source_image_not_found",
             "target_count": len(targets),
+            "review_box_count": len(review_boxes),
+            "total_box_count": len(targets) + len(review_boxes),
         }
 
     output_path = build_review_overlay_path(name_hint=name_hint or source_image.stem, suffix="learn-target-coordinates")
@@ -5867,6 +6430,16 @@ def _render_learn_all_targets_overlay(*, image_path: str, targets: list[dict[str
                     draw.ellipse((px - 5, py - 5, px + 5, py + 5), fill=(0, 100, 255), outline=(255, 255, 255), width=2)
                 label = f"{index} {target.get('role') or 'control'} ({bbox['x']},{bbox['y']},{bbox['w']},{bbox['h']})"
                 _draw_learn_target_overlay_label(draw, bbox["x"], bbox["y"], label, font=font, color=color)
+            review_color = (217, 119, 6)
+            for index, review_box in enumerate(review_boxes, start=1):
+                bbox = _normalize_map_bbox(review_box.get("bbox"))
+                if not bbox:
+                    continue
+                rect = (bbox["x"], bbox["y"], bbox["x"] + bbox["w"], bbox["y"] + bbox["h"])
+                draw.rectangle(rect, outline=review_color, width=3)
+                role = str(review_box.get("role") or "review")
+                label = f"R{index}" if role in {"ocr_text_review_only", "nav_rail_icon_review_only"} else f"R{index} {role}"
+                _draw_learn_target_overlay_label(draw, bbox["x"], bbox["y"], label, font=font, color=review_color)
             annotated.save(output_path)
     except Exception as exc:
         return {
@@ -5875,6 +6448,8 @@ def _render_learn_all_targets_overlay(*, image_path: str, targets: list[dict[str
             "reason": f"overlay_render_failed: {exc}",
             "image_path": str(source_image),
             "target_count": len(targets),
+            "review_box_count": len(review_boxes),
+            "total_box_count": len(targets) + len(review_boxes),
         }
 
     return {
@@ -5883,6 +6458,8 @@ def _render_learn_all_targets_overlay(*, image_path: str, targets: list[dict[str
         "image_path": str(source_image.resolve()),
         "output_path": str(output_path.resolve()),
         "target_count": len(targets),
+        "review_box_count": len(review_boxes),
+        "total_box_count": len(targets) + len(review_boxes),
         "valid_count": sum(1 for item in targets if (item.get("coordinate_validation") or {}).get("status") == "valid"),
         "invalid_count": sum(1 for item in targets if (item.get("coordinate_validation") or {}).get("status") != "valid"),
     }
@@ -6026,14 +6603,39 @@ def _apply_learn_locate_model_review_to_screen_map(
     refined = dict(screen_map)
     candidates = [dict(item) for item in _as_list(refined.get("candidates")) if isinstance(item, dict)]
     if model_review.get("status") != "ready":
+        refined_candidates, overlap_removals = _prune_non_containment_overlaps(candidates)
+        refined["candidates"] = refined_candidates
+        refined["summary"] = {
+            **dict(refined.get("summary") if isinstance(refined.get("summary"), dict) else {}),
+            "candidate_count": len(refined_candidates),
+            "non_containment_overlap_removal_count": len(overlap_removals),
+        }
+        decisions = [
+            {
+                "candidate_id": removal.get("candidate_id"),
+                "label": removal.get("label"),
+                "action": "remove",
+                "source": "path_graph_overlap_rule",
+                "reasons": [removal.get("reason")],
+                "kept_candidate_id": removal.get("kept_candidate_id"),
+                "kept_label": removal.get("kept_label"),
+            }
+            for removal in overlap_removals
+        ]
         return refined, {
             "contract_version": "learn_locate_path_calibration_delta_v1",
-            "status": model_review.get("status") or "skipped",
-            "summary": {"addition_count": 0, "removal_count": 0, "update_count": 0},
+            "status": "ready" if overlap_removals else (model_review.get("status") or "skipped"),
+            "summary": {
+                "addition_count": 0,
+                "removal_count": len(overlap_removals),
+                "update_count": 0,
+                "non_containment_overlap_removal_count": len(overlap_removals),
+                "output_candidate_count": len(refined_candidates),
+            },
             "additions": [],
-            "removals": [],
+            "removals": overlap_removals,
             "updates": [],
-            "candidate_decisions": [],
+            "candidate_decisions": decisions,
         }
 
     existing_by_id = {str(item.get("candidate_id")): item for item in candidates if item.get("candidate_id")}
@@ -6156,13 +6758,80 @@ def _build_learn_all_targets_from_screen_map(
     vista_validation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     screen_map = observe_reuse.get("screen_map") if isinstance(observe_reuse.get("screen_map"), dict) else {}
-    candidates = [item for item in _as_list(screen_map.get("candidates")) if isinstance(item, dict)]
     image_size = _learn_target_image_size(image_path)
+    raw_candidates = [item for item in _as_list(screen_map.get("candidates")) if isinstance(item, dict)]
+    filtered_browser_chrome: list[dict[str, Any]] = []
+    filtered_noise: list[dict[str, Any]] = []
+    filtered_non_actionable: list[dict[str, Any]] = []
+    filtered_blocked_review_only: list[dict[str, Any]] = []
+    filtered_ungrounded: list[dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
+    for candidate in raw_candidates:
+        if _learn_target_candidate_is_tiny_noise(candidate):
+            filtered_noise.append(candidate)
+            continue
+        if _learn_target_candidate_is_browser_chrome(candidate, image_size=image_size, screen_map=screen_map):
+            filtered_browser_chrome.append(candidate)
+            continue
+        if _learn_target_candidate_is_non_actionable_content(candidate):
+            filtered_non_actionable.append(candidate)
+            continue
+        if _learn_target_candidate_is_blocked_review_only(candidate):
+            filtered_blocked_review_only.append(candidate)
+            continue
+        if _learn_target_candidate_is_ungrounded_semantic_region(candidate):
+            filtered_ungrounded.append(candidate)
+            continue
+        candidates.append(candidate)
     targets = [
         _validate_learn_target_coordinates(target, image_size=image_size)
         for index, candidate in enumerate(candidates)
         if (target := _screen_map_candidate_to_learn_target(candidate, index)) is not None
     ]
+    review_boxes = [
+        review_box
+        for index, candidate in enumerate(filtered_non_actionable)
+        if (review_box := _screen_map_candidate_to_learn_review_box(candidate, index, review_status="non_actionable_review_only")) is not None
+    ]
+    for index, candidate in enumerate(filtered_blocked_review_only):
+        if _learn_blocked_candidate_should_be_suppressed_from_review(candidate):
+            continue
+        review_box = _screen_map_candidate_to_learn_review_box(candidate, index, review_status="blocked_review_only")
+        if review_box is not None:
+            review_boxes.append(review_box)
+    review_box_keys = {
+        f"{item.get('label')}|{item.get('bbox')}"
+        for item in review_boxes
+    }
+    child_ids, child_box_keys = _learn_review_child_identity(review_boxes)
+    observe_result = observe_reuse.get("observe_result") if isinstance(observe_reuse.get("observe_result"), dict) else {}
+    for index, text_item in enumerate(_screen_map_texts(observe_result)):
+        if not isinstance(text_item, dict):
+            continue
+        text_id = _first_compact_text(text_item.get("id"), text_item.get("text_id"))
+        if text_id and text_id in child_ids:
+            continue
+        review_box = _ocr_text_to_learn_review_box(text_item, index)
+        if review_box is None:
+            continue
+        key = f"{review_box.get('label')}|{review_box.get('bbox')}"
+        if key in child_box_keys:
+            continue
+        if key in review_box_keys:
+            continue
+        review_box_keys.add(key)
+        review_boxes.append(review_box)
+        if len(review_boxes) >= 80:
+            break
+    for review_box in _learn_nav_rail_review_boxes_from_image(image_path, existing_count=len(review_boxes)):
+        key = f"{review_box.get('label')}|{review_box.get('bbox')}"
+        if key in review_box_keys:
+            continue
+        review_box_keys.add(key)
+        review_boxes.append(review_box)
+        if len(review_boxes) >= 96:
+            break
+    targets, visual_overlap_removals = _prune_learn_target_visual_overlaps(targets)
     vista_summary = None
     if isinstance(vista_validation, dict):
         vista_summary = _apply_vista_coordinate_validation_to_learn_targets(
@@ -6177,6 +6846,7 @@ def _build_learn_all_targets_from_screen_map(
         image_path=image_path,
         targets=targets,
         name_hint=f"{screen_map.get('state_id') or Path(image_path).stem}-learn-targets",
+        review_boxes=review_boxes,
     )
     valid_count = sum(1 for item in targets if (item.get("coordinate_validation") or {}).get("status") == "valid")
     invalid_count = len(targets) - valid_count
@@ -6186,12 +6856,22 @@ def _build_learn_all_targets_from_screen_map(
         "state_id": screen_map.get("state_id"),
         "source_trace_path": observe_reuse.get("trace_path"),
         "image_size": image_size,
+        "raw_candidate_count": len(raw_candidates),
+        "filtered_browser_chrome_count": len(filtered_browser_chrome),
+        "filtered_noise_count": len(filtered_noise),
+        "filtered_non_actionable_count": len(filtered_non_actionable),
+        "filtered_blocked_review_only_count": len(filtered_blocked_review_only),
+        "filtered_ungrounded_count": len(filtered_ungrounded),
         "target_count": len(targets),
+        "review_box_count": len(review_boxes),
         "validated_count": valid_count,
         "invalid_count": invalid_count,
+        "visual_overlap_removal_count": len(visual_overlap_removals),
+        "visual_overlap_removals": visual_overlap_removals,
         "overlay": overlay,
         "overlay_path": overlay.get("output_path") if overlay.get("status") == "ready" else None,
         "targets": targets,
+        "review_boxes": review_boxes,
         "vista_coordinate_validation": vista_summary,
     }
 
@@ -6212,6 +6892,16 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
                 purpose="locate_target",
                 app_name=request.app_name,
             )
+        operation_context = build_operation_runtime_context(
+            request=request,
+            skill_id="locate_element",
+            semantic_action="locate_element",
+            side_effect_class="read_only",
+            requires_gate=False,
+            capture_id=image_path,
+            viewport_size=_image_size_payload(image_path=image_path, live_capture=live_capture),
+            evidence_refs=[ref for ref in [image_path, request.observe_trace_path] if ref],
+        )
         with timer.step("load_observe_trace_reuse", has_observe_trace=bool(request.observe_trace_path)):
             observe_reuse = _load_observe_trace_reuse(request.observe_trace_path, image_path=image_path, goal=request.goal)
         metadata = dict(request.metadata or {})
@@ -6286,6 +6976,8 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
                 "located_point": None,
                 "location_status": "learn_all_targets_ready" if learn_all_targets["target_count"] else "not_located",
                 "learn_all_targets": learn_all_targets,
+                "operation_context": operation_context,
+                "operation_trace_link": operation_trace_link(operation_context, result_status="success", evidence_refs=[image_path]),
                 "coordinate_overlay_path": learn_all_targets.get("overlay_path"),
                 "coordinate_overlay": learn_all_targets.get("overlay"),
                 "learn_locate_model_review": learn_locate_model_review,
@@ -6362,6 +7054,7 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
             },
             top_k=request.top_k,
             observe_trace_path=request.observe_trace_path,
+            operation_context=operation_context,
         )
         with timer.step("recognition_plan"):
             response = recognition_plan(plan_request)
@@ -6398,6 +7091,8 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
             "located_point": located_point,
             "location_status": "pre_click_verified" if selected_click_point else ("requires_pre_click_confirmation" if located_point else "not_located"),
             "path_map_review": path_map_review,
+            "operation_context": operation_context,
+            "operation_trace_link": operation_trace_link(operation_context, result_status="success", evidence_refs=[image_path]),
             "observe_trace_reuse": {
                 key: value
                 for key, value in observe_reuse.items()
@@ -6742,6 +7437,16 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
             with Image.open(image_path) as image:
                 input_image_size = ImageSize(width=image.width, height=image.height)
         goal = request.goal or request.task
+        operation_context = build_operation_runtime_context(
+            request=request,
+            skill_id="locate_element",
+            semantic_action="rank_candidates",
+            side_effect_class="read_only",
+            requires_gate=False,
+            capture_id=str(image_path),
+            viewport_size={"width": int(input_image_size.width), "height": int(input_image_size.height)},
+            evidence_refs=[str(image_path), *([request.observe_trace_path] if request.observe_trace_path else [])],
+        )
         with timer.step("load_observe_trace_reuse", has_observe_trace=bool(request.observe_trace_path)):
             observe_reuse = _load_observe_trace_reuse(request.observe_trace_path, image_path=str(image_path), goal=goal)
         with timer.step("path_graph_recall", observe_reuse_status=observe_reuse.get("status")):
@@ -6919,6 +7624,8 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
             "path_graph_recall": path_graph_recall,
             "visual_asset_recall": visual_asset_recall,
             "seeded_candidate": seeded_candidate,
+            "operation_context": operation_context,
+            "operation_trace_link": operation_trace_link(operation_context, result_status="success", evidence_refs=[str(image_path)]),
             "candidate_freshness_decision": _candidate_freshness_decision_for_trace(
                 seeded_candidate,
                 image_path=image_path,

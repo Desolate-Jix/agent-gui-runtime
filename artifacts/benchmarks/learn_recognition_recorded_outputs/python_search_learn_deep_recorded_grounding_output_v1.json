@@ -1,0 +1,68 @@
+{
+  "contract_version": "recorded_grounding_output_v1",
+  "provider": "existing_learn_deep_coordinate_calibration",
+  "source_type": "recorded_grounding_output",
+  "recorded_output_origin": "existing_learn_deep_locate_trace",
+  "actual_model_call_in_this_run": false,
+  "trace_path": "logs/traces/vision/20260703-174008-737067__learn-mode-deep-locate__python-org.json",
+  "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png",
+  "grounding_by_label": {
+    "Search button": {
+      "screen_point": {
+        "x": 1350,
+        "y": 267
+      },
+      "screen_bbox": {
+        "x": 1322,
+        "y": 244,
+        "w": 57,
+        "h": 46
+      },
+      "evidence": {
+        "coordinate_transform_replay": true,
+        "screenshot_freshness": true,
+        "uia_or_dom_or_parser_overlap": true
+      },
+      "debug": {
+        "source": "top_level.ui.elements",
+        "role": "button",
+        "recorded_target": {
+          "contract_version": "learn_target_location_v1",
+          "candidate_id": "element_search_button_7ce6e760",
+          "label": "Search button",
+          "role": "button",
+          "bbox": {
+            "x": 1322,
+            "y": 244,
+            "w": 57,
+            "h": 46
+          },
+          "click_point": {
+            "x": 1350,
+            "y": 267
+          },
+          "section_id": "primary_area",
+          "source": "top_level.ui.elements",
+          "confidence": 0.637,
+          "description": "",
+          "coordinate_source": "screen_map_v1.candidates",
+          "location_status": "coordinate_verified",
+          "coordinate_validation": {
+            "contract_version": "learn_target_coordinate_validation_v1",
+            "status": "valid",
+            "bbox_present": true,
+            "click_point_present": true,
+            "bbox_inside_image": true,
+            "click_point_inside_image": true,
+            "click_point_inside_bbox": true,
+            "image_size": {
+              "width": 2540,
+              "height": 1380
+            },
+            "reasons": []
+          }
+        }
+      }
+    }
+  }
+}

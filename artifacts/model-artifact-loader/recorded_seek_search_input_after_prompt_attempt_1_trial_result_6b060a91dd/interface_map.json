@@ -1,0 +1,66 @@
+{
+  "contract_version": "learned_interface_map_v1",
+  "app_id": "model_learning_benchmark",
+  "page_type": "search_page",
+  "source": {
+    "trial_path": "logs/benchmarks/model_learning_actual_call_checkpoint4/loader_trials/loader_trials/recorded_seek_search_input_after_prompt_attempt_1/trial_result.json",
+    "sha256": "6b060a91dd3be093d9b910995d741f79794e54ac565db6092afcf202bedfd6b2",
+    "attempt_index": 0,
+    "readonly": true,
+    "posthoc_optimization_allowed": false,
+    "loaded_at": "2026-07-02T22:30:45.952380"
+  },
+  "loader": {
+    "contract_version": "model_learning_artifact_loader_v1",
+    "source_trial_path": "logs/benchmarks/model_learning_actual_call_checkpoint4/loader_trials/loader_trials/recorded_seek_search_input_after_prompt_attempt_1/trial_result.json",
+    "source_sha256": "6b060a91dd3be093d9b910995d741f79794e54ac565db6092afcf202bedfd6b2",
+    "source_attempt_index": 0,
+    "source_artifact_readonly": true,
+    "posthoc_optimization_allowed": false
+  },
+  "screen_summary": "A job search bar showing 'All jobs • All Auckland' with a magnifying glass icon.",
+  "states": [
+    {
+      "state_id": "s1",
+      "label": "job_search_home",
+      "page_type": "search_page",
+      "region_refs": [
+        "r1"
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "model:transition:a1",
+      "from_state_id": "s1",
+      "to_state_id": "s1",
+      "action_template_id": "a1",
+      "default_available": true,
+      "verification_refs": []
+    }
+  ],
+  "regions": [
+    {
+      "region_id": "r1",
+      "label": "search_input_field",
+      "role": "text_input",
+      "region_type": "text_input",
+      "source_artifact_readonly": true
+    }
+  ],
+  "fixed_visual_assets": [],
+  "dynamic_areas": [],
+  "danger_zones": [],
+  "editor_policy": {
+    "source_artifact_editable": false,
+    "derived_artifact_editable": false,
+    "save_as_required_for_manual_changes": true
+  },
+  "summary": {
+    "state_count": 1,
+    "region_count": 1,
+    "fixed_visual_asset_count": 0,
+    "dynamic_area_count": 0,
+    "danger_zone_count": 0
+  }
+}

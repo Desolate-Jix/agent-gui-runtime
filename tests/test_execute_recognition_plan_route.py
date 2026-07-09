@@ -254,6 +254,11 @@ def test_execute_mode_dry_run_builds_agent_ready_preview(monkeypatch, tmp_path) 
     assert captured_request["observe_trace_path"] == "observe-trace.json"
     assert result["recognition_plan_overlay"]["output_path"] == "overlay.png"
     assert result["approved_plan_id"]
+    assert result["operation_context"]["skill_id"] == "click_target"
+    assert result["operation_context"]["requires_gate"] is True
+    assert result["operation_context"]["gate_decision_id"]
+    assert result["operation_trace_link"]["gate_decision_id"] == result["operation_context"]["gate_decision_id"]
+    assert result["operation_trace_link"]["result_status"] == "dry_run_ready"
     guidance = result["agent_execution_guidance"]
     assert guidance["status"] == "dry_run_ready"
     assert guidance["next_action"] == "execute_approved_plan"
@@ -267,6 +272,69 @@ def test_execute_mode_dry_run_builds_agent_ready_preview(monkeypatch, tmp_path) 
     assert step_result["evidence"]["coordinate_overlay_path"] == "overlay.png"
     assert step_result["evidence"]["action_trace_path"].endswith("execute_mode_plan_preview.json")
     assert written_traces[-1]["operation"] == "execute_mode_plan_preview"
+
+
+def test_execute_mode_can_auto_observe_learned_artifacts_before_plan(monkeypatch, tmp_path) -> None:
+    captured_observe: dict[str, object] = {}
+    captured_plan: dict[str, object] = {}
+    monkeypatch.setattr(action_api, "APPROVED_PLANS_DIR", tmp_path / "approved-plans")
+    action_api.APPROVED_PLANS_DIR.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: _bound_window(title="SEEK - Microsoft Edge"))
+    monkeypatch.setattr(
+        action_api.screenshot_service,
+        "capture_window",
+        lambda **kwargs: {
+            "image_path": "seek-capture.png",
+            "roi": None,
+            "roi_adjusted": False,
+            "window_size": {"width": 1200, "height": 800},
+        },
+    )
+
+    def fake_observe(request):
+        captured_observe["image_path"] = request.image_path
+        captured_observe["capture_live"] = request.capture_live
+        captured_observe["agent_mode"] = request.agent_mode
+        captured_observe["learn_depth"] = request.learn_depth
+        captured_observe["metadata"] = request.metadata
+        return APIResponse(
+            success=True,
+            message="observed",
+            data=VisionResultData(result={"trace_path": "logs/traces/vision/auto-observe-seek.json"}).model_dump(),
+            error=None,
+        )
+
+    def fake_recognition_plan(request):
+        captured_plan["observe_trace_path"] = request.observe_trace_path
+        captured_plan["image_path"] = request.image_path
+        return APIResponse(success=True, message="ok", data=VisionResultData(result=_allowed_plan(goal=request.goal)).model_dump(), error=None)
+
+    monkeypatch.setattr(action_api, "_run_observe_screen_for_execution", fake_observe)
+    monkeypatch.setattr(action_api, "_run_recognition_plan_for_execution", fake_recognition_plan)
+    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", lambda trace_path: {"output_path": "overlay.png"})
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: f"logs/traces/actions/{kwargs['operation']}.json")
+
+    response = action_api.execute_recognition_plan(
+        ExecuteRecognitionPlanRequest(
+            goal="Click Apply",
+            app_name="seek",
+            state_hint="SEEK job detail page",
+            auto_observe_learning_artifacts=True,
+            dry_run=True,
+        )
+    )
+
+    assert response.success is True
+    result = response.data["result"]
+    assert captured_observe["image_path"].endswith("seek-capture.png")
+    assert captured_observe["capture_live"] is False
+    assert captured_observe["agent_mode"] == "learn"
+    assert captured_observe["learn_depth"] == "fast"
+    assert captured_observe["metadata"]["visual_assets"] == {"enabled": True}
+    assert captured_plan["observe_trace_path"] == "logs/traces/vision/auto-observe-seek.json"
+    assert captured_plan["image_path"].endswith("seek-capture.png")
+    assert result["auto_observe_trace"]["success"] is True
+    assert result["effective_execution_options"]["observe_trace_path"] == "logs/traces/vision/auto-observe-seek.json"
 
 
 def test_execute_mode_reuses_approved_plan_for_next_call(monkeypatch, tmp_path) -> None:

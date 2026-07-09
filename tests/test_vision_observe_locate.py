@@ -3,10 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.api import vision as vision_api
-from app.api.models.request import VisionLocateTargetRequestModel, VisionObserveScreenRequestModel
+from app.api.models.request import OCRRegionRequest, ROIModel, VisionLocateTargetRequestModel, VisionObserveScreenRequestModel
 from app.api.models.request import VisionRecognitionPlanRequestModel
 from app.api.models.response import APIResponse, ErrorModel
 from app.vision.schemas import ImageSize, VisionAnalyzeResponse
+from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
 
 
 def test_observe_screen_wraps_live_capture_and_screen_reading(monkeypatch) -> None:
@@ -110,6 +111,9 @@ def test_observe_screen_wraps_live_capture_and_screen_reading(monkeypatch) -> No
     assert result["screen_map"]["candidates"][0]["section_id"]
     assert result["screen_map"]["candidates"][0]["risk_class"] == "safe_click_allowed"
     assert result["screen_map"]["candidates"][0]["expected_effect"] == "filter panel opens"
+    assert result["operation_context"]["skill_id"] == "observe_screen"
+    assert result["operation_context"]["requires_gate"] is False
+    assert result["operation_trace_link"]["result_status"] == "success"
     assert result["screen_map"]["candidates"][1]["risk_class"] == "requires_user_confirmation"
     candidates = result["screen_map"]["candidates"]
     docs = next(item for item in candidates if item["label"] == "Docs")
@@ -122,6 +126,37 @@ def test_observe_screen_wraps_live_capture_and_screen_reading(monkeypatch) -> No
     assert any(item["label"] == "Apply now" and item["source"] == "ocr_text_actions" for item in candidates)
     assert "screen_map.state_id" in result["agent_next_steps"][1]
     assert "POST /vision/locate_target" in result["agent_next_steps"][2]
+
+
+def test_ocr_region_returns_read_region_operation_context(monkeypatch) -> None:
+    monkeypatch.setattr(
+        vision_api.screenshot_service,
+        "capture_window",
+        lambda **_kwargs: {
+            "image_path": "roi.png",
+            "roi": {"x": 1, "y": 2, "width": 50, "height": 20},
+            "roi_adjusted": False,
+            "window_size": {"width": 800, "height": 600},
+        },
+    )
+    monkeypatch.setattr(
+        vision_api.ocr_service,
+        "scan_image",
+        lambda path: OCRResult(
+            image_path=path,
+            matches=[OCRTextMatch(text="Apply", score=0.98, bbox=OCRBoundingBox(x=1, y=2, width=40, height=12))],
+        ),
+    )
+    monkeypatch.setattr(vision_api, "write_trace", lambda **_kwargs: "ocr-region-trace.json")
+
+    response = vision_api.ocr_region(OCRRegionRequest(roi=ROIModel(x=1, y=2, width=50, height=20)))
+
+    assert response.success is True
+    result = response.data["result"]
+    assert result["operation_context"]["skill_id"] == "read_region"
+    assert result["operation_context"]["requires_gate"] is False
+    assert result["operation_trace_link"]["result_status"] == "success"
+    assert result["trace_path"] == "ocr-region-trace.json"
 
 
 def test_observe_screen_learn_mode_outputs_interface_map_with_visual_assets(monkeypatch, tmp_path) -> None:
@@ -587,6 +622,7 @@ def test_locate_target_wraps_recognition_plan_without_clicking(monkeypatch) -> N
 
     def fake_recognition_plan(request):
         assert request.goal == "click home"
+        assert request.operation_context.skill_id == "locate_element"
         assert request.metadata["ocr_anchors"]["max_anchors"] == "all"
         assert "Precision-localization stage only" in request.metadata["prompt_overrides"]["additional_rules"]
         assert 'text_inclusion_policy="exclude_text"' in request.metadata["prompt_overrides"]["additional_rules"]
@@ -630,6 +666,8 @@ def test_locate_target_wraps_recognition_plan_without_clicking(monkeypatch) -> N
     assert result["located_bbox"] == {"x": 4, "y": 14, "w": 12, "h": 12}
     assert result["located_point"] == {"x": 10, "y": 20}
     assert result["location_status"] == "pre_click_verified"
+    assert result["operation_context"]["skill_id"] == "locate_element"
+    assert result["operation_context"]["requires_gate"] is False
     assert result["execution_path"]["action_executed"] is False
     assert result["execution_path"]["located_coordinate_source"] == "recommended_target.element.click_point"
     assert result["execution_path"]["agent_must_call_for_click"] == "POST /action/execute_recognition_plan"
@@ -1260,6 +1298,656 @@ def test_learn_path_overlap_rule_removes_non_containment_overlap_but_keeps_child
             "kept_label": "News card",
         }
     ]
+
+
+def test_learn_locate_hard_rules_run_when_model_review_skipped() -> None:
+    screen_map = {
+        "contract_version": "screen_map_v1",
+        "summary": {"candidate_count": 2},
+        "candidates": [
+            {
+                "candidate_id": "primary_card",
+                "label": "Primary card",
+                "role": "news_card",
+                "bbox": {"x": 20, "y": 40, "w": 260, "h": 140},
+                "section_id": "main_content",
+                "confidence": 0.8,
+            },
+            {
+                "candidate_id": "overlap_card",
+                "label": "Overlapping card",
+                "role": "news_card",
+                "bbox": {"x": 230, "y": 105, "w": 180, "h": 120},
+                "section_id": "main_content",
+                "confidence": 0.5,
+            },
+        ],
+    }
+
+    refined, delta = vision_api._apply_learn_locate_model_review_to_screen_map(
+        screen_map=screen_map,
+        model_review={"contract_version": "learn_locate_model_review_v1", "status": "skipped"},
+    )
+
+    assert [item["candidate_id"] for item in refined["candidates"]] == ["primary_card"]
+    assert refined["summary"]["non_containment_overlap_removal_count"] == 1
+    assert delta["summary"]["removal_count"] == 1
+    assert delta["removals"][0]["candidate_id"] == "overlap_card"
+    assert delta["candidate_decisions"][0]["source"] == "path_graph_overlap_rule"
+
+
+def test_learn_all_targets_visual_preview_removes_contained_parent_card(tmp_path) -> None:
+    image_path = tmp_path / "screen.png"
+    vision_api.Image.new("RGB", (420, 240), (255, 255, 255)).save(image_path)
+    observe_reuse = {
+        "status": "ready",
+        "trace_path": "observe.json",
+        "screen_map": {
+            "contract_version": "screen_map_v1",
+            "state_id": "demo_state",
+            "candidates": [
+                {
+                    "candidate_id": "parent_card",
+                    "label": "News card",
+                    "role": "news_card",
+                    "bbox": {"x": 20, "y": 40, "w": 260, "h": 140},
+                    "click_point": {"x": 150, "y": 110},
+                    "section_id": "main_content",
+                    "source": "ocr_card_groups",
+                    "confidence": 0.7,
+                },
+                {
+                    "candidate_id": "child_button",
+                    "label": "Read more",
+                    "role": "button",
+                    "bbox": {"x": 210, "y": 145, "w": 60, "h": 24},
+                    "click_point": {"x": 240, "y": 157},
+                    "section_id": "main_content",
+                    "source": "ocr_text_actions",
+                    "confidence": 0.8,
+                },
+            ],
+        },
+    }
+
+    result = vision_api._build_learn_all_targets_from_screen_map(
+        observe_reuse,
+        image_path=str(image_path),
+        vista_validation={"options": {"enabled": False}},
+    )
+
+    assert [item["candidate_id"] for item in result["targets"]] == ["child_button"]
+    assert result["target_count"] == 1
+    assert result["visual_overlap_removal_count"] == 1
+    assert result["visual_overlap_removals"][0]["candidate_id"] == "parent_card"
+    assert result["visual_overlap_removals"][0]["reason"] == "contained_visual_parent_removed"
+
+
+def test_learn_all_targets_filters_browser_chrome_and_tiny_noise(tmp_path) -> None:
+    image_path = tmp_path / "browser.png"
+    vision_api.Image.new("RGB", (640, 360), (255, 255, 255)).save(image_path)
+    observe_reuse = {
+        "status": "ready",
+        "screen_map": {
+            "contract_version": "screen_map_v1",
+            "state_id": "browser_page",
+            "app_name": "python.org",
+            "candidates": [
+                {
+                    "candidate_id": "tab_noise",
+                    "label": "Welcome tab",
+                    "role": "button",
+                    "bbox": {"x": 1, "y": 1, "w": 1, "h": 1},
+                    "click_point": {"x": 1, "y": 1},
+                    "section_id": "browser_chrome",
+                    "source": "top_level.ui.elements",
+                },
+                {
+                    "candidate_id": "browser_tab_title",
+                    "label": "Welcome to Python.org tab",
+                    "role": "button",
+                    "bbox": {"x": 12, "y": 8, "w": 120, "h": 24},
+                    "click_point": {"x": 72, "y": 20},
+                    "section_id": "page_header",
+                    "source": "top_level.ui.elements",
+                },
+                {
+                    "candidate_id": "address_bar",
+                    "label": "https://example.com",
+                    "role": "text_input",
+                    "bbox": {"x": 90, "y": 32, "w": 360, "h": 24},
+                    "click_point": {"x": 270, "y": 44},
+                    "section_id": "page_header",
+                    "source": "top_level.ui.elements",
+                },
+                {
+                    "candidate_id": "page_search",
+                    "label": "Search documentation",
+                    "role": "text_input",
+                    "bbox": {"x": 120, "y": 120, "w": 240, "h": 36},
+                    "click_point": {"x": 240, "y": 138},
+                    "section_id": "primary_area",
+                    "source": "ocr_text_actions",
+                },
+                {
+                    "candidate_id": "site_top_nav",
+                    "label": "Documentation",
+                    "role": "link",
+                    "bbox": {"x": 260, "y": 62, "w": 120, "h": 26},
+                    "click_point": {"x": 320, "y": 75},
+                    "section_id": "site_header",
+                    "source": "ocr_text_actions",
+                },
+                {
+                    "candidate_id": "windows_taskbar_edge",
+                    "label": "Microsoft Edge",
+                    "role": "button",
+                    "bbox": {"x": 110, "y": 334, "w": 90, "h": 24},
+                    "click_point": {"x": 155, "y": 346},
+                    "section_id": "taskbar",
+                    "source": "windows_uia.controls",
+                },
+            ],
+        },
+    }
+
+    result = vision_api._build_learn_all_targets_from_screen_map(
+        observe_reuse,
+        image_path=str(image_path),
+        vista_validation={"options": {"enabled": False}},
+    )
+
+    assert {item["candidate_id"] for item in result["targets"]} == {"site_top_nav", "page_search"}
+    assert result["target_count"] == 2
+    assert result["filtered_browser_chrome_count"] == 3
+    assert result["filtered_noise_count"] == 1
+
+
+def test_learn_all_targets_excludes_dry_run_only_content_cards(tmp_path) -> None:
+    image_path = tmp_path / "content_cards.png"
+    vision_api.Image.new("RGB", (900, 600), (255, 255, 255)).save(image_path)
+    observe_reuse = {
+        "status": "ready",
+        "screen_map": {
+            "contract_version": "screen_map_v1",
+            "state_id": "python_homepage",
+            "app_name": "python.org",
+            "candidates": [
+                {
+                    "candidate_id": "search_button",
+                    "label": "Search button",
+                    "role": "button",
+                    "bbox": {"x": 700, "y": 80, "w": 80, "h": 36},
+                    "click_point": {"x": 740, "y": 98},
+                    "section_id": "site_header",
+                    "source": "top_level.ui.elements",
+                    "risk_class": "safe_click_allowed",
+                    "evidence": {"interaction_policy": {"allowed": True}},
+                },
+                {
+                    "candidate_id": "code_sample_text_card",
+                    "label": "# Simple output (with Unicode)",
+                    "role": "news_card",
+                    "bbox": {"x": 120, "y": 150, "w": 360, "h": 220},
+                    "click_point": {"x": 300, "y": 260},
+                    "section_id": "primary_area",
+                    "source": "ocr_card_groups",
+                    "risk_class": "safe_dry_run_only",
+                    "screen_map_rule": "card_texts_grouped_as_single_candidate",
+                    "evidence": {
+                        "interaction_policy": {
+                            "allowed": None,
+                            "reasons": ["card_group_candidate", "section:primary_area"],
+                        }
+                    },
+                },
+                {
+                    "candidate_id": "jobs_body_text_card",
+                    "label": "Looking for work or have a Python related position",
+                    "role": "recommendation_item",
+                    "bbox": {"x": 540, "y": 280, "w": 280, "h": 130},
+                    "click_point": {"x": 680, "y": 345},
+                    "section_id": "primary_area",
+                    "source": "ocr_card_groups",
+                    "risk_class": "safe_dry_run_only",
+                    "screen_map_rule": "card_texts_grouped_as_single_candidate",
+                    "evidence": {
+                        "interaction_policy": {
+                            "allowed": None,
+                            "reasons": ["card_group_candidate", "section:primary_area"],
+                        }
+                    },
+                },
+            ],
+        },
+    }
+
+    result = vision_api._build_learn_all_targets_from_screen_map(
+        observe_reuse,
+        image_path=str(image_path),
+        vista_validation={"options": {"enabled": False}},
+    )
+
+    assert [item["candidate_id"] for item in result["targets"]] == ["search_button"]
+    assert result["filtered_non_actionable_count"] == 2
+    assert [item["candidate_id"] for item in result["review_boxes"]] == [
+        "code_sample_text_card",
+        "jobs_body_text_card",
+    ]
+    assert all(item["review_status"] == "non_actionable_review_only" for item in result["review_boxes"])
+    assert result["overlay"]["review_box_count"] == 2
+    assert result["overlay"]["target_count"] == 1
+    assert result["overlay"]["total_box_count"] == 3
+
+
+def test_learn_all_targets_renders_non_actionable_review_boxes_when_no_targets(tmp_path) -> None:
+    image_path = tmp_path / "review_only.png"
+    vision_api.Image.new("RGB", (900, 600), (255, 255, 255)).save(image_path)
+    observe_reuse = {
+        "status": "ready",
+        "observe_result": {
+            "texts": [
+                {
+                    "id": "ocr_home_title",
+                    "text": "主页",
+                    "bbox": {"x": 94, "y": 98, "w": 68, "h": 38},
+                    "confidence": 0.99,
+                },
+                {
+                    "id": "ocr_section_title",
+                    "text": "专属精选推荐",
+                    "bbox": {"x": 95, "y": 162, "w": 96, "h": 20},
+                    "confidence": 0.99,
+                },
+                {
+                    "id": "ocr_album_title",
+                    "text": "能量充电",
+                    "bbox": {"x": 135, "y": 329, "w": 162, "h": 45},
+                    "confidence": 0.99,
+                },
+            ]
+        },
+        "screen_map": {
+            "contract_version": "screen_map_v1",
+            "state_id": "apple_music_home",
+            "app_name": "apple_music",
+            "candidates": [
+                {
+                    "candidate_id": "album_card_1",
+                    "label": "ATLUS Sound Team",
+                    "role": "news_card",
+                    "bbox": {"x": 76, "y": 417, "w": 232, "h": 201},
+                    "click_point": {"x": 192, "y": 518},
+                    "section_id": "main_content",
+                    "source": "ocr_card_groups",
+                    "risk_class": "safe_dry_run_only",
+                    "screen_map_rule": "card_texts_grouped_as_single_candidate",
+                    "evidence": {
+                        "interaction_policy": {
+                            "allowed": None,
+                            "reasons": ["card_group_candidate", "section:main_content"],
+                        }
+                    },
+                },
+                {
+                    "candidate_id": "album_card_2",
+                    "label": "Death Stranding 2 Songs",
+                    "role": "recommendation_item",
+                    "bbox": {"x": 693, "y": 786, "w": 199, "h": 58},
+                    "click_point": {"x": 792, "y": 815},
+                    "section_id": "main_content",
+                    "source": "ocr_card_groups",
+                    "risk_class": "safe_dry_run_only",
+                    "screen_map_rule": "card_texts_grouped_as_single_candidate",
+                    "evidence": {
+                        "interaction_policy": {
+                            "allowed": None,
+                            "reasons": ["card_group_candidate", "section:main_content"],
+                        }
+                    },
+                },
+            ],
+        },
+    }
+
+    result = vision_api._build_learn_all_targets_from_screen_map(
+        observe_reuse,
+        image_path=str(image_path),
+        vista_validation={"options": {"enabled": False}},
+    )
+
+    assert result["status"] == "empty"
+    assert result["target_count"] == 0
+    assert result["filtered_non_actionable_count"] == 2
+    assert [item["candidate_id"] for item in result["review_boxes"][:2]] == ["album_card_1", "album_card_2"]
+    assert {item["candidate_id"] for item in result["review_boxes"]} >= {
+        "learn_ocr_text_ocr_home_title",
+        "learn_ocr_text_ocr_section_title",
+        "learn_ocr_text_ocr_album_title",
+    }
+    assert all(
+        item["execute_binding_enabled"] is False and item["artifact_is_authorization"] is False
+        for item in result["review_boxes"]
+    )
+    assert result["overlay"]["status"] == "ready"
+    assert result["overlay"]["target_count"] == 0
+    assert result["overlay"]["review_box_count"] == 5
+    assert result["overlay"]["total_box_count"] == 5
+    assert result["overlay_path"]
+
+
+def test_learn_review_boxes_keep_card_text_as_children_not_sibling_numbers(tmp_path) -> None:
+    image_path = tmp_path / "card_children.png"
+    vision_api.Image.new("RGB", (800, 500), (255, 255, 255)).save(image_path)
+    observe_reuse = {
+        "status": "ready",
+        "observe_result": {
+            "texts": [
+                {"id": "ocr_section", "text": "专属精选推荐", "bbox": {"x": 80, "y": 120, "w": 110, "h": 20}, "confidence": 0.99},
+                {"id": "ocr_album", "text": "能量充电", "bbox": {"x": 120, "y": 260, "w": 130, "h": 36}, "confidence": 0.99},
+                {"id": "ocr_artist", "text": "ATLUS Sound Team", "bbox": {"x": 120, "y": 318, "w": 150, "h": 18}, "confidence": 0.99},
+            ]
+        },
+        "screen_map": {
+            "contract_version": "screen_map_v1",
+            "state_id": "apple_music_home",
+            "app_name": "apple_music",
+            "candidates": [
+                {
+                    "candidate_id": "music_card_energy",
+                    "label": "能量充电",
+                    "role": "news_card",
+                    "bbox": {"x": 88, "y": 190, "w": 245, "h": 180},
+                    "click_point": {"x": 210, "y": 280},
+                    "section_id": "main_content",
+                    "source": "ocr_card_groups",
+                    "risk_class": "safe_dry_run_only",
+                    "screen_map_rule": "card_texts_grouped_as_single_candidate",
+                    "children": [
+                        {"child_id": "ocr_album", "label": "能量充电", "bbox": {"x": 120, "y": 260, "w": 130, "h": 36}},
+                        {"child_id": "ocr_artist", "label": "ATLUS Sound Team", "bbox": {"x": 120, "y": 318, "w": 150, "h": 18}},
+                    ],
+                    "evidence": {"interaction_policy": {"allowed": None, "reasons": ["card_group_candidate"]}},
+                }
+            ],
+        },
+    }
+
+    result = vision_api._build_learn_all_targets_from_screen_map(
+        observe_reuse,
+        image_path=str(image_path),
+        vista_validation={"options": {"enabled": False}},
+    )
+
+    by_id = {item["candidate_id"]: item for item in result["review_boxes"]}
+    assert "music_card_energy" in by_id
+    assert [item["label"] for item in by_id["music_card_energy"]["children"]] == ["能量充电", "ATLUS Sound Team"]
+    assert "learn_ocr_text_ocr_album" not in by_id
+    assert "learn_ocr_text_ocr_artist" not in by_id
+    assert "learn_ocr_text_ocr_section" in by_id
+
+
+def test_learn_review_boxes_include_left_nav_rail_icons_without_ocr(tmp_path) -> None:
+    image_path = tmp_path / "left_nav_rail.png"
+    image = vision_api.Image.new("RGB", (640, 480), (255, 255, 255))
+    draw = vision_api.ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 56, 479), fill=(245, 245, 245))
+    draw.rectangle((22, 96, 36, 110), fill=(30, 30, 30))
+    draw.rectangle((22, 146, 36, 160), fill=(30, 30, 30))
+    draw.rectangle((22, 196, 36, 210), fill=(30, 30, 30))
+    image.save(image_path)
+    observe_reuse = {
+        "status": "ready",
+        "observe_result": {"image_size": {"width": 640, "height": 480}, "texts": []},
+        "screen_map": {
+            "contract_version": "screen_map_v1",
+            "state_id": "desktop_app_home",
+            "app_name": "desktop_app",
+            "candidates": [],
+        },
+    }
+
+    result = vision_api._build_learn_all_targets_from_screen_map(
+        observe_reuse,
+        image_path=str(image_path),
+        vista_validation={"options": {"enabled": False}},
+    )
+
+    nav_boxes = [item for item in result["review_boxes"] if item["role"] == "nav_rail_icon_review_only"]
+    assert len(nav_boxes) >= 3
+    assert all(item["execute_binding_enabled"] is False for item in nav_boxes)
+    assert all(item["artifact_is_authorization"] is False for item in nav_boxes)
+
+
+def test_learn_all_targets_excludes_blocked_visual_icons_but_keeps_cards_as_review_boxes(tmp_path) -> None:
+    image_path = tmp_path / "blocked_icons_with_cards.png"
+    image = vision_api.Image.new("RGB", (900, 650), (255, 255, 255))
+    draw = vision_api.ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 58, 649), fill=(246, 246, 246))
+    draw.rectangle((18, 140, 38, 160), fill=(24, 24, 24))
+    image.save(image_path)
+    observe_reuse = {
+        "status": "ready",
+        "observe_result": {
+            "texts": [
+                {"id": "card_title", "text": "能量充电", "bbox": {"x": 180, "y": 300, "w": 110, "h": 32}, "confidence": 0.98},
+                {"id": "section_title", "text": "专属精选推荐", "bbox": {"x": 160, "y": 240, "w": 110, "h": 20}, "confidence": 0.98},
+            ]
+        },
+        "screen_map": {
+            "contract_version": "screen_map_v1",
+            "state_id": "apple_music_home",
+            "app_name": "apple_music",
+            "candidates": [
+                {
+                    "candidate_id": "visual_left_icon_home",
+                    "label": "Home",
+                    "role": "icon_button",
+                    "bbox": {"x": 16, "y": 136, "w": 24, "h": 24},
+                    "click_point": {"x": 28, "y": 148},
+                    "section_id": "left_nav_rail",
+                    "source": "top_level.ui.elements",
+                    "risk_class": "blocked",
+                    "evidence": {
+                        "interaction_policy": {
+                            "allowed": False,
+                            "reasons": ["semantic_icon_without_text_or_uia"],
+                        }
+                    },
+                },
+                {
+                    "candidate_id": "music_card_energy",
+                    "label": "能量充电",
+                    "role": "news_card",
+                    "bbox": {"x": 148, "y": 270, "w": 240, "h": 180},
+                    "click_point": {"x": 268, "y": 360},
+                    "section_id": "primary_area",
+                    "source": "ocr_card_groups",
+                    "risk_class": "safe_dry_run_only",
+                    "screen_map_rule": "card_texts_grouped_as_single_candidate",
+                    "children": [
+                        {"child_id": "card_title", "label": "能量充电", "bbox": {"x": 180, "y": 300, "w": 110, "h": 32}},
+                    ],
+                    "evidence": {"interaction_policy": {"allowed": None, "reasons": ["card_group_candidate"]}},
+                },
+            ],
+        },
+    }
+
+    result = vision_api._build_learn_all_targets_from_screen_map(
+        observe_reuse,
+        image_path=str(image_path),
+        vista_validation={"options": {"enabled": False}},
+    )
+
+    assert result["target_count"] == 0
+    assert result["filtered_blocked_review_only_count"] == 1
+    assert {item["candidate_id"] for item in result["review_boxes"]} >= {"music_card_energy"}
+    assert not any(item["candidate_id"] == "visual_left_icon_home" for item in result["targets"])
+    assert not any(item["candidate_id"] == "visual_left_icon_home" for item in result["review_boxes"])
+    assert any(item["role"] == "nav_rail_icon_review_only" for item in result["review_boxes"])
+    assert result["overlay"]["review_box_count"] >= 2
+    assert result["overlay_path"]
+
+
+def test_card_bbox_uses_contiguous_text_cluster_without_swallowing_next_heading() -> None:
+    section_bbox = {"x": 80, "y": 180, "w": 280, "h": 460}
+    texts = [
+        {"id": "title", "text": "专属推荐", "bbox": {"x": 112, "y": 435, "w": 53, "h": 17}},
+        {"id": "seed", "text": "ATLUS Sound Team", "bbox": {"x": 110, "y": 451, "w": 180, "h": 20}},
+        {"id": "artist", "text": "CthulhuSeeker", "bbox": {"x": 112, "y": 468, "w": 160, "h": 17}},
+        {"id": "more", "text": "San-Z", "bbox": {"x": 111, "y": 483, "w": 190, "h": 17}},
+        {"id": "next_heading", "text": "最近播放", "bbox": {"x": 94, "y": 579, "w": 67, "h": 21}},
+    ]
+
+    bbox = vision_api._card_bbox_for_seed(
+        texts,
+        seed_bbox={"x": 110, "y": 451, "w": 180, "h": 20},
+        seed_boxes=[{"x": 110, "y": 451, "w": 180, "h": 20}],
+        section_bbox=section_bbox,
+    )
+
+    assert bbox is not None
+    assert bbox["y"] + bbox["h"] < 560
+
+
+def test_learn_all_targets_excludes_ocr_only_text_headers_but_keeps_clear_small_buttons(tmp_path) -> None:
+    image_path = tmp_path / "ocr_text_actions.png"
+    vision_api.Image.new("RGB", (1000, 700), (255, 255, 255)).save(image_path)
+    observe_reuse = {
+        "status": "ready",
+        "screen_map": {
+            "contract_version": "screen_map_v1",
+            "state_id": "python_homepage",
+            "app_name": "python.org",
+            "candidates": [
+                {
+                    "candidate_id": "ocr_latest_news_header",
+                    "label": "Latest News",
+                    "role": "text_action",
+                    "bbox": {"x": 180, "y": 420, "w": 145, "h": 30},
+                    "click_point": {"x": 252, "y": 435},
+                    "section_id": "primary_area",
+                    "source": "ocr_text_actions",
+                    "risk_class": "safe_click_allowed",
+                    "evidence": {
+                        "interaction_policy": {"allowed": True, "reasons": ["ocr_text_candidate"]},
+                        "evidence_level": "ocr_text_only",
+                    },
+                },
+                {
+                    "candidate_id": "ocr_latest_version_text",
+                    "label": "Latest: Python 3.14.6",
+                    "role": "text_action",
+                    "bbox": {"x": 360, "y": 320, "w": 150, "h": 24},
+                    "click_point": {"x": 435, "y": 332},
+                    "section_id": "primary_area",
+                    "source": "ocr_text_actions",
+                    "risk_class": "safe_click_allowed",
+                    "evidence": {
+                        "interaction_policy": {"allowed": True, "reasons": ["ocr_text_candidate"]},
+                        "evidence_level": "ocr_text_only",
+                    },
+                },
+                {
+                    "candidate_id": "ocr_more_button",
+                    "label": ">> More",
+                    "role": "button",
+                    "bbox": {"x": 850, "y": 420, "w": 62, "h": 24},
+                    "click_point": {"x": 881, "y": 432},
+                    "section_id": "primary_area",
+                    "source": "ocr_text_actions",
+                    "risk_class": "safe_click_allowed",
+                    "screen_map_rule": "more_text_is_button",
+                    "evidence": {
+                        "interaction_policy": {"allowed": True, "reasons": ["ocr_text_candidate"]},
+                        "evidence_level": "ocr_text_only",
+                    },
+                },
+            ],
+        },
+    }
+
+    result = vision_api._build_learn_all_targets_from_screen_map(
+        observe_reuse,
+        image_path=str(image_path),
+        vista_validation={"options": {"enabled": False}},
+    )
+
+    assert [item["candidate_id"] for item in result["targets"]] == ["ocr_more_button"]
+    assert result["filtered_non_actionable_count"] == 2
+
+
+def test_learn_all_targets_excludes_ungrounded_semantic_regions(tmp_path) -> None:
+    image_path = tmp_path / "semantic_regions.png"
+    vision_api.Image.new("RGB", (1000, 700), (255, 255, 255)).save(image_path)
+    observe_reuse = {
+        "status": "ready",
+        "screen_map": {
+            "contract_version": "screen_map_v1",
+            "state_id": "python_homepage",
+            "app_name": "python.org",
+            "candidates": [
+                {
+                    "candidate_id": "semantic_search_button",
+                    "label": "Search button",
+                    "role": "button",
+                    "bbox": {"x": 620, "y": 240, "w": 70, "h": 44},
+                    "click_point": {"x": 655, "y": 262},
+                    "source": "top_level.ui.elements",
+                    "risk_class": "safe_click_allowed",
+                    "evidence": {
+                        "interaction_policy": {"allowed": True, "reasons": ["generic_action"]},
+                        "coordinate_confidence": "medium",
+                        "evidence_level": "semantic_region_only",
+                        "source_text_id": None,
+                    },
+                },
+                {
+                    "candidate_id": "grounded_download_button",
+                    "label": "Download button",
+                    "role": "button",
+                    "bbox": {"x": 140, "y": 120, "w": 120, "h": 42},
+                    "click_point": {"x": 200, "y": 141},
+                    "source": "top_level.ui.elements",
+                    "risk_class": "safe_click_allowed",
+                    "evidence": {
+                        "interaction_policy": {"allowed": True, "reasons": ["generic_action"]},
+                        "coordinate_confidence": "medium",
+                        "evidence_level": "semantic_region_only",
+                        "source_text_id": "text_download",
+                    },
+                },
+                {
+                    "candidate_id": "high_confidence_semantic_button",
+                    "label": "Docs button",
+                    "role": "button",
+                    "bbox": {"x": 320, "y": 120, "w": 95, "h": 42},
+                    "click_point": {"x": 367, "y": 141},
+                    "source": "top_level.ui.elements",
+                    "risk_class": "safe_click_allowed",
+                    "evidence": {
+                        "interaction_policy": {"allowed": True, "reasons": ["generic_action"]},
+                        "coordinate_confidence": "high",
+                        "evidence_level": "semantic_region_only",
+                        "source_text_id": None,
+                    },
+                },
+            ],
+        },
+    }
+
+    result = vision_api._build_learn_all_targets_from_screen_map(
+        observe_reuse,
+        image_path=str(image_path),
+        vista_validation={"options": {"enabled": False}},
+    )
+
+    assert [item["candidate_id"] for item in result["targets"]] == [
+        "grounded_download_button",
+        "high_confidence_semantic_button",
+    ]
+    assert result["filtered_ungrounded_count"] == 1
 
 
 def test_recognition_plan_reuses_observe_ocr_anchors_without_rescanning(monkeypatch, tmp_path) -> None:

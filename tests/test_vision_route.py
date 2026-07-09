@@ -51,6 +51,24 @@ def test_payment_word_inside_job_title_does_not_block_safe_open_detail() -> None
     assert reason == "risk_class_safe_click_allowed"
 
 
+def test_safe_click_apply_entry_allowed_but_submit_application_blocked() -> None:
+    allowed, reason = vision_api._execution_allowed_for_risk_class(
+        label="Apply",
+        role="button",
+        risk_class="safe_click_allowed",
+    )
+    blocked, blocked_reason = vision_api._execution_allowed_for_risk_class(
+        label="Submit application",
+        role="button",
+        risk_class="safe_click_allowed",
+    )
+
+    assert allowed is True
+    assert reason == "risk_class_safe_apply_entry"
+    assert blocked is False
+    assert blocked_reason == "potential_side_effect_action"
+
+
 def test_blocked_policy_low_risk_card_becomes_safe_click_candidate() -> None:
     risk_class, reasons = vision_api._risk_class_for_candidate(
         label="AI Product Engineer",

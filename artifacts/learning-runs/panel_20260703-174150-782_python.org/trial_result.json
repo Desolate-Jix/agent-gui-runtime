@@ -1,0 +1,2628 @@
+{
+  "contract_version": "learning_model_trial_v1",
+  "status": "passed",
+  "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png",
+  "image_size": {
+    "width": 2540,
+    "height": 1380
+  },
+  "app_name": "python.org",
+  "state_hint": "Python.org homepage after Learn Fast + Learn Deep calibration",
+  "validation_mode": "standard",
+  "target_score_ratio": 0.9,
+  "best_attempt_index": 0,
+  "best_score_ratio": 1.0,
+  "best_score_percent": 100.0,
+  "attempt_count": 1,
+  "attempts": [
+    {
+      "contract_version": "learning_model_trial_attempt_v1",
+      "attempt_index": 0,
+      "learning_parameters": {
+        "contract_version": "learning_parameters_v1",
+        "learning_model_profile_id": "qwen3_vl_8b_q4_k_m",
+        "temperature": 0.0,
+        "max_output_tokens": 3072,
+        "timeout_seconds": 600,
+        "learning_image_max_edge": 768,
+        "prompt_detail_mode": "compact_contract",
+        "draft_reference_alignment_threshold": 0.9,
+        "direct_use_accuracy_threshold": 0.9,
+        "artifact_posthoc_optimization_allowed": false,
+        "allow_fast_profile_fallback": false
+      },
+      "model_run": {
+        "contract_version": "learning_model_run_v1",
+        "status": "success",
+        "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+        "raw_text": "{\n  \"contract_version\": \"learning_template_draft_v1\",\n  \"image_size\": {\"width\": 768, \"height\": 417},\n  \"learning_source\": \"observe_model\",\n  \"screen_summary\": \"Python.org homepage with top navigation, search bar, and content cards for Get Started, Download, Docs, Jobs, Latest News, and Upcoming Events.\",\n  \"state_guess\": \"Python.org homepage after Learn Fast + Learn Deep calibration\",\n  \"workflow_draft\": {\n    \"states\": [\n      {\n        \"state_id\": \"s1\",\n        \"label\": \"Python.org homepage\",\n        \"page_type\": \"landing_page\"\n      }\n    ],\n    \"transitions\": [],\n    \"action_templates\": [\n      {\n        \"action_template_id\": \"a1\",\n        \"label\": \"Search input field\",\n        \"semantic_action\": \"type_text\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Search query entered into the search field\"\n      },\n      {\n        \"action_template_id\": \"a2\",\n        \"label\": \"Search button\",\n        \"semantic_action\": \"click\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Initiate search with current query\"\n      },\n      {\n        \"action_template_id\": \"a3\",\n        \"label\": \"About link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to About page\"\n      },\n      {\n        \"action_template_id\": \"a4\",\n        \"label\": \"Downloads link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Downloads page\"\n      },\n      {\n        \"action_template_id\": \"a5\",\n        \"label\": \"Documentation link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Documentation page\"\n      },\n      {\n        \"action_template_id\": \"a6\",\n        \"label\": \"Community link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Community page\"\n      },\n      {\n        \"action_template_id\": \"a7\",\n        \"label\": \"Success Stories link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Success Stories page\"\n      },\n      {\n        \"action_template_id\": \"a8\",\n        \"label\": \"News link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to News page\"\n      },\n      {\n        \"action_template_id\": \"a9\",\n        \"label\": \"Events link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Events page\"\n      },\n      {\n        \"action_template_id\": \"a10\",\n        \"label\": \"Get Started button\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Get Started page\"\n      },\n      {\n        \"action_template_id\": \"a11\",\n        \"label\": \"Download button\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Download page\"\n      },\n      {\n        \"action_template_id\": \"a12\",\n        \"label\": \"Docs link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Docs page\"\n      }\n    ],\n    \"path_patterns\": []\n  },\n  \"interface_draft\": {\n    \"regions\": [\n      {\n        \"region_id\": \"r1\",\n        \"label\": \"Search input field\",\n        \"role\": \"text_input\",\n        \"source\": \"element_search_input_field_e7d36c1c\",\n        \"click_point\": {\"x\": 1230, \"y\": 267},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r2\",\n        \"label\": \"Search button\",\n        \"role\": \"button\",\n        \"source\": \"element_search_button_7ce6e760\",\n        \"click_point\": {\"x\": 1350, \"y\": 267},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r3\",\n        \"label\": \"About link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_about_link_53812d72\",\n        \"click_point\": {\"x\": 694, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r4\",\n        \"label\": \"Downloads link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_downloads_link_fe68f0de\",\n        \"click_point\": {\"x\": 816, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r5\",\n        \"label\": \"Documentation link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_documentation_link_9381d9f3\",\n        \"click_point\": {\"x\": 934, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r6\",\n        \"label\": \"Community link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_community_link_3a1bfae9\",\n        \"click_point\": {\"x\": 1054, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r7\",\n        \"label\": \"Success Stories link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_success_stories_link_4ba17021\",\n        \"click_point\": {\"x\": 1172, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r8\",\n        \"label\": \"News link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_news_link_86a30db6\",\n        \"click_point\": {\"x\": 1272, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r9\",\n        \"label\": \"Events link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_events_link_863f346e\",\n        \"click_point\": {\"x\": 1350, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r10\",\n        \"label\": \"Get Started button\",\n        \"role\": \"button\",\n        \"source\": \"element_get_started_button_81109b8d\",\n        \"click_point\": {\"x\": 618, \"y\": 1087},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r11\",\n        \"label\": \"Download button\",\n        \"role\": \"button\",\n        \"source\": \"element_download_button_3b6c566f\",\n        \"click_point\": {\"x\": 856, \"y\": 1087},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r12\",\n        \"label\": \"Docs link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_docs_link_d633a071\",\n        \"click_point\": {\"x\": 1074, \"y\": 1087},\n        \"section_id\": \"primary_area\"\n      }\n    ],\n    \"visual_assets\": [],\n    \"dynamic_areas\": [],\n    \"danger_zones\": []\n  },\n  \"agent_decision_points\": [],\n  \"operation_skills\": [],\n  \"gate_contracts\": [],\n  \"safety\": {\n    \"observation_only\": true,\n    \"promotion_allowed\": false,\n    \"final_submit_blocked\": true,\n    \"real_clicks_performed\": 0\n  },\n  \"notes\": []\n}",
+        "model_json": {
+          "contract_version": "learning_template_draft_v1",
+          "image_size": {
+            "width": 2540,
+            "height": 1380
+          },
+          "learning_source": "observe_model",
+          "screen_summary": "Python.org homepage with top navigation, search bar, and content cards for Get Started, Download, Docs, Jobs, Latest News, and Upcoming Events.",
+          "state_guess": "Python.org homepage after Learn Fast + Learn Deep calibration",
+          "workflow_draft": {
+            "states": [
+              {
+                "state_id": "s1",
+                "label": "Python.org homepage",
+                "page_type": "landing_page"
+              }
+            ],
+            "transitions": [],
+            "action_templates": [
+              {
+                "action_template_id": "a1",
+                "label": "Search input field",
+                "semantic_action": "type_text",
+                "risk_level": "low",
+                "requires_gate": true,
+                "expected_effect": "Search query entered into the search field"
+              },
+              {
+                "action_template_id": "a2",
+                "label": "Search button",
+                "semantic_action": "click",
+                "risk_level": "low",
+                "requires_gate": true,
+                "expected_effect": "Initiate search with current query"
+              },
+              {
+                "action_template_id": "a3",
+                "label": "About link",
+                "semantic_action": "open_detail",
+                "risk_level": "low",
+                "requires_gate": true,
+                "expected_effect": "Navigate to About page"
+              },
+              {
+                "action_template_id": "a4",
+                "label": "Downloads link",
+                "semantic_action": "open_detail",
+                "risk_level": "low",
+                "requires_gate": true,
+                "expected_effect": "Navigate to Downloads page"
+              },
+              {
+                "action_template_id": "a5",
+                "label": "Documentation link",
+                "semantic_action": "open_detail",
+                "risk_level": "low",
+                "requires_gate": true,
+                "expected_effect": "Navigate to Documentation page"
+              },
+              {
+                "action_template_id": "a6",
+                "label": "Community link",
+                "semantic_action": "open_detail",
+                "risk_level": "low",
+                "requires_gate": true,
+                "expected_effect": "Navigate to Community page"
+              },
+              {
+                "action_template_id": "a7",
+                "label": "Success Stories link",
+                "semantic_action": "open_detail",
+                "risk_level": "low",
+                "requires_gate": true,
+                "expected_effect": "Navigate to Success Stories page"
+              },
+              {
+                "action_template_id": "a8",
+                "label": "News link",
+                "semantic_action": "open_detail",
+                "risk_level": "low",
+                "requires_gate": true,
+                "expected_effect": "Navigate to News page"
+              },
+              {
+                "action_template_id": "a9",
+                "label": "Events link",
+                "semantic_action": "open_detail",
+                "risk_level": "low",
+                "requires_gate": true,
+                "expected_effect": "Navigate to Events page"
+              },
+              {
+                "action_template_id": "a10",
+                "label": "Get Started button",
+                "semantic_action": "open_detail",
+                "risk_level": "low",
+                "requires_gate": true,
+                "expected_effect": "Navigate to Get Started page"
+              },
+              {
+                "action_template_id": "a11",
+                "label": "Download button",
+                "semantic_action": "open_detail",
+                "risk_level": "low",
+                "requires_gate": true,
+                "expected_effect": "Navigate to Download page"
+              },
+              {
+                "action_template_id": "a12",
+                "label": "Docs link",
+                "semantic_action": "open_detail",
+                "risk_level": "low",
+                "requires_gate": true,
+                "expected_effect": "Navigate to Docs page"
+              }
+            ],
+            "path_patterns": []
+          },
+          "interface_draft": {
+            "regions": [
+              {
+                "region_id": "r1",
+                "label": "Search input field",
+                "role": "text_input",
+                "source": "element_search_input_field_e7d36c1c",
+                "click_point": {
+                  "x": 1230,
+                  "y": 267
+                },
+                "section_id": "primary_area"
+              },
+              {
+                "region_id": "r2",
+                "label": "Search button",
+                "role": "button",
+                "source": "element_search_button_7ce6e760",
+                "click_point": {
+                  "x": 1350,
+                  "y": 267
+                },
+                "section_id": "primary_area"
+              },
+              {
+                "region_id": "r3",
+                "label": "About link",
+                "role": "menu_item",
+                "source": "element_about_link_53812d72",
+                "click_point": {
+                  "x": 694,
+                  "y": 378
+                },
+                "section_id": "primary_area"
+              },
+              {
+                "region_id": "r4",
+                "label": "Downloads link",
+                "role": "menu_item",
+                "source": "element_downloads_link_fe68f0de",
+                "click_point": {
+                  "x": 816,
+                  "y": 378
+                },
+                "section_id": "primary_area"
+              },
+              {
+                "region_id": "r5",
+                "label": "Documentation link",
+                "role": "menu_item",
+                "source": "element_documentation_link_9381d9f3",
+                "click_point": {
+                  "x": 934,
+                  "y": 378
+                },
+                "section_id": "primary_area"
+              },
+              {
+                "region_id": "r6",
+                "label": "Community link",
+                "role": "menu_item",
+                "source": "element_community_link_3a1bfae9",
+                "click_point": {
+                  "x": 1054,
+                  "y": 378
+                },
+                "section_id": "primary_area"
+              },
+              {
+                "region_id": "r7",
+                "label": "Success Stories link",
+                "role": "menu_item",
+                "source": "element_success_stories_link_4ba17021",
+                "click_point": {
+                  "x": 1172,
+                  "y": 378
+                },
+                "section_id": "primary_area"
+              },
+              {
+                "region_id": "r8",
+                "label": "News link",
+                "role": "menu_item",
+                "source": "element_news_link_86a30db6",
+                "click_point": {
+                  "x": 1272,
+                  "y": 378
+                },
+                "section_id": "primary_area"
+              },
+              {
+                "region_id": "r9",
+                "label": "Events link",
+                "role": "menu_item",
+                "source": "element_events_link_863f346e",
+                "click_point": {
+                  "x": 1350,
+                  "y": 378
+                },
+                "section_id": "primary_area"
+              },
+              {
+                "region_id": "r10",
+                "label": "Get Started button",
+                "role": "button",
+                "source": "element_get_started_button_81109b8d",
+                "click_point": {
+                  "x": 618,
+                  "y": 1087
+                },
+                "section_id": "primary_area"
+              },
+              {
+                "region_id": "r11",
+                "label": "Download button",
+                "role": "button",
+                "source": "element_download_button_3b6c566f",
+                "click_point": {
+                  "x": 856,
+                  "y": 1087
+                },
+                "section_id": "primary_area"
+              },
+              {
+                "region_id": "r12",
+                "label": "Docs link",
+                "role": "menu_item",
+                "source": "element_docs_link_d633a071",
+                "click_point": {
+                  "x": 1074,
+                  "y": 1087
+                },
+                "section_id": "primary_area"
+              }
+            ],
+            "visual_assets": [],
+            "dynamic_areas": [],
+            "danger_zones": []
+          },
+          "agent_decision_points": [],
+          "operation_skills": [],
+          "gate_contracts": [],
+          "safety": {
+            "observation_only": true,
+            "promotion_allowed": false,
+            "final_submit_blocked": true,
+            "real_clicks_performed": 0
+          },
+          "notes": [],
+          "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+          "regions": [],
+          "targets": [],
+          "observers": [],
+          "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+        },
+        "raw_response": {
+          "contract_version": "provider_model_trace_v1",
+          "provider": "local",
+          "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+          "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png",
+          "raw_text": "{\n  \"contract_version\": \"learning_template_draft_v1\",\n  \"image_size\": {\"width\": 768, \"height\": 417},\n  \"learning_source\": \"observe_model\",\n  \"screen_summary\": \"Python.org homepage with top navigation, search bar, and content cards for Get Started, Download, Docs, Jobs, Latest News, and Upcoming Events.\",\n  \"state_guess\": \"Python.org homepage after Learn Fast + Learn Deep calibration\",\n  \"workflow_draft\": {\n    \"states\": [\n      {\n        \"state_id\": \"s1\",\n        \"label\": \"Python.org homepage\",\n        \"page_type\": \"landing_page\"\n      }\n    ],\n    \"transitions\": [],\n    \"action_templates\": [\n      {\n        \"action_template_id\": \"a1\",\n        \"label\": \"Search input field\",\n        \"semantic_action\": \"type_text\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Search query entered into the search field\"\n      },\n      {\n        \"action_template_id\": \"a2\",\n        \"label\": \"Search button\",\n        \"semantic_action\": \"click\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Initiate search with current query\"\n      },\n      {\n        \"action_template_id\": \"a3\",\n        \"label\": \"About link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to About page\"\n      },\n      {\n        \"action_template_id\": \"a4\",\n        \"label\": \"Downloads link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Downloads page\"\n      },\n      {\n        \"action_template_id\": \"a5\",\n        \"label\": \"Documentation link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Documentation page\"\n      },\n      {\n        \"action_template_id\": \"a6\",\n        \"label\": \"Community link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Community page\"\n      },\n      {\n        \"action_template_id\": \"a7\",\n        \"label\": \"Success Stories link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Success Stories page\"\n      },\n      {\n        \"action_template_id\": \"a8\",\n        \"label\": \"News link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to News page\"\n      },\n      {\n        \"action_template_id\": \"a9\",\n        \"label\": \"Events link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Events page\"\n      },\n      {\n        \"action_template_id\": \"a10\",\n        \"label\": \"Get Started button\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Get Started page\"\n      },\n      {\n        \"action_template_id\": \"a11\",\n        \"label\": \"Download button\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Download page\"\n      },\n      {\n        \"action_template_id\": \"a12\",\n        \"label\": \"Docs link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Docs page\"\n      }\n    ],\n    \"path_patterns\": []\n  },\n  \"interface_draft\": {\n    \"regions\": [\n      {\n        \"region_id\": \"r1\",\n        \"label\": \"Search input field\",\n        \"role\": \"text_input\",\n        \"source\": \"element_search_input_field_e7d36c1c\",\n        \"click_point\": {\"x\": 1230, \"y\": 267},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r2\",\n        \"label\": \"Search button\",\n        \"role\": \"button\",\n        \"source\": \"element_search_button_7ce6e760\",\n        \"click_point\": {\"x\": 1350, \"y\": 267},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r3\",\n        \"label\": \"About link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_about_link_53812d72\",\n        \"click_point\": {\"x\": 694, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r4\",\n        \"label\": \"Downloads link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_downloads_link_fe68f0de\",\n        \"click_point\": {\"x\": 816, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r5\",\n        \"label\": \"Documentation link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_documentation_link_9381d9f3\",\n        \"click_point\": {\"x\": 934, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r6\",\n        \"label\": \"Community link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_community_link_3a1bfae9\",\n        \"click_point\": {\"x\": 1054, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r7\",\n        \"label\": \"Success Stories link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_success_stories_link_4ba17021\",\n        \"click_point\": {\"x\": 1172, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r8\",\n        \"label\": \"News link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_news_link_86a30db6\",\n        \"click_point\": {\"x\": 1272, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r9\",\n        \"label\": \"Events link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_events_link_863f346e\",\n        \"click_point\": {\"x\": 1350, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r10\",\n        \"label\": \"Get Started button\",\n        \"role\": \"button\",\n        \"source\": \"element_get_started_button_81109b8d\",\n        \"click_point\": {\"x\": 618, \"y\": 1087},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r11\",\n        \"label\": \"Download button\",\n        \"role\": \"button\",\n        \"source\": \"element_download_button_3b6c566f\",\n        \"click_point\": {\"x\": 856, \"y\": 1087},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r12\",\n        \"label\": \"Docs link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_docs_link_d633a071\",\n        \"click_point\": {\"x\": 1074, \"y\": 1087},\n        \"section_id\": \"primary_area\"\n      }\n    ],\n    \"visual_assets\": [],\n    \"dynamic_areas\": [],\n    \"danger_zones\": []\n  },\n  \"agent_decision_points\": [],\n  \"operation_skills\": [],\n  \"gate_contracts\": [],\n  \"safety\": {\n    \"observation_only\": true,\n    \"promotion_allowed\": false,\n    \"final_submit_blocked\": true,\n    \"real_clicks_performed\": 0\n  },\n  \"notes\": []\n}",
+          "model_json": {
+            "contract_version": "learning_template_draft_v1",
+            "image_size": {
+              "width": 2540,
+              "height": 1380
+            },
+            "learning_source": "observe_model",
+            "screen_summary": "Python.org homepage with top navigation, search bar, and content cards for Get Started, Download, Docs, Jobs, Latest News, and Upcoming Events.",
+            "state_guess": "Python.org homepage after Learn Fast + Learn Deep calibration",
+            "workflow_draft": {
+              "states": [
+                {
+                  "state_id": "s1",
+                  "label": "Python.org homepage",
+                  "page_type": "landing_page"
+                }
+              ],
+              "transitions": [],
+              "action_templates": [
+                {
+                  "action_template_id": "a1",
+                  "label": "Search input field",
+                  "semantic_action": "type_text",
+                  "risk_level": "low",
+                  "requires_gate": true,
+                  "expected_effect": "Search query entered into the search field"
+                },
+                {
+                  "action_template_id": "a2",
+                  "label": "Search button",
+                  "semantic_action": "click",
+                  "risk_level": "low",
+                  "requires_gate": true,
+                  "expected_effect": "Initiate search with current query"
+                },
+                {
+                  "action_template_id": "a3",
+                  "label": "About link",
+                  "semantic_action": "open_detail",
+                  "risk_level": "low",
+                  "requires_gate": true,
+                  "expected_effect": "Navigate to About page"
+                },
+                {
+                  "action_template_id": "a4",
+                  "label": "Downloads link",
+                  "semantic_action": "open_detail",
+                  "risk_level": "low",
+                  "requires_gate": true,
+                  "expected_effect": "Navigate to Downloads page"
+                },
+                {
+                  "action_template_id": "a5",
+                  "label": "Documentation link",
+                  "semantic_action": "open_detail",
+                  "risk_level": "low",
+                  "requires_gate": true,
+                  "expected_effect": "Navigate to Documentation page"
+                },
+                {
+                  "action_template_id": "a6",
+                  "label": "Community link",
+                  "semantic_action": "open_detail",
+                  "risk_level": "low",
+                  "requires_gate": true,
+                  "expected_effect": "Navigate to Community page"
+                },
+                {
+                  "action_template_id": "a7",
+                  "label": "Success Stories link",
+                  "semantic_action": "open_detail",
+                  "risk_level": "low",
+                  "requires_gate": true,
+                  "expected_effect": "Navigate to Success Stories page"
+                },
+                {
+                  "action_template_id": "a8",
+                  "label": "News link",
+                  "semantic_action": "open_detail",
+                  "risk_level": "low",
+                  "requires_gate": true,
+                  "expected_effect": "Navigate to News page"
+                },
+                {
+                  "action_template_id": "a9",
+                  "label": "Events link",
+                  "semantic_action": "open_detail",
+                  "risk_level": "low",
+                  "requires_gate": true,
+                  "expected_effect": "Navigate to Events page"
+                },
+                {
+                  "action_template_id": "a10",
+                  "label": "Get Started button",
+                  "semantic_action": "open_detail",
+                  "risk_level": "low",
+                  "requires_gate": true,
+                  "expected_effect": "Navigate to Get Started page"
+                },
+                {
+                  "action_template_id": "a11",
+                  "label": "Download button",
+                  "semantic_action": "open_detail",
+                  "risk_level": "low",
+                  "requires_gate": true,
+                  "expected_effect": "Navigate to Download page"
+                },
+                {
+                  "action_template_id": "a12",
+                  "label": "Docs link",
+                  "semantic_action": "open_detail",
+                  "risk_level": "low",
+                  "requires_gate": true,
+                  "expected_effect": "Navigate to Docs page"
+                }
+              ],
+              "path_patterns": []
+            },
+            "interface_draft": {
+              "regions": [
+                {
+                  "region_id": "r1",
+                  "label": "Search input field",
+                  "role": "text_input",
+                  "source": "element_search_input_field_e7d36c1c",
+                  "click_point": {
+                    "x": 1230,
+                    "y": 267
+                  },
+                  "section_id": "primary_area"
+                },
+                {
+                  "region_id": "r2",
+                  "label": "Search button",
+                  "role": "button",
+                  "source": "element_search_button_7ce6e760",
+                  "click_point": {
+                    "x": 1350,
+                    "y": 267
+                  },
+                  "section_id": "primary_area"
+                },
+                {
+                  "region_id": "r3",
+                  "label": "About link",
+                  "role": "menu_item",
+                  "source": "element_about_link_53812d72",
+                  "click_point": {
+                    "x": 694,
+                    "y": 378
+                  },
+                  "section_id": "primary_area"
+                },
+                {
+                  "region_id": "r4",
+                  "label": "Downloads link",
+                  "role": "menu_item",
+                  "source": "element_downloads_link_fe68f0de",
+                  "click_point": {
+                    "x": 816,
+                    "y": 378
+                  },
+                  "section_id": "primary_area"
+                },
+                {
+                  "region_id": "r5",
+                  "label": "Documentation link",
+                  "role": "menu_item",
+                  "source": "element_documentation_link_9381d9f3",
+                  "click_point": {
+                    "x": 934,
+                    "y": 378
+                  },
+                  "section_id": "primary_area"
+                },
+                {
+                  "region_id": "r6",
+                  "label": "Community link",
+                  "role": "menu_item",
+                  "source": "element_community_link_3a1bfae9",
+                  "click_point": {
+                    "x": 1054,
+                    "y": 378
+                  },
+                  "section_id": "primary_area"
+                },
+                {
+                  "region_id": "r7",
+                  "label": "Success Stories link",
+                  "role": "menu_item",
+                  "source": "element_success_stories_link_4ba17021",
+                  "click_point": {
+                    "x": 1172,
+                    "y": 378
+                  },
+                  "section_id": "primary_area"
+                },
+                {
+                  "region_id": "r8",
+                  "label": "News link",
+                  "role": "menu_item",
+                  "source": "element_news_link_86a30db6",
+                  "click_point": {
+                    "x": 1272,
+                    "y": 378
+                  },
+                  "section_id": "primary_area"
+                },
+                {
+                  "region_id": "r9",
+                  "label": "Events link",
+                  "role": "menu_item",
+                  "source": "element_events_link_863f346e",
+                  "click_point": {
+                    "x": 1350,
+                    "y": 378
+                  },
+                  "section_id": "primary_area"
+                },
+                {
+                  "region_id": "r10",
+                  "label": "Get Started button",
+                  "role": "button",
+                  "source": "element_get_started_button_81109b8d",
+                  "click_point": {
+                    "x": 618,
+                    "y": 1087
+                  },
+                  "section_id": "primary_area"
+                },
+                {
+                  "region_id": "r11",
+                  "label": "Download button",
+                  "role": "button",
+                  "source": "element_download_button_3b6c566f",
+                  "click_point": {
+                    "x": 856,
+                    "y": 1087
+                  },
+                  "section_id": "primary_area"
+                },
+                {
+                  "region_id": "r12",
+                  "label": "Docs link",
+                  "role": "menu_item",
+                  "source": "element_docs_link_d633a071",
+                  "click_point": {
+                    "x": 1074,
+                    "y": 1087
+                  },
+                  "section_id": "primary_area"
+                }
+              ],
+              "visual_assets": [],
+              "dynamic_areas": [],
+              "danger_zones": []
+            },
+            "agent_decision_points": [],
+            "operation_skills": [],
+            "gate_contracts": [],
+            "safety": {
+              "observation_only": true,
+              "promotion_allowed": false,
+              "final_submit_blocked": true,
+              "real_clicks_performed": 0
+            },
+            "notes": [],
+            "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            "regions": [],
+            "targets": [],
+            "observers": [],
+            "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+          },
+          "endpoint_response": {
+            "choices": [
+              {
+                "finish_reason": "stop",
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "{\n  \"contract_version\": \"learning_template_draft_v1\",\n  \"image_size\": {\"width\": 768, \"height\": 417},\n  \"learning_source\": \"observe_model\",\n  \"screen_summary\": \"Python.org homepage with top navigation, search bar, and content cards for Get Started, Download, Docs, Jobs, Latest News, and Upcoming Events.\",\n  \"state_guess\": \"Python.org homepage after Learn Fast + Learn Deep calibration\",\n  \"workflow_draft\": {\n    \"states\": [\n      {\n        \"state_id\": \"s1\",\n        \"label\": \"Python.org homepage\",\n        \"page_type\": \"landing_page\"\n      }\n    ],\n    \"transitions\": [],\n    \"action_templates\": [\n      {\n        \"action_template_id\": \"a1\",\n        \"label\": \"Search input field\",\n        \"semantic_action\": \"type_text\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Search query entered into the search field\"\n      },\n      {\n        \"action_template_id\": \"a2\",\n        \"label\": \"Search button\",\n        \"semantic_action\": \"click\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Initiate search with current query\"\n      },\n      {\n        \"action_template_id\": \"a3\",\n        \"label\": \"About link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to About page\"\n      },\n      {\n        \"action_template_id\": \"a4\",\n        \"label\": \"Downloads link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Downloads page\"\n      },\n      {\n        \"action_template_id\": \"a5\",\n        \"label\": \"Documentation link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Documentation page\"\n      },\n      {\n        \"action_template_id\": \"a6\",\n        \"label\": \"Community link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Community page\"\n      },\n      {\n        \"action_template_id\": \"a7\",\n        \"label\": \"Success Stories link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Success Stories page\"\n      },\n      {\n        \"action_template_id\": \"a8\",\n        \"label\": \"News link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to News page\"\n      },\n      {\n        \"action_template_id\": \"a9\",\n        \"label\": \"Events link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Events page\"\n      },\n      {\n        \"action_template_id\": \"a10\",\n        \"label\": \"Get Started button\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Get Started page\"\n      },\n      {\n        \"action_template_id\": \"a11\",\n        \"label\": \"Download button\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Download page\"\n      },\n      {\n        \"action_template_id\": \"a12\",\n        \"label\": \"Docs link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Docs page\"\n      }\n    ],\n    \"path_patterns\": []\n  },\n  \"interface_draft\": {\n    \"regions\": [\n      {\n        \"region_id\": \"r1\",\n        \"label\": \"Search input field\",\n        \"role\": \"text_input\",\n        \"source\": \"element_search_input_field_e7d36c1c\",\n        \"click_point\": {\"x\": 1230, \"y\": 267},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r2\",\n        \"label\": \"Search button\",\n        \"role\": \"button\",\n        \"source\": \"element_search_button_7ce6e760\",\n        \"click_point\": {\"x\": 1350, \"y\": 267},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r3\",\n        \"label\": \"About link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_about_link_53812d72\",\n        \"click_point\": {\"x\": 694, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r4\",\n        \"label\": \"Downloads link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_downloads_link_fe68f0de\",\n        \"click_point\": {\"x\": 816, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r5\",\n        \"label\": \"Documentation link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_documentation_link_9381d9f3\",\n        \"click_point\": {\"x\": 934, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r6\",\n        \"label\": \"Community link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_community_link_3a1bfae9\",\n        \"click_point\": {\"x\": 1054, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r7\",\n        \"label\": \"Success Stories link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_success_stories_link_4ba17021\",\n        \"click_point\": {\"x\": 1172, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r8\",\n        \"label\": \"News link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_news_link_86a30db6\",\n        \"click_point\": {\"x\": 1272, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r9\",\n        \"label\": \"Events link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_events_link_863f346e\",\n        \"click_point\": {\"x\": 1350, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r10\",\n        \"label\": \"Get Started button\",\n        \"role\": \"button\",\n        \"source\": \"element_get_started_button_81109b8d\",\n        \"click_point\": {\"x\": 618, \"y\": 1087},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r11\",\n        \"label\": \"Download button\",\n        \"role\": \"button\",\n        \"source\": \"element_download_button_3b6c566f\",\n        \"click_point\": {\"x\": 856, \"y\": 1087},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r12\",\n        \"label\": \"Docs link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_docs_link_d633a071\",\n        \"click_point\": {\"x\": 1074, \"y\": 1087},\n        \"section_id\": \"primary_area\"\n      }\n    ],\n    \"visual_assets\": [],\n    \"dynamic_areas\": [],\n    \"danger_zones\": []\n  },\n  \"agent_decision_points\": [],\n  \"operation_skills\": [],\n  \"gate_contracts\": [],\n  \"safety\": {\n    \"observation_only\": true,\n    \"promotion_allowed\": false,\n    \"final_submit_blocked\": true,\n    \"real_clicks_performed\": 0\n  },\n  \"notes\": []\n}"
+                }
+              }
+            ],
+            "created": 1783057310,
+            "model": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            "system_fingerprint": "b8892-0d0764dfd",
+            "object": "chat.completion",
+            "usage": {
+              "completion_tokens": 1894,
+              "prompt_tokens": 5781,
+              "total_tokens": 7675,
+              "prompt_tokens_details": {
+                "cached_tokens": 55
+              }
+            },
+            "id": "chatcmpl-22uP45nskf4gTuMJPwWwMUxgFa43QzoQ",
+            "timings": {
+              "cache_n": 55,
+              "prompt_n": 5726,
+              "prompt_ms": 1814.089,
+              "prompt_per_token_ms": 0.3168161019909186,
+              "prompt_per_second": 3156.4052259839514,
+              "predicted_n": 1894,
+              "predicted_ms": 30713.606,
+              "predicted_per_token_ms": 16.21626504751848,
+              "predicted_per_second": 61.66648097263474
+            }
+          },
+          "attempts": [
+            {
+              "tag": "learning_draft",
+              "compact_prompt": false,
+              "max_regions": 8,
+              "requested_max_edge": 1280,
+              "inference_image_size": {
+                "width": 768,
+                "height": 417
+              },
+              "original_image_size": {
+                "width": 2540,
+                "height": 1380
+              },
+              "model_io": {
+                "contract_version": "model_io_attempt_v1",
+                "status": "success",
+                "provider": "local",
+                "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                "endpoint": "http://127.0.0.1:1240/v1/chat/completions",
+                "task": "learn_template_draft",
+                "app_name": "python.org",
+                "goal": "learn a reusable read-only path graph draft for the Python.org homepage using calibrated targets",
+                "state_hint": "Python.org homepage after Learn Fast + Learn Deep calibration",
+                "provider_mode": "local_understanding",
+                "attempt": {
+                  "tag": "learning_draft",
+                  "compact_prompt": false,
+                  "max_regions": 8,
+                  "requested_max_edge": 1280
+                },
+                "input": {
+                  "image_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png",
+                  "inference_image_path": "C:\\Users\\DesolateJix\\AppData\\Local\\Temp\\vision-inference-f_4q12nq\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036__1280__learn-768.png",
+                  "original_image_size": {
+                    "width": 2540,
+                    "height": 1380
+                  },
+                  "inference_image_size": {
+                    "width": 768,
+                    "height": 417
+                  },
+                  "max_tokens": 3072,
+                  "temperature": 0.0,
+                  "prompt": "Return JSON only. You are learning a reusable GUI workflow draft from the screenshot.\nDo not authorize actions. Do not copy an existing template. Keep arrays focused but demo-useful: prefer 4-8 useful regions/actions when calibrated evidence is available.\n\nInput: app=python.org; state=Python.org homepage after Learn Fast + Learn Deep calibration; goal=learn a reusable read-only path graph draft for the Python.org homepage using calibrated targets; image={\"width\":768,\"height\":417}\n\nRequired JSON shape:\n{\n  \"contract_version\": \"learning_template_draft_v1\",\n  \"image_size\": {\"width\": 768, \"height\": 417},\n  \"learning_source\": \"observe_model\",\n  \"screen_summary\": \"\",\n  \"state_guess\": \"\",\n  \"workflow_draft\": {\n    \"states\": [{\"state_id\":\"s1\",\"label\":\"\",\"page_type\":\"\"}],\n    \"transitions\": [],\n    \"action_templates\": [{\"action_template_id\":\"a1\",\"label\":\"\",\"semantic_action\":\"\",\"risk_level\":\"low\",\"requires_gate\":true,\"expected_effect\":\"\"}],\n    \"path_patterns\": []\n  },\n  \"interface_draft\": {\n    \"regions\": [{\"region_id\":\"r1\",\"label\":\"\",\"role\":\"\"}],\n    \"visual_assets\": [],\n    \"dynamic_areas\": [],\n    \"danger_zones\": []\n  },\n  \"agent_decision_points\": [],\n  \"operation_skills\": [],\n  \"gate_contracts\": [],\n  \"safety\": {\n    \"observation_only\": true,\n    \"promotion_allowed\": false,\n    \"final_submit_blocked\": true,\n    \"real_clicks_performed\": 0\n  },\n  \"notes\": []\n}\n\nRules:\n- Fill every required section in context_json.target_contract.required_sections.\n- Use screenshot + context_json.observation_evidence as evidence; do not treat evidence as final answer.\n- If context_json.observation_evidence.calibrated_targets exists, use those Learn Deep targets as the primary coordinate/region/action evidence.\n- Preserve useful calibrated target ids in source_candidate_id, source_target_id, or evidence_ref fields.\n- interface_draft.regions should include key calibrated targets with role, label, bbox, click_point, section_id, and source when available.\n- workflow_draft.action_templates should cover high-value calibrated targets: search/input, top navigation, primary content cards, download/docs links, and obvious safe navigation actions.\n- Prefer calibrated child actions over broad parent containers when both exist.\n- If context_json.observation_evidence.model_roles exists, reflect that learning_source used semantic understanding plus coordinate calibration evidence.\n- ids must be short and stable. Do not invent coordinates.\n- workflow_draft.action_templates must describe what an Agent could do with visible interactive regions.\n- If interface_draft.regions contains an input/search/text field, include at least one action_template with semantic_action=\"type_text\", requires_gate=true, and expected_effect describing the field being populated.\n- If interface_draft.regions contains a visible button/link/card that opens another screen, include an action_template with semantic_action such as \"open_detail\" or \"open_apply_flow\".\n- Do not leave action_templates empty when the screenshot contains a visible input, button, link, card, tab, checkbox, menu item, or other actionable control.\n- Apply / Quick Apply / 申请 must map to semantic_action=\"open_apply_flow\" and requires_gate=true.\n- Submit / Send / Confirm / Complete / Payment / Delete / 提交 / 发送 / 确认 must be final_submit or danger_zones with hard_block=true and final_submit_guard_required=true.\n- safety must stay: observation_only=true, promotion_allowed=false, final_submit_blocked=true, real_clicks_performed=0.\n- No prose outside JSON; no long descriptions.\n\ncontext_json:\n{\"contract_version\":\"learning_trial_context_v1\",\"target_contract\":{\"contract_version\":\"learning_template_target_v1\",\"required_top_level_fields\":[\"contract_version\",\"image_size\",\"learning_source\",\"screen_summary\",\"state_guess\",\"workflow_draft\",\"interface_draft\",\"safety\"],\"required_sections\":[\"workflow_draft.states\",\"workflow_draft.action_templates\",\"interface_draft.regions\",\"safety\"],\"expected_actions\":[],\"expected_visible_text\":[],\"reference_template\":null,\"require_expected_actions_for_pass\":false,\"draft_reference_alignment_threshold\":0.9,\"direct_use_accuracy_threshold\":0.9,\"human_adjudication\":null},\"observation_evidence\":{\"contract_version\":\"panel_learning_draft_observation_evidence_v1\",\"evidence_source\":\"panel_current_learn_trace\",\"model_roles\":{\"screen_understanding\":{\"stage\":\"Learn Fast\",\"model_profile_id\":\"qwen3-vl-8b-instruct\",\"expected_model_family\":\"8B\",\"trace_path\":\"D:\\\\agent-gui-runtime\\\\logs\\\\traces\\\\vision\\\\20260703-173955-882461__learn-mode-fast-observe__python-org.json\"},\"coordinate_calibration\":{\"stage\":\"Learn Deep\",\"model_profile_id\":\"vista_4b_transformers\",\"expected_model_family\":\"4B\",\"trace_path\":\"D:\\\\agent-gui-runtime\\\\logs\\\\traces\\\\vision\\\\20260703-174008-737067__learn-mode-deep-locate__python-org.json\"}},\"current_image_path\":\"D:\\\\agent-gui-runtime\\\\artifacts\\\\screenshots\\\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png\",\"coordinate_overlay_path\":\"D:\\\\agent-gui-runtime\\\\artifacts\\\\review-overlays\\\\state-b8bed884c84100e8-learn-targets__learn-target-coordinates__20260703-174008-660067.png\",\"learn_all_targets_summary\":{\"status\":\"ready\",\"target_count\":35,\"validated_count\":35,\"invalid_count\":0,\"filtered_browser_chrome_count\":3,\"filtered_noise_count\":0,\"visual_overlap_removal_count\":2},\"calibrated_targets\":[{\"candidate_id\":\"element_search_input_field_e7d36c1c\",\"label\":\"Search input field\",\"role\":\"text_input\",\"semantic_action\":\"\",\"bbox\":{\"x\":1137,\"y\":244,\"w\":185,\"h\":46},\"click_point\":{\"x\":1230,\"y\":267},\"section_id\":\"primary_area\",\"source\":\"top_level.ui.elements\",\"confidence\":0.637,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"failed\"},{\"candidate_id\":\"element_search_button_7ce6e760\",\"label\":\"Search button\",\"role\":\"button\",\"semantic_action\":\"\",\"bbox\":{\"x\":1322,\"y\":244,\"w\":57,\"h\":46},\"click_point\":{\"x\":1350,\"y\":267},\"section_id\":\"primary_area\",\"source\":\"top_level.ui.elements\",\"confidence\":0.637,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"\"},{\"candidate_id\":\"element_about_link_53812d72\",\"label\":\"About link\",\"role\":\"menu_item\",\"semantic_action\":\"\",\"bbox\":{\"x\":661,\"y\":363,\"w\":65,\"h\":30},\"click_point\":{\"x\":694,\"y\":378},\"section_id\":\"primary_area\",\"source\":\"top_level.ui.elements\",\"confidence\":0.6305,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"\"},{\"candidate_id\":\"element_downloads_link_fe68f0de\",\"label\":\"Downloads link\",\"role\":\"menu_item\",\"semantic_action\":\"\",\"bbox\":{\"x\":766,\"y\":363,\"w\":99,\"h\":30},\"click_point\":{\"x\":816,\"y\":378},\"section_id\":\"primary_area\",\"source\":\"top_level.ui.elements\",\"confidence\":0.6305,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"\"},{\"candidate_id\":\"element_documentation_link_9381d9f3\",\"label\":\"Documentation link\",\"role\":\"menu_item\",\"semantic_action\":\"\",\"bbox\":{\"x\":885,\"y\":363,\"w\":99,\"h\":30},\"click_point\":{\"x\":934,\"y\":378},\"section_id\":\"primary_area\",\"source\":\"top_level.ui.elements\",\"confidence\":0.6305,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"\"},{\"candidate_id\":\"element_community_link_3a1bfae9\",\"label\":\"Community link\",\"role\":\"menu_item\",\"semantic_action\":\"\",\"bbox\":{\"x\":1004,\"y\":363,\"w\":99,\"h\":30},\"click_point\":{\"x\":1054,\"y\":378},\"section_id\":\"primary_area\",\"source\":\"top_level.ui.elements\",\"confidence\":0.6305,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"\"},{\"candidate_id\":\"element_success_stories_link_4ba17021\",\"label\":\"Success Stories link\",\"role\":\"menu_item\",\"semantic_action\":\"\",\"bbox\":{\"x\":1123,\"y\":363,\"w\":99,\"h\":30},\"click_point\":{\"x\":1172,\"y\":378},\"section_id\":\"primary_area\",\"source\":\"top_level.ui.elements\",\"confidence\":0.6305,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"\"},{\"candidate_id\":\"element_news_link_86a30db6\",\"label\":\"News link\",\"role\":\"menu_item\",\"semantic_action\":\"\",\"bbox\":{\"x\":1242,\"y\":363,\"w\":60,\"h\":30},\"click_point\":{\"x\":1272,\"y\":378},\"section_id\":\"primary_area\",\"source\":\"top_level.ui.elements\",\"confidence\":0.6305,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"\"},{\"candidate_id\":\"element_events_link_863f346e\",\"label\":\"Events link\",\"role\":\"menu_item\",\"semantic_action\":\"\",\"bbox\":{\"x\":1322,\"y\":363,\"w\":57,\"h\":30},\"click_point\":{\"x\":1350,\"y\":378},\"section_id\":\"primary_area\",\"source\":\"top_level.ui.elements\",\"confidence\":0.6305,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"\"},{\"candidate_id\":\"element_get_started_button_81109b8d\",\"label\":\"Get Started button\",\"role\":\"button\",\"semantic_action\":\"\",\"bbox\":{\"x\":568,\"y\":1072,\"w\":99,\"h\":30},\"click_point\":{\"x\":618,\"y\":1087},\"section_id\":\"primary_area\",\"source\":\"top_level.ui.elements\",\"confidence\":0.624,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"\"},{\"candidate_id\":\"element_download_button_3b6c566f\",\"label\":\"Download button\",\"role\":\"button\",\"semantic_action\":\"\",\"bbox\":{\"x\":806,\"y\":1072,\"w\":99,\"h\":30},\"click_point\":{\"x\":856,\"y\":1087},\"section_id\":\"primary_area\",\"source\":\"top_level.ui.elements\",\"confidence\":0.624,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"\"},{\"candidate_id\":\"element_docs_link_d633a071\",\"label\":\"Docs link\",\"role\":\"menu_item\",\"semantic_action\":\"\",\"bbox\":{\"x\":1044,\"y\":1072,\"w\":59,\"h\":30},\"click_point\":{\"x\":1074,\"y\":1087},\"section_id\":\"primary_area\",\"source\":\"top_level.ui.elements\",\"confidence\":0.624,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"\"},{\"candidate_id\":\"card_primary_area_8\",\"label\":\"#Simple output (with Unicode)\",\"role\":\"news_card\",\"semantic_action\":\"\",\"bbox\":{\"x\":767,\"y\":302,\"w\":305,\"h\":57},\"click_point\":{\"x\":920,\"y\":330},\"section_id\":\"primary_area\",\"source\":\"ocr_card_groups\",\"confidence\":0.9639,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"\"},{\"candidate_id\":\"ocr_text_38\",\"label\":\"and integrate systems more effectively. ≥> Learn More\",\"role\":\"button\",\"semantic_action\":\"\",\"bbox\":{\"x\":990,\"y\":635,\"w\":548,\"h\":30},\"click_point\":{\"x\":1264,\"y\":650},\"section_id\":\"primary_area\",\"source\":\"ocr_text_actions\",\"confidence\":0.9637,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"\"},{\"candidate_id\":\"card_primary_area_57\",\"label\":\"DjangoGirls Tamale 2026\",\"role\":\"news_card\",\"semantic_action\":\"\",\"bbox\":{\"x\":1274,\"y\":1105,\"w\":302,\"h\":82},\"click_point\":{\"x\":1425,\"y\":1146},\"section_id\":\"primary_area\",\"source\":\"ocr_card_groups\",\"confidence\":0.9851,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"\"},{\"candidate_id\":\"card_primary_area_29\",\"label\":\"Looking for work or have a Python\",\"role\":\"recommendation_item\",\"semantic_action\":\"\",\"bbox\":{\"x\":1568,\"y\":768,\"w\":258,\"h\":58},\"click_point\":{\"x\":1697,\"y\":797},\"section_id\":\"primary_area\",\"source\":\"ocr_card_groups\",\"confidence\":0.9847,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"\"},{\"candidate_id\":\"ocr_text_58\",\"label\":\"Latest: Python 3.14.6\",\"role\":\"text_action\",\"semantic_action\":\"\",\"bbox\":{\"x\":997,\"y\":874,\"w\":140,\"h\":20},\"click_point\":{\"x\":1067,\"y\":884},\"section_id\":\"primary_area\",\"source\":\"ocr_text_actions\",\"confidence\":0.9961,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"\"},{\"candidate_id\":\"card_primary_area_35\",\"label\":\"hire for? Our relaunched\",\"role\":\"recommendation_item\",\"semantic_action\":\"\",\"bbox\":{\"x\":1566,\"y\":817,\"w\":201,\"h\":147},\"click_point\":{\"x\":1666,\"y\":890},\"section_id\":\"primary_area\",\"source\":\"ocr_card_groups\",\"confidence\":0.9634,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"\"},{\"candidate_id\":\"card_bottom_bar_1\",\"label\":\"PyData PyCon Armenia 2026\",\"role\":\"news_card\",\"semantic_action\":\"\",\"bbox\":{\"x\":1275,\"y\":1184,\"w\":325,\"h\":57},\"click_point\":{\"x\":1438,\"y\":1212},\"section_id\":\"bottom_bar\",\"source\":\"ocr_card_groups\",\"confidence\":0.9883,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"\"},{\"candidate_id\":\"card_bottom_bar_3\",\"label\":\"Python 3.15.0 beta 3 is here!\",\"role\":\"news_card\",\"semantic_action\":\"\",\"bbox\":{\"x\":685,\"y\":1207,\"w\":324,\"h\":157},\"click_point\":{\"x\":847,\"y\":1286},\"section_id\":\"bottom_bar\",\"source\":\"ocr_card_groups\",\"confidence\":0.9778,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"\"},{\"candidate_id\":\"card_bottom_bar_6\",\"label\":\"2 Use Python for...\",\"role\":\"news_card\",\"semantic_action\":\"\",\"bbox\":{\"x\":1152,\"y\":1297,\"w\":334,\"h\":83},\"click_point\":{\"x\":1319,\"y\":1338},\"section_id\":\"bottom_bar\",\"source\":\"ocr_card_groups\",\"confidence\":0.9487,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"\"},{\"candidate_id\":\"ocr_text_6\",\"label\":\"Python\",\"role\":\"nav_text_action\",\"semantic_action\":\"\",\"bbox\":{\"x\":732,\"y\":91,\"w\":62,\"h\":29},\"click_point\":{\"x\":763,\"y\":106},\"section_id\":\"top_bar\",\"source\":\"ocr_text_actions\",\"confidence\":0.9729,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"\"},{\"candidate_id\":\"ocr_text_7\",\"label\":\"PSF\",\"role\":\"nav_text_action\",\"semantic_action\":\"\",\"bbox\":{\"x\":947,\"y\":95,\"w\":31,\"h\":20},\"click_point\":{\"x\":962,\"y\":105},\"section_id\":\"top_bar\",\"source\":\"ocr_text_actions\",\"confidence\":0.9968,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"\"},{\"candidate_id\":\"ocr_text_8\",\"label\":\"Docs\",\"role\":\"nav_text_action\",\"semantic_action\":\"\",\"bbox\":{\"x\":1145,\"y\":96,\"w\":38,\"h\":19},\"click_point\":{\"x\":1164,\"y\":106},\"section_id\":\"top_bar\",\"source\":\"ocr_text_actions\",\"confidence\":0.9811,\"coordinate_source\":\"screen_map_v1.candidates\",\"coordinate_validation_status\":\"valid\",\"vista_status\":\"\"}],\"path_map_review_summary\":{\"addition_count\":35,\"validated_count\":35,\"invalid_count\":0,\"coordinate_overlay_path\":\"D:\\\\agent-gui-runtime\\\\artifacts\\\\review-overlays\\\\state-b8bed884c84100e8-learn-targets__learn-target-coordinates__20260703-174008-660067.png\",\"model_addition_count\":0,\"model_removal_count\":5,\"model_update_count\":0,\"removal_count\":5,\"update_count\":0,\"kept_count\":0,\"vista_validated_count\":1,\"vista_inside_count\":0,\"vista_outside_count\":0},\"path_map_review_removals\":[{\"candidate_id\":\"card_primary_area_10\",\"label\":\"Hello, I'm Python!\",\"bbox\":{\"x\":764,\"y\":346,\"w\":255,\"h\":231},\"section_id\":\"primary_area\",\"reason\":\"non_containment_overlap_removed\",\"source\":\"path_graph_overlap_rule\",\"kept_candidate_id\":\"element_community_link_3a1bfae9\",\"kept_label\":\"Community link\"},{\"candidate_id\":\"card_primary_area_11\",\"label\":\"Python very quickly, and beginners find the clean syntax and\",\"bbox\":{\"x\":1272,\"y\":357,\"w\":450,\"h\":62},\"section_id\":\"primary_area\",\"reason\":\"non_containment_overlap_removed\",\"source\":\"path_graph_overlap_rule\",\"kept_candidate_id\":\"element_news_link_86a30db6\",\"kept_label\":\"News link\"},{\"candidate_id\":\"card_primary_area_27\",\"label\":\"Whether you're new to\",\"bbox\":{\"x\":684,\"y\":737,\"w\":187,\"h\":388},\"section_id\":\"primary_area\",\"reason\":\"non_containment_overlap_removed\",\"source\":\"path_graph_overlap_rule\",\"kept_candidate_id\":\"element_download_button_3b6c566f\",\"kept_label\":\"Download button\"},{\"candidate_id\":\"card_primary_area_51\",\"label\":\"Thinking about running for the PSF Board? Let's talk!\",\"bbox\":{\"x\":787,\"y\":995,\"w\":463,\"h\":192},\"section_id\":\"primary_area\",\"reason\":\"non_containment_overlap_removed\",\"source\":\"path_graph_overlap_rule\",\"kept_candidate_id\":\"card_primary_area_31\",\"kept_label\":\"are available for download for all\"},{\"candidate_id\":\"card_primary_area_26\",\"label\":\"Documentation for Python's\",\"bbox\":{\"x\":1271,\"y\":733,\"w\":230,\"h\":392},\"section_id\":\"primary_area\",\"reason\":\"non_containment_overlap_removed\",\"source\":\"path_graph_overlap_rule\",\"kept_candidate_id\":\"card_primary_area_57\",\"kept_label\":\"DjangoGirls Tamale 2026\"}],\"no_click_authorization\":true,\"execute_binding_enabled\":false,\"evidence_quality\":\"calibrated_targets_available\"},\"learning_parameters\":{\"contract_version\":\"learning_parameters_v1\",\"learning_model_profile_id\":\"qwen3_vl_8b_q4_k_m\",\"temperature\":0.0,\"max_output_tokens\":3072,\"timeout_seconds\":600,\"learning_image_max_edge\":768,\"prompt_detail_mode\":\"compact_contract\",\"draft_reference_alignment_threshold\":0.9,\"direct_use_accuracy_threshold\":0.9,\"artifact_posthoc_optimization_allowed\":false,\"allow_fast_profile_fallback\":false},\"prompt_context_hidden\":false}"
+                },
+                "output": {
+                  "raw_text": "{\n  \"contract_version\": \"learning_template_draft_v1\",\n  \"image_size\": {\"width\": 768, \"height\": 417},\n  \"learning_source\": \"observe_model\",\n  \"screen_summary\": \"Python.org homepage with top navigation, search bar, and content cards for Get Started, Download, Docs, Jobs, Latest News, and Upcoming Events.\",\n  \"state_guess\": \"Python.org homepage after Learn Fast + Learn Deep calibration\",\n  \"workflow_draft\": {\n    \"states\": [\n      {\n        \"state_id\": \"s1\",\n        \"label\": \"Python.org homepage\",\n        \"page_type\": \"landing_page\"\n      }\n    ],\n    \"transitions\": [],\n    \"action_templates\": [\n      {\n        \"action_template_id\": \"a1\",\n        \"label\": \"Search input field\",\n        \"semantic_action\": \"type_text\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Search query entered into the search field\"\n      },\n      {\n        \"action_template_id\": \"a2\",\n        \"label\": \"Search button\",\n        \"semantic_action\": \"click\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Initiate search with current query\"\n      },\n      {\n        \"action_template_id\": \"a3\",\n        \"label\": \"About link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to About page\"\n      },\n      {\n        \"action_template_id\": \"a4\",\n        \"label\": \"Downloads link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Downloads page\"\n      },\n      {\n        \"action_template_id\": \"a5\",\n        \"label\": \"Documentation link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Documentation page\"\n      },\n      {\n        \"action_template_id\": \"a6\",\n        \"label\": \"Community link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Community page\"\n      },\n      {\n        \"action_template_id\": \"a7\",\n        \"label\": \"Success Stories link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Success Stories page\"\n      },\n      {\n        \"action_template_id\": \"a8\",\n        \"label\": \"News link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to News page\"\n      },\n      {\n        \"action_template_id\": \"a9\",\n        \"label\": \"Events link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Events page\"\n      },\n      {\n        \"action_template_id\": \"a10\",\n        \"label\": \"Get Started button\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Get Started page\"\n      },\n      {\n        \"action_template_id\": \"a11\",\n        \"label\": \"Download button\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Download page\"\n      },\n      {\n        \"action_template_id\": \"a12\",\n        \"label\": \"Docs link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Docs page\"\n      }\n    ],\n    \"path_patterns\": []\n  },\n  \"interface_draft\": {\n    \"regions\": [\n      {\n        \"region_id\": \"r1\",\n        \"label\": \"Search input field\",\n        \"role\": \"text_input\",\n        \"source\": \"element_search_input_field_e7d36c1c\",\n        \"click_point\": {\"x\": 1230, \"y\": 267},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r2\",\n        \"label\": \"Search button\",\n        \"role\": \"button\",\n        \"source\": \"element_search_button_7ce6e760\",\n        \"click_point\": {\"x\": 1350, \"y\": 267},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r3\",\n        \"label\": \"About link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_about_link_53812d72\",\n        \"click_point\": {\"x\": 694, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r4\",\n        \"label\": \"Downloads link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_downloads_link_fe68f0de\",\n        \"click_point\": {\"x\": 816, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r5\",\n        \"label\": \"Documentation link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_documentation_link_9381d9f3\",\n        \"click_point\": {\"x\": 934, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r6\",\n        \"label\": \"Community link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_community_link_3a1bfae9\",\n        \"click_point\": {\"x\": 1054, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r7\",\n        \"label\": \"Success Stories link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_success_stories_link_4ba17021\",\n        \"click_point\": {\"x\": 1172, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r8\",\n        \"label\": \"News link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_news_link_86a30db6\",\n        \"click_point\": {\"x\": 1272, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r9\",\n        \"label\": \"Events link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_events_link_863f346e\",\n        \"click_point\": {\"x\": 1350, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r10\",\n        \"label\": \"Get Started button\",\n        \"role\": \"button\",\n        \"source\": \"element_get_started_button_81109b8d\",\n        \"click_point\": {\"x\": 618, \"y\": 1087},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r11\",\n        \"label\": \"Download button\",\n        \"role\": \"button\",\n        \"source\": \"element_download_button_3b6c566f\",\n        \"click_point\": {\"x\": 856, \"y\": 1087},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r12\",\n        \"label\": \"Docs link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_docs_link_d633a071\",\n        \"click_point\": {\"x\": 1074, \"y\": 1087},\n        \"section_id\": \"primary_area\"\n      }\n    ],\n    \"visual_assets\": [],\n    \"dynamic_areas\": [],\n    \"danger_zones\": []\n  },\n  \"agent_decision_points\": [],\n  \"operation_skills\": [],\n  \"gate_contracts\": [],\n  \"safety\": {\n    \"observation_only\": true,\n    \"promotion_allowed\": false,\n    \"final_submit_blocked\": true,\n    \"real_clicks_performed\": 0\n  },\n  \"notes\": []\n}",
+                  "raw_response": {
+                    "choices": [
+                      {
+                        "finish_reason": "stop",
+                        "index": 0,
+                        "message": {
+                          "role": "assistant",
+                          "content": "{\n  \"contract_version\": \"learning_template_draft_v1\",\n  \"image_size\": {\"width\": 768, \"height\": 417},\n  \"learning_source\": \"observe_model\",\n  \"screen_summary\": \"Python.org homepage with top navigation, search bar, and content cards for Get Started, Download, Docs, Jobs, Latest News, and Upcoming Events.\",\n  \"state_guess\": \"Python.org homepage after Learn Fast + Learn Deep calibration\",\n  \"workflow_draft\": {\n    \"states\": [\n      {\n        \"state_id\": \"s1\",\n        \"label\": \"Python.org homepage\",\n        \"page_type\": \"landing_page\"\n      }\n    ],\n    \"transitions\": [],\n    \"action_templates\": [\n      {\n        \"action_template_id\": \"a1\",\n        \"label\": \"Search input field\",\n        \"semantic_action\": \"type_text\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Search query entered into the search field\"\n      },\n      {\n        \"action_template_id\": \"a2\",\n        \"label\": \"Search button\",\n        \"semantic_action\": \"click\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Initiate search with current query\"\n      },\n      {\n        \"action_template_id\": \"a3\",\n        \"label\": \"About link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to About page\"\n      },\n      {\n        \"action_template_id\": \"a4\",\n        \"label\": \"Downloads link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Downloads page\"\n      },\n      {\n        \"action_template_id\": \"a5\",\n        \"label\": \"Documentation link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Documentation page\"\n      },\n      {\n        \"action_template_id\": \"a6\",\n        \"label\": \"Community link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Community page\"\n      },\n      {\n        \"action_template_id\": \"a7\",\n        \"label\": \"Success Stories link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Success Stories page\"\n      },\n      {\n        \"action_template_id\": \"a8\",\n        \"label\": \"News link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to News page\"\n      },\n      {\n        \"action_template_id\": \"a9\",\n        \"label\": \"Events link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Events page\"\n      },\n      {\n        \"action_template_id\": \"a10\",\n        \"label\": \"Get Started button\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Get Started page\"\n      },\n      {\n        \"action_template_id\": \"a11\",\n        \"label\": \"Download button\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Download page\"\n      },\n      {\n        \"action_template_id\": \"a12\",\n        \"label\": \"Docs link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Docs page\"\n      }\n    ],\n    \"path_patterns\": []\n  },\n  \"interface_draft\": {\n    \"regions\": [\n      {\n        \"region_id\": \"r1\",\n        \"label\": \"Search input field\",\n        \"role\": \"text_input\",\n        \"source\": \"element_search_input_field_e7d36c1c\",\n        \"click_point\": {\"x\": 1230, \"y\": 267},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r2\",\n        \"label\": \"Search button\",\n        \"role\": \"button\",\n        \"source\": \"element_search_button_7ce6e760\",\n        \"click_point\": {\"x\": 1350, \"y\": 267},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r3\",\n        \"label\": \"About link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_about_link_53812d72\",\n        \"click_point\": {\"x\": 694, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r4\",\n        \"label\": \"Downloads link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_downloads_link_fe68f0de\",\n        \"click_point\": {\"x\": 816, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r5\",\n        \"label\": \"Documentation link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_documentation_link_9381d9f3\",\n        \"click_point\": {\"x\": 934, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r6\",\n        \"label\": \"Community link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_community_link_3a1bfae9\",\n        \"click_point\": {\"x\": 1054, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r7\",\n        \"label\": \"Success Stories link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_success_stories_link_4ba17021\",\n        \"click_point\": {\"x\": 1172, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r8\",\n        \"label\": \"News link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_news_link_86a30db6\",\n        \"click_point\": {\"x\": 1272, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r9\",\n        \"label\": \"Events link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_events_link_863f346e\",\n        \"click_point\": {\"x\": 1350, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r10\",\n        \"label\": \"Get Started button\",\n        \"role\": \"button\",\n        \"source\": \"element_get_started_button_81109b8d\",\n        \"click_point\": {\"x\": 618, \"y\": 1087},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r11\",\n        \"label\": \"Download button\",\n        \"role\": \"button\",\n        \"source\": \"element_download_button_3b6c566f\",\n        \"click_point\": {\"x\": 856, \"y\": 1087},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r12\",\n        \"label\": \"Docs link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_docs_link_d633a071\",\n        \"click_point\": {\"x\": 1074, \"y\": 1087},\n        \"section_id\": \"primary_area\"\n      }\n    ],\n    \"visual_assets\": [],\n    \"dynamic_areas\": [],\n    \"danger_zones\": []\n  },\n  \"agent_decision_points\": [],\n  \"operation_skills\": [],\n  \"gate_contracts\": [],\n  \"safety\": {\n    \"observation_only\": true,\n    \"promotion_allowed\": false,\n    \"final_submit_blocked\": true,\n    \"real_clicks_performed\": 0\n  },\n  \"notes\": []\n}"
+                        }
+                      }
+                    ],
+                    "created": 1783057310,
+                    "model": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                    "system_fingerprint": "b8892-0d0764dfd",
+                    "object": "chat.completion",
+                    "usage": {
+                      "completion_tokens": 1894,
+                      "prompt_tokens": 5781,
+                      "total_tokens": 7675,
+                      "prompt_tokens_details": {
+                        "cached_tokens": 55
+                      }
+                    },
+                    "id": "chatcmpl-22uP45nskf4gTuMJPwWwMUxgFa43QzoQ",
+                    "timings": {
+                      "cache_n": 55,
+                      "prompt_n": 5726,
+                      "prompt_ms": 1814.089,
+                      "prompt_per_token_ms": 0.3168161019909186,
+                      "prompt_per_second": 3156.4052259839514,
+                      "predicted_n": 1894,
+                      "predicted_ms": 30713.606,
+                      "predicted_per_token_ms": 16.21626504751848,
+                      "predicted_per_second": 61.66648097263474
+                    }
+                  },
+                  "parsed_model_json": {
+                    "contract_version": "learning_template_draft_v1",
+                    "image_size": {
+                      "width": 2540,
+                      "height": 1380
+                    },
+                    "learning_source": "observe_model",
+                    "screen_summary": "Python.org homepage with top navigation, search bar, and content cards for Get Started, Download, Docs, Jobs, Latest News, and Upcoming Events.",
+                    "state_guess": "Python.org homepage after Learn Fast + Learn Deep calibration",
+                    "workflow_draft": {
+                      "states": [
+                        {
+                          "state_id": "s1",
+                          "label": "Python.org homepage",
+                          "page_type": "landing_page"
+                        }
+                      ],
+                      "transitions": [],
+                      "action_templates": [
+                        {
+                          "action_template_id": "a1",
+                          "label": "Search input field",
+                          "semantic_action": "type_text",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Search query entered into the search field"
+                        },
+                        {
+                          "action_template_id": "a2",
+                          "label": "Search button",
+                          "semantic_action": "click",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Initiate search with current query"
+                        },
+                        {
+                          "action_template_id": "a3",
+                          "label": "About link",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to About page"
+                        },
+                        {
+                          "action_template_id": "a4",
+                          "label": "Downloads link",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to Downloads page"
+                        },
+                        {
+                          "action_template_id": "a5",
+                          "label": "Documentation link",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to Documentation page"
+                        },
+                        {
+                          "action_template_id": "a6",
+                          "label": "Community link",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to Community page"
+                        },
+                        {
+                          "action_template_id": "a7",
+                          "label": "Success Stories link",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to Success Stories page"
+                        },
+                        {
+                          "action_template_id": "a8",
+                          "label": "News link",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to News page"
+                        },
+                        {
+                          "action_template_id": "a9",
+                          "label": "Events link",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to Events page"
+                        },
+                        {
+                          "action_template_id": "a10",
+                          "label": "Get Started button",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to Get Started page"
+                        },
+                        {
+                          "action_template_id": "a11",
+                          "label": "Download button",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to Download page"
+                        },
+                        {
+                          "action_template_id": "a12",
+                          "label": "Docs link",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to Docs page"
+                        }
+                      ],
+                      "path_patterns": []
+                    },
+                    "interface_draft": {
+                      "regions": [
+                        {
+                          "region_id": "r1",
+                          "label": "Search input field",
+                          "role": "text_input",
+                          "source": "element_search_input_field_e7d36c1c",
+                          "click_point": {
+                            "x": 1230,
+                            "y": 267
+                          },
+                          "section_id": "primary_area"
+                        },
+                        {
+                          "region_id": "r2",
+                          "label": "Search button",
+                          "role": "button",
+                          "source": "element_search_button_7ce6e760",
+                          "click_point": {
+                            "x": 1350,
+                            "y": 267
+                          },
+                          "section_id": "primary_area"
+                        },
+                        {
+                          "region_id": "r3",
+                          "label": "About link",
+                          "role": "menu_item",
+                          "source": "element_about_link_53812d72",
+                          "click_point": {
+                            "x": 694,
+                            "y": 378
+                          },
+                          "section_id": "primary_area"
+                        },
+                        {
+                          "region_id": "r4",
+                          "label": "Downloads link",
+                          "role": "menu_item",
+                          "source": "element_downloads_link_fe68f0de",
+                          "click_point": {
+                            "x": 816,
+                            "y": 378
+                          },
+                          "section_id": "primary_area"
+                        },
+                        {
+                          "region_id": "r5",
+                          "label": "Documentation link",
+                          "role": "menu_item",
+                          "source": "element_documentation_link_9381d9f3",
+                          "click_point": {
+                            "x": 934,
+                            "y": 378
+                          },
+                          "section_id": "primary_area"
+                        },
+                        {
+                          "region_id": "r6",
+                          "label": "Community link",
+                          "role": "menu_item",
+                          "source": "element_community_link_3a1bfae9",
+                          "click_point": {
+                            "x": 1054,
+                            "y": 378
+                          },
+                          "section_id": "primary_area"
+                        },
+                        {
+                          "region_id": "r7",
+                          "label": "Success Stories link",
+                          "role": "menu_item",
+                          "source": "element_success_stories_link_4ba17021",
+                          "click_point": {
+                            "x": 1172,
+                            "y": 378
+                          },
+                          "section_id": "primary_area"
+                        },
+                        {
+                          "region_id": "r8",
+                          "label": "News link",
+                          "role": "menu_item",
+                          "source": "element_news_link_86a30db6",
+                          "click_point": {
+                            "x": 1272,
+                            "y": 378
+                          },
+                          "section_id": "primary_area"
+                        },
+                        {
+                          "region_id": "r9",
+                          "label": "Events link",
+                          "role": "menu_item",
+                          "source": "element_events_link_863f346e",
+                          "click_point": {
+                            "x": 1350,
+                            "y": 378
+                          },
+                          "section_id": "primary_area"
+                        },
+                        {
+                          "region_id": "r10",
+                          "label": "Get Started button",
+                          "role": "button",
+                          "source": "element_get_started_button_81109b8d",
+                          "click_point": {
+                            "x": 618,
+                            "y": 1087
+                          },
+                          "section_id": "primary_area"
+                        },
+                        {
+                          "region_id": "r11",
+                          "label": "Download button",
+                          "role": "button",
+                          "source": "element_download_button_3b6c566f",
+                          "click_point": {
+                            "x": 856,
+                            "y": 1087
+                          },
+                          "section_id": "primary_area"
+                        },
+                        {
+                          "region_id": "r12",
+                          "label": "Docs link",
+                          "role": "menu_item",
+                          "source": "element_docs_link_d633a071",
+                          "click_point": {
+                            "x": 1074,
+                            "y": 1087
+                          },
+                          "section_id": "primary_area"
+                        }
+                      ],
+                      "visual_assets": [],
+                      "dynamic_areas": [],
+                      "danger_zones": []
+                    },
+                    "agent_decision_points": [],
+                    "operation_skills": [],
+                    "gate_contracts": [],
+                    "safety": {
+                      "observation_only": true,
+                      "promotion_allowed": false,
+                      "final_submit_blocked": true,
+                      "real_clicks_performed": 0
+                    },
+                    "notes": [],
+                    "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                    "regions": [],
+                    "targets": [],
+                    "observers": [],
+                    "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+                  },
+                  "runtime_normalized_json": {
+                    "contract_version": "learning_template_draft_v1",
+                    "image_size": {
+                      "width": 2540,
+                      "height": 1380
+                    },
+                    "learning_source": "observe_model",
+                    "screen_summary": "Python.org homepage with top navigation, search bar, and content cards for Get Started, Download, Docs, Jobs, Latest News, and Upcoming Events.",
+                    "state_guess": "Python.org homepage after Learn Fast + Learn Deep calibration",
+                    "workflow_draft": {
+                      "states": [
+                        {
+                          "state_id": "s1",
+                          "label": "Python.org homepage",
+                          "page_type": "landing_page"
+                        }
+                      ],
+                      "transitions": [],
+                      "action_templates": [
+                        {
+                          "action_template_id": "a1",
+                          "label": "Search input field",
+                          "semantic_action": "type_text",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Search query entered into the search field"
+                        },
+                        {
+                          "action_template_id": "a2",
+                          "label": "Search button",
+                          "semantic_action": "click",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Initiate search with current query"
+                        },
+                        {
+                          "action_template_id": "a3",
+                          "label": "About link",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to About page"
+                        },
+                        {
+                          "action_template_id": "a4",
+                          "label": "Downloads link",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to Downloads page"
+                        },
+                        {
+                          "action_template_id": "a5",
+                          "label": "Documentation link",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to Documentation page"
+                        },
+                        {
+                          "action_template_id": "a6",
+                          "label": "Community link",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to Community page"
+                        },
+                        {
+                          "action_template_id": "a7",
+                          "label": "Success Stories link",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to Success Stories page"
+                        },
+                        {
+                          "action_template_id": "a8",
+                          "label": "News link",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to News page"
+                        },
+                        {
+                          "action_template_id": "a9",
+                          "label": "Events link",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to Events page"
+                        },
+                        {
+                          "action_template_id": "a10",
+                          "label": "Get Started button",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to Get Started page"
+                        },
+                        {
+                          "action_template_id": "a11",
+                          "label": "Download button",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to Download page"
+                        },
+                        {
+                          "action_template_id": "a12",
+                          "label": "Docs link",
+                          "semantic_action": "open_detail",
+                          "risk_level": "low",
+                          "requires_gate": true,
+                          "expected_effect": "Navigate to Docs page"
+                        }
+                      ],
+                      "path_patterns": []
+                    },
+                    "interface_draft": {
+                      "regions": [
+                        {
+                          "region_id": "r1",
+                          "label": "Search input field",
+                          "role": "text_input",
+                          "source": "element_search_input_field_e7d36c1c",
+                          "click_point": {
+                            "x": 1230,
+                            "y": 267
+                          },
+                          "section_id": "primary_area"
+                        },
+                        {
+                          "region_id": "r2",
+                          "label": "Search button",
+                          "role": "button",
+                          "source": "element_search_button_7ce6e760",
+                          "click_point": {
+                            "x": 1350,
+                            "y": 267
+                          },
+                          "section_id": "primary_area"
+                        },
+                        {
+                          "region_id": "r3",
+                          "label": "About link",
+                          "role": "menu_item",
+                          "source": "element_about_link_53812d72",
+                          "click_point": {
+                            "x": 694,
+                            "y": 378
+                          },
+                          "section_id": "primary_area"
+                        },
+                        {
+                          "region_id": "r4",
+                          "label": "Downloads link",
+                          "role": "menu_item",
+                          "source": "element_downloads_link_fe68f0de",
+                          "click_point": {
+                            "x": 816,
+                            "y": 378
+                          },
+                          "section_id": "primary_area"
+                        },
+                        {
+                          "region_id": "r5",
+                          "label": "Documentation link",
+                          "role": "menu_item",
+                          "source": "element_documentation_link_9381d9f3",
+                          "click_point": {
+                            "x": 934,
+                            "y": 378
+                          },
+                          "section_id": "primary_area"
+                        },
+                        {
+                          "region_id": "r6",
+                          "label": "Community link",
+                          "role": "menu_item",
+                          "source": "element_community_link_3a1bfae9",
+                          "click_point": {
+                            "x": 1054,
+                            "y": 378
+                          },
+                          "section_id": "primary_area"
+                        },
+                        {
+                          "region_id": "r7",
+                          "label": "Success Stories link",
+                          "role": "menu_item",
+                          "source": "element_success_stories_link_4ba17021",
+                          "click_point": {
+                            "x": 1172,
+                            "y": 378
+                          },
+                          "section_id": "primary_area"
+                        },
+                        {
+                          "region_id": "r8",
+                          "label": "News link",
+                          "role": "menu_item",
+                          "source": "element_news_link_86a30db6",
+                          "click_point": {
+                            "x": 1272,
+                            "y": 378
+                          },
+                          "section_id": "primary_area"
+                        },
+                        {
+                          "region_id": "r9",
+                          "label": "Events link",
+                          "role": "menu_item",
+                          "source": "element_events_link_863f346e",
+                          "click_point": {
+                            "x": 1350,
+                            "y": 378
+                          },
+                          "section_id": "primary_area"
+                        },
+                        {
+                          "region_id": "r10",
+                          "label": "Get Started button",
+                          "role": "button",
+                          "source": "element_get_started_button_81109b8d",
+                          "click_point": {
+                            "x": 618,
+                            "y": 1087
+                          },
+                          "section_id": "primary_area"
+                        },
+                        {
+                          "region_id": "r11",
+                          "label": "Download button",
+                          "role": "button",
+                          "source": "element_download_button_3b6c566f",
+                          "click_point": {
+                            "x": 856,
+                            "y": 1087
+                          },
+                          "section_id": "primary_area"
+                        },
+                        {
+                          "region_id": "r12",
+                          "label": "Docs link",
+                          "role": "menu_item",
+                          "source": "element_docs_link_d633a071",
+                          "click_point": {
+                            "x": 1074,
+                            "y": 1087
+                          },
+                          "section_id": "primary_area"
+                        }
+                      ],
+                      "visual_assets": [],
+                      "dynamic_areas": [],
+                      "danger_zones": []
+                    },
+                    "agent_decision_points": [],
+                    "operation_skills": [],
+                    "gate_contracts": [],
+                    "safety": {
+                      "observation_only": true,
+                      "promotion_allowed": false,
+                      "final_submit_blocked": true,
+                      "real_clicks_performed": 0
+                    },
+                    "notes": [],
+                    "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                    "regions": [],
+                    "targets": [],
+                    "observers": [],
+                    "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+                  },
+                  "parse_error": null
+                },
+                "raw_text": "{\n  \"contract_version\": \"learning_template_draft_v1\",\n  \"image_size\": {\"width\": 768, \"height\": 417},\n  \"learning_source\": \"observe_model\",\n  \"screen_summary\": \"Python.org homepage with top navigation, search bar, and content cards for Get Started, Download, Docs, Jobs, Latest News, and Upcoming Events.\",\n  \"state_guess\": \"Python.org homepage after Learn Fast + Learn Deep calibration\",\n  \"workflow_draft\": {\n    \"states\": [\n      {\n        \"state_id\": \"s1\",\n        \"label\": \"Python.org homepage\",\n        \"page_type\": \"landing_page\"\n      }\n    ],\n    \"transitions\": [],\n    \"action_templates\": [\n      {\n        \"action_template_id\": \"a1\",\n        \"label\": \"Search input field\",\n        \"semantic_action\": \"type_text\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Search query entered into the search field\"\n      },\n      {\n        \"action_template_id\": \"a2\",\n        \"label\": \"Search button\",\n        \"semantic_action\": \"click\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Initiate search with current query\"\n      },\n      {\n        \"action_template_id\": \"a3\",\n        \"label\": \"About link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to About page\"\n      },\n      {\n        \"action_template_id\": \"a4\",\n        \"label\": \"Downloads link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Downloads page\"\n      },\n      {\n        \"action_template_id\": \"a5\",\n        \"label\": \"Documentation link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Documentation page\"\n      },\n      {\n        \"action_template_id\": \"a6\",\n        \"label\": \"Community link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Community page\"\n      },\n      {\n        \"action_template_id\": \"a7\",\n        \"label\": \"Success Stories link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Success Stories page\"\n      },\n      {\n        \"action_template_id\": \"a8\",\n        \"label\": \"News link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to News page\"\n      },\n      {\n        \"action_template_id\": \"a9\",\n        \"label\": \"Events link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Events page\"\n      },\n      {\n        \"action_template_id\": \"a10\",\n        \"label\": \"Get Started button\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Get Started page\"\n      },\n      {\n        \"action_template_id\": \"a11\",\n        \"label\": \"Download button\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Download page\"\n      },\n      {\n        \"action_template_id\": \"a12\",\n        \"label\": \"Docs link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Docs page\"\n      }\n    ],\n    \"path_patterns\": []\n  },\n  \"interface_draft\": {\n    \"regions\": [\n      {\n        \"region_id\": \"r1\",\n        \"label\": \"Search input field\",\n        \"role\": \"text_input\",\n        \"source\": \"element_search_input_field_e7d36c1c\",\n        \"click_point\": {\"x\": 1230, \"y\": 267},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r2\",\n        \"label\": \"Search button\",\n        \"role\": \"button\",\n        \"source\": \"element_search_button_7ce6e760\",\n        \"click_point\": {\"x\": 1350, \"y\": 267},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r3\",\n        \"label\": \"About link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_about_link_53812d72\",\n        \"click_point\": {\"x\": 694, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r4\",\n        \"label\": \"Downloads link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_downloads_link_fe68f0de\",\n        \"click_point\": {\"x\": 816, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r5\",\n        \"label\": \"Documentation link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_documentation_link_9381d9f3\",\n        \"click_point\": {\"x\": 934, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r6\",\n        \"label\": \"Community link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_community_link_3a1bfae9\",\n        \"click_point\": {\"x\": 1054, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r7\",\n        \"label\": \"Success Stories link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_success_stories_link_4ba17021\",\n        \"click_point\": {\"x\": 1172, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r8\",\n        \"label\": \"News link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_news_link_86a30db6\",\n        \"click_point\": {\"x\": 1272, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r9\",\n        \"label\": \"Events link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_events_link_863f346e\",\n        \"click_point\": {\"x\": 1350, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r10\",\n        \"label\": \"Get Started button\",\n        \"role\": \"button\",\n        \"source\": \"element_get_started_button_81109b8d\",\n        \"click_point\": {\"x\": 618, \"y\": 1087},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r11\",\n        \"label\": \"Download button\",\n        \"role\": \"button\",\n        \"source\": \"element_download_button_3b6c566f\",\n        \"click_point\": {\"x\": 856, \"y\": 1087},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r12\",\n        \"label\": \"Docs link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_docs_link_d633a071\",\n        \"click_point\": {\"x\": 1074, \"y\": 1087},\n        \"section_id\": \"primary_area\"\n      }\n    ],\n    \"visual_assets\": [],\n    \"dynamic_areas\": [],\n    \"danger_zones\": []\n  },\n  \"agent_decision_points\": [],\n  \"operation_skills\": [],\n  \"gate_contracts\": [],\n  \"safety\": {\n    \"observation_only\": true,\n    \"promotion_allowed\": false,\n    \"final_submit_blocked\": true,\n    \"real_clicks_performed\": 0\n  },\n  \"notes\": []\n}",
+                "raw_text_preview": "{ \"contract_version\": \"learning_template_draft_v1\", \"image_size\": {\"width\": 768, \"height\": 417}, \"learning_source\": \"observe_model\", \"screen_summary\": \"Python.org homepage with top navigation, search bar, and content cards for Get Started, Download, Docs, Jobs, Latest News, and Upcoming Events.\", \"s...",
+                "raw_response": {
+                  "choices": [
+                    {
+                      "finish_reason": "stop",
+                      "index": 0,
+                      "message": {
+                        "role": "assistant",
+                        "content": "{\n  \"contract_version\": \"learning_template_draft_v1\",\n  \"image_size\": {\"width\": 768, \"height\": 417},\n  \"learning_source\": \"observe_model\",\n  \"screen_summary\": \"Python.org homepage with top navigation, search bar, and content cards for Get Started, Download, Docs, Jobs, Latest News, and Upcoming Events.\",\n  \"state_guess\": \"Python.org homepage after Learn Fast + Learn Deep calibration\",\n  \"workflow_draft\": {\n    \"states\": [\n      {\n        \"state_id\": \"s1\",\n        \"label\": \"Python.org homepage\",\n        \"page_type\": \"landing_page\"\n      }\n    ],\n    \"transitions\": [],\n    \"action_templates\": [\n      {\n        \"action_template_id\": \"a1\",\n        \"label\": \"Search input field\",\n        \"semantic_action\": \"type_text\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Search query entered into the search field\"\n      },\n      {\n        \"action_template_id\": \"a2\",\n        \"label\": \"Search button\",\n        \"semantic_action\": \"click\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Initiate search with current query\"\n      },\n      {\n        \"action_template_id\": \"a3\",\n        \"label\": \"About link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to About page\"\n      },\n      {\n        \"action_template_id\": \"a4\",\n        \"label\": \"Downloads link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Downloads page\"\n      },\n      {\n        \"action_template_id\": \"a5\",\n        \"label\": \"Documentation link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Documentation page\"\n      },\n      {\n        \"action_template_id\": \"a6\",\n        \"label\": \"Community link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Community page\"\n      },\n      {\n        \"action_template_id\": \"a7\",\n        \"label\": \"Success Stories link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Success Stories page\"\n      },\n      {\n        \"action_template_id\": \"a8\",\n        \"label\": \"News link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to News page\"\n      },\n      {\n        \"action_template_id\": \"a9\",\n        \"label\": \"Events link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Events page\"\n      },\n      {\n        \"action_template_id\": \"a10\",\n        \"label\": \"Get Started button\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Get Started page\"\n      },\n      {\n        \"action_template_id\": \"a11\",\n        \"label\": \"Download button\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Download page\"\n      },\n      {\n        \"action_template_id\": \"a12\",\n        \"label\": \"Docs link\",\n        \"semantic_action\": \"open_detail\",\n        \"risk_level\": \"low\",\n        \"requires_gate\": true,\n        \"expected_effect\": \"Navigate to Docs page\"\n      }\n    ],\n    \"path_patterns\": []\n  },\n  \"interface_draft\": {\n    \"regions\": [\n      {\n        \"region_id\": \"r1\",\n        \"label\": \"Search input field\",\n        \"role\": \"text_input\",\n        \"source\": \"element_search_input_field_e7d36c1c\",\n        \"click_point\": {\"x\": 1230, \"y\": 267},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r2\",\n        \"label\": \"Search button\",\n        \"role\": \"button\",\n        \"source\": \"element_search_button_7ce6e760\",\n        \"click_point\": {\"x\": 1350, \"y\": 267},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r3\",\n        \"label\": \"About link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_about_link_53812d72\",\n        \"click_point\": {\"x\": 694, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r4\",\n        \"label\": \"Downloads link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_downloads_link_fe68f0de\",\n        \"click_point\": {\"x\": 816, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r5\",\n        \"label\": \"Documentation link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_documentation_link_9381d9f3\",\n        \"click_point\": {\"x\": 934, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r6\",\n        \"label\": \"Community link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_community_link_3a1bfae9\",\n        \"click_point\": {\"x\": 1054, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r7\",\n        \"label\": \"Success Stories link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_success_stories_link_4ba17021\",\n        \"click_point\": {\"x\": 1172, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r8\",\n        \"label\": \"News link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_news_link_86a30db6\",\n        \"click_point\": {\"x\": 1272, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r9\",\n        \"label\": \"Events link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_events_link_863f346e\",\n        \"click_point\": {\"x\": 1350, \"y\": 378},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r10\",\n        \"label\": \"Get Started button\",\n        \"role\": \"button\",\n        \"source\": \"element_get_started_button_81109b8d\",\n        \"click_point\": {\"x\": 618, \"y\": 1087},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r11\",\n        \"label\": \"Download button\",\n        \"role\": \"button\",\n        \"source\": \"element_download_button_3b6c566f\",\n        \"click_point\": {\"x\": 856, \"y\": 1087},\n        \"section_id\": \"primary_area\"\n      },\n      {\n        \"region_id\": \"r12\",\n        \"label\": \"Docs link\",\n        \"role\": \"menu_item\",\n        \"source\": \"element_docs_link_d633a071\",\n        \"click_point\": {\"x\": 1074, \"y\": 1087},\n        \"section_id\": \"primary_area\"\n      }\n    ],\n    \"visual_assets\": [],\n    \"dynamic_areas\": [],\n    \"danger_zones\": []\n  },\n  \"agent_decision_points\": [],\n  \"operation_skills\": [],\n  \"gate_contracts\": [],\n  \"safety\": {\n    \"observation_only\": true,\n    \"promotion_allowed\": false,\n    \"final_submit_blocked\": true,\n    \"real_clicks_performed\": 0\n  },\n  \"notes\": []\n}"
+                      }
+                    }
+                  ],
+                  "created": 1783057310,
+                  "model": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                  "system_fingerprint": "b8892-0d0764dfd",
+                  "object": "chat.completion",
+                  "usage": {
+                    "completion_tokens": 1894,
+                    "prompt_tokens": 5781,
+                    "total_tokens": 7675,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 55
+                    }
+                  },
+                  "id": "chatcmpl-22uP45nskf4gTuMJPwWwMUxgFa43QzoQ",
+                  "timings": {
+                    "cache_n": 55,
+                    "prompt_n": 5726,
+                    "prompt_ms": 1814.089,
+                    "prompt_per_token_ms": 0.3168161019909186,
+                    "prompt_per_second": 3156.4052259839514,
+                    "predicted_n": 1894,
+                    "predicted_ms": 30713.606,
+                    "predicted_per_token_ms": 16.21626504751848,
+                    "predicted_per_second": 61.66648097263474
+                  }
+                },
+                "parsed_model_json": {
+                  "contract_version": "learning_template_draft_v1",
+                  "image_size": {
+                    "width": 2540,
+                    "height": 1380
+                  },
+                  "learning_source": "observe_model",
+                  "screen_summary": "Python.org homepage with top navigation, search bar, and content cards for Get Started, Download, Docs, Jobs, Latest News, and Upcoming Events.",
+                  "state_guess": "Python.org homepage after Learn Fast + Learn Deep calibration",
+                  "workflow_draft": {
+                    "states": [
+                      {
+                        "state_id": "s1",
+                        "label": "Python.org homepage",
+                        "page_type": "landing_page"
+                      }
+                    ],
+                    "transitions": [],
+                    "action_templates": [
+                      {
+                        "action_template_id": "a1",
+                        "label": "Search input field",
+                        "semantic_action": "type_text",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Search query entered into the search field"
+                      },
+                      {
+                        "action_template_id": "a2",
+                        "label": "Search button",
+                        "semantic_action": "click",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Initiate search with current query"
+                      },
+                      {
+                        "action_template_id": "a3",
+                        "label": "About link",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to About page"
+                      },
+                      {
+                        "action_template_id": "a4",
+                        "label": "Downloads link",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to Downloads page"
+                      },
+                      {
+                        "action_template_id": "a5",
+                        "label": "Documentation link",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to Documentation page"
+                      },
+                      {
+                        "action_template_id": "a6",
+                        "label": "Community link",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to Community page"
+                      },
+                      {
+                        "action_template_id": "a7",
+                        "label": "Success Stories link",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to Success Stories page"
+                      },
+                      {
+                        "action_template_id": "a8",
+                        "label": "News link",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to News page"
+                      },
+                      {
+                        "action_template_id": "a9",
+                        "label": "Events link",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to Events page"
+                      },
+                      {
+                        "action_template_id": "a10",
+                        "label": "Get Started button",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to Get Started page"
+                      },
+                      {
+                        "action_template_id": "a11",
+                        "label": "Download button",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to Download page"
+                      },
+                      {
+                        "action_template_id": "a12",
+                        "label": "Docs link",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to Docs page"
+                      }
+                    ],
+                    "path_patterns": []
+                  },
+                  "interface_draft": {
+                    "regions": [
+                      {
+                        "region_id": "r1",
+                        "label": "Search input field",
+                        "role": "text_input",
+                        "source": "element_search_input_field_e7d36c1c",
+                        "click_point": {
+                          "x": 1230,
+                          "y": 267
+                        },
+                        "section_id": "primary_area"
+                      },
+                      {
+                        "region_id": "r2",
+                        "label": "Search button",
+                        "role": "button",
+                        "source": "element_search_button_7ce6e760",
+                        "click_point": {
+                          "x": 1350,
+                          "y": 267
+                        },
+                        "section_id": "primary_area"
+                      },
+                      {
+                        "region_id": "r3",
+                        "label": "About link",
+                        "role": "menu_item",
+                        "source": "element_about_link_53812d72",
+                        "click_point": {
+                          "x": 694,
+                          "y": 378
+                        },
+                        "section_id": "primary_area"
+                      },
+                      {
+                        "region_id": "r4",
+                        "label": "Downloads link",
+                        "role": "menu_item",
+                        "source": "element_downloads_link_fe68f0de",
+                        "click_point": {
+                          "x": 816,
+                          "y": 378
+                        },
+                        "section_id": "primary_area"
+                      },
+                      {
+                        "region_id": "r5",
+                        "label": "Documentation link",
+                        "role": "menu_item",
+                        "source": "element_documentation_link_9381d9f3",
+                        "click_point": {
+                          "x": 934,
+                          "y": 378
+                        },
+                        "section_id": "primary_area"
+                      },
+                      {
+                        "region_id": "r6",
+                        "label": "Community link",
+                        "role": "menu_item",
+                        "source": "element_community_link_3a1bfae9",
+                        "click_point": {
+                          "x": 1054,
+                          "y": 378
+                        },
+                        "section_id": "primary_area"
+                      },
+                      {
+                        "region_id": "r7",
+                        "label": "Success Stories link",
+                        "role": "menu_item",
+                        "source": "element_success_stories_link_4ba17021",
+                        "click_point": {
+                          "x": 1172,
+                          "y": 378
+                        },
+                        "section_id": "primary_area"
+                      },
+                      {
+                        "region_id": "r8",
+                        "label": "News link",
+                        "role": "menu_item",
+                        "source": "element_news_link_86a30db6",
+                        "click_point": {
+                          "x": 1272,
+                          "y": 378
+                        },
+                        "section_id": "primary_area"
+                      },
+                      {
+                        "region_id": "r9",
+                        "label": "Events link",
+                        "role": "menu_item",
+                        "source": "element_events_link_863f346e",
+                        "click_point": {
+                          "x": 1350,
+                          "y": 378
+                        },
+                        "section_id": "primary_area"
+                      },
+                      {
+                        "region_id": "r10",
+                        "label": "Get Started button",
+                        "role": "button",
+                        "source": "element_get_started_button_81109b8d",
+                        "click_point": {
+                          "x": 618,
+                          "y": 1087
+                        },
+                        "section_id": "primary_area"
+                      },
+                      {
+                        "region_id": "r11",
+                        "label": "Download button",
+                        "role": "button",
+                        "source": "element_download_button_3b6c566f",
+                        "click_point": {
+                          "x": 856,
+                          "y": 1087
+                        },
+                        "section_id": "primary_area"
+                      },
+                      {
+                        "region_id": "r12",
+                        "label": "Docs link",
+                        "role": "menu_item",
+                        "source": "element_docs_link_d633a071",
+                        "click_point": {
+                          "x": 1074,
+                          "y": 1087
+                        },
+                        "section_id": "primary_area"
+                      }
+                    ],
+                    "visual_assets": [],
+                    "dynamic_areas": [],
+                    "danger_zones": []
+                  },
+                  "agent_decision_points": [],
+                  "operation_skills": [],
+                  "gate_contracts": [],
+                  "safety": {
+                    "observation_only": true,
+                    "promotion_allowed": false,
+                    "final_submit_blocked": true,
+                    "real_clicks_performed": 0
+                  },
+                  "notes": [],
+                  "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                  "regions": [],
+                  "targets": [],
+                  "observers": [],
+                  "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+                },
+                "runtime_normalized_json": {
+                  "contract_version": "learning_template_draft_v1",
+                  "image_size": {
+                    "width": 2540,
+                    "height": 1380
+                  },
+                  "learning_source": "observe_model",
+                  "screen_summary": "Python.org homepage with top navigation, search bar, and content cards for Get Started, Download, Docs, Jobs, Latest News, and Upcoming Events.",
+                  "state_guess": "Python.org homepage after Learn Fast + Learn Deep calibration",
+                  "workflow_draft": {
+                    "states": [
+                      {
+                        "state_id": "s1",
+                        "label": "Python.org homepage",
+                        "page_type": "landing_page"
+                      }
+                    ],
+                    "transitions": [],
+                    "action_templates": [
+                      {
+                        "action_template_id": "a1",
+                        "label": "Search input field",
+                        "semantic_action": "type_text",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Search query entered into the search field"
+                      },
+                      {
+                        "action_template_id": "a2",
+                        "label": "Search button",
+                        "semantic_action": "click",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Initiate search with current query"
+                      },
+                      {
+                        "action_template_id": "a3",
+                        "label": "About link",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to About page"
+                      },
+                      {
+                        "action_template_id": "a4",
+                        "label": "Downloads link",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to Downloads page"
+                      },
+                      {
+                        "action_template_id": "a5",
+                        "label": "Documentation link",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to Documentation page"
+                      },
+                      {
+                        "action_template_id": "a6",
+                        "label": "Community link",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to Community page"
+                      },
+                      {
+                        "action_template_id": "a7",
+                        "label": "Success Stories link",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to Success Stories page"
+                      },
+                      {
+                        "action_template_id": "a8",
+                        "label": "News link",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to News page"
+                      },
+                      {
+                        "action_template_id": "a9",
+                        "label": "Events link",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to Events page"
+                      },
+                      {
+                        "action_template_id": "a10",
+                        "label": "Get Started button",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to Get Started page"
+                      },
+                      {
+                        "action_template_id": "a11",
+                        "label": "Download button",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to Download page"
+                      },
+                      {
+                        "action_template_id": "a12",
+                        "label": "Docs link",
+                        "semantic_action": "open_detail",
+                        "risk_level": "low",
+                        "requires_gate": true,
+                        "expected_effect": "Navigate to Docs page"
+                      }
+                    ],
+                    "path_patterns": []
+                  },
+                  "interface_draft": {
+                    "regions": [
+                      {
+                        "region_id": "r1",
+                        "label": "Search input field",
+                        "role": "text_input",
+                        "source": "element_search_input_field_e7d36c1c",
+                        "click_point": {
+                          "x": 1230,
+                          "y": 267
+                        },
+                        "section_id": "primary_area"
+                      },
+                      {
+                        "region_id": "r2",
+                        "label": "Search button",
+                        "role": "button",
+                        "source": "element_search_button_7ce6e760",
+                        "click_point": {
+                          "x": 1350,
+                          "y": 267
+                        },
+                        "section_id": "primary_area"
+                      },
+                      {
+                        "region_id": "r3",
+                        "label": "About link",
+                        "role": "menu_item",
+                        "source": "element_about_link_53812d72",
+                        "click_point": {
+                          "x": 694,
+                          "y": 378
+                        },
+                        "section_id": "primary_area"
+                      },
+                      {
+                        "region_id": "r4",
+                        "label": "Downloads link",
+                        "role": "menu_item",
+                        "source": "element_downloads_link_fe68f0de",
+                        "click_point": {
+                          "x": 816,
+                          "y": 378
+                        },
+                        "section_id": "primary_area"
+                      },
+                      {
+                        "region_id": "r5",
+                        "label": "Documentation link",
+                        "role": "menu_item",
+                        "source": "element_documentation_link_9381d9f3",
+                        "click_point": {
+                          "x": 934,
+                          "y": 378
+                        },
+                        "section_id": "primary_area"
+                      },
+                      {
+                        "region_id": "r6",
+                        "label": "Community link",
+                        "role": "menu_item",
+                        "source": "element_community_link_3a1bfae9",
+                        "click_point": {
+                          "x": 1054,
+                          "y": 378
+                        },
+                        "section_id": "primary_area"
+                      },
+                      {
+                        "region_id": "r7",
+                        "label": "Success Stories link",
+                        "role": "menu_item",
+                        "source": "element_success_stories_link_4ba17021",
+                        "click_point": {
+                          "x": 1172,
+                          "y": 378
+                        },
+                        "section_id": "primary_area"
+                      },
+                      {
+                        "region_id": "r8",
+                        "label": "News link",
+                        "role": "menu_item",
+                        "source": "element_news_link_86a30db6",
+                        "click_point": {
+                          "x": 1272,
+                          "y": 378
+                        },
+                        "section_id": "primary_area"
+                      },
+                      {
+                        "region_id": "r9",
+                        "label": "Events link",
+                        "role": "menu_item",
+                        "source": "element_events_link_863f346e",
+                        "click_point": {
+                          "x": 1350,
+                          "y": 378
+                        },
+                        "section_id": "primary_area"
+                      },
+                      {
+                        "region_id": "r10",
+                        "label": "Get Started button",
+                        "role": "button",
+                        "source": "element_get_started_button_81109b8d",
+                        "click_point": {
+                          "x": 618,
+                          "y": 1087
+                        },
+                        "section_id": "primary_area"
+                      },
+                      {
+                        "region_id": "r11",
+                        "label": "Download button",
+                        "role": "button",
+                        "source": "element_download_button_3b6c566f",
+                        "click_point": {
+                          "x": 856,
+                          "y": 1087
+                        },
+                        "section_id": "primary_area"
+                      },
+                      {
+                        "region_id": "r12",
+                        "label": "Docs link",
+                        "role": "menu_item",
+                        "source": "element_docs_link_d633a071",
+                        "click_point": {
+                          "x": 1074,
+                          "y": 1087
+                        },
+                        "section_id": "primary_area"
+                      }
+                    ],
+                    "visual_assets": [],
+                    "dynamic_areas": [],
+                    "danger_zones": []
+                  },
+                  "agent_decision_points": [],
+                  "operation_skills": [],
+                  "gate_contracts": [],
+                  "safety": {
+                    "observation_only": true,
+                    "promotion_allowed": false,
+                    "final_submit_blocked": true,
+                    "real_clicks_performed": 0
+                  },
+                  "notes": [],
+                  "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                  "regions": [],
+                  "targets": [],
+                  "observers": [],
+                  "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+                },
+                "parse_error": null
+              },
+              "coordinate_remap": {
+                "from": {
+                  "width": 768,
+                  "height": 417
+                },
+                "to": {
+                  "width": 2540,
+                  "height": 1380
+                }
+              },
+              "status": "success"
+            }
+          ]
+        }
+      },
+      "result_kind": "draft_scored",
+      "quality_score_applicable": true,
+      "quality_score_ratio": 1.0,
+      "quality_score_percent": 100.0,
+      "score_report": {
+        "contract_version": "learning_template_draft_score_v1",
+        "metric_name": "draft_reference_alignment_score",
+        "metric_aliases": [
+          "template_similarity_score"
+        ],
+        "forbidden_interpretations": [
+          "model_accuracy",
+          "click_success_rate",
+          "gate_success_rate",
+          "seek_e2e_success_rate"
+        ],
+        "target_contract_version": "learning_template_target_v1",
+        "checks": [
+          {
+            "check_id": "top_level.contract_version",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "top_level.image_size",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "top_level.learning_source",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "top_level.screen_summary",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "top_level.state_guess",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "top_level.workflow_draft",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "top_level.interface_draft",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "top_level.safety",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "contract_version.learning_template_draft_v1",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "section.workflow_draft.states",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "section.workflow_draft.action_templates",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "section.interface_draft.regions",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "section.safety",
+            "passed": true,
+            "severity": "error"
+          },
+          {
+            "check_id": "safety.observation_only",
+            "passed": true,
+            "severity": "hard_error"
+          },
+          {
+            "check_id": "safety.promotion_allowed",
+            "passed": true,
+            "severity": "hard_error"
+          },
+          {
+            "check_id": "safety.final_submit_blocked",
+            "passed": true,
+            "severity": "hard_error"
+          },
+          {
+            "check_id": "safety.real_clicks_performed",
+            "passed": true,
+            "severity": "hard_error"
+          },
+          {
+            "check_id": "safety.final_submit_actions_blocked",
+            "passed": true,
+            "severity": "hard_error"
+          },
+          {
+            "check_id": "expected_action.validation_answer_present",
+            "passed": true,
+            "severity": "info"
+          }
+        ],
+        "section_scores": {
+          "contract": 1.0,
+          "sections": 1.0,
+          "safety": 1.0,
+          "actions": 1.0,
+          "evidence": 1.0,
+          "template_similarity": 1.0
+        },
+        "template_similarity": {
+          "contract_version": "learning_template_similarity_score_v1",
+          "score_ratio": 1.0,
+          "score_percent": 100.0,
+          "subscores": {},
+          "template_present": false
+        },
+        "template_similarity_score": {
+          "contract_version": "learning_template_similarity_score_v1",
+          "score_ratio": 1.0,
+          "score_percent": 100.0,
+          "subscores": {},
+          "template_present": false
+        },
+        "draft_reference_alignment_score": {
+          "contract_version": "draft_reference_alignment_score_v1",
+          "score_ratio": 1.0,
+          "score_percent": 100.0,
+          "passed": true,
+          "threshold": 0.9,
+          "reason": "passed"
+        },
+        "human_adjudication": {
+          "contract_version": "learning_human_adjudication_v1",
+          "status": "not_adjudicated",
+          "scope": null,
+          "rationale": null
+        },
+        "overall_score": {
+          "contract_version": "learning_overall_score_v1",
+          "score_ratio": 1.0,
+          "score_percent": 100.0,
+          "passed": true,
+          "metric_name": "draft_reference_alignment_score",
+          "draft_reference_alignment_threshold": 0.9,
+          "legacy_direct_use_accuracy_threshold": 0.9,
+          "reason": "passed"
+        },
+        "parameter_feedback": []
+      },
+      "score_ratio": 1.0,
+      "score_percent": 100.0,
+      "passed": true,
+      "draft_result": {
+        "contract_version": "learning_template_draft_v1",
+        "image_size": {
+          "width": 2540,
+          "height": 1380
+        },
+        "learning_source": "observe_model",
+        "screen_summary": "Python.org homepage with top navigation, search bar, and content cards for Get Started, Download, Docs, Jobs, Latest News, and Upcoming Events.",
+        "state_guess": "Python.org homepage after Learn Fast + Learn Deep calibration",
+        "workflow_draft": {
+          "states": [
+            {
+              "state_id": "s1",
+              "label": "Python.org homepage",
+              "page_type": "landing_page"
+            }
+          ],
+          "transitions": [],
+          "action_templates": [
+            {
+              "action_template_id": "a1",
+              "label": "Search input field",
+              "semantic_action": "type_text",
+              "risk_level": "low",
+              "requires_gate": true,
+              "expected_effect": "Search query entered into the search field"
+            },
+            {
+              "action_template_id": "a2",
+              "label": "Search button",
+              "semantic_action": "click",
+              "risk_level": "low",
+              "requires_gate": true,
+              "expected_effect": "Initiate search with current query"
+            },
+            {
+              "action_template_id": "a3",
+              "label": "About link",
+              "semantic_action": "open_detail",
+              "risk_level": "low",
+              "requires_gate": true,
+              "expected_effect": "Navigate to About page"
+            },
+            {
+              "action_template_id": "a4",
+              "label": "Downloads link",
+              "semantic_action": "open_detail",
+              "risk_level": "low",
+              "requires_gate": true,
+              "expected_effect": "Navigate to Downloads page"
+            },
+            {
+              "action_template_id": "a5",
+              "label": "Documentation link",
+              "semantic_action": "open_detail",
+              "risk_level": "low",
+              "requires_gate": true,
+              "expected_effect": "Navigate to Documentation page"
+            },
+            {
+              "action_template_id": "a6",
+              "label": "Community link",
+              "semantic_action": "open_detail",
+              "risk_level": "low",
+              "requires_gate": true,
+              "expected_effect": "Navigate to Community page"
+            },
+            {
+              "action_template_id": "a7",
+              "label": "Success Stories link",
+              "semantic_action": "open_detail",
+              "risk_level": "low",
+              "requires_gate": true,
+              "expected_effect": "Navigate to Success Stories page"
+            },
+            {
+              "action_template_id": "a8",
+              "label": "News link",
+              "semantic_action": "open_detail",
+              "risk_level": "low",
+              "requires_gate": true,
+              "expected_effect": "Navigate to News page"
+            },
+            {
+              "action_template_id": "a9",
+              "label": "Events link",
+              "semantic_action": "open_detail",
+              "risk_level": "low",
+              "requires_gate": true,
+              "expected_effect": "Navigate to Events page"
+            },
+            {
+              "action_template_id": "a10",
+              "label": "Get Started button",
+              "semantic_action": "open_detail",
+              "risk_level": "low",
+              "requires_gate": true,
+              "expected_effect": "Navigate to Get Started page"
+            },
+            {
+              "action_template_id": "a11",
+              "label": "Download button",
+              "semantic_action": "open_detail",
+              "risk_level": "low",
+              "requires_gate": true,
+              "expected_effect": "Navigate to Download page"
+            },
+            {
+              "action_template_id": "a12",
+              "label": "Docs link",
+              "semantic_action": "open_detail",
+              "risk_level": "low",
+              "requires_gate": true,
+              "expected_effect": "Navigate to Docs page"
+            }
+          ],
+          "path_patterns": []
+        },
+        "interface_draft": {
+          "regions": [
+            {
+              "region_id": "r1",
+              "label": "Search input field",
+              "role": "text_input",
+              "source": "element_search_input_field_e7d36c1c",
+              "click_point": {
+                "x": 1230,
+                "y": 267
+              },
+              "section_id": "primary_area"
+            },
+            {
+              "region_id": "r2",
+              "label": "Search button",
+              "role": "button",
+              "source": "element_search_button_7ce6e760",
+              "click_point": {
+                "x": 1350,
+                "y": 267
+              },
+              "section_id": "primary_area"
+            },
+            {
+              "region_id": "r3",
+              "label": "About link",
+              "role": "menu_item",
+              "source": "element_about_link_53812d72",
+              "click_point": {
+                "x": 694,
+                "y": 378
+              },
+              "section_id": "primary_area"
+            },
+            {
+              "region_id": "r4",
+              "label": "Downloads link",
+              "role": "menu_item",
+              "source": "element_downloads_link_fe68f0de",
+              "click_point": {
+                "x": 816,
+                "y": 378
+              },
+              "section_id": "primary_area"
+            },
+            {
+              "region_id": "r5",
+              "label": "Documentation link",
+              "role": "menu_item",
+              "source": "element_documentation_link_9381d9f3",
+              "click_point": {
+                "x": 934,
+                "y": 378
+              },
+              "section_id": "primary_area"
+            },
+            {
+              "region_id": "r6",
+              "label": "Community link",
+              "role": "menu_item",
+              "source": "element_community_link_3a1bfae9",
+              "click_point": {
+                "x": 1054,
+                "y": 378
+              },
+              "section_id": "primary_area"
+            },
+            {
+              "region_id": "r7",
+              "label": "Success Stories link",
+              "role": "menu_item",
+              "source": "element_success_stories_link_4ba17021",
+              "click_point": {
+                "x": 1172,
+                "y": 378
+              },
+              "section_id": "primary_area"
+            },
+            {
+              "region_id": "r8",
+              "label": "News link",
+              "role": "menu_item",
+              "source": "element_news_link_86a30db6",
+              "click_point": {
+                "x": 1272,
+                "y": 378
+              },
+              "section_id": "primary_area"
+            },
+            {
+              "region_id": "r9",
+              "label": "Events link",
+              "role": "menu_item",
+              "source": "element_events_link_863f346e",
+              "click_point": {
+                "x": 1350,
+                "y": 378
+              },
+              "section_id": "primary_area"
+            },
+            {
+              "region_id": "r10",
+              "label": "Get Started button",
+              "role": "button",
+              "source": "element_get_started_button_81109b8d",
+              "click_point": {
+                "x": 618,
+                "y": 1087
+              },
+              "section_id": "primary_area"
+            },
+            {
+              "region_id": "r11",
+              "label": "Download button",
+              "role": "button",
+              "source": "element_download_button_3b6c566f",
+              "click_point": {
+                "x": 856,
+                "y": 1087
+              },
+              "section_id": "primary_area"
+            },
+            {
+              "region_id": "r12",
+              "label": "Docs link",
+              "role": "menu_item",
+              "source": "element_docs_link_d633a071",
+              "click_point": {
+                "x": 1074,
+                "y": 1087
+              },
+              "section_id": "primary_area"
+            }
+          ],
+          "visual_assets": [],
+          "dynamic_areas": [],
+          "danger_zones": []
+        },
+        "agent_decision_points": [],
+        "operation_skills": [],
+        "gate_contracts": [],
+        "safety": {
+          "observation_only": true,
+          "promotion_allowed": false,
+          "final_submit_blocked": true,
+          "real_clicks_performed": 0
+        },
+        "notes": [],
+        "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+        "regions": [],
+        "targets": [],
+        "observers": [],
+        "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+      }
+    }
+  ],
+  "best_learning_draft": {
+    "contract_version": "learning_template_draft_v1",
+    "image_size": {
+      "width": 2540,
+      "height": 1380
+    },
+    "learning_source": "observe_model",
+    "screen_summary": "Python.org homepage with top navigation, search bar, and content cards for Get Started, Download, Docs, Jobs, Latest News, and Upcoming Events.",
+    "state_guess": "Python.org homepage after Learn Fast + Learn Deep calibration",
+    "workflow_draft": {
+      "states": [
+        {
+          "state_id": "s1",
+          "label": "Python.org homepage",
+          "page_type": "landing_page"
+        }
+      ],
+      "transitions": [],
+      "action_templates": [
+        {
+          "action_template_id": "a1",
+          "label": "Search input field",
+          "semantic_action": "type_text",
+          "risk_level": "low",
+          "requires_gate": true,
+          "expected_effect": "Search query entered into the search field"
+        },
+        {
+          "action_template_id": "a2",
+          "label": "Search button",
+          "semantic_action": "click",
+          "risk_level": "low",
+          "requires_gate": true,
+          "expected_effect": "Initiate search with current query"
+        },
+        {
+          "action_template_id": "a3",
+          "label": "About link",
+          "semantic_action": "open_detail",
+          "risk_level": "low",
+          "requires_gate": true,
+          "expected_effect": "Navigate to About page"
+        },
+        {
+          "action_template_id": "a4",
+          "label": "Downloads link",
+          "semantic_action": "open_detail",
+          "risk_level": "low",
+          "requires_gate": true,
+          "expected_effect": "Navigate to Downloads page"
+        },
+        {
+          "action_template_id": "a5",
+          "label": "Documentation link",
+          "semantic_action": "open_detail",
+          "risk_level": "low",
+          "requires_gate": true,
+          "expected_effect": "Navigate to Documentation page"
+        },
+        {
+          "action_template_id": "a6",
+          "label": "Community link",
+          "semantic_action": "open_detail",
+          "risk_level": "low",
+          "requires_gate": true,
+          "expected_effect": "Navigate to Community page"
+        },
+        {
+          "action_template_id": "a7",
+          "label": "Success Stories link",
+          "semantic_action": "open_detail",
+          "risk_level": "low",
+          "requires_gate": true,
+          "expected_effect": "Navigate to Success Stories page"
+        },
+        {
+          "action_template_id": "a8",
+          "label": "News link",
+          "semantic_action": "open_detail",
+          "risk_level": "low",
+          "requires_gate": true,
+          "expected_effect": "Navigate to News page"
+        },
+        {
+          "action_template_id": "a9",
+          "label": "Events link",
+          "semantic_action": "open_detail",
+          "risk_level": "low",
+          "requires_gate": true,
+          "expected_effect": "Navigate to Events page"
+        },
+        {
+          "action_template_id": "a10",
+          "label": "Get Started button",
+          "semantic_action": "open_detail",
+          "risk_level": "low",
+          "requires_gate": true,
+          "expected_effect": "Navigate to Get Started page"
+        },
+        {
+          "action_template_id": "a11",
+          "label": "Download button",
+          "semantic_action": "open_detail",
+          "risk_level": "low",
+          "requires_gate": true,
+          "expected_effect": "Navigate to Download page"
+        },
+        {
+          "action_template_id": "a12",
+          "label": "Docs link",
+          "semantic_action": "open_detail",
+          "risk_level": "low",
+          "requires_gate": true,
+          "expected_effect": "Navigate to Docs page"
+        }
+      ],
+      "path_patterns": []
+    },
+    "interface_draft": {
+      "regions": [
+        {
+          "region_id": "r1",
+          "label": "Search input field",
+          "role": "text_input",
+          "source": "element_search_input_field_e7d36c1c",
+          "click_point": {
+            "x": 1230,
+            "y": 267
+          },
+          "section_id": "primary_area"
+        },
+        {
+          "region_id": "r2",
+          "label": "Search button",
+          "role": "button",
+          "source": "element_search_button_7ce6e760",
+          "click_point": {
+            "x": 1350,
+            "y": 267
+          },
+          "section_id": "primary_area"
+        },
+        {
+          "region_id": "r3",
+          "label": "About link",
+          "role": "menu_item",
+          "source": "element_about_link_53812d72",
+          "click_point": {
+            "x": 694,
+            "y": 378
+          },
+          "section_id": "primary_area"
+        },
+        {
+          "region_id": "r4",
+          "label": "Downloads link",
+          "role": "menu_item",
+          "source": "element_downloads_link_fe68f0de",
+          "click_point": {
+            "x": 816,
+            "y": 378
+          },
+          "section_id": "primary_area"
+        },
+        {
+          "region_id": "r5",
+          "label": "Documentation link",
+          "role": "menu_item",
+          "source": "element_documentation_link_9381d9f3",
+          "click_point": {
+            "x": 934,
+            "y": 378
+          },
+          "section_id": "primary_area"
+        },
+        {
+          "region_id": "r6",
+          "label": "Community link",
+          "role": "menu_item",
+          "source": "element_community_link_3a1bfae9",
+          "click_point": {
+            "x": 1054,
+            "y": 378
+          },
+          "section_id": "primary_area"
+        },
+        {
+          "region_id": "r7",
+          "label": "Success Stories link",
+          "role": "menu_item",
+          "source": "element_success_stories_link_4ba17021",
+          "click_point": {
+            "x": 1172,
+            "y": 378
+          },
+          "section_id": "primary_area"
+        },
+        {
+          "region_id": "r8",
+          "label": "News link",
+          "role": "menu_item",
+          "source": "element_news_link_86a30db6",
+          "click_point": {
+            "x": 1272,
+            "y": 378
+          },
+          "section_id": "primary_area"
+        },
+        {
+          "region_id": "r9",
+          "label": "Events link",
+          "role": "menu_item",
+          "source": "element_events_link_863f346e",
+          "click_point": {
+            "x": 1350,
+            "y": 378
+          },
+          "section_id": "primary_area"
+        },
+        {
+          "region_id": "r10",
+          "label": "Get Started button",
+          "role": "button",
+          "source": "element_get_started_button_81109b8d",
+          "click_point": {
+            "x": 618,
+            "y": 1087
+          },
+          "section_id": "primary_area"
+        },
+        {
+          "region_id": "r11",
+          "label": "Download button",
+          "role": "button",
+          "source": "element_download_button_3b6c566f",
+          "click_point": {
+            "x": 856,
+            "y": 1087
+          },
+          "section_id": "primary_area"
+        },
+        {
+          "region_id": "r12",
+          "label": "Docs link",
+          "role": "menu_item",
+          "source": "element_docs_link_d633a071",
+          "click_point": {
+            "x": 1074,
+            "y": 1087
+          },
+          "section_id": "primary_area"
+        }
+      ],
+      "visual_assets": [],
+      "dynamic_areas": [],
+      "danger_zones": []
+    },
+    "agent_decision_points": [],
+    "operation_skills": [],
+    "gate_contracts": [],
+    "safety": {
+      "observation_only": true,
+      "promotion_allowed": false,
+      "final_submit_blocked": true,
+      "real_clicks_performed": 0
+    },
+    "notes": [],
+    "provider": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+    "regions": [],
+    "targets": [],
+    "observers": [],
+    "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+  },
+  "target_contract": {
+    "contract_version": "learning_template_target_v1",
+    "required_top_level_fields": [
+      "contract_version",
+      "image_size",
+      "learning_source",
+      "screen_summary",
+      "state_guess",
+      "workflow_draft",
+      "interface_draft",
+      "safety"
+    ],
+    "required_sections": [
+      "workflow_draft.states",
+      "workflow_draft.action_templates",
+      "interface_draft.regions",
+      "safety"
+    ],
+    "expected_actions": [],
+    "expected_visible_text": [],
+    "reference_template": null,
+    "require_expected_actions_for_pass": false,
+    "draft_reference_alignment_threshold": 0.9,
+    "direct_use_accuracy_threshold": 0.9,
+    "human_adjudication": null
+  },
+  "safety": {
+    "real_clicks_performed": 0,
+    "artifact_posthoc_optimization_allowed": false,
+    "promotion_allowed": false,
+    "final_submit_blocked": true,
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "live_safe_fill_attempted": 0,
+    "final_submit_forbidden": true,
+    "real_action_requires_gate": true
+  },
+  "artifact_type": "raw_learning_trial",
+  "draft_only": true,
+  "draft_graph_preview": true,
+  "runtime_path_graph": false,
+  "promotion_allowed": false,
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "real_clicks": 0,
+  "live_safe_fill_attempted": 0,
+  "final_submit_forbidden": true,
+  "real_action_requires_gate": true,
+  "reference_available": false,
+  "panel_learning_studio": {
+    "contract_version": "panel_learning_studio_trial_v1",
+    "draft_graph_preview": true,
+    "display_only": true,
+    "source": "panel_run_learning_model_trial"
+  }
+}

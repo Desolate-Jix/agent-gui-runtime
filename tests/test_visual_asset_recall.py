@@ -177,6 +177,42 @@ def test_visual_asset_recall_respects_gate_required_review_policy(tmp_path: Path
     assert recall["matches"][0]["asset_summary"]["review_policy"]["click_permission"] == "gate_required"
 
 
+def test_visual_asset_recall_does_not_use_brand_asset_for_apply_goal(tmp_path: Path) -> None:
+    learned_path = tmp_path / "learned.png"
+    target_path = tmp_path / "target.png"
+    learned_bbox = _draw_button(learned_path, xy=(120, 60), label="SEEK")
+    _draw_button(target_path, xy=(130, 80), label="SEEK")
+    template_path = tmp_path / "seek_brand.png"
+    with Image.open(learned_path) as image:
+        image.crop(
+            (
+                learned_bbox["x"],
+                learned_bbox["y"],
+                learned_bbox["x"] + learned_bbox["w"],
+                learned_bbox["y"] + learned_bbox["h"],
+            )
+        ).save(template_path)
+
+    recall = _build_visual_asset_recall(
+        metadata={"visual_assets": _asset_store(
+            template_path=template_path,
+            source_bbox=learned_bbox,
+            label="SEEK top search area",
+            semantic_action="click",
+            danger_level="safe",
+        )},
+        observe_reuse={},
+        image_path=target_path,
+        image_size=ImageSize(width=640, height=420),
+        goal="Click the visible Apply button for the selected SEEK job.",
+    )
+
+    assert recall["status"] == "no_match"
+    assert recall["fast_lane_allowed"] is False
+    assert recall["selected_candidate"] is None
+    assert recall["skipped"][0]["reason"] == "not_goal_relevant"
+
+
 def test_visual_asset_recall_accepts_learned_interface_map_assets(tmp_path: Path) -> None:
     learned_path = tmp_path / "learned.png"
     target_path = tmp_path / "target.png"

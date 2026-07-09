@@ -1,0 +1,1889 @@
+{
+  "contract_version": "learn_recognition_golden_manifest_v1",
+  "description": "Fixture-only benchmark for the rebuilt Learn Recognition front half. It is not model accuracy and not execute authorization.",
+  "cases": [
+    {
+      "case_id": "python_search_button_grounded",
+      "surface": "python_homepage",
+      "goal": "Recognize the Search button as an actionable candidate and produce a reviewable draft region.",
+      "observe_bundle": {
+        "contract_version": "learn_observe_bundle_v1",
+        "screen_size": {
+          "width": 1280,
+          "height": 720
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Search",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 980,
+                  "y": 140,
+                  "w": 92,
+                  "h": 36
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "actionable_labels": [
+          "Search"
+        ],
+        "roi_coverage_labels": [
+          "Search"
+        ],
+        "grounding_valid_labels": [
+          "Search"
+        ]
+      },
+      "grounding": {
+        "Search": {
+          "screen_point": {
+            "x": 1024,
+            "y": 158
+          },
+          "screen_bbox": {
+            "x": 980,
+            "y": 140,
+            "w": 92,
+            "h": 36
+          },
+          "evidence": {
+            "coordinate_transform_replay": true,
+            "screenshot_freshness": true,
+            "uia_or_dom_or_parser_overlap": true
+          }
+        }
+      }
+    },
+    {
+      "case_id": "download_button_grounded",
+      "surface": "python_homepage",
+      "goal": "Recognize Download as a normal actionable button.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 1280,
+          "height": 720
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Download",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 420,
+                  "y": 320,
+                  "w": 130,
+                  "h": 38
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "actionable_labels": [
+          "Download"
+        ],
+        "grounding_valid_labels": [
+          "Download"
+        ]
+      },
+      "grounding": {
+        "Download": {
+          "screen_point": {
+            "x": 482,
+            "y": 338
+          },
+          "screen_bbox": {
+            "x": 420,
+            "y": 320,
+            "w": 130,
+            "h": 38
+          },
+          "evidence": {
+            "coordinate_transform_replay": true,
+            "screenshot_freshness": true,
+            "uia_or_dom_or_parser_overlap": true
+          }
+        }
+      }
+    },
+    {
+      "case_id": "learn_more_link_grounded",
+      "surface": "python_homepage",
+      "goal": "Recognize a hyperlink action.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 1280,
+          "height": 720
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Learn More",
+                "control_type": "Hyperlink",
+                "bbox": {
+                  "x": 680,
+                  "y": 430,
+                  "w": 120,
+                  "h": 28
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "actionable_labels": [
+          "Learn More"
+        ],
+        "grounding_valid_labels": [
+          "Learn More"
+        ]
+      },
+      "grounding": {
+        "Learn More": {
+          "screen_point": {
+            "x": 735,
+            "y": 443
+          },
+          "screen_bbox": {
+            "x": 680,
+            "y": 430,
+            "w": 120,
+            "h": 28
+          },
+          "evidence": {
+            "coordinate_transform_replay": true,
+            "screenshot_freshness": true,
+            "uia_or_dom_or_parser_overlap": true
+          }
+        }
+      }
+    },
+    {
+      "case_id": "menu_downloads_grounded",
+      "surface": "navigation_bar",
+      "goal": "Recognize a menu item as actionable.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 1280,
+          "height": 720
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Downloads",
+                "control_type": "MenuItem",
+                "bbox": {
+                  "x": 330,
+                  "y": 175,
+                  "w": 120,
+                  "h": 42
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "actionable_labels": [
+          "Downloads"
+        ],
+        "grounding_valid_labels": [
+          "Downloads"
+        ]
+      },
+      "grounding": {
+        "Downloads": {
+          "screen_point": {
+            "x": 388,
+            "y": 196
+          },
+          "screen_bbox": {
+            "x": 330,
+            "y": 175,
+            "w": 120,
+            "h": 42
+          },
+          "evidence": {
+            "coordinate_transform_replay": true,
+            "screenshot_freshness": true,
+            "uia_or_dom_or_parser_overlap": true
+          }
+        }
+      }
+    },
+    {
+      "case_id": "apply_now_entry_grounded",
+      "surface": "job_detail",
+      "goal": "Recognize Apply now as an application-entry action, not final submit.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 1440,
+          "height": 1000
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Apply now",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 1180,
+                  "y": 180,
+                  "w": 120,
+                  "h": 42
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "actionable_labels": [
+          "Apply now"
+        ],
+        "grounding_valid_labels": [
+          "Apply now"
+        ]
+      },
+      "grounding": {
+        "Apply now": {
+          "screen_point": {
+            "x": 1238,
+            "y": 201
+          },
+          "screen_bbox": {
+            "x": 1180,
+            "y": 180,
+            "w": 120,
+            "h": 42
+          },
+          "evidence": {
+            "coordinate_transform_replay": true,
+            "screenshot_freshness": true,
+            "uia_or_dom_or_parser_overlap": true
+          }
+        }
+      }
+    },
+    {
+      "case_id": "roi_edge_top_left_button_grounded",
+      "surface": "desktop_toolbar",
+      "goal": "Verify ROI coverage when an actionable button sits on the top-left screen edge.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 400,
+          "height": 300
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Back",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 0,
+                  "y": 0,
+                  "w": 40,
+                  "h": 32
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "actionable_labels": [
+          "Back"
+        ],
+        "roi_coverage_labels": [
+          "Back"
+        ],
+        "grounding_valid_labels": [
+          "Back"
+        ]
+      },
+      "grounding": {
+        "Back": {
+          "screen_point": {
+            "x": 20,
+            "y": 16
+          },
+          "screen_bbox": {
+            "x": 0,
+            "y": 0,
+            "w": 40,
+            "h": 32
+          },
+          "evidence": {
+            "coordinate_transform_replay": true,
+            "screenshot_freshness": true,
+            "uia_or_dom_or_parser_overlap": true
+          }
+        }
+      }
+    },
+    {
+      "case_id": "roi_edge_bottom_right_button_grounded",
+      "surface": "desktop_toolbar",
+      "goal": "Verify ROI coverage when an actionable button sits on the bottom-right screen edge.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 400,
+          "height": 300
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Next",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 360,
+                  "y": 268,
+                  "w": 40,
+                  "h": 32
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "actionable_labels": [
+          "Next"
+        ],
+        "roi_coverage_labels": [
+          "Next"
+        ],
+        "grounding_valid_labels": [
+          "Next"
+        ]
+      },
+      "grounding": {
+        "Next": {
+          "screen_point": {
+            "x": 380,
+            "y": 284
+          },
+          "screen_bbox": {
+            "x": 360,
+            "y": 268,
+            "w": 40,
+            "h": 32
+          },
+          "evidence": {
+            "coordinate_transform_replay": true,
+            "screenshot_freshness": true,
+            "uia_or_dom_or_parser_overlap": true
+          }
+        }
+      }
+    },
+    {
+      "case_id": "form_search_input_roi_covered",
+      "surface": "search_form",
+      "goal": "Verify ROI coverage and grounding for a safe form input field.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 1000,
+          "height": 700
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Search jobs",
+                "control_type": "Edit",
+                "bbox": {
+                  "x": 120,
+                  "y": 96,
+                  "w": 360,
+                  "h": 44
+                },
+                "patterns": [
+                  "Value"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "form_field_labels": [
+          "Search jobs"
+        ],
+        "roi_coverage_labels": [
+          "Search jobs"
+        ],
+        "grounding_valid_labels": [
+          "Search jobs"
+        ]
+      },
+      "grounding": {
+        "Search jobs": {
+          "screen_point": {
+            "x": 300,
+            "y": 118
+          },
+          "screen_bbox": {
+            "x": 120,
+            "y": 96,
+            "w": 360,
+            "h": 44
+          },
+          "evidence": {
+            "coordinate_transform_replay": true,
+            "screenshot_freshness": true,
+            "uia_or_dom_or_parser_overlap": true
+          }
+        }
+      }
+    },
+    {
+      "case_id": "form_email_field_classified",
+      "surface": "application_form",
+      "goal": "Classify email input as a form field.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 1000,
+          "height": 800
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Email",
+                "control_type": "Edit",
+                "bbox": {
+                  "x": 120,
+                  "y": 220,
+                  "w": 320,
+                  "h": 36
+                },
+                "patterns": [
+                  "Value"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "form_field_labels": [
+          "Email"
+        ]
+      }
+    },
+    {
+      "case_id": "form_phone_field_classified",
+      "surface": "application_form",
+      "goal": "Classify mobile phone input as a form field.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 1000,
+          "height": 800
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Mobile phone",
+                "control_type": "Edit",
+                "bbox": {
+                  "x": 120,
+                  "y": 270,
+                  "w": 240,
+                  "h": 36
+                },
+                "patterns": [
+                  "Value"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "form_field_labels": [
+          "Mobile phone"
+        ]
+      }
+    },
+    {
+      "case_id": "form_city_combo_classified",
+      "surface": "application_form",
+      "goal": "Classify city/suburb combo as a form field.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 1000,
+          "height": 800
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "City or suburb",
+                "control_type": "ComboBox",
+                "bbox": {
+                  "x": 120,
+                  "y": 320,
+                  "w": 300,
+                  "h": 36
+                },
+                "patterns": [
+                  "Value",
+                  "ExpandCollapse"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "form_field_labels": [
+          "City or suburb"
+        ]
+      }
+    },
+    {
+      "case_id": "form_cover_letter_textarea_classified",
+      "surface": "application_form",
+      "goal": "Classify cover letter textarea/document area as a form field.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 1000,
+          "height": 800
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Cover letter",
+                "control_type": "Document",
+                "bbox": {
+                  "x": 120,
+                  "y": 420,
+                  "w": 620,
+                  "h": 160
+                },
+                "patterns": [
+                  "Value"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "form_field_labels": [
+          "Cover letter"
+        ]
+      }
+    },
+    {
+      "case_id": "ocr_latest_news_rejected",
+      "surface": "python_homepage",
+      "goal": "Reject readonly OCR text from grounding.",
+      "observe_bundle": {
+        "contract_version": "learn_observe_bundle_v1",
+        "screen_size": {
+          "width": 1280,
+          "height": 720
+        },
+        "sources": {
+          "ocr": {
+            "texts": [
+              {
+                "text": "Latest News",
+                "bbox": {
+                  "x": 80,
+                  "y": 540,
+                  "w": 260,
+                  "h": 48
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "rejected_labels": [
+          "Latest News"
+        ]
+      }
+    },
+    {
+      "case_id": "code_block_rejected",
+      "surface": "python_homepage",
+      "goal": "Reject code-like OCR content from grounding.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 1280,
+          "height": 720
+        },
+        "sources": {
+          "ocr": {
+            "texts": [
+              {
+                "text": ">>> print('Hello, Python!')",
+                "bbox": {
+                  "x": 300,
+                  "y": 240,
+                  "w": 280,
+                  "h": 28
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "rejected_labels": [
+          ">>> print('Hello, Python!')"
+        ]
+      }
+    },
+    {
+      "case_id": "readonly_card_rejected",
+      "surface": "job_results",
+      "goal": "Reject a readonly card title without interactable evidence.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 1280,
+          "height": 720
+        },
+        "sources": {
+          "ocr": {
+            "texts": [
+              {
+                "text": "Looking for work or have a Python job?",
+                "bbox": {
+                  "x": 820,
+                  "y": 340,
+                  "w": 320,
+                  "h": 60
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "rejected_labels": [
+          "Looking for work or have a Python job?"
+        ]
+      }
+    },
+    {
+      "case_id": "wrong_surface_browser_chrome_rejected",
+      "surface": "browser_chrome",
+      "goal": "Reject browser address-bar text as non-actionable OCR evidence.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 1280,
+          "height": 720
+        },
+        "sources": {
+          "ocr": {
+            "texts": [
+              {
+                "text": "https://www.python.org",
+                "bbox": {
+                  "x": 120,
+                  "y": 48,
+                  "w": 260,
+                  "h": 22
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "rejected_labels": [
+          "https://www.python.org"
+        ],
+        "wrong_surface_labels": [
+          "https://www.python.org"
+        ]
+      }
+    },
+    {
+      "case_id": "wrong_surface_login_overlay_rejected",
+      "surface": "login_overlay",
+      "goal": "Reject login overlay text as wrong-surface readable evidence before grounding.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 1280,
+          "height": 720
+        },
+        "sources": {
+          "ocr": {
+            "texts": [
+              {
+                "text": "Sign in to continue",
+                "bbox": {
+                  "x": 420,
+                  "y": 240,
+                  "w": 320,
+                  "h": 40
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "rejected_labels": [
+          "Sign in to continue"
+        ],
+        "wrong_surface_labels": [
+          "Sign in to continue"
+        ]
+      }
+    },
+    {
+      "case_id": "wrong_surface_cookie_overlay_rejected",
+      "surface": "cookie_overlay",
+      "goal": "Reject cookie overlay OCR-only text as wrong-surface evidence before grounding.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 1280,
+          "height": 720
+        },
+        "sources": {
+          "ocr": {
+            "texts": [
+              {
+                "text": "Accept all cookies",
+                "bbox": {
+                  "x": 860,
+                  "y": 630,
+                  "w": 210,
+                  "h": 42
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "rejected_labels": [
+          "Accept all cookies"
+        ],
+        "wrong_surface_labels": [
+          "Accept all cookies"
+        ]
+      }
+    },
+    {
+      "case_id": "submit_application_danger_zone",
+      "surface": "application_form",
+      "goal": "Classify final submit text as danger-zone evidence, not a normal action.",
+      "observe_bundle": {
+        "contract_version": "learn_observe_bundle_v1",
+        "screen_size": {
+          "width": 1000,
+          "height": 800
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Submit application",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 700,
+                  "y": 720,
+                  "w": 180,
+                  "h": 44
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "danger_zone_labels": [
+          "Submit application"
+        ]
+      }
+    },
+    {
+      "case_id": "send_application_danger_zone",
+      "surface": "application_form",
+      "goal": "Classify Send application as a danger zone.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 1000,
+          "height": 800
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Send application",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 710,
+                  "y": 720,
+                  "w": 170,
+                  "h": 44
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "danger_zone_labels": [
+          "Send application"
+        ]
+      }
+    },
+    {
+      "case_id": "complete_application_danger_zone",
+      "surface": "application_form",
+      "goal": "Classify Complete application as a danger zone.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 1000,
+          "height": 800
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Complete application",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 700,
+                  "y": 720,
+                  "w": 190,
+                  "h": 44
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "danger_zone_labels": [
+          "Complete application"
+        ]
+      }
+    },
+    {
+      "case_id": "confirm_danger_zone",
+      "surface": "modal",
+      "goal": "Classify Confirm as a danger zone.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 900,
+          "height": 600
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Confirm",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 500,
+                  "y": 420,
+                  "w": 120,
+                  "h": 42
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "danger_zone_labels": [
+          "Confirm"
+        ]
+      }
+    },
+    {
+      "case_id": "review_and_submit_danger_zone",
+      "surface": "final_review",
+      "goal": "Classify Review and submit as a danger zone.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 1000,
+          "height": 800
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Review and submit",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 650,
+                  "y": 700,
+                  "w": 210,
+                  "h": 44
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "danger_zone_labels": [
+          "Review and submit"
+        ]
+      }
+    },
+    {
+      "case_id": "grounding_point_outside_bbox_failure",
+      "surface": "python_homepage",
+      "goal": "Expose point-outside-bbox grounding failure.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 900,
+          "height": 600
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Search",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 100,
+                  "y": 100,
+                  "w": 80,
+                  "h": 30
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "actionable_labels": [
+          "Search"
+        ],
+        "grounding_valid_labels": [
+          "Search"
+        ]
+      },
+      "grounding": {
+        "Search": {
+          "screen_point": {
+            "x": 300,
+            "y": 115
+          },
+          "screen_bbox": {
+            "x": 100,
+            "y": 100,
+            "w": 80,
+            "h": 30
+          },
+          "evidence": {
+            "coordinate_transform_replay": true,
+            "screenshot_freshness": true,
+            "uia_or_dom_or_parser_overlap": true
+          }
+        }
+      }
+    },
+    {
+      "case_id": "grounding_missing_transform_failure",
+      "surface": "python_homepage",
+      "goal": "Expose missing coordinate-transform replay failure.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 900,
+          "height": 600
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Search",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 100,
+                  "y": 100,
+                  "w": 80,
+                  "h": 30
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "actionable_labels": [
+          "Search"
+        ],
+        "grounding_valid_labels": [
+          "Search"
+        ]
+      },
+      "grounding": {
+        "Search": {
+          "screen_point": {
+            "x": 130,
+            "y": 115
+          },
+          "screen_bbox": {
+            "x": 100,
+            "y": 100,
+            "w": 80,
+            "h": 30
+          },
+          "evidence": {
+            "coordinate_transform_replay": false,
+            "screenshot_freshness": true,
+            "uia_or_dom_or_parser_overlap": true
+          }
+        }
+      }
+    },
+    {
+      "case_id": "grounding_stale_screenshot_failure",
+      "surface": "python_homepage",
+      "goal": "Expose stale screenshot grounding failure.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 900,
+          "height": 600
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Search",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 100,
+                  "y": 100,
+                  "w": 80,
+                  "h": 30
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "actionable_labels": [
+          "Search"
+        ],
+        "grounding_valid_labels": [
+          "Search"
+        ]
+      },
+      "grounding": {
+        "Search": {
+          "screen_point": {
+            "x": 130,
+            "y": 115
+          },
+          "screen_bbox": {
+            "x": 100,
+            "y": 100,
+            "w": 80,
+            "h": 30
+          },
+          "evidence": {
+            "coordinate_transform_replay": true,
+            "screenshot_freshness": false,
+            "uia_or_dom_or_parser_overlap": true
+          }
+        }
+      }
+    },
+    {
+      "case_id": "semantic_bbox_without_interactable_evidence",
+      "surface": "python_homepage",
+      "goal": "Reject semantic-only VLM bbox that has no interactable evidence.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 1280,
+          "height": 720
+        },
+        "sources": {
+          "vision": {
+            "regions": [
+              {
+                "label": "Hero code sample",
+                "role": "card",
+                "bbox": {
+                  "x": 300,
+                  "y": 220,
+                  "w": 420,
+                  "h": 220
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "semantic_without_interactable_labels": [
+          "Hero code sample"
+        ],
+        "not_grounded_labels": [
+          "Hero code sample"
+        ]
+      }
+    },
+    {
+      "case_id": "semantic_region_uia_cross_evidence_grounded",
+      "surface": "python_homepage",
+      "goal": "Allow a semantic VLM region to become grounding-eligible only when it overlaps real UIA interaction evidence.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 1280,
+          "height": 720
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "id": "uia_search",
+                "name": "Search",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 980,
+                  "y": 140,
+                  "w": 92,
+                  "h": 36
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          },
+          "vision": {
+            "regions": [
+              {
+                "region_id": "vision_search",
+                "label": "Search",
+                "role": "button",
+                "bbox": {
+                  "x": 976,
+                  "y": 136,
+                  "w": 100,
+                  "h": 44
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 2,
+        "actionable_labels": [
+          "Search"
+        ]
+      }
+    },
+    {
+      "case_id": "pathgraph_candidate_validation_ok",
+      "surface": "python_homepage",
+      "goal": "Validate a recognized draft can enter the reviewed pathgraph candidate safety path.",
+      "observe_bundle": {
+        "screen_size": {
+          "width": 1280,
+          "height": 720
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Search",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 980,
+                  "y": 140,
+                  "w": 92,
+                  "h": 36
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 1,
+        "actionable_labels": [
+          "Search"
+        ],
+        "grounding_valid_labels": [
+          "Search"
+        ],
+        "pathgraph_candidate_validation_status": "passed_candidate"
+      },
+      "review_patch": {
+        "blockers": [
+          {
+            "blocker_id": "final_submit",
+            "label": "Final submit remains blocked"
+          }
+        ],
+        "verification_rules": [
+          {
+            "rule_id": "search_visible",
+            "label": "Search button remains visible"
+          }
+        ],
+        "review_status": "approved_as_assisted_template"
+      },
+      "grounding": {
+        "Search": {
+          "screen_point": {
+            "x": 1024,
+            "y": 158
+          },
+          "screen_bbox": {
+            "x": 980,
+            "y": 140,
+            "w": 92,
+            "h": 36
+          },
+          "evidence": {
+            "coordinate_transform_replay": true,
+            "screenshot_freshness": true,
+            "uia_or_dom_or_parser_overlap": true
+          }
+        }
+      }
+    },
+    {
+      "case_id": "recorded_parser_semantic_region_rejected",
+      "source_type": "recorded_parser_output",
+      "surface": "python_homepage",
+      "goal": "Load an existing Learn Fast model trace-derived parser output and reject semantic-only VLM controls without interactable evidence.",
+      "recorded_parser_output_path": "artifacts/benchmarks/learn_recognition_recorded_outputs/python_homepage_learn_fast_recorded_parser_output_v1.json",
+      "expected": {
+        "inventory_min_count": 12,
+        "semantic_without_interactable_labels": [
+          "Search button"
+        ],
+        "not_grounded_labels": [
+          "Search button"
+        ]
+      }
+    },
+    {
+      "case_id": "recorded_grounding_search_point_valid",
+      "source_type": "recorded_grounding_output",
+      "surface": "python_homepage",
+      "goal": "Load an existing Learn Deep coordinate-calibration output and validate its Search button point with replayable evidence.",
+      "observe_bundle": {
+        "contract_version": "learn_observe_bundle_v1",
+        "screen_size": {
+          "width": 2540,
+          "height": 1380
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Search button",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 1322,
+                  "y": 244,
+                  "w": 57,
+                  "h": 46
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "recorded_grounding_output_path": "artifacts/benchmarks/learn_recognition_recorded_outputs/python_search_learn_deep_recorded_grounding_output_v1.json",
+      "expected": {
+        "inventory_min_count": 1,
+        "actionable_labels": [
+          "Search button"
+        ],
+        "grounding_valid_labels": [
+          "Search button"
+        ]
+      }
+    },
+    {
+      "case_id": "recorded_parser_omniparser_style_search_action",
+      "source_type": "recorded_parser_output",
+      "surface": "generic_homepage",
+      "goal": "Load an OmniParser-style parsed_content_list output and accept interactive Search while rejecting readonly text.",
+      "recorded_parser_output_path": "artifacts/benchmarks/learn_recognition_recorded_outputs/omniparser_style_search_output_v1.json",
+      "expected": {
+        "inventory_min_count": 2,
+        "actionable_labels": [
+          "Search"
+        ],
+        "rejected_labels": [
+          "Latest News"
+        ]
+      }
+    },
+    {
+      "case_id": "recorded_parser_omniparser_style_form_fields",
+      "source_type": "recorded_parser_output",
+      "surface": "generic_form",
+      "goal": "Load an OmniParser-style form parser output and classify interactive inputs without promoting readonly helper text.",
+      "recorded_parser_output_path": "artifacts/benchmarks/learn_recognition_recorded_outputs/omniparser_style_form_fields_output_v1.json",
+      "expected": {
+        "inventory_min_count": 4,
+        "form_field_labels": [
+          "Email",
+          "Mobile phone",
+          "Cover letter"
+        ],
+        "rejected_labels": [
+          "Your details are saved securely"
+        ]
+      }
+    },
+    {
+      "case_id": "recorded_parser_omniparser_style_final_submit_danger",
+      "source_type": "recorded_parser_output",
+      "surface": "final_review",
+      "goal": "Load an OmniParser-style final review parser output and classify final submit as a danger zone.",
+      "recorded_parser_output_path": "artifacts/benchmarks/learn_recognition_recorded_outputs/omniparser_style_final_submit_output_v1.json",
+      "expected": {
+        "inventory_min_count": 3,
+        "actionable_labels": [
+          "Back"
+        ],
+        "danger_zone_labels": [
+          "Submit application"
+        ],
+        "not_grounded_labels": [
+          "Submit application",
+          "Review your application before submitting"
+        ]
+      }
+    },
+    {
+      "case_id": "recorded_parser_seek_search_header_controls",
+      "source_type": "recorded_parser_output",
+      "surface": "seek_results_header",
+      "goal": "Use a saved SEEK results screenshot as learn-only parser evidence for non-submit header controls.",
+      "observe_bundle": {
+        "contract_version": "learn_observe_bundle_v1",
+        "screen_size": {
+          "width": 2560,
+          "height": 1400
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Search keyword field",
+                "control_type": "Edit",
+                "bbox": {
+                  "x": 633,
+                  "y": 184,
+                  "w": 850,
+                  "h": 48
+                },
+                "patterns": [
+                  "Value"
+                ]
+              },
+              {
+                "name": "SEEK search button",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 1820,
+                  "y": 184,
+                  "w": 92,
+                  "h": 48
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              },
+              {
+                "name": "Pay filter",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 632,
+                  "y": 258,
+                  "w": 78,
+                  "h": 42
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "inventory_min_count": 3,
+        "actionable_labels": [
+          "SEEK search button",
+          "Pay filter"
+        ],
+        "form_field_labels": [
+          "Search keyword field"
+        ],
+        "not_grounded_labels": []
+      }
+    },
+    {
+      "case_id": "recorded_parser_execute_candidate_docs_search",
+      "source_type": "recorded_parser_output",
+      "surface": "docs_search",
+      "goal": "Load a recorded execute recognition candidate result for a docs search action as learn-only parser evidence.",
+      "recorded_parser_output_path": "learn_recognition_recorded_outputs/docs_search_execute_candidate_recorded_parser_output_v1.json",
+      "expected": {
+        "inventory_min_count": 1,
+        "actionable_labels": [
+          "search"
+        ]
+      }
+    },
+    {
+      "case_id": "recorded_parser_execute_candidate_google_news_home",
+      "source_type": "recorded_parser_output",
+      "surface": "google_news_home",
+      "goal": "Load a recorded execute recognition candidate result for a Google News Home nav action as learn-only parser evidence.",
+      "recorded_parser_output_path": "learn_recognition_recorded_outputs/google_news_home_execute_candidate_recorded_parser_output_v1.json",
+      "expected": {
+        "inventory_min_count": 1,
+        "actionable_labels": [
+          "Home"
+        ]
+      }
+    },
+    {
+      "case_id": "recorded_grounding_uground_style_roi_point_valid",
+      "source_type": "recorded_grounding_output",
+      "surface": "generic_homepage",
+      "goal": "Load a UGround-style normalized ROI point and restore it through the ROI coordinate transform.",
+      "observe_bundle": {
+        "contract_version": "learn_observe_bundle_v1",
+        "screen_size": {
+          "width": 500,
+          "height": 400
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Search",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 100,
+                  "y": 100,
+                  "w": 80,
+                  "h": 30
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "recorded_grounding_output_path": "artifacts/benchmarks/learn_recognition_recorded_outputs/uground_style_search_roi_output_v1.json",
+      "expected": {
+        "inventory_min_count": 1,
+        "actionable_labels": [
+          "Search"
+        ],
+        "grounding_valid_labels": [
+          "Search"
+        ]
+      }
+    },
+    {
+      "case_id": "recorded_grounding_uground_2b_search_point_valid",
+      "source_type": "recorded_grounding_output",
+      "surface": "generic_homepage",
+      "goal": "Load a recorded-per-model UGround 2B normalized ROI point and restore it inside a Search button bbox.",
+      "observe_bundle": {
+        "contract_version": "learn_observe_bundle_v1",
+        "screen_size": {
+          "width": 500,
+          "height": 400
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Search",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 100,
+                  "y": 100,
+                  "w": 80,
+                  "h": 30
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "recorded_grounding_output_path": "artifacts/benchmarks/learn_recognition_recorded_outputs/uground_2b_search_roi_recorded_output_v1.json",
+      "expected": {
+        "inventory_min_count": 1,
+        "actionable_labels": [
+          "Search"
+        ],
+        "grounding_valid_labels": [
+          "Search"
+        ]
+      }
+    },
+    {
+      "case_id": "recorded_grounding_uground_7b_apply_now_point_valid",
+      "source_type": "recorded_grounding_output",
+      "surface": "apply_entry",
+      "goal": "Load a recorded-per-model UGround 7B normalized ROI point and restore it inside an Apply now button bbox without enabling execute binding.",
+      "observe_bundle": {
+        "contract_version": "learn_observe_bundle_v1",
+        "screen_size": {
+          "width": 900,
+          "height": 700
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Apply now",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 600,
+                  "y": 420,
+                  "w": 140,
+                  "h": 44
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "recorded_grounding_output_path": "artifacts/benchmarks/learn_recognition_recorded_outputs/uground_7b_apply_now_roi_recorded_output_v1.json",
+      "expected": {
+        "inventory_min_count": 1,
+        "actionable_labels": [
+          "Apply now"
+        ],
+        "grounding_valid_labels": [
+          "Apply now"
+        ]
+      }
+    },
+    {
+      "case_id": "recorded_parser_qwen8b_python_homepage_semantic_only",
+      "source_type": "recorded_parser_output",
+      "surface": "python_homepage",
+      "goal": "Replay a real Qwen3-VL 8B whole-screen parser output; semantic-only model regions should become inventory evidence but not grounding authorization.",
+      "recorded_parser_output_path": "artifacts/benchmarks/learn_recognition_recorded_outputs/qwen8b_python_homepage_actual_parser_output_v1.json",
+      "expected": {
+        "inventory_min_count": 12,
+        "semantic_without_interactable_labels": [
+          "Search",
+          "GO"
+        ],
+        "not_grounded_labels": [
+          "Search",
+          "GO"
+        ]
+      }
+    },
+    {
+      "case_id": "invalid_missing_observe_bundle",
+      "surface": "invalid_fixture",
+      "goal": "Invalid fixtures are excluded from metric denominators.",
+      "expected": {
+        "inventory_min_count": 1
+      }
+    },
+    {
+      "case_id": "recorded_parser_calibrated_targets_python_homepage",
+      "source_type": "recorded_parser_output",
+      "surface": "python_homepage",
+      "goal": "Parse validated calibrated targets from learn-mode-deep-locate trace into grounding candidates.",
+      "recorded_parser_output_path": "artifacts/benchmarks/learn_recognition_recorded_outputs/python_homepage_calibrated_targets_recorded_parser_output_v1.json",
+      "expected": {
+        "inventory_min_count": 6,
+        "actionable_labels": [
+          "Search button",
+          "Downloads link",
+          "Documentation link",
+          "Get Started button",
+          "Download button"
+        ],
+        "form_field_labels": [
+          "Search input field"
+        ],
+        "not_grounded_labels": []
+      }
+    },
+    {
+      "case_id": "recorded_grounding_uground_7b_seek_search_button_point_valid",
+      "source_type": "recorded_grounding_output",
+      "surface": "seek_results_header",
+      "goal": "Replay a recorded-per-config UGround 7B ROI point on the same SEEK search button bbox that VISTA missed; validates contract only.",
+      "observe_bundle": {
+        "contract_version": "learn_observe_bundle_v1",
+        "screen_size": {
+          "width": 2560,
+          "height": 1400
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Search keyword field",
+                "control_type": "Edit",
+                "bbox": {
+                  "x": 633,
+                  "y": 184,
+                  "w": 850,
+                  "h": 48
+                },
+                "patterns": [
+                  "Value"
+                ]
+              },
+              {
+                "name": "SEEK search button",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 1820,
+                  "y": 184,
+                  "w": 92,
+                  "h": 48
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              },
+              {
+                "name": "Pay filter",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 632,
+                  "y": 258,
+                  "w": 78,
+                  "h": 42
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "recorded_grounding_output_path": "artifacts/benchmarks/learn_recognition_recorded_outputs/uground_7b_seek_search_button_roi_recorded_output_v1.json",
+      "expected": {
+        "inventory_min_count": 3,
+        "actionable_labels": [
+          "SEEK search button",
+          "Pay filter"
+        ],
+        "form_field_labels": [
+          "Search keyword field"
+        ],
+        "grounding_valid_labels": [
+          "SEEK search button"
+        ]
+      }
+    },
+    {
+      "case_id": "recorded_grounding_gui_actor_7b_seek_pay_filter_point_valid",
+      "source_type": "recorded_grounding_output",
+      "surface": "seek_results_header",
+      "goal": "Replay a recorded-per-config GUI-Actor 7B ROI point on the same SEEK Pay filter bbox where VISTA emitted an out-of-ROI point; validates contract only.",
+      "observe_bundle": {
+        "contract_version": "learn_observe_bundle_v1",
+        "screen_size": {
+          "width": 2560,
+          "height": 1400
+        },
+        "sources": {
+          "uia": {
+            "controls": [
+              {
+                "name": "Search keyword field",
+                "control_type": "Edit",
+                "bbox": {
+                  "x": 633,
+                  "y": 184,
+                  "w": 850,
+                  "h": 48
+                },
+                "patterns": [
+                  "Value"
+                ]
+              },
+              {
+                "name": "SEEK search button",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 1820,
+                  "y": 184,
+                  "w": 92,
+                  "h": 48
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              },
+              {
+                "name": "Pay filter",
+                "control_type": "Button",
+                "bbox": {
+                  "x": 632,
+                  "y": 258,
+                  "w": 78,
+                  "h": 42
+                },
+                "patterns": [
+                  "Invoke"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "recorded_grounding_output_path": "artifacts/benchmarks/learn_recognition_recorded_outputs/gui_actor_7b_seek_pay_filter_roi_recorded_output_v1.json",
+      "expected": {
+        "inventory_min_count": 3,
+        "actionable_labels": [
+          "SEEK search button",
+          "Pay filter"
+        ],
+        "form_field_labels": [
+          "Search keyword field"
+        ],
+        "grounding_valid_labels": [
+          "Pay filter"
+        ]
+      }
+    },
+    {
+      "case_id": "recorded_parser_qwen8b_learn_profile_python_homepage_semantic_only",
+      "source_type": "recorded_parser_output",
+      "surface": "python_homepage",
+      "goal": "Replay a profile-aware learn-only Qwen3-VL 8B parser output; semantic-only model regions should remain review-only and carry model profile provenance.",
+      "recorded_parser_output_path": "artifacts/benchmarks/learn_recognition_recorded_outputs/qwen8b_python_homepage_learn_profile_actual_parser_output_v1.json",
+      "expected": {
+        "inventory_min_count": 12,
+        "semantic_without_interactable_labels": [
+          "Search",
+          "GO"
+        ],
+        "not_grounded_labels": [
+          "Search",
+          "GO"
+        ]
+      }
+    }
+  ]
+}

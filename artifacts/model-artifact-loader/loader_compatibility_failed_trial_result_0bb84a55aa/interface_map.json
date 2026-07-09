@@ -1,0 +1,83 @@
+{
+  "contract_version": "learned_interface_map_v1",
+  "app_id": "model_learning_benchmark",
+  "page_type": "seek_results_to_detail_apply",
+  "source": {
+    "trial_path": "logs/benchmarks/model_learning_template_loader_trials/124f439492c0/loader_compatibility_failed/trial_result.json",
+    "sha256": "0bb84a55aa85b2e332499a6fc93e87e5766457632afb3329bd4029ed169a5e8b",
+    "attempt_index": 0,
+    "readonly": true,
+    "posthoc_optimization_allowed": false,
+    "loaded_at": "2026-07-07T13:33:11.173005"
+  },
+  "loader": {
+    "contract_version": "model_learning_artifact_loader_v1",
+    "source_trial_path": "logs/benchmarks/model_learning_template_loader_trials/124f439492c0/loader_compatibility_failed/trial_result.json",
+    "source_sha256": "0bb84a55aa85b2e332499a6fc93e87e5766457632afb3329bd4029ed169a5e8b",
+    "source_attempt_index": 0,
+    "source_artifact_readonly": true,
+    "posthoc_optimization_allowed": false
+  },
+  "screen_summary": "SEEK results list with job cards and apply entry surfaces",
+  "page_details": {},
+  "states": [
+    {
+      "state_id": "model_observed_state",
+      "label": "seek_results_to_detail_apply",
+      "page_type": "seek_results_to_detail_apply",
+      "region_refs": []
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "open_detail",
+      "from_state": "results",
+      "to_state": "detail",
+      "action_template_id": "open_job_card"
+    },
+    {
+      "transition_id": "open_apply",
+      "from_state": "detail",
+      "to_state": "apply_entry",
+      "action_template_id": "open_apply_entry"
+    }
+  ],
+  "regions": [],
+  "fixed_visual_assets": [
+    {
+      "asset_id": "job_card",
+      "semantic_action": "open_detail",
+      "label": "job_card",
+      "can_authorize_click": false,
+      "source_artifact_readonly": true
+    }
+  ],
+  "dynamic_areas": [
+    {
+      "area_id": "results_scroll",
+      "role": "scroll_container"
+    }
+  ],
+  "danger_zones": [
+    {
+      "zone_id": "final_submit_zone",
+      "label": "Submit application",
+      "semantic_action": "final_submit",
+      "hard_block": true,
+      "final_submit_guard_required": true,
+      "fast_lane_allowed": false
+    }
+  ],
+  "editor_policy": {
+    "source_artifact_editable": false,
+    "derived_artifact_editable": false,
+    "save_as_required_for_manual_changes": true
+  },
+  "summary": {
+    "state_count": 1,
+    "region_count": 0,
+    "fixed_visual_asset_count": 1,
+    "dynamic_area_count": 1,
+    "danger_zone_count": 1
+  }
+}

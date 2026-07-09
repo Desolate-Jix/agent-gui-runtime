@@ -14,6 +14,7 @@ def test_list_app_profiles_includes_seek_profile() -> None:
     assert seek["execution_model"] == "agentic_loop_first"
     assert seek["final_submit_default"] == "forbidden"
     assert seek["workflow_asset_count"] >= 1
+    assert seek["learned_pattern_count"] == 6
 
 
 def test_get_app_profile_loads_seek_profile() -> None:
@@ -25,6 +26,14 @@ def test_get_app_profile_loads_seek_profile() -> None:
     assert "bound_window_match_v1" in profile.gate_contracts
     assert "final_submit_guard_v1" in profile.gate_contracts
     assert "latest_detail_snapshot_v1" in profile.gate_contracts
+    assert {item["pattern_id"] for item in profile.learned_patterns} == {
+        "list_detail_page",
+        "long_detail_reading",
+        "agent_full_content_review",
+        "entry_boundary",
+        "multi_step_form",
+        "danger_zone_final_submit",
+    }
 
 
 def test_runtime_app_profiles_routes() -> None:
@@ -44,6 +53,7 @@ def test_runtime_app_profiles_routes() -> None:
     assert seek_payload["data"]["contract_version"] == "runtime_app_profile_v1"
     assert seek_payload["data"]["profile"]["policy"]["final_submit_default"] == "forbidden"
     assert "ocr_contextual_normalization_v1" in seek_payload["data"]["profile"]["gate_contracts"]
+    assert len(seek_payload["data"]["profile"]["learned_patterns"]) == 6
 
 
 def test_runtime_app_profile_missing_is_structured_error() -> None:

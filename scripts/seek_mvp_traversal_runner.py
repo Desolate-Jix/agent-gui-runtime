@@ -597,10 +597,19 @@ def _seek_apply_seeded_candidate(
     title = str(detail.get("title") or job.get("title") or "").strip()
     company = str(detail.get("company") or job.get("company") or "").strip()
     label = str(state.get("label") or "Apply").strip() or "Apply"
-    if not _is_seek_internal_quick_apply_label(label):
+    if not _is_seek_apply_entry_label(label):
         return None
     identity = " | ".join(part for part in [label, title, company] if part)
     candidate_id = "seek_apply_" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:12]
+    label_kind = _seek_apply_label_kind(label)
+    candidate_constraints = {
+        "required_container_id": "seek:job_detail",
+        "required_label_any": ["Quick apply", "Quick Apply"] if label_kind == "seek_internal_quick_apply" else [label],
+        "allow_standard_apply_external_entry": label_kind == "external_standard_apply",
+        "forbid_final_submit": True,
+    }
+    if label_kind == "seek_internal_quick_apply":
+        candidate_constraints["forbid_label_any"] = ["Apply"]
     return {
         "contract_version": "seeded_candidate_v1",
         "source": "seek_apply_button_v1",
@@ -613,13 +622,8 @@ def _seek_apply_seeded_candidate(
         "bbox": bbox,
         "click_point": click_point,
         "risk_class": "safe_open_apply_flow",
-        "expected_effect": "open SEEK Quick apply application form",
-        "candidate_constraints": {
-            "required_container_id": "seek:job_detail",
-            "required_label_any": ["Quick apply", "Quick Apply"],
-            "forbid_label_any": ["Apply"],
-            "forbid_final_submit": True,
-        },
+        "expected_effect": "open external application flow" if label_kind == "external_standard_apply" else "open SEEK Quick apply application form",
+        "candidate_constraints": candidate_constraints,
         "safety": {
             "require_point_inside_seed_bbox": True,
             "require_pre_apply_detail_verification": True,
@@ -632,6 +636,73 @@ def _seek_apply_seeded_candidate(
 def _is_seek_internal_quick_apply_label(label: Any) -> bool:
     text = " ".join(str(label or "").strip().casefold().split())
     return "quick apply" in text
+
+
+def _seek_apply_label_kind(label: Any) -> str:
+    text = " ".join(str(label or "").strip().casefold().split())
+    if "quick apply" in text:
+        return "seek_internal_quick_apply"
+    if text == "apply":
+        return "external_standard_apply"
+    return "unknown_apply_label"
+
+
+def _is_seek_apply_entry_label(label: Any) -> bool:
+    return _seek_apply_label_kind(label) in {"seek_internal_quick_apply", "external_standard_apply"}
+
+
+def _read_bound_browser_current_url(base_url: str, timeout: float) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "contract_version": "current_browser_url_snapshot_v1",
+        "status": "unavailable",
+        "url": None,
+        "source": None,
+    }
+    try:
+        state = _runtime_state(base_url, timeout).get("payload") or {}
+    except Exception as exc:
+        result["reason"] = "runtime_state_unavailable"
+        result["error"] = str(exc)
+        return result
+    process_id = state.get("process_id")
+    if not process_id:
+        result["reason"] = "bound_window_process_id_missing"
+        return result
+    try:
+        from pywinauto import Desktop  # type: ignore
+    except Exception as exc:  # pragma: no cover - depends on optional Windows UIA dependency
+        result["reason"] = "pywinauto_unavailable"
+        result["error"] = str(exc)
+        return result
+    try:
+        windows = Desktop(backend="uia").windows(process=int(process_id))
+        for window in windows:
+            try:
+                edits = window.descendants(control_type="Edit")
+            except Exception:
+                continue
+            for edit in edits:
+                try:
+                    value = edit.get_value()
+                except Exception:
+                    value = edit.window_text()
+                text = str(value or "").strip()
+                if text.startswith(("http://", "https://")):
+                    return {
+                        **result,
+                        "status": "ok",
+                        "url": text,
+                        "source": "windows_uia_address_bar",
+                        "window_title": window.window_text(),
+                        "process_id": int(process_id),
+                    }
+    except Exception as exc:
+        result["reason"] = "windows_uia_url_read_failed"
+        result["error"] = str(exc)
+        return result
+    result["reason"] = "address_bar_url_not_found"
+    result["process_id"] = int(process_id)
+    return result
 
 
 def _numeric_value(value: Any) -> float | None:
@@ -1266,8 +1337,8 @@ def _execute_apply_entry(
         "final_submission_performed": False,
         "apply_entry_semantics": {
             "apply_click_is_final_submit": False,
-            "apply_click_effect": "quick_apply_opens_seek_internal_application_flow",
-            "seek_apply_label_policy": "quick_apply_only_internal_standard_apply_external",
+            "apply_click_effect": "open_application_flow",
+            "seek_apply_label_policy": "quick_apply_internal_standard_apply_external_both_allowed",
             "true_final_submit_policy": "blocked_until_explicit_user_review",
         },
         "apply_click": {
@@ -1285,20 +1356,20 @@ def _execute_apply_entry(
     initial_apply_state = detail.get("apply_button_state") if isinstance(detail.get("apply_button_state"), dict) else {}
     initial_apply_label = str(initial_apply_state.get("label") or "").strip()
     initial_has_geometry = isinstance(initial_apply_state.get("bbox"), dict) and isinstance(initial_apply_state.get("click_point"), dict)
-    if initial_apply_label and not _is_seek_internal_quick_apply_label(initial_apply_label):
-        summary["status"] = "skipped"
-        summary["eligible"] = False
-        summary["stop_reason"] = "seek_standard_apply_is_external_use_quick_apply_only"
+    if initial_apply_label:
+        label_kind = _seek_apply_label_kind(initial_apply_label)
+        summary["apply_click"]["label_kind"] = label_kind
         summary["apply_click"]["label"] = initial_apply_label
-        summary["apply_entry_semantics"]["standard_apply_is_external_application_entry"] = True
-        summary["external_apply_guard"] = {
-            "contract_version": "seek_apply_label_policy_v1",
-            "allowed_label": "Quick apply",
-            "observed_label": initial_apply_label,
-            "decision": "skip_before_expensive_apply_verification",
-            "source": initial_apply_state.get("source") or "detail_snapshot",
-        }
-        return summary
+        if label_kind == "external_standard_apply":
+            summary["apply_entry_semantics"]["standard_apply_is_external_application_entry"] = True
+            summary["external_apply_guard"] = {
+                "contract_version": "seek_apply_label_policy_v2",
+                "allowed_label_any": ["Quick apply", "Apply"],
+                "observed_label": initial_apply_label,
+                "decision": "allow_open_external_apply_flow",
+                "source": initial_apply_state.get("source") or "detail_snapshot",
+                "final_submit_forbidden": True,
+            }
     pre_apply_detail_reset_attempts: list[dict[str, Any]] = []
     apply_candidate_stable, apply_candidate_stability_reason = _apply_state_stability(initial_apply_state)
     summary["initial_apply_candidate_stability"] = {
@@ -1415,23 +1486,28 @@ def _execute_apply_entry(
     )
     verified_apply_label = str(verified_apply_state.get("label") or "").strip()
     summary["apply_click"]["label"] = verified_apply_label or summary["apply_click"].get("label")
-    if not _is_seek_internal_quick_apply_label(verified_apply_label):
-        summary["status"] = "skipped"
-        summary["eligible"] = False
-        summary["stop_reason"] = "seek_standard_apply_is_external_use_quick_apply_only"
+    verified_label_kind = _seek_apply_label_kind(verified_apply_label)
+    summary["apply_click"]["label_kind"] = verified_label_kind
+    if verified_label_kind == "external_standard_apply":
         summary["apply_entry_semantics"]["standard_apply_is_external_application_entry"] = True
         summary["external_apply_guard"] = {
-            "contract_version": "seek_apply_label_policy_v1",
-            "allowed_label": "Quick apply",
+            "contract_version": "seek_apply_label_policy_v2",
+            "allowed_label_any": ["Quick apply", "Apply"],
             "observed_label": verified_apply_label or None,
             "standard_apply_is_external": True,
-            "decision": "skip_before_click",
+            "decision": "allow_open_external_apply_flow",
+            "final_submit_forbidden": True,
         }
+    elif not _is_seek_apply_entry_label(verified_apply_label):
+        summary["status"] = "blocked_need_user_or_gpt_decision"
+        summary["eligible"] = False
+        summary["stop_reason"] = "apply_label_not_recognized"
         return summary
 
     title = detail.get("title") or job.get("title") or pre_apply_verification.get("observed_title") or "the selected job"
     company = pre_apply_verification.get("observed_company") or detail.get("company") or job.get("company")
-    goal = f"Click the Quick apply button in the right SEEK job detail pane for {title}"
+    apply_label_for_goal = verified_apply_label or "Apply"
+    goal = f"Click the {apply_label_for_goal} button in the right SEEK job detail pane for {title}"
     if company:
         goal += f" at {company}"
     goal += ". Do not click Submit, Send application, or Complete application."
@@ -1441,6 +1517,8 @@ def _execute_apply_entry(
         "seek_apply_entry": True,
         "job_id": summary["job_id"],
         "forbid_final_submit": True,
+        "action_taxonomy": "open_apply_flow",
+        "allow_external_standard_apply_entry": verified_label_kind == "external_standard_apply",
         "required_container_id": "seek:job_detail",
     }
     if seeded_candidate:
@@ -1457,6 +1535,8 @@ def _execute_apply_entry(
     apply_bbox = _job_card_bbox({"card_bbox": summary["apply_click"].get("bbox")})
     apply_point = _job_card_click_point({"click_point": summary["apply_click"].get("click_point")}, apply_bbox) if apply_bbox else None
     used_confirmed_apply_click = False
+    if execute_clicks:
+        summary["url_before_apply_click"] = _read_bound_browser_current_url(base_url, timeout)
     if apply_bbox and apply_point:
         confirmed_payload = {
             "x": int(apply_point["x"]),
@@ -1472,7 +1552,7 @@ def _execute_apply_entry(
         summary["final_submit_guard"] = {
             "contract_version": "final_submit_guard_v1",
             "allowed": True,
-            "reason": "quick_apply_open_apply_flow_confirmed_point_not_final_submit",
+            "reason": "apply_entry_open_apply_flow_confirmed_point_not_final_submit",
             "action_taxonomy": "open_apply_flow",
             "final_submit_forbidden": True,
         }
@@ -1491,6 +1571,7 @@ def _execute_apply_entry(
             summary["status"] = "blocked_need_user_or_gpt_decision"
             summary["stop_reason"] = "apply_entry_confirmed_point_execute_failed"
             return summary
+        summary["url_after_apply_click"] = _read_bound_browser_current_url(base_url, timeout)
         used_confirmed_apply_click = True
     else:
         summary["apply_click_missing_geometry"] = True
@@ -1503,7 +1584,7 @@ def _execute_apply_entry(
                 "agent_mode": "execute",
                 "goal": goal,
                 "app_name": app_name,
-                "state_hint": "SEEK opened job detail pane with Quick apply visible",
+                "state_hint": "SEEK opened job detail pane with Apply or Quick apply visible",
                 "capture_live": True,
                 "dry_run": True,
                 "enable_post_click_verification": True,
@@ -1549,11 +1630,12 @@ def _execute_apply_entry(
             summary["status"] = "blocked_need_user_or_gpt_decision"
             summary["stop_reason"] = "apply_entry_execute_plan_failed"
             return summary
+        summary["url_after_apply_click"] = _read_bound_browser_current_url(base_url, timeout)
 
     observation = _observe(
         base_url,
         app_name=app_name,
-        state_hint="SEEK application flow after Quick apply click; stop before form fill or final submit",
+        state_hint="Application flow after SEEK Apply or Quick apply click; stop before account creation, privacy consent, form fill, or final submit",
         timeout=timeout,
     )
     flow_state = assess_seek_application_flow_state(observation, source_job={**job, **detail})

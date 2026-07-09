@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from io import BytesIO
 from pathlib import Path
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 from PIL import Image
 
@@ -59,6 +59,7 @@ def test_local_provider_calls_openai_compatible_vision_endpoint(tmp_path, monkey
         body = json.loads(request.data.decode("utf-8"))
         assert body["model"] == "Qwen3-VL-8B-Instruct-GGUF"
         assert body["max_tokens"] == 2048
+        assert body["temperature"] == 0.1
         assert body["messages"][1]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
         return _FakeHTTPResponse({"choices": [{"message": {"content": json.dumps(model_json)}}]})
 
@@ -125,6 +126,215 @@ def test_local_provider_caps_fast_screen_understanding_output(tmp_path, monkeypa
 
     assert result.screen_summary == "actionable screen"
     assert result.raw_response["attempts"][0]["max_regions"] == 12
+
+
+def test_local_provider_learning_pattern_prompt_requests_model_draft_contract(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "learn.png"
+    Image.new("RGB", (200, 120), color=(255, 255, 255)).save(image_path)
+
+    def fake_urlopen(request, timeout):
+        body = json.loads(request.data.decode("utf-8"))
+        assert body["temperature"] == 0.0
+        assert body["max_tokens"] == 6144
+        prompt = body["messages"][1]["content"][0]["text"]
+        assert "Observe-model learning stage" in prompt
+        assert '"contract_version": "learning_model_draft_v1"' in prompt
+        assert "do not copy a pre-existing learned template" in prompt
+        return _FakeHTTPResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "contract_version": "learning_model_draft_v1",
+                                    "screen_summary": "learned screen",
+                                    "state_guess": "learn state",
+                                    "regions": [],
+                                    "targets": [],
+                                    "observers": [],
+                                    "pattern_candidates": [],
+                                    "learned_seek_template_draft": {},
+                                    "learned_navigation_path_graph_draft": {},
+                                    "learned_interface_details": {},
+                                    "learned_interface_map_draft": {},
+                                }
+                            )
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("app.vision.local_provider.urlopen", fake_urlopen)
+    result = LocalVisionProvider(endpoint="http://127.0.0.1:1234/v1/chat/completions").analyze(
+        VisionAnalyzeRequest(
+            image_path=str(image_path),
+            task="learn_pattern_draft",
+            metadata={
+                "learning_prompt_context": {"reference_output_shape": {}},
+                "temperature": 0.0,
+                "max_output_tokens": 6144,
+            },
+        )
+    )
+
+    assert result.raw_response["model_json"]["contract_version"] == "learning_model_draft_v1"
+    assert len(result.raw_response["attempts"]) == 1
+    assert result.raw_response["attempts"][0]["tag"] == "learning_draft"
+    assert result.raw_response["attempts"][0]["model_io"]["input"]["prompt"]
+    assert result.raw_response["attempts"][0]["model_io"]["input"]["temperature"] == 0.0
+    assert result.raw_response["attempts"][0]["model_io"]["input"]["max_tokens"] == 6144
+
+
+def test_local_provider_learning_template_prompt_requests_generic_draft_contract(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "learn-template.png"
+    Image.new("RGB", (240, 160), color=(255, 255, 255)).save(image_path)
+
+    def fake_urlopen(request, timeout):
+        body = json.loads(request.data.decode("utf-8"))
+        assert body["temperature"] == 0.0
+        assert body["max_tokens"] == 3072
+        prompt = body["messages"][1]["content"][0]["text"]
+        assert "learning a reusable GUI workflow draft" in prompt
+        assert '"contract_version": "learning_template_draft_v1"' in prompt
+        assert "context_json.target_contract.required_sections" in prompt
+        assert "Do not copy an existing template" in prompt
+        assert 'semantic_action="type_text"' in prompt
+        assert "Do not leave action_templates empty" in prompt
+        return _FakeHTTPResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "contract_version": "learning_template_draft_v1",
+                                    "screen_summary": "learned generic screen",
+                                    "state_guess": "generic state",
+                                    "workflow_draft": {
+                                        "states": [],
+                                        "transitions": [],
+                                        "action_templates": [],
+                                        "path_patterns": [],
+                                    },
+                                    "interface_draft": {
+                                        "regions": [],
+                                        "visual_assets": [],
+                                        "dynamic_areas": [],
+                                        "danger_zones": [],
+                                    },
+                                    "safety": {
+                                        "observation_only": True,
+                                        "promotion_allowed": False,
+                                        "final_submit_blocked": True,
+                                        "real_clicks_performed": 0,
+                                    },
+                                }
+                            )
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("app.vision.local_provider.urlopen", fake_urlopen)
+    result = LocalVisionProvider(endpoint="http://127.0.0.1:1234/v1/chat/completions").analyze(
+        VisionAnalyzeRequest(
+            image_path=str(image_path),
+            task="learn_template_draft",
+            metadata={
+                "learning_trial_context": {
+                    "target_contract": {"required_sections": ["workflow_draft.states"]},
+                    "observation_evidence": {},
+                },
+                "temperature": 0.0,
+                "max_output_tokens": 3072,
+            },
+        )
+    )
+
+    assert result.raw_response["model_json"]["contract_version"] == "learning_template_draft_v1"
+    assert len(result.raw_response["attempts"]) == 1
+    assert result.raw_response["attempts"][0]["tag"] == "learning_draft"
+
+
+def test_local_provider_learning_template_can_downscale_inference_image(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "large-learn-template.png"
+    Image.new("RGB", (900, 500), color=(255, 255, 255)).save(image_path)
+
+    def fake_urlopen(request, timeout):
+        body = json.loads(request.data.decode("utf-8"))
+        image_url = body["messages"][1]["content"][1]["image_url"]["url"]
+        assert image_url.startswith("data:image/png;base64,")
+        return _FakeHTTPResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "contract_version": "learning_template_draft_v1",
+                                    "image_size": {"width": 256, "height": 142},
+                                    "learning_source": "observe_model",
+                                    "screen_summary": "small",
+                                    "state_guess": "small",
+                                    "workflow_draft": {"states": [], "transitions": [], "action_templates": [], "path_patterns": []},
+                                    "interface_draft": {"regions": [], "visual_assets": [], "dynamic_areas": [], "danger_zones": []},
+                                    "safety": {
+                                        "observation_only": True,
+                                        "promotion_allowed": False,
+                                        "final_submit_blocked": True,
+                                        "real_clicks_performed": 0,
+                                    },
+                                }
+                            )
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("app.vision.local_provider.urlopen", fake_urlopen)
+    result = LocalVisionProvider(endpoint="http://127.0.0.1:1234/v1/chat/completions").analyze(
+        VisionAnalyzeRequest(
+            image_path=str(image_path),
+            task="learn_template_draft",
+            metadata={
+                "learning_trial_context": {},
+                "learning_image_max_edge": 256,
+                "max_output_tokens": 512,
+            },
+        )
+    )
+
+    attempt = result.raw_response["attempts"][0]
+    assert attempt["model_io"]["input"]["inference_image_size"] == {"width": 256, "height": 142}
+    assert "learning_image_scaled_to_max_edge=256" in result.notes
+
+
+def test_local_provider_records_prompt_when_endpoint_request_fails(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "fail.png"
+    Image.new("RGB", (200, 120), color=(255, 255, 255)).save(image_path)
+
+    def fake_urlopen(request, timeout):
+        raise URLError("connection refused")
+
+    monkeypatch.setattr("app.vision.local_provider.urlopen", fake_urlopen)
+    provider = LocalVisionProvider(endpoint="http://127.0.0.1:1234/v1/chat/completions")
+
+    try:
+        provider.analyze(VisionAnalyzeRequest(image_path=str(image_path), task="learn_pattern_draft"))
+    except RuntimeError as exc:
+        diagnostics = exc.diagnostics
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    attempt = diagnostics["attempts"][0]
+    assert attempt["status"] == "failed"
+    assert attempt["model_io"]["status"] == "request_failed"
+    assert "Observe-model learning stage" in attempt["model_io"]["input"]["prompt"]
+    assert attempt["model_io"]["output"]["parse_error"]
 
 
 def test_local_provider_waits_for_loading_model_then_runs_same_attempt(tmp_path, monkeypatch) -> None:
@@ -259,6 +469,92 @@ def test_local_provider_recovers_normalized_1000_coordinates_before_scaled_image
 
     assert result.regions[0].bbox.to_dict() == {"x": 792, "y": 13, "w": 16, "h": 26}
     assert "coordinate_space_recovered=normalized_1000;items=1" in result.notes
+
+
+def test_local_provider_keeps_implicit_normalized_1000_disabled_by_default(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "wide-screen.png"
+    Image.new("RGB", (2521, 1300), color=(255, 255, 255)).save(image_path)
+
+    def fake_urlopen(request, timeout):
+        model_json = {
+            "provider": "local",
+            "contract_version": "vision_regions_v1",
+            "image_size": {"width": 1280, "height": 660},
+            "screen_summary": "wide screen",
+            "state_guess": "home",
+            "regions": [
+                {
+                    "region_id": "search",
+                    "label": "Search input",
+                    "role": "input",
+                    "diagonal": {"x1": 568, "y1": 68, "x2": 666, "y2": 88},
+                    "confidence": 0.98,
+                }
+            ],
+            "targets": [],
+            "observers": [],
+            "notes": [],
+        }
+        return _FakeHTTPResponse({"choices": [{"message": {"content": json.dumps(model_json)}}]})
+
+    monkeypatch.setattr("app.vision.local_provider.urlopen", fake_urlopen)
+
+    result = LocalVisionProvider(endpoint="http://127.0.0.1:1234/v1/chat/completions", timeout_seconds=12).analyze(
+        VisionAnalyzeRequest(image_path=str(image_path), task="observe_screen")
+    )
+
+    assert result.regions[0].diagonal.to_dict() == {"x1": 1119, "y1": 134, "x2": 1312, "y2": 173}
+    attempt_io = result.raw_response["attempts"][0]["model_io"]
+    assert attempt_io["coordinate_recovery"]["implicit_normalized_1000_enabled"] is False
+    assert attempt_io["coordinate_recovery"]["applied"] is False
+    assert attempt_io["parsed_model_json"]["regions"][0]["diagonal"] == {"x1": 568, "y1": 68, "x2": 666, "y2": 88}
+    assert attempt_io["runtime_normalized_json"]["regions"][0]["diagonal"] == {"x1": 1119, "y1": 134, "x2": 1312, "y2": 173}
+
+
+def test_local_provider_opt_in_recovers_implicit_normalized_1000_before_scaled_remap(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "wide-screen.png"
+    Image.new("RGB", (2521, 1300), color=(255, 255, 255)).save(image_path)
+
+    def fake_urlopen(request, timeout):
+        model_json = {
+            "provider": "local",
+            "contract_version": "vision_regions_v1",
+            "image_size": {"width": 1280, "height": 660},
+            "screen_summary": "wide screen",
+            "state_guess": "home",
+            "regions": [
+                {
+                    "region_id": "search",
+                    "label": "Search input",
+                    "role": "input",
+                    "diagonal": {"x1": 568, "y1": 68, "x2": 666, "y2": 88},
+                    "confidence": 0.98,
+                }
+            ],
+            "targets": [],
+            "observers": [],
+            "notes": [],
+        }
+        return _FakeHTTPResponse({"choices": [{"message": {"content": json.dumps(model_json)}}]})
+
+    monkeypatch.setattr("app.vision.local_provider.urlopen", fake_urlopen)
+
+    result = LocalVisionProvider(endpoint="http://127.0.0.1:1234/v1/chat/completions", timeout_seconds=12).analyze(
+        VisionAnalyzeRequest(
+            image_path=str(image_path),
+            task="observe_screen",
+            metadata={"coordinate_recovery": {"implicit_normalized_1000": True}},
+        )
+    )
+
+    assert result.regions[0].diagonal.to_dict() == {"x1": 1432, "y1": 89, "x2": 1678, "y2": 114}
+    assert "coordinate_space_recovered=normalized_1000;items=1" in result.notes
+    attempt_io = result.raw_response["attempts"][0]["model_io"]
+    assert attempt_io["coordinate_recovery"]["implicit_normalized_1000_enabled"] is True
+    assert attempt_io["coordinate_recovery"]["applied"] is True
+    assert attempt_io["coordinate_recovery"]["recovered_coordinate_count"] == 1
+    assert attempt_io["parsed_model_json"]["regions"][0]["diagonal"] == {"x1": 568, "y1": 68, "x2": 666, "y2": 88}
+    assert attempt_io["runtime_normalized_json"]["regions"][0]["diagonal"] == {"x1": 1432, "y1": 89, "x2": 1678, "y2": 114}
 
 
 def test_local_provider_scales_ocr_anchors_for_resized_inference_image(tmp_path, monkeypatch) -> None:

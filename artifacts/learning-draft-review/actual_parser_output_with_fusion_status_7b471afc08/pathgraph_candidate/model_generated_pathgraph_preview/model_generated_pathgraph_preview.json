@@ -1,0 +1,720 @@
+{
+  "contract_version": "model_generated_pathgraph_preview_v1",
+  "preview_status": "model_generated_preview_ready",
+  "source_path": "logs/benchmarks/learn_pathgraph_readiness_with_handoff_20260706/actual_parser_output_with_fusion_status.json",
+  "source_type": "actual_parser_call",
+  "actual_model_call_in_this_run": true,
+  "counts_as_pure_model_generated": true,
+  "reviewed_by_human": false,
+  "source_after_review": "model_generated",
+  "runtime_path_graph_model_preview_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_7b471afc08/pathgraph_candidate/model_generated_pathgraph_preview/runtime_path_graph_model_preview.json",
+  "interface_map_model_preview_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_7b471afc08/pathgraph_candidate/model_generated_pathgraph_preview/interface_map_model_preview.json",
+  "summary": {
+    "state_count": 1,
+    "region_count": 10,
+    "action_template_count": 10,
+    "transition_count": 10,
+    "page_detail_section_count": 4,
+    "page_detail_possible_operation_count": 10,
+    "blocker_count": 0
+  },
+  "page_detail_preview": {
+    "contract_version": "model_generated_page_detail_preview_v1",
+    "layout_mode": "model_screen_inventory_spatial_bbox_order",
+    "summary": {
+      "region_count": 10,
+      "section_count": 4,
+      "possible_operation_count": 10,
+      "display_only": true,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false
+    },
+    "layout": {
+      "bounds": {
+        "x": 656,
+        "y": 186,
+        "w": 1264,
+        "h": 1158
+      },
+      "sections": [
+        {
+          "section_id": "top_search_and_filters",
+          "label": "Top Search And Filters",
+          "region_numbers": [
+            1,
+            2,
+            3,
+            9
+          ],
+          "possible_operations": [
+            "fill_field",
+            "open_detail"
+          ],
+          "regions": [
+            {
+              "region_no": 1,
+              "region_id": "c1",
+              "label": "Job search bar",
+              "role": "input",
+              "bbox": {
+                "x": 656,
+                "y": 186,
+                "w": 840,
+                "h": 42,
+                "width": 840,
+                "height": 42
+              },
+              "layout_zone": "top_search_and_filters",
+              "visual_order_key": [
+                186,
+                656
+              ],
+              "description": "Job search bar · role=input · operation=fill_field",
+              "possible_operation": {
+                "kind": "fill_field",
+                "label": "Job search bar",
+                "readiness": "model_preview_requires_gate_review",
+                "execute_binding_enabled": false,
+                "artifact_is_authorization": false
+              },
+              "display_only": true,
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            {
+              "region_no": 2,
+              "region_id": "c2",
+              "label": "Location filter",
+              "role": "input",
+              "bbox": {
+                "x": 1496,
+                "y": 186,
+                "w": 296,
+                "h": 42,
+                "width": 296,
+                "height": 42
+              },
+              "layout_zone": "top_search_and_filters",
+              "visual_order_key": [
+                186,
+                1496
+              ],
+              "description": "Location filter · role=input · operation=fill_field",
+              "possible_operation": {
+                "kind": "fill_field",
+                "label": "Location filter",
+                "readiness": "model_preview_requires_gate_review",
+                "execute_binding_enabled": false,
+                "artifact_is_authorization": false
+              },
+              "display_only": true,
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            {
+              "region_no": 3,
+              "region_id": "c3",
+              "label": "Search button",
+              "role": "button",
+              "bbox": {
+                "x": 1792,
+                "y": 186,
+                "w": 128,
+                "h": 42,
+                "width": 128,
+                "height": 42
+              },
+              "layout_zone": "top_search_and_filters",
+              "visual_order_key": [
+                186,
+                1792
+              ],
+              "description": "Search button · role=button · operation=fill_field",
+              "possible_operation": {
+                "kind": "fill_field",
+                "label": "Search button",
+                "readiness": "model_preview_requires_gate_review",
+                "execute_binding_enabled": false,
+                "artifact_is_authorization": false
+              },
+              "display_only": true,
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            {
+              "region_no": 9,
+              "region_id": "c10",
+              "label": "Job filters",
+              "role": "menu_item",
+              "bbox": {
+                "x": 656,
+                "y": 252,
+                "w": 572,
+                "h": 42,
+                "width": 572,
+                "height": 42
+              },
+              "layout_zone": "top_search_and_filters",
+              "visual_order_key": [
+                252,
+                656
+              ],
+              "description": "Job filters · role=menu_item · operation=open_detail",
+              "possible_operation": {
+                "kind": "open_detail",
+                "label": "Job filters",
+                "readiness": "model_preview_requires_gate_review",
+                "execute_binding_enabled": false,
+                "artifact_is_authorization": false
+              },
+              "display_only": true,
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            }
+          ]
+        },
+        {
+          "section_id": "left_results_list",
+          "label": "Left Results List",
+          "region_numbers": [
+            10,
+            4,
+            5,
+            6
+          ],
+          "possible_operations": [
+            "fill_field",
+            "open_detail"
+          ],
+          "regions": [
+            {
+              "region_no": 10,
+              "region_id": "c11",
+              "label": "Job count indicator",
+              "role": "other",
+              "bbox": {
+                "x": 656,
+                "y": 336,
+                "w": 112,
+                "h": 42,
+                "width": 112,
+                "height": 42
+              },
+              "layout_zone": "left_results_list",
+              "visual_order_key": [
+                336,
+                656
+              ],
+              "description": "Job count indicator · role=other · operation=open_detail",
+              "possible_operation": {
+                "kind": "open_detail",
+                "label": "Job count indicator",
+                "readiness": "model_preview_requires_gate_review",
+                "execute_binding_enabled": false,
+                "artifact_is_authorization": false
+              },
+              "display_only": true,
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            {
+              "region_no": 4,
+              "region_id": "c4",
+              "label": "Job listing card",
+              "role": "card",
+              "bbox": {
+                "x": 656,
+                "y": 518,
+                "w": 470,
+                "h": 378,
+                "width": 470,
+                "height": 378
+              },
+              "layout_zone": "left_results_list",
+              "visual_order_key": [
+                518,
+                656
+              ],
+              "description": "Job listing card · role=card · operation=open_detail",
+              "possible_operation": {
+                "kind": "open_detail",
+                "label": "Job listing card",
+                "readiness": "model_preview_requires_gate_review",
+                "execute_binding_enabled": false,
+                "artifact_is_authorization": false
+              },
+              "display_only": true,
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            {
+              "region_no": 5,
+              "region_id": "c5",
+              "label": "Job listing card",
+              "role": "card",
+              "bbox": {
+                "x": 656,
+                "y": 896,
+                "w": 470,
+                "h": 238,
+                "width": 470,
+                "height": 238
+              },
+              "layout_zone": "left_results_list",
+              "visual_order_key": [
+                896,
+                656
+              ],
+              "description": "Job listing card · role=card · operation=open_detail",
+              "possible_operation": {
+                "kind": "open_detail",
+                "label": "Job listing card",
+                "readiness": "model_preview_requires_gate_review",
+                "execute_binding_enabled": false,
+                "artifact_is_authorization": false
+              },
+              "display_only": true,
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            {
+              "region_no": 6,
+              "region_id": "c7",
+              "label": "Save search button",
+              "role": "button",
+              "bbox": {
+                "x": 768,
+                "y": 1302,
+                "w": 204,
+                "h": 42,
+                "width": 204,
+                "height": 42
+              },
+              "layout_zone": "left_results_list",
+              "visual_order_key": [
+                1302,
+                768
+              ],
+              "description": "Save search button · role=button · operation=fill_field",
+              "possible_operation": {
+                "kind": "fill_field",
+                "label": "Save search button",
+                "readiness": "model_preview_requires_gate_review",
+                "execute_binding_enabled": false,
+                "artifact_is_authorization": false
+              },
+              "display_only": true,
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            }
+          ]
+        },
+        {
+          "section_id": "right_detail_panel",
+          "label": "Right Detail Panel",
+          "region_numbers": [
+            7
+          ],
+          "possible_operations": [
+            "open_detail"
+          ],
+          "regions": [
+            {
+              "region_no": 7,
+              "region_id": "c8",
+              "label": "Job details placeholder",
+              "role": "other",
+              "bbox": {
+                "x": 1178,
+                "y": 336,
+                "w": 716,
+                "h": 560,
+                "width": 716,
+                "height": 560
+              },
+              "layout_zone": "right_detail_panel",
+              "visual_order_key": [
+                336,
+                1178
+              ],
+              "description": "Job details placeholder · role=other · operation=open_detail",
+              "possible_operation": {
+                "kind": "open_detail",
+                "label": "Job details placeholder",
+                "readiness": "model_preview_requires_gate_review",
+                "execute_binding_enabled": false,
+                "artifact_is_authorization": false
+              },
+              "display_only": true,
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            }
+          ]
+        },
+        {
+          "section_id": "middle_controls",
+          "label": "Middle Controls",
+          "region_numbers": [
+            8
+          ],
+          "possible_operations": [
+            "open_control"
+          ],
+          "regions": [
+            {
+              "region_no": 8,
+              "region_id": "c9",
+              "label": "Filter toggle",
+              "role": "toggle",
+              "bbox": {
+                "x": 998,
+                "y": 434,
+                "w": 102,
+                "h": 42,
+                "width": 102,
+                "height": 42
+              },
+              "layout_zone": "middle_controls",
+              "visual_order_key": [
+                434,
+                998
+              ],
+              "description": "Filter toggle · role=toggle · operation=open_control",
+              "possible_operation": {
+                "kind": "open_control",
+                "label": "Filter toggle",
+                "readiness": "model_preview_requires_gate_review",
+                "execute_binding_enabled": false,
+                "artifact_is_authorization": false
+              },
+              "display_only": true,
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            }
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "region_no": 1,
+          "region_id": "c1",
+          "label": "Job search bar",
+          "role": "input",
+          "bbox": {
+            "x": 656,
+            "y": 186,
+            "w": 840,
+            "h": 42,
+            "width": 840,
+            "height": 42
+          },
+          "layout_zone": "top_search_and_filters",
+          "visual_order_key": [
+            186,
+            656
+          ],
+          "description": "Job search bar · role=input · operation=fill_field",
+          "possible_operation": {
+            "kind": "fill_field",
+            "label": "Job search bar",
+            "readiness": "model_preview_requires_gate_review",
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          "display_only": true,
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        {
+          "region_no": 2,
+          "region_id": "c2",
+          "label": "Location filter",
+          "role": "input",
+          "bbox": {
+            "x": 1496,
+            "y": 186,
+            "w": 296,
+            "h": 42,
+            "width": 296,
+            "height": 42
+          },
+          "layout_zone": "top_search_and_filters",
+          "visual_order_key": [
+            186,
+            1496
+          ],
+          "description": "Location filter · role=input · operation=fill_field",
+          "possible_operation": {
+            "kind": "fill_field",
+            "label": "Location filter",
+            "readiness": "model_preview_requires_gate_review",
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          "display_only": true,
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        {
+          "region_no": 3,
+          "region_id": "c3",
+          "label": "Search button",
+          "role": "button",
+          "bbox": {
+            "x": 1792,
+            "y": 186,
+            "w": 128,
+            "h": 42,
+            "width": 128,
+            "height": 42
+          },
+          "layout_zone": "top_search_and_filters",
+          "visual_order_key": [
+            186,
+            1792
+          ],
+          "description": "Search button · role=button · operation=fill_field",
+          "possible_operation": {
+            "kind": "fill_field",
+            "label": "Search button",
+            "readiness": "model_preview_requires_gate_review",
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          "display_only": true,
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        {
+          "region_no": 4,
+          "region_id": "c4",
+          "label": "Job listing card",
+          "role": "card",
+          "bbox": {
+            "x": 656,
+            "y": 518,
+            "w": 470,
+            "h": 378,
+            "width": 470,
+            "height": 378
+          },
+          "layout_zone": "left_results_list",
+          "visual_order_key": [
+            518,
+            656
+          ],
+          "description": "Job listing card · role=card · operation=open_detail",
+          "possible_operation": {
+            "kind": "open_detail",
+            "label": "Job listing card",
+            "readiness": "model_preview_requires_gate_review",
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          "display_only": true,
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        {
+          "region_no": 5,
+          "region_id": "c5",
+          "label": "Job listing card",
+          "role": "card",
+          "bbox": {
+            "x": 656,
+            "y": 896,
+            "w": 470,
+            "h": 238,
+            "width": 470,
+            "height": 238
+          },
+          "layout_zone": "left_results_list",
+          "visual_order_key": [
+            896,
+            656
+          ],
+          "description": "Job listing card · role=card · operation=open_detail",
+          "possible_operation": {
+            "kind": "open_detail",
+            "label": "Job listing card",
+            "readiness": "model_preview_requires_gate_review",
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          "display_only": true,
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        {
+          "region_no": 6,
+          "region_id": "c7",
+          "label": "Save search button",
+          "role": "button",
+          "bbox": {
+            "x": 768,
+            "y": 1302,
+            "w": 204,
+            "h": 42,
+            "width": 204,
+            "height": 42
+          },
+          "layout_zone": "left_results_list",
+          "visual_order_key": [
+            1302,
+            768
+          ],
+          "description": "Save search button · role=button · operation=fill_field",
+          "possible_operation": {
+            "kind": "fill_field",
+            "label": "Save search button",
+            "readiness": "model_preview_requires_gate_review",
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          "display_only": true,
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        {
+          "region_no": 7,
+          "region_id": "c8",
+          "label": "Job details placeholder",
+          "role": "other",
+          "bbox": {
+            "x": 1178,
+            "y": 336,
+            "w": 716,
+            "h": 560,
+            "width": 716,
+            "height": 560
+          },
+          "layout_zone": "right_detail_panel",
+          "visual_order_key": [
+            336,
+            1178
+          ],
+          "description": "Job details placeholder · role=other · operation=open_detail",
+          "possible_operation": {
+            "kind": "open_detail",
+            "label": "Job details placeholder",
+            "readiness": "model_preview_requires_gate_review",
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          "display_only": true,
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        {
+          "region_no": 8,
+          "region_id": "c9",
+          "label": "Filter toggle",
+          "role": "toggle",
+          "bbox": {
+            "x": 998,
+            "y": 434,
+            "w": 102,
+            "h": 42,
+            "width": 102,
+            "height": 42
+          },
+          "layout_zone": "middle_controls",
+          "visual_order_key": [
+            434,
+            998
+          ],
+          "description": "Filter toggle · role=toggle · operation=open_control",
+          "possible_operation": {
+            "kind": "open_control",
+            "label": "Filter toggle",
+            "readiness": "model_preview_requires_gate_review",
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          "display_only": true,
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        {
+          "region_no": 9,
+          "region_id": "c10",
+          "label": "Job filters",
+          "role": "menu_item",
+          "bbox": {
+            "x": 656,
+            "y": 252,
+            "w": 572,
+            "h": 42,
+            "width": 572,
+            "height": 42
+          },
+          "layout_zone": "top_search_and_filters",
+          "visual_order_key": [
+            252,
+            656
+          ],
+          "description": "Job filters · role=menu_item · operation=open_detail",
+          "possible_operation": {
+            "kind": "open_detail",
+            "label": "Job filters",
+            "readiness": "model_preview_requires_gate_review",
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          "display_only": true,
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        {
+          "region_no": 10,
+          "region_id": "c11",
+          "label": "Job count indicator",
+          "role": "other",
+          "bbox": {
+            "x": 656,
+            "y": 336,
+            "w": 112,
+            "h": 42,
+            "width": 112,
+            "height": 42
+          },
+          "layout_zone": "left_results_list",
+          "visual_order_key": [
+            336,
+            656
+          ],
+          "description": "Job count indicator · role=other · operation=open_detail",
+          "possible_operation": {
+            "kind": "open_detail",
+            "label": "Job count indicator",
+            "readiness": "model_preview_requires_gate_review",
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          "display_only": true,
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        }
+      ]
+    },
+    "safety": {
+      "display_only": true,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false,
+      "runtime_pathgraph_promotion": false
+    }
+  },
+  "blockers": [],
+  "safety": {
+    "display_only": true,
+    "model_started": false,
+    "live_clicks": 0,
+    "live_fills": 0,
+    "live_submits": 0,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false,
+    "runtime_pathgraph_promotion": false
+  },
+  "interpretation": "Model-generated PathGraph preview built directly from a raw learning artifact. It bypasses reviewed_template_candidate for demo provenance only and remains display-only; it does not authorize Execute or Runtime PathGraph promotion.",
+  "report_path": "D:\\agent-gui-runtime\\artifacts\\learning-draft-review\\actual_parser_output_with_fusion_status_7b471afc08\\pathgraph_candidate\\model_generated_pathgraph_preview\\model_generated_pathgraph_preview.json"
+}

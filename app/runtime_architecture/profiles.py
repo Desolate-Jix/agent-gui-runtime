@@ -61,6 +61,7 @@ def _profile_summary(profile: AppProfile, path: Path) -> dict[str, object]:
         "gate_contract_count": len(profile.gate_contracts),
         "workflow_asset_count": len(profile.workflow_assets),
         "learning_asset_count": len(profile.learning_assets),
+        "learned_pattern_count": len(profile.learned_patterns),
         "final_submit_default": profile.policy.get("final_submit_default"),
     }
 

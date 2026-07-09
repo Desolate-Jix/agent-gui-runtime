@@ -1,0 +1,145 @@
+{
+  "contract_version": "learn_fusion_current_evidence_packet_v1",
+  "source_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_7b471afc08/pathgraph_candidate/pathgraph_candidate.json",
+  "screen_summary": "Job search results page for Auckland, showing job listings and filters",
+  "state_guess": "seek_results",
+  "full_screen_understanding": {
+    "overlay_path": "logs/benchmarks/learn_full_screen_understanding_backlog_triage_preview_20260706/full_screen_understanding_overlay.png",
+    "compiled_overlay_path": "logs/benchmarks/learn_locator_card_execute_calibration_seek_full_20260705/numbered_region_calibration_overlay.png",
+    "fusion_summary": {
+      "attempted": 10,
+      "promotable_to_pathgraph_candidate_review": 0,
+      "needs_human_review": 8,
+      "safe_intercepts": 2,
+      "failed": 0,
+      "real_clicks": 0,
+      "total_locator_cards": 10,
+      "calibrated_cases": 2,
+      "uncalibrated_locator_cards": 8,
+      "calibration_coverage_rate": 0.2
+    },
+    "display_readiness": {
+      "status": "display_ready",
+      "full_screen_overlay_available": true,
+      "overlay_available": true,
+      "screenshot_available": true,
+      "interpretation": "display readiness only; it does not authorize Execute or PathGraph promotion"
+    },
+    "not_accuracy": true
+  },
+  "calibration": {
+    "readiness_summary": {
+      "readiness_status": "needs_pending_calibration",
+      "total_locator_cards": 10,
+      "calibrated_cases": 2,
+      "uncalibrated_locator_cards": 8,
+      "calibration_coverage_rate": 0.2,
+      "pending_calibration_ready_count": 6,
+      "pending_calibration_review_count": 2,
+      "pathgraph_status": "blocked_from_pathgraph_candidate_review",
+      "ready_for_runtime_pathgraph_promotion": false,
+      "display_only": true,
+      "not_accuracy": true,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false
+    },
+    "backlog_summary": {
+      "uncalibrated_locator_cards": 8,
+      "ready_for_execute_dry_run": 6,
+      "review_before_calibration": 2,
+      "display_only": true,
+      "execute_binding_enabled": false
+    },
+    "backlog_item_count": 8,
+    "batch_ready_region_numbers": [
+      1,
+      2,
+      3,
+      6,
+      8,
+      9
+    ],
+    "batch_review_blocked_region_numbers": [
+      7,
+      10
+    ],
+    "batch_command_executes_now": false,
+    "post_batch_refresh_command_executes_now": false,
+    "pre_run_status": "ready_after_explicit_approval"
+  },
+  "pathgraph": {
+    "candidate_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_7b471afc08/pathgraph_candidate/pathgraph_candidate.json",
+    "validation_status": "blocked_pending_calibration",
+    "readiness_status": "blocked_from_promotion_review",
+    "ready_for_runtime_pathgraph_promotion": false,
+    "integration_readiness_status": "blocked_pending_calibration",
+    "integration_report_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_7b471afc08/pathgraph_candidate/learn_fusion_pathgraph_integration_readiness_report.json",
+    "ready_for_audited_pathgraph_review": false,
+    "ready_for_runtime_pathgraph_promotion_after_integration": false,
+    "blockers": [
+      "pending_calibration_required"
+    ]
+  },
+  "evidence_integrity": {
+    "contract_version": "learn_precise_understanding_evidence_integrity_v1",
+    "status": "complete",
+    "required_for_pathgraph_review": true,
+    "missing_declared_evidence": [],
+    "display_only": true,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false,
+    "screenshot": {
+      "kind": "screenshot",
+      "path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+      "declared_path": "artifacts\\screenshots\\jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+      "exists": true,
+      "sha256": "4ad07148c25da7935c8845a8455346c167d7fbb3056f15c7ab50be004d12283b"
+    },
+    "full_screen_understanding_overlay": {
+      "kind": "full_screen_understanding_overlay",
+      "path": "logs/benchmarks/learn_full_screen_understanding_backlog_triage_preview_20260706/full_screen_understanding_overlay.png",
+      "declared_path": "D:\\agent-gui-runtime\\logs\\benchmarks\\learn_full_screen_understanding_backlog_triage_preview_20260706\\full_screen_understanding_overlay.png",
+      "exists": true,
+      "sha256": "317632d716d6c00d7ce6c2a8306ad17a16244867f9d8b120cff18c2100534dec"
+    },
+    "compiled_overlay": {
+      "kind": "compiled_overlay",
+      "path": "logs/benchmarks/learn_locator_card_execute_calibration_seek_full_20260705/numbered_region_calibration_overlay.png",
+      "declared_path": "D:\\agent-gui-runtime\\logs\\benchmarks\\learn_locator_card_execute_calibration_seek_full_20260705\\numbered_region_calibration_overlay.png",
+      "exists": true,
+      "sha256": "baedf7b003b2bac7848b25a6fd4991ce593f74fd6c1c4a2504ec9476ced7ab46"
+    },
+    "source_status_report": {
+      "kind": "source_status_report",
+      "path": "logs/benchmarks/learn_pathgraph_readiness_with_refresh_plan_20260706/refresh_base/learn_fusion_refresh_base_status.json",
+      "declared_path": "logs/benchmarks/learn_pathgraph_readiness_with_refresh_plan_20260706/refresh_base/learn_fusion_refresh_base_status.json",
+      "exists": true,
+      "sha256": "28c0c40b5ab0953c105b1dca0bdc7d06f6172b1aa2e9a8e794c566879b44be30"
+    },
+    "source_calibration_report": {
+      "kind": "source_calibration_report",
+      "path": "logs/benchmarks/learn_locator_card_execute_calibration_seek_full_20260705/numbered_region_calibration_report.json",
+      "declared_path": "logs/benchmarks/learn_locator_card_execute_calibration_seek_full_20260705/numbered_region_calibration_report.json",
+      "exists": true,
+      "sha256": "56b3ad46ffe02977d0f369e23645391c1aa4871e352c8ac1679431a833b46bb2"
+    }
+  },
+  "next_required_steps": [
+    "run_approved_numbered_region_calibration_batch",
+    "run_gated_post_batch_refresh",
+    "rerun_pathgraph_candidate_validation",
+    "run_pending_numbered_region_calibration_batch_before_pathgraph_review"
+  ],
+  "safety": {
+    "display_only": true,
+    "model_started": false,
+    "live_clicks": 0,
+    "live_fills": 0,
+    "live_submits": 0,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false,
+    "runtime_pathgraph_promotion": false
+  },
+  "interpretation": "Offline evidence packet for the current fused Learn Mode understanding. It summarizes existing screen-understanding, calibration, PathGraph, and integration-readiness evidence; it does not start models, click, fill, submit, authorize Execute, or promote Runtime PathGraph.",
+  "report_path": "D:\\agent-gui-runtime\\artifacts\\learning-draft-review\\actual_parser_output_with_fusion_status_7b471afc08\\pathgraph_candidate\\learn_fusion_current_evidence_packet.json"
+}

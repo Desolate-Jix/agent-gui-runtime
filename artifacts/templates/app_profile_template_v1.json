@@ -31,6 +31,15 @@
   ],
   "workflow_assets": [],
   "learning_assets": [],
+  "learned_patterns": [
+    {
+      "contract_version": "learning_pattern_ref_v1",
+      "pattern_id": "example_pattern",
+      "path": "artifacts/learning_patterns/example_pattern_template_v1.json",
+      "role": "Reusable pattern selected by this app profile.",
+      "authorization": "guidance_only"
+    }
+  ],
   "policy": {
     "workflow_first_required": false,
     "unknown_interface_policy": "agentic_loop_observe_decide_act_trace",

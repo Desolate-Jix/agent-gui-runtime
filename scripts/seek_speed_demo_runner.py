@@ -217,6 +217,23 @@ def _external_apply_flow_started(execute_apply: dict[str, Any]) -> bool:
     )
 
 
+def _external_ats_login_required(execute_apply: dict[str, Any]) -> bool:
+    state = _apply_entry_state(execute_apply)
+    state_type = str(state.get("state_type") or "").casefold()
+    risk_flags = {str(item).casefold() for item in state.get("risk_flags") or []}
+    stop_reason = str(state.get("stop_reason") or "").casefold()
+    has_external = (
+        state_type in {"third_party_ats", "external_ats"}
+        or "third_party_ats" in risk_flags
+        or "external_ats" in risk_flags
+        or "third_party_ats" in stop_reason
+        or "external_ats" in stop_reason
+        or "external" in stop_reason
+    )
+    has_login = state_type == "login_required" or "login_required" in risk_flags or "login" in stop_reason
+    return has_external and has_login
+
+
 def _write_speed_demo_result(
     run_dir: Path,
     *,
@@ -448,6 +465,39 @@ def run_speed_demo(args: argparse.Namespace) -> dict[str, Any]:
                 attempt["apply_entry_state_type"] = apply_state.get("state_type")
                 job_attempts.append(attempt)
                 if _external_apply_flow_started(execute_apply):
+                    if _external_ats_login_required(execute_apply):
+                        return _write_speed_demo_result(
+                            run_dir,
+                            started=started,
+                            args=args,
+                            steps=steps,
+                            job_attempts=job_attempts,
+                            result_scrolls=result_scrolls,
+                            status="safe_stop",
+                            stop_reason="external_ats_login_required_safe_stop",
+                            extra={
+                                "safe_stop": {
+                                    "contract_version": "seek_safe_stop_v1",
+                                    "reason": "external_ats_login_required",
+                                    "surface": "external_ats",
+                                    "state_type": apply_state.get("state_type"),
+                                    "stop_reason": apply_state.get("stop_reason"),
+                                    "forbidden_next_steps": [
+                                        "seek_results_extraction",
+                                        "result_scroll",
+                                        "next_card_lookup",
+                                        "safe_fill",
+                                        "final_submit",
+                                    ],
+                                },
+                                "state_machine_failure": {
+                                    "contract_version": "state_machine_failure_v1",
+                                    "category": "surface_drift_prevented",
+                                    "reason": "external ATS login blocker must terminate SEEK card loop",
+                                },
+                                "external_apply_state": apply_state,
+                            },
+                        )
                     if attempted_jobs >= args.max_jobs:
                         return _write_speed_demo_result(
                             run_dir,
@@ -525,6 +575,8 @@ def run_speed_demo(args: argparse.Namespace) -> dict[str, Any]:
                     "requested_wheel_clicks": requested_wheel_clicks,
                     "wheel_clicks_clamped": wheel_clicks != requested_wheel_clicks,
                     "success": scroll_response.get("success") is True,
+                    "scroll_dispatch_success": scroll_response.get("success") is True,
+                    "scroll_effect_success": changed,
                     "message": scroll_response.get("message"),
                     "card_fingerprint_changed": changed,
                 }

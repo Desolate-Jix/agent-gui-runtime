@@ -1,0 +1,336 @@
+{
+  "contract_version": "runtime_path_graph_v1",
+  "graph_id": "artifacts_learn-recognition-matrix-evidence_uground2b_actual_v3_matrix_learning:model_loaded:6d2cd2252a42",
+  "app_id": "artifacts_learn-recognition-matrix-evidence_uground2b_actual_v3_matrix_learning",
+  "page_type": "python_homepage",
+  "coordinate_policy": {
+    "coordinate_space": "window_screenshot",
+    "requires_current_capture": true,
+    "source_bbox_is_learning_evidence_only": true
+  },
+  "loader": {
+    "contract_version": "model_learning_artifact_loader_v1",
+    "source_trial_path": "artifacts/learning-draft-review/matrix_learning_draft_package_d7d02ebbe4/reviewed_template_candidate.json",
+    "source_sha256": "6d2cd2252a429fc34464499d0277ab2875cb984ab43f3178d3cdbdfc0532200e",
+    "source_attempt_index": null,
+    "source_artifact_readonly": true,
+    "posthoc_optimization_allowed": false,
+    "candidate_mode": true
+  },
+  "source": {
+    "trial_path": "artifacts/learning-draft-review/matrix_learning_draft_package_d7d02ebbe4/reviewed_template_candidate.json",
+    "reviewed_candidate_path": "artifacts/learning-draft-review/matrix_learning_draft_package_d7d02ebbe4/reviewed_template_candidate.json",
+    "source_trial_path": "artifacts/learn-recognition-matrix-evidence/uground2b_actual_v3/matrix_learning_draft_package.json",
+    "sha256": "6d2cd2252a429fc34464499d0277ab2875cb984ab43f3178d3cdbdfc0532200e",
+    "attempt_index": null,
+    "readonly": true,
+    "posthoc_optimization_allowed": false,
+    "candidate_mode": true
+  },
+  "states": [
+    {
+      "state_id": "python_homepage",
+      "label": "Python Homepage",
+      "page_type": "python_homepage",
+      "region_refs": [
+        "region_1_search_keyword_field",
+        "region_2_seek_search_button",
+        "region_3_pay_filter",
+        "region_4_search_button",
+        "region_5_downloads_link"
+      ]
+    },
+    {
+      "state_id": "seek_results_header",
+      "label": "Seek Results Header",
+      "page_type": "python_homepage",
+      "region_refs": [
+        "region_1_search_keyword_field",
+        "region_2_seek_search_button",
+        "region_3_pay_filter",
+        "region_4_search_button",
+        "region_5_downloads_link"
+      ]
+    }
+  ],
+  "regions": [
+    {
+      "region_id": "region_1_search_keyword_field",
+      "label": "Search keyword field",
+      "region_type": "validated_grounding_target",
+      "state_id": "seek_results_header",
+      "bbox": {
+        "x": 633,
+        "y": 184,
+        "w": 850,
+        "h": 48
+      },
+      "click_point": {
+        "x": 1058,
+        "y": 207
+      },
+      "source_case_id": "recorded_parser_seek_search_header_controls",
+      "source_profile_id": "learn_mode_uground_2b",
+      "display_only": true,
+      "role": "validated_grounding_target",
+      "source_artifact_readonly": true
+    },
+    {
+      "region_id": "region_2_seek_search_button",
+      "label": "SEEK search button",
+      "region_type": "validated_grounding_target",
+      "state_id": "seek_results_header",
+      "bbox": {
+        "x": 1820,
+        "y": 184,
+        "w": 92,
+        "h": 48
+      },
+      "click_point": {
+        "x": 1866,
+        "y": 208
+      },
+      "source_case_id": "recorded_parser_seek_search_header_controls",
+      "source_profile_id": "learn_mode_uground_2b",
+      "display_only": true,
+      "role": "validated_grounding_target",
+      "source_artifact_readonly": true
+    },
+    {
+      "region_id": "region_3_pay_filter",
+      "label": "Pay filter",
+      "region_type": "validated_grounding_target",
+      "state_id": "seek_results_header",
+      "bbox": {
+        "x": 632,
+        "y": 258,
+        "w": 78,
+        "h": 42
+      },
+      "click_point": {
+        "x": 671,
+        "y": 276
+      },
+      "source_case_id": "recorded_parser_seek_search_header_controls",
+      "source_profile_id": "learn_mode_uground_2b",
+      "display_only": true,
+      "role": "validated_grounding_target",
+      "source_artifact_readonly": true
+    },
+    {
+      "region_id": "region_4_search_button",
+      "label": "Search button",
+      "region_type": "validated_grounding_target",
+      "state_id": "python_homepage",
+      "bbox": {
+        "x": 1322,
+        "y": 244,
+        "w": 57,
+        "h": 46
+      },
+      "click_point": {
+        "x": 1351,
+        "y": 267
+      },
+      "source_case_id": "recorded_parser_calibrated_targets_python_homepage",
+      "source_profile_id": "learn_mode_uground_2b",
+      "display_only": true,
+      "role": "validated_grounding_target",
+      "source_artifact_readonly": true
+    },
+    {
+      "region_id": "region_5_downloads_link",
+      "label": "Downloads link",
+      "region_type": "validated_grounding_target",
+      "state_id": "python_homepage",
+      "bbox": {
+        "x": 766,
+        "y": 363,
+        "w": 99,
+        "h": 30
+      },
+      "click_point": {
+        "x": 815,
+        "y": 378
+      },
+      "source_case_id": "recorded_parser_calibrated_targets_python_homepage",
+      "source_profile_id": "learn_mode_uground_2b",
+      "display_only": true,
+      "role": "validated_grounding_target",
+      "source_artifact_readonly": true
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "model:transition:action_1_search_keyword_field",
+      "from_state_id": "python_homepage",
+      "to_state_id": "python_homepage",
+      "action_template_id": "action_1_search_keyword_field",
+      "default_available": true,
+      "verification_refs": []
+    },
+    {
+      "transition_id": "model:transition:action_2_seek_search_button",
+      "from_state_id": "python_homepage",
+      "to_state_id": "python_homepage",
+      "action_template_id": "action_2_seek_search_button",
+      "default_available": true,
+      "verification_refs": []
+    },
+    {
+      "transition_id": "model:transition:action_3_pay_filter",
+      "from_state_id": "python_homepage",
+      "to_state_id": "python_homepage",
+      "action_template_id": "action_3_pay_filter",
+      "default_available": true,
+      "verification_refs": []
+    },
+    {
+      "transition_id": "model:transition:action_4_search_button",
+      "from_state_id": "python_homepage",
+      "to_state_id": "python_homepage",
+      "action_template_id": "action_4_search_button",
+      "default_available": true,
+      "verification_refs": []
+    },
+    {
+      "transition_id": "model:transition:action_5_downloads_link",
+      "from_state_id": "python_homepage",
+      "to_state_id": "python_homepage",
+      "action_template_id": "action_5_downloads_link",
+      "default_available": true,
+      "verification_refs": []
+    }
+  ],
+  "action_templates": [
+    {
+      "action_template_id": "action_1_search_keyword_field",
+      "label": "Search keyword field",
+      "semantic_action": "search_or_filter",
+      "low_level_action_type": "input",
+      "target_entity": "region_1_search_keyword_field",
+      "state_id": "seek_results_header",
+      "expected_effect": "needs_human_review_before_use",
+      "evidence_ref": "logs\\benchmarks\\learn_recognition_grounding_model_matrix_uground2b_actual_v3\\learn_mode_uground_2b\\01_recorded_parser_seek_search_header_controls\\actual_grounding_output_v1.json",
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false,
+      "action_type": "input",
+      "requires_gate": true,
+      "learned_skill_ref": "skill.input_text_into_field",
+      "input_target": {
+        "region_id": "region_1_search_keyword_field",
+        "role": "validated_grounding_target",
+        "requires_current_validation": true
+      },
+      "input_policy": {
+        "requires_agent_text": true,
+        "clear_existing": true,
+        "submit_allowed": false,
+        "text_is_not_stored_by_menu": true
+      }
+    },
+    {
+      "action_template_id": "action_2_seek_search_button",
+      "label": "SEEK search button",
+      "semantic_action": "search_or_filter",
+      "low_level_action_type": "input",
+      "target_entity": "region_2_seek_search_button",
+      "state_id": "seek_results_header",
+      "expected_effect": "needs_human_review_before_use",
+      "evidence_ref": "logs\\benchmarks\\learn_recognition_grounding_model_matrix_uground2b_actual_v3\\learn_mode_uground_2b\\02_recorded_parser_seek_search_header_controls\\actual_grounding_output_v1.json",
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false,
+      "action_type": "input",
+      "requires_gate": true,
+      "learned_skill_ref": "skill.input_text_into_field",
+      "input_target": {
+        "region_id": "region_2_seek_search_button",
+        "role": "validated_grounding_target",
+        "requires_current_validation": true
+      },
+      "input_policy": {
+        "requires_agent_text": true,
+        "clear_existing": true,
+        "submit_allowed": false,
+        "text_is_not_stored_by_menu": true
+      }
+    },
+    {
+      "action_template_id": "action_3_pay_filter",
+      "label": "Pay filter",
+      "semantic_action": "open_filter",
+      "low_level_action_type": "click",
+      "target_entity": "region_3_pay_filter",
+      "state_id": "seek_results_header",
+      "expected_effect": "needs_human_review_before_use",
+      "evidence_ref": "logs\\benchmarks\\learn_recognition_grounding_model_matrix_uground2b_actual_v3\\learn_mode_uground_2b\\03_recorded_parser_seek_search_header_controls\\actual_grounding_output_v1.json",
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false,
+      "action_type": "click",
+      "requires_gate": true,
+      "learned_skill_ref": "skill.click_currently_validated_target"
+    },
+    {
+      "action_template_id": "action_4_search_button",
+      "label": "Search button",
+      "semantic_action": "search_or_filter",
+      "low_level_action_type": "input",
+      "target_entity": "region_4_search_button",
+      "state_id": "python_homepage",
+      "expected_effect": "needs_human_review_before_use",
+      "evidence_ref": "logs\\benchmarks\\learn_recognition_grounding_model_matrix_uground2b_actual_v3\\learn_mode_uground_2b\\04_recorded_parser_calibrated_targets_python_homepage\\actual_grounding_output_v1.json",
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false,
+      "action_type": "input",
+      "requires_gate": true,
+      "learned_skill_ref": "skill.input_text_into_field",
+      "input_target": {
+        "region_id": "region_4_search_button",
+        "role": "validated_grounding_target",
+        "requires_current_validation": true
+      },
+      "input_policy": {
+        "requires_agent_text": true,
+        "clear_existing": true,
+        "submit_allowed": false,
+        "text_is_not_stored_by_menu": true
+      }
+    },
+    {
+      "action_template_id": "action_5_downloads_link",
+      "label": "Downloads link",
+      "semantic_action": "open_download_or_navigation",
+      "low_level_action_type": "click",
+      "target_entity": "region_5_downloads_link",
+      "state_id": "python_homepage",
+      "expected_effect": "needs_human_review_before_use",
+      "evidence_ref": "logs\\benchmarks\\learn_recognition_grounding_model_matrix_uground2b_actual_v3\\learn_mode_uground_2b\\05_recorded_parser_calibrated_targets_python_homepage\\actual_grounding_output_v1.json",
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false,
+      "action_type": "click",
+      "requires_gate": true,
+      "learned_skill_ref": "skill.click_currently_validated_target"
+    }
+  ],
+  "artifact_is_authorization": false,
+  "safety": {
+    "final_submit_allowed": false,
+    "final_submit_forbidden": true,
+    "real_action_requires_gate": true,
+    "observation_source_only": true,
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "candidate_only": true
+  },
+  "summary": {
+    "state_count": 2,
+    "region_count": 5,
+    "transition_count": 5,
+    "action_template_count": 5
+  },
+  "candidate_mode": true,
+  "candidate_contract_version": "runtime_path_graph_candidate_v1",
+  "execute_binding_enabled": false,
+  "final_submit_forbidden": true,
+  "real_action_requires_gate": true
+}

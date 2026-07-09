@@ -1,0 +1,29 @@
+{
+  "contract_version": "recorded_grounding_output_v1",
+  "provider": "uground_v1_recorded_contract_sample",
+  "source_type": "recorded_grounding_output",
+  "recorded_output_origin": "recorded_per_model_contract_sample",
+  "actual_model_call_in_this_run": false,
+  "model_profile_id": "learn_mode_uground_7b",
+  "model_id": "osunlp/UGround-V1-7B",
+  "model_profile": {
+    "profile_id": "learn_mode_uground_7b",
+    "mode_scope": "learn_only",
+    "download_status": "not_downloaded"
+  },
+  "note": "Recorded-per-model UGround 7B contract sample only; not a fresh model call.",
+  "grounding_by_label": {
+    "Apply now": {
+      "coordinate_space": "uground_0_999",
+      "raw_output": "(500, 500)",
+      "evidence": {
+        "screenshot_freshness": true,
+        "uia_or_dom_or_parser_overlap": true
+      },
+      "debug": {
+        "recorded_profile_id": "learn_mode_uground_7b",
+        "expected_restore_note": "Normalized ROI center restores inside the Apply now button bbox."
+      }
+    }
+  }
+}

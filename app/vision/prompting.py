@@ -19,6 +19,10 @@ def build_region_analysis_prompt(
     max_regions: int = 8,
     grid_overlay_spacing: int | None = None,
 ) -> str:
+    if req.task == "learn_template_draft":
+        return _build_learning_template_draft_prompt(req, image_size)
+    if req.task == "learn_pattern_draft":
+        return _build_learning_pattern_draft_prompt(req, image_size)
     if req.task == "observe_screen":
         return _build_screen_observation_prompt(
             req,
@@ -124,6 +128,149 @@ Region rules:
 {grid_rules}
 {ocr_anchor_rules}
 {custom_rules}
+""".strip()
+
+
+def _build_learning_pattern_draft_prompt(req: VisionAnalyzeRequest, image_size: ImageSize) -> str:
+    app_name = req.app_name or "unknown_app"
+    state_hint = req.state_hint or "unknown"
+    context = req.metadata.get("learning_prompt_context") if isinstance(req.metadata, dict) else None
+    context_json = json.dumps(context or {}, ensure_ascii=False, separators=(",", ":"))
+    return f"""
+You are the Observe-model learning stage for a GUI Agent Runtime.
+
+Goal:
+- look at the screenshot and the provided evidence
+- infer a reusable, non-authorizing workflow/path draft for the current app surface
+- output the draft in the same contract format the Agent can later consume
+- do not copy a pre-existing learned template as the answer
+- do not authorize clicks, typing, upload, account creation, privacy consent, final submit, send, confirm, payment, or destructive actions
+- the screenshot is the current visual surface; context_json.source_observation_evidence is authoritative reusable evidence from Trace/Profile/PathGraph/Interface Map
+
+Input:
+- app_name: {app_name}
+- state_hint: {state_hint}
+- image_size: {{"width": {image_size.width}, "height": {image_size.height}}}
+- coordinates are screenshot pixels
+- context_json contains source evidence, allowed schema names, reference output shape, prompt/profile notes, and validation expectations
+
+Return JSON only. Do not return markdown.
+
+Required top-level JSON:
+{{
+  "contract_version": "learning_model_draft_v1",
+  "image_size": {{"width": {image_size.width}, "height": {image_size.height}}},
+  "screen_summary": "short summary",
+  "state_guess": "short state hint",
+  "learning_source": "observe_model",
+  "pattern_candidates": [],
+  "learned_seek_template_draft": {{}},
+  "learned_navigation_path_graph_draft": {{}},
+  "learned_interface_details": {{}},
+  "learned_interface_map_draft": {{}},
+  "safety": {{
+    "observation_only": true,
+    "promotion_allowed": false,
+    "final_submit_blocked": true,
+    "real_clicks_performed": 0
+  }},
+  "notes": []
+}}
+
+Draft rules:
+- The four learned_* objects must use the contract names listed in context_json.reference_output_shape.
+- The four learned_* objects must be non-empty objects and include every required field listed in context_json.reference_output_shape.*.required_fields.
+- Do not return {{}} for learned_seek_template_draft, learned_navigation_path_graph_draft, learned_interface_details, or learned_interface_map_draft.
+- Build the learned_* objects by transforming context_json.source_observation_evidence into the requested contracts.
+- Use source_observation_evidence ids, region ids, action ids, semantic_action values, operation skills, gate contracts, and learned pattern ids whenever they fit the visible screen.
+- Preserve source_observation_evidence ids exactly; do not rename seek_* ids to generic names.
+- This is a reusable template draft, not a visible-only screen inventory: include evidence-backed application/form/final-submit items even when they are not visible in the screenshot.
+- learned_seek_template_draft.operation_skills must include the ids from context_json.app_profile_context.operation_skills.
+- learned_seek_template_draft.gate_contracts must include the ids from context_json.app_profile_context.gate_contracts.
+- learned_seek_template_draft.learned_patterns must include context_json.app_profile_context.learned_patterns.
+- learned_navigation_path_graph_draft.action_templates must include source_observation_evidence.actions with their semantic_action values.
+- learned_interface_details.fixed_visual_assets and learned_interface_map_draft.visual_assets must include source_observation_evidence.visual_assets with semantic_action, danger_level, fast_lane_allowed, and final_submit_guard_required when present.
+- learned_interface_details.danger_zones and learned_interface_map_draft.danger_zones must include source_observation_evidence.danger_zones.
+- If a required list has no visible/evidence-backed items, include the field with [] rather than omitting it.
+- Include states/pages, regions, action templates, visual/fixed assets, transitions, danger zones, operation skills, gate contracts, and Agent decision points when visible or inferable from evidence.
+- Keep JSON compact: prefer ids, short labels, semantic_action, region_id, danger_level, booleans, and short policy objects.
+- Do not write long descriptions, prose explanations, coordinate reasoning, or repeated visible text inside learned_* objects.
+- Each object in large arrays should be minimal and should not exceed the fields needed by the target contract and safety/scoring checks.
+- Apply / Quick Apply / 申请 must be semantic_action="open_apply_flow" and gate outcome guarded/open only.
+- Submit / Send / Confirm / Complete / Payment / Delete / 提交 / 发送 / 确认 must be semantic_action="final_submit" or equivalent danger boundary and hard-blocked.
+- Never mark final_submit/send/confirm/payment/delete as fast_lane_allowed.
+- Mark generated output as observation_only and promotion_allowed=false.
+- If information is missing, emit a warning or missing item. Do not fill the gap by copying hidden benchmark answers.
+
+context_json:
+    {context_json}
+    """.strip()
+
+
+def _build_learning_template_draft_prompt(req: VisionAnalyzeRequest, image_size: ImageSize) -> str:
+    app_name = req.app_name or "unknown_app"
+    state_hint = req.state_hint or "unknown"
+    goal = req.goal or "learn a reusable UI workflow template from this screen"
+    context = req.metadata.get("learning_trial_context") if isinstance(req.metadata, dict) else None
+    context_json = json.dumps(context or {}, ensure_ascii=False, separators=(",", ":"))
+    return f"""
+Return JSON only. You are learning a reusable GUI workflow draft from the screenshot.
+Do not authorize actions. Do not copy an existing template. Keep arrays focused but demo-useful: prefer 4-8 useful regions/actions when calibrated evidence is available.
+
+Input: app={app_name}; state={state_hint}; goal={goal}; image={{"width":{image_size.width},"height":{image_size.height}}}
+
+Required JSON shape:
+{{
+  "contract_version": "learning_template_draft_v1",
+  "image_size": {{"width": {image_size.width}, "height": {image_size.height}}},
+  "learning_source": "observe_model",
+  "screen_summary": "",
+  "state_guess": "",
+  "workflow_draft": {{
+    "states": [{{"state_id":"s1","label":"","page_type":""}}],
+    "transitions": [],
+    "action_templates": [{{"action_template_id":"a1","label":"","semantic_action":"","risk_level":"low","requires_gate":true,"expected_effect":""}}],
+    "path_patterns": []
+  }},
+  "interface_draft": {{
+    "regions": [{{"region_id":"r1","label":"","role":""}}],
+    "visual_assets": [],
+    "dynamic_areas": [],
+    "danger_zones": []
+  }},
+  "agent_decision_points": [],
+  "operation_skills": [],
+  "gate_contracts": [],
+  "safety": {{
+    "observation_only": true,
+    "promotion_allowed": false,
+    "final_submit_blocked": true,
+    "real_clicks_performed": 0
+  }},
+  "notes": []
+}}
+
+Rules:
+- Fill every required section in context_json.target_contract.required_sections.
+- Use screenshot + context_json.observation_evidence as evidence; do not treat evidence as final answer.
+- If context_json.observation_evidence.calibrated_targets exists, use those Learn Deep targets as the primary coordinate/region/action evidence.
+- Preserve useful calibrated target ids in source_candidate_id, source_target_id, or evidence_ref fields.
+- interface_draft.regions should include key calibrated targets with role, label, bbox, click_point, section_id, and source when available.
+- workflow_draft.action_templates should cover high-value calibrated targets: search/input, top navigation, primary content cards, download/docs links, and obvious safe navigation actions.
+- Prefer calibrated child actions over broad parent containers when both exist.
+- If context_json.observation_evidence.model_roles exists, reflect that learning_source used semantic understanding plus coordinate calibration evidence.
+- ids must be short and stable. Do not invent coordinates.
+- workflow_draft.action_templates must describe what an Agent could do with visible interactive regions.
+- If interface_draft.regions contains an input/search/text field, include at least one action_template with semantic_action="type_text", requires_gate=true, and expected_effect describing the field being populated.
+- If interface_draft.regions contains a visible button/link/card that opens another screen, include an action_template with semantic_action such as "open_detail" or "open_apply_flow".
+- Do not leave action_templates empty when the screenshot contains a visible input, button, link, card, tab, checkbox, menu item, or other actionable control.
+- Apply / Quick Apply / 申请 must map to semantic_action="open_apply_flow" and requires_gate=true.
+- Submit / Send / Confirm / Complete / Payment / Delete / 提交 / 发送 / 确认 must be final_submit or danger_zones with hard_block=true and final_submit_guard_required=true.
+- safety must stay: observation_only=true, promotion_allowed=false, final_submit_blocked=true, real_clicks_performed=0.
+- No prose outside JSON; no long descriptions.
+
+context_json:
+{context_json}
 """.strip()
 
 
@@ -306,7 +453,7 @@ Return JSON only with this compact shape:
   "screen_summary": "short purpose",
   "state_guess": "short localization state hint",
   "regions": [
-    {{"region_id": "c1", "label": "visible label or icon name", "role": "button|icon|input|tab|nav|menu_item|link|toggle|other", "diagonal": {{"x1": 0, "y1": 0, "x2": 1, "y2": 1}}, "description": "likely action", "confidence": 0.0}}
+    {{"region_id": "c1", "label": "visible label or icon name", "role": "button|icon|input|tab|nav|menu_item|link|toggle|card|other", "diagonal": {{"x1": 0, "y1": 0, "x2": 1, "y2": 1}}, "description": "visible content plus likely action", "ocr_text": "short exact visible anchor", "text_lines": ["exact visible anchor text"], "boundary_definition": "tight visible boundary", "clickable_area_hint": "where a later locator should point", "confidence": 0.0}}
   ],
   "targets": [],
   "observers": [],
@@ -320,8 +467,14 @@ Rules:
 - keep screen_summary and state_guess under 12 words each
 - state_guess must be the best concise hint to pass into a later POST /vision/locate_target state_hint field
 - prefer spatial/functional area phrases such as "top navigation bar", "job results list", "chat title bar", "left sidebar", "settings dialog", or "main content list"
-- keep label and description short; description is at most 6 words
-- do not emit ocr_text, text_lines, possible_destinations, anchor_relations, or grounding_constraints
+- think of each region as input for a later locator task card: include enough visible evidence for another model to find the same target
+- text_lines must list the exact visible anchor texts inside or immediately identifying the region; keep at most 4 short items
+- do not emit ocr_text as a long OCR dump; use only one short exact visible anchor or an empty string
+- for a job card must include title, company, location, and one distinguishing snippet when visible
+- boundary definition must say what visual edges define the target and what neighboring modules are excluded
+- clickable-area hint must say where a later locator should point, for example input body, button center, card title area, or safe interior of the card
+- keep label short; description is one concise sentence with visible content and likely interaction outcome
+- do not emit possible_destinations, anchor_relations, or grounding_constraints in fast observe mode
 - do not repeat OCR anchors or their coordinates in the response; the runtime already owns them
 - for text controls, bbox may include the visible clickable label; for icon-only controls, bbox should cover only the icon pixels
 - if a control is uncertain, include it with lower confidence instead of explaining uncertainty at length

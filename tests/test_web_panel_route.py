@@ -20,6 +20,8 @@ def test_web_panel_serves_browser_control_surface() -> None:
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert "charset=utf-8" in response.headers["content-type"]
+    assert response.headers["cache-control"] == "no-store, max-age=0"
+    assert response.headers["pragma"] == "no-cache"
     assert "OpenClaw Console" in response.text
     assert "/panel/assets/panel.js" in response.text
     assert 'class="language-toggle"' in response.text
@@ -40,16 +42,19 @@ def test_web_panel_serves_browser_control_surface() -> None:
     assert 'data-i18n="nav_group_execute"' in response.text
     assert 'data-i18n="nav_group_learn_flow"' in response.text
     assert 'data-i18n="nav_group_execute_flow"' in response.text
-    assert 'data-stage="learn_locate"' in response.text
-    assert 'data-stage="learn_replay"' in response.text
+    assert 'data-stage="learn_interface"' in response.text
+    assert 'data-stage="template_display"' in response.text
     assert 'data-stage="learn_validation"' in response.text
     assert 'data-stage="execute_actions"' in response.text
     assert 'data-stage="execute_task_run"' in response.text
     assert 'data-stage="execute_locate"' in response.text
-    assert 'data-stage="learn_locate" data-step="2"' in response.text
     assert 'data-i18n="nav_group_replay"' not in response.text
     assert 'data-i18n="nav_group_replay_flow"' not in response.text
-    assert 'data-stage="learn_replay" data-step="3"' in response.text
+    assert 'data-stage="open_bind"' in response.text
+    assert 'data-stage="capture"' in response.text
+    assert 'data-stage="learn_interface" data-step="1"' in response.text
+    assert 'data-stage="template_display" data-step="2"' in response.text
+    assert 'data-stage="trace" data-step="3"' in response.text
     assert 'data-stage="learn_validation" data-step="4"' in response.text
     assert 'data-stage="execute_task_run" data-step="2"' in response.text
     assert 'data-stage="execute_actions" data-step="1"' in response.text
@@ -106,9 +111,75 @@ def test_web_panel_serves_browser_control_surface() -> None:
     assert 'id="replayAgentPromptDiff"' in response.text
     assert 'id="replayInterfaceMapPath"' in response.text
     assert 'id="replayInterfaceCalibrationPath"' in response.text
+    assert 'data-i18n="template_replay_section"' in response.text
+    assert 'data-i18n="learning_studio_section"' in response.text
+    assert 'data-learn-replay-view="template"' in response.text
+    assert 'data-learn-replay-view="draft"' in response.text
+    assert 'data-learn-replay-panel="template"' in response.text
+    assert 'data-learn-replay-panel="draft"' in response.text
+    assert 'id="replayModelArtifactPath"' in response.text
+    assert 'id="learningTrialApp"' in response.text
+    assert 'id="learningTrialState"' in response.text
+    assert 'id="learningTrialImagePath"' in response.text
+    assert 'id="learningTrialResultPath"' in response.text
+    assert 'id="learningTrialResultPath" value=""' in response.text
+    assert 'id="learningDraftReviewSourcePath" value=""' in response.text
+    assert 'id="learningPathGraphCandidatePath" value=""' in response.text
+    assert 'id="learningPathGraphValidationPath" value=""' in response.text
+    assert "new_site_python_org_20260702_after_similarity_fix" not in response.text
+    assert "trial_result_cae1c88703" not in response.text
+    assert 'id="learningPathGraphCandidatePath"' in response.text
+    assert 'id="learningPathGraphValidationPath"' in response.text
     assert 'id="replayLoadBtn"' in response.text
+    assert 'id="replayModelArtifactLoadBtn"' in response.text
+    assert 'value="model_artifact_single_step">model_artifact_single_step' in response.text
     assert 'id="replayInterfaceMapLoadBtn"' in response.text
     assert 'id="replayInterfaceCalibrationLoadBtn"' in response.text
+    assert 'id="learningGeneralizationBtn"' not in response.text
+    assert 'id="learningDraftGenerateBtn"' not in response.text
+    assert 'id="learningTemplateViewBtn"' not in response.text
+    assert 'id="learningDraftViewBtn"' not in response.text
+    assert 'id="learningWorkbench"' not in response.text
+    assert 'id="learningTemplatePanel"' not in response.text
+    assert 'id="learningOutputPanel"' not in response.text
+    assert 'id="learningDraftReviewLoadBtn"' in response.text
+    assert 'id="learningDraftRecommendedLoadBtn"' in response.text
+    assert 'id="learningDraftReviewSaveBtn"' in response.text
+    assert 'id="learningAssistedTemplateAcceptanceSimulationBtn"' in response.text
+    assert 'id="learningAssistedTemplateAcceptanceSimulationSummary"' in response.text
+    assert 'data-i18n="learning_assisted_template_acceptance_simulation_create"' in response.text
+    assert 'id="learningAssistedTemplateAuditedPromotionRequestBtn"' in response.text
+    assert 'id="learningAssistedTemplateAuditedPromotionRequestSummary"' in response.text
+    assert 'data-i18n="learning_assisted_template_audited_promotion_request_create"' in response.text
+    assert 'id="learningAssistedTemplateDecisionsSaveAuditPreviewBtn"' in response.text
+    assert 'data-i18n="learning_assisted_template_decisions_save_audit_preview"' in response.text
+    assert 'id="learningTrialCaptureBtn"' in response.text
+    assert 'id="learningTrialRunBtn"' in response.text
+    assert 'id="learningPathGraphCandidateBtn"' in response.text
+    assert 'id="learningPreciseUnderstandingCandidateBtn"' in response.text
+    assert 'data-i18n="learning_precise_understanding_candidate_create"' in response.text
+    assert 'id="learningPageDetailCandidateBtn"' in response.text
+    assert 'data-i18n="learning_page_detail_candidate_create"' in response.text
+    assert 'id="learningDemoScaffoldBtn"' in response.text
+    assert 'data-i18n="learning_demo_scaffold_create"' in response.text
+    assert 'id="learningDemoGoalReadinessBtn"' in response.text
+    assert 'data-i18n="learning_demo_goal_readiness_create"' in response.text
+    assert 'id="learningDraftFreshnessDemoCase"' in response.text
+    assert 'id="learningDraftFreshnessDemoBtn"' in response.text
+    assert 'id="learningDraftReviewPanel"' in response.text
+    assert 'id="learningDraftPathPreview"' in response.text
+    assert 'id="learningDraftPathMap"' in response.text
+    assert 'id="learningDraftPathDetail"' in response.text
+    assert 'data-i18n="learning_draft_path_preview_title"' in response.text
+    assert 'class="replay-action-disclosure"' in response.text
+    assert 'data-i18n="replay_advanced_actions"' in response.text
+    assert 'id="learningDraftReviewSummary"' in response.text
+    assert 'data-i18n="learning_draft_states"' in response.text
+    assert 'data-i18n="learning_draft_regions"' in response.text
+    assert 'data-i18n="learning_draft_actions"' in response.text
+    assert 'id="learningLoadDraftGraphBtn"' not in response.text
+    assert 'id="learningShowInterfaceDetailsBtn"' not in response.text
+    assert 'id="learningDraftPanel"' not in response.text
     assert 'id="replayInterfaceMapSaveName"' in response.text
     assert 'id="replayInterfaceMapSaveBtn"' in response.text
     assert 'id="seekApplicationRecordPath"' in response.text
@@ -166,6 +237,8 @@ def test_web_panel_serves_static_assets() -> None:
     response = client.get("/panel/assets/panel.js")
 
     assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store, max-age=0"
+    assert response.headers["pragma"] == "no-cache"
     assert "renderNavPath" in response.text
     assert "renderFlowGraph" in response.text
     assert "detectFlowStagesFromResponse" in response.text
@@ -180,7 +253,8 @@ def test_web_panel_serves_static_assets() -> None:
     assert "setWindowCandidates" in response.text
     assert "testModelService" in response.text
     assert "DEFAULT_STAGE_PROFILE_IDS" in response.text
-    assert 'observe: "qwen3_vl_4b_q4_k_m"' in response.text
+    assert 'observe: "qwen3_vl_8b_q4_k_m"' in response.text
+    assert 'understanding: "qwen3_vl_8b_q4_k_m"' in response.text
     assert 'locate: "vista_4b_transformers"' in response.text
     assert 'on("modelTestStage", "change", () => syncModelTestProfile())' in response.text
     assert 'warning: { color: "#71634e"' in response.text
@@ -201,6 +275,196 @@ def test_web_panel_serves_static_assets() -> None:
     assert "generateLearnValidationPlan" in response.text
     assert "runLearnValidationStep" in response.text
     assert "loadReplayArtifact" in response.text
+    assert "loadReplayModelArtifact" in response.text
+    assert "/panel/load_model_artifact" in response.text
+    assert "loadLearningDraftReview" in response.text
+    assert "saveLearningDraftReview" in response.text
+    assert "runLearningDraftTrial" in response.text
+    assert "captureLearningDraftWindow" in response.text
+    assert "buildLearningDraftObservationEvidence" in response.text
+    assert "screenMapEvidenceCount" in response.text
+    assert "compactLearningDraftTargets" in response.text
+    assert "learningRecognitionTrialRequestPayload" in response.text
+    assert "coordinate_validation:" in response.text
+    assert "screen_map:" in response.text
+    assert "screen_map_available_no_recent_learn_deep" in response.text
+    assert "panel_learning_draft_observation_evidence_v1" in response.text
+    assert "setLearnReplaySubview" in response.text
+    assert "applyLearnReplaySubviewChrome" in response.text
+    assert "/panel/run_learning_recognition_trial" in response.text
+    assert "/panel/run_learning_two_stage_understanding" in response.text
+    assert "generatePathGraphCandidate" in response.text
+    assert "renderLearningDraftPathPreview" in response.text
+    assert "renderLearningDraftPathDetail" in response.text
+    assert "renderLearningDraftPageDetailCards" in response.text
+    assert "renderLearningDraftPipelineAudit" in response.text
+    assert "renderLearningDraftPathgraphReviewQueue" in response.text
+    assert "renderLearningDraftPathgraphPreflightPlan" in response.text
+    assert "learningDraftPreviewButton" in response.text
+    assert "previewLearningDraftBbox" in response.text
+    assert "bindLearningDraftPreviewButtons" in response.text
+    assert "openImageInspector" in response.text
+    assert "closeImageInspector" in response.text
+    assert "applyImageInspectorSelectionToDraft" in response.text
+    assert "bindImageInspectorEditDrag" in response.text
+    assert "learningDraftHumanReviewMeta" in response.text
+    assert "learningDraftBboxText" in response.text
+    assert "learningDraftManualBboxEditSummary" in response.text
+    assert "renderLearningDraftManualBboxEditSummary" in response.text
+    assert "manual_bbox_edit_summary_v1" in response.text
+    assert "learningDraftSourceFreshnessSummary" in response.text
+    assert "renderLearningDraftSourceFreshnessSummary" in response.text
+    assert "source_freshness_summary_v1" in response.text
+    assert "loadLearningDraftFreshnessDemo" in response.text
+    assert "LEARNING_DRAFT_FRESHNESS_DEMO_CASES" in response.text
+    assert "artifacts/learning-draft-freshness-demo/freshness_demo_summary.json" in response.text
+    assert "learning-review-edited-badge" in response.text
+    assert "if (!bbox && !(editKind && imagePath)) return" in response.text
+    assert "if (!hasBbox && !editContext)" in response.text
+    assert "region_bbox_updates" in response.text
+    assert "action_bbox_updates" in response.text
+    assert "learning_draft_page_understanding" in response.text
+    assert "learning_draft_pipeline_audit" in response.text
+    assert "learning_draft_preview_bbox" in response.text
+    assert "learning_draft_image_inspector" in response.text
+    assert "learning_draft_edit_bbox" in response.text
+    assert "learning_draft_apply_selected_bbox" in response.text
+    assert "learning_draft_drag_bbox_hint" in response.text
+    assert "learning_draft_bbox_edited" in response.text
+    assert "learning_draft_bbox_edit_summary" in response.text
+    assert "learning_draft_source_freshness_summary" in response.text
+    assert "learning_draft_freshness_demo_case" in response.text
+    assert "learning_draft_load_freshness_demo" in response.text
+    assert "learning_draft_cleanup" in response.text
+    assert "learning_draft_gate" in response.text
+    assert "learning_draft_roi_grounding" in response.text
+    assert "learning_draft_fusion_status" in response.text
+    assert "gate_diagnosis" in response.text
+    assert "learning_draft_pathgraph_review_queue" in response.text
+    assert "pathgraph_queue:open_detail" in response.text
+    assert "review_bucket" in response.text
+    assert "learning_draft_pathgraph_preflight_plan" in response.text
+    assert "preflight:open_detail_transitions" in response.text
+    assert "preflight:pending_calibration_ready" in response.text
+    assert "pending_calibration_ready_count" in response.text
+    assert "pending_calibration_batch" in response.text
+    assert "pathgraphReadinessCurrentEvidencePacket" in response.text
+    assert "pathgraphReadinessPreciseUnderstandingCandidate" in response.text
+
+    assert "renderLearningPageDetailCandidate" in response.text
+    assert "renderLearningPageDetailSpatialMap" in response.text
+    assert "learning-page-layout-map" in response.text
+    assert "learning-page-detail-sections" in response.text
+    assert "current_evidence_packet=available" in response.text
+    assert "current_packet_coverage=${currentEvidencePacketSummary.coverage}" in response.text
+    assert "current_evidence_packet=${currentEvidencePacketReportPath}" in response.text
+    assert "current_evidence_packet_safety=${currentEvidencePacketSummary.safety.join" in response.text
+    assert "precise_understanding=${preciseUnderstandingCandidate.readiness_status}" in response.text
+    assert "precise_understanding_candidate=${preciseUnderstandingReportPath}" in response.text
+    assert "precise_understanding_safety=${preciseUnderstandingSummary.safety.join" in response.text
+    assert "learning_draft_review_patch_proposal" in response.text
+    assert "review_patch:actions" in response.text
+    assert "learning_assisted_template_package_path" in response.text
+    assert "learning_assisted_template_package_create" in response.text
+    assert "learning_assisted_template_package_load" in response.text
+    assert "learning_assisted_template_suggestions_create" in response.text
+    assert "learning_assisted_template_suggestions" in response.text
+    assert "learning_assisted_template_acceptance_simulation_create" in response.text
+    assert "learning_assisted_template_acceptance_simulation" in response.text
+    assert "learning_assisted_template_acceptance_simulation_apply" in response.text
+    assert "learning_assisted_template_asset_candidate_path" in response.text
+    assert "learning_assisted_template_asset_candidate_create" in response.text
+    assert "learning_assisted_template_graph_draft_path" in response.text
+    assert "learning_assisted_template_graph_draft_create" in response.text
+    assert "learning_assisted_template_checklist" in response.text
+    assert "learning_assisted_template_decisions_save" in response.text
+    assert "learning_assisted_template_decisions_save_export" in response.text
+    assert "learning_assisted_template_decisions_save_graph_preview" in response.text
+    assert "learning_assisted_template_decisions_save_audit_preview" in response.text
+    assert "learning_assisted_template_promotion_preflight_create" in response.text
+    assert "learning_assisted_template_promotion_preflight" in response.text
+    assert "learning_assisted_template_audited_promotion_request_create" in response.text
+    assert "learning_assisted_template_audited_promotion_request" in response.text
+    assert "screen_understanding_full_overlay" in response.text
+    assert "screen_understanding_calibration_backlog" in response.text
+    assert "screen_understanding_calibration_batch_plan" in response.text
+    assert "screen_understanding_calibration_handoff" in response.text
+    assert "screen_understanding_calibration_batch_acceptance" in response.text
+    assert "renderScreenUnderstandingCalibrationBatchAcceptance" in response.text
+    assert "calibration_batch_acceptance_report" in response.text
+    assert "ready_for_post_batch_refresh" in response.text
+    assert "screen_understanding_handoff_consistency" in response.text
+    assert "renderScreenUnderstandingHandoffConsistency" in response.text
+    assert "calibration_handoff_consistency_report" in response.text
+    assert "consistency_status" in response.text
+    assert "screen_understanding_evidence_integrity" in response.text
+    assert "renderScreenUnderstandingEvidenceIntegrity" in response.text
+    assert "missing_declared_evidence" in response.text
+    assert "sha256" in response.text
+    assert "renderScreenUnderstandingCalibrationHandoff" in response.text
+    assert "calibration_handoff_report" in response.text
+    assert "safe_to_start_after_user_approval" in response.text
+    assert "rerun_report_status" in response.text
+    assert "backlog_ready" in response.text
+    assert "backlog_review" in response.text
+    assert "batch_ready" in response.text
+    assert "batch_review" in response.text
+    assert "calibration_batch_ready_region_numbers" in response.text
+    assert "command_executes_now" in response.text
+    assert "precise_understanding_readiness_summary" in response.text
+    assert "readiness=" in response.text
+    assert "pending_ready=" in response.text
+    assert "pending_review=" in response.text
+    assert "calibration_backlog_items" in response.text
+    assert "full_screen_understanding_overlay_path" in response.text
+    assert "showScreenUnderstandingOverlay" in response.text
+    assert "learning_draft_review_only_regions" in response.text
+    assert "learning_draft_grounding_candidates" in response.text
+    assert "pageDetails.pipeline_audit" in response.text
+    assert "data-learning-draft-preview-bbox" in response.text
+    assert "draft.page_details" in response.text
+    assert "data-learning-draft-node" in response.text
+    assert "/panel/generate_pathgraph_candidate" in response.text
+    assert "/panel/create_assisted_template_review_package" in response.text
+    assert "/panel/create_assisted_template_audited_promotion_request" in response.text
+    assert "/panel/load_assisted_template_review_package" in response.text
+    assert "/panel/create_assisted_template_acceptance_suggestions" in response.text
+    assert "/panel/create_assisted_template_acceptance_simulation" in response.text
+    assert "applyAssistedTemplateAcceptanceSimulationToChecklist" in response.text
+    assert "saveAssistedTemplateReviewDecisionsAndBuildAuditPreview" in response.text
+    assert "audit_request_preview_path" in response.text
+    assert "data-assisted-template-simulation-apply" in response.text
+    assert "simulation_applied_to_unsaved_checklist" in response.text
+    assert "/panel/save_assisted_template_review_decisions" in response.text
+    assert "/panel/create_assisted_template_asset_candidate" in response.text
+    assert "/panel/create_assisted_template_graph_draft" in response.text
+    assert "/panel/create_assisted_template_promotion_preflight" in response.text
+    assert "renderAssistedTemplateAcceptanceSuggestions" in response.text
+    assert "applyAssistedTemplateSuggestion" in response.text
+    assert "data-assisted-template-suggestion-apply" in response.text
+    assert "renderAssistedTemplateCompletenessSummary" in response.text
+    assert "learning_assisted_template_completeness" in response.text
+    assert "saveAssistedTemplateReviewDecisionsAndBuildGraphDraft" in response.text
+    assert "renderAssistedTemplateReviewToGraphDiff" in response.text
+    assert "learning_assisted_template_review_to_graph_diff" in response.text
+    assert "renderAssistedTemplatePromotionPreflight" in response.text
+    assert "createAssistedTemplatePromotionPreflight" in response.text
+    assert "blocker_details" in response.text
+    assert "recommended_action" in response.text
+    assert "renderAssistedTemplateGraphDraftSummary" in response.text
+    assert "renderAssistedGraphDraftList" in response.text
+    assert "data-assisted-template-decision" in response.text
+    assert "data-assisted-template-note" in response.text
+    assert "data-assisted-template-override" in response.text
+    assert "semantic_action" in response.text
+    assert "target_entity" in response.text
+    assert "/panel/load_learning_draft_review" in response.text
+    assert "/panel/save_learning_draft_review" in response.text
+    assert 'on("replayModelArtifactLoadBtn", "click", loadReplayModelArtifact)' in response.text
+    assert 'task_template === "model_artifact_single_step"' in response.text
+    assert 'isModelArtifactTaskRun' in response.text
+    assert 'model_learning_artifact_loader_v1' in response.text
+    assert 'if (isModelLoadedRuntimePathGraph(graph)) return null;' in response.text
     assert "renderReplayGraph" in response.text
     assert "loadSeekApplicationEvidence" in response.text
     assert "renderSeekApplicationEvidence" in response.text
@@ -255,6 +519,47 @@ def test_web_panel_serves_static_assets() -> None:
     assert "syncStageLearningControls" in response.text
     assert 'stage === "observe" ? "learn"' in response.text
     assert 'stage === "observe" ? "fast"' in response.text
+    assert 'return new Set(["locate", "execute_actions", "learn_replay", "learn_validation", "execute_task_run", "execute"]);' in response.text
+    assert "function currentPageAllowsSharedPathSurface" in response.text
+    assert "function isScreenUnderstandingResponse" in response.text
+    assert "if (isScreenUnderstandingResponse(result)) return false;" in response.text
+    assert "function resetSharedPathForScreenUnderstanding" in response.text
+    assert "function isScreenUnderstandingStageActive" in response.text
+    assert "function shouldBlockPathGraphRestoreForScreenUnderstanding" in response.text
+    assert 'document.body.dataset.pathSurface = pathVisible ? "visible" : "hidden"' in response.text
+    assert "const pathVisible = setSharedPathSurfaceVisibility(page)" in response.text
+    assert "pathPanel.hidden = !pathVisible" in response.text
+    assert "pathDetailPanel.hidden = !pathVisible" in response.text
+    assert 'pathPanel.setAttribute("aria-hidden", pathVisible ? "false" : "true")' in response.text
+    assert "clearSharedPathDetailDisplay()" in response.text
+    assert "function enterScreenUnderstandingStage()" in response.text
+    assert "if (page === \"observe\") enterScreenUnderstandingStage();" in response.text
+    assert 'document.body.dataset.pathSurface = "hidden";' in response.text
+    assert 'setSharedPathSurfaceVisibility("observe");' in response.text
+    assert "cancelAnimationFrame(pathAnimId);" in response.text
+    assert 'ctx.clearRect(0, 0, canvas.width || 0, canvas.height || 0);' in response.text
+    assert "renderNavPath();" in response.text
+    assert "if (!sharedPathSurfaceVisible())" in response.text
+    assert "document.body.dataset.stagePage = page" in response.text
+    assert 'document.body.classList.toggle("learn-fast-clean-stage", page === "observe")' in response.text
+    assert 'if (isScreenUnderstandingResponse(result)) return;' in response.text
+    assert 'const isObserveScreenTask = taskType === "observe_screen"' in response.text
+    assert "const restored = isObserveScreenTask ? false : restorePathGraph(respAppName)" in response.text
+    assert "if (shouldBlockPathGraphRestoreForScreenUnderstanding())" in response.text
+    restore_body = response.text[
+        response.text.index("function restorePathGraph"):
+        response.text.index("function updatePathAppLabel")
+    ]
+    runtime_render_body = response.text[
+        response.text.index("function renderRuntimePathGraph"):
+        response.text.index("function updateRuntimePathGraphHighlight")
+    ]
+    assert "resetSharedPathForScreenUnderstanding(appName || navPathAppName)" in restore_body
+    assert "resetSharedPathForScreenUnderstanding(options.path || graph.app_id || navPathAppName)" in runtime_render_body
+    assert "const isObserveScreenResponse =" in response.text
+    assert "resetSharedPathForScreenUnderstanding(result.app_name || nestedGet(result, [\"request\", \"app_name\"]) || navPathAppName)" in response.text
+    assert "if (isObserveScreenResponse) hideSharedPathSurface();" in response.text
+    assert 'const needsPreview = new Set(["capture", "observe", "locate", "execute"]);' in response.text
     assert 'goal: learnLocate ? "learn all visible controls" : goal' in response.text
     assert "learn_fast_build_path" in response.text
     assert "learn_deep_calibrate_path" in response.text
@@ -273,6 +578,9 @@ def test_web_panel_serves_static_assets() -> None:
     assert "learned_interface_map" in response.text
     assert "renderInterfaceMap" in response.text
     assert "loadReplayInterfaceCalibrationReport" in response.text
+    assert "loadLearningGeneralization" not in response.text
+    assert "/runtime/learning/seek/draft" not in response.text
+    assert "/runtime/learning/generalization" not in response.text
     assert "interfaceCalibrationSummaryHtml" in response.text
     assert "interfaceCalibrationMatchForAsset" in response.text
     assert "interfaceReviewPolicyForAsset" in response.text
@@ -287,6 +595,11 @@ def test_web_panel_serves_static_assets() -> None:
     assert "panelQueryFlag" in response.text
     assert "low_risk_fast_lane_eligible" in response.text
     assert "recropInterfaceAsset" in response.text
+    assert "openInterfaceCropSelector" in response.text
+    assert "interfaceAssetFullSourceImage" in response.text
+    assert "source.source_image_path || source.capture_id || crop.source_image_path || geometry.source_image_path || refs.source_image_path" in response.text
+    assert "data-interface-select-crop" in response.text
+    assert "data-interface-crop-selector-image" in response.text
     assert "/panel/crop_interface_asset" in response.text
     assert "data-interface-recrops-asset" in response.text
     assert "data-interface-crop" in response.text
@@ -324,6 +637,8 @@ def test_web_panel_serves_static_assets() -> None:
     css_response = client.get("/panel/assets/panel.css")
 
     assert css_response.status_code == 200
+    assert css_response.headers["cache-control"] == "no-store, max-age=0"
+    assert css_response.headers["pragma"] == "no-cache"
     assert "path-detail-sections" in css_response.text
     assert "interface-known-layout-seek-application" in css_response.text
     assert "interface-region-summary" in css_response.text
@@ -343,7 +658,7 @@ def test_web_panel_serves_static_assets() -> None:
     assert "body.agent-mode-learn .nav-group-execute" in css_response.text
     assert "body.agent-mode-execute .nav-group-learn" in css_response.text
     assert ".settings-entry" in css_response.text
-    assert "body.agent-mode-learn .nav-group-system" not in css_response.text
+    assert "body.agent-mode-learn .nav-group-system" in css_response.text
     assert "card-drop-active" in css_response.text
     assert "card-drag-zone" in css_response.text
     assert "card-drag-placeholder" in css_response.text
@@ -367,13 +682,156 @@ def test_web_panel_serves_static_assets() -> None:
     assert "interface-chip-danger" in css_response.text
     assert "interface-edit-grid" in css_response.text
     assert "interface-inspector" in css_response.text
+    assert "learning-draft-panel" not in css_response.text
+    assert "learning-draft-card" not in css_response.text
+    assert "learning-draft-table" not in css_response.text
     assert "interface-evidence-grid" in css_response.text
     assert "interface-crop-editor" in css_response.text
+    assert "interface-crop-selector-modal" in css_response.text
+    assert "interface-crop-selector-box" in css_response.text
     assert "run-timeline" in css_response.text
     assert "action-table" in css_response.text
     assert "ctrl-focused" in css_response.text
     assert "focused-control-card" in css_response.text
     assert ".run-badge.warn" in css_response.text
+
+
+def test_learning_interface_flow_has_unified_progress_and_simple_review_surface() -> None:
+    html = Path("app/web_panel/index.html").read_text(encoding="utf-8")
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8")
+    panel_css = Path("app/web_panel/panel.css").read_text(encoding="utf-8")
+
+    assert 'id="learningInterfaceRunBtn"' in html
+    assert 'data-i18n="learning_interface_run"' in html
+    assert 'id="learningInterfacePrepCard"' in html
+    assert 'id="learningInterfaceAppCatalogSelect"' in html
+    assert 'id="learningInterfaceWindowSelect"' in html
+    assert 'id="learningInterfaceListAppsBtn"' in html
+    assert 'id="learningInterfaceOpenAppBtn"' in html
+    assert 'id="learningInterfaceListWindowsBtn"' in html
+    assert 'id="learningInterfaceBindWindowBtn"' in html
+    assert 'id="learningInterfaceCaptureBtn"' in html
+    assert 'id="learningInterfaceFlowProgress"' in html
+    assert 'id="learningInterfaceFlowStatus"' in html
+    for step in [
+        "bind_capture",
+        "screen_understanding",
+        "numbered_map",
+        "page_details",
+        "precise_calibration",
+        "fusion",
+        "pathgraph_draft",
+        "complete",
+    ]:
+        assert f'data-learning-flow-step="{step}"' in html
+
+    assert 'id="learningDraftHistoryList"' in html
+    assert 'id="learningDraftScreenshotPanel"' in html
+    assert 'id="learningDraftPathGraphPanel"' in html
+    assert 'id="learningDraftPathResizer"' in html
+    assert 'id="learningDraftPathLayoutResetBtn"' in html
+    assert 'id="learningDraftInterfaceDetailPanel"' in html
+    assert 'id="learningDraftManualEditPanel"' in html
+    for field_id in [
+        "learningDraftManualRegionLabel",
+        "learningDraftManualRegionRole",
+        "learningDraftManualRegionSection",
+        "learningDraftManualOperation",
+        "learningDraftManualEnterPathGraph",
+        "learningDraftManualNeedsRecalibration",
+        "learningDraftManualNotes",
+        "learningDraftManualSaveBtn",
+    ]:
+        assert f'id="{field_id}"' in html
+
+    assert '<details class="replay-action-disclosure" id="learningDraftAdvancedDiagnostics">' in html
+    assert "const LEARNING_INTERFACE_FLOW_STEPS" in panel_js
+    assert "function setLearningInterfaceFlowStep" in panel_js
+    assert "function learningInterfaceTrialEvidenceSummary" in panel_js
+    assert "function learningInterfaceTrialEvidenceStatusText" in panel_js
+    assert "function learningDeepCalibrationEvidenceSummary" in panel_js
+    assert "function learningDeepCalibrationEvidenceStatusText" in panel_js
+    assert "function learningDeepCalibrationOverlayPath" in panel_js
+    assert "function renderLearningDraftScreenshotPath" in panel_js
+    assert "async function runLearningDeepCalibration" in panel_js
+    assert "async function completeLearningInterfaceReadonlyFlow" in panel_js
+    assert "async function runLearningInterfaceFlow" in panel_js
+    assert "hasNumberedOverlayEvidence" in panel_js
+    assert "hasCalibratedEvidence" in panel_js
+    assert "Stage1 region gate + two-stage numbering" in panel_js
+    assert "async function runLearningTwoStageUnderstanding" in panel_js
+    assert "/panel/run_learning_two_stage_understanding" in panel_js
+    assert "function learningTwoStageAllowsDraftTrial" in panel_js
+    assert "Stage1 gate blocked Stage2" in panel_js
+    assert "two-stage boxes accepted for draft review" in panel_js
+    assert 'renderLearningDraftScreenshotPath(twoStageOverlayPath, "learning two-stage fused overlay")' in panel_js
+    numbered_map_start = panel_js.index("function learningDraftNumberedMapImagePath")
+    numbered_map_body = panel_js[numbered_map_start:panel_js.index("function renderLearningDraftScreenshotPath", numbered_map_start)]
+    assert numbered_map_body.index("preview.compiled_overlay_path") < numbered_map_body.index("learningDraftSourceImagePath(draft)")
+    assert "draft?.page_details?.precise_understanding_fusion_status?.compiled_overlay_path" in panel_js
+    assert "filtered_non_actionable" in panel_js
+    assert "two-stage fused draft · Stage1 gate passed" in panel_js
+    assert "function syncLearningInterfacePrepFromSharedControls" in panel_js
+    assert 'on("learningInterfaceRunBtn", "click", runLearningInterfaceFlow)' in panel_js
+    assert 'on("learningInterfaceListWindowsBtn", "click", learningInterfaceListWindows)' in panel_js
+    assert 'on("learningInterfaceBindWindowBtn", "click", learningInterfaceBindWindow)' in panel_js
+    assert 'on("learningInterfaceCaptureBtn", "click", learningInterfaceCapture)' in panel_js
+    assert "renderLearningDraftHistoryList" in panel_js
+    assert "renderLearningDraftScreenshotPanel" in panel_js
+    assert "renderLearningDraftManualEditPanel" in panel_js
+    assert ".learning-interface-prep-card" in panel_css
+    assert ".learning-interface-flow-card" in panel_css
+    assert ".learning-draft-review-workspace" in panel_css
+    assert ".learning-draft-screenshot-frame" in panel_css
+    assert "max-height: none" in panel_css
+    assert "max-height: 360px" not in panel_css
+
+
+def test_learning_mode_sidebar_uses_demo_stage_names_without_draft_replay_label() -> None:
+    html = Path("app/web_panel/index.html").read_text(encoding="utf-8")
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8")
+    panel_css = Path("app/web_panel/panel.css").read_text(encoding="utf-8")
+
+    expected_order = [
+        'data-stage="learn_interface"',
+        'data-stage="template_display"',
+        'data-stage="trace"',
+        'data-stage="learn_validation"',
+    ]
+    positions = [html.index(item) for item in expected_order]
+    assert positions == sorted(positions)
+    assert 'data-i18n="nav_learn_interface"' in html
+    assert 'data-i18n="nav_template_display"' in html
+    assert 'data-stage="learn_interface" data-step="1"' in html
+    assert 'data-stage="template_display" data-step="2"' in html
+    assert 'data-stage="trace" data-step="3"' in html
+    assert 'data-stage="learn_validation" data-step="4"' in html
+    assert 'data-i18n="nav_learn_replay"' not in html
+    assert 'data-i18n="nav_learn_observe"' not in html
+    assert 'data-i18n="nav_learn_locate"' not in html
+    assert "学习产物回放" not in html
+    assert "body.agent-mode-learn .nav-group-system" in panel_css
+
+    assert 'learn_interface: {' in panel_js
+    assert 'template_display: {' in panel_js
+    assert 'learnReplaySubview: "draft"' in panel_js
+    assert 'learnReplaySubview: "template"' in panel_js
+    assert 'on("agentModeLearnBtn", "click", () => showStage("learn_interface"))' in panel_js
+    assert 'if (page === "learn_replay" && meta.learnReplaySubview)' in panel_js
+
+
+def test_panel_api_response_result_helper_preserves_two_stage_gate_data() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    result_of_start = panel_js.index("function resultOf(response)")
+    result_of_body = panel_js[result_of_start:panel_js.index("function statusTextForResponse", result_of_start)]
+    assert "if (Object.keys(result).length) return result;" in result_of_body
+    assert "if (Object.keys(data).length) return data;" in result_of_body
+
+    allows_start = panel_js.index("function learningTwoStageAllowsDraftTrial")
+    allows_body = panel_js[allows_start:panel_js.index("async function runLearningTwoStageUnderstanding", allows_start)]
+    assert 'nestedGet(result, ["stage1_gate", "status"])' in allows_body
+    assert 'gateStatus === "passed"' in allows_body
+    assert 'nestedGet(result, ["stage2_numbering_skipped"]) !== true' in allows_body
 
 
 def test_web_panel_saves_interface_map_with_edit_trace() -> None:
@@ -1534,6 +1992,9 @@ def test_panel_path_detail_keeps_interface_inspector_and_seek_layout() -> None:
     assert "fill_employer_questions" in panel_js
     assert "final_submit" in panel_js
     assert "interface-crop-source-preview" in panel_js
+    assert "interface-crop-selector-modal" in panel_js
+    assert "writeInterfaceCropValues" in panel_js
+    assert "image.naturalWidth / Math.max(1, rect.width)" in panel_js
     assert "interface-crop-disabled" in panel_js
     assert "interface-inspector-contents" in panel_js
     assert "replay_region_contents" in panel_js
@@ -1577,6 +2038,751 @@ def test_panel_translation_keys_stay_bilingual() -> None:
     assert "load_agent_prompt" in zh_keys
     assert "save_agent_prompt_version" in zh_keys
     assert "agent_prompt_summary" in zh_keys
+    assert "generate_learning_draft" not in zh_keys
+    assert "generate_learning_generalization" not in zh_keys
+    assert "learning_template_title" not in zh_keys
+    assert "learning_output_title" not in zh_keys
+    assert "learning_view_template" not in zh_keys
+    assert "learning_view_draft" not in zh_keys
+    assert "learning_draft_review" in zh_keys
+    assert "learning_draft_review_save" in zh_keys
+    assert "learning_draft_summary" in zh_keys
+    assert "learning_draft_states" in zh_keys
+    assert "learning_draft_regions" in zh_keys
+    assert "learning_draft_actions" in zh_keys
+    assert "learning_draft_blockers" in zh_keys
+    assert "learning_draft_verification_rules" in zh_keys
+    assert "learning_draft_safety_status" in zh_keys
+    assert "learning_draft_path_preview_title" in zh_keys
+    assert "learning_draft_path_preview_hint" in zh_keys
+    assert "learning_draft_not_executable" in zh_keys
+    assert "learning_draft_node_detail" in zh_keys
+    assert "learning_draft_related_regions" in zh_keys
+    assert "learning_draft_related_actions" in zh_keys
+    assert "learning_draft_no_path_nodes" in zh_keys
+    assert "learning_draft_evidence_sources" in zh_keys
+    assert "learning_review_empty" in zh_keys
+    assert "replay_advanced_actions" in zh_keys
+    assert "replay_advanced_actions_hint" in zh_keys
+    assert "learning_trial_capture" in zh_keys
+    assert "learning_trial_run" in zh_keys
+    assert "learning_trial_result_path" in zh_keys
+    assert "template_subinterface" in zh_keys
+    assert "learning_draft_subinterface" in zh_keys
+    assert "learning_pathgraph_candidate_generate" in zh_keys
+    assert "learning_pathgraph_candidate_path" in zh_keys
+    assert "learning_pathgraph_validation_path" in zh_keys
+    assert "learning_assisted_template_package_path" in zh_keys
+    assert "learning_assisted_template_package_create" in zh_keys
+    assert "learning_assisted_template_package_load" in zh_keys
+    assert "learning_assisted_template_suggestions_create" in zh_keys
+    assert "learning_assisted_template_suggestions" in zh_keys
+    assert "learning_assisted_template_suggestion_apply" in zh_keys
+    assert "learning_assisted_template_acceptance_simulation_apply" in zh_keys
+    assert "learning_assisted_template_completeness" in zh_keys
+    assert "learning_assisted_template_completeness_passed" in zh_keys
+    assert "learning_assisted_template_completeness_blocked" in zh_keys
+    assert "learning_assisted_template_asset_candidate_path" in zh_keys
+    assert "learning_assisted_template_asset_candidate_create" in zh_keys
+    assert "learning_assisted_template_graph_draft_path" in zh_keys
+    assert "learning_assisted_template_graph_draft_create" in zh_keys
+    assert "learning_assisted_template_checklist" in zh_keys
+    assert "learning_assisted_template_empty" in zh_keys
+    assert "learning_assisted_template_decisions_save" in zh_keys
+    assert "learning_assisted_template_decisions_save_export" in zh_keys
+    assert "learning_assisted_template_decisions_save_graph_preview" in zh_keys
+    assert "learning_assisted_template_review_to_graph_diff" in zh_keys
+    assert "learning_assisted_template_promotion_preflight_create" in zh_keys
+    assert "learning_assisted_template_promotion_preflight" in zh_keys
+    assert "learning_load_draft_graph" not in zh_keys
+    assert "learning_show_interface_details" not in zh_keys
+    assert "learning_output_seek_template" not in zh_keys
+    assert "learning_output_navigation_graph" not in zh_keys
+    assert "learning_output_interface_details" not in zh_keys
+    assert "learning_output_interface_regions" not in zh_keys
+    assert "learning_output_draft_actions" not in zh_keys
+    assert "learning_draft_title" not in zh_keys
+    assert "learning_site_validation" not in zh_keys
+    assert "learning_overall_score" not in zh_keys
+    assert "learning_generalization_title" not in zh_keys
+    assert "learning_diff" not in zh_keys
+
+
+def test_panel_removes_wrong_learning_draft_workbench() -> None:
+    index_html = Path("app/web_panel/index.html").read_text(encoding="utf-8")
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8")
+    panel_css = Path("app/web_panel/panel.css").read_text(encoding="utf-8")
+
+    assert 'class="button-row replay-template-actions"' in index_html
+    assert 'class="replay-action-disclosure"' in index_html
+    assert 'class="button-row replay-template-advanced-actions"' in index_html
+    assert 'class="button-row replay-learning-actions"' in index_html
+    assert 'class="learn-replay-subnav"' in index_html
+    assert 'data-learn-replay-panel="template"' in index_html
+    assert 'data-learn-replay-panel="draft"' in index_html
+    assert 'class="form-section-label wide-control"' in index_html
+    assert 'class="form-section-label wide-control learning-studio-section-label"' in index_html
+    assert 'data-i18n="template_replay_section"' in index_html
+    assert 'data-i18n="learning_studio_section"' in index_html
+    assert 'id="learningTrialResultPath"' in index_html
+    assert 'id="learningTrialCaptureBtn"' in index_html
+    assert 'id="learningTrialRunBtn"' in index_html
+    assert 'id="learningPathGraphCandidatePath"' in index_html
+    assert 'id="learningPathGraphValidationPath"' in index_html
+    assert 'id="learningPathGraphCandidateBtn"' in index_html
+    assert 'id="learningDraftFreshnessDemoCase"' in index_html
+    assert 'id="learningDraftFreshnessDemoBtn"' in index_html
+    assert 'value="freshness_checksum_mismatch"' in index_html
+    assert 'id="learningTrialResultPath" value=""' in index_html
+    assert 'id="learningDraftReviewSourcePath" value=""' in index_html
+    assert 'id="learningDraftRecommendedLoadBtn"' in index_html
+    assert 'id="learningPathGraphCandidatePath" value=""' in index_html
+    assert 'id="learningPathGraphValidationPath" value=""' in index_html
+    assert "trial_result_cae1c88703" not in index_html
+    assert "new_site_python_org_20260702_after_similarity_fix" not in index_html
+    assert 'class="learning-mode-switch"' not in index_html
+    assert 'data-learning-view="template"' not in index_html
+    assert 'data-learning-panel="draft"' not in index_html
+    assert 'id="learningTemplatePanel"' not in index_html
+    assert 'id="learningOutputPanel"' not in index_html
+    assert 'id="learningDraftReviewPanel"' in index_html
+    assert 'id="learningDraftReviewSummary"' in index_html
+    assert 'id="learningDraftPathPreview"' in index_html
+    assert 'id="learningDraftPathMap"' in index_html
+    assert 'id="learningDraftPathDetail"' in index_html
+    assert 'id="learningDetailObserveCandidatePath"' in index_html
+    assert 'id="learningDetailObserveRequestSelect"' in index_html
+    assert 'id="learningDetailObserveRequestId"' in index_html
+    assert 'id="learningDetailObserveSourceSelect"' in index_html
+    assert 'id="learningDetailObserveSourcePath"' in index_html
+    assert 'id="learningDetailObserveSourcesBtn"' in index_html
+    assert 'id="learningDetailObserveAttachBtn"' in index_html
+    assert 'id="imageInspectorOverlay"' in index_html
+    assert 'id="imageInspectorImage"' in index_html
+    assert 'id="imageInspectorBox"' in index_html
+    assert 'id="imageInspectorPoint"' in index_html
+    assert 'id="imageInspectorFooter"' in index_html
+    assert 'id="imageInspectorApplyBoxBtn"' in index_html
+    assert "function renderLearningTemplateSummary" not in panel_js
+    assert "function setLearningWorkbenchView" not in panel_js
+    assert 'let currentLearnReplaySubview = "template";' in panel_js
+    assert 'document.body.classList.toggle("learn-replay-draft-subview", draftActive);' in panel_js
+
+
+def test_learning_draft_panel_renders_open_detail_transition_hints() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    panel_css = Path("app/web_panel/panel.css").read_text(encoding="utf-8-sig")
+    panel_html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
+
+    assert "function escapeAttr" in panel_js
+    assert 'data-screen-understanding-overlay="${escapeAttr(fullOverlayPath)}"' in panel_js
+    assert "learningDraftTransitionHintForAction" in panel_js
+    assert "learn_open_detail_transition_hint_v1" in panel_js
+    assert "learningDraftStateTransitions" in panel_js
+    assert "renderLearningDraftDetailAttachments" in panel_js
+    assert "renderLearningDraftPathGraphReadiness" in panel_js
+    assert "pathgraphReadinessRunbook" in panel_js
+    assert "pathgraphReadinessRunbookChecklist" in panel_js
+    assert "pathgraphReadinessEvidenceRequirements" in panel_js
+    assert "pathgraphReadinessPreflight" in panel_js
+    assert "pathgraphReadinessDemo" in panel_js
+    assert "pathgraphReadinessApprovalPacket" in panel_js
+    assert "pathgraphReadinessApprovalPacketChecklist" in panel_js
+    assert "pathgraphReadinessApprovalPacketEvidence" in panel_js
+    assert "pathgraphReadinessCalibrationPreRun" in panel_js
+    assert "pathgraphReadinessCalibrationPreRunChecklist" in panel_js
+    assert "pathgraphReadinessCalibrationPreRunEvidence" in panel_js
+    assert "pathgraphReadinessCalibrationPreRunModelSnapshot" in panel_js
+    assert "createModelStartApprovalPacket" in panel_js
+    assert "createCalibrationPreRunCheck" in panel_js
+    assert "createPathgraphIntegrationReadiness" in panel_js
+    assert "createCurrentEvidencePacket" in panel_js
+    assert "createPreciseUnderstandingCandidate" in panel_js
+    assert "createPageDetailCandidate" in panel_js
+    assert "createLearningDemoScaffold" in panel_js
+    assert "const candidateSourcePath = String(data.report_path || data.page_detail_candidate_path || sourcePath || \"\").trim();" in panel_js
+    assert "const scaffoldSourcePath = String(data.report_path || data.learn_mode_demo_scaffold_path || sourcePath || \"\").trim();" in panel_js
+    assert "/panel/create_model_start_approval_packet" in panel_js
+    assert "/panel/create_calibration_pre_run_check" in panel_js
+    assert "/panel/create_pathgraph_integration_readiness" in panel_js
+    assert "/panel/create_current_evidence_packet" in panel_js
+    assert "/panel/create_precise_understanding_candidate" in panel_js
+    assert "/panel/create_page_detail_candidate" in panel_js
+    assert "/panel/create_learning_demo_scaffold" in panel_js
+    assert "/panel/create_learning_demo_goal_readiness" in panel_js
+    assert 'on("learningModelStartApprovalPacketBtn", "click", createModelStartApprovalPacket);' in panel_js
+    assert 'on("learningCalibrationPreRunCheckBtn", "click", createCalibrationPreRunCheck);' in panel_js
+    assert 'on("learningPathGraphIntegrationReadinessBtn", "click", createPathgraphIntegrationReadiness);' in panel_js
+    assert 'on("learningCurrentEvidencePacketBtn", "click", createCurrentEvidencePacket);' in panel_js
+    assert 'on("learningPreciseUnderstandingCandidateBtn", "click", createPreciseUnderstandingCandidate);' in panel_js
+    assert 'on("learningPageDetailCandidateBtn", "click", createPageDetailCandidate);' in panel_js
+    assert 'on("learningDemoScaffoldBtn", "click", createLearningDemoScaffold);' in panel_js
+    assert 'on("learningDemoGoalReadinessBtn", "click", createLearningDemoGoalReadiness);' in panel_js
+    assert "learning_model_start_approval_packet_create" in panel_html
+    assert "learning_calibration_pre_run_check_create" in panel_html
+    assert "learning_pathgraph_integration_readiness_create" in panel_html
+    assert "learning_current_evidence_packet_create" in panel_html
+    assert "learning_page_detail_candidate_create" in panel_html
+    assert "learning_demo_scaffold_create" in panel_html
+    assert "learning_demo_goal_readiness_create" in panel_html
+    assert "learning_demo_scaffold" in panel_js
+    assert "learning_demo_goal_readiness" in panel_js
+    assert "renderLearningDemoGoalReadiness" in panel_js
+    assert "renderLearningFreshModelChainAcceptance" in panel_js
+    assert "fresh_model_chain_acceptance" in panel_js
+    assert "counts_as_final_goal_completion" in panel_js
+    assert "source_breakdown" in panel_js
+    assert "fresh_model_acceptance_status" in panel_js
+    assert "fresh_model_chain_accepted" in panel_js
+    assert "fresh_model_counts_as_final_goal_completion" in panel_js
+    assert "fresh_acceptance=${freshModelAcceptance}" in panel_js
+    assert "fresh_actual_model=${freshModelActualEvidence}" in panel_js
+    assert "fresh_assisted=${freshModelAssistedEvidence}" in panel_js
+    assert "renderLearningFreshModelReplacementPlan" in panel_js
+    assert "replacement_plan" in panel_js
+    assert "learning-demo-fresh-replacement-plan" in panel_css
+    assert "replacement_required=${plan.replacement_required" in panel_js
+    assert "required_source_type=${plan.required_source_type" in panel_js
+    assert "fresh_model_replacement_required" in panel_js
+    assert "fresh_replacement=${source.fresh_model_replacement_required" in panel_js
+    assert "fresh_replacement_plan=${freshModelReplacementPlan}" in panel_js
+    assert "fresh_replace_sources=${freshModelSourcesToReplace.join" in panel_js
+    assert "renderLearningDemoChainManifest" in panel_js
+    assert "demo_chain_manifest" in panel_js
+    assert "chain_can_be_demoed" in panel_js
+    assert "stage_ready_for_display" in panel_js
+    assert "proof_fields" in panel_js
+    assert "learning_demo_chain_can_be_demoed" in panel_js
+    assert "learning_demo_chain_final_complete" in panel_js
+    assert "learning_demo_chain_ready_step_count" in panel_js
+    assert "learning_demo_chain_missing_proof_count" in panel_js
+    assert "demo_chain=${source.learning_demo_chain_can_be_demoed" in panel_js
+    assert "demoChainBadge" in panel_js
+    assert "item.learning_demo_chain_can_be_demoed === true" in panel_js
+    assert "item.learning_demo_chain_final_complete !== true" in panel_js
+    preferred_start = panel_js.index("function preferredLearningDraftReviewSource")
+    preferred_body = panel_js[preferred_start : panel_js.index("function learningDraftSourceMetaText", preferred_start)]
+    assert "fresh_model_chain_accepted === true" in preferred_body
+    assert "fresh_model_counts_as_final_goal_completion === true" in preferred_body
+    assert preferred_body.index("fresh_model_chain_accepted === true") < preferred_body.index(
+        "learning_demo_chain_can_be_demoed === true"
+    )
+    assert 'panelQueryFlag("demo_chain")' in panel_js
+    assert 'panelQueryFlag("demoChain")' in panel_js
+    assert "Learning demo chain preloaded from recommended source" in panel_js
+    assert "renderLearningDemoNextAction" in panel_js
+    assert "renderLearningDemoEvidenceMapItem" in panel_js
+    assert "demo_evidence_map" in panel_js
+    assert "artifact_exists" in panel_js
+    assert "artifact_sha256_prefix" in panel_js
+    assert "layout_mode=${item.layout_mode}" in panel_js
+    assert "layout_section_count=${item.layout_section_count}" in panel_js
+    assert "bbox_regions=${item.bbox_region_count}" in panel_js
+    assert "operation_kinds=${item.operation_kinds.join" in panel_js
+    assert "renderLearningPageDetailSectionSummary" in panel_js
+    assert "renderLearningPageDetailOperationLinks" in panel_js
+    assert "renderLearningPageDetailSpatialSections" in panel_js
+    assert "renderLearningPageDetailSpatialMap(regions, bounds, sections, displayGroups)" in panel_js
+    assert "renderLearningPageDetailSpatialFooterConnectors" in panel_js
+    assert "item.render_in_spatial_preview !== false" in panel_js
+    assert "footer_connectors" in panel_js
+    assert "section.operation_summary" in panel_js
+    assert "section.operation_links" in panel_js
+    assert "learning-page-layout-section" in panel_css
+    assert "learning-page-layout-footer-connector" in panel_css
+    assert "kind_counts" in panel_js
+    assert "readiness_counts" in panel_js
+    assert "learning-page-detail-section-summary" in panel_css
+    assert "learning-page-detail-operation-links" in panel_css
+    assert "next_action_status" in panel_js
+    assert "run_command_preview" in panel_js
+    assert "command_executes_now" in panel_js
+    assert "start_model_flag_included" in panel_js
+    assert "learning-demo-next-actions" in panel_css
+    assert "learning-demo-next-action" in panel_css
+    assert "learning-demo-evidence-map" in panel_css
+    assert "learning-demo-evidence-item" in panel_css
+    assert "learning-demo-chain-manifest" in panel_css
+    assert "learning-demo-chain-step" in panel_css
+    assert "learning-demo-fresh-acceptance" in panel_css
+    assert "runbook_status=${runbook.runbook_status" in panel_js
+    assert "preflight_status=${preflight.preflight_status" in panel_js
+    assert "demo_readiness=${demo.demo_readiness_status" in panel_js
+    assert "approval_packet=${approvalPacket.approval_packet_status" in panel_js
+    assert "calibration_pre_run=${pathgraphReadinessCalibrationPreRunStatus(calibrationPreRun)}" in panel_js
+    assert "pathgraph_integration=${pathgraphIntegration.integration_readiness_status" in panel_js
+    assert "pathgraphReadinessIntegration" in panel_js
+    assert "pathgraphReadinessIntegrationChecklist" in panel_js
+    assert "function pathgraphReadinessCalibrationPreRunStatus" in panel_js
+    assert "approval_packet_checklist=${approvalPacketChecklist.join" in panel_js
+    assert "approval_packet_evidence=${approvalPacketEvidence.join" in panel_js
+    assert "calibration_pre_run_checklist=${calibrationPreRunChecklist.join" in panel_js
+    assert "calibration_pre_run_evidence=${calibrationPreRunEvidence.join" in panel_js
+    assert "calibration_pre_run_model_snapshot=${calibrationPreRunModelSnapshot.join" in panel_js
+    assert "pathgraph_integration_checklist=${pathgraphIntegrationChecklist.join" in panel_js
+    assert "pathgraph_integration_report=${pathgraphIntegrationReportPath}" in panel_js
+    assert "runtime_promotion:${integration.ready_for_runtime_pathgraph_promotion === true ? \"true\" : \"false\"}" in panel_js
+    assert "checked_at:${snapshot.checked_at || \"-\"}" in panel_js
+    assert "model_ports_clear:${snapshot.model_ports_clear === true ? \"true\" : \"false\"}" in panel_js
+    assert "model_processes_clear:${snapshot.model_processes_clear === true ? \"true\" : \"false\"}" in panel_js
+    assert "tasks_path:${report.tasks_path || \"-\"}" in panel_js
+    assert "approval_packet_sha256:${report.approval_packet_sha256 || \"-\"}" in panel_js
+    assert "approval_packet_checksum_status:${report.approval_packet_checksum_status || \"unknown\"}" in panel_js
+    assert "approval_packet_current_sha256:${report.approval_packet_current_sha256 || \"-\"}" in panel_js
+    assert "batch_plan:${report.batch_plan_path || \"-\"}" in panel_js
+    assert "expected_rerun:${report.expected_rerun_report_path || \"-\"}" in panel_js
+    assert "refresh_rerun:${report.refresh_rerun_report_path || \"-\"}" in panel_js
+    assert "approval_packet_calibration_preview=${approvalCalibrationCommandPreview}" in panel_js
+    assert "approval_packet_refresh_preview=${approvalRefreshCommandPreview}" in panel_js
+    assert "preflight_start_after_approval=${preflight.may_start_model_after_user_approval" in panel_js
+    assert "may_run_now=${runbook.may_run_calibration_batch_now" in panel_js
+    assert "approval_required:${runbook.approval_required === true ? \"true\" : \"false\"}" in panel_js
+    assert "authorization:${runbook.artifact_is_authorization === true ? \"true\" : \"false\"}" in panel_js
+    assert "calibration_preview=${calibrationCommandPreview}" in panel_js
+    assert "refresh_preview=${refreshCommandPreview}" in panel_js
+    assert "evidence_requirements=${evidenceRequirements.join" in panel_js
+    assert "future_rerun_report:${expectedOutputs.rerun_report_status || \"unknown\"}" in panel_js
+    assert "ready_regions:${readyRegions.join" in panel_js
+    assert "promotion_review_gate" in panel_js
+    assert "gate_status" in panel_js
+    assert "learning_draft_pathgraph_readiness" in panel_js
+    assert "renderLearningDemoScaffold" in panel_js
+    assert "renderLearningDemoFlowStep" in panel_js
+    assert "learning-demo-flow" in panel_css
+    assert "learning-demo-flow-step" in panel_css
+    assert "learning-demo-provenance" in panel_css
+    assert "learning-demo-provenance-row" in panel_css
+    assert "demo_scaffold=${scaffold.report_path}" in panel_js
+    assert "model_origin=${provenance.status" in panel_js
+    assert "actual_model_evidence=${provenance.actual_model_call_evidence_count" in panel_js
+    assert "fully_model_generated=${provenance.meets_fully_model_generated_demo_requirement" in panel_js
+    assert "model_preview=${summary.model_generated_pathgraph_preview_status" in panel_js
+    assert "model_preview_regions=${summary.model_generated_pathgraph_preview_region_count" in panel_js
+    assert "model_preview_actions=${summary.model_generated_pathgraph_preview_action_count" in panel_js
+    assert "model_page_sections=${summary.model_generated_page_detail_section_count" in panel_js
+    assert "model_page_ops=${summary.model_generated_page_detail_possible_operation_count" in panel_js
+    assert "readonly_preview=${summary.page_detail_readonly_pathgraph_preview_status" in panel_js
+    assert "readonly_preview_regions=${summary.page_detail_readonly_pathgraph_preview_region_count" in panel_js
+    assert "readonly_preview_groups=${summary.page_detail_readonly_pathgraph_preview_display_group_count" in panel_js
+    assert "model_only_demo=${modelOnlyReadiness.status" in panel_js
+    assert "model_only_ready=${modelOnlyReadiness.ready" in panel_js
+    assert "renderLearningModelOnlyDemoReadiness" in panel_js
+    assert "Model-only demo readiness" in panel_js
+    assert "learning-model-only-readiness" in panel_css
+    assert "renderLearningDemoProvenanceEvidence" in panel_js
+    assert "renderLearningModelGeneratedPageDetailPreview" in panel_js
+    assert "Model-only page detail preview" in panel_js
+    assert "Read-only PathGraph page detail preview" in panel_js
+    assert "learning-model-page-detail-preview" in panel_css
+    assert "width:${width.toFixed(3)}%" in panel_js
+    assert "height:${height.toFixed(3)}%" in panel_js
+    assert "Math.max(width, 6)" not in panel_js
+    assert "Math.max(width, 7)" not in panel_js
+    assert "Math.max(width, 8)" not in panel_js
+    assert "box-sizing: border-box;" in panel_css
+    spatial_css = "\n".join(
+        panel_css[panel_css.index(selector) : panel_css.index("}", panel_css.index(selector))]
+        for selector in (
+            ".learning-page-layout-region",
+            ".learning-page-layout-section",
+            ".learning-page-layout-group",
+        )
+    )
+    assert "min-width: 74px;" not in spatial_css
+    assert "min-height: 44px;" not in spatial_css
+    assert "min-width: 0;" in spatial_css
+    assert "min-height: 0;" in spatial_css
+    assert "not_geometry_equivalence=true" in panel_js
+    assert "section_bucket_correspondence=true" in panel_js
+    assert "demo_model_origin=${demoScaffoldModelOrigin}" in panel_js
+    assert "demo_model_preview=${demoScaffoldModelPreview}" in panel_js
+    assert "demo_model_only=${demoScaffoldModelOnlyStatus}" in panel_js
+    assert "demo_model_preview_regions=${demoScaffoldModelPreviewRegions}" in panel_js
+    assert "demo_model_preview_actions=${demoScaffoldModelPreviewActions}" in panel_js
+    assert "demo_model_page_sections=${demoScaffoldModelPageSections}" in panel_js
+    assert "demo_model_page_ops=${demoScaffoldModelPageOps}" in panel_js
+    assert "demo_fully_model_generated=${source.learning_demo_scaffold_fully_model_generated" in panel_js
+    assert "demo_model_only_ready=${source.learning_demo_scaffold_model_only_ready" in panel_js
+    assert "learning_demo_goal_status" in panel_js
+    assert "demo_goal=${demoGoalStatus}" in panel_js
+    assert "learning_demo_goal_final_complete" in panel_js
+    assert "demo_goal_final=${source.learning_demo_goal_final_complete" in panel_js
+    assert "${renderLearningDemoScaffold(review)}" in panel_js
+    assert "learning_draft_detail_attachments" in panel_js
+    assert "learning_draft_attached_detail_regions" in panel_js
+    assert "learning_draft_attached_detail_actions" in panel_js
+    assert "setLearningDetailObserveRequests" in panel_js
+    assert "learningDetailObserveRequestSelect" in panel_js
+    assert "loadLearningDetailObserveSources" in panel_js
+    assert "setLearningDetailObserveSourceOptions" in panel_js
+    assert "setRecommendedLearningDraftReviewSource" in panel_js
+    assert "loadRecommendedLearningDraftReview" in panel_js
+    assert 'on("learningDraftRecommendedLoadBtn", "click", loadRecommendedLearningDraftReview);' in panel_js
+    assert "recommended_current_precise_understanding" in panel_js
+    assert "item.pinned" in panel_js
+    assert "learningDraftReviewSourcePath" in panel_js
+    assert "readiness_status" in panel_js
+    assert "handoff_status" in panel_js
+    assert "consistency_status" in panel_js
+    assert "model_start_runbook" in panel_js
+    assert "renderScreenUnderstandingModelStartRunbook" in panel_js
+    assert "screen_understanding_model_start_runbook" in panel_js
+    assert "runbook_status" in panel_js
+    assert "may_start_model_after_user_approval" in panel_js
+    assert "may_run_calibration_batch_now" in panel_js
+    assert "runbook_ready_region_count" in panel_js
+    assert "post_batch_refresh_has_batch_plan" in panel_js
+    assert "refresh_blocks_before_future_rerun" in panel_js
+    assert "calibration_coverage_rate" in panel_js
+    assert "learningDraftSourceMetaText" in panel_js
+    assert "learningDraftSourceLoadPath" in panel_js
+    assert "preferredLearningDraftReviewSource" in panel_js
+    assert "const recommended = preferredLearningDraftReviewSource(sources);" in panel_js
+    assert 'item.preflight_status || "") === "ready_for_explicit_model_start"' in panel_js
+    assert "item.pathgraph_candidate_path" in panel_js
+    assert "[Ready preflight]" in panel_js
+    assert "preflight=${preflight}" in panel_js
+    assert "preflight_start_after_approval=true" in panel_js
+    assert "demo=${demoReadiness}" in panel_js
+    assert "demo_readiness_may_run_calibration_batch_now" in panel_js
+    assert "demo_run_now=" in panel_js
+    assert "approval=${approvalPacket}" in panel_js
+    assert "approval_packet_may_run_calibration_batch_now" in panel_js
+    assert "approval_run_now=" in panel_js
+    assert "calibration_pre_run=${calibrationPreRun}" in panel_js
+    assert "pathgraph_integration=${pathgraphIntegration}" in panel_js
+    assert "pathgraph_integration_report=${pathgraphIntegrationReportPath}" in panel_js
+    assert "calibration_pre_run_checked_at=${calibrationPreRunCheckedAt}" in panel_js
+    assert "calibration_pre_run_checked_at" in panel_js
+    assert "calibration_pre_run_model_ports_clear=" in panel_js
+    assert "calibration_pre_run_model_processes_clear=" in panel_js
+    assert "calibration_pre_run_may_run_calibration_batch_now" in panel_js
+    assert "calibration_pre_run_now=" in panel_js
+    assert "calibration_pre_run_checksum=${calibrationPreRunChecksumStatus}" in panel_js
+    assert "/panel/learning_draft_sources" in panel_js
+    assert "recent_learning_page_detail" in panel_js
+    assert "recent_learning_demo_scaffold" in panel_js
+    assert "learning_demo_scaffold_page_detail_ready" in panel_js
+    assert 'on("learningDetailObserveSourceSelect", "change"' in panel_js
+    assert 'on("learningDetailObserveSourcesBtn", "click", loadLearningDetailObserveSources);' in panel_js
+    assert "attachLearningDetailObserveResult" in panel_js
+    assert 'on("learningDetailObserveAttachBtn", "click", attachLearningDetailObserveResult);' in panel_js
+    assert "/panel/attach_detail_observe_result" in panel_js
+    assert "transition=${transitionType}->${nextRole}" in panel_js
+    assert "learning_draft_candidate_transitions" in panel_js
+    assert "execute_binding_enabled=false" in panel_js
+    assert 'applyLearnReplaySubviewChrome(page);' in panel_js
+    assert "currentLearnReplaySubview = selected;" in panel_js
+    assert "function learningRuntimeGraphFromDraft" not in panel_js
+    assert "function learningInterfaceMapFromDraft" not in panel_js
+    assert "function loadLearningDraftPathGraph" not in panel_js
+    assert "function showLearningDraftInterfaceDetails" not in panel_js
+    assert "function loadLearningDraftSharedViews" not in panel_js
+    assert "function clearLearningDraftReviewDisplay" in panel_js
+    assert "function clearLearningDraftWorkspaceForNewRun" in panel_js
+    assert "function renderLearningDraftPathPreview" in panel_js
+    assert "function renderLearningDraftPathDetail" in panel_js
+    assert "function buildLearningDraftObservationEvidence" in panel_js
+    assert "function screenMapEvidenceCount" in panel_js
+    assert "screen_map_available_no_recent_learn_deep" in panel_js
+    assert 'trace_path: hasCalibratedTargets ?' in panel_js
+    assert "calibrated_targets: compactLearningDraftTargets" in panel_js
+    assert "function learningTrialRequestPayload" not in panel_js
+    assert "function learningRecognitionTrialRequestPayload" in panel_js
+    assert "/panel/run_learning_recognition_trial" in panel_js
+    assert "/panel/run_learning_model_trial" not in panel_js
+    assert "data-learning-draft-node" in panel_js
+    render_review_start = panel_js.index("function renderLearningDraftReview")
+    clear_review_start = panel_js.index("function clearLearningDraftReviewDisplay")
+    render_review_body = panel_js[render_review_start:clear_review_start]
+    assert "renderLearningDraftPathPreview(review)" in render_review_body
+    assert "renderRuntimePathGraph" not in render_review_body
+    readiness_start = panel_js.index("function renderLearningDraftPathGraphReadiness")
+    runbook_start = panel_js.index("function pathgraphReadinessRunbook")
+    readiness_body = panel_js[readiness_start:runbook_start]
+    assert "pathgraph_integration_report=${pathgraphIntegrationReportPath}" in readiness_body
+    assert "navPathCanvas" not in render_review_body
+    assert "learning_draft_review_auto_loaded: false" in panel_js
+    assert "$(\"learningTrialResultPath\")?.value" in panel_js
+    assert "$(\"learningPathGraphCandidatePath\")?.value" in panel_js
+    assert "$(\"learningPathGraphValidationPath\")?.value" in panel_js
+    assert 'clearLearningDraftReviewDisplay("not_loaded · source path prepared; click Load learning draft")' in panel_js
+    load_model_start = panel_js.index("async function loadReplayModelArtifact")
+    load_app_profile_start = panel_js.index("async function loadReplayAppProfile")
+    load_model_body = panel_js[load_model_start:load_app_profile_start]
+    assert "await loadLearningDraftReview({ skipResponse: true })" not in load_model_body
+    capture_trial_start = panel_js.index("async function captureLearningDraftWindow")
+    run_trial_start = panel_js.index("async function runLearningDraftTrial")
+    learning_review_start = panel_js.index("function learningReviewLabel")
+    capture_trial_body = panel_js[capture_trial_start:run_trial_start]
+    run_trial_body = panel_js[run_trial_start:learning_review_start]
+    run_flow_start = panel_js.index("async function runLearningInterfaceFlow")
+    run_flow_end = panel_js.index("async function runLearningDraftTrial")
+    run_flow_body = panel_js[run_flow_start:run_flow_end]
+    assert 'clearLearningDraftWorkspaceForNewRun("not_loaded · new learning run started")' in run_flow_body
+    assert run_flow_body.index("clearLearningDraftWorkspaceForNewRun") < run_flow_body.index("captureLearningDraftWindow")
+    assert 'clearScreenUnderstandingResidualDisplays("not_loaded · screen understanding started")' in capture_trial_body
+    assert "await loadLearningDraftReview({ skipResponse: true })" in run_trial_body
+    assert 'clearScreenUnderstandingResidualDisplays("not_loaded · generating learning draft")' in run_trial_body
+    assert run_trial_body.index("const payload = learningRecognitionTrialRequestPayload()") < run_trial_body.index('clearScreenUnderstandingResidualDisplays("not_loaded · generating learning draft")')
+    assert "const trialEvidence = learningInterfaceTrialEvidenceSummary(trial)" in run_flow_body
+    assert "const twoStage = await runLearningTwoStageUnderstanding()" in run_flow_body
+    assert "if (!learningTwoStageAllowsDraftTrial(twoStage))" in run_flow_body
+    assert "const fusedTrial = await runLearningDraftTrial()" in run_flow_body
+    assert 'stage2_region_strategy: "partitioned"' in panel_js
+    assert 'stage2_region_strategy: "global_no_partition"' not in run_flow_body
+    assert run_flow_body.index("const twoStage = await runLearningTwoStageUnderstanding()") < run_flow_body.index("const fusedTrial = await runLearningDraftTrial()")
+    assert run_flow_body.index("if (!learningTwoStageAllowsDraftTrial(twoStage))") < run_flow_body.index("const fusedTrial = await runLearningDraftTrial()")
+    assert "replayModelArtifactPath" not in run_trial_body
+    assert "loadReplayModelArtifact" not in run_trial_body
+    assert "/execute/" not in run_trial_body
+    generate_start = panel_js.index("async function generatePathGraphCandidate")
+    load_model_start_again = panel_js.index("async function loadReplayModelArtifact")
+    generate_body = panel_js[generate_start:load_model_start_again]
+    assert "/panel/generate_pathgraph_candidate" in generate_body
+    assert "replayGraphPath" not in generate_body
+    assert "taskRunGraphPath" not in generate_body
+    assert "loadReplayModelArtifact" not in generate_body
+    assert "/execute/" not in generate_body
+    assert "learning_draft_shared_views_loaded_v1" not in panel_js
+    assert "learned_seek_template_draft" not in panel_js
+    assert "learned_navigation_path_graph_draft" not in panel_js
+    assert "learning_output_draft_regions" not in panel_js
+    assert "learning_output_draft_actions" not in panel_js
+    assert "learning_output_coverage" not in panel_js
+    assert "learning_site_validation" not in panel_js
+    assert "learning_overall_score" not in panel_js
+    assert "report.prompt_parameter_feedback" not in panel_js
+    assert ".learning-mode-switch" not in panel_css
+    assert ".learning-workbench" not in panel_css
+    assert ".learning-template-panel" not in panel_css
+    assert ".learning-output-panel" not in panel_css
+    assert ".learning-review-panel" in panel_css
+    assert ".learning-review-preview-bbox" in panel_css
+    assert ".image-inspector-overlay" in panel_css
+    assert ".screen-understanding-overlay-toolbar" in panel_css
+    assert ".image-inspector-box" in panel_css
+    assert ".image-inspector-point" in panel_css
+    assert ".image-inspector-footer" in panel_css
+    assert ".learning-review-edited-badge" in panel_css
+    assert ".learning-review-bbox-summary" in panel_css
+
+    assert ".learning-draft-path-preview" in panel_css
+    assert ".learning-draft-path-grid" in panel_css
+    assert ".learning-draft-path-resizer" in panel_css
+    assert "grid-column: 1 / -1" in panel_css
+    assert "--learning-draft-path-map-width" in panel_css
+    assert ".learning-draft-node.active" in panel_css
+    assert ".form-section-label" in panel_css
+    assert ".learn-replay-subview" in panel_css
+    assert ".learn-replay-subview.active" in panel_css
+    assert ".learn-replay-tab.active" in panel_css
+    assert ".replay-action-disclosure" in panel_css
+    assert ".learning-review-summary" in panel_css
+    assert "body.learn-replay-draft-subview .nav-path-panel" in panel_css
+    assert "body.learn-replay-draft-subview .path-detail-panel" in panel_css
+    assert "body.learn-fast-clean-stage .nav-path-panel" in panel_css
+    assert "body.learn-fast-clean-stage .path-detail-panel" in panel_css
+    assert 'body:not([data-path-surface="visible"]) .nav-path-panel' in panel_css
+    assert 'body:not([data-path-surface="visible"]) .path-detail-panel' in panel_css
+    assert "[hidden]" in panel_css
+    assert 'body[data-stage-page="observe"] .nav-path-panel' in panel_css
+    assert 'body[data-stage-page="observe"] .path-detail-panel' in panel_css
+    assert 'body[data-stage-page="observe"] #navPathPanel' in panel_css
+    assert 'body[data-stage-page="observe"] #pathDetailPanel' in panel_css
+    assert 'body[data-stage-page="observe"] .stage-page[data-page="learn_replay"]' in panel_css
+    assert 'body[data-stage-page="observe"] .learn-replay-subview[data-learn-replay-panel="template"]' in panel_css
+    assert 'body[data-stage-page="observe"] #replayGraphSummary' in panel_css
+    assert 'body[data-stage-page="observe"] #replayInterfaceMapPanel' in panel_css
+    assert 'body[data-stage-page="observe"] #replayGraphActions' in panel_css
+    assert 'body[data-stage-page="observe"] #learningDraftReviewPanel' in panel_css
+    assert 'body[data-stage-page="observe"] #learningDraftPathPreview' in panel_css
+    assert 'body.learn-fast-clean-stage .stage-page[data-page="learn_replay"]' in panel_css
+    assert 'body.learn-fast-clean-stage .learn-replay-subview[data-learn-replay-panel="template"]' in panel_css
+    assert 'body.learn-fast-clean-stage #replayGraphSummary' in panel_css
+    assert 'body.learn-fast-clean-stage #replayInterfaceMapPanel' in panel_css
+    assert 'body.learn-fast-clean-stage #replayGraphActions' in panel_css
+    assert 'body.learn-fast-clean-stage #learningDraftReviewPanel' in panel_css
+    assert 'body.learn-fast-clean-stage #learningDraftPathPreview' in panel_css
+    assert 'body[data-path-surface="hidden"] .nav-path-panel' in panel_css
+    assert 'body[data-path-surface="hidden"] .path-detail-panel' in panel_css
+    assert 'body[data-path-surface="hidden"] #navPathPanel' in panel_css
+    assert 'body[data-path-surface="hidden"] #pathDetailPanel' in panel_css
+    assert "function hideSharedPathSurface()" in panel_js
+    assert "function bindLearningDraftPathResize" in panel_js
+    assert "LEARNING_DRAFT_PATH_SPLIT_STORAGE_KEY" in panel_js
+    assert 'on("learningDraftPathLayoutResetBtn", "click", resetLearningDraftPathLayout)' in panel_js
+    assert "function clearScreenUnderstandingResidualDisplays" in panel_js
+    assert 'setSharedPathSurfaceVisibility("observe");' in panel_js
+    assert 'resetSharedPathForScreenUnderstanding($("observeApp").value || $("locateApp").value || "")' in panel_js
+    assert 'resetSharedPathForScreenUnderstanding($("observeApp").value || "")' in panel_js
+    assert 'clearScreenUnderstandingResidualDisplays("not_loaded · screen understanding started")' in panel_js
+    clear_artifacts_start = panel_js.index("function clearLearningDraftTrialArtifacts")
+    active_stage_start = panel_js.index("function activeStagePage")
+    clear_artifacts_body = panel_js[clear_artifacts_start:active_stage_start]
+    assert 'setLearningTrialResultPath("")' in clear_artifacts_body
+    assert 'setLearningDraftReviewSourcePath("")' in clear_artifacts_body
+    assert "setLearningPathGraphCandidatePaths({})" in clear_artifacts_body
+    assert "clearLearningDraftReviewDisplay(reason)" in clear_artifacts_body
+    clear_residual_start = panel_js.index("function clearScreenUnderstandingResidualDisplays")
+    clear_residual_end = panel_js.index("function enterScreenUnderstandingStage")
+    clear_residual_body = panel_js[clear_residual_start:clear_residual_end]
+    assert 'setLearnReplaySubview("draft")' not in clear_residual_body
+    assert "clearLearningDraftTrialArtifacts(reason)" in clear_residual_body
+    assert "clearTemplateReplayResidualDisplays(reason)" in clear_residual_body
+    assert "clearSharedPathDetailDisplay()" in clear_residual_body
+    assert "hideSharedPathSurface()" in clear_residual_body
+    assert '$("responseText").textContent = "{}"' in clear_residual_body
+    clear_template_start = panel_js.index("function clearTemplateReplayResidualDisplays")
+    clear_template_end = panel_js.index("function clearScreenUnderstandingResidualDisplays")
+    clear_template_body = panel_js[clear_template_start:clear_template_end]
+    assert '$("replayGraphSummary").innerHTML = ""' in clear_template_body
+    assert '$("replayInterfaceMapPanel").innerHTML = ""' in clear_template_body
+    assert '$("replayGraphActions").innerHTML = ""' in clear_template_body
+    assert '$("replayAgentPromptSummary").innerHTML = ""' in clear_template_body
+    assert '$("replayAgentPromptTemplate").value = ""' in clear_template_body
+    assert '$("replayAgentPromptDiff").textContent = ""' in clear_template_body
+    assert "replayArtifact = null" in clear_template_body
+    assert "replayInterfaceMap = null" in clear_template_body
+    assert "selectedInterfaceMapRef = \"\"" in clear_template_body
+    enter_observe_start = panel_js.index("function enterScreenUnderstandingStage")
+    enter_observe_end = panel_js.index("function clearSharedPathDetailDisplay")
+    enter_observe_body = panel_js[enter_observe_start:enter_observe_end]
+    assert 'clearScreenUnderstandingResidualDisplays("not_loaded · screen understanding started")' in enter_observe_body
+    assert 'setSharedPathSurfaceVisibility("observe")' not in enter_observe_body
+    assert "hideSharedPathSurface()" in enter_observe_body
+    assert "renderLearningDraftPathPreview" not in enter_observe_body
+    assert "renderLearningDraftPathDetail" not in enter_observe_body
+    set_subview_start = panel_js.index("function setLearnReplaySubview")
+    set_subview_end = panel_js.index("function learningRecognitionTrialRequestPayload")
+    set_subview_body = panel_js[set_subview_start:set_subview_end]
+    assert 'if (selected === "draft") hideSharedPathSurface()' in set_subview_body
+    observe_handler_start = panel_js.index('on("observeBtn", "click"')
+    observe_handler_end = panel_js.index('on("analyzeBtn", "click"', observe_handler_start)
+    observe_handler_body = panel_js[observe_handler_start:observe_handler_end]
+    assert 'clearScreenUnderstandingResidualDisplays("not_loaded · screen understanding started")' in observe_handler_body
+    assert observe_handler_body.index("clearScreenUnderstandingResidualDisplays") < observe_handler_body.index("ensureStageModelReady")
+    render_nav_start = panel_js.index("function renderNavPath")
+    render_nav_end = panel_js.index("/* 鈹€鈹€ Fake test data")
+    render_nav_body = panel_js[render_nav_start:render_nav_end]
+    hidden_branch = render_nav_body[
+        render_nav_body.index("if (!sharedPathSurfaceVisible())"):
+        render_nav_body.index("if (!ensurePathCanvas())")
+    ]
+    assert "clearSharedPathDetailDisplay()" in hidden_branch
+    assert ".learning-interface-detail-grid" not in panel_css
+
+
+def test_panel_two_stage_endpoint_returns_review_boxes_for_real_learning_flow(monkeypatch) -> None:
+    client = TestClient(app)
+
+    monkeypatch.setattr(
+        panel_api,
+        "_observe_bundle_from_trace_result",
+        lambda result, trace_path: {
+            "image_path": result.get("image_path", ""),
+            "source_image_path": result.get("image_path", ""),
+            "screen_size": {"width": 320, "height": 240},
+            "screen_reading": {"screen_summary": "demo screen"},
+        },
+    )
+    monkeypatch.setattr(
+        panel_api,
+        "_stage1_inventory_from_trace_result",
+        lambda result: [{"item_id": "item_1", "label": "Main", "bbox": {"x": 0, "y": 0, "w": 320, "h": 240}}],
+    )
+    monkeypatch.setattr(
+        panel_api,
+        "build_inventory_layout_graph",
+        lambda inventory, screen_size=None: {"node_count": len(inventory), "zone_count": 1, "zones": {}},
+    )
+    monkeypatch.setattr(
+        panel_api,
+        "build_two_stage_screen_understanding",
+        lambda **kwargs: {
+            "stage1_gate": {"status": "passed", "failure_categories": [], "allow_stage2_numbering": True},
+            "stage2_numbering_skipped": False,
+            "stage2_numbering": {"regions": [{"region_id": "R1"}]},
+            "fusion": {
+                "compiled_overlay_path": "artifacts/review-overlays/demo_two_stage.png",
+                "full_screen_understanding_overlay_path": "artifacts/review-overlays/demo_two_stage.png",
+                "fused_review_boxes": [
+                    {
+                        "id": "R1",
+                        "label": "Main Card",
+                        "role": "review_only",
+                        "bbox": {"x": 10, "y": 20, "w": 100, "h": 80},
+                    }
+                ],
+            },
+        },
+    )
+    monkeypatch.setattr(panel_api, "fusion_status_from_two_stage", lambda report: {"status": "available"})
+
+    response = client.post(
+        "/panel/run_learning_two_stage_understanding",
+        json={
+            "app_name": "demo_app",
+            "state_hint": "home",
+            "observe_result": {"image_path": "artifacts/screenshots/demo.png", "image_size": {"width": 320, "height": 240}},
+            "require_stage1_gate": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    data = payload["data"]
+    assert data["contract_version"] == "panel_learning_two_stage_understanding_run_v1"
+    assert data["stage1_gate"]["status"] == "passed"
+    assert data["stage2_numbering_skipped"] is False
+    assert data["learn_all_targets"]["review_box_count"] == 1
+    assert data["learn_all_targets"]["review_boxes"][0]["label"] == "Main Card"
+    assert data["coordinate_overlay_path"] == "artifacts/review-overlays/demo_two_stage.png"
+    assert data["real_clicks"] == 0
+    assert data["promotion_allowed"] is False
+
+def test_seek_search_button_visual_asset_uses_real_source_screenshot() -> None:
+    map_path = Path("artifacts/visual-match-smoke/live_seek_20260624/learned_interface_map_calibrated_real_crops.json")
+    interface_map = json.loads(map_path.read_text(encoding="utf-8"))
+    asset = next(item for item in interface_map["fixed_visual_assets"] if item["asset_id"] == "seek:visual:search_button")
+
+    source_path = Path(asset["source"]["source_image_path"])
+    tight_path = Path(asset["template_refs"]["tight_crop_ref"])
+    context_path = Path(asset["template_refs"]["context_crop_ref"])
+    bbox = asset["source"]["bbox"]
+
+    assert source_path.exists()
+    assert tight_path.exists()
+    assert context_path.exists()
+    assert asset["template_refs"]["source_image_path"] == asset["source"]["source_image_path"]
+    assert bbox["x"] > 1700
+    assert bbox["y"] < 260
+
+    with Image.open(tight_path) as image:
+        rgb_bytes = image.convert("RGB").tobytes()
+        magenta_pixels = sum(
+            1
+            for index in range(0, len(rgb_bytes), 3)
+            if rgb_bytes[index] > 190 and rgb_bytes[index + 1] < 80 and rgb_bytes[index + 2] > 110
+        )
+        assert magenta_pixels > 1000
+
+
+def test_seek_search_input_precedes_search_button_by_screen_position() -> None:
+    map_path = Path("artifacts/visual-match-smoke/live_seek_20260624/learned_interface_map_calibrated_real_crops.json")
+    interface_map = json.loads(map_path.read_text(encoding="utf-8"))
+    assets = {item["asset_id"]: item for item in interface_map["fixed_visual_assets"]}
+    search_input = assets["seek:visual:search_input"]
+    search_button = assets["seek:visual:search_button"]
+
+    input_x = search_input["bbox"]["x"]
+    button_x = search_button["source"]["bbox"]["x"]
+
+    assert search_input["region_id"] == search_button["region_id"] == "top_search_area"
+    assert input_x < button_x
+    assert search_input["label"] == "Search input field"
+    assert search_button["label"] == "Search button"
 
 
 def test_panel_region_workflow_stays_in_node_detail_and_inspector() -> None:
@@ -1615,6 +2821,8 @@ def test_panel_interface_map_uses_compact_structural_assets() -> None:
     panel_css = Path("app/web_panel/panel.css").read_text(encoding="utf-8")
 
     assert "function interfaceRegionContentNodesHtml" in panel_js
+    assert "function interfaceSortedVisualAssets" in panel_js
+    assert "function interfaceAssetSortBbox" in panel_js
     assert 'loading="eager"' in panel_js
     assert 'decoding="async"' in panel_js
     content_nodes_start = panel_js.index("function interfaceRegionContentNodesHtml")
@@ -1623,6 +2831,7 @@ def test_panel_interface_map_uses_compact_structural_assets() -> None:
     assert "regionDynamics.map" in content_nodes_body
     assert "visualAssets.map" in content_nodes_body
     assert content_nodes_body.index("regionDynamics.map") < content_nodes_body.index("visualAssets.map")
+    assert "interfaceSortedVisualAssets(regionAssets)" in panel_js
     assert "const compact = !showThumb && !crop" in panel_js
     assert "interface-visual-node-compact" in panel_js
     assert "interface-visual-node-compact" in panel_css

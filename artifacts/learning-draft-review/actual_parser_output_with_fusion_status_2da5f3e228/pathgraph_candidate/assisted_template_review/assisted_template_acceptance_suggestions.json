@@ -1,0 +1,120 @@
+{
+  "contract_version": "assisted_template_acceptance_suggestions_v1",
+  "suggestion_status": "ready_for_human_review",
+  "created_at": "2026-07-05T23:26:33.465376",
+  "package_path": "artifacts/learning-draft-review/actual_parser_output_with_fusion_status_2da5f3e228/pathgraph_candidate/assisted_template_review/assisted_template_review_package.json",
+  "package_sha256": "7b49097eef1faa3fd74eed58ab242b2c23e4e15189880c3b47ad61eb66f7aac5",
+  "suggestions": [
+    {
+      "suggestion_id": "linked_acceptance:fusion_open_detail_region_4",
+      "label": "Job listing card: Software Engineer Specialist - Integration",
+      "semantic_action": "open_detail",
+      "target_entity": "c4",
+      "recommended_decision": "accepted",
+      "item_count": 5,
+      "items": [
+        {
+          "item_type": "region",
+          "item_id": "c4"
+        },
+        {
+          "item_type": "action",
+          "item_id": "fusion_open_detail_region_4"
+        },
+        {
+          "item_type": "state",
+          "item_id": "seek_results"
+        },
+        {
+          "item_type": "state",
+          "item_id": "model_detail_view"
+        },
+        {
+          "item_type": "transition",
+          "item_id": "preflight_transition_fusion_open_detail_region_4"
+        }
+      ],
+      "recommended_note": "linked suggestion generated from action target and transition references",
+      "overrides": {
+        "label": "Job listing card: Software Engineer Specialist - Integration",
+        "semantic_action": "open_detail",
+        "target_entity": "c4"
+      },
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false
+    },
+    {
+      "suggestion_id": "linked_acceptance:fusion_open_detail_region_5",
+      "label": "Job listing card: Intermediate Software Engineer (TypeScript, Node.js, React)",
+      "semantic_action": "open_detail",
+      "target_entity": "c5",
+      "recommended_decision": "accepted",
+      "item_count": 5,
+      "items": [
+        {
+          "item_type": "region",
+          "item_id": "c5"
+        },
+        {
+          "item_type": "action",
+          "item_id": "fusion_open_detail_region_5"
+        },
+        {
+          "item_type": "state",
+          "item_id": "seek_results"
+        },
+        {
+          "item_type": "state",
+          "item_id": "model_detail_view"
+        },
+        {
+          "item_type": "transition",
+          "item_id": "preflight_transition_fusion_open_detail_region_5"
+        }
+      ],
+      "recommended_note": "linked suggestion generated from action target and transition references",
+      "overrides": {
+        "label": "Job listing card: Intermediate Software Engineer (TypeScript, Node.js, React)",
+        "semantic_action": "open_detail",
+        "target_entity": "c5"
+      },
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false
+    },
+    {
+      "suggestion_id": "linked_acceptance:model_detail_view::apply_entry_fixture",
+      "label": "Apply entry fixture",
+      "semantic_action": "open_apply_flow",
+      "target_entity": "model_detail_view::apply_button_fixture",
+      "recommended_decision": "accepted",
+      "item_count": 2,
+      "items": [
+        {
+          "item_type": "region",
+          "item_id": "model_detail_view::apply_button_fixture"
+        },
+        {
+          "item_type": "action",
+          "item_id": "model_detail_view::apply_entry_fixture"
+        }
+      ],
+      "recommended_note": "linked suggestion generated from action target and transition references",
+      "overrides": {
+        "label": "Apply entry fixture",
+        "semantic_action": "open_apply_flow",
+        "target_entity": "model_detail_view::apply_button_fixture"
+      },
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false
+    }
+  ],
+  "summary": {
+    "suggestion_count": 3,
+    "action_suggestion_count": 3
+  },
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "ready_for_runtime_pathgraph_promotion": false,
+  "final_submit_forbidden": true,
+  "interpretation": "human acceptance suggestions only; not review decisions and not Runtime PathGraph promotion"
+}

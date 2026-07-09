@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-07-03T09:42:01.453Z",
+  "includeContent": false,
+  "summary": {
+    "ok": false,
+    "status": "partial",
+    "warnings": [],
+    "error": {
+      "name": "[redacted:5 chars]",
+      "message": "[redacted:54 chars]",
+      "recoverable": false
+    },
+    "context": {
+      "timestamp": "2026-07-03T09:42:01.453Z"
+    }
+  },
+  "steps": [
+    {
+      "id": "bootstrap",
+      "command": "session.bootstrap",
+      "status": "ok",
+      "ok": true,
+      "startedAt": "2026-07-03T09:42:01.450Z",
+      "endedAt": "2026-07-03T09:42:01.453Z",
+      "warnings": [],
+      "dataPreview": {
+        "browserName": "[redacted:6 chars]",
+        "tabId": "[redacted:9 chars]",
+        "url": "[redacted:0 chars]",
+        "loggedIn": false
+      }
+    },
+    {
+      "id": "open",
+      "command": "threads.open",
+      "status": "error",
+      "ok": false,
+      "startedAt": "2026-07-03T09:42:01.453Z",
+      "endedAt": "2026-07-03T09:42:01.453Z",
+      "warnings": []
+    }
+  ],
+  "data": {
+    "bootstrap": {
+      "browserName": "[redacted:6 chars]",
+      "tabId": "[redacted:9 chars]",
+      "url": "[redacted:0 chars]",
+      "loggedIn": false
+    }
+  }
+}

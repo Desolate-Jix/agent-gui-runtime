@@ -6,6 +6,7 @@ from loguru import logger
 from app.core.window_manager import BoundWindow, window_manager
 from app.api.models.request import BindWindowRequest, ResizeBoundWindowRequest
 from app.api.models.response import APIResponse, ErrorModel, SessionData, WindowRectModel
+from app.operation.runtime_context import build_operation_runtime_context, operation_trace_link
 
 router = APIRouter(prefix="/session", tags=["session"])
 
@@ -56,6 +57,20 @@ def bind_window(request: BindWindowRequest) -> APIResponse:
         bound = window_manager.bind_window(request.process_name, request.title)
         data = _to_session_data(bound).model_dump()
         data["candidates"] = candidates
+        operation_context = build_operation_runtime_context(
+            request=request,
+            skill_id="bind_window",
+            semantic_action="bind_window",
+            side_effect_class="navigation",
+            requires_gate=False,
+            window_binding_id=f"window:{int(bound.handle)}",
+            viewport_size={
+                "width": int(bound.rect.right - bound.rect.left),
+                "height": int(bound.rect.bottom - bound.rect.top),
+            },
+        )
+        data["operation_context"] = operation_context
+        data["operation_trace_link"] = operation_trace_link(operation_context, result_status="success")
         return APIResponse(success=True, message="Window bound", data=data, error=None)
     except ValueError as exc:
         logger.warning("Window bind did not match any visible candidate: {}", exc)

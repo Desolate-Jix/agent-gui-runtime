@@ -12,8 +12,8 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 MODEL_PROFILE_DIR = ROOT_DIR / "configs" / "model_profiles"
 
 STAGE_PROFILE_IDS = {
-    "observe": "qwen3_vl_4b_q4_k_m",
-    "understanding": "qwen3_vl_4b_q4_k_m",
+    "observe": "qwen3_vl_8b_q4_k_m",
+    "understanding": "qwen3_vl_8b_q4_k_m",
     "locate": "vista_4b_transformers",
     "grounding": "vista_4b_transformers",
 }
@@ -181,11 +181,20 @@ def start_model_server(profile: dict[str, Any]) -> dict[str, Any]:
     pid_path = _profile_pid_path(profile)
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     pid_path.write_text(str(process.pid), encoding="utf-8")
+    health_status: dict[str, Any] | None = None
+    pid_sync = None
+    if _profile_supports_health_status(profile):
+        health_timeout = float(profile.get("startup_health_timeout_seconds") or 0.25)
+        health_status = check_model_server(profile, timeout=health_timeout)
+        pid_sync = _sync_pid_file_from_health(profile, health_status, pid_path=pid_path)
     return {
         "pid": process.pid,
+        "pid_source": "health" if pid_sync else "wrapper_process",
+        "service_pid": pid_sync["pid"] if pid_sync else None,
         "command": command,
         "log_path": str(log_path),
         "pid_path": str(pid_path),
+        "health_after_start": health_status,
     }
 
 
@@ -230,14 +239,50 @@ def wait_for_model_server(profile: dict[str, Any], *, wait_seconds: float) -> di
     last = check_model_server(profile)
     while time.monotonic() < deadline:
         if last["status"] == "running":
+            last = _refresh_running_status_health(profile, last)
+            _sync_pid_file_from_health(profile, last)
             return last
         time.sleep(1.0)
         last = check_model_server(profile)
+    if last.get("status") == "running":
+        last = _refresh_running_status_health(profile, last)
+    _sync_pid_file_from_health(profile, last)
     return last
 
 
 def _profile_supports_health_status(profile: dict[str, Any]) -> bool:
     return str(profile.get("runtime") or "").casefold() == "transformers" or str(profile.get("output_contract") or "").casefold() == "vista_point_v1"
+
+
+def _sync_pid_file_from_health(
+    profile: dict[str, Any],
+    status: dict[str, Any],
+    *,
+    pid_path: Path | None = None,
+) -> dict[str, Any] | None:
+    health = status.get("health")
+    if not isinstance(health, dict):
+        return None
+    pid_value = health.get("pid")
+    try:
+        pid = int(pid_value)
+    except (TypeError, ValueError):
+        return None
+    target = pid_path or _profile_pid_path(profile)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(str(pid), encoding="utf-8")
+    return {"pid": pid, "pid_path": str(target), "source": "health"}
+
+
+def _refresh_running_status_health(profile: dict[str, Any], status: dict[str, Any]) -> dict[str, Any]:
+    if status.get("status") != "running" or status.get("health"):
+        return status
+    if not _profile_supports_health_status(profile):
+        return status
+    refreshed = check_model_server(profile, timeout=1.0)
+    if refreshed.get("status") == "running" and refreshed.get("health"):
+        return refreshed
+    return status
 
 
 def _resolve_path(path: str) -> Path:

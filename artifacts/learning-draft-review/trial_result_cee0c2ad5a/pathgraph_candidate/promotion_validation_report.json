@@ -1,0 +1,114 @@
+{
+  "contract_version": "pathgraph_candidate_validation_report_v1",
+  "validation_status": "passed_candidate",
+  "checks": [
+    {
+      "check_id": "states_present",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "count": 1
+      }
+    },
+    {
+      "check_id": "regions_present",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "count": 1
+      }
+    },
+    {
+      "check_id": "action_templates_present",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "count": 1
+      }
+    },
+    {
+      "check_id": "action_region_linkage",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "unlinked_actions": []
+      }
+    },
+    {
+      "check_id": "blockers_present",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "count": 2
+      }
+    },
+    {
+      "check_id": "verification_rules_present",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "count": 3
+      }
+    },
+    {
+      "check_id": "unsafe_final_actions_absent",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "unsafe_actions": []
+      }
+    },
+    {
+      "check_id": "artifact_is_authorization_false",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {}
+    },
+    {
+      "check_id": "execute_binding_disabled",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {}
+    },
+    {
+      "check_id": "final_submit_forbidden",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {}
+    },
+    {
+      "check_id": "source_not_pure_model_generated",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {}
+    },
+    {
+      "check_id": "no_dispatch_dry_run_preview_only",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "operation_dispatch": "not_executed"
+      }
+    }
+  ],
+  "summary": {
+    "state_count": 1,
+    "region_count": 1,
+    "action_template_count": 1,
+    "blocker_count": 2,
+    "verification_rule_count": 3,
+    "failed_check_count": 0,
+    "operation_dispatch": "not_executed",
+    "candidate_only": true
+  },
+  "safety": {
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "final_submit_forbidden": true,
+    "real_action_requires_gate": true
+  },
+  "paths": {
+    "runtime_path_graph_candidate_path": "artifacts/learning-draft-review/trial_result_cee0c2ad5a/pathgraph_candidate/runtime_path_graph_candidate.json",
+    "interface_map_candidate_path": "artifacts/learning-draft-review/trial_result_cee0c2ad5a/pathgraph_candidate/interface_map_candidate.json"
+  }
+}

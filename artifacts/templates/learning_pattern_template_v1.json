@@ -1,0 +1,17 @@
+{
+  "contract_version": "learning_pattern_template_v1",
+  "pattern_id": "example_pattern",
+  "display_name": "Example Pattern",
+  "purpose": "Reusable learning pattern extracted from one or more app profiles.",
+  "applies_when": [],
+  "states": [],
+  "regions": [],
+  "operation_skills": [],
+  "semantic_actions": [],
+  "gate_contracts": [],
+  "trace_requirements": [],
+  "success_conditions": [],
+  "stop_conditions": [],
+  "seek_source": null,
+  "authorization": "guidance_only"
+}

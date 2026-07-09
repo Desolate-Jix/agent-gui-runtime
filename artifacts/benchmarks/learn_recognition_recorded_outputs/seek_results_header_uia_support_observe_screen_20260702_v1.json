@@ -1,0 +1,73 @@
+{
+  "contract_version": "recorded_parser_support_v1",
+  "source_type": "recorded_parser_support",
+  "support_origin": "same_screenshot_uia_header_controls",
+  "surface": "seek_results_header",
+  "app_name": "seek",
+  "screenshot_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+  "screenshot_sha256": "4ad07148c25da7935c8845a8455346c167d7fbb3056f15c7ab50be004d12283b",
+  "actual_model_call_in_this_run": false,
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "real_action_requires_gate": true,
+  "final_submit_forbidden": true,
+  "interpretation": "Same-screenshot UIA support for Learn Recognition parser actionability; it may create grounding candidates but does not authorize Execute or clicks.",
+  "observe_bundle": {
+    "contract_version": "learn_observe_bundle_v1",
+    "screen_size": {
+      "width": 2560,
+      "height": 1400
+    },
+    "image_size": {
+      "width": 2560,
+      "height": 1400
+    },
+    "screenshot_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+    "sources": {
+      "uia": {
+        "source_trace_path": "artifacts/benchmarks/learn_recognition_golden_manifest_v1.json#recorded_parser_seek_search_header_controls",
+        "controls": [
+          {
+            "name": "Search keyword field",
+            "control_type": "Edit",
+            "bbox": {
+              "x": 633,
+              "y": 184,
+              "w": 850,
+              "h": 48
+            },
+            "patterns": [
+              "Value"
+            ]
+          },
+          {
+            "name": "SEEK search button",
+            "control_type": "Button",
+            "bbox": {
+              "x": 1820,
+              "y": 184,
+              "w": 92,
+              "h": 48
+            },
+            "patterns": [
+              "Invoke"
+            ]
+          },
+          {
+            "name": "Pay filter",
+            "control_type": "Button",
+            "bbox": {
+              "x": 632,
+              "y": 258,
+              "w": 78,
+              "h": 42
+            },
+            "patterns": [
+              "Invoke"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

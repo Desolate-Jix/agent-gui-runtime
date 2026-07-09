@@ -57,6 +57,9 @@ def test_open_app_launches_catalog_entry_and_binds(monkeypatch) -> None:
     assert response.data["bound_window"]["process_name"] == "demo.exe"
     assert response.data["maximize_after_open"] is True
     assert response.data["maximize_error"] is None
+    assert response.data["operation_context"]["skill_id"] == "bind_window"
+    assert response.data["operation_context"]["window_binding_id"] == "window:1"
+    assert response.data["operation_trace_link"]["result_status"] == "success"
     assert response.data["timings"]["contract_version"] == "runtime_timing_v1"
     assert [step["name"] for step in response.data["timings"]["steps"]] == [
         "load_app_catalog",

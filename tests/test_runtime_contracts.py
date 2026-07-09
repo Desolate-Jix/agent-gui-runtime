@@ -230,6 +230,23 @@ def test_scoped_final_submit_ignores_search_submit_outside_application_flow() ->
     assert flow["final_submit_visible_blocker"]["blocked"] is False
 
 
+def test_high_risk_detection_allows_salary_pay_filter_but_blocks_payment_actions() -> None:
+    allowed, reason = vision_api._execution_allowed_for_risk_class(
+        label="Pay filter",
+        role="button",
+        risk_class="safe_click_allowed",
+    )
+    blocked, blocked_reason = vision_api._execution_allowed_for_risk_class(
+        label="Pay now",
+        role="button",
+        risk_class="safe_click_allowed",
+    )
+
+    assert (allowed, reason) == (True, "risk_class_safe_click_allowed")
+    assert blocked is False
+    assert blocked_reason == "potential_side_effect_action"
+
+
 def test_scoped_final_submit_blocks_inside_active_application_container() -> None:
     items = [
         {

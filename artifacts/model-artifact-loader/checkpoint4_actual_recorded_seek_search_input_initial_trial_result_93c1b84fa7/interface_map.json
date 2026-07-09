@@ -1,0 +1,66 @@
+{
+  "contract_version": "learned_interface_map_v1",
+  "app_id": "model_learning_benchmark",
+  "page_type": "search_page",
+  "source": {
+    "trial_path": "logs/benchmarks/model_learning_patch_retry_checkpoint4_7/cases/checkpoint4_actual_recorded_seek_search_input_initial/loader_trials/checkpoint4_actual_recorded_seek_search_input_initial/trial_result.json",
+    "sha256": "93c1b84fa773ee0838e26c2ecb313506f2b466a47f7dee7a4a4c82f95939f680",
+    "attempt_index": 0,
+    "readonly": true,
+    "posthoc_optimization_allowed": false,
+    "loaded_at": "2026-07-02T23:06:08.661457"
+  },
+  "loader": {
+    "contract_version": "model_learning_artifact_loader_v1",
+    "source_trial_path": "logs/benchmarks/model_learning_patch_retry_checkpoint4_7/cases/checkpoint4_actual_recorded_seek_search_input_initial/loader_trials/checkpoint4_actual_recorded_seek_search_input_initial/trial_result.json",
+    "source_sha256": "93c1b84fa773ee0838e26c2ecb313506f2b466a47f7dee7a4a4c82f95939f680",
+    "source_attempt_index": 0,
+    "source_artifact_readonly": true,
+    "posthoc_optimization_allowed": false
+  },
+  "screen_summary": "A job search bar showing 'All jobs • All Auckland' with a magnifying glass icon.",
+  "states": [
+    {
+      "state_id": "s1",
+      "label": "job_search_home",
+      "page_type": "search_page",
+      "region_refs": [
+        "r1"
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "model:transition:a1",
+      "from_state_id": "s1",
+      "to_state_id": "s1",
+      "action_template_id": "a1",
+      "default_available": true,
+      "verification_refs": []
+    }
+  ],
+  "regions": [
+    {
+      "region_id": "r1",
+      "label": "search_input_field",
+      "role": "text_input",
+      "region_type": "text_input",
+      "source_artifact_readonly": true
+    }
+  ],
+  "fixed_visual_assets": [],
+  "dynamic_areas": [],
+  "danger_zones": [],
+  "editor_policy": {
+    "source_artifact_editable": false,
+    "derived_artifact_editable": false,
+    "save_as_required_for_manual_changes": true
+  },
+  "summary": {
+    "state_count": 1,
+    "region_count": 1,
+    "fixed_visual_asset_count": 0,
+    "dynamic_area_count": 0,
+    "danger_zone_count": 0
+  }
+}

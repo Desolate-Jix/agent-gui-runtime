@@ -1,0 +1,164 @@
+{
+  "contract_version": "runtime_path_graph_v1",
+  "graph_id": "artifacts_learning-runs_new_site_python_org_20260702_after_similarity_fix_trial:model_loaded:34186c1fc9be",
+  "app_id": "artifacts_learning-runs_new_site_python_org_20260702_after_similarity_fix_trial",
+  "page_type": "homepage",
+  "coordinate_policy": {
+    "coordinate_space": "window_screenshot",
+    "requires_current_capture": true,
+    "source_bbox_is_learning_evidence_only": true
+  },
+  "loader": {
+    "contract_version": "model_learning_artifact_loader_v1",
+    "source_trial_path": "artifacts/learning-draft-review/trial_result_cae1c88703/reviewed_template_candidate.json",
+    "source_sha256": "34186c1fc9beab85662b54013d39d502810b5f9c7f5064176b5a8627474e4641",
+    "source_attempt_index": null,
+    "source_artifact_readonly": true,
+    "posthoc_optimization_allowed": false,
+    "candidate_mode": true
+  },
+  "source": {
+    "trial_path": "artifacts/learning-draft-review/trial_result_cae1c88703/reviewed_template_candidate.json",
+    "reviewed_candidate_path": "artifacts/learning-draft-review/trial_result_cae1c88703/reviewed_template_candidate.json",
+    "source_trial_path": "artifacts/learning-runs/new_site_python_org_20260702_after_similarity_fix/trial_result.json",
+    "sha256": "34186c1fc9beab85662b54013d39d502810b5f9c7f5064176b5a8627474e4641",
+    "attempt_index": null,
+    "readonly": true,
+    "posthoc_optimization_allowed": false,
+    "candidate_mode": true
+  },
+  "states": [
+    {
+      "state_id": "s1",
+      "label": "Python.org Home",
+      "page_type": "homepage",
+      "region_refs": [
+        "r1",
+        "r2",
+        "r3"
+      ]
+    }
+  ],
+  "regions": [
+    {
+      "region_id": "r1",
+      "label": "Search Input",
+      "role": "text_input",
+      "region_type": "text_input",
+      "source_artifact_readonly": true
+    },
+    {
+      "region_id": "r2",
+      "label": "Downloads Section",
+      "role": "navigation_link",
+      "region_type": "navigation_link",
+      "source_artifact_readonly": true
+    },
+    {
+      "region_id": "r3",
+      "label": "Documentation Section",
+      "role": "navigation_link",
+      "region_type": "navigation_link",
+      "source_artifact_readonly": true
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "model:transition:a1",
+      "from_state_id": "s1",
+      "to_state_id": "s1",
+      "action_template_id": "a1",
+      "default_available": true,
+      "verification_refs": []
+    },
+    {
+      "transition_id": "model:transition:a2",
+      "from_state_id": "s1",
+      "to_state_id": "s1",
+      "action_template_id": "a2",
+      "default_available": true,
+      "verification_refs": []
+    },
+    {
+      "transition_id": "model:transition:a3",
+      "from_state_id": "s1",
+      "to_state_id": "s1",
+      "action_template_id": "a3",
+      "default_available": true,
+      "verification_refs": []
+    }
+  ],
+  "action_templates": [
+    {
+      "action_template_id": "a1",
+      "label": "Search for Python content",
+      "semantic_action": "type_text",
+      "risk_level": "low",
+      "requires_gate": true,
+      "expected_effect": "Search query entered into search field",
+      "action_type": "input",
+      "low_level_action_type": "input",
+      "target_entity": "r1",
+      "learned_skill_ref": "skill.input_text_into_field",
+      "artifact_is_authorization": false,
+      "input_target": {
+        "region_id": "r1",
+        "role": "text_input",
+        "requires_current_validation": true
+      },
+      "input_policy": {
+        "requires_agent_text": true,
+        "clear_existing": true,
+        "submit_allowed": false,
+        "text_is_not_stored_by_menu": true
+      }
+    },
+    {
+      "action_template_id": "a2",
+      "label": "Navigate to Downloads",
+      "semantic_action": "open_detail",
+      "risk_level": "low",
+      "requires_gate": true,
+      "expected_effect": "Opens Downloads section",
+      "action_type": "click",
+      "low_level_action_type": "click",
+      "target_entity": "r1",
+      "learned_skill_ref": "skill.click_currently_validated_target",
+      "artifact_is_authorization": false
+    },
+    {
+      "action_template_id": "a3",
+      "label": "Navigate to Documentation",
+      "semantic_action": "open_detail",
+      "risk_level": "low",
+      "requires_gate": true,
+      "expected_effect": "Opens Documentation section",
+      "action_type": "click",
+      "low_level_action_type": "click",
+      "target_entity": "r1",
+      "learned_skill_ref": "skill.click_currently_validated_target",
+      "artifact_is_authorization": false
+    }
+  ],
+  "artifact_is_authorization": false,
+  "safety": {
+    "final_submit_allowed": false,
+    "final_submit_forbidden": true,
+    "real_action_requires_gate": true,
+    "observation_source_only": true,
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "candidate_only": true
+  },
+  "summary": {
+    "state_count": 1,
+    "region_count": 3,
+    "transition_count": 3,
+    "action_template_count": 3
+  },
+  "candidate_mode": true,
+  "candidate_contract_version": "runtime_path_graph_candidate_v1",
+  "execute_binding_enabled": false,
+  "final_submit_forbidden": true,
+  "real_action_requires_gate": true
+}

@@ -1,6 +1,85 @@
 # 学习模式设计
 
-更新日期：2026-06-07
+更新日期：2026-07-07
+
+## 2026-07-07 更新：学习模式两轮分栏识别流程合同
+
+用户已确认学习模式前半段必须按固定流程推进，不能再围绕单张截图做局部 bbox 修补。权威流程合同记录在：
+
+- `docs/LEARN_MODE_TWO_PASS_PIPELINE_CONTRACT.zh-CN.md`
+
+后续实现、调试和验收必须以该合同为准：
+
+```text
+绑定 / 截图
+-> 第一次模型调用：整屏分栏
+-> 栏精准定位
+-> 第二次模型调用：按栏识别内容
+   -> 顶栏 / 侧栏 / 底栏：直接编号定位
+   -> 中间栏：二次分区后编号定位
+-> OCR / 视觉 / 执行定位融合
+-> 学习草稿
+-> 只读 PathGraph 预览
+-> 人工审查 / 修改
+```
+
+关键纠偏：
+
+- 第一次模型调用只做上下左右中栏和弹窗/浮层分栏，不编号按钮和卡片。
+- 栏精准定位必须覆盖完整视觉栏位；栏之间允许紧贴，不需要保留固定间隔。
+- 按钮间距只属于栏内编号/分组策略，不能用来缩小栏 bbox。
+- 顶栏、侧栏、底栏在栏内直接编号；中间主内容必须先二次分区，再对子区编号。
+- 每次真实界面失败必须先归类为通用流程失败，例如 `region_bbox_too_narrow`、`sidebar_items_missing`、`main_subregion_split_failed`、`card_parent_child_failed`，不能把单图 heuristic 当作主策略。
+- 每次开始新识别必须清空当前学习草稿、路径图、界面详情和融合框的旧结果；历史结果只能显示在历史区。
+- 不可操作的 review-only 区域也必须进入融合截图审查框；不可执行不等于不显示。
+- 进度条必须由证据推进：没有编号图、精准定位、融合结果或 PathGraph 草稿证据时，不能显示完成。
+- 每次改识别策略后必须先跑 Apple Music 保护已有较好结果，再跑第二个界面验证通用性；第二个界面暴露的问题必须回到通用 invariant 修复，不能污染 Apple Music 或写成单图补丁。
+- Codex 必须目检生成 overlay 后再汇报效果；没有目检时只能说脚本产物已生成，不能说识别变好。
+
+当前 `app.learn.recognition.two_stage` 仍包含 parser / heuristic 驱动的 scaffold，可作为临时 display/review 工具和回归材料，但不能代表最终学习模式主流程。
+
+## 2026-07-03 更新：重做学习模式识别前半段
+
+用户已确认新的方向：执行模式当前完整度较高，不能为了学习模式重构而改变执行模式模型、Operation、Gate、Trace 或 final-submit 安全边界。学习模式要清理的是前半段“整屏理解 + 定位”路径；后半段学习产物分析展示、Learning Draft Review、DraftGraph Preview、PathGraph candidate 和 promotion validation 继续保留。
+
+新设计记录在：
+
+- `docs/superpowers/specs/2026-07-03-learning-recognition-rebuild-design.md`
+- `docs/superpowers/plans/2026-07-03-learning-recognition-rebuild-plan.md`
+- `docs/LEARN_RECOGNITION_PARSER_AND_GROUNDING.zh-CN.md`
+
+新的学习识别主线：
+
+```text
+Capture bound window
+-> Observe evidence bundle
+-> Parse screen inventory
+-> Classify inventory items
+-> Select actionable/form-field candidates
+-> Build ROI crops
+-> Ground locally
+-> Restore coordinates
+-> Validate evidence
+-> Generate learning_template_draft_v1
+-> Human review
+-> PathGraph candidate
+```
+
+关键约束：
+
+- Parser 只是可插拔候选来源，不能授权点击。
+- OCR-only 普通文本、标题、段落、代码块、只读卡片默认是 `readable`，不能进入 grounding。
+- `semantic_region_only` 中等置信 bbox 默认不能进入点击坐标层。
+- Grounding 只处理 `actionable` / `form_field` 候选。
+- ROI crop / zoom 后必须保存 coordinate transform，并能 replay。
+- Validator 必须检查 OCR/UIA/DOM/OmniParser/vision evidence、point/bbox、screenshot freshness、danger zone、final-submit blocker。
+- 学习草稿和 PathGraph candidate 仍然是 display/review-only，不是 Execute 授权。
+
+允许用于学习模式实验的模型限定为 12B 以下或工具型 parser，不覆盖执行模式 profile。候选包括 OmniParser 作为 screen parser、Qwen3-VL 8B 做页面结构理解、UGround 2B/7B 和 GUI-Actor 3B/7B 做 grounding/verifier、ShowUI 2B 做 trial/对比。任何实验都必须记录 raw input/output、model config、screenshot checksum、parsed result 和 failure taxonomy。
+
+90% 目标必须拆成分层指标衡量，例如 `actionable_classification`、`non_actionable_rejection`、`grounding_point_inside_target`、`coordinate_transform_replay`、`pathgraph_candidate_validation`。样本不足时显示 `not_covered`，不能包装成模型准确率、点击成功率或端到端成功率。
+
+当前 benchmark 已开始从纯 fixture-only 过渡到 recorded-output ingestion：manifest 可通过 `recorded_parser_output_path` 加载已有 Learn Fast 模型 trace 派生的 parser 输出，也可通过 `recorded_grounding_output_path` 加载已有 Learn Deep 坐标校准 trace 派生的 grounding 输出。该阶段只证明记录输出可以进入统一 parser / validator / draft 链路，不能证明模型可靠性；`actual_parser_call` / `actual_grounding_call` 仍需后续单独覆盖。
 
 本文记录 `agent-gui-runtime` 的学习模式设计。学习模式必须服务于安全执行和可复盘决策，不能绕过现有点击前闸门，也不能让历史坐标直接替代实时窗口校验。
 

@@ -1,0 +1,64 @@
+{
+  "contract_version": "learn_actual_grounding_vista_baseline_cases_v1",
+  "profile_id": "learn_grounding_vista_4b_baseline",
+  "interpretation": "Mixed actual/precondition smoke for the learn-only VISTA grounding baseline. Fresh actual-call denominator includes only accepted ROI cases; semantic-only, danger-zone, and OCR-only precondition stops must remain blocked and excluded from model ability claims.",
+  "cases": [
+    {
+      "case_id": "recorded_grounding_search_point_valid",
+      "label": "Search button",
+      "screenshot_path": "D:/agent-gui-runtime/artifacts/screenshots/welcome-to-python-org-microsoft-edge__observe-screen__python-org__full-window__20260703-173928-663164.png",
+      "expected_case_outcome": "actual_grounding_call"
+    },
+    {
+      "case_id": "recorded_parser_calibrated_targets_python_homepage",
+      "label": "Search input field",
+      "screenshot_path": "D:/agent-gui-runtime/artifacts/screenshots/welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png",
+      "expected_case_outcome": "actual_grounding_call"
+    },
+    {
+      "case_id": "recorded_parser_calibrated_targets_python_homepage",
+      "label": "Search button",
+      "screenshot_path": "D:/agent-gui-runtime/artifacts/screenshots/welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png",
+      "expected_case_outcome": "actual_grounding_call"
+    },
+    {
+      "case_id": "recorded_parser_calibrated_targets_python_homepage",
+      "label": "Downloads link",
+      "screenshot_path": "D:/agent-gui-runtime/artifacts/screenshots/welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png",
+      "expected_case_outcome": "actual_grounding_call"
+    },
+    {
+      "case_id": "recorded_parser_calibrated_targets_python_homepage",
+      "label": "Documentation link",
+      "screenshot_path": "D:/agent-gui-runtime/artifacts/screenshots/welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png",
+      "expected_case_outcome": "actual_grounding_call"
+    },
+    {
+      "case_id": "recorded_parser_calibrated_targets_python_homepage",
+      "label": "Download button",
+      "screenshot_path": "D:/agent-gui-runtime/artifacts/screenshots/welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png",
+      "expected_case_outcome": "actual_grounding_call"
+    },
+    {
+      "case_id": "recorded_parser_semantic_region_rejected",
+      "label": "Search button",
+      "screenshot_path": "D:/agent-gui-runtime/artifacts/screenshots/welcome-to-python-org-microsoft-edge__observe-screen__python-org__full-window__20260703-173928-663164.png",
+      "expected_case_outcome": "blocked_precondition",
+      "expected_blocker": "fixture_precondition_failed"
+    },
+    {
+      "case_id": "submit_application_danger_zone",
+      "label": "Submit application",
+      "screenshot_path": "D:/agent-gui-runtime/artifacts/screenshots/welcome-to-python-org-microsoft-edge__observe-screen__python-org__full-window__20260703-173928-663164.png",
+      "expected_case_outcome": "blocked_precondition",
+      "expected_blocker": "fixture_precondition_failed"
+    },
+    {
+      "case_id": "ocr_latest_news_rejected",
+      "label": "Latest News",
+      "screenshot_path": "D:/agent-gui-runtime/artifacts/screenshots/welcome-to-python-org-microsoft-edge__observe-screen__python-org__full-window__20260703-173928-663164.png",
+      "expected_case_outcome": "blocked_precondition",
+      "expected_blocker": "fixture_precondition_failed"
+    }
+  ]
+}

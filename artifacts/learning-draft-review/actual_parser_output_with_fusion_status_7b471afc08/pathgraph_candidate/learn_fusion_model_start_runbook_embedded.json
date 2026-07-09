@@ -1,0 +1,39 @@
+{
+  "contract_version": "learning_draft_model_start_runbook_v1",
+  "runbook_status": "awaiting_explicit_model_start_approval",
+  "approval_required": true,
+  "may_start_model_after_user_approval": true,
+  "may_run_calibration_batch_now": false,
+  "next_manual_action": "ask_user_to_approve_model_start_for_ready_regions",
+  "ready_region_numbers": [
+    1,
+    2,
+    3,
+    6,
+    8,
+    9
+  ],
+  "review_blocked_region_numbers": [
+    7,
+    10
+  ],
+  "guards": {
+    "post_batch_refresh_has_batch_plan": true,
+    "prebatch_refresh_blocks_before_future_rerun": true,
+    "acceptance_required_before_refresh": true,
+    "accepted_for_post_batch_refresh": false
+  },
+  "safety": {
+    "display_only": true,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false,
+    "model_started": false,
+    "live_clicks": 0,
+    "live_fills": 0,
+    "live_submits": 0
+  },
+  "blockers": [],
+  "display_only": true,
+  "execute_binding_enabled": false,
+  "artifact_is_authorization": false
+}

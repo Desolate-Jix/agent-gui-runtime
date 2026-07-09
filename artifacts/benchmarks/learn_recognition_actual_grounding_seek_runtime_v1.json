@@ -1,0 +1,29 @@
+﻿{
+  "contract_version": "learn_actual_grounding_cases_tmp_v1",
+  "cases": [
+    {
+      "case_id": "seek_search_header_controls",
+      "label": "Search keyword field",
+      "surface": "seek_results_header",
+      "screenshot_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+      "recorded_parser_output_path": "artifacts/benchmarks/learn_recognition_recorded_outputs/seek_results_header_uia_support_observe_screen_20260702_v1.json",
+      "goal": "ground Search keyword field point"
+    },
+    {
+      "case_id": "seek_search_header_controls",
+      "label": "SEEK search button",
+      "surface": "seek_results_header",
+      "screenshot_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+      "recorded_parser_output_path": "artifacts/benchmarks/learn_recognition_recorded_outputs/seek_results_header_uia_support_observe_screen_20260702_v1.json",
+      "goal": "ground SEEK search button point"
+    },
+    {
+      "case_id": "seek_search_header_controls",
+      "label": "Pay filter",
+      "surface": "seek_results_header",
+      "screenshot_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+      "recorded_parser_output_path": "artifacts/benchmarks/learn_recognition_recorded_outputs/seek_results_header_uia_support_observe_screen_20260702_v1.json",
+      "goal": "ground Pay filter point"
+    }
+  ]
+}

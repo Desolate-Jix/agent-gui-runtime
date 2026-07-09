@@ -1,0 +1,2872 @@
+{
+  "contract_version": "learn_page_detail_candidate_v1",
+  "source_path": "artifacts/learning-runs/panel_20260709-234743-729_applemusic/trial_result.json",
+  "source_detail_shape": "learning_template_draft_v1",
+  "precise_understanding_candidate_path": "",
+  "screen_summary": "Auto-generated page detail candidate from Learn Mode full-screen understanding and calibration evidence.",
+  "layout_mode": "spatial_bbox_order",
+  "readiness_status": "needs_page_detail_review",
+  "screenshot_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\apple-music__observe-screen__applemusic__full-window__20260709-233802-784094.png",
+  "full_screen_understanding_overlay_path": "artifacts\\review-overlays\\apple-music__observe-screen__applemusic__full-window__20260709-233802-784094__two-stage-understanding__20260709-234743-503868.png",
+  "compiled_overlay_path": "artifacts\\review-overlays\\apple-music__observe-screen__applemusic__full-window__20260709-233802-784094__two-stage-understanding__20260709-234743-503868.png",
+  "summary": {
+    "region_count": 32,
+    "section_count": 2,
+    "display_group_count": 0,
+    "list_group_count": 0,
+    "container_group_count": 0,
+    "spatial_preview_suppressed_region_count": 0,
+    "possible_operation_count": 32,
+    "pending_calibration_count": null,
+    "review_blocked_count": null,
+    "pathgraph_candidate_review_ready_count": null,
+    "runtime_pathgraph_promotion": false,
+    "display_only": true,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false
+  },
+  "layout": {
+    "bounds": {
+      "x": 0,
+      "y": 0,
+      "w": 1148,
+      "h": 993
+    },
+    "sections": [
+      {
+        "section_id": "top_search_and_filters",
+        "label": "Top Search And Filters",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "w": 1148,
+          "h": 520
+        },
+        "region_count": 23,
+        "region_numbers": [
+          9,
+          10,
+          17,
+          18,
+          1,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          2,
+          19,
+          3,
+          20,
+          4,
+          21,
+          22,
+          23,
+          24,
+          5,
+          6,
+          7
+        ],
+        "possible_operations": [
+          "read_only"
+        ],
+        "operation_summary": {
+          "kind_counts": {
+            "read_only": 23
+          },
+          "readiness_counts": {
+            "review_required": 23
+          }
+        },
+        "operation_links": [
+          {
+            "region_no": 9,
+            "region_id": "review_region_review_box_13",
+            "label": "top/header control cluster 1",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 10,
+            "region_id": "review_region_review_box_15",
+            "label": "top/header control cluster 3",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 17,
+            "region_id": "review_region_review_box_23",
+            "label": "口",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 18,
+            "region_id": "review_region_review_box_24",
+            "label": "×",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 1,
+            "region_id": "review_region_review_box_4",
+            "label": "日",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 11,
+            "region_id": "review_region_review_box_17",
+            "label": "Play/Pause",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 12,
+            "region_id": "review_region_review_box_18",
+            "label": "Next",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 13,
+            "region_id": "review_region_review_box_19",
+            "label": "Volume",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 14,
+            "region_id": "review_region_review_box_20",
+            "label": "Chat",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 15,
+            "region_id": "review_region_review_box_21",
+            "label": "Menu",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 16,
+            "region_id": "review_region_review_box_22",
+            "label": "三",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 2,
+            "region_id": "review_region_review_box_5",
+            "label": "Search",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 19,
+            "region_id": "review_region_review_box_29",
+            "label": "主页",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 3,
+            "region_id": "review_region_review_box_6",
+            "label": "Home",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 20,
+            "region_id": "review_region_review_box_30",
+            "label": "专属精选推荐",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 4,
+            "region_id": "review_region_review_box_7",
+            "label": "88 / Library",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 21,
+            "region_id": "review_region_review_box_31",
+            "label": "Music",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 22,
+            "region_id": "review_region_review_box_32",
+            "label": "DAICHI MIURA",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 23,
+            "region_id": "review_region_review_box_33",
+            "label": "Music",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 24,
+            "region_id": "review_region_review_box_34",
+            "label": "Music",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 5,
+            "region_id": "review_region_review_box_8",
+            "label": "(-)",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 6,
+            "region_id": "review_region_review_box_9",
+            "label": "Playlists",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 7,
+            "region_id": "review_region_review_box_10",
+            "label": "Radio / 手",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "regions": [
+          {
+            "region_no": 9,
+            "region_id": "review_region_review_box_13",
+            "source_item_id": "review_box_13",
+            "label": "top/header control cluster 1",
+            "role": "topbar_control_cluster",
+            "bbox": {
+              "x": 158,
+              "y": 0,
+              "w": 88,
+              "h": 63
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              0,
+              158
+            ],
+            "description": "top/header control cluster 1 · role=topbar_control_cluster · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 10,
+            "region_id": "review_region_review_box_15",
+            "source_item_id": "review_box_15",
+            "label": "top/header control cluster 3",
+            "role": "topbar_control_cluster",
+            "bbox": {
+              "x": 917,
+              "y": 0,
+              "w": 52,
+              "h": 63
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              0,
+              917
+            ],
+            "description": "top/header control cluster 3 · role=topbar_control_cluster · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 17,
+            "region_id": "review_region_review_box_23",
+            "source_item_id": "review_box_23",
+            "label": "口",
+            "role": "text",
+            "bbox": {
+              "x": 1054,
+              "y": 0,
+              "w": 48,
+              "h": 34
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              0,
+              1054
+            ],
+            "description": "口 · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 18,
+            "region_id": "review_region_review_box_24",
+            "source_item_id": "review_box_24",
+            "label": "×",
+            "role": "text",
+            "bbox": {
+              "x": 1100,
+              "y": 0,
+              "w": 48,
+              "h": 35
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              0,
+              1100
+            ],
+            "description": "× · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 1,
+            "region_id": "review_region_review_box_4",
+            "source_item_id": "review_box_4",
+            "label": "日",
+            "role": "nav_item",
+            "bbox": {
+              "x": 0,
+              "y": 7,
+              "w": 92,
+              "h": 31
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              7,
+              0
+            ],
+            "description": "日 · role=nav_item · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 11,
+            "region_id": "review_region_review_box_17",
+            "source_item_id": "review_box_17",
+            "label": "Play/Pause",
+            "role": "button",
+            "bbox": {
+              "x": 158,
+              "y": 12,
+              "w": 48,
+              "h": 40
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              12,
+              158
+            ],
+            "description": "Play/Pause · role=button · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 12,
+            "region_id": "review_region_review_box_18",
+            "source_item_id": "review_box_18",
+            "label": "Next",
+            "role": "button",
+            "bbox": {
+              "x": 198,
+              "y": 12,
+              "w": 48,
+              "h": 40
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              12,
+              198
+            ],
+            "description": "Next · role=button · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 13,
+            "region_id": "review_region_review_box_19",
+            "source_item_id": "review_box_19",
+            "label": "Volume",
+            "role": "icon_button",
+            "bbox": {
+              "x": 708,
+              "y": 12,
+              "w": 48,
+              "h": 40
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              12,
+              708
+            ],
+            "description": "Volume · role=icon_button · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 14,
+            "region_id": "review_region_review_box_20",
+            "source_item_id": "review_box_20",
+            "label": "Chat",
+            "role": "icon_button",
+            "bbox": {
+              "x": 748,
+              "y": 12,
+              "w": 48,
+              "h": 40
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              12,
+              748
+            ],
+            "description": "Chat · role=icon_button · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 15,
+            "region_id": "review_region_review_box_21",
+            "source_item_id": "review_box_21",
+            "label": "Menu",
+            "role": "icon_button",
+            "bbox": {
+              "x": 788,
+              "y": 12,
+              "w": 48,
+              "h": 40
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              12,
+              788
+            ],
+            "description": "Menu · role=icon_button · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 16,
+            "region_id": "review_region_review_box_22",
+            "source_item_id": "review_box_22",
+            "label": "三",
+            "role": "text",
+            "bbox": {
+              "x": 917,
+              "y": 16,
+              "w": 52,
+              "h": 39
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              16,
+              917
+            ],
+            "description": "三 · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 2,
+            "region_id": "review_region_review_box_5",
+            "source_item_id": "review_box_5",
+            "label": "Search",
+            "role": "nav_item",
+            "bbox": {
+              "x": 0,
+              "y": 91,
+              "w": 92,
+              "h": 32
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              91,
+              0
+            ],
+            "description": "Search · role=nav_item · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 19,
+            "region_id": "review_region_review_box_29",
+            "source_item_id": "review_box_29",
+            "label": "主页",
+            "role": "text",
+            "bbox": {
+              "x": 94,
+              "y": 98,
+              "w": 67,
+              "h": 38
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              98,
+              94
+            ],
+            "description": "主页 · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 3,
+            "region_id": "review_region_review_box_6",
+            "source_item_id": "review_box_6",
+            "label": "Home",
+            "role": "nav_item",
+            "bbox": {
+              "x": 0,
+              "y": 141,
+              "w": 92,
+              "h": 32
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              141,
+              0
+            ],
+            "description": "Home · role=nav_item · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 20,
+            "region_id": "review_region_review_box_30",
+            "source_item_id": "review_box_30",
+            "label": "专属精选推荐",
+            "role": "text",
+            "bbox": {
+              "x": 95,
+              "y": 162,
+              "w": 96,
+              "h": 20
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              162,
+              95
+            ],
+            "description": "专属精选推荐 · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 4,
+            "region_id": "review_region_review_box_7",
+            "source_item_id": "review_box_7",
+            "label": "88 / Library",
+            "role": "nav_item",
+            "bbox": {
+              "x": 0,
+              "y": 181,
+              "w": 92,
+              "h": 36
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              181,
+              0
+            ],
+            "description": "88 / Library · role=nav_item · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 21,
+            "region_id": "review_region_review_box_31",
+            "source_item_id": "review_box_31",
+            "label": "Music",
+            "role": "media_card",
+            "bbox": {
+              "x": 97,
+              "y": 197,
+              "w": 237,
+              "h": 316
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              197,
+              97
+            ],
+            "description": "Music · role=media_card · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 22,
+            "region_id": "review_region_review_box_32",
+            "source_item_id": "review_box_32",
+            "label": "DAICHI MIURA",
+            "role": "media_card",
+            "bbox": {
+              "x": 354,
+              "y": 197,
+              "w": 237,
+              "h": 316
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              197,
+              354
+            ],
+            "description": "DAICHI MIURA · role=media_card · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 23,
+            "region_id": "review_region_review_box_33",
+            "source_item_id": "review_box_33",
+            "label": "Music",
+            "role": "media_card",
+            "bbox": {
+              "x": 606,
+              "y": 197,
+              "w": 242,
+              "h": 323
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              197,
+              606
+            ],
+            "description": "Music · role=media_card · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 24,
+            "region_id": "review_region_review_box_34",
+            "source_item_id": "review_box_34",
+            "label": "Music",
+            "role": "media_card",
+            "bbox": {
+              "x": 864,
+              "y": 197,
+              "w": 241,
+              "h": 316
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              197,
+              864
+            ],
+            "description": "Music · role=media_card · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 5,
+            "region_id": "review_region_review_box_8",
+            "source_item_id": "review_box_8",
+            "label": "(-)",
+            "role": "nav_item",
+            "bbox": {
+              "x": 0,
+              "y": 216,
+              "w": 92,
+              "h": 33
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              216,
+              0
+            ],
+            "description": "(-) · role=nav_item · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 6,
+            "region_id": "review_region_review_box_9",
+            "source_item_id": "review_box_9",
+            "label": "Playlists",
+            "role": "nav_item",
+            "bbox": {
+              "x": 0,
+              "y": 241,
+              "w": 92,
+              "h": 32
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              241,
+              0
+            ],
+            "description": "Playlists · role=nav_item · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 7,
+            "region_id": "review_region_review_box_10",
+            "source_item_id": "review_box_10",
+            "label": "Radio / 手",
+            "role": "nav_item",
+            "bbox": {
+              "x": 0,
+              "y": 291,
+              "w": 92,
+              "h": 36
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              291,
+              0
+            ],
+            "description": "Radio / 手 · role=nav_item · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "section_id": "middle_controls",
+        "label": "Middle Controls",
+        "bbox": {
+          "x": 22,
+          "y": 347,
+          "w": 1085,
+          "h": 646
+        },
+        "region_count": 9,
+        "region_numbers": [
+          8,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32
+        ],
+        "possible_operations": [
+          "read_only"
+        ],
+        "operation_summary": {
+          "kind_counts": {
+            "read_only": 9
+          },
+          "readiness_counts": {
+            "review_required": 9
+          }
+        },
+        "operation_links": [
+          {
+            "region_no": 8,
+            "region_id": "review_region_review_box_11",
+            "label": "sidebar background / empty review region",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 25,
+            "region_id": "review_region_review_box_35",
+            "label": "最近播放",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 26,
+            "region_id": "review_region_review_box_36",
+            "label": "Music",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 27,
+            "region_id": "review_region_review_box_37",
+            "label": "喜爱歌曲",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 28,
+            "region_id": "review_region_review_box_38",
+            "label": "Death Stranding 2(Songs",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 29,
+            "region_id": "review_region_review_box_39",
+            "label": "Music",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 30,
+            "region_id": "review_region_review_box_40",
+            "label": "OCTOPATH",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 31,
+            "region_id": "review_region_review_box_41",
+            "label": "电子游戏音乐",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 32,
+            "region_id": "review_region_review_box_42",
+            "label": "EXPEDITION",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "regions": [
+          {
+            "region_no": 8,
+            "region_id": "review_region_review_box_11",
+            "source_item_id": "review_box_11",
+            "label": "sidebar background / empty review region",
+            "role": "sidebar_review_region",
+            "bbox": {
+              "x": 22,
+              "y": 347,
+              "w": 20,
+              "h": 70
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              347,
+              22
+            ],
+            "description": "sidebar background / empty review region · role=sidebar_review_region · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 25,
+            "region_id": "review_region_review_box_35",
+            "source_item_id": "review_box_35",
+            "label": "最近播放",
+            "role": "text",
+            "bbox": {
+              "x": 94,
+              "y": 579,
+              "w": 67,
+              "h": 21
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              579,
+              94
+            ],
+            "description": "最近播放 · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 26,
+            "region_id": "review_region_review_box_36",
+            "source_item_id": "review_box_36",
+            "label": "Music",
+            "role": "media_card",
+            "bbox": {
+              "x": 93,
+              "y": 614,
+              "w": 190,
+              "h": 227
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              614,
+              93
+            ],
+            "description": "Music · role=media_card · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 27,
+            "region_id": "review_region_review_box_37",
+            "source_item_id": "review_box_37",
+            "label": "喜爱歌曲",
+            "role": "media_card",
+            "bbox": {
+              "x": 301,
+              "y": 614,
+              "w": 186,
+              "h": 300
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              614,
+              301
+            ],
+            "description": "喜爱歌曲 · role=media_card · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 28,
+            "region_id": "review_region_review_box_38",
+            "source_item_id": "review_box_38",
+            "label": "Death Stranding 2(Songs",
+            "role": "media_card",
+            "bbox": {
+              "x": 693,
+              "y": 614,
+              "w": 208,
+              "h": 242
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              614,
+              693
+            ],
+            "description": "Death Stranding 2(Songs · role=media_card · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 29,
+            "region_id": "review_region_review_box_39",
+            "source_item_id": "review_box_39",
+            "label": "Music",
+            "role": "media_card",
+            "bbox": {
+              "x": 919,
+              "y": 614,
+              "w": 188,
+              "h": 227
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              614,
+              919
+            ],
+            "description": "Music · role=media_card · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 30,
+            "region_id": "review_region_review_box_40",
+            "source_item_id": "review_box_40",
+            "label": "OCTOPATH",
+            "role": "media_card",
+            "bbox": {
+              "x": 507,
+              "y": 628,
+              "w": 183,
+              "h": 228
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              628,
+              507
+            ],
+            "description": "OCTOPATH · role=media_card · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 31,
+            "region_id": "review_region_review_box_41",
+            "source_item_id": "review_box_41",
+            "label": "电子游戏音乐",
+            "role": "text",
+            "bbox": {
+              "x": 94,
+              "y": 917,
+              "w": 96,
+              "h": 20
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              917,
+              94
+            ],
+            "description": "电子游戏音乐 · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 32,
+            "region_id": "review_region_review_box_42",
+            "source_item_id": "review_box_42",
+            "label": "EXPEDITION",
+            "role": "text",
+            "bbox": {
+              "x": 775,
+              "y": 973,
+              "w": 120,
+              "h": 20
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              973,
+              775
+            ],
+            "description": "EXPEDITION · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      }
+    ],
+    "display_groups": [],
+    "regions": [
+      {
+        "region_no": 1,
+        "region_id": "review_region_review_box_4",
+        "source_item_id": "review_box_4",
+        "label": "日",
+        "role": "nav_item",
+        "bbox": {
+          "x": 0,
+          "y": 7,
+          "w": 92,
+          "h": 31
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          7,
+          0
+        ],
+        "description": "日 · role=nav_item · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 2,
+        "region_id": "review_region_review_box_5",
+        "source_item_id": "review_box_5",
+        "label": "Search",
+        "role": "nav_item",
+        "bbox": {
+          "x": 0,
+          "y": 91,
+          "w": 92,
+          "h": 32
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          91,
+          0
+        ],
+        "description": "Search · role=nav_item · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 3,
+        "region_id": "review_region_review_box_6",
+        "source_item_id": "review_box_6",
+        "label": "Home",
+        "role": "nav_item",
+        "bbox": {
+          "x": 0,
+          "y": 141,
+          "w": 92,
+          "h": 32
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          141,
+          0
+        ],
+        "description": "Home · role=nav_item · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 4,
+        "region_id": "review_region_review_box_7",
+        "source_item_id": "review_box_7",
+        "label": "88 / Library",
+        "role": "nav_item",
+        "bbox": {
+          "x": 0,
+          "y": 181,
+          "w": 92,
+          "h": 36
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          181,
+          0
+        ],
+        "description": "88 / Library · role=nav_item · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 5,
+        "region_id": "review_region_review_box_8",
+        "source_item_id": "review_box_8",
+        "label": "(-)",
+        "role": "nav_item",
+        "bbox": {
+          "x": 0,
+          "y": 216,
+          "w": 92,
+          "h": 33
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          216,
+          0
+        ],
+        "description": "(-) · role=nav_item · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 6,
+        "region_id": "review_region_review_box_9",
+        "source_item_id": "review_box_9",
+        "label": "Playlists",
+        "role": "nav_item",
+        "bbox": {
+          "x": 0,
+          "y": 241,
+          "w": 92,
+          "h": 32
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          241,
+          0
+        ],
+        "description": "Playlists · role=nav_item · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 7,
+        "region_id": "review_region_review_box_10",
+        "source_item_id": "review_box_10",
+        "label": "Radio / 手",
+        "role": "nav_item",
+        "bbox": {
+          "x": 0,
+          "y": 291,
+          "w": 92,
+          "h": 36
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          291,
+          0
+        ],
+        "description": "Radio / 手 · role=nav_item · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 8,
+        "region_id": "review_region_review_box_11",
+        "source_item_id": "review_box_11",
+        "label": "sidebar background / empty review region",
+        "role": "sidebar_review_region",
+        "bbox": {
+          "x": 22,
+          "y": 347,
+          "w": 20,
+          "h": 70
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          347,
+          22
+        ],
+        "description": "sidebar background / empty review region · role=sidebar_review_region · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 9,
+        "region_id": "review_region_review_box_13",
+        "source_item_id": "review_box_13",
+        "label": "top/header control cluster 1",
+        "role": "topbar_control_cluster",
+        "bbox": {
+          "x": 158,
+          "y": 0,
+          "w": 88,
+          "h": 63
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          0,
+          158
+        ],
+        "description": "top/header control cluster 1 · role=topbar_control_cluster · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 10,
+        "region_id": "review_region_review_box_15",
+        "source_item_id": "review_box_15",
+        "label": "top/header control cluster 3",
+        "role": "topbar_control_cluster",
+        "bbox": {
+          "x": 917,
+          "y": 0,
+          "w": 52,
+          "h": 63
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          0,
+          917
+        ],
+        "description": "top/header control cluster 3 · role=topbar_control_cluster · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 11,
+        "region_id": "review_region_review_box_17",
+        "source_item_id": "review_box_17",
+        "label": "Play/Pause",
+        "role": "button",
+        "bbox": {
+          "x": 158,
+          "y": 12,
+          "w": 48,
+          "h": 40
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          12,
+          158
+        ],
+        "description": "Play/Pause · role=button · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 12,
+        "region_id": "review_region_review_box_18",
+        "source_item_id": "review_box_18",
+        "label": "Next",
+        "role": "button",
+        "bbox": {
+          "x": 198,
+          "y": 12,
+          "w": 48,
+          "h": 40
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          12,
+          198
+        ],
+        "description": "Next · role=button · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 13,
+        "region_id": "review_region_review_box_19",
+        "source_item_id": "review_box_19",
+        "label": "Volume",
+        "role": "icon_button",
+        "bbox": {
+          "x": 708,
+          "y": 12,
+          "w": 48,
+          "h": 40
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          12,
+          708
+        ],
+        "description": "Volume · role=icon_button · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 14,
+        "region_id": "review_region_review_box_20",
+        "source_item_id": "review_box_20",
+        "label": "Chat",
+        "role": "icon_button",
+        "bbox": {
+          "x": 748,
+          "y": 12,
+          "w": 48,
+          "h": 40
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          12,
+          748
+        ],
+        "description": "Chat · role=icon_button · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 15,
+        "region_id": "review_region_review_box_21",
+        "source_item_id": "review_box_21",
+        "label": "Menu",
+        "role": "icon_button",
+        "bbox": {
+          "x": 788,
+          "y": 12,
+          "w": 48,
+          "h": 40
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          12,
+          788
+        ],
+        "description": "Menu · role=icon_button · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 16,
+        "region_id": "review_region_review_box_22",
+        "source_item_id": "review_box_22",
+        "label": "三",
+        "role": "text",
+        "bbox": {
+          "x": 917,
+          "y": 16,
+          "w": 52,
+          "h": 39
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          16,
+          917
+        ],
+        "description": "三 · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 17,
+        "region_id": "review_region_review_box_23",
+        "source_item_id": "review_box_23",
+        "label": "口",
+        "role": "text",
+        "bbox": {
+          "x": 1054,
+          "y": 0,
+          "w": 48,
+          "h": 34
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          0,
+          1054
+        ],
+        "description": "口 · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 18,
+        "region_id": "review_region_review_box_24",
+        "source_item_id": "review_box_24",
+        "label": "×",
+        "role": "text",
+        "bbox": {
+          "x": 1100,
+          "y": 0,
+          "w": 48,
+          "h": 35
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          0,
+          1100
+        ],
+        "description": "× · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 19,
+        "region_id": "review_region_review_box_29",
+        "source_item_id": "review_box_29",
+        "label": "主页",
+        "role": "text",
+        "bbox": {
+          "x": 94,
+          "y": 98,
+          "w": 67,
+          "h": 38
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          98,
+          94
+        ],
+        "description": "主页 · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 20,
+        "region_id": "review_region_review_box_30",
+        "source_item_id": "review_box_30",
+        "label": "专属精选推荐",
+        "role": "text",
+        "bbox": {
+          "x": 95,
+          "y": 162,
+          "w": 96,
+          "h": 20
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          162,
+          95
+        ],
+        "description": "专属精选推荐 · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 21,
+        "region_id": "review_region_review_box_31",
+        "source_item_id": "review_box_31",
+        "label": "Music",
+        "role": "media_card",
+        "bbox": {
+          "x": 97,
+          "y": 197,
+          "w": 237,
+          "h": 316
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          197,
+          97
+        ],
+        "description": "Music · role=media_card · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 22,
+        "region_id": "review_region_review_box_32",
+        "source_item_id": "review_box_32",
+        "label": "DAICHI MIURA",
+        "role": "media_card",
+        "bbox": {
+          "x": 354,
+          "y": 197,
+          "w": 237,
+          "h": 316
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          197,
+          354
+        ],
+        "description": "DAICHI MIURA · role=media_card · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 23,
+        "region_id": "review_region_review_box_33",
+        "source_item_id": "review_box_33",
+        "label": "Music",
+        "role": "media_card",
+        "bbox": {
+          "x": 606,
+          "y": 197,
+          "w": 242,
+          "h": 323
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          197,
+          606
+        ],
+        "description": "Music · role=media_card · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 24,
+        "region_id": "review_region_review_box_34",
+        "source_item_id": "review_box_34",
+        "label": "Music",
+        "role": "media_card",
+        "bbox": {
+          "x": 864,
+          "y": 197,
+          "w": 241,
+          "h": 316
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          197,
+          864
+        ],
+        "description": "Music · role=media_card · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 25,
+        "region_id": "review_region_review_box_35",
+        "source_item_id": "review_box_35",
+        "label": "最近播放",
+        "role": "text",
+        "bbox": {
+          "x": 94,
+          "y": 579,
+          "w": 67,
+          "h": 21
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          579,
+          94
+        ],
+        "description": "最近播放 · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 26,
+        "region_id": "review_region_review_box_36",
+        "source_item_id": "review_box_36",
+        "label": "Music",
+        "role": "media_card",
+        "bbox": {
+          "x": 93,
+          "y": 614,
+          "w": 190,
+          "h": 227
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          614,
+          93
+        ],
+        "description": "Music · role=media_card · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 27,
+        "region_id": "review_region_review_box_37",
+        "source_item_id": "review_box_37",
+        "label": "喜爱歌曲",
+        "role": "media_card",
+        "bbox": {
+          "x": 301,
+          "y": 614,
+          "w": 186,
+          "h": 300
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          614,
+          301
+        ],
+        "description": "喜爱歌曲 · role=media_card · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 28,
+        "region_id": "review_region_review_box_38",
+        "source_item_id": "review_box_38",
+        "label": "Death Stranding 2(Songs",
+        "role": "media_card",
+        "bbox": {
+          "x": 693,
+          "y": 614,
+          "w": 208,
+          "h": 242
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          614,
+          693
+        ],
+        "description": "Death Stranding 2(Songs · role=media_card · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 29,
+        "region_id": "review_region_review_box_39",
+        "source_item_id": "review_box_39",
+        "label": "Music",
+        "role": "media_card",
+        "bbox": {
+          "x": 919,
+          "y": 614,
+          "w": 188,
+          "h": 227
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          614,
+          919
+        ],
+        "description": "Music · role=media_card · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 30,
+        "region_id": "review_region_review_box_40",
+        "source_item_id": "review_box_40",
+        "label": "OCTOPATH",
+        "role": "media_card",
+        "bbox": {
+          "x": 507,
+          "y": 628,
+          "w": 183,
+          "h": 228
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          628,
+          507
+        ],
+        "description": "OCTOPATH · role=media_card · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 31,
+        "region_id": "review_region_review_box_41",
+        "source_item_id": "review_box_41",
+        "label": "电子游戏音乐",
+        "role": "text",
+        "bbox": {
+          "x": 94,
+          "y": 917,
+          "w": 96,
+          "h": 20
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          917,
+          94
+        ],
+        "description": "电子游戏音乐 · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 32,
+        "region_id": "review_region_review_box_42",
+        "source_item_id": "review_box_42",
+        "label": "EXPEDITION",
+        "role": "text",
+        "bbox": {
+          "x": 775,
+          "y": 973,
+          "w": 120,
+          "h": 20
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          973,
+          775
+        ],
+        "description": "EXPEDITION · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      }
+    ]
+  },
+  "safety": {
+    "display_only": true,
+    "model_started": false,
+    "live_clicks": 0,
+    "live_fills": 0,
+    "live_submits": 0,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false,
+    "runtime_pathgraph_promotion": false
+  },
+  "display_only": true,
+  "execute_binding_enabled": false,
+  "artifact_is_authorization": false,
+  "not_accuracy": true,
+  "not_e2e_success": true,
+  "interpretation": "Template-like page detail candidate generated from model-produced learning artifacts and existing calibration evidence. It is arranged by source bbox layout for demo/review only; it does not start models, click, fill, submit, authorize Execute, or promote Runtime PathGraph.",
+  "report_path": "D:\\agent-gui-runtime\\artifacts\\learning-runs\\panel_20260709-234743-729_applemusic\\learn_page_detail_candidate.json"
+}

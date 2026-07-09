@@ -78,6 +78,50 @@
       "path": "artifacts/seek/visual_assets_seek_mvp_20260617.json"
     }
   ],
+  "learned_patterns": [
+    {
+      "contract_version": "learning_pattern_ref_v1",
+      "pattern_id": "list_detail_page",
+      "path": "artifacts/learning_patterns/list_detail_page_template_v1.json",
+      "role": "SEEK search results and right-detail pane learning pattern.",
+      "authorization": "guidance_only"
+    },
+    {
+      "contract_version": "learning_pattern_ref_v1",
+      "pattern_id": "long_detail_reading",
+      "path": "artifacts/learning_patterns/long_detail_reading_template_v1.json",
+      "role": "SEEK full JD reading and latest detail snapshot pattern.",
+      "authorization": "guidance_only"
+    },
+    {
+      "contract_version": "learning_pattern_ref_v1",
+      "pattern_id": "agent_full_content_review",
+      "path": "artifacts/learning_patterns/agent_full_content_review_template_v1.json",
+      "role": "Full job detail text must be reviewed by Agent before Apply Entry.",
+      "authorization": "decision_support_only"
+    },
+    {
+      "contract_version": "learning_pattern_ref_v1",
+      "pattern_id": "entry_boundary",
+      "path": "artifacts/learning_patterns/entry_boundary_template_v1.json",
+      "role": "Apply and Quick Apply open an application flow; they are not final submit.",
+      "authorization": "opens_flow_only"
+    },
+    {
+      "contract_version": "learning_pattern_ref_v1",
+      "pattern_id": "multi_step_form",
+      "path": "artifacts/learning_patterns/multi_step_form_template_v1.json",
+      "role": "Station-internal SEEK application form up to Review and submit.",
+      "authorization": "safe_fill_only"
+    },
+    {
+      "contract_version": "learning_pattern_ref_v1",
+      "pattern_id": "danger_zone_final_submit",
+      "path": "artifacts/learning_patterns/danger_zone_final_submit_template_v1.json",
+      "role": "Submit application and similar destructive/final actions are blocked by default.",
+      "authorization": "blocked_by_default"
+    }
+  ],
   "policy": {
     "workflow_first_required": false,
     "unknown_interface_policy": "agentic_loop_observe_decide_gate_operate_trace",
@@ -91,6 +135,7 @@
   },
   "notes": [
     "SEEK is a software/app profile and learning sample, not the root architecture.",
+    "SEEK is now a source profile for reusable learning patterns, not a monolithic learning template.",
     "PathGraph assets are concrete learned workflows. They guide operation only after current observation and Gate validation.",
     "The 2026-06-29 job-screening correction is captured here: full content goes to Agent; local snippets do not decide suitability."
   ]

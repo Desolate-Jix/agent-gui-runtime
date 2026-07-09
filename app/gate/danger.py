@@ -6,13 +6,18 @@ from typing import Any
 
 FINAL_SUBMIT_SCOPE_CONTRACT = "scoped_final_submit_guard_v1"
 FINAL_SUBMIT_TERMS = {
+    "submit",
     "submit application",
     "submit your application",
     "send application",
     "send your application",
+    "complete",
     "complete application",
     "complete your application",
+    "confirm",
     "confirm application",
+    "apply now",
+    "review and submit",
     "finish application",
     "提交申请",
     "发送申请",
@@ -25,6 +30,7 @@ def scoped_final_submit_visible_blocker(
     *,
     active_container: dict[str, Any] | None = None,
     active_flow_started: bool = False,
+    surface_context: str | None = None,
 ) -> dict[str, Any]:
     scoped_items = [
         item
@@ -38,7 +44,15 @@ def scoped_final_submit_visible_blocker(
         item_terms = _final_submit_terms_in_text(text)
         if not item_terms:
             continue
+        if "review and submit" in item_terms and not _review_and_submit_is_final_submit_context(item, surface_context):
+            item_terms = [term for term in item_terms if term != "review and submit"]
+            if not item_terms:
+                continue
+        if _is_apply_entry_context(surface_context) and _clean_text(text).casefold() == "apply now":
+            continue
         if _is_search_submit(item, text):
+            continue
+        if _is_generic_generated_submit_button(item, text):
             continue
         if _is_negative_or_instructional_submit_text(text):
             continue
@@ -60,6 +74,7 @@ def scoped_final_submit_visible_blocker(
         "enabled": True,
         "active_flow_started": bool(active_flow_started),
         "active_container": active_container or None,
+        "surface_context": surface_context,
         "blocked": bool(matched_items),
         "matched_terms": sorted(set(matched_terms)),
         "matched_items": matched_items[:20],
@@ -86,16 +101,43 @@ def _item_in_active_scope(
 def _final_submit_terms_in_text(text: str) -> list[str]:
     key = text.casefold()
     matched: list[str] = []
-    for term in FINAL_SUBMIT_TERMS:
+    for term in sorted(FINAL_SUBMIT_TERMS, key=len, reverse=True):
         pattern = r"(?<![a-z0-9])" + re.escape(term.casefold()) + r"(?![a-z0-9])"
         if re.search(pattern, key):
             matched.append(term)
-    return matched
+    filtered: list[str] = []
+    for term in matched:
+        lowered = term.casefold()
+        if any(lowered != other.casefold() and lowered in other.casefold() for other in matched):
+            continue
+        filtered.append(term)
+    return filtered
 
 
 def _is_search_submit(item: dict[str, Any], text: str) -> bool:
     key = " ".join([str(text or ""), str(item.get("id") or ""), str(item.get("role") or "")]).casefold()
     return "submit search" in key or "search" in key and _clean_text(text).casefold() in {"submit", "submit search"}
+
+
+def _is_generic_generated_submit_button(item: dict[str, Any], text: str) -> bool:
+    key = " ".join([str(text or ""), str(item.get("id") or "")]).casefold()
+    return _clean_text(text).casefold() == "submit button" and "submit-button" in key
+
+
+def _is_apply_entry_context(surface_context: str | None) -> bool:
+    key = str(surface_context or "").casefold()
+    return key in {"apply_entry", "application_entry", "job_detail_apply_entry", "open_apply_flow"}
+
+
+def _review_and_submit_is_final_submit_context(item: dict[str, Any], surface_context: str | None) -> bool:
+    context = str(surface_context or "").casefold()
+    if context in {"final_review_submit", "final_submit_visible", "final_review_submit_visible"}:
+        return True
+    semantic = " ".join(
+        str(item.get(key) or "")
+        for key in ("id", "semantic_action", "danger_level", "action_type", "taxonomy")
+    ).casefold()
+    return "final_submit" in semantic or "final-submit" in semantic
 
 
 def _is_negative_or_instructional_submit_text(text: str) -> bool:

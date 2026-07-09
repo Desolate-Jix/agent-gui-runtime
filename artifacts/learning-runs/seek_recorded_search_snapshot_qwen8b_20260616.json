@@ -1,0 +1,39 @@
+{
+  "contract_version": "learning_site_snapshot_v1",
+  "source": "recorded_qwen8b_seek_jobs_screenshot_20260616",
+  "source_report_path": "artifacts/accuracy-checks/understanding_model_benchmark_qwen8b.json",
+  "source_image_path": "artifacts/screenshots/software-engineer-jobs-in-all-auckland-job-vacancies-jun-2026-seek-microsoft-edge__recognition-plan-execution__edge__full-window__20260616-160955-988635.png",
+  "url": "https://www.seek.co.nz/software-engineer-jobs/in-All-Auckland",
+  "title": "Software Engineer Jobs in All Auckland - SEEK",
+  "visible_text": "Software Engineer Jobs in All Auckland Job search software engineer All Auckland SEEK 323 jobs New to you 99+ Strong applicant jobs Software Engineers (All levels!) Halter Auckland CBD, Auckland Applications Software Engineer Temperzone Manukau, Auckland Save this search",
+  "action_labels": [
+    "SEEK",
+    "Save this search",
+    "Software Engineers (All levels!)",
+    "Applications Software Engineer"
+  ],
+  "validation_cases": [
+    {
+      "case_id": "recorded_seek_save_search",
+      "observed_label": "Save this search",
+      "expected_semantic_action": "save_or_bookmark",
+      "expected_gate_outcome": "available"
+    },
+    {
+      "case_id": "recorded_seek_open_job_card_1",
+      "observed_label": "Software Engineers (All levels!)",
+      "observed_role": "card",
+      "target_entity": "job_card",
+      "expected_semantic_action": "open_detail",
+      "expected_gate_outcome": "available"
+    },
+    {
+      "case_id": "recorded_seek_open_job_card_2",
+      "observed_label": "Applications Software Engineer",
+      "observed_role": "card",
+      "target_entity": "job_card",
+      "expected_semantic_action": "open_detail",
+      "expected_gate_outcome": "available"
+    }
+  ]
+}

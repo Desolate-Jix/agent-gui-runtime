@@ -1,0 +1,134 @@
+{
+  "contract_version": "runtime_path_graph_v1",
+  "graph_id": "artifacts_learning-runs_panel_20260704-044232-337_python_org_trial_result.json:model_loaded:3bdbf0d7402b",
+  "app_id": "artifacts_learning-runs_panel_20260704-044232-337_python_org_trial_result.json",
+  "page_type": "python_homepage",
+  "coordinate_policy": {
+    "coordinate_space": "window_screenshot",
+    "requires_current_capture": true,
+    "source_bbox_is_learning_evidence_only": true
+  },
+  "loader": {
+    "contract_version": "model_learning_artifact_loader_v1",
+    "source_trial_path": "artifacts/learning-draft-review/trial_result_cee0c2ad5a/reviewed_template_candidate.json",
+    "source_sha256": "3bdbf0d7402bfaed7adac20648e1ea41cfe2cbf9b03b38a0492ffe1c8266caf4",
+    "source_attempt_index": null,
+    "source_artifact_readonly": true,
+    "posthoc_optimization_allowed": false,
+    "candidate_mode": true
+  },
+  "source": {
+    "trial_path": "artifacts/learning-draft-review/trial_result_cee0c2ad5a/reviewed_template_candidate.json",
+    "reviewed_candidate_path": "artifacts/learning-draft-review/trial_result_cee0c2ad5a/reviewed_template_candidate.json",
+    "source_trial_path": "artifacts/learning-runs/panel_20260704-044232-337_python_org/trial_result.json",
+    "sha256": "3bdbf0d7402bfaed7adac20648e1ea41cfe2cbf9b03b38a0492ffe1c8266caf4",
+    "attempt_index": null,
+    "readonly": true,
+    "posthoc_optimization_allowed": false,
+    "candidate_mode": true
+  },
+  "states": [
+    {
+      "state_id": "python_homepage",
+      "label": "python_homepage",
+      "page_type": "python_homepage",
+      "region_refs": [
+        "region_1"
+      ]
+    }
+  ],
+  "regions": [
+    {
+      "region_id": "region_1",
+      "label": "Search input",
+      "role": "input",
+      "bbox": {
+        "x": 800,
+        "y": 120,
+        "w": 240,
+        "h": 36
+      },
+      "source_item_id": "search_input",
+      "grounding_status": "validated",
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "region_type": "input",
+      "source_artifact_readonly": true
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "model:transition:action_1",
+      "from_state_id": "python_homepage",
+      "to_state_id": "python_homepage",
+      "action_template_id": "action_1",
+      "default_available": true,
+      "verification_refs": []
+    }
+  ],
+  "action_templates": [
+    {
+      "action_template_id": "action_1",
+      "label": "Search input",
+      "target_entity": "region_1",
+      "target_region_id": "region_1",
+      "semantic_action": "fill_field",
+      "action_kind": "fill_field",
+      "low_level_action_type": "input",
+      "source_item_id": "search_input",
+      "bbox": {
+        "x": 800,
+        "y": 120,
+        "w": 240,
+        "h": 36
+      },
+      "click_point": {
+        "x": 920,
+        "y": 138
+      },
+      "requires_gate": true,
+      "candidate_freshness_required": true,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "verification_rule_ids": [
+        "target_region_still_visible",
+        "point_inside_validated_region",
+        "no_final_submit_surface"
+      ],
+      "action_type": "input",
+      "learned_skill_ref": "skill.input_text_into_field",
+      "input_target": {
+        "region_id": "region_1",
+        "role": "input",
+        "requires_current_validation": true
+      },
+      "input_policy": {
+        "requires_agent_text": true,
+        "clear_existing": true,
+        "submit_allowed": false,
+        "text_is_not_stored_by_menu": true
+      }
+    }
+  ],
+  "artifact_is_authorization": false,
+  "safety": {
+    "final_submit_allowed": false,
+    "final_submit_forbidden": true,
+    "real_action_requires_gate": true,
+    "observation_source_only": true,
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "candidate_only": true
+  },
+  "summary": {
+    "state_count": 1,
+    "region_count": 1,
+    "transition_count": 1,
+    "action_template_count": 1
+  },
+  "candidate_mode": true,
+  "candidate_contract_version": "runtime_path_graph_candidate_v1",
+  "execute_binding_enabled": false,
+  "final_submit_forbidden": true,
+  "real_action_requires_gate": true
+}

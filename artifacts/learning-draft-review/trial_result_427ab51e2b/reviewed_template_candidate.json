@@ -1,0 +1,207 @@
+{
+  "contract_version": "reviewed_template_candidate_v1",
+  "source": {
+    "source_path": "artifacts/learning-draft-freshness-demo/freshness_missing_file/trial_result.json",
+    "source_trial_path": "artifacts/learning-draft-freshness-demo/freshness_missing_file/trial_result.json",
+    "original_draft_path": "artifacts/learning-draft-freshness-demo/freshness_missing_file/trial_result.json",
+    "sha256": "427ab51e2b74be253bd96c54df70fd15a8cfa4545d16a34c6ddf8cd7273828d1",
+    "attempt_index": 0,
+    "readonly": true
+  },
+  "source_after_review": "mixed",
+  "counts_as_pure_model_generated": false,
+  "artifact_is_authorization": false,
+  "draft_only": false,
+  "reviewed_by_human": true,
+  "review_status": "approved_as_assisted_template",
+  "final_submit_forbidden": true,
+  "real_action_requires_gate": true,
+  "execute_binding_enabled": false,
+  "authorization_scope": "display_and_review_only",
+  "draft": {
+    "contract_version": "learning_template_draft_v1",
+    "screen_summary": "Freshness demo case: freshness_missing_file",
+    "state_guess": "demo_search_surface",
+    "states": [
+      {
+        "state_id": "s1",
+        "label": "Demo page",
+        "page_type": "search_page"
+      }
+    ],
+    "regions": [
+      {
+        "region_id": "r1",
+        "label": "Demo input",
+        "role": "text_input",
+        "bbox": {
+          "x": 12,
+          "y": 22,
+          "w": 96,
+          "h": 28
+        },
+        "click_point": {
+          "x": 60,
+          "y": 36
+        },
+        "human_review": {
+          "bbox_edited": true,
+          "bbox_edit_source": "human_review_full_image_inspector_v1",
+          "previous_bbox": {
+            "x": 8,
+            "y": 18,
+            "w": 100,
+            "h": 30
+          },
+          "previous_click_point": {
+            "x": 58,
+            "y": 33
+          },
+          "updated_bbox": {
+            "x": 12,
+            "y": 22,
+            "w": 96,
+            "h": 28
+          },
+          "updated_click_point": {
+            "x": 60,
+            "y": 36
+          }
+        }
+      }
+    ],
+    "action_templates": [
+      {
+        "action_template_id": "a1",
+        "label": "Type query",
+        "semantic_action": "fill_field",
+        "target_entity": "r1",
+        "bbox": {
+          "x": 14,
+          "y": 24,
+          "w": 82,
+          "h": 22
+        },
+        "click_point": {
+          "x": 55,
+          "y": 35
+        },
+        "human_review": {
+          "bbox_edited": true,
+          "bbox_edit_source": "human_review_full_image_inspector_v1",
+          "previous_bbox": {
+            "x": 10,
+            "y": 20,
+            "w": 80,
+            "h": 24
+          },
+          "previous_click_point": {
+            "x": 50,
+            "y": 32
+          },
+          "updated_bbox": {
+            "x": 14,
+            "y": 24,
+            "w": 82,
+            "h": 22
+          },
+          "updated_click_point": {
+            "x": 55,
+            "y": 35
+          }
+        }
+      }
+    ],
+    "blockers": [
+      {
+        "blocker_id": "b1",
+        "label": "Stop on final submit"
+      }
+    ],
+    "verification_rules": [
+      {
+        "rule_id": "v1",
+        "label": "Confirm edited target remains visible"
+      }
+    ],
+    "agent_decision_points": [],
+    "operation_skills": [],
+    "gate_contracts": [],
+    "learning_source": "offline_freshness_demo_fixture",
+    "page_details": {
+      "screen": {
+        "source_image_path": "artifacts/learning-draft-freshness-demo/missing_source.png",
+        "source_image_sha256": "09f9ac07145964ec26d72d0e3a974449bc62914cee5b19452dbf65e9aeebcf92"
+      }
+    },
+    "notes": [],
+    "safety": {
+      "observation_only": true,
+      "final_submit_blocked": true
+    }
+  },
+  "safety": {
+    "artifact_is_authorization": false,
+    "final_submit_allowed": false,
+    "final_submit_forbidden": true,
+    "real_action_requires_gate": true,
+    "execute_binding_enabled": false,
+    "authorization_scope": "display_and_review_only"
+  },
+  "audit": {
+    "source_trial_path": "artifacts/learning-draft-freshness-demo/freshness_missing_file/trial_result.json",
+    "original_draft_path": "artifacts/learning-draft-freshness-demo/freshness_missing_file/trial_result.json",
+    "reviewed_at": "2026-07-05T16:48:20.539874",
+    "changes_summary": [
+      "region_bbox:r1",
+      "action_bbox:a1",
+      "blockers:1",
+      "verification_rules:1"
+    ],
+    "manual_bbox_edit_summary": {
+      "contract_version": "manual_bbox_edit_summary_v1",
+      "edited_region_count": 1,
+      "edited_action_count": 1,
+      "edited_total": 2,
+      "point_inside_bbox_passed": 2,
+      "point_inside_bbox_failed": 0,
+      "invalid_geometry_count": 0,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false
+    },
+    "source_freshness_summary": {
+      "contract_version": "source_freshness_summary_v1",
+      "source_image_status": "missing_file",
+      "checksum_status": "not_verified",
+      "freshness_status": "warning",
+      "warning_count": 1,
+      "warnings": [
+        "source_image_file_missing"
+      ],
+      "edited_geometry_requires_review": true,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false
+    },
+    "precise_understanding_summary": {
+      "contract_version": "precise_understanding_summary_v1",
+      "state_count": 1,
+      "region_count": 1,
+      "bbox_region_count": 1,
+      "action_template_count": 1,
+      "action_click_point_count": 1,
+      "open_detail_transition_hint_count": 0,
+      "blocker_count": 1,
+      "verification_rule_count": 1,
+      "semantic_actions": [
+        "fill_field"
+      ],
+      "candidate_only": true,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "final_submit_forbidden": true,
+      "interpretation": "review-only precise understanding summary; not Execute authorization"
+    },
+    "review_status": "approved_as_assisted_template",
+    "authorization_scope": "display_and_review_only"
+  }
+}

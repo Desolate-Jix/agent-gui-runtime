@@ -1,0 +1,49 @@
+{
+  "contract_version": "recorded_parser_output_v1",
+  "provider": "omniparser_style_sample",
+  "source_type": "recorded_parser_output",
+  "recorded_output_origin": "omniparser_output_shape_fixture",
+  "actual_model_call_in_this_run": false,
+  "note": "OmniParser-style form surface with interactive text inputs and readonly helper text. This is recorded parser evidence, not a fresh OmniParser model call.",
+  "observe_bundle": {
+    "contract_version": "learn_observe_bundle_v1",
+    "screen_size": {
+      "width": 1200,
+      "height": 900
+    },
+    "sources": {
+      "omniparser": {
+        "parsed_content_list": [
+          {
+            "type": "textbox",
+            "content": "Email",
+            "bbox": [0.18, 0.24, 0.52, 0.30],
+            "interactivity": true,
+            "source": "box_yolo_content_yolo"
+          },
+          {
+            "type": "input",
+            "content": "Mobile phone",
+            "bbox": [0.18, 0.34, 0.52, 0.40],
+            "interactivity": true,
+            "source": "box_yolo_content_yolo"
+          },
+          {
+            "type": "textarea",
+            "content": "Cover letter",
+            "bbox": [0.18, 0.48, 0.72, 0.78],
+            "interactivity": true,
+            "source": "box_yolo_content_yolo"
+          },
+          {
+            "type": "text",
+            "content": "Your details are saved securely",
+            "bbox": [0.18, 0.82, 0.58, 0.86],
+            "interactivity": false,
+            "source": "text_ocr"
+          }
+        ]
+      }
+    }
+  }
+}

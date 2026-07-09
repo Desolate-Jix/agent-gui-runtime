@@ -12,6 +12,7 @@ from app.api.action import type_text as dispatch_type_text
 from app.core.runtime_artifacts import RuntimeTimer, write_trace
 from app.operation.path_graph import build_available_actions
 from app.operation.reading import build_read_region_batch_report
+from app.operation.runtime_context import build_operation_runtime_context, operation_trace_link
 from app.operation.step import build_execute_step_plan
 from app.operation.verification import build_ui_diff_verification
 from app.learn.path_graph_resolver import resolve_runtime_path_graph
@@ -32,11 +33,19 @@ from app.seek.form_inventory import build_seek_form_field_inventory
 
 
 router = APIRouter(prefix="/execute", tags=["execute"])
+ROOT_DIR = Path(__file__).resolve().parents[2]
 
 
 @router.post("/observe", response_model=APIResponse)
 def execute_observe(request: ExecuteObserveRequest) -> APIResponse:
     timer = RuntimeTimer()
+    operation_context = build_operation_runtime_context(
+        request=request,
+        skill_id="observe_screen",
+        semantic_action="observe_screen",
+        side_effect_class="read_only",
+        requires_gate=False,
+    )
     try:
         with timer.step("build_execute_observation", app_id=request.app_id):
             if str(request.app_id or "").casefold() in {"seek", "nz.seek.com", "seek.co.nz"}:
@@ -46,6 +55,8 @@ def execute_observe(request: ExecuteObserveRequest) -> APIResponse:
                 )
             else:
                 result = _generic_execute_observation(request)
+        result["operation_context"] = operation_context
+        result["operation_trace_link"] = operation_trace_link(operation_context, result_status="success")
         result["timings"] = timer.to_dict()
         trace_path = write_trace(
             category="execute",
@@ -74,6 +85,15 @@ def execute_observe(request: ExecuteObserveRequest) -> APIResponse:
 @router.post("/verify_diff", response_model=APIResponse)
 def verify_diff(request: ExecuteVerifyDiffRequest) -> APIResponse:
     timer = RuntimeTimer()
+    operation_context = build_operation_runtime_context(
+        request=request,
+        skill_id="verify_change",
+        semantic_action="verify_change",
+        side_effect_class="read_only",
+        requires_gate=False,
+        capture_id=f"{request.before_image}|{request.after_image}",
+        evidence_refs=[request.before_image, request.after_image],
+    )
     try:
         with timer.step("build_ui_diff_verification", expected_change=request.expected_change):
             result = build_ui_diff_verification(
@@ -82,6 +102,8 @@ def verify_diff(request: ExecuteVerifyDiffRequest) -> APIResponse:
                 expected_change=request.expected_change,
                 target_bbox=request.target_bbox.model_dump() if request.target_bbox else None,
             )
+        result["operation_context"] = operation_context
+        result["operation_trace_link"] = operation_trace_link(operation_context, result_status="success")
         result["timings"] = timer.to_dict()
         trace_path = write_trace(
             category="execute",
@@ -110,6 +132,14 @@ def verify_diff(request: ExecuteVerifyDiffRequest) -> APIResponse:
 @router.post("/read_region_batch", response_model=APIResponse)
 def read_region_batch(request: ExecuteReadRegionBatchRequest) -> APIResponse:
     timer = RuntimeTimer()
+    operation_context = build_operation_runtime_context(
+        request=request,
+        skill_id="read_region",
+        semantic_action="read_region_batch",
+        side_effect_class="read_only",
+        requires_gate=False,
+        capture_id=request.target_container_id,
+    )
     try:
         with timer.step("build_read_region_batch_report", target_container_id=request.target_container_id):
             result = build_read_region_batch_report(
@@ -120,6 +150,8 @@ def read_region_batch(request: ExecuteReadRegionBatchRequest) -> APIResponse:
                 stop_after_no_new_content=request.stop_after_no_new_content,
                 wrong_scope_detected=request.wrong_scope_detected,
             )
+        result["operation_context"] = operation_context
+        result["operation_trace_link"] = operation_trace_link(operation_context, result_status="success")
         result["timings"] = timer.to_dict()
         trace_path = write_trace(
             category="execute",
@@ -148,6 +180,13 @@ def read_region_batch(request: ExecuteReadRegionBatchRequest) -> APIResponse:
 @router.post("/form_inventory", response_model=APIResponse)
 def form_inventory(request: ExecuteFormInventoryRequest) -> APIResponse:
     timer = RuntimeTimer()
+    operation_context = build_operation_runtime_context(
+        request=request,
+        skill_id="detect_form",
+        semantic_action="detect_form",
+        side_effect_class="read_only",
+        requires_gate=False,
+    )
     try:
         with timer.step("build_form_field_inventory", app_id=request.app_id):
             if str(request.app_id or "").casefold() in {"seek", "nz.seek.com", "seek.co.nz"}:
@@ -158,6 +197,8 @@ def form_inventory(request: ExecuteFormInventoryRequest) -> APIResponse:
                 )
             else:
                 result = _generic_form_field_inventory(request)
+        result["operation_context"] = operation_context
+        result["operation_trace_link"] = operation_trace_link(operation_context, result_status="success")
         result["timings"] = timer.to_dict()
         trace_path = write_trace(
             category="execute",
@@ -602,7 +643,15 @@ def _load_runtime_path_graph(inline_graph: dict[str, Any], graph_path: str | Non
         return inline_graph
     if not graph_path:
         raise ValueError("runtime_graph_path or runtime_path_graph is required")
-    path = Path(graph_path)
+    path = Path(graph_path).expanduser()
+    if not path.is_absolute():
+        path = ROOT_DIR / path
+    path = path.resolve()
+    allowed_roots = [(ROOT_DIR / "artifacts").resolve(), (ROOT_DIR / "logs").resolve()]
+    if not any(path == root or root in path.parents for root in allowed_roots):
+        raise ValueError("runtime_graph_path must be under artifacts or logs")
+    if not path.exists() or not path.is_file():
+        raise FileNotFoundError(f"runtime_graph_path not found: {graph_path}")
     payload = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(payload, dict):
         raise ValueError(f"{graph_path} must contain a JSON object")

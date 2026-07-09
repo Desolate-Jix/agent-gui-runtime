@@ -1,0 +1,182 @@
+{
+  "contract_version": "runtime_path_graph_v1",
+  "graph_id": "artifacts_learning-draft-freshness-demo_freshness_matched_trial_result.json:model_loaded:32c6effb44de",
+  "app_id": "artifacts_learning-draft-freshness-demo_freshness_matched_trial_result.json",
+  "page_type": "search_page",
+  "coordinate_policy": {
+    "coordinate_space": "window_screenshot",
+    "requires_current_capture": true,
+    "source_bbox_is_learning_evidence_only": true
+  },
+  "loader": {
+    "contract_version": "model_learning_artifact_loader_v1",
+    "source_trial_path": "artifacts/learning-draft-review/trial_result_8d7a049ff6/reviewed_template_candidate.json",
+    "source_sha256": "32c6effb44de0c145f03ada34657818a640a8758549ad01bfde38ffe16026cfa",
+    "source_attempt_index": null,
+    "source_artifact_readonly": true,
+    "posthoc_optimization_allowed": false,
+    "candidate_mode": true
+  },
+  "source": {
+    "trial_path": "artifacts/learning-draft-review/trial_result_8d7a049ff6/reviewed_template_candidate.json",
+    "reviewed_candidate_path": "artifacts/learning-draft-review/trial_result_8d7a049ff6/reviewed_template_candidate.json",
+    "source_trial_path": "artifacts/learning-draft-freshness-demo/freshness_matched/trial_result.json",
+    "sha256": "32c6effb44de0c145f03ada34657818a640a8758549ad01bfde38ffe16026cfa",
+    "attempt_index": null,
+    "readonly": true,
+    "posthoc_optimization_allowed": false,
+    "candidate_mode": true
+  },
+  "page_details": {
+    "screen": {
+      "source_image_path": "artifacts/learning-draft-freshness-demo/source.png",
+      "source_image_sha256": "09f9ac07145964ec26d72d0e3a974449bc62914cee5b19452dbf65e9aeebcf92"
+    },
+    "display_only": true,
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "candidate_only": true
+  },
+  "states": [
+    {
+      "state_id": "s1",
+      "label": "Demo page",
+      "page_type": "search_page",
+      "region_refs": [
+        "r1"
+      ]
+    }
+  ],
+  "regions": [
+    {
+      "region_id": "r1",
+      "label": "Demo input",
+      "role": "text_input",
+      "bbox": {
+        "x": 12,
+        "y": 22,
+        "w": 96,
+        "h": 28
+      },
+      "click_point": {
+        "x": 60,
+        "y": 36
+      },
+      "human_review": {
+        "bbox_edited": true,
+        "bbox_edit_source": "human_review_full_image_inspector_v1",
+        "previous_bbox": {
+          "x": 8,
+          "y": 18,
+          "w": 100,
+          "h": 30
+        },
+        "previous_click_point": {
+          "x": 58,
+          "y": 33
+        },
+        "updated_bbox": {
+          "x": 12,
+          "y": 22,
+          "w": 96,
+          "h": 28
+        },
+        "updated_click_point": {
+          "x": 60,
+          "y": 36
+        }
+      },
+      "region_type": "text_input",
+      "source_artifact_readonly": true
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "model:transition:a1",
+      "from_state_id": "s1",
+      "to_state_id": "s1",
+      "action_template_id": "a1",
+      "default_available": true,
+      "verification_refs": []
+    }
+  ],
+  "action_templates": [
+    {
+      "action_template_id": "a1",
+      "label": "Type query",
+      "semantic_action": "fill_field",
+      "target_entity": "r1",
+      "bbox": {
+        "x": 14,
+        "y": 24,
+        "w": 82,
+        "h": 22
+      },
+      "click_point": {
+        "x": 55,
+        "y": 35
+      },
+      "human_review": {
+        "bbox_edited": true,
+        "bbox_edit_source": "human_review_full_image_inspector_v1",
+        "previous_bbox": {
+          "x": 10,
+          "y": 20,
+          "w": 80,
+          "h": 24
+        },
+        "previous_click_point": {
+          "x": 50,
+          "y": 32
+        },
+        "updated_bbox": {
+          "x": 14,
+          "y": 24,
+          "w": 82,
+          "h": 22
+        },
+        "updated_click_point": {
+          "x": 55,
+          "y": 35
+        }
+      },
+      "action_type": "input",
+      "low_level_action_type": "input",
+      "requires_gate": true,
+      "learned_skill_ref": "skill.input_text_into_field",
+      "artifact_is_authorization": false,
+      "input_target": {
+        "region_id": "r1",
+        "role": "text_input",
+        "requires_current_validation": true
+      },
+      "input_policy": {
+        "requires_agent_text": true,
+        "clear_existing": true,
+        "submit_allowed": false,
+        "text_is_not_stored_by_menu": true
+      }
+    }
+  ],
+  "artifact_is_authorization": false,
+  "safety": {
+    "final_submit_allowed": false,
+    "final_submit_forbidden": true,
+    "real_action_requires_gate": true,
+    "observation_source_only": true,
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "candidate_only": true
+  },
+  "summary": {
+    "state_count": 1,
+    "region_count": 1,
+    "transition_count": 1,
+    "action_template_count": 1
+  },
+  "candidate_mode": true,
+  "candidate_contract_version": "runtime_path_graph_candidate_v1",
+  "execute_binding_enabled": false,
+  "final_submit_forbidden": true,
+  "real_action_requires_gate": true
+}

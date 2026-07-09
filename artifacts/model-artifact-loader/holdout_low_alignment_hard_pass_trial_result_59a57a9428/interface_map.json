@@ -1,0 +1,110 @@
+{
+  "contract_version": "learned_interface_map_v1",
+  "app_id": "model_learning_benchmark",
+  "page_type": "generic_homepage_search",
+  "source": {
+    "trial_path": "logs/benchmarks/model_learning_template_loader_trials/8d1386a890c9/holdout_low_alignment_hard_pass/trial_result.json",
+    "sha256": "59a57a9428322ad48ffe8432f5e30143ead172e6d82625928ae66a57a61be862",
+    "attempt_index": 0,
+    "readonly": true,
+    "posthoc_optimization_allowed": false,
+    "loaded_at": "2026-07-07T13:33:11.009345"
+  },
+  "loader": {
+    "contract_version": "model_learning_artifact_loader_v1",
+    "source_trial_path": "logs/benchmarks/model_learning_template_loader_trials/8d1386a890c9/holdout_low_alignment_hard_pass/trial_result.json",
+    "source_sha256": "59a57a9428322ad48ffe8432f5e30143ead172e6d82625928ae66a57a61be862",
+    "source_attempt_index": 0,
+    "source_artifact_readonly": true,
+    "posthoc_optimization_allowed": false
+  },
+  "screen_summary": "SEEK results list with job cards and apply entry surfaces",
+  "page_details": {},
+  "states": [
+    {
+      "state_id": "home",
+      "label": "Homepage",
+      "page_type": "generic_homepage_search",
+      "region_refs": [
+        "search_box",
+        "results_area"
+      ]
+    },
+    {
+      "state_id": "search_results",
+      "label": "Search results",
+      "page_type": "generic_homepage_search",
+      "region_refs": [
+        "search_box",
+        "results_area"
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "open_detail",
+      "from_state": "results",
+      "to_state": "detail",
+      "action_template_id": "open_job_card"
+    },
+    {
+      "transition_id": "open_apply",
+      "from_state": "detail",
+      "to_state": "apply_entry",
+      "action_template_id": "open_apply_entry"
+    }
+  ],
+  "regions": [
+    {
+      "region_id": "search_box",
+      "role": "input",
+      "label": "search_box",
+      "region_type": "input",
+      "source_artifact_readonly": true
+    },
+    {
+      "region_id": "results_area",
+      "role": "list",
+      "label": "results_area",
+      "region_type": "list",
+      "source_artifact_readonly": true
+    }
+  ],
+  "fixed_visual_assets": [
+    {
+      "asset_id": "job_card",
+      "semantic_action": "open_detail",
+      "label": "job_card",
+      "can_authorize_click": false,
+      "source_artifact_readonly": true
+    }
+  ],
+  "dynamic_areas": [
+    {
+      "area_id": "results_scroll",
+      "role": "scroll_container"
+    }
+  ],
+  "danger_zones": [
+    {
+      "zone_id": "final_submit_zone",
+      "label": "Submit application",
+      "semantic_action": "final_submit",
+      "hard_block": true,
+      "final_submit_guard_required": true,
+      "fast_lane_allowed": false
+    }
+  ],
+  "editor_policy": {
+    "source_artifact_editable": false,
+    "derived_artifact_editable": false,
+    "save_as_required_for_manual_changes": true
+  },
+  "summary": {
+    "state_count": 2,
+    "region_count": 2,
+    "fixed_visual_asset_count": 1,
+    "dynamic_area_count": 1,
+    "danger_zone_count": 1
+  }
+}

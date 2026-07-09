@@ -16,7 +16,56 @@ from pydantic import BaseModel, Field
 from app.core.runtime_artifacts import write_trace
 from app.core.model_server import load_model_profiles
 from app.core.model_server import model_base_url
+from app.learn.draft_review import load_learning_draft_review, save_reviewed_template_candidate
+from app.learn.assisted_template_review import (
+    create_assisted_template_acceptance_suggestions,
+    create_assisted_template_acceptance_simulation,
+    create_assisted_template_asset_candidate,
+    create_assisted_template_audited_promotion_request,
+    create_assisted_template_graph_draft,
+    create_assisted_template_promotion_preflight,
+    create_assisted_template_review_package,
+    load_assisted_template_review_package,
+    save_assisted_template_review_decisions,
+)
+from app.learn.model_artifact_loader import load_model_learning_artifact
+from app.learn.model_trial import build_learning_model_trial
+from app.learn.pathgraph_candidate import attach_detail_observe_result_to_candidate, build_pathgraph_candidate_from_review
+from app.learn.recognition import (
+    build_inventory_layout_graph,
+    build_learning_recognition_trial,
+    build_two_stage_screen_understanding,
+    fusion_status_from_two_stage,
+)
 from app.api.models.response import APIResponse, ErrorModel
+from scripts.report_learn_fusion_model_start_approval_packet import (
+    report_learn_fusion_model_start_approval_packet,
+)
+from scripts.report_learn_fusion_calibration_pre_run_check import (
+    report_learn_fusion_calibration_pre_run_check,
+)
+from scripts.report_learn_fusion_pathgraph_integration_readiness import (
+    report_learn_fusion_pathgraph_integration_readiness,
+)
+from scripts.report_learn_fusion_current_evidence_packet import (
+    report_learn_fusion_current_evidence_packet,
+)
+from scripts.build_learn_precise_understanding_candidate import (
+    build_learn_precise_understanding_candidate,
+)
+from scripts.build_learn_page_detail_candidate import (
+    build_learn_page_detail_candidate,
+)
+from scripts.build_learn_demo_scaffold import (
+    build_learn_demo_scaffold,
+)
+from scripts.report_learning_mode_demo_goal_readiness import (
+    report_learning_mode_demo_goal_readiness,
+)
+from scripts.run_learn_stage1_region_localization import (
+    _observe_bundle_from_trace_result,
+    _stage1_inventory_from_trace_result,
+)
 
 PANEL_DIR = Path(__file__).resolve().parents[1] / "web_panel"
 PANEL_INDEX = PANEL_DIR / "index.html"
@@ -74,10 +123,155 @@ class PanelModelTestRequest(BaseModel):
     temperature: float = Field(default=0.1, ge=0.0, le=2.0)
 
 
+class PanelLoadModelArtifactRequest(BaseModel):
+    trial_path: str = Field(min_length=1)
+
+
+class PanelLoadLearningDraftReviewRequest(BaseModel):
+    source_path: str = Field(min_length=1)
+
+
+class PanelCreateLearningDemoGoalReadinessRequest(BaseModel):
+    scaffold_path: str = Field(min_length=1)
+    out_dir: Optional[str] = None
+
+
+class PanelSaveLearningDraftReviewRequest(BaseModel):
+    source_path: str = Field(min_length=1)
+    review_patch: dict[str, Any] = Field(default_factory=dict)
+
+
+class PanelRunLearningModelTrialRequest(BaseModel):
+    image_path: str = Field(min_length=1)
+    app_name: str = "unknown_app"
+    state_hint: str = ""
+    goal: str = "learn a reusable UI workflow template from this screen"
+    validation_mode: str = Field(default="standard", pattern="^(strict_blind|standard)$")
+    max_attempts: int = Field(default=2, ge=1, le=5)
+    max_output_tokens: int = Field(default=3072, ge=256, le=8192)
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    timeout_seconds: int = Field(default=180, ge=1, le=600)
+    learning_image_max_edge: int = Field(default=768, ge=128, le=1280)
+    allow_fast_profile_fallback: bool = False
+    observation_evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+class PanelRunLearningRecognitionTrialRequest(BaseModel):
+    app_name: str = "unknown_app"
+    state_hint: str = ""
+    summary: str = ""
+    observation_evidence: dict[str, Any] = Field(default_factory=dict)
+    crop_size: dict[str, Any] = Field(default_factory=dict)
+
+
+class PanelRunLearningTwoStageUnderstandingRequest(BaseModel):
+    app_name: str = "unknown_app"
+    state_hint: str = ""
+    trace_path: Optional[str] = None
+    observe_result: dict[str, Any] = Field(default_factory=dict)
+    require_stage1_gate: bool = True
+    stage2_region_strategy: str = Field(default="partitioned", pattern="^(partitioned|global_no_partition)$")
+
+
+class PanelGeneratePathGraphCandidateRequest(BaseModel):
+    source_path: str = Field(min_length=1)
+    review_patch: dict[str, Any] = Field(default_factory=dict)
+
+
+class PanelAttachDetailObserveResultRequest(BaseModel):
+    candidate_path: str = Field(min_length=1)
+    request_id: str = Field(min_length=1)
+    detail_source_path: str = Field(min_length=1)
+
+
+class PanelAssistedTemplateReviewPackageRequest(BaseModel):
+    candidate_path: str = Field(min_length=1)
+    review_decision: str = "prepare_for_review"
+    reviewer_note: str = ""
+
+
+class PanelLoadAssistedTemplateReviewPackageRequest(BaseModel):
+    package_path: str = Field(min_length=1)
+
+
+class PanelSaveAssistedTemplateReviewDecisionsRequest(BaseModel):
+    package_path: str = Field(min_length=1)
+    decisions: list[dict[str, Any]] = Field(default_factory=list)
+    overall_decision: str = "needs_changes"
+    reviewer_note: str = ""
+
+
+class PanelCreateAssistedTemplateAssetCandidateRequest(BaseModel):
+    package_path: str = Field(min_length=1)
+    review_record_path: Optional[str] = None
+
+
+class PanelCreateAssistedTemplateGraphDraftRequest(BaseModel):
+    asset_candidate_path: str = Field(min_length=1)
+
+
+class PanelCreateAssistedTemplateAcceptanceSuggestionsRequest(BaseModel):
+    package_path: str = Field(min_length=1)
+
+
+class PanelCreateAssistedTemplateAcceptanceSimulationRequest(BaseModel):
+    package_path: str = Field(min_length=1)
+
+
+class PanelCreateAssistedTemplatePromotionPreflightRequest(BaseModel):
+    package_path: str = Field(min_length=1)
+
+
+class PanelCreateAssistedTemplateAuditedPromotionRequestRequest(BaseModel):
+    package_path: str = Field(min_length=1)
+
+
+class PanelCreateModelStartApprovalPacketRequest(BaseModel):
+    candidate_path: Optional[str] = None
+    runbook_path: Optional[str] = None
+    preflight_report_path: Optional[str] = None
+    demo_readiness_report_path: Optional[str] = None
+    out_dir: Optional[str] = None
+
+
+class PanelCreateCalibrationPreRunCheckRequest(BaseModel):
+    candidate_path: Optional[str] = None
+    approval_packet_path: Optional[str] = None
+    out_dir: Optional[str] = None
+
+
+class PanelCreatePathgraphIntegrationReadinessRequest(BaseModel):
+    candidate_path: str = Field(min_length=1)
+    out_dir: Optional[str] = None
+
+
+class PanelCreateCurrentEvidencePacketRequest(BaseModel):
+    source_path: str = Field(min_length=1)
+    out_dir: Optional[str] = None
+
+
+class PanelCreatePreciseUnderstandingCandidateRequest(BaseModel):
+    source_path: str = Field(min_length=1)
+    out_dir: Optional[str] = None
+
+
+class PanelCreatePageDetailCandidateRequest(BaseModel):
+    source_path: str = Field(min_length=1)
+    out_dir: Optional[str] = None
+
+
+class PanelCreateLearningDemoScaffoldRequest(BaseModel):
+    source_path: str = Field(min_length=1)
+    out_dir: Optional[str] = None
+
+
 @router.get("/panel", include_in_schema=False)
 def web_panel() -> FileResponse:
     """Serve the browser-based local test panel."""
-    return FileResponse(PANEL_INDEX, media_type="text/html; charset=utf-8")
+    response = FileResponse(PANEL_INDEX, media_type="text/html; charset=utf-8")
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
 @router.get("/panel/file", include_in_schema=False)
@@ -96,6 +290,2023 @@ def panel_file(path: str) -> Response:
     response.headers["Cache-Control"] = "no-store, max-age=0"
     response.headers["Pragma"] = "no-cache"
     return response
+
+
+@router.post("/panel/load_model_artifact", response_model=APIResponse)
+def load_model_artifact(request: PanelLoadModelArtifactRequest) -> APIResponse:
+    """Load a model learning product as read-only derived replay artifacts."""
+    try:
+        result = load_model_learning_artifact(request.trial_path, project_root=ROOT_DIR)
+        trace_path = write_trace(
+            category="panel",
+            operation="load_model_artifact",
+            payload={"success": True, "request": request.model_dump(), "result": result},
+            name_hint=result.get("summary", {}).get("app_id") or "model_artifact",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Model artifact loaded", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Model artifact load failed",
+            data=None,
+            error=ErrorModel(code="model_artifact_load_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/load_learning_draft_review", response_model=APIResponse)
+def load_learning_draft_review_endpoint(request: PanelLoadLearningDraftReviewRequest) -> APIResponse:
+    """Load a model learning draft for display-only human review."""
+    try:
+        result = load_learning_draft_review(request.source_path, project_root=ROOT_DIR)
+        trace_path = write_trace(
+            category="panel",
+            operation="load-learning-draft-review",
+            payload={"success": True, "request": request.model_dump(), "result": result},
+            name_hint="learning_draft_review",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Learning draft review loaded", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Learning draft review load failed",
+            data=None,
+            error=ErrorModel(code="learning_draft_review_load_failed", details=str(exc)),
+        )
+
+
+@router.get("/panel/learning_draft_sources", response_model=APIResponse)
+def list_learning_draft_sources_endpoint() -> APIResponse:
+    """List recent learning draft sources that can be loaded for review."""
+    try:
+        result = _list_recent_learning_draft_sources()
+        return APIResponse(success=True, message="Learning draft sources listed", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Learning draft source list failed",
+            data=None,
+            error=ErrorModel(code="learning_draft_source_list_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/save_learning_draft_review", response_model=APIResponse)
+def save_learning_draft_review_endpoint(request: PanelSaveLearningDraftReviewRequest) -> APIResponse:
+    """Save a reviewed template candidate without enabling execution."""
+    try:
+        result = save_reviewed_template_candidate(
+            request.source_path,
+            request.review_patch,
+            project_root=ROOT_DIR,
+        )
+        trace_path = write_trace(
+            category="panel",
+            operation="save-learning-draft-review",
+            payload={"success": True, "request": request.model_dump(), "result": result},
+            name_hint="reviewed_template_candidate",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Reviewed template candidate saved", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Learning draft review save failed",
+            data=None,
+            error=ErrorModel(code="learning_draft_review_save_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/run_learning_model_trial", response_model=APIResponse)
+def run_learning_model_trial_endpoint(request: PanelRunLearningModelTrialRequest) -> APIResponse:
+    """Run and save a raw Learning Studio draft trial without creating executable assets."""
+    try:
+        image_path = _resolve_panel_learning_image_path(request.image_path)
+    except FileNotFoundError as exc:
+        return APIResponse(
+            success=False,
+            message="Learning model trial image not found",
+            data={"image_path": request.image_path},
+            error=ErrorModel(code="learning_trial_image_not_found", details=str(exc)),
+        )
+    except ValueError as exc:
+        return APIResponse(
+            success=False,
+            message="Learning model trial image path is not allowed",
+            data={"image_path": request.image_path},
+            error=ErrorModel(code="learning_trial_image_not_allowed", details=str(exc)),
+        )
+
+    try:
+        result = build_learning_model_trial(
+            image_path=image_path,
+            app_name=request.app_name,
+            state_hint=request.state_hint,
+            goal=request.goal,
+            validation_mode=request.validation_mode,
+            max_attempts=request.max_attempts,
+            observation_evidence=request.observation_evidence,
+            learning_parameter_overrides={
+                "max_output_tokens": request.max_output_tokens,
+                "temperature": request.temperature,
+                "timeout_seconds": request.timeout_seconds,
+                "learning_image_max_edge": request.learning_image_max_edge,
+                "allow_fast_profile_fallback": request.allow_fast_profile_fallback,
+            },
+        )
+        safety = {
+            **(result.get("safety") if isinstance(result.get("safety"), dict) else {}),
+            "real_clicks_performed": 0,
+            "promotion_allowed": False,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+            "live_safe_fill_attempted": 0,
+            "final_submit_forbidden": True,
+            "real_action_requires_gate": True,
+        }
+        reference_available = bool((result.get("target_contract") or {}).get("reference_template")) if isinstance(result.get("target_contract"), dict) else False
+        saved_payload = {
+            **result,
+            "artifact_type": "raw_learning_trial",
+            "draft_only": True,
+            "draft_graph_preview": True,
+            "runtime_path_graph": False,
+            "promotion_allowed": False,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+            "real_clicks": 0,
+            "live_safe_fill_attempted": 0,
+            "final_submit_forbidden": True,
+            "real_action_requires_gate": True,
+            "reference_available": reference_available,
+            "safety": safety,
+            "panel_learning_studio": {
+                "contract_version": "panel_learning_studio_trial_v1",
+                "draft_graph_preview": True,
+                "display_only": True,
+                "source": "panel_run_learning_model_trial",
+            },
+        }
+        trial_path = _save_panel_learning_trial(saved_payload, app_name=request.app_name)
+        trace_path = write_trace(
+            category="panel",
+            operation="run-learning-model-trial",
+            payload={
+                "success": True,
+                "request": request.model_dump(),
+                "result": {
+                    "trial_path": trial_path,
+                    "status": saved_payload.get("status"),
+                    "artifact_type": saved_payload.get("artifact_type"),
+                    "draft_only": True,
+                    "real_clicks": 0,
+                    "promotion_allowed": False,
+                },
+            },
+            name_hint="learning_model_trial",
+        )
+        return APIResponse(
+            success=True,
+            message="Learning draft trial saved",
+            data={
+                "contract_version": "panel_learning_model_trial_run_v1",
+                "artifact_type": "raw_learning_trial",
+                "draft_only": True,
+                "draft_graph_preview": True,
+                "runtime_path_graph": False,
+                "trial_path": trial_path,
+                "trace_path": trace_path,
+                "status": saved_payload.get("status"),
+                "best_score_percent": saved_payload.get("best_score_percent") if reference_available else None,
+                "alignment_score": saved_payload.get("best_score_percent") if reference_available else "not_available",
+                "reference_available": saved_payload.get("reference_available"),
+                "promotion_allowed": False,
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+                "real_clicks": 0,
+                "live_safe_fill_attempted": 0,
+                "final_submit_forbidden": True,
+                "real_action_requires_gate": True,
+                "safety": safety,
+                "summary": {
+                    "app_name": saved_payload.get("app_name"),
+                    "state_hint": saved_payload.get("state_hint"),
+                    "attempt_count": saved_payload.get("attempt_count"),
+                    "best_attempt_index": saved_payload.get("best_attempt_index"),
+                    "draft_section_counts": _learning_draft_section_counts(saved_payload.get("best_learning_draft")),
+                },
+            },
+            error=None,
+        )
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Learning model trial failed",
+            data={"image_path": request.image_path, "app_name": request.app_name},
+            error=ErrorModel(code="learning_model_trial_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/run_learning_recognition_trial", response_model=APIResponse)
+def run_learning_recognition_trial_endpoint(request: PanelRunLearningRecognitionTrialRequest) -> APIResponse:
+    """Build a display-only learning draft from current observe/coordinate evidence."""
+    try:
+        observe_bundle = _panel_learning_recognition_observe_bundle(request)
+        summary = request.summary or _panel_learning_recognition_summary(request.observation_evidence)
+        result = build_learning_recognition_trial(
+            observe_bundle=observe_bundle,
+            state_guess=request.state_hint,
+            summary=summary,
+            grounding_adapter=_panel_calibrated_target_grounding_adapter,
+            crop_size=request.crop_size if request.crop_size else None,
+        )
+        safety = {
+            **(result.get("safety") if isinstance(result.get("safety"), dict) else {}),
+            "real_clicks_performed": 0,
+            "promotion_allowed": False,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+            "live_safe_fill_attempted": 0,
+            "final_submit_forbidden": True,
+            "real_action_requires_gate": True,
+        }
+        saved_payload = {
+            **result,
+            "app_name": request.app_name,
+            "state_hint": request.state_hint,
+            "summary": summary,
+            "artifact_type": "learn_recognition_trial",
+            "draft_only": True,
+            "draft_graph_preview": True,
+            "runtime_path_graph": False,
+            "promotion_allowed": False,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+            "real_clicks": 0,
+            "live_safe_fill_attempted": 0,
+            "final_submit_forbidden": True,
+            "real_action_requires_gate": True,
+            "best_attempt_index": 0,
+            "best_learning_draft": result.get("learning_draft"),
+            "source_type": "panel_observe_coordinate_evidence",
+            "panel_learning_studio": {
+                "contract_version": "panel_learning_recognition_trial_v1",
+                "draft_graph_preview": True,
+                "display_only": True,
+                "source": "panel_run_learning_recognition_trial",
+                "uses_execute_mode": False,
+                "live_clicks": 0,
+                "live_safe_fill": 0,
+            },
+            "observe_bundle": observe_bundle,
+            "safety": safety,
+        }
+        trial_path = _save_panel_learning_trial(saved_payload, app_name=request.app_name)
+        trace_path = write_trace(
+            category="panel",
+            operation="run-learning-recognition-trial",
+            payload={
+                "success": True,
+                "request": request.model_dump(),
+                "result": {
+                    "trial_path": trial_path,
+                    "status": saved_payload.get("status"),
+                    "artifact_type": saved_payload.get("artifact_type"),
+                    "draft_only": True,
+                    "real_clicks": 0,
+                    "promotion_allowed": False,
+                },
+            },
+            name_hint="learning_recognition_trial",
+        )
+        return APIResponse(
+            success=True,
+            message="Learning recognition draft saved",
+            data={
+                "contract_version": "panel_learning_recognition_trial_run_v1",
+                "artifact_type": "learn_recognition_trial",
+                "draft_only": True,
+                "draft_graph_preview": True,
+                "runtime_path_graph": False,
+                "trial_path": trial_path,
+                "trace_path": trace_path,
+                "status": saved_payload.get("status"),
+                "promotion_allowed": False,
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+                "real_clicks": 0,
+                "live_safe_fill_attempted": 0,
+                "final_submit_forbidden": True,
+                "real_action_requires_gate": True,
+                "safety": safety,
+                "summary": {
+                    "app_name": request.app_name,
+                    "state_hint": request.state_hint,
+                    "screen_inventory_count": len(saved_payload.get("screen_inventory") or []),
+                    "accepted_for_grounding_count": int(
+                        ((saved_payload.get("classification") or {}).get("summary") or {}).get("accepted_for_grounding_count") or 0
+                    ),
+                    "grounding_validation_count": len(saved_payload.get("grounding_validations") or []),
+                    "draft_section_counts": _learning_draft_section_counts(saved_payload.get("learning_draft")),
+                },
+            },
+            error=None,
+        )
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Learning recognition draft failed",
+            data={"app_name": request.app_name, "state_hint": request.state_hint},
+            error=ErrorModel(code="learning_recognition_trial_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/run_learning_two_stage_understanding", response_model=APIResponse)
+def run_learning_two_stage_understanding_endpoint(
+    request: PanelRunLearningTwoStageUnderstandingRequest,
+) -> APIResponse:
+    """Run the real learning-panel Stage1 gate + Stage2 numbering path."""
+    try:
+        observe_result, source_trace_path = _panel_two_stage_observe_result(request)
+        bundle = _observe_bundle_from_trace_result(observe_result, trace_path=source_trace_path)
+        screen_inventory = _stage1_inventory_from_trace_result(observe_result)
+        layout_graph = build_inventory_layout_graph(screen_inventory, screen_size=bundle.get("screen_size"))
+        report = build_two_stage_screen_understanding(
+            bundle=bundle,
+            screen_inventory=screen_inventory,
+            layout_graph=layout_graph,
+            require_stage1_gate=request.require_stage1_gate,
+            stage2_region_strategy=request.stage2_region_strategy,
+        )
+        report["source_trace_path"] = str(source_trace_path)
+        report["screen_inventory_count"] = len(screen_inventory)
+        report["layout_graph_summary"] = {
+            "node_count": layout_graph.get("node_count"),
+            "zone_count": layout_graph.get("zone_count"),
+            "zones": {
+                zone_id: len(zone.get("item_ids") if isinstance(zone, dict) and isinstance(zone.get("item_ids"), list) else [])
+                for zone_id, zone in (layout_graph.get("zones") if isinstance(layout_graph.get("zones"), dict) else {}).items()
+            },
+        }
+        report["fusion_status"] = fusion_status_from_two_stage(report)
+        fusion = report.get("fusion") if isinstance(report.get("fusion"), dict) else {}
+        stage1_gate = report.get("stage1_gate") if isinstance(report.get("stage1_gate"), dict) else {}
+        review_boxes = fusion.get("fused_review_boxes") if isinstance(fusion.get("fused_review_boxes"), list) else []
+        overlay_path = _str(
+            fusion.get("compiled_overlay_path")
+            or fusion.get("full_screen_understanding_overlay_path")
+            or report.get("overlay_path")
+        )
+        stage2 = report.get("stage2_numbering") if isinstance(report.get("stage2_numbering"), dict) else {}
+        saved_payload = {
+            **report,
+            "app_name": request.app_name,
+            "state_hint": request.state_hint,
+            "artifact_type": "learn_two_stage_understanding",
+            "draft_only": True,
+            "draft_graph_preview": True,
+            "runtime_path_graph": False,
+            "promotion_allowed": False,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+            "real_clicks": 0,
+            "live_safe_fill_attempted": 0,
+            "final_submit_forbidden": True,
+            "source_type": "panel_live_observe_two_stage_understanding",
+            "observe_bundle": bundle,
+        }
+        report_path = _save_panel_learning_trial(saved_payload, app_name=request.app_name)
+        trace_path = write_trace(
+            category="panel",
+            operation="run-learning-two-stage-understanding",
+            payload={
+                "success": True,
+                "request": request.model_dump(),
+                "result": {
+                    "report_path": report_path,
+                    "overlay_path": overlay_path,
+                    "stage1_gate_status": stage1_gate.get("status"),
+                    "stage2_numbering_skipped": bool(report.get("stage2_numbering_skipped")),
+                    "review_box_count": len(review_boxes),
+                    "real_clicks": 0,
+                    "promotion_allowed": False,
+                },
+            },
+            name_hint="learning_two_stage_understanding",
+        )
+        return APIResponse(
+            success=True,
+            message="Two-stage learning understanding generated",
+            data={
+                "contract_version": "panel_learning_two_stage_understanding_run_v1",
+                "artifact_type": "learn_two_stage_understanding",
+                "draft_only": True,
+                "draft_graph_preview": True,
+                "runtime_path_graph": False,
+                "report_path": report_path,
+                "trace_path": trace_path,
+                "source_trace_path": str(source_trace_path),
+                "status": stage1_gate.get("status") or "unknown",
+                "stage1_gate": stage1_gate,
+                "stage1_gate_required": bool(request.require_stage1_gate),
+                "stage2_numbering_skipped": bool(report.get("stage2_numbering_skipped")),
+                "fusion_status": report.get("fusion_status"),
+                "coordinate_overlay_path": overlay_path,
+                "full_screen_understanding_overlay_path": overlay_path,
+                "image_path": bundle.get("image_path") or bundle.get("source_image_path"),
+                "screen_size": bundle.get("screen_size") or {},
+                "screen_summary": ((bundle.get("screen_reading") or {}).get("screen_summary") if isinstance(bundle.get("screen_reading"), dict) else ""),
+                "learn_all_targets": {
+                    "status": "two_stage_stage1_gate_passed"
+                    if stage1_gate.get("status") == "passed"
+                    else "blocked_before_stage2_numbering",
+                    "targets": [],
+                    "target_count": 0,
+                    "validated_count": 0,
+                    "invalid_count": 0,
+                    "review_boxes": review_boxes,
+                    "review_box_count": len(review_boxes),
+                    "overlay_path": overlay_path,
+                    "trace_path": trace_path,
+                    "stage1_gate_status": stage1_gate.get("status"),
+                    "stage2_numbered_region_count": len(stage2.get("regions") if isinstance(stage2.get("regions"), list) else []),
+                },
+                "summary": {
+                    "app_name": request.app_name,
+                    "state_hint": request.state_hint,
+                    "screen_inventory_count": len(screen_inventory),
+                    "review_box_count": len(review_boxes),
+                    "stage1_gate_status": stage1_gate.get("status"),
+                    "stage1_failure_categories": stage1_gate.get("failure_categories") if isinstance(stage1_gate.get("failure_categories"), list) else [],
+                    "stage2_numbering_skipped": bool(report.get("stage2_numbering_skipped")),
+                    "overlay_path": overlay_path,
+                },
+                "promotion_allowed": False,
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+                "real_clicks": 0,
+                "live_safe_fill_attempted": 0,
+                "final_submit_forbidden": True,
+            },
+            error=None,
+        )
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Two-stage learning understanding failed",
+            data={"app_name": request.app_name, "state_hint": request.state_hint},
+            error=ErrorModel(code="learning_two_stage_understanding_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/generate_pathgraph_candidate", response_model=APIResponse)
+def generate_pathgraph_candidate_endpoint(request: PanelGeneratePathGraphCandidateRequest) -> APIResponse:
+    """Generate a non-executable PathGraph candidate from the reviewed learning draft."""
+    try:
+        result = build_pathgraph_candidate_from_review(
+            request.source_path,
+            request.review_patch,
+            project_root=ROOT_DIR,
+        )
+        trace_path = write_trace(
+            category="panel",
+            operation="generate-pathgraph-candidate",
+            payload={"success": True, "request": request.model_dump(), "result": result},
+            name_hint="pathgraph_candidate",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="PathGraph candidate generated", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="PathGraph candidate generation failed",
+            data=None,
+            error=ErrorModel(code="pathgraph_candidate_generation_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/attach_detail_observe_result", response_model=APIResponse)
+def attach_detail_observe_result_endpoint(request: PanelAttachDetailObserveResultRequest) -> APIResponse:
+    """Attach a reviewed detail observe result to an existing non-executable PathGraph candidate."""
+    try:
+        result = attach_detail_observe_result_to_candidate(
+            request.candidate_path,
+            request_id=request.request_id,
+            detail_source_path=request.detail_source_path,
+            project_root=ROOT_DIR,
+        )
+        trace_path = write_trace(
+            category="panel",
+            operation="attach-detail-observe-result",
+            payload={"success": True, "request": request.model_dump(), "result": result},
+            name_hint="detail_observe_attachment",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Detail observe result attached", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Detail observe attachment failed",
+            data=None,
+            error=ErrorModel(code="detail_observe_attachment_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/create_assisted_template_review_package", response_model=APIResponse)
+def create_assisted_template_review_package_endpoint(request: PanelAssistedTemplateReviewPackageRequest) -> APIResponse:
+    """Create a review-only assisted-template package from a promotion-gate-passed candidate."""
+    try:
+        result = create_assisted_template_review_package(
+            request.candidate_path,
+            review_decision=request.review_decision,
+            reviewer_note=request.reviewer_note,
+            project_root=ROOT_DIR,
+        )
+        trace_path = write_trace(
+            category="panel",
+            operation="create-assisted-template-review-package",
+            payload={"success": True, "request": request.model_dump(), "result": result},
+            name_hint="assisted_template_review_package",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Assisted template review package created", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Assisted template review package creation failed",
+            data=None,
+            error=ErrorModel(code="assisted_template_review_package_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/load_assisted_template_review_package", response_model=APIResponse)
+def load_assisted_template_review_package_endpoint(request: PanelLoadAssistedTemplateReviewPackageRequest) -> APIResponse:
+    """Load a review-only assisted-template package for checklist display."""
+    try:
+        result = load_assisted_template_review_package(request.package_path, project_root=ROOT_DIR)
+        trace_path = write_trace(
+            category="panel",
+            operation="load-assisted-template-review-package",
+            payload={"success": True, "request": request.model_dump(), "result": result},
+            name_hint="assisted_template_review_package",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Assisted template review package loaded", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Assisted template review package load failed",
+            data=None,
+            error=ErrorModel(code="assisted_template_review_package_load_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/save_assisted_template_review_decisions", response_model=APIResponse)
+def save_assisted_template_review_decisions_endpoint(
+    request: PanelSaveAssistedTemplateReviewDecisionsRequest,
+) -> APIResponse:
+    """Save human checklist decisions for a review-only assisted-template package."""
+    try:
+        result = save_assisted_template_review_decisions(
+            request.package_path,
+            request.decisions,
+            overall_decision=request.overall_decision,
+            reviewer_note=request.reviewer_note,
+            project_root=ROOT_DIR,
+        )
+        trace_path = write_trace(
+            category="panel",
+            operation="save-assisted-template-review-decisions",
+            payload={"success": True, "request": request.model_dump(), "result": result},
+            name_hint="assisted_template_review_decisions",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Assisted template review decisions saved", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Assisted template review decisions save failed",
+            data=None,
+            error=ErrorModel(code="assisted_template_review_decisions_save_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/create_assisted_template_asset_candidate", response_model=APIResponse)
+def create_assisted_template_asset_candidate_endpoint(
+    request: PanelCreateAssistedTemplateAssetCandidateRequest,
+) -> APIResponse:
+    """Create a non-executable asset candidate from accepted assisted-template checklist items."""
+    try:
+        result = create_assisted_template_asset_candidate(
+            request.package_path,
+            review_record_path=request.review_record_path,
+            project_root=ROOT_DIR,
+        )
+        trace_path = write_trace(
+            category="panel",
+            operation="create-assisted-template-asset-candidate",
+            payload={"success": True, "request": request.model_dump(), "result": result},
+            name_hint="assisted_template_asset_candidate",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Assisted template asset candidate created", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Assisted template asset candidate creation failed",
+            data=None,
+            error=ErrorModel(code="assisted_template_asset_candidate_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/create_assisted_template_graph_draft", response_model=APIResponse)
+def create_assisted_template_graph_draft_endpoint(
+    request: PanelCreateAssistedTemplateGraphDraftRequest,
+) -> APIResponse:
+    """Create a non-executable graph-shaped draft from an assisted-template asset candidate."""
+    try:
+        result = create_assisted_template_graph_draft(
+            request.asset_candidate_path,
+            project_root=ROOT_DIR,
+        )
+        trace_path = write_trace(
+            category="panel",
+            operation="create-assisted-template-graph-draft",
+            payload={"success": True, "request": request.model_dump(), "result": result},
+            name_hint="assisted_template_graph_draft",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Assisted template graph draft created", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Assisted template graph draft creation failed",
+            data=None,
+            error=ErrorModel(code="assisted_template_graph_draft_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/create_assisted_template_acceptance_suggestions", response_model=APIResponse)
+def create_assisted_template_acceptance_suggestions_endpoint(
+    request: PanelCreateAssistedTemplateAcceptanceSuggestionsRequest,
+) -> APIResponse:
+    """Create linked checklist suggestions for human review only."""
+    try:
+        result = create_assisted_template_acceptance_suggestions(
+            request.package_path,
+            project_root=ROOT_DIR,
+        )
+        trace_path = write_trace(
+            category="panel",
+            operation="create-assisted-template-acceptance-suggestions",
+            payload={"success": True, "request": request.model_dump(), "result": result},
+            name_hint="assisted_template_acceptance_suggestions",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Assisted template acceptance suggestions created", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Assisted template acceptance suggestion creation failed",
+            data=None,
+            error=ErrorModel(code="assisted_template_acceptance_suggestions_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/create_assisted_template_promotion_preflight", response_model=APIResponse)
+def create_assisted_template_promotion_preflight_endpoint(
+    request: PanelCreateAssistedTemplatePromotionPreflightRequest,
+) -> APIResponse:
+    """Create a review-only manual preflight before any audited Runtime promotion path."""
+    try:
+        result = create_assisted_template_promotion_preflight(
+            request.package_path,
+            project_root=ROOT_DIR,
+        )
+        trace_path = write_trace(
+            category="panel",
+            operation="create-assisted-template-promotion-preflight",
+            payload={"success": True, "request": request.model_dump(), "result": result},
+            name_hint="assisted_template_promotion_preflight",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Assisted template promotion preflight created", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Assisted template promotion preflight failed",
+            data=None,
+            error=ErrorModel(code="assisted_template_promotion_preflight_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/create_assisted_template_acceptance_simulation", response_model=APIResponse)
+def create_assisted_template_acceptance_simulation_endpoint(
+    request: PanelCreateAssistedTemplateAcceptanceSimulationRequest,
+) -> APIResponse:
+    """Create a non-authorizing simulation for accepting linked checklist suggestions."""
+    try:
+        result = create_assisted_template_acceptance_simulation(
+            request.package_path,
+            project_root=ROOT_DIR,
+        )
+        trace_path = write_trace(
+            category="panel",
+            operation="create-assisted-template-acceptance-simulation",
+            payload={"success": True, "request": request.model_dump(), "result": result},
+            name_hint="assisted_template_acceptance_simulation",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Assisted template acceptance simulation created", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Assisted template acceptance simulation failed",
+            data=None,
+            error=ErrorModel(code="assisted_template_acceptance_simulation_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/create_assisted_template_audited_promotion_request", response_model=APIResponse)
+def create_assisted_template_audited_promotion_request_endpoint(
+    request: PanelCreateAssistedTemplateAuditedPromotionRequestRequest,
+) -> APIResponse:
+    """Create a non-authorizing audited promotion request preview from a ready preflight."""
+    try:
+        result = create_assisted_template_audited_promotion_request(
+            request.package_path,
+            project_root=ROOT_DIR,
+        )
+        trace_path = write_trace(
+            category="panel",
+            operation="create-assisted-template-audited-promotion-request",
+            payload={"success": True, "request": request.model_dump(), "result": result},
+            name_hint="assisted_template_audited_promotion_request",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Assisted template audited promotion request created", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Assisted template audited promotion request failed",
+            data=None,
+            error=ErrorModel(code="assisted_template_audited_promotion_request_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/create_model_start_approval_packet", response_model=APIResponse)
+def create_model_start_approval_packet_endpoint(request: PanelCreateModelStartApprovalPacketRequest) -> APIResponse:
+    """Create the no-execute approval packet before any learn-fusion model start."""
+    try:
+        input_paths = _model_start_approval_packet_input_paths(request)
+        result = report_learn_fusion_model_start_approval_packet(
+            runbook_path=input_paths["runbook_path"],
+            preflight_report_path=input_paths["preflight_report_path"],
+            demo_readiness_report_path=input_paths["demo_readiness_report_path"],
+            out_dir=input_paths["out_dir"],
+            project_root=ROOT_DIR,
+        )
+        trace_path = write_trace(
+            category="panel",
+            operation="create-model-start-approval-packet",
+            payload={"success": True, "request": request.model_dump(), "resolved_inputs": input_paths, "result": result},
+            name_hint="learn_fusion_model_start_approval_packet",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Model-start approval packet created", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Model-start approval packet creation failed",
+            data=None,
+            error=ErrorModel(code="model_start_approval_packet_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/create_calibration_pre_run_check", response_model=APIResponse)
+def create_calibration_pre_run_check_endpoint(request: PanelCreateCalibrationPreRunCheckRequest) -> APIResponse:
+    """Create the no-model calibration command packet pre-run check."""
+    try:
+        input_paths = _calibration_pre_run_check_input_paths(request)
+        result = report_learn_fusion_calibration_pre_run_check(
+            approval_packet_path=input_paths["approval_packet_path"],
+            out_dir=input_paths["out_dir"],
+            project_root=ROOT_DIR,
+        )
+        trace_path = write_trace(
+            category="panel",
+            operation="create-calibration-pre-run-check",
+            payload={"success": True, "request": request.model_dump(), "resolved_inputs": input_paths, "result": result},
+            name_hint="learn_fusion_calibration_pre_run_check",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Calibration pre-run check created", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Calibration pre-run check creation failed",
+            data=None,
+            error=ErrorModel(code="calibration_pre_run_check_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/create_pathgraph_integration_readiness", response_model=APIResponse)
+def create_pathgraph_integration_readiness_endpoint(
+    request: PanelCreatePathgraphIntegrationReadinessRequest,
+) -> APIResponse:
+    """Create the display-only PathGraph integration readiness report."""
+    try:
+        input_paths = _pathgraph_integration_readiness_input_paths(request)
+        result = report_learn_fusion_pathgraph_integration_readiness(
+            pathgraph_candidate_path=input_paths["candidate_path"],
+            out_dir=input_paths["out_dir"],
+            project_root=ROOT_DIR,
+        )
+        trace_path = write_trace(
+            category="panel",
+            operation="create-pathgraph-integration-readiness",
+            payload={"success": True, "request": request.model_dump(), "resolved_inputs": input_paths, "result": result},
+            name_hint="learn_fusion_pathgraph_integration_readiness",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="PathGraph integration readiness created", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="PathGraph integration readiness creation failed",
+            data=None,
+            error=ErrorModel(code="pathgraph_integration_readiness_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/create_current_evidence_packet", response_model=APIResponse)
+def create_current_evidence_packet_endpoint(request: PanelCreateCurrentEvidencePacketRequest) -> APIResponse:
+    """Create the display-only current learn-fusion evidence packet."""
+    try:
+        input_paths = _current_evidence_packet_input_paths(request)
+        result = report_learn_fusion_current_evidence_packet(
+            source_path=input_paths["source_path"],
+            out_dir=input_paths["out_dir"],
+            project_root=ROOT_DIR,
+        )
+        trace_path = write_trace(
+            category="panel",
+            operation="create-current-evidence-packet",
+            payload={"success": True, "request": request.model_dump(), "resolved_inputs": input_paths, "result": result},
+            name_hint="learn_fusion_current_evidence_packet",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Current evidence packet created", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Current evidence packet creation failed",
+            data=None,
+            error=ErrorModel(code="current_evidence_packet_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/create_precise_understanding_candidate", response_model=APIResponse)
+def create_precise_understanding_candidate_endpoint(
+    request: PanelCreatePreciseUnderstandingCandidateRequest,
+) -> APIResponse:
+    """Create the display-only precise-understanding candidate for future PathGraph preparation."""
+    try:
+        input_paths = _precise_understanding_candidate_input_paths(request)
+        result = build_learn_precise_understanding_candidate(
+            source_path=input_paths["source_path"],
+            out_dir=input_paths["out_dir"],
+            project_root=ROOT_DIR,
+        )
+        trace_path = write_trace(
+            category="panel",
+            operation="create-precise-understanding-candidate",
+            payload={"success": True, "request": request.model_dump(), "resolved_inputs": input_paths, "result": result},
+            name_hint="learn_precise_understanding_candidate",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Precise understanding candidate created", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Precise understanding candidate creation failed",
+            data=None,
+            error=ErrorModel(code="precise_understanding_candidate_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/create_page_detail_candidate", response_model=APIResponse)
+def create_page_detail_candidate_endpoint(request: PanelCreatePageDetailCandidateRequest) -> APIResponse:
+    """Create the display-only template-like page detail candidate for Learning Mode demo."""
+    try:
+        input_paths = _page_detail_candidate_input_paths(request)
+        result = build_learn_page_detail_candidate(
+            source_path=input_paths["source_path"],
+            out_dir=input_paths["out_dir"],
+            project_root=ROOT_DIR,
+        )
+        trace_path = write_trace(
+            category="panel",
+            operation="create-page-detail-candidate",
+            payload={"success": True, "request": request.model_dump(), "resolved_inputs": input_paths, "result": result},
+            name_hint="learn_page_detail_candidate",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Page detail candidate created", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Page detail candidate creation failed",
+            data=None,
+            error=ErrorModel(code="page_detail_candidate_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/create_learning_demo_scaffold", response_model=APIResponse)
+def create_learning_demo_scaffold_endpoint(request: PanelCreateLearningDemoScaffoldRequest) -> APIResponse:
+    """Create the review-only Learning Mode demo scaffold sidecar chain."""
+    try:
+        input_paths = _learning_demo_scaffold_input_paths(request)
+        result = build_learn_demo_scaffold(
+            source_path=input_paths["source_path"],
+            out_dir=input_paths["out_dir"],
+            project_root=ROOT_DIR,
+        )
+        trace_path = write_trace(
+            category="panel",
+            operation="create-learning-demo-scaffold",
+            payload={"success": True, "request": request.model_dump(), "resolved_inputs": input_paths, "result": result},
+            name_hint="learn_mode_demo_scaffold",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Learning demo scaffold created", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Learning demo scaffold creation failed",
+            data=None,
+            error=ErrorModel(code="learning_demo_scaffold_failed", details=str(exc)),
+        )
+
+
+@router.post("/panel/create_learning_demo_goal_readiness", response_model=APIResponse)
+def create_learning_demo_goal_readiness_endpoint(request: PanelCreateLearningDemoGoalReadinessRequest) -> APIResponse:
+    """Create the review-only Learning Mode demo goal-readiness sidecar report."""
+    try:
+        input_paths = _learning_demo_goal_readiness_input_paths(request)
+        result = report_learning_mode_demo_goal_readiness(
+            scaffold_path=input_paths["scaffold_path"],
+            out_dir=input_paths["out_dir"],
+            project_root=ROOT_DIR,
+        )
+        trace_path = write_trace(
+            category="panel",
+            operation="create-learning-demo-goal-readiness",
+            payload={"success": True, "request": request.model_dump(), "resolved_inputs": input_paths, "result": result},
+            name_hint="learning_mode_demo_goal_readiness",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(success=True, message="Learning demo goal readiness created", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Learning demo goal readiness creation failed",
+            data=None,
+            error=ErrorModel(code="learning_demo_goal_readiness_failed", details=str(exc)),
+        )
+
+
+def _model_start_approval_packet_input_paths(request: PanelCreateModelStartApprovalPacketRequest) -> dict[str, str]:
+    if request.candidate_path:
+        candidate_path = _resolve_under_root_path(request.candidate_path)
+        review = load_learning_draft_review(_relative_panel_path(candidate_path), project_root=ROOT_DIR)
+        candidate_review = (
+            review.get("pathgraph_candidate_review") if isinstance(review.get("pathgraph_candidate_review"), dict) else {}
+        )
+        runbook = candidate_review.get("model_start_runbook") if isinstance(candidate_review.get("model_start_runbook"), dict) else {}
+        preflight = (
+            candidate_review.get("model_start_preflight")
+            if isinstance(candidate_review.get("model_start_preflight"), dict)
+            else {}
+        )
+        demo = candidate_review.get("demo_readiness") if isinstance(candidate_review.get("demo_readiness"), dict) else {}
+        out_dir = _resolve_under_root_path(request.out_dir) if request.out_dir else candidate_path.parent
+        out_dir.mkdir(parents=True, exist_ok=True)
+        preflight_path = request.preflight_report_path or preflight.get("report_path") or str(
+            candidate_path.parent / "learn_fusion_model_start_preflight_report.json"
+        )
+        demo_path = request.demo_readiness_report_path or demo.get("report_path") or str(
+            candidate_path.parent / "learn_fusion_demo_readiness_report.json"
+        )
+        runbook_path = _model_start_runbook_path(runbook, out_dir, fallback_path=preflight.get("runbook_path"))
+        return {
+            "runbook_path": _relative_panel_path(_resolve_under_root_path(str(runbook_path))),
+            "preflight_report_path": _relative_panel_path(_resolve_under_root_path(str(preflight_path))),
+            "demo_readiness_report_path": _relative_panel_path(_resolve_under_root_path(str(demo_path))),
+            "out_dir": _relative_panel_path(out_dir),
+        }
+    if not (request.runbook_path and request.preflight_report_path and request.demo_readiness_report_path and request.out_dir):
+        raise ValueError("candidate_path or all explicit approval packet paths are required")
+    return {
+        "runbook_path": _relative_panel_path(_resolve_under_root_path(request.runbook_path)),
+        "preflight_report_path": _relative_panel_path(_resolve_under_root_path(request.preflight_report_path)),
+        "demo_readiness_report_path": _relative_panel_path(_resolve_under_root_path(request.demo_readiness_report_path)),
+        "out_dir": _relative_panel_path(_resolve_under_root_path(request.out_dir)),
+    }
+
+
+def _model_start_runbook_path(runbook: dict[str, Any], out_dir: Path, *, fallback_path: Any = None) -> Path:
+    if isinstance(fallback_path, str) and fallback_path.strip():
+        return _resolve_under_root_path(fallback_path)
+    for key in ("source_runbook_path", "runbook_path", "report_path"):
+        value = runbook.get(key)
+        if isinstance(value, str) and value.strip():
+            return _resolve_under_root_path(value)
+    if not runbook:
+        raise ValueError("model_start_runbook missing from candidate")
+    embedded_path = out_dir / "learn_fusion_model_start_runbook_embedded.json"
+    embedded_path.write_text(json.dumps(runbook, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return embedded_path
+
+
+def _calibration_pre_run_check_input_paths(request: PanelCreateCalibrationPreRunCheckRequest) -> dict[str, str]:
+    if request.candidate_path:
+        candidate_path = _resolve_under_root_path(request.candidate_path)
+        out_dir = _resolve_under_root_path(request.out_dir) if request.out_dir else candidate_path.parent
+        out_dir.mkdir(parents=True, exist_ok=True)
+        approval_packet_path = request.approval_packet_path or str(
+            candidate_path.parent / "learn_fusion_model_start_approval_packet.json"
+        )
+        return {
+            "approval_packet_path": _relative_panel_path(_resolve_under_root_path(approval_packet_path)),
+            "out_dir": _relative_panel_path(out_dir),
+        }
+    if not (request.approval_packet_path and request.out_dir):
+        raise ValueError("candidate_path or approval_packet_path and out_dir are required")
+    return {
+        "approval_packet_path": _relative_panel_path(_resolve_under_root_path(request.approval_packet_path)),
+        "out_dir": _relative_panel_path(_resolve_under_root_path(request.out_dir)),
+    }
+
+
+def _pathgraph_integration_readiness_input_paths(
+    request: PanelCreatePathgraphIntegrationReadinessRequest,
+) -> dict[str, str]:
+    candidate_path = _resolve_under_root_path(request.candidate_path)
+    out_dir = _resolve_under_root_path(request.out_dir) if request.out_dir else candidate_path.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return {
+        "candidate_path": _relative_panel_path(candidate_path),
+        "out_dir": _relative_panel_path(out_dir),
+    }
+
+
+def _current_evidence_packet_input_paths(request: PanelCreateCurrentEvidencePacketRequest) -> dict[str, str]:
+    source_path = _resolve_under_root_path(request.source_path)
+    out_dir = _resolve_under_root_path(request.out_dir) if request.out_dir else source_path.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return {
+        "source_path": _relative_panel_path(source_path),
+        "out_dir": _relative_panel_path(out_dir),
+    }
+
+
+def _precise_understanding_candidate_input_paths(
+    request: PanelCreatePreciseUnderstandingCandidateRequest,
+) -> dict[str, str]:
+    source_path = _resolve_under_root_path(request.source_path)
+    out_dir = _resolve_under_root_path(request.out_dir) if request.out_dir else source_path.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return {
+        "source_path": _relative_panel_path(source_path),
+        "out_dir": _relative_panel_path(out_dir),
+    }
+
+
+def _page_detail_candidate_input_paths(request: PanelCreatePageDetailCandidateRequest) -> dict[str, str]:
+    source_path = _resolve_under_root_path(request.source_path)
+    out_dir = _resolve_under_root_path(request.out_dir) if request.out_dir else source_path.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return {
+        "source_path": _relative_panel_path(source_path),
+        "out_dir": _relative_panel_path(out_dir),
+    }
+
+
+def _learning_demo_scaffold_input_paths(request: PanelCreateLearningDemoScaffoldRequest) -> dict[str, str]:
+    source_path = _resolve_under_root_path(request.source_path)
+    out_dir = _resolve_under_root_path(request.out_dir) if request.out_dir else source_path.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return {
+        "source_path": _relative_panel_path(source_path),
+        "out_dir": _relative_panel_path(out_dir),
+    }
+
+
+def _learning_demo_goal_readiness_input_paths(request: PanelCreateLearningDemoGoalReadinessRequest) -> dict[str, str]:
+    scaffold_path = _resolve_under_root_path(request.scaffold_path)
+    out_dir = _resolve_under_root_path(request.out_dir) if request.out_dir else scaffold_path.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return {
+        "scaffold_path": _relative_panel_path(scaffold_path),
+        "out_dir": _relative_panel_path(out_dir),
+    }
+
+
+def _resolve_under_root_path(path: str | Path) -> Path:
+    resolved = Path(path).expanduser()
+    if not resolved.is_absolute():
+        resolved = ROOT_DIR / resolved
+    resolved = resolved.resolve()
+    root = ROOT_DIR.resolve()
+    if resolved != root and root not in resolved.parents:
+        raise ValueError(f"path is outside project root: {resolved}")
+    return resolved
+
+
+PINNED_LEARNING_DRAFT_SOURCE_PATHS = [
+    "logs/benchmarks/learn_two_stage_python_v105_readonly_pathgraph_scaffold/learn_mode_demo_scaffold.json",
+    "logs/benchmarks/learn_two_stage_applemusic_v105_readonly_pathgraph_scaffold/learn_mode_demo_scaffold.json",
+    "logs/benchmarks/learn_two_stage_qq_v105_readonly_pathgraph_scaffold/learn_mode_demo_scaffold.json",
+    "logs/benchmarks/learn_two_stage_python_v104_readonly_pathgraph_scaffold/learn_mode_demo_scaffold.json",
+    "logs/benchmarks/learn_two_stage_applemusic_v104_readonly_pathgraph_scaffold/learn_mode_demo_scaffold.json",
+    "logs/benchmarks/learn_two_stage_qq_v104_readonly_pathgraph_scaffold/learn_mode_demo_scaffold.json",
+    "logs/benchmarks/learn_two_stage_python_v103_readonly_pathgraph_scaffold/learn_mode_demo_scaffold.json",
+    "logs/benchmarks/learn_two_stage_applemusic_v103_readonly_pathgraph_scaffold/learn_mode_demo_scaffold.json",
+    "logs/benchmarks/learn_two_stage_qq_v103_readonly_pathgraph_scaffold/learn_mode_demo_scaffold.json",
+    "logs/benchmarks/learn_fresh_model_post_batch_refresh_v2_20260706/attached_draft/actual_parser_output_with_fusion_status.json",
+    "logs/benchmarks/learn_pathgraph_readiness_with_handoff_20260706/actual_parser_output_with_fusion_status.json",
+]
+
+
+def _list_recent_learning_draft_sources(*, limit: int = 50) -> dict[str, Any]:
+    roots = [
+        ROOT_DIR / "artifacts" / "learning-runs",
+        ROOT_DIR / "artifacts" / "learning-draft-review",
+    ]
+    targeted_benchmark_root = ROOT_DIR / "logs" / "benchmarks"
+    pinned_paths = [ROOT_DIR / path for path in PINNED_LEARNING_DRAFT_SOURCE_PATHS]
+    candidates: list[Path] = []
+    sources: list[dict[str, Any]] = []
+    skipped_count = 0
+    seen_paths: set[str] = set()
+    for path in pinned_paths:
+        if not path.exists() or not path.is_file():
+            continue
+        try:
+            source = _learning_draft_source_entry(path, pinned=True)
+        except Exception:
+            skipped_count += 1
+            continue
+        source["source_category"] = "recommended_current_precise_understanding"
+        source["pinned"] = True
+        sources.append(source)
+        seen_paths.add(str(path.resolve()))
+    for root in roots:
+        if root.exists():
+            candidates.extend(path for path in root.rglob("*.json") if path.is_file() and _is_learning_draft_source_candidate_file(path))
+    if targeted_benchmark_root.exists():
+        for file_name in ("learn_page_detail_candidate.json", "learn_mode_demo_scaffold.json"):
+            candidates.extend(path for path in targeted_benchmark_root.rglob(file_name) if path.is_file())
+    candidates.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    for path in candidates:
+        if len(sources) >= limit:
+            break
+        if str(path.resolve()) in seen_paths:
+            continue
+        try:
+            source = _learning_draft_source_entry(path, pinned=False)
+        except Exception:
+            skipped_count += 1
+            continue
+        source["source_category"] = _learning_draft_source_category(path, default=source.get("source_category"))
+        sources.append(source)
+        seen_paths.add(str(path.resolve()))
+    return {
+        "contract_version": "panel_learning_draft_sources_v1",
+        "roots": [_relative_panel_path(root) for root in roots],
+        "targeted_benchmark_roots": [_relative_panel_path(targeted_benchmark_root)] if targeted_benchmark_root.exists() else [],
+        "pinned_source_paths": [_relative_panel_path(path) for path in pinned_paths if path.exists()],
+        "sources": sources,
+        "skipped_count": skipped_count,
+        "limit": limit,
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+
+
+def _learning_draft_source_category(path: Path, *, default: Any = None) -> str:
+    if path.name == "learn_page_detail_candidate.json":
+        return "recent_learning_page_detail"
+    if path.name == "learn_mode_demo_scaffold.json":
+        return "recent_learning_demo_scaffold"
+    return str(default or "recent_learning_draft")
+
+
+def _learning_draft_source_entry(path: Path, *, pinned: bool) -> dict[str, Any]:
+    review = load_learning_draft_review(_relative_panel_path(path), project_root=ROOT_DIR)
+    draft = review.get("draft") if isinstance(review.get("draft"), dict) else {}
+    counts = _learning_draft_section_counts(draft)
+    source = review.get("source") if isinstance(review.get("source"), dict) else {}
+    preview = review.get("screen_understanding_preview") if isinstance(review.get("screen_understanding_preview"), dict) else {}
+    candidate_review = (
+        review.get("pathgraph_candidate_review") if isinstance(review.get("pathgraph_candidate_review"), dict) else {}
+    )
+    candidate_summary = (
+        candidate_review.get("pathgraph_readiness_summary")
+        if isinstance(candidate_review.get("pathgraph_readiness_summary"), dict)
+        else {}
+    )
+    candidate_preflight = (
+        candidate_review.get("model_start_preflight")
+        if isinstance(candidate_review.get("model_start_preflight"), dict)
+        else {}
+    )
+    candidate_demo = (
+        candidate_review.get("demo_readiness") if isinstance(candidate_review.get("demo_readiness"), dict) else {}
+    )
+    candidate_approval_packet = (
+        candidate_review.get("model_start_approval_packet")
+        if isinstance(candidate_review.get("model_start_approval_packet"), dict)
+        else {}
+    )
+    candidate_calibration_pre_run = (
+        candidate_review.get("calibration_pre_run_check")
+        if isinstance(candidate_review.get("calibration_pre_run_check"), dict)
+        else {}
+    )
+    candidate_pathgraph_integration = (
+        candidate_review.get("pathgraph_integration_readiness")
+        if isinstance(candidate_review.get("pathgraph_integration_readiness"), dict)
+        else {}
+    )
+    candidate_current_evidence = (
+        candidate_review.get("current_evidence_packet")
+        if isinstance(candidate_review.get("current_evidence_packet"), dict)
+        else {}
+    )
+    candidate_precise_understanding = (
+        candidate_review.get("precise_understanding_candidate")
+        if isinstance(candidate_review.get("precise_understanding_candidate"), dict)
+        else {}
+    )
+    candidate_page_detail = (
+        candidate_review.get("page_detail_candidate")
+        if isinstance(candidate_review.get("page_detail_candidate"), dict)
+        else {}
+    )
+    candidate_demo_scaffold = (
+        candidate_review.get("learn_mode_demo_scaffold")
+        if isinstance(candidate_review.get("learn_mode_demo_scaffold"), dict)
+        else {}
+    )
+    candidate_demo_goal_readiness = (
+        candidate_review.get("learning_mode_demo_goal_readiness")
+        if isinstance(candidate_review.get("learning_mode_demo_goal_readiness"), dict)
+        else {}
+    )
+    readiness = (
+        preview.get("precise_understanding_readiness_summary")
+        if isinstance(preview.get("precise_understanding_readiness_summary"), dict)
+        else {}
+    )
+    handoff = preview.get("calibration_handoff_report") if isinstance(preview.get("calibration_handoff_report"), dict) else {}
+    handoff_future = handoff.get("future_outputs") if isinstance(handoff.get("future_outputs"), dict) else {}
+    consistency = (
+        preview.get("calibration_handoff_consistency_report")
+        if isinstance(preview.get("calibration_handoff_consistency_report"), dict)
+        else {}
+    )
+    consistency_summary = consistency.get("summary") if isinstance(consistency.get("summary"), dict) else {}
+    runbook = preview.get("model_start_runbook") if isinstance(preview.get("model_start_runbook"), dict) else {}
+    entry = {
+        "source_path": source.get("source_path") or _relative_panel_path(path),
+        "source_trial_path": source.get("source_trial_path"),
+        "screen_summary": draft.get("screen_summary") or "",
+        "state_guess": draft.get("state_guess") or "",
+        "state_count": counts["states"],
+        "region_count": counts["regions"],
+        "action_template_count": counts["action_templates"],
+        "blocker_count": counts["blockers"],
+        "verification_rule_count": counts["verification_rules"],
+        "modified_at": path.stat().st_mtime,
+        "source_category": "recent_learning_draft",
+        "pinned": pinned,
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    if readiness:
+        entry.update(
+            {
+                "readiness_status": readiness.get("readiness_status"),
+                "calibration_coverage_rate": readiness.get("calibration_coverage_rate"),
+                "pending_calibration_ready_count": readiness.get("pending_calibration_ready_count"),
+                "pending_calibration_review_count": readiness.get("pending_calibration_review_count"),
+                "pathgraph_status": readiness.get("pathgraph_status"),
+            }
+        )
+    if handoff:
+        entry.update(
+            {
+                "handoff_status": handoff.get("handoff_status"),
+                "safe_to_start_after_user_approval": handoff.get("safe_to_start_after_user_approval") is True,
+                "rerun_report_status": handoff_future.get("rerun_report_status"),
+            }
+        )
+    if consistency:
+        entry.update(
+            {
+                "consistency_status": consistency.get("consistency_status"),
+                "post_batch_refresh_has_batch_plan": consistency_summary.get("post_batch_refresh_has_batch_plan") is True,
+                "refresh_blocks_before_future_rerun": consistency_summary.get("refresh_blocks_before_future_rerun") is True,
+                "consistency_blocker_count": len(consistency.get("blockers")) if isinstance(consistency.get("blockers"), list) else 0,
+            }
+        )
+    if runbook:
+        ready_regions = runbook.get("ready_region_numbers") if isinstance(runbook.get("ready_region_numbers"), list) else []
+        review_regions = (
+            runbook.get("review_blocked_region_numbers")
+            if isinstance(runbook.get("review_blocked_region_numbers"), list)
+            else []
+        )
+        entry.update(
+            {
+                "runbook_status": runbook.get("runbook_status"),
+                "approval_required": runbook.get("approval_required") is True,
+                "may_start_model_after_user_approval": runbook.get("may_start_model_after_user_approval") is True,
+                "may_run_calibration_batch_now": runbook.get("may_run_calibration_batch_now") is True,
+                "runbook_ready_region_count": len(ready_regions),
+                "runbook_review_blocked_region_count": len(review_regions),
+                "runbook_blocker_count": len(runbook.get("blockers")) if isinstance(runbook.get("blockers"), list) else 0,
+            }
+        )
+    if candidate_review:
+        entry.update(
+            {
+                "pathgraph_candidate_path": candidate_review.get("pathgraph_candidate_path"),
+                "candidate_validation_status": candidate_summary.get("validation_status"),
+                "candidate_readiness_status": candidate_summary.get("readiness_status"),
+            }
+        )
+    if candidate_preflight:
+        entry.update(
+            {
+                "preflight_status": candidate_preflight.get("preflight_status"),
+                "preflight_may_start_model_after_user_approval": (
+                    candidate_preflight.get("may_start_model_after_user_approval") is True
+                ),
+                "preflight_may_run_calibration_batch_now": candidate_preflight.get("may_run_calibration_batch_now") is True,
+                "preflight_blocker_count": (
+                    len(candidate_preflight.get("blockers")) if isinstance(candidate_preflight.get("blockers"), list) else 0
+                ),
+            }
+        )
+    if candidate_demo:
+        entry.update(
+            {
+                "demo_readiness_status": candidate_demo.get("demo_readiness_status"),
+                "demo_readiness_may_run_calibration_batch_now": (
+                    candidate_demo.get("may_run_calibration_batch_now") is True
+                ),
+                "demo_readiness_blocker_count": (
+                    len(candidate_demo.get("blockers")) if isinstance(candidate_demo.get("blockers"), list) else 0
+                ),
+            }
+        )
+    if candidate_approval_packet:
+        entry.update(
+            {
+                "approval_packet_status": candidate_approval_packet.get("approval_packet_status"),
+                "approval_packet_requires_explicit_user_approval": (
+                    candidate_approval_packet.get("requires_explicit_user_approval") is True
+                ),
+                "approval_packet_may_run_calibration_batch_now": (
+                    candidate_approval_packet.get("may_run_calibration_batch_now") is True
+                ),
+                "approval_packet_blocker_count": (
+                    len(candidate_approval_packet.get("blockers"))
+                    if isinstance(candidate_approval_packet.get("blockers"), list)
+                    else 0
+                ),
+            }
+        )
+    if candidate_calibration_pre_run:
+        calibration_snapshot = (
+            candidate_calibration_pre_run.get("model_runtime_snapshot")
+            if isinstance(candidate_calibration_pre_run.get("model_runtime_snapshot"), dict)
+            else {}
+        )
+        entry.update(
+            {
+                "calibration_pre_run_status": candidate_calibration_pre_run.get("effective_pre_run_status")
+                or candidate_calibration_pre_run.get("pre_run_status"),
+                "calibration_pre_run_raw_status": candidate_calibration_pre_run.get("pre_run_status"),
+                "calibration_pre_run_checked_at": calibration_snapshot.get("checked_at"),
+                "calibration_pre_run_model_ports_clear": calibration_snapshot.get("model_ports_clear") is True,
+                "calibration_pre_run_model_processes_clear": calibration_snapshot.get("model_processes_clear") is True,
+                "calibration_pre_run_approval_packet_checksum_status": candidate_calibration_pre_run.get(
+                    "approval_packet_checksum_status"
+                ),
+                "calibration_pre_run_requires_explicit_user_approval": (
+                    candidate_calibration_pre_run.get("requires_explicit_user_approval") is True
+                ),
+                "calibration_pre_run_may_run_calibration_batch_now": (
+                    candidate_calibration_pre_run.get("may_run_calibration_batch_now") is True
+                ),
+                "calibration_pre_run_blocker_count": (
+                    len(candidate_calibration_pre_run.get("blockers"))
+                    if isinstance(candidate_calibration_pre_run.get("blockers"), list)
+                    else 0
+                ),
+            }
+        )
+    if candidate_pathgraph_integration:
+        integration_report_path = candidate_pathgraph_integration.get("report_path")
+        entry.update(
+            {
+                "pathgraph_integration_status": candidate_pathgraph_integration.get("integration_readiness_status"),
+                "pathgraph_integration_report_path": (
+                    _relative_panel_path(_resolve_under_root_path(integration_report_path)).replace("\\", "/")
+                    if isinstance(integration_report_path, str) and integration_report_path.strip()
+                    else None
+                ),
+                "pathgraph_integration_ready_for_audited_review": (
+                    candidate_pathgraph_integration.get("ready_for_audited_pathgraph_review") is True
+                ),
+                "pathgraph_integration_ready_for_runtime_promotion": (
+                    candidate_pathgraph_integration.get("ready_for_runtime_pathgraph_promotion") is True
+                ),
+                "pathgraph_integration_blocker_count": (
+                    len(candidate_pathgraph_integration.get("blockers"))
+                    if isinstance(candidate_pathgraph_integration.get("blockers"), list)
+                    else 0
+                ),
+            }
+        )
+    if candidate_current_evidence:
+        packet_report_path = candidate_current_evidence.get("report_path")
+        packet_calibration = (
+            candidate_current_evidence.get("calibration")
+            if isinstance(candidate_current_evidence.get("calibration"), dict)
+            else {}
+        )
+        packet_readiness = (
+            packet_calibration.get("readiness_summary") if isinstance(packet_calibration.get("readiness_summary"), dict) else {}
+        )
+        packet_pathgraph = (
+            candidate_current_evidence.get("pathgraph")
+            if isinstance(candidate_current_evidence.get("pathgraph"), dict)
+            else {}
+        )
+        packet_safety = (
+            candidate_current_evidence.get("safety") if isinstance(candidate_current_evidence.get("safety"), dict) else {}
+        )
+        entry.update(
+            {
+                "current_evidence_packet_status": "available",
+                "current_evidence_packet_path": (
+                    _relative_panel_path(_resolve_under_root_path(packet_report_path)).replace("\\", "/")
+                    if isinstance(packet_report_path, str) and packet_report_path.strip()
+                    else None
+                ),
+                "current_evidence_packet_coverage": packet_readiness.get("calibration_coverage_rate"),
+                "current_evidence_packet_integration_status": packet_pathgraph.get("integration_readiness_status"),
+                "current_evidence_packet_runtime_promotion": packet_safety.get("runtime_pathgraph_promotion") is True,
+                "current_evidence_packet_model_started": packet_safety.get("model_started") is True,
+            }
+        )
+    if candidate_precise_understanding:
+        precise_report_path = candidate_precise_understanding.get("report_path")
+        precise_summary = (
+            candidate_precise_understanding.get("summary")
+            if isinstance(candidate_precise_understanding.get("summary"), dict)
+            else {}
+        )
+        precise_safety = (
+            candidate_precise_understanding.get("safety")
+            if isinstance(candidate_precise_understanding.get("safety"), dict)
+            else {}
+        )
+        entry.update(
+            {
+                "precise_understanding_candidate_status": candidate_precise_understanding.get("readiness_status"),
+                "precise_understanding_candidate_path": (
+                    _relative_panel_path(_resolve_under_root_path(precise_report_path)).replace("\\", "/")
+                    if isinstance(precise_report_path, str) and precise_report_path.strip()
+                    else None
+                ),
+                "precise_understanding_candidate_total_regions": precise_summary.get("total_regions"),
+                "precise_understanding_candidate_pending_count": precise_summary.get("pending_calibration_count"),
+                "precise_understanding_candidate_review_blocked_count": precise_summary.get("review_blocked_count"),
+                "precise_understanding_candidate_pathgraph_ready_count": precise_summary.get(
+                    "pathgraph_candidate_review_ready_count"
+                ),
+                "precise_understanding_candidate_runtime_promotion": (
+                    precise_safety.get("runtime_pathgraph_promotion") is True
+                ),
+                "precise_understanding_candidate_model_started": precise_safety.get("model_started") is True,
+            }
+        )
+    if candidate_page_detail:
+        page_detail_report_path = candidate_page_detail.get("report_path")
+        page_detail_summary = (
+            candidate_page_detail.get("summary") if isinstance(candidate_page_detail.get("summary"), dict) else {}
+        )
+        page_detail_safety = (
+            candidate_page_detail.get("safety") if isinstance(candidate_page_detail.get("safety"), dict) else {}
+        )
+        entry.update(
+            {
+                "page_detail_candidate_status": candidate_page_detail.get("readiness_status"),
+                "page_detail_candidate_path": (
+                    _relative_panel_path(_resolve_under_root_path(page_detail_report_path)).replace("\\", "/")
+                    if isinstance(page_detail_report_path, str) and page_detail_report_path.strip()
+                    else None
+                ),
+                "page_detail_candidate_region_count": page_detail_summary.get("region_count"),
+                "page_detail_candidate_section_count": page_detail_summary.get("section_count"),
+                "page_detail_candidate_possible_operation_count": page_detail_summary.get("possible_operation_count"),
+                "page_detail_candidate_runtime_promotion": page_detail_safety.get("runtime_pathgraph_promotion") is True,
+                "page_detail_candidate_model_started": page_detail_safety.get("model_started") is True,
+            }
+        )
+    if candidate_demo_scaffold:
+        scaffold_report_path = candidate_demo_scaffold.get("report_path")
+        scaffold_summary = (
+            candidate_demo_scaffold.get("summary") if isinstance(candidate_demo_scaffold.get("summary"), dict) else {}
+        )
+        scaffold_display = (
+            candidate_demo_scaffold.get("display_readiness")
+            if isinstance(candidate_demo_scaffold.get("display_readiness"), dict)
+            else {}
+        )
+        scaffold_model_only = (
+            candidate_demo_scaffold.get("model_only_demo_readiness")
+            if isinstance(candidate_demo_scaffold.get("model_only_demo_readiness"), dict)
+            else {}
+        )
+        scaffold_provenance = (
+            candidate_demo_scaffold.get("model_provenance_audit")
+            if isinstance(candidate_demo_scaffold.get("model_provenance_audit"), dict)
+            else {}
+        )
+        scaffold_safety = (
+            candidate_demo_scaffold.get("safety") if isinstance(candidate_demo_scaffold.get("safety"), dict) else {}
+        )
+        entry.update(
+            {
+                "learning_demo_scaffold_status": "available",
+                "learning_demo_scaffold_path": (
+                    _relative_panel_path(_resolve_under_root_path(scaffold_report_path)).replace("\\", "/")
+                    if isinstance(scaffold_report_path, str) and scaffold_report_path.strip()
+                    else None
+                ),
+                "learning_demo_scaffold_artifact_count": scaffold_summary.get("artifact_count"),
+                "learning_demo_scaffold_failure_count": scaffold_summary.get("failure_count"),
+                "learning_demo_scaffold_model_preview_status": scaffold_summary.get(
+                    "model_generated_pathgraph_preview_status"
+                ),
+                "learning_demo_scaffold_model_preview_region_count": scaffold_summary.get(
+                    "model_generated_pathgraph_preview_region_count"
+                ),
+                "learning_demo_scaffold_model_preview_action_count": scaffold_summary.get(
+                    "model_generated_pathgraph_preview_action_count"
+                ),
+                "learning_demo_scaffold_model_page_detail_section_count": scaffold_summary.get(
+                    "model_generated_page_detail_section_count"
+                ),
+                "learning_demo_scaffold_model_page_detail_operation_count": scaffold_summary.get(
+                    "model_generated_page_detail_possible_operation_count"
+                ),
+                "learning_demo_scaffold_model_only_status": scaffold_model_only.get("status"),
+                "learning_demo_scaffold_model_only_ready": scaffold_model_only.get("ready") is True,
+                "learning_demo_scaffold_page_detail_ready": (
+                    scaffold_display.get("pathgraph_detail_can_show_page_detail") is True
+                ),
+                "learning_demo_scaffold_model_origin_status": scaffold_provenance.get("status"),
+                "learning_demo_scaffold_actual_model_call_evidence_count": scaffold_provenance.get(
+                    "actual_model_call_evidence_count"
+                ),
+                "learning_demo_scaffold_assisted_evidence_count": scaffold_provenance.get(
+                    "assisted_or_human_review_evidence_count"
+                ),
+                "learning_demo_scaffold_fully_model_generated": (
+                    scaffold_provenance.get("meets_fully_model_generated_demo_requirement") is True
+                ),
+                "learning_demo_scaffold_runtime_promotion": scaffold_safety.get("runtime_pathgraph_promotion") is True,
+                "learning_demo_scaffold_model_started": scaffold_safety.get("model_started") is True,
+            }
+        )
+    if candidate_demo_goal_readiness:
+        goal_report_path = candidate_demo_goal_readiness.get("report_path")
+        goal_summary = (
+            candidate_demo_goal_readiness.get("summary")
+            if isinstance(candidate_demo_goal_readiness.get("summary"), dict)
+            else {}
+        )
+        fresh_model_acceptance = (
+            candidate_demo_goal_readiness.get("fresh_model_chain_acceptance")
+            if isinstance(candidate_demo_goal_readiness.get("fresh_model_chain_acceptance"), dict)
+            else {}
+        )
+        fresh_model_source_breakdown = (
+            fresh_model_acceptance.get("source_breakdown")
+            if isinstance(fresh_model_acceptance.get("source_breakdown"), dict)
+            else {}
+        )
+        fresh_model_blockers = (
+            fresh_model_acceptance.get("blocking_reasons")
+            if isinstance(fresh_model_acceptance.get("blocking_reasons"), list)
+            else []
+        )
+        fresh_model_replacement_plan = (
+            fresh_model_acceptance.get("replacement_plan")
+            if isinstance(fresh_model_acceptance.get("replacement_plan"), dict)
+            else {}
+        )
+        fresh_model_replacement_steps = (
+            fresh_model_replacement_plan.get("replacement_steps")
+            if isinstance(fresh_model_replacement_plan.get("replacement_steps"), list)
+            else []
+        )
+        fresh_model_sources_to_replace = (
+            fresh_model_replacement_plan.get("sources_to_replace")
+            if isinstance(fresh_model_replacement_plan.get("sources_to_replace"), list)
+            else []
+        )
+        goal_chain = (
+            candidate_demo_goal_readiness.get("demo_chain_manifest")
+            if isinstance(candidate_demo_goal_readiness.get("demo_chain_manifest"), dict)
+            else {}
+        )
+        goal_chain_steps = goal_chain.get("steps") if isinstance(goal_chain.get("steps"), list) else []
+        goal_chain_ready_steps = [
+            item for item in goal_chain_steps if isinstance(item, dict) and item.get("stage_ready_for_display") is True
+        ]
+        goal_chain_missing_proofs = sum(
+            len(item.get("missing_proof_fields"))
+            for item in goal_chain_steps
+            if isinstance(item, dict) and isinstance(item.get("missing_proof_fields"), list)
+        )
+        goal_chain_blockers = (
+            goal_chain.get("final_goal_blockers")
+            if isinstance(goal_chain.get("final_goal_blockers"), list)
+            else candidate_demo_goal_readiness.get("blocking_reasons")
+            if isinstance(candidate_demo_goal_readiness.get("blocking_reasons"), list)
+            else []
+        )
+        goal_safety = (
+            candidate_demo_goal_readiness.get("safety")
+            if isinstance(candidate_demo_goal_readiness.get("safety"), dict)
+            else {}
+        )
+        entry.update(
+            {
+                "learning_demo_goal_status": candidate_demo_goal_readiness.get("demo_goal_status"),
+                "learning_demo_goal_path": (
+                    _relative_panel_path(_resolve_under_root_path(goal_report_path)).replace("\\", "/")
+                    if isinstance(goal_report_path, str) and goal_report_path.strip()
+                    else None
+                ),
+                "learning_demo_goal_display_ready": candidate_demo_goal_readiness.get("display_demo_ready") is True,
+                "learning_demo_goal_final_complete": candidate_demo_goal_readiness.get("final_goal_complete") is True,
+                "learning_demo_goal_passed_requirement_count": goal_summary.get("passed_requirement_count"),
+                "learning_demo_goal_failed_requirement_count": goal_summary.get("failed_requirement_count"),
+                "learning_demo_goal_blocker_count": (
+                    len(candidate_demo_goal_readiness.get("blocking_reasons"))
+                    if isinstance(candidate_demo_goal_readiness.get("blocking_reasons"), list)
+                    else 0
+                ),
+                "learning_demo_chain_can_be_demoed": goal_chain.get("chain_can_be_demoed") is True,
+                "learning_demo_chain_final_complete": goal_chain.get("chain_is_final_goal_complete") is True,
+                "learning_demo_chain_ready_step_count": len(goal_chain_ready_steps),
+                "learning_demo_chain_total_step_count": len(goal_chain_steps),
+                "learning_demo_chain_missing_proof_count": goal_chain_missing_proofs,
+                "learning_demo_chain_blocker_count": len(goal_chain_blockers),
+                "learning_demo_goal_runtime_promotion": goal_safety.get("runtime_pathgraph_promotion") is True,
+                "learning_demo_goal_model_started": goal_safety.get("model_started") is True,
+            }
+        )
+        if fresh_model_acceptance:
+            entry.update(
+                {
+                    "fresh_model_acceptance_status": fresh_model_acceptance.get("acceptance_status"),
+                    "fresh_model_chain_accepted": fresh_model_acceptance.get("accepted") is True,
+                    "fresh_model_counts_as_final_goal_completion": (
+                        fresh_model_acceptance.get("counts_as_final_goal_completion") is True
+                    ),
+                    "fresh_model_actual_model_call_evidence_count": fresh_model_acceptance.get(
+                        "actual_model_call_evidence_count"
+                    ),
+                    "fresh_model_assisted_or_human_review_evidence_count": fresh_model_acceptance.get(
+                        "assisted_or_human_review_evidence_count"
+                    ),
+                    "fresh_model_acceptance_blocker_count": len(fresh_model_blockers),
+                    "fresh_model_source_breakdown_actual_model_call": fresh_model_source_breakdown.get(
+                        "actual_model_call"
+                    ),
+                    "fresh_model_source_breakdown_assisted_or_human_review": fresh_model_source_breakdown.get(
+                        "assisted_or_human_review"
+                    ),
+                    "fresh_model_source_breakdown_fixture_only": fresh_model_source_breakdown.get("fixture_only"),
+                    "fresh_model_source_breakdown_recorded_model_output": fresh_model_source_breakdown.get(
+                        "recorded_model_output"
+                    ),
+                }
+            )
+            if fresh_model_replacement_plan:
+                entry.update(
+                    {
+                        "fresh_model_replacement_required": (
+                            fresh_model_replacement_plan.get("replacement_required") is True
+                        ),
+                        "fresh_model_replacement_plan_status": fresh_model_replacement_plan.get("plan_status"),
+                        "fresh_model_replacement_sources_to_replace": [
+                            str(item) for item in fresh_model_sources_to_replace if str(item).strip()
+                        ],
+                        "fresh_model_replacement_required_source_type": fresh_model_replacement_plan.get(
+                            "required_source_type"
+                        ),
+                        "fresh_model_replacement_step_count": len(fresh_model_replacement_steps),
+                        "fresh_model_replacement_command_executes_now_count": sum(
+                            1
+                            for item in fresh_model_replacement_steps
+                            if isinstance(item, dict) and item.get("command_executes_now") is True
+                        ),
+                    }
+                )
+    return entry
+
+
+def _is_learning_draft_source_candidate_file(path: Path) -> bool:
+    return path.name not in {
+        "promotion_validation_report.json",
+        "learn_fusion_model_start_preflight_report.json",
+        "learn_fusion_demo_readiness_report.json",
+        "learn_fusion_model_start_approval_packet.json",
+        "learn_fusion_calibration_pre_run_check_report.json",
+        "learn_fusion_pathgraph_integration_readiness_report.json",
+        "learn_fusion_current_evidence_packet.json",
+        "learn_precise_understanding_candidate.json",
+        "learn_page_detail_candidate.json",
+        "learn_mode_demo_scaffold.json",
+        "learning_mode_demo_goal_readiness_report.json",
+    }
+
+
+def _relative_panel_path(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(ROOT_DIR.resolve()))
+    except ValueError:
+        return str(path)
+
+
+def _resolve_panel_learning_image_path(path: str) -> Path:
+    resolved = Path(path).expanduser()
+    if not resolved.is_absolute():
+        resolved = ROOT_DIR / resolved
+    resolved = resolved.resolve()
+    allowed_roots = [(ROOT_DIR / "artifacts").resolve(), (ROOT_DIR / "logs").resolve()]
+    if not any(resolved == root or root in resolved.parents for root in allowed_roots):
+        raise ValueError(str(resolved))
+    if not resolved.exists() or not resolved.is_file():
+        raise FileNotFoundError(str(resolved))
+    return resolved
+
+
+def _save_panel_learning_trial(payload: dict[str, Any], *, app_name: str) -> str:
+    run_root = ROOT_DIR / "artifacts" / "learning-runs"
+    run_root.mkdir(parents=True, exist_ok=True)
+    timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+    millis = int((time.time() % 1) * 1000)
+    safe_app = _safe_panel_learning_slug(app_name or payload.get("app_name") or "unknown_app")
+    run_dir = run_root / f"panel_{timestamp}-{millis:03d}_{safe_app}"
+    run_dir.mkdir(parents=True, exist_ok=False)
+    trial_path = run_dir / "trial_result.json"
+    trial_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    try:
+        return str(trial_path.relative_to(ROOT_DIR))
+    except ValueError:
+        return str(trial_path)
+
+
+def _safe_panel_learning_slug(value: Any) -> str:
+    text = str(value or "unknown_app").strip().lower()
+    cleaned = "".join(ch if ch.isalnum() or ch in "_.-" else "_" for ch in text)
+    cleaned = "_".join(part for part in cleaned.split("_") if part)
+    return cleaned[:80] or "unknown_app"
+
+
+def _learning_draft_section_counts(draft: Any) -> dict[str, int]:
+    if not isinstance(draft, dict):
+        return {"states": 0, "regions": 0, "action_templates": 0, "blockers": 0, "verification_rules": 0}
+    workflow = draft.get("workflow_draft") if isinstance(draft.get("workflow_draft"), dict) else {}
+    interface = draft.get("interface_draft") if isinstance(draft.get("interface_draft"), dict) else {}
+    states = workflow.get("states") or draft.get("states") or []
+    regions = interface.get("regions") or draft.get("regions") or []
+    actions = workflow.get("action_templates") or draft.get("action_templates") or []
+    rules = workflow.get("verification_rules") or draft.get("verification_rules") or []
+    return {
+        "states": len(states),
+        "regions": len(regions),
+        "action_templates": len(actions),
+        "blockers": len(draft.get("blockers") or []),
+        "verification_rules": len(rules),
+    }
+
+
+def _panel_two_stage_observe_result(
+    request: PanelRunLearningTwoStageUnderstandingRequest,
+) -> tuple[dict[str, Any], Path]:
+    if request.trace_path and str(request.trace_path).strip():
+        trace_path = _resolve_panel_learning_image_path(str(request.trace_path))
+        trace = json.loads(trace_path.read_text(encoding="utf-8-sig"))
+        result = trace.get("result") if isinstance(trace.get("result"), dict) else trace
+        if not isinstance(result, dict):
+            raise ValueError("trace does not contain a dict result")
+        return result, trace_path
+
+    result = request.observe_result if isinstance(request.observe_result, dict) else {}
+    if isinstance(result.get("data"), dict):
+        result = result["data"]
+    if isinstance(result.get("result"), dict) and not result.get("image_path"):
+        result = result["result"]
+    if not result:
+        raise ValueError("observe_result or trace_path is required")
+    source_trace = _str(result.get("trace_path") or result.get("source_trace_path") or "panel_inline_observe_result.json")
+    return result, Path(source_trace)
+
+
+def _panel_learning_recognition_observe_bundle(request: PanelRunLearningRecognitionTrialRequest) -> dict[str, Any]:
+    evidence = request.observation_evidence if isinstance(request.observation_evidence, dict) else {}
+    screen_size = _panel_first_dict(evidence.get("screen_size"), evidence.get("viewport_size"), evidence.get("image_size"))
+    targets = _normalized_panel_calibrated_targets(evidence.get("calibrated_targets"))
+    review_boxes = _normalized_panel_review_boxes(evidence.get("review_boxes"))
+    screen_map = evidence.get("screen_map") if isinstance(evidence.get("screen_map"), dict) else {}
+    sources: dict[str, Any] = {
+        "calibrated_targets": {
+            "targets": targets,
+            "source_trace_path": _str(evidence.get("coordinate_trace_path") or evidence.get("trace_path")),
+            "source_overlay_path": _str(evidence.get("coordinate_overlay_path")),
+        }
+    }
+    candidates = screen_map.get("candidates") if isinstance(screen_map.get("candidates"), list) else []
+    if candidates:
+        sources["vision"] = {"regions": candidates}
+    if review_boxes:
+        ocr_review_boxes = [item for item in review_boxes if item.get("role") == "ocr_text_review_only"]
+        region_review_boxes = [item for item in review_boxes if item.get("role") != "ocr_text_review_only"]
+        if ocr_review_boxes:
+            sources["ocr"] = {"texts": ocr_review_boxes}
+        if region_review_boxes:
+            existing_regions = list(sources.get("vision", {}).get("regions") or [])
+            sources["vision"] = {"regions": [*existing_regions, *region_review_boxes]}
+    return {
+        "contract_version": "learn_observe_bundle_v1",
+        "app_name": request.app_name,
+        "state_hint": request.state_hint,
+        "screen_size": screen_size,
+        "image_path": _str(evidence.get("current_image_path") or evidence.get("image_path")),
+        "source_image_path": _str(evidence.get("current_image_path") or evidence.get("image_path")),
+        "sources": sources,
+        "panel_observation_evidence": {
+            "contract_version": _str(evidence.get("contract_version")),
+            "evidence_quality": _str(evidence.get("evidence_quality")),
+            "model_roles": evidence.get("model_roles") if isinstance(evidence.get("model_roles"), dict) else {},
+            "coordinate_overlay_path": _str(evidence.get("coordinate_overlay_path")),
+            "learn_all_targets_summary": evidence.get("learn_all_targets_summary")
+            if isinstance(evidence.get("learn_all_targets_summary"), dict)
+            else {},
+            "review_box_count": len(review_boxes),
+        },
+    }
+
+
+def _panel_learning_recognition_summary(evidence: dict[str, Any]) -> str:
+    if not isinstance(evidence, dict):
+        return ""
+    screen_map = evidence.get("screen_map") if isinstance(evidence.get("screen_map"), dict) else {}
+    screen_summary = screen_map.get("summary") if isinstance(screen_map.get("summary"), dict) else {}
+    return _str(
+        evidence.get("screen_summary")
+        or screen_summary.get("screen_summary")
+        or screen_map.get("state_hint")
+        or evidence.get("goal")
+    )
+
+
+def _panel_calibrated_target_grounding_adapter(*, item: dict[str, Any], roi_crop: dict[str, Any]) -> dict[str, Any]:
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    point = metadata.get("click_point") if isinstance(metadata.get("click_point"), dict) else {}
+    return {
+        "screen_point": _normalized_point(point),
+        "screen_bbox": item.get("bbox") if isinstance(item.get("bbox"), dict) else {},
+        "evidence": {
+            "coordinate_transform_replay": True,
+            "screenshot_freshness": True,
+            "uia_or_dom_or_parser_overlap": True,
+            "ocr_anchor_overlap": True,
+        },
+        "debug": {
+            "adapter": "panel_calibrated_target_replay",
+            "roi_contract": roi_crop.get("contract_version"),
+        },
+    }
+
+
+def _normalized_panel_calibrated_targets(value: Any) -> list[dict[str, Any]]:
+    targets = value if isinstance(value, list) else []
+    normalized: list[dict[str, Any]] = []
+    for index, target in enumerate(targets):
+        if not isinstance(target, dict):
+            continue
+        item = dict(target)
+        item.setdefault("candidate_id", item.get("item_id") or item.get("id") or f"panel_target_{index + 1}")
+        item.setdefault("role", item.get("semantic_action") or item.get("type") or "actionable")
+        bbox = _normalized_bbox(item.get("bbox"))
+        point = _normalized_point(item.get("click_point"))
+        item["bbox"] = bbox
+        item["click_point"] = point
+        validation = item.get("coordinate_validation") if isinstance(item.get("coordinate_validation"), dict) else {}
+        if not validation:
+            status = _str(item.get("coordinate_validation_status") or item.get("vista_status") or "valid")
+            point_inside_bbox = _point_inside_bbox(point, bbox)
+            validation = {
+                "status": status or "valid",
+                "bbox_present": bool(bbox["w"] and bbox["h"]),
+                "click_point_present": point != {"x": 0, "y": 0},
+                "bbox_inside_image": True,
+                "click_point_inside_image": True,
+                "click_point_inside_bbox": point_inside_bbox,
+            }
+        item["coordinate_validation"] = validation
+        normalized.append(item)
+    return normalized
+
+
+def _normalized_panel_review_boxes(value: Any) -> list[dict[str, Any]]:
+    boxes = value if isinstance(value, list) else []
+    normalized: list[dict[str, Any]] = []
+    for index, box in enumerate(boxes):
+        if not isinstance(box, dict):
+            continue
+        bbox = _normalized_bbox(box.get("bbox"))
+        label = _str(box.get("label") or box.get("text") or box.get("name"))
+        if not label or not bbox.get("w") or not bbox.get("h"):
+            continue
+        normalized.append(
+            {
+                "id": _str(box.get("candidate_id") or box.get("item_id") or box.get("id") or f"review_box_{index + 1}"),
+                "text": label,
+                "label": label,
+                "role": _str(box.get("role") or "review_only"),
+                "bbox": bbox,
+                "confidence": box.get("confidence"),
+                "source": _str(box.get("source") or "learn_all_targets.review_boxes"),
+                "review_status": _str(box.get("review_status") or "review_only"),
+                "children": box.get("children") if isinstance(box.get("children"), list) else [],
+                "execute_binding_enabled": False,
+                "artifact_is_authorization": False,
+            }
+        )
+    return normalized
+
+
+def _normalized_bbox(value: Any) -> dict[str, int]:
+    value = value if isinstance(value, dict) else {}
+    return {
+        "x": _int_or_zero(value.get("x")),
+        "y": _int_or_zero(value.get("y")),
+        "w": max(0, _int_or_zero(value.get("w") if "w" in value else value.get("width"))),
+        "h": max(0, _int_or_zero(value.get("h") if "h" in value else value.get("height"))),
+    }
+
+
+def _normalized_point(value: Any) -> dict[str, int]:
+    value = value if isinstance(value, dict) else {}
+    return {"x": _int_or_zero(value.get("x")), "y": _int_or_zero(value.get("y"))}
+
+
+def _point_inside_bbox(point: dict[str, int], bbox: dict[str, int]) -> bool:
+    return bbox["x"] <= point["x"] <= bbox["x"] + bbox["w"] and bbox["y"] <= point["y"] <= bbox["y"] + bbox["h"]
+
+
+def _panel_first_dict(*values: Any) -> dict[str, Any]:
+    for value in values:
+        if isinstance(value, dict):
+            return value
+    return {}
+
+
+def _str(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _int_or_zero(value: Any) -> int:
+    try:
+        return int(round(float(value)))
+    except (TypeError, ValueError):
+        return 0
 
 
 @router.get("/panel/list_traces", include_in_schema=False)

@@ -1,0 +1,151 @@
+{
+  "contract_version": "numbered_region_precision_experiment_v1",
+  "interpretation": "offline feasibility test; no new model calls, no clicks, no pathgraph binding",
+  "items": [
+    {
+      "case_id": "seek_results_observe_screen",
+      "region_count": 14,
+      "available_precision_count": 3,
+      "matched_precision": [
+        {
+          "precision_label": "Search keyword field",
+          "precision_status": "valid_candidate",
+          "matched_region_no": 1,
+          "matched_region_label": "Search keyword field",
+          "match_score": 17,
+          "precision_bbox": {
+            "x": 633,
+            "y": 184,
+            "w": 850,
+            "h": 48
+          },
+          "precision_point": {
+            "x": 651,
+            "y": 184
+          },
+          "failure_category": null
+        },
+        {
+          "precision_label": "SEEK search button",
+          "precision_status": "rejected",
+          "matched_region_no": 2,
+          "matched_region_label": "SEEK search button",
+          "match_score": 17,
+          "precision_bbox": {
+            "x": 1820,
+            "y": 184,
+            "w": 92,
+            "h": 48
+          },
+          "precision_point": {
+            "x": 1810,
+            "y": 184
+          },
+          "failure_category": "point_outside_bbox"
+        },
+        {
+          "precision_label": "Pay filter",
+          "precision_status": "rejected",
+          "matched_region_no": 3,
+          "matched_region_label": "Pay filter",
+          "match_score": 15,
+          "precision_bbox": {
+            "x": 632,
+            "y": 258,
+            "w": 78,
+            "h": 42
+          },
+          "precision_point": {
+            "x": 893,
+            "y": 537
+          },
+          "failure_category": "point_outside_bbox"
+        }
+      ],
+      "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\numbered_region_precision_experiment_20260705\\seek_results_observe_screen__numbered_precision_overlay.png",
+      "task_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\numbered_region_precision_experiment_20260705\\seek_results_observe_screen__per_region_precision_tasks.json"
+    },
+    {
+      "case_id": "python_homepage_full_observe",
+      "region_count": 12,
+      "available_precision_count": 4,
+      "matched_precision": [
+        {
+          "precision_label": "Search input field",
+          "precision_status": "valid_candidate",
+          "matched_region_no": 1,
+          "matched_region_label": "Search input field",
+          "match_score": 17,
+          "precision_bbox": {
+            "x": 1135,
+            "y": 244,
+            "w": 187,
+            "h": 44
+          },
+          "precision_point": {
+            "x": 1158,
+            "y": 252
+          },
+          "failure_category": null
+        },
+        {
+          "precision_label": "Search button",
+          "precision_status": "valid_candidate",
+          "matched_region_no": 1,
+          "matched_region_label": "Search input field",
+          "match_score": 17,
+          "precision_bbox": {
+            "x": 1322,
+            "y": 244,
+            "w": 57,
+            "h": 44
+          },
+          "precision_point": {
+            "x": 1330,
+            "y": 252
+          },
+          "failure_category": null
+        },
+        {
+          "precision_label": "Downloads link",
+          "precision_status": "valid_candidate",
+          "matched_region_no": 4,
+          "matched_region_label": "Downloads link",
+          "match_score": 17,
+          "precision_bbox": {
+            "x": 768,
+            "y": 367,
+            "w": 99,
+            "h": 30
+          },
+          "precision_point": {
+            "x": 768,
+            "y": 367
+          },
+          "failure_category": null
+        },
+        {
+          "precision_label": "Documentation link",
+          "precision_status": "valid_candidate",
+          "matched_region_no": 5,
+          "matched_region_label": "Documentation link",
+          "match_score": 17,
+          "precision_bbox": {
+            "x": 887,
+            "y": 367,
+            "w": 99,
+            "h": 30
+          },
+          "precision_point": {
+            "x": 888,
+            "y": 370
+          },
+          "failure_category": null
+        }
+      ],
+      "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\numbered_region_precision_experiment_20260705\\python_homepage_full_observe__numbered_precision_overlay.png",
+      "task_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\numbered_region_precision_experiment_20260705\\python_homepage_full_observe__per_region_precision_tasks.json"
+    }
+  ],
+  "contact_sheet": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\numbered_region_precision_experiment_20260705\\numbered_region_precision_experiment_contact_sheet.png"
+}

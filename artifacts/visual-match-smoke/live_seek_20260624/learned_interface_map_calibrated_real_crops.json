@@ -479,22 +479,23 @@
       "template_refs": {
         "tight_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_search_button_real.png",
         "context_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_search_button_context_real.png",
-        "source_image_path": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_search_button_context_real.png",
+        "source_image_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-3-microsoft-edge__capture__full-window__20260702-235058-876442.png",
         "current_roi_ref": null,
         "current_match_ref": null
       },
       "source_geometry": {
         "bbox": {
-          "x": 1051,
-          "y": 297,
-          "w": 56,
-          "h": 56
+          "x": 1818,
+          "y": 183,
+          "w": 97,
+          "h": 52
         },
         "click_point": {
-          "x": 1079,
-          "y": 325
+          "x": 1866,
+          "y": 209
         },
         "coordinate_space": "source_capture_px",
+        "source_image_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-3-microsoft-edge__capture__full-window__20260702-235058-876442.png",
         "source_is_authorization": false,
         "click_point_policy": "learned_relative_point"
       },
@@ -528,43 +529,43 @@
         ]
       },
       "source": {
-        "source_image_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-163501-349708.png",
-        "capture_id": "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-163501-349708.png",
+        "source_image_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-3-microsoft-edge__capture__full-window__20260702-235058-876442.png",
+        "capture_id": "artifacts/screenshots/jobs-in-all-new-zealand-seek-3-microsoft-edge__capture__full-window__20260702-235058-876442.png",
         "coordinate_space": "source_capture_px",
         "screenshot_size": {
           "width": 2560,
           "height": 1400
         },
         "bbox": {
-          "x": 1051,
-          "y": 297,
-          "w": 56,
-          "h": 56
+          "x": 1818,
+          "y": 183,
+          "w": 97,
+          "h": 52
         },
         "click_point": {
-          "x": 1079,
-          "y": 325
+          "x": 1866,
+          "y": 209
         }
       },
       "crop": {
         "tight_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_search_button_real.png",
         "context_crop_ref": "artifacts/visual-assets/seek/real_crops_20260625/seek_visual_search_button_context_real.png",
-        "source_image_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-microsoft-edge__capture__full-window__20260625-163501-349708.png",
+        "source_image_path": "artifacts/screenshots/jobs-in-all-new-zealand-seek-3-microsoft-edge__capture__full-window__20260702-235058-876442.png",
         "tight_bbox": {
-          "x": 1051,
-          "y": 297,
-          "w": 56,
-          "h": 56
+          "x": 1818,
+          "y": 183,
+          "w": 97,
+          "h": 52
         },
         "context_bbox": {
-          "x": 1019,
-          "y": 265,
-          "w": 120,
-          "h": 120
+          "x": 1786,
+          "y": 151,
+          "w": 161,
+          "h": 116
         },
         "size_px": [
-          56,
-          56
+          97,
+          52
         ]
       }
     },

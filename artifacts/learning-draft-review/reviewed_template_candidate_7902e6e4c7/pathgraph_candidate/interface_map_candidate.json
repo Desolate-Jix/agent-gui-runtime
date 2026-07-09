@@ -1,0 +1,323 @@
+{
+  "contract_version": "learned_interface_map_v1",
+  "app_id": "reviewed_learning_app",
+  "page_type": "landing_page",
+  "source": {
+    "trial_path": "artifacts/learning-draft-review/reviewed_template_candidate_7902e6e4c7/reviewed_template_candidate.json",
+    "reviewed_candidate_path": "artifacts/learning-draft-review/reviewed_template_candidate_7902e6e4c7/reviewed_template_candidate.json",
+    "source_trial_path": "artifacts/learning-draft-review/trial_result_ca8274386a/reviewed_template_candidate.json",
+    "sha256": "bc8d91fadb8af424bf52fe74a06a30b3fb792267dbabb65858a17d3e14e1ab0c",
+    "attempt_index": null,
+    "readonly": true,
+    "posthoc_optimization_allowed": false,
+    "candidate_mode": true
+  },
+  "loader": {
+    "contract_version": "model_learning_artifact_loader_v1",
+    "source_trial_path": "artifacts/learning-draft-review/reviewed_template_candidate_7902e6e4c7/reviewed_template_candidate.json",
+    "source_sha256": "bc8d91fadb8af424bf52fe74a06a30b3fb792267dbabb65858a17d3e14e1ab0c",
+    "source_attempt_index": null,
+    "source_artifact_readonly": true,
+    "posthoc_optimization_allowed": false,
+    "candidate_mode": true
+  },
+  "screen_summary": "Python.org homepage with top navigation, search bar, and content cards for Get Started, Download, Docs, Jobs, Latest News, and Upcoming Events.",
+  "states": [
+    {
+      "state_id": "s1",
+      "label": "Python.org homepage",
+      "page_type": "landing_page",
+      "region_refs": [
+        "r1",
+        "r2",
+        "r3",
+        "r4",
+        "r5",
+        "r6",
+        "r7",
+        "r8",
+        "r9",
+        "r10",
+        "r11",
+        "r12"
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "model:transition:a1",
+      "from_state_id": "s1",
+      "to_state_id": "s1",
+      "action_template_id": "a1",
+      "default_available": true,
+      "verification_refs": []
+    },
+    {
+      "transition_id": "model:transition:a2",
+      "from_state_id": "s1",
+      "to_state_id": "s1",
+      "action_template_id": "a2",
+      "default_available": true,
+      "verification_refs": []
+    },
+    {
+      "transition_id": "model:transition:a3",
+      "from_state_id": "s1",
+      "to_state_id": "s1",
+      "action_template_id": "a3",
+      "default_available": true,
+      "verification_refs": []
+    },
+    {
+      "transition_id": "model:transition:a4",
+      "from_state_id": "s1",
+      "to_state_id": "s1",
+      "action_template_id": "a4",
+      "default_available": true,
+      "verification_refs": []
+    },
+    {
+      "transition_id": "model:transition:a5",
+      "from_state_id": "s1",
+      "to_state_id": "s1",
+      "action_template_id": "a5",
+      "default_available": true,
+      "verification_refs": []
+    },
+    {
+      "transition_id": "model:transition:a6",
+      "from_state_id": "s1",
+      "to_state_id": "s1",
+      "action_template_id": "a6",
+      "default_available": true,
+      "verification_refs": []
+    },
+    {
+      "transition_id": "model:transition:a7",
+      "from_state_id": "s1",
+      "to_state_id": "s1",
+      "action_template_id": "a7",
+      "default_available": true,
+      "verification_refs": []
+    },
+    {
+      "transition_id": "model:transition:a8",
+      "from_state_id": "s1",
+      "to_state_id": "s1",
+      "action_template_id": "a8",
+      "default_available": true,
+      "verification_refs": []
+    },
+    {
+      "transition_id": "model:transition:a9",
+      "from_state_id": "s1",
+      "to_state_id": "s1",
+      "action_template_id": "a9",
+      "default_available": true,
+      "verification_refs": []
+    },
+    {
+      "transition_id": "model:transition:a10",
+      "from_state_id": "s1",
+      "to_state_id": "s1",
+      "action_template_id": "a10",
+      "default_available": true,
+      "verification_refs": []
+    },
+    {
+      "transition_id": "model:transition:a11",
+      "from_state_id": "s1",
+      "to_state_id": "s1",
+      "action_template_id": "a11",
+      "default_available": true,
+      "verification_refs": []
+    },
+    {
+      "transition_id": "model:transition:a12",
+      "from_state_id": "s1",
+      "to_state_id": "s1",
+      "action_template_id": "a12",
+      "default_available": true,
+      "verification_refs": []
+    }
+  ],
+  "regions": [
+    {
+      "region_id": "r1",
+      "label": "Search input field",
+      "role": "text_input",
+      "source": "element_search_input_field_e7d36c1c",
+      "click_point": {
+        "x": 1230,
+        "y": 267
+      },
+      "section_id": "primary_area",
+      "region_type": "text_input",
+      "source_artifact_readonly": true
+    },
+    {
+      "region_id": "r2",
+      "label": "Search button",
+      "role": "button",
+      "source": "element_search_button_7ce6e760",
+      "click_point": {
+        "x": 1350,
+        "y": 267
+      },
+      "section_id": "primary_area",
+      "region_type": "button",
+      "source_artifact_readonly": true
+    },
+    {
+      "region_id": "r3",
+      "label": "About link",
+      "role": "menu_item",
+      "source": "element_about_link_53812d72",
+      "click_point": {
+        "x": 694,
+        "y": 378
+      },
+      "section_id": "primary_area",
+      "region_type": "menu_item",
+      "source_artifact_readonly": true
+    },
+    {
+      "region_id": "r4",
+      "label": "Downloads link",
+      "role": "menu_item",
+      "source": "element_downloads_link_fe68f0de",
+      "click_point": {
+        "x": 816,
+        "y": 378
+      },
+      "section_id": "primary_area",
+      "region_type": "menu_item",
+      "source_artifact_readonly": true
+    },
+    {
+      "region_id": "r5",
+      "label": "Documentation link",
+      "role": "menu_item",
+      "source": "element_documentation_link_9381d9f3",
+      "click_point": {
+        "x": 934,
+        "y": 378
+      },
+      "section_id": "primary_area",
+      "region_type": "menu_item",
+      "source_artifact_readonly": true
+    },
+    {
+      "region_id": "r6",
+      "label": "Community link",
+      "role": "menu_item",
+      "source": "element_community_link_3a1bfae9",
+      "click_point": {
+        "x": 1054,
+        "y": 378
+      },
+      "section_id": "primary_area",
+      "region_type": "menu_item",
+      "source_artifact_readonly": true
+    },
+    {
+      "region_id": "r7",
+      "label": "Success Stories link",
+      "role": "menu_item",
+      "source": "element_success_stories_link_4ba17021",
+      "click_point": {
+        "x": 1172,
+        "y": 378
+      },
+      "section_id": "primary_area",
+      "region_type": "menu_item",
+      "source_artifact_readonly": true
+    },
+    {
+      "region_id": "r8",
+      "label": "News link",
+      "role": "menu_item",
+      "source": "element_news_link_86a30db6",
+      "click_point": {
+        "x": 1272,
+        "y": 378
+      },
+      "section_id": "primary_area",
+      "region_type": "menu_item",
+      "source_artifact_readonly": true
+    },
+    {
+      "region_id": "r9",
+      "label": "Events link",
+      "role": "menu_item",
+      "source": "element_events_link_863f346e",
+      "click_point": {
+        "x": 1350,
+        "y": 378
+      },
+      "section_id": "primary_area",
+      "region_type": "menu_item",
+      "source_artifact_readonly": true
+    },
+    {
+      "region_id": "r10",
+      "label": "Get Started button",
+      "role": "button",
+      "source": "element_get_started_button_81109b8d",
+      "click_point": {
+        "x": 618,
+        "y": 1087
+      },
+      "section_id": "primary_area",
+      "region_type": "button",
+      "source_artifact_readonly": true
+    },
+    {
+      "region_id": "r11",
+      "label": "Download button",
+      "role": "button",
+      "source": "element_download_button_3b6c566f",
+      "click_point": {
+        "x": 856,
+        "y": 1087
+      },
+      "section_id": "primary_area",
+      "region_type": "button",
+      "source_artifact_readonly": true
+    },
+    {
+      "region_id": "r12",
+      "label": "Docs link",
+      "role": "menu_item",
+      "source": "element_docs_link_d633a071",
+      "click_point": {
+        "x": 1074,
+        "y": 1087
+      },
+      "section_id": "primary_area",
+      "region_type": "menu_item",
+      "source_artifact_readonly": true
+    }
+  ],
+  "fixed_visual_assets": [],
+  "dynamic_areas": [],
+  "danger_zones": [],
+  "editor_policy": {
+    "source_artifact_editable": false,
+    "derived_artifact_editable": false,
+    "save_as_required_for_manual_changes": true,
+    "candidate_only": true,
+    "execute_binding_enabled": false
+  },
+  "summary": {
+    "state_count": 1,
+    "region_count": 12,
+    "fixed_visual_asset_count": 0,
+    "dynamic_area_count": 0,
+    "danger_zone_count": 0
+  },
+  "candidate_mode": true,
+  "candidate_contract_version": "interface_map_candidate_v1",
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false
+}

@@ -1,0 +1,158 @@
+{
+  "contract_version": "learning_template_draft_v1",
+  "image_size": {
+    "width": 1365,
+    "height": 768
+  },
+  "learning_source": "observe_model",
+  "screen_summary": "SEEK results list with job cards and apply entry surfaces",
+  "state_guess": "generic_homepage_search",
+  "workflow_draft": {
+    "states": [
+      {
+        "state_id": "home",
+        "label": "Homepage"
+      },
+      {
+        "state_id": "search_results",
+        "label": "Search results"
+      }
+    ],
+    "transitions": [
+      {
+        "transition_id": "open_detail",
+        "from_state": "results",
+        "to_state": "detail",
+        "action_template_id": "open_job_card"
+      },
+      {
+        "transition_id": "open_apply",
+        "from_state": "detail",
+        "to_state": "apply_entry",
+        "action_template_id": "open_apply_entry"
+      }
+    ],
+    "action_templates": [
+      {
+        "action_template_id": "enter_search_query",
+        "label": "Search keyword",
+        "semantic_action": "search",
+        "risk_level": "low",
+        "requires_gate": true,
+        "target_region_id": "search_box",
+        "expected_effect": "search results appear",
+        "verification_rule_id": "results_visible"
+      },
+      {
+        "action_template_id": "open_result",
+        "label": "Open result",
+        "semantic_action": "open_detail",
+        "risk_level": "medium",
+        "requires_gate": true,
+        "target_region_id": "results_area",
+        "expected_effect": "result detail opens",
+        "verification_rule_id": "detail_visible"
+      },
+      {
+        "action_template_id": "final_submit_guard",
+        "label": "Submit application",
+        "semantic_action": "final_submit",
+        "risk_level": "high",
+        "requires_gate": true,
+        "hard_block": true,
+        "final_submit_guard_required": true,
+        "fast_lane_allowed": false
+      }
+    ],
+    "path_patterns": [
+      {
+        "pattern_id": "results_detail_apply_safe_stop"
+      }
+    ]
+  },
+  "interface_draft": {
+    "regions": [
+      {
+        "region_id": "search_box",
+        "role": "input"
+      },
+      {
+        "region_id": "results_area",
+        "role": "list"
+      }
+    ],
+    "visual_assets": [
+      {
+        "asset_id": "job_card",
+        "semantic_action": "open_detail"
+      }
+    ],
+    "dynamic_areas": [
+      {
+        "area_id": "results_scroll",
+        "role": "scroll_container"
+      }
+    ],
+    "danger_zones": [
+      {
+        "zone_id": "final_submit_zone",
+        "label": "Submit application",
+        "semantic_action": "final_submit",
+        "hard_block": true,
+        "final_submit_guard_required": true,
+        "fast_lane_allowed": false
+      }
+    ]
+  },
+  "agent_decision_points": [
+    {
+      "decision_id": "agent_reviews_job_fit_before_apply"
+    }
+  ],
+  "operation_skills": [
+    "observe_screen",
+    "locate_element",
+    "click_element",
+    "scroll_container"
+  ],
+  "gate_contracts": [
+    "final_submit_blocking",
+    "external_ats_login_safe_stop"
+  ],
+  "safety": {
+    "observation_only": true,
+    "promotion_allowed": false,
+    "final_submit_blocked": true,
+    "real_clicks_performed": 0
+  },
+  "safety_policy": {
+    "no_final_submit": true,
+    "no_live_safe_fill": true,
+    "external_login_safe_stop": true
+  },
+  "blockers": [
+    {
+      "blocker_id": "login_required",
+      "expected_action": "safe_stop"
+    },
+    {
+      "blocker_id": "final_submit_visible",
+      "expected_action": "unsafe_prevented"
+    }
+  ],
+  "verification_rules": [
+    {
+      "verification_rule_id": "results_visible",
+      "expected": "results are visible"
+    },
+    {
+      "verification_rule_id": "detail_visible",
+      "expected": "detail visible"
+    }
+  ],
+  "notes": [],
+  "_source_tracking": {
+    "template_source": "fixture_only",
+    "model_generated": false
+  }
+}

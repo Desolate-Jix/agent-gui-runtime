@@ -17,6 +17,14 @@ from app.api.state import router as state_router
 from app.api.vision import router as vision_router
 from app.api.models.response import APIResponse, HealthData
 
+
+class NoCacheStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        return response
+
 LOG_DIR = Path("logs")
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -33,7 +41,7 @@ app.include_router(action_router)
 app.include_router(execute_router)
 app.include_router(vision_router)
 app.include_router(panel_router)
-app.mount("/panel/assets", StaticFiles(directory=PANEL_DIR), name="panel-assets")
+app.mount("/panel/assets", NoCacheStaticFiles(directory=PANEL_DIR), name="panel-assets")
 
 
 def _print_log_message(message: str) -> None:

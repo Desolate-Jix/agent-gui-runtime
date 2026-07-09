@@ -1,0 +1,42 @@
+{
+  "contract_version": "learn_recognition_reviewed_targets_v1",
+  "case_id": "python_homepage_saved_template_screenshot",
+  "screenshot_path": "artifacts/learning-runs/new_site_python_org_20260702/python_org_home.png",
+  "source_tracking": "assisted_generation",
+  "counts_as_model_ability": false,
+  "interpretation": "Reviewed support boxes for a locked saved screenshot. These boxes are support evidence only and do not authorize clicks or prove model ability.",
+  "targets": [
+    {
+      "candidate_id": "reviewed_python_search_input",
+      "label": "Search input",
+      "role": "text_input",
+      "bbox": {
+        "x": 1454,
+        "y": 90,
+        "w": 222,
+        "h": 36
+      },
+      "click_point": {
+        "x": 1565,
+        "y": 108
+      },
+      "source_tracking": "assisted_generation"
+    },
+    {
+      "candidate_id": "reviewed_python_go_button",
+      "label": "GO search button",
+      "role": "button",
+      "bbox": {
+        "x": 1686,
+        "y": 88,
+        "w": 48,
+        "h": 40
+      },
+      "click_point": {
+        "x": 1710,
+        "y": 108
+      },
+      "source_tracking": "assisted_generation"
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "contract_version": "learning_site_snapshot_v1",
+  "source": "recorded_seek_direct_use_validation_v1",
+  "url": "https://www.seek.co.nz/software-engineer-jobs/in-All-Auckland",
+  "title": "Software Engineer Jobs in All Auckland - SEEK",
+  "visible_text": "SEEK job search results and job detail surface. Visible actions include job card, Save, Apply, Quick Apply, and Submit application on application review.",
+  "action_labels": [
+    "Job card shape",
+    "Save",
+    "Apply",
+    "Quick Apply",
+    "Submit application"
+  ],
+  "validation_cases": [
+    {
+      "case_id": "seek_open_job_detail",
+      "observed_label": "Job card shape",
+      "expected_semantic_action": "open_detail",
+      "expected_gate_outcome": "available"
+    },
+    {
+      "case_id": "seek_save_bookmark",
+      "observed_label": "Save",
+      "expected_semantic_action": "save_or_bookmark",
+      "expected_gate_outcome": "available"
+    },
+    {
+      "case_id": "seek_apply_entry",
+      "observed_label": "Apply",
+      "expected_semantic_action": "open_apply_flow",
+      "expected_gate_outcome": "guarded_open"
+    },
+    {
+      "case_id": "seek_quick_apply_entry",
+      "observed_label": "Quick Apply",
+      "expected_semantic_action": "open_apply_flow",
+      "expected_gate_outcome": "guarded_open"
+    },
+    {
+      "case_id": "seek_submit_application_block",
+      "observed_label": "Submit application",
+      "expected_semantic_action": "final_submit",
+      "expected_gate_outcome": "hard_block"
+    }
+  ]
+}

@@ -89,3 +89,70 @@ def test_type_text_fails_when_clipboard_write_verification_mismatches(monkeypatc
         ("sleep", input_module.CLIPBOARD_VERIFY_RETRY_SECONDS),
         ("sleep", input_module.CLIPBOARD_VERIFY_RETRY_SECONDS),
     ]
+
+
+def test_paste_image_can_target_current_focus_without_refocusing_bound_window(monkeypatch, tmp_path) -> None:
+    controller = InputController()
+    image_path = tmp_path / "overlay.png"
+    image_path.write_bytes(b"fake image bytes")
+    events: list[tuple[str, object]] = []
+
+    monkeypatch.setattr(controller, "_ensure_windows_input", lambda: events.append(("ensure", None)))
+    monkeypatch.setattr(
+        controller,
+        "_require_bound_window",
+        lambda: (_ for _ in ()).throw(AssertionError("should not require a bound window")),
+    )
+    monkeypatch.setattr(
+        controller,
+        "_focus_window",
+        lambda handle: (_ for _ in ()).throw(AssertionError("should not refocus a bound window")),
+    )
+    monkeypatch.setattr(controller, "_image_path_to_cf_dib", lambda path: events.append(("read_image", path)) or b"dib")
+    monkeypatch.setattr(controller, "_set_clipboard_image_dib", lambda data: events.append(("set_image", data)))
+    monkeypatch.setattr(controller, "_press_chord", lambda keys: events.append(("press_chord", tuple(keys))))
+    monkeypatch.setattr(input_module.time, "sleep", lambda seconds: events.append(("sleep", seconds)))
+
+    result = controller.paste_image(str(image_path), focus_bound_window=False, settle_ms=25)
+
+    assert result["pasted"] is True
+    assert result["focus_bound_window"] is False
+    assert result["window_handle"] is None
+    assert result["clipboard_format"] == "CF_DIB"
+    assert result["clipboard_paste_settle_ms"] == 25
+    assert events == [
+        ("ensure", None),
+        ("read_image", image_path),
+        ("set_image", b"dib"),
+        ("press_chord", (VK_CONTROL, VK_V)),
+        ("sleep", 0.025),
+    ]
+
+
+def test_paste_image_can_restore_previous_text_clipboard(monkeypatch, tmp_path) -> None:
+    controller = InputController()
+    image_path = tmp_path / "overlay.png"
+    image_path.write_bytes(b"fake image bytes")
+    events: list[tuple[str, object]] = []
+
+    monkeypatch.setattr(controller, "_ensure_windows_input", lambda: None)
+    monkeypatch.setattr(controller, "_require_bound_window", lambda: SimpleNamespace(handle=9, title="ChatGPT"))
+    monkeypatch.setattr(controller, "_focus_window", lambda handle: events.append(("focus", handle)) or True)
+    monkeypatch.setattr(controller, "_get_clipboard_text", lambda: "previous text")
+    monkeypatch.setattr(controller, "_image_path_to_cf_dib", lambda path: b"dib")
+    monkeypatch.setattr(controller, "_set_clipboard_image_dib", lambda data: events.append(("set_image", data)))
+    monkeypatch.setattr(controller, "_set_clipboard_text", lambda text: events.append(("set_text", text)))
+    monkeypatch.setattr(controller, "_press_chord", lambda keys: events.append(("press_chord", tuple(keys))))
+    monkeypatch.setattr(input_module.time, "sleep", lambda seconds: events.append(("sleep", seconds)))
+
+    result = controller.paste_image(str(image_path), restore_clipboard_text=True)
+
+    assert result["window_handle"] == 9
+    assert result["restore_clipboard_text"] is True
+    assert events == [
+        ("focus", 9),
+        ("set_image", b"dib"),
+        ("press_chord", (VK_CONTROL, VK_V)),
+        ("sleep", input_module.CLIPBOARD_PASTE_SETTLE_SECONDS),
+        ("set_text", "previous text"),
+    ]

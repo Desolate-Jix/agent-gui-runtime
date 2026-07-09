@@ -1,0 +1,58 @@
+{
+  "contract_version": "learned_interface_map_v1",
+  "app_id": "model_learning_benchmark",
+  "page_type": "job_listing_page",
+  "source": {
+    "trial_path": "logs/benchmarks/model_learning_template_loader_trials/8c6d360d2caf/recorded_seek_search_input_initial/trial_result.json",
+    "sha256": "52fcc6ee04fa4f7bee57c01868925ca35bf49738109d9d6a630f5265bde2caa9",
+    "attempt_index": 0,
+    "readonly": true,
+    "posthoc_optimization_allowed": false,
+    "loaded_at": "2026-07-07T13:33:10.884346"
+  },
+  "loader": {
+    "contract_version": "model_learning_artifact_loader_v1",
+    "source_trial_path": "logs/benchmarks/model_learning_template_loader_trials/8c6d360d2caf/recorded_seek_search_input_initial/trial_result.json",
+    "source_sha256": "52fcc6ee04fa4f7bee57c01868925ca35bf49738109d9d6a630f5265bde2caa9",
+    "source_attempt_index": 0,
+    "source_artifact_readonly": true,
+    "posthoc_optimization_allowed": false
+  },
+  "screen_summary": "Job search bar showing 'All jobs • All Auckland' with search icon",
+  "page_details": {},
+  "states": [
+    {
+      "state_id": "s1",
+      "label": "job_search_initial",
+      "page_type": "job_listing_page",
+      "region_refs": [
+        "r1"
+      ]
+    }
+  ],
+  "transitions": [],
+  "regions": [
+    {
+      "region_id": "r1",
+      "label": "search_input",
+      "role": "search_field",
+      "region_type": "search_field",
+      "source_artifact_readonly": true
+    }
+  ],
+  "fixed_visual_assets": [],
+  "dynamic_areas": [],
+  "danger_zones": [],
+  "editor_policy": {
+    "source_artifact_editable": false,
+    "derived_artifact_editable": false,
+    "save_as_required_for_manual_changes": true
+  },
+  "summary": {
+    "state_count": 1,
+    "region_count": 1,
+    "fixed_visual_asset_count": 0,
+    "dynamic_area_count": 0,
+    "danger_zone_count": 0
+  }
+}

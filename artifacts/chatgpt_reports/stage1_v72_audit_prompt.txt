@@ -1,0 +1,16 @@
+请作为 reviewer 审核这三张单独图片，目标不是请教方案，而是指出当前框有没有识别好、有什么问题。
+
+背景：这是 Learning Mode Stage1-only 栏定位 v72，不是 Stage2 内部编号，不授权点击，也不是识别准确率宣传。请只看大栏/结构区框是否合理。
+
+三张图分别是：
+1. Python.org Stage1-only overlay
+2. AppleMusic Stage1-only overlay
+3. QQ Stage1-only overlay
+
+请按下面格式回复：
+- 每张图给 PASS / CONDITIONAL PASS / FAIL
+- 指出是否存在：栏框过窄、栏框过宽、顶栏压入主区域、侧栏漏框、主区域越界、右侧 floating/scroll 归属错误、同级栏不合理重叠、需要 Stage1.5 子栏拆分
+- 明确 AppleMusic 是否仍保持当前保护集里最好的 Stage1 完成度
+- 明确 Python.org 和 QQ 是否只能算 conditional，以及条件是什么
+- 不要评价具体按钮/卡片内部编号，因为这次只审核 Stage1 栏定位
+- 如果你觉得某张图不能通过，请说明这是通用流程问题还是仅仅 Stage1.5 粒度问题。

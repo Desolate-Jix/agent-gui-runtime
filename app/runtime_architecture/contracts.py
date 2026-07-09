@@ -77,6 +77,7 @@ class AppProfile(BaseModel):
     trace_requirements: list[str] = Field(default_factory=list)
     workflow_assets: list[dict[str, Any]] = Field(default_factory=list)
     learning_assets: list[dict[str, Any]] = Field(default_factory=list)
+    learned_patterns: list[dict[str, Any]] = Field(default_factory=list)
     policy: dict[str, Any] = Field(default_factory=dict)
     notes: list[str] = Field(default_factory=list)
 

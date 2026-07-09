@@ -1,0 +1,145 @@
+{
+  "items": [
+    {
+      "index": 1,
+      "label": "Search input field",
+      "status": "valid_candidate",
+      "point_quality": "passed_inside_expected_bbox",
+      "failure_category": null,
+      "bbox": {
+        "x": 1135,
+        "y": 244,
+        "w": 187,
+        "h": 44
+      },
+      "point": {
+        "x": 1158,
+        "y": 252
+      },
+      "report_path": "D:\\agent-gui-runtime\\logs\\benchmarks\\learn_recognition_goal_progress_grounding_matrix\\learn_grounding_vista_4b_baseline\\01_trace_python_locate_grounding_search_input_field\\actual_grounding_output_v1.json",
+      "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\web_recognition_examples_20260705\\01_search_input_field_overlay.png",
+      "screenshot_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png"
+    },
+    {
+      "index": 2,
+      "label": "Search button",
+      "status": "valid_candidate",
+      "point_quality": "passed_inside_expected_bbox",
+      "failure_category": null,
+      "bbox": {
+        "x": 1322,
+        "y": 244,
+        "w": 57,
+        "h": 44
+      },
+      "point": {
+        "x": 1330,
+        "y": 252
+      },
+      "report_path": "D:\\agent-gui-runtime\\logs\\benchmarks\\learn_recognition_goal_progress_grounding_matrix\\learn_grounding_vista_4b_baseline\\02_trace_python_locate_grounding_search_button\\actual_grounding_output_v1.json",
+      "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\web_recognition_examples_20260705\\02_search_button_overlay.png",
+      "screenshot_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png"
+    },
+    {
+      "index": 3,
+      "label": "Downloads link",
+      "status": "valid_candidate",
+      "point_quality": "passed_inside_expected_bbox",
+      "failure_category": null,
+      "bbox": {
+        "x": 768,
+        "y": 367,
+        "w": 99,
+        "h": 30
+      },
+      "point": {
+        "x": 768,
+        "y": 367
+      },
+      "report_path": "D:\\agent-gui-runtime\\logs\\benchmarks\\learn_recognition_goal_progress_grounding_matrix\\learn_grounding_vista_4b_baseline\\03_trace_python_locate_grounding_downloads_link\\actual_grounding_output_v1.json",
+      "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\web_recognition_examples_20260705\\03_downloads_link_overlay.png",
+      "screenshot_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png"
+    },
+    {
+      "index": 4,
+      "label": "Documentation link",
+      "status": "valid_candidate",
+      "point_quality": "passed_inside_expected_bbox",
+      "failure_category": null,
+      "bbox": {
+        "x": 887,
+        "y": 367,
+        "w": 99,
+        "h": 30
+      },
+      "point": {
+        "x": 888,
+        "y": 370
+      },
+      "report_path": "D:\\agent-gui-runtime\\logs\\benchmarks\\learn_recognition_goal_progress_grounding_matrix\\learn_grounding_vista_4b_baseline\\04_trace_python_locate_grounding_documentation_link\\actual_grounding_output_v1.json",
+      "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\web_recognition_examples_20260705\\04_documentation_link_overlay.png",
+      "screenshot_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png"
+    },
+    {
+      "index": 5,
+      "label": "Search keyword field",
+      "status": "valid_candidate",
+      "point_quality": "passed_inside_expected_bbox",
+      "failure_category": null,
+      "bbox": {
+        "x": 633,
+        "y": 184,
+        "w": 850,
+        "h": 48
+      },
+      "point": {
+        "x": 651,
+        "y": 184
+      },
+      "report_path": "D:\\agent-gui-runtime\\logs\\learn-recognition-grounding-exp1\\01_seek_search_header_controls\\actual_grounding_output_v1.json",
+      "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\web_recognition_examples_20260705\\05_search_keyword_field_overlay.png",
+      "screenshot_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png"
+    },
+    {
+      "index": 6,
+      "label": "SEEK search button",
+      "status": "rejected",
+      "point_quality": "failed_outside_expected_bbox",
+      "failure_category": "point_outside_bbox",
+      "bbox": {
+        "x": 1820,
+        "y": 184,
+        "w": 92,
+        "h": 48
+      },
+      "point": {
+        "x": 1810,
+        "y": 184
+      },
+      "report_path": "D:\\agent-gui-runtime\\logs\\learn-recognition-grounding-exp1\\02_seek_search_header_controls\\actual_grounding_output_v1.json",
+      "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\web_recognition_examples_20260705\\06_seek_search_button_overlay.png",
+      "screenshot_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png"
+    },
+    {
+      "index": 7,
+      "label": "Pay filter",
+      "status": "rejected",
+      "point_quality": "failed_outside_expected_bbox",
+      "failure_category": "point_outside_bbox",
+      "bbox": {
+        "x": 632,
+        "y": 258,
+        "w": 78,
+        "h": 42
+      },
+      "point": {
+        "x": 893,
+        "y": 537
+      },
+      "report_path": "D:\\agent-gui-runtime\\logs\\learn-recognition-grounding-exp1\\03_seek_search_header_controls\\actual_grounding_output_v1.json",
+      "overlay_path": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\web_recognition_examples_20260705\\07_pay_filter_overlay.png",
+      "screenshot_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png"
+    }
+  ],
+  "contact_sheet": "D:\\agent-gui-runtime\\artifacts\\review-overlays\\web_recognition_examples_20260705\\web_recognition_examples_contact_sheet.png"
+}

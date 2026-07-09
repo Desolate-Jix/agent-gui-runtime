@@ -1,0 +1,32 @@
+{
+  "contract_version": "chatgpt_visual_audit_result_v1",
+  "audit_id": "stage2_v87_dense_row_placeholder_slot_inference",
+  "timestamp_local": "2026-07-08T19:22:40+12:00",
+  "prompt_path": "logs/benchmarks/stage2_v87_gpt_audit_prompt.txt",
+  "image_paths": [
+    "artifacts/review-overlays/apple-music__observe-screen__applemusic__full-window__20260706-200734-125573__two-stage-understanding__20260708-191936-703380.png",
+    "artifacts/review-overlays/qq__observe-screen__qq__full-window__20260706-185700-021296__two-stage-understanding__20260708-192015-624280.png",
+    "artifacts/review-overlays/welcome-to-python-org-microsoft-edge__observe-screen__python-org__full-window__20260703-173928-663164__two-stage-understanding__20260708-192015-755455.png"
+  ],
+  "send_evidence": {
+    "latest_user_message_img_count": 3,
+    "framework_paste_used": true,
+    "framework_send_click_point": {
+      "x": 1310,
+      "y": 1108
+    }
+  },
+  "verdicts": {
+    "applemusic_v87": "PASS",
+    "qq_v87": "CONDITIONAL PASS",
+    "python_org_v87": "CONDITIONAL PASS"
+  },
+  "summary": "Dense-row placeholder slot inference improves AppleMusic red-star/Favorite Songs card without visible protected-set regression in QQ or Python.org. Outputs remain display/review-only.",
+  "remaining_issues": [
+    "QQ message/thread internals are still noisy and layered.",
+    "Python.org content_column remains over-fragmented.",
+    "Topbar overlays remain dense.",
+    "Bottom composer and all outputs remain review-only."
+  ],
+  "raw_reply": "AppleMusic v87: PASS\n\nv87 checkpoint result: the red-star / ?Favorite Songs? card is improved.\n\nThe previous incomplete red-star card is now a full-width row card slot: image area + title are enclosed in one orange media-card box.\n\nIt aligns with the other second-row cards and no longer looks like only the red-star icon was boxed.\n\nFirst-row cards 3.3?3.6 remain stable.\n\nSecond-row peer cards remain inside the same row group.\n\nBottom partial cards remain partial/review-style and were not converted into full cards.\n\nNo visible pollution from QQ/Python rules.\n\nRemaining visible issues:\n\nTopbar labels and control boxes are still dense.\n\nLeft sidebar review/background strip is still visually prominent.\n\nThis is still display/review output only.\n\nProtected-set regression: none visible.\nv87 AppleMusic improvement: yes, the red-star card issue appears fixed without obvious regression.\n\nQQ v87: CONDITIONAL PASS\n\nv87 checkpoint result: no obvious pollution from the new media-card slot rule.\n\nNo new large media-card slot appears inside the QQ chat thread.\n\nThe message/card area remains basically like the prior protected state.\n\nConversation list, message thread, right sidebar, and bottom area still appear separated.\n\nThe rule does not appear to reinterpret chat messages as AppleMusic-style media-card rows.\n\nRemaining visible issues:\n\nMessage/thread internals are still visually noisy.\n\nMessage card / bubble / context layering remains dense.\n\nRight sidebar notice/member area is still cluttered.\n\nTopbar still has tight labels and small controls.\n\nBottom composer should remain review-only.\n\nProtected-set regression: no obvious regression.\nStage2 may proceed? conditionally, but only within the existing Stage1.5 panes; do not treat broad primary as a numbering target.\n\nPython.org v87: CONDITIONAL PASS\n\nv87 checkpoint result: no obvious pollution from the new media-card slot rule.\n\nI do not see new large wrong media-card slots created in the webpage content.\n\nBrowser chrome and header remain separate from the page body.\n\nNumbering still appears concentrated around the central content column / hero / cards / news areas rather than the whole wide primary background.\n\nThe page remains over-fragmented, but that looks like the existing webpage-content issue, not a new media-card-slot regression.\n\nRemaining visible issues:\n\nHero/code/text area is still very fragmented.\n\nCards and list rows remain dense and visually noisy.\n\nSome blue review/structure boxes overlap heavily.\n\nWeb nav/header controls still look tight.\n\nThere may still be a few small candidates near low-content/blank areas that need review.\n\nProtected-set regression: no obvious regression.\nStage2 may proceed? conditionally, but only from content_column / header subregions, not from broad primary.\n\nSummary\nAppleMusic v87: PASS\nQQ v87: CONDITIONAL PASS\nPython.org v87: CONDITIONAL PASS\n\nv87 appears to improve AppleMusic?s red-star card without visible protected-set regression in QQ or Python.org. These remain display/review overlays only, not execution or PathGraph promotion evidence."
+}

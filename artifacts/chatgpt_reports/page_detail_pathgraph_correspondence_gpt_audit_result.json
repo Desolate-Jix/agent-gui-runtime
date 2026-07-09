@@ -1,0 +1,28 @@
+{
+  "contract_version": "chatgpt_visual_audit_result_v1",
+  "token": "REVIEW_TOKEN_PAGE_DETAIL_PATHGRAPH_CORRESPONDENCE_20260709",
+  "reviewed_at": "2026-07-09T05:03:34.713Z",
+  "source_prompt": "logs/benchmarks/pathgraph_correspondence_smoke/gpt_audit_prompt.txt",
+  "images": [
+    "artifacts/review-overlays/apple-music__observe-screen__applemusic__full-window__20260706-200734-125573__two-stage-understanding__20260708-204617-630226.png",
+    "logs/benchmarks/pathgraph_correspondence_smoke/page_detail_pathgraph_correspondence_audit.png"
+  ],
+  "latest_user_message_verified": true,
+  "expected_image_count": 2,
+  "verdict_summary": {
+    "correspondence_display_scaffold": "CONDITIONAL PASS",
+    "applemusic_page_detail_evidence": "CONDITIONAL PASS",
+    "pathgraph_preview_correspondence": "CONDITIONAL PASS"
+  },
+  "reviewer_response": "1. Correspondence display scaffold：CONDITIONAL PASS\n\nImage 2 的左右两栏能让 reviewer 看懂：page_detail_candidate 和 PathGraph preview 共享了这 4 个 section：\n\ntop_search_and_filters\nleft_results_list\nmiddle_controls\nright_detail_panel\n\n颜色和名称对应关系是清楚的，适合作为 display-only scaffold evidence。但它还不能算完整 PASS，因为左右两边的 bbox 形状和位置并不是严格一致，容易被误读成“PathGraph 已经精确复刻 page_detail 几何”。\n\n2. Image 1：AppleMusic overlay 是否能作为 review-only page detail evidence\n\n可以，CONDITIONAL PASS。\n\n可接受点：\n\n顶栏、左侧栏、主内容区大结构还在。\n\n第一行媒体卡片完整。\n\n第二行卡片结构保持，红星 / Favorite Songs 卡片已经不再是明显 incomplete 小框。\n\n底部 partial cards 仍是局部可见状态，没有被错误提升成完整卡片。\n\n没看到明显内容跨出父栏。\n\n仍有问题：\n\n顶栏 control / label 仍然密集，不适合当“干净 UI 层级”展示。\n\n左侧 review/background 区仍比较显眼。\n\n主内容 section / card group 的蓝框层级仍有些重叠，review 能看懂，但不够 demo-clean。\n\n它只能作为 page_detail 草稿证据，不能证明可执行或 PathGraph promotion。\n\n结论：Image 1 不阻塞 review-only page detail drafting，但仍需要标注 display-only / review-only。\n\n3. Image 2：page-detail 与 PathGraph preview 对应关系的问题\n\n主要问题是“可理解，但可能误导几何一致性”。\n\n可接受点：\n\n左右两侧都明确展示同一组 section id。\n\n颜色稳定：紫色 top、红色 left、蓝色 middle、绿色 right。\n\n下方写了 shared section ids，这一点有助于审查。\n\n可疑 / 可能误导的地方：\n\ntop_search_and_filters 左右尺寸差异大\n左侧只覆盖较短顶部区域，右侧几乎横跨整行。若这是同一 section 的对应关系，视觉上会让人怀疑 bbox 是否一致。\n\nright_detail_panel 位置和比例不完全对应\n左侧右详情区较高较大，右侧 preview 里位置更规整但比例不同。需要明确这是 preview scaffold，而不是几何验证通过。\n\nmiddle_controls 与 left/right 区域交界有重叠感\n蓝色 small control 位于左结果和右详情之间，合理，但如果没有说明它是 overlay/control section，容易被误读成位置漂移。\n\n缺少连接线或编号对应说明\n现在只能靠 label 和颜色匹配。作为 panel 展示可以，但作为 audit view，最好明确“same section id / not exact geometry equivalence”。\n\nImage 2 看起来是 split-list/detail 模板，不是 AppleMusic 当前页面\n如果它是 demo scaffold，可以接受；如果放在 AppleMusic overlay 后面展示，必须标明这是独立的 scaffold / template preview，不是 AppleMusic 的 PathGraph。\n\n4. Remaining next work before demo-ready\n\n明确 Image 2 的语义\n\n是 “section correspondence scaffold”，不是几何一致性证明。\n\n需要明确 display-only、execute=False、not promoted。\n\n让左右 bbox 对应更可审查\n\n至少标出 shared section id、source view、preview view。\n\n避免用户以为左右位置/大小必须完全一致但当前又不一致。\n\nAppleMusic overlay 还要降低视觉噪声\n\n顶栏标签和父框仍偏密。\n\nsection/card group 层级还可以更清楚。\n\nPathGraph preview 不能叫 ready\n\n当前只能说 preview 有共同 section id。\n\n不能说 Runtime PathGraph 可用、不能说 Execute 可用、不能说点击安全。\n\n最终判断：\n\nCorrespondence scaffold: CONDITIONAL PASS\nImage 1 page-detail evidence: CONDITIONAL PASS\nImage 2 PathGraph preview correspondence: CONDITIONAL PASS, but geometry-equivalence wording must be avoided\n\n这不是准确率结论，不是 Execute 授权，不是 Runtime PathGraph promotion，也不是 E2E 成功。",
+  "boundaries": {
+    "display_only": true,
+    "execute_authorization": false,
+    "runtime_pathgraph_promotion": false,
+    "accuracy_claim": false,
+    "e2e_success_claim": false,
+    "live_click": false,
+    "live_fill": false,
+    "live_submit": false
+  }
+}

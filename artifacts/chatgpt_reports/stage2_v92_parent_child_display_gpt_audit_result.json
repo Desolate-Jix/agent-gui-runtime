@@ -1,0 +1,23 @@
+{
+  "audit_id": "stage2_v92_parent_child_display_20260708",
+  "conclusions": {
+    "applemusic": "PASS",
+    "python_org": "CONDITIONAL PASS",
+    "qq": "CONDITIONAL PASS"
+  },
+  "contract_version": "chatgpt_visual_audit_result_v1",
+  "fixed_flow_evidence_path": "logs/benchmarks/stage2_v92_parent_child_display_gpt_audit_fixed_flow_real_send.json",
+  "latest_assistant_text": "AppleMusic v92: PASS\n\nMain issues\n\nMedia-card structure is preserved.\n\nThe first row cards are still complete and contained within the main content region.\n\nThe red-star / Favorite Songs card is now a full card slot, not the earlier incomplete icon-only box.\n\nThe second row card group remains aligned and does not visibly cross into the next section.\n\nBottom partial cards remain partial/review items and are not incorrectly promoted to full cards.\n\nLeft sidebar and topbar structure are preserved.\n\nRemaining visual issues:\n\nTopbar control labels are still dense.\n\nLeft sidebar review/background strip is still visually prominent.\n\nSome section/group labels are visually busy, but not a blocking geometry issue.\n\nAllowed to continue into page_details / read-only PathGraph preview:\nYes, for display-only preview. Keep review-only/incomplete semantics where marked. Not Execute-ready.\n\nQQ v92: CONDITIONAL PASS\n\nMain issues\n\nMain Stage1/Stage1.5 layout is mostly preserved: left nav, conversation list, message thread, right sidebar, and bottom composer remain separated.\n\nThe right member sidebar is more complete than earlier versions: member rows are present down the visible right column.\n\nAnnouncement rows do not appear to be fully swallowed into the member list; the notice area remains visually distinct.\n\nMessage thread content stays inside the center region and does not visibly intrude into the right sidebar.\n\nBottom composer/tool area remains at the bottom and is not obviously separated by a large gap.\n\nRemaining visual issues:\n\nRight sidebar is still cluttered around the notice/member boundary. boundary_review_region still looks like a transitional leftover.\n\nMember header/search/member-list hierarchy is not fully clean.\n\nMessage thread still has dense overlays: message cards, bubbles, timestamps/context boxes remain visually busy.\n\nSome message parent boxes still look broad and review-only rather than clean final grouping.\n\nTopbar remains crowded.\n\nAllowed to continue into page_details / read-only PathGraph preview:\nConditionally. It can proceed as display-only evidence, but right sidebar and message hierarchy should remain review-marked. Not promotion-ready.\n\nPython.org v92: CONDITIONAL PASS\n\nMain issues\n\nBrowser chrome, webpage header, and primary/content area remain separated.\n\nNumbering appears concentrated around the central webpage content rather than the whole wide primary background.\n\nHero/content structure is improved compared with the earlier very dense versions, but it is still visually crowded.\n\nLatest News and Upcoming Events now have more visible list/group structure, but the row/section/card layering is still busy.\n\nCards such as Get Started / Download / Docs / Jobs are present, but internal text/link grouping remains dense.\n\nNo obvious new large wrong media-card slot pollution is visible.\n\nRemaining visual issues:\n\nHero area still has heavy overlap between code panel, text panel, CTA, and review boxes.\n\nLatest News / Events rows are improved but not clean; list row parents and text children still visually overlap.\n\nLower page sections still contain dense partial/review structures.\n\nRight floating/scroll area should remain review-only.\n\nThis is still too noisy to call a clean page-detail result.\n\nAllowed to continue into page_details / read-only PathGraph preview:\nConditionally. It can be used as display-only evidence for review, but not as clean or promotion-ready page_details. Continue only with review markings and without using broad primary as a direct numbering target.\n\nExplicit warning\n\nThese are not recognition-accuracy claims, not Execute approval, not Runtime PathGraph promotion readiness, and not end-to-end success. They are only visual review judgments for display-only Learning Mode evidence.",
+  "latest_assistant_text_length": 3779,
+  "latest_user_image_count": 3,
+  "latest_user_text_length": 1288,
+  "post_send_verified": true,
+  "prompt_token": "REVIEW_TOKEN_STAGE2_V92_PARENT_CHILD_DISPLAY_20260708",
+  "source_prompt_path": "logs/benchmarks/stage2_v92_parent_child_display_gpt_audit_prompt.txt",
+  "warnings": {
+    "not_accuracy": true,
+    "not_e2e_success": true,
+    "not_execute_approval": true,
+    "not_runtime_pathgraph_promotion": true
+  }
+}

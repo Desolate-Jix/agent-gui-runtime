@@ -135,6 +135,12 @@ def test_type_text_dispatches_real_input(monkeypatch) -> None:
     assert typed["clear_existing"] is True
     assert typed["submit"] is True
     assert response.data["result"]["execution_path"]["action_executed"] is True
+    context = response.data["result"]["operation_context"]
+    assert context["skill_id"] == "type_text"
+    assert context["requires_gate"] is True
+    assert context["gate_decision_id"]
+    assert context["window_binding_id"] == "window:1"
+    assert response.data["result"]["operation_trace_link"]["result_status"] == "executed"
 
 
 def test_type_text_dry_run_does_not_dispatch(monkeypatch) -> None:
@@ -185,6 +191,10 @@ def test_scroll_dry_run_validates_without_dispatch(monkeypatch) -> None:
     assert result["contract_version"] == "scroll_action_v1"
     assert result["point"] == {"x": 400, "y": 300}
     assert result["execution_path"]["action_executed"] is False
+    assert result["operation_context"]["skill_id"] == "scroll_region"
+    assert result["operation_context"]["requires_gate"] is True
+    assert result["operation_context"]["gate_decision_id"]
+    assert result["operation_trace_link"]["result_status"] == "dry_run_ready"
     assert result["trace_path"].endswith("scroll-dry-run.json")
 
 
@@ -291,6 +301,8 @@ def test_scroll_dispatches_and_verifies(monkeypatch) -> None:
     result = response.data["result"]
     assert result["execution_path"]["action_executed"] is True
     assert result["post_scroll_verification"]["verified"] is True
+    assert result["operation_context"]["window_binding_id"] == "window:1"
+    assert result["operation_trace_link"]["gate_decision_id"] == result["operation_context"]["gate_decision_id"]
     assert result["trace_path"].endswith("scroll.json")
 
 

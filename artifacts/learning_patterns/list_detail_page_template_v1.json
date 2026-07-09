@@ -1,0 +1,67 @@
+{
+  "contract_version": "learning_pattern_template_v1",
+  "pattern_id": "list_detail_page",
+  "display_name": "List Detail Page",
+  "purpose": "Learn interfaces where selecting a list item opens a detail pane or detail page.",
+  "applies_when": [
+    "The screen has repeated list/card items.",
+    "Selecting an item reveals a richer detail area.",
+    "Card text is insufficient for the Agent's final content decision."
+  ],
+  "states": [
+    "list_visible",
+    "detail_open",
+    "detail_verified",
+    "list_ready_for_next_item"
+  ],
+  "regions": [
+    "results_list",
+    "detail_pane",
+    "detail_header",
+    "detail_body"
+  ],
+  "operation_skills": [
+    "observe_screen",
+    "locate_element",
+    "click_target",
+    "read_region",
+    "scroll_region",
+    "verify_change"
+  ],
+  "semantic_actions": [
+    "open_item_detail",
+    "read_detail",
+    "reset_detail_before_next_item"
+  ],
+  "gate_contracts": [
+    "candidate_freshness_v1",
+    "pre_click_decision_v1",
+    "scroll_scope_v1",
+    "latest_detail_snapshot_v1"
+  ],
+  "trace_requirements": [
+    "Record list item/card identity before click.",
+    "Record detail header identity after click.",
+    "Record list-to-detail identity match.",
+    "Record scoped scroll evidence for the detail region."
+  ],
+  "success_conditions": [
+    "The opened detail identity matches the selected list item.",
+    "The latest detail snapshot is available for downstream decisions.",
+    "Detail scrolling does not move the list region."
+  ],
+  "stop_conditions": [
+    "detail_identity_mismatch",
+    "wrong_scope_detected",
+    "detail_not_opened",
+    "candidate_stale_or_ambiguous"
+  ],
+  "seek_source": {
+    "profile_id": "seek",
+    "source_assets": [
+      "artifacts/seek/runtime_path_graph_seek_mvp_20260617.json"
+    ],
+    "lesson": "SEEK cards are only entry evidence; full job detail must be opened, verified, and read before suitability review."
+  },
+  "authorization": "guidance_only"
+}

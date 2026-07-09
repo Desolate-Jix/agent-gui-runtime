@@ -3,10 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+
 from app.api import runtime as runtime_api
 from app.core import model_server
 from app.core.model_server import profile_for_stage
 from app.api.models.request import ModelServerRequest, RuntimePrepareRequest
+from app.main import app
 
 
 def test_model_status_reports_profiles(monkeypatch) -> None:
@@ -21,14 +24,36 @@ def test_model_status_reports_profiles(monkeypatch) -> None:
     assert response.data["timings"]["steps"][0]["name"] == "load_model_profiles"
 
 
-def test_observe_stage_defaults_to_small_understanding_profile() -> None:
+def test_observe_stage_defaults_to_learning_quality_understanding_profile() -> None:
     observe = profile_for_stage("observe")
     locate = profile_for_stage("locate")
 
-    assert observe["profile_id"] == "qwen3_vl_4b_q4_k_m"
+    assert observe["profile_id"] == "qwen3_vl_8b_q4_k_m"
     assert observe["provider_mode"] == "local_understanding"
+    assert "learning" in observe["role"]
     assert locate["profile_id"] == "vista_4b_transformers"
     assert locate["provider_mode"] == "local_grounding"
+
+
+def test_vision_config_uses_learning_quality_understanding_profile() -> None:
+    vision_config = json.loads(Path("configs/vision.json").read_text(encoding="utf-8"))
+    local_understanding = vision_config["vision"]["local_understanding"]
+
+    assert local_understanding["profile_id"] == "qwen3_vl_8b_q4_k_m"
+    assert local_understanding["model_name"] == "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+    assert local_understanding["endpoint"] == "http://127.0.0.1:1240/v1/chat/completions"
+
+
+def test_removed_learning_draft_routes_are_not_exposed() -> None:
+    client = TestClient(app)
+
+    for path in (
+        "/runtime/learning/seek/draft",
+        "/runtime/learning/seek/tune",
+        "/runtime/learning/fixtures/generic_list_detail_fixture/draft",
+        "/runtime/learning/generalization",
+    ):
+        assert client.get(path).status_code == 404
 
 
 def test_vista_transformers_profile_is_launchable() -> None:
@@ -96,6 +121,56 @@ def test_start_model_server_passes_transformers_profile_args(monkeypatch) -> Non
     assert command[command.index("-Device") + 1] == "auto"
     assert command[command.index("-DType") + 1] == "bfloat16"
     assert command[command.index("-MaxNewTokens") + 1] == "32"
+
+
+def test_start_model_server_refreshes_pid_file_from_health(monkeypatch, tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+    script_path = tmp_path / "start.ps1"
+    model_path = tmp_path / "model"
+    pid_path = tmp_path / "server.pid"
+    script_path.write_text("# test", encoding="utf-8")
+    model_path.mkdir()
+
+    class DummyProcess:
+        pid = 111
+
+        def poll(self):
+            return None
+
+    def fake_popen(command, **_kwargs):
+        calls.append(command)
+        return DummyProcess()
+
+    monkeypatch.setattr(model_server.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(model_server.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        model_server,
+        "check_model_server",
+        lambda profile, timeout=1.0: {
+            "status": "running",
+            "health": {"pid": 222, "model": "osunlp/UGround-V1-2B"},
+        },
+    )
+
+    result = model_server.start_model_server(
+        {
+            "profile_id": "learn_mode_uground_2b",
+            "runtime": "transformers",
+            "model_name": "osunlp/UGround-V1-2B",
+            "model_path": str(model_path),
+            "start_script": str(script_path),
+            "pid_file": str(pid_path),
+            "endpoint": "http://127.0.0.1:1245/v1/chat/completions",
+            "startup_exit_check_seconds": 0,
+            "startup_health_timeout_seconds": 0,
+        }
+    )
+
+    assert calls
+    assert result["pid"] == 111
+    assert result["service_pid"] == 222
+    assert result["pid_source"] == "health"
+    assert pid_path.read_text(encoding="utf-8") == "222"
 
 
 def test_start_model_server_rejects_non_launchable_profile(monkeypatch) -> None:
@@ -201,6 +276,69 @@ def test_ensure_model_server_does_not_start_second_vista_when_busy(monkeypatch) 
 
     assert result["started"] is False
     assert result["before"]["status"] == "busy"
+
+
+def test_wait_for_model_server_refreshes_pid_file_from_health(monkeypatch, tmp_path: Path) -> None:
+    pid_path = tmp_path / "uground.pid"
+    monkeypatch.setattr(
+        model_server,
+        "check_model_server",
+        lambda profile: {
+            "status": "running",
+            "health": {"pid": 333, "model": "osunlp/UGround-V1-2B"},
+        },
+    )
+
+    result = model_server.wait_for_model_server(
+        {
+            "profile_id": "learn_mode_uground_2b",
+            "runtime": "transformers",
+            "pid_file": str(pid_path),
+        },
+        wait_seconds=0,
+    )
+
+    assert result["status"] == "running"
+    assert pid_path.read_text(encoding="utf-8") == "333"
+
+
+def test_wait_for_model_server_retries_health_when_running_status_lacks_pid(monkeypatch, tmp_path: Path) -> None:
+    pid_path = tmp_path / "uground.pid"
+    statuses = [
+        {"status": "running", "health": None},
+        {
+            "status": "running",
+            "health": {"pid": 444, "model": "osunlp/UGround-V1-2B"},
+        },
+    ]
+
+    def fake_check(_profile, timeout=1.0):
+        return statuses.pop(0)
+
+    monkeypatch.setattr(model_server, "check_model_server", fake_check)
+
+    result = model_server.wait_for_model_server(
+        {
+            "profile_id": "learn_mode_uground_2b",
+            "runtime": "transformers",
+            "pid_file": str(pid_path),
+        },
+        wait_seconds=0,
+    )
+
+    assert result["health"]["pid"] == 444
+    assert pid_path.read_text(encoding="utf-8") == "444"
+
+
+def test_stop_script_keeps_explicit_port_scope() -> None:
+    script = Path("scripts/model_servers/stop_local_vision_server.ps1").read_text(encoding="utf-8")
+
+    assert '$explicitPort = $PSBoundParameters.ContainsKey("Port")' in script
+    assert '$explicitPidFile = $PSBoundParameters.ContainsKey("PidFile") -and $PidFile' in script
+    assert "$ports = if ($explicitPort)" in script
+    assert "if (-not $explicitPidFile -and (Test-Path $profileDir))" in script
+    assert "if (-not $explicitPidFile)" in script
+    assert "@($Port) + $profilePorts" in script
 
 
 def test_start_model_accepts_panel_preflight_wait(monkeypatch) -> None:

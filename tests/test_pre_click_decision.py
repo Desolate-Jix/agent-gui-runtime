@@ -15,7 +15,9 @@ from app.vision.schemas import BBox
 def _candidate(
     *,
     candidate_id: str = "candidate_element_start",
+    element_id: str = "element_start",
     label: str = "Start detection",
+    role: str = "button",
     score: float = 0.8,
     text_similarity: float = 1.0,
     allowed: bool = True,
@@ -23,17 +25,21 @@ def _candidate(
     zone_type: str = "test_module",
     eligible: bool | None = None,
     refined_bbox: dict[str, int] | None = None,
+    bbox: BBox | None = None,
+    click_point: dict[str, int] | None = None,
 ) -> RecognitionCandidate:
+    element_bbox = bbox or BBox(x=100, y=80, w=140, h=80)
+    element_click_point = click_point or {"x": 170, "y": 120}
     element = PageElement(
-        element_id="element_start",
+        element_id=element_id,
         label=label,
-        role="button",
+        role=role,
         interaction_type="click",
         description=f"{label} button",
         text=label,
-        bbox=BBox(x=100, y=80, w=140, h=80),
-        semantic_bbox=BBox(x=100, y=80, w=140, h=80),
-        click_point={"x": 170, "y": 120},
+        bbox=element_bbox,
+        semantic_bbox=element_bbox,
+        click_point=element_click_point,
         click_strategy="semantic_bbox_center",
         possible_destinations=[],
         verification_hints=VerificationHints(expected_changes=["content_change"], target_scope="local"),
@@ -168,6 +174,49 @@ def test_pre_click_decision_does_not_treat_negated_label_as_positive_goal_match(
     assert "goal_explicitly_mentions_candidate_label" not in result.candidate_decisions[0].reasons
 
 
+def test_pre_click_decision_rejects_context_word_when_goal_has_explicit_action_target() -> None:
+    candidate = _candidate(label="SEEK", text_similarity=0.9)
+
+    result = decide_pre_click(
+        goal="Click the visible Apply button for the selected SEEK job.",
+        candidates=_rank_result(candidate),
+        grounding=_grounding(matched_text="SEEK"),
+    )
+
+    assert result.allowed is False
+    assert "candidate_goal_action_mismatch" in result.candidate_decisions[0].reasons
+    assert "goal_explicitly_mentions_candidate_label" in result.candidate_decisions[0].reasons
+
+
+def test_pre_click_decision_does_not_treat_negated_submit_terms_as_action_target() -> None:
+    candidate = _candidate(
+        candidate_id="seeded_numbered_region_4_c4",
+        element_id="seeded_numbered_region_4_c4",
+        label="Job listing card: Software Engineer Specialist - Integration",
+        role="card",
+        text_similarity=0.9,
+        bbox=BBox(x=656, y=518, w=470, h=378),
+        click_point={"x": 891, "y": 707},
+    )
+
+    result = decide_pre_click(
+        goal=(
+            "Open the job detail for Job listing card: Software Engineer Specialist - Integration. "
+            "Do not click browser toolbar, final submit, send, confirm, payment, or surrounding containers."
+        ),
+        candidates=_rank_result(candidate),
+        grounding=_grounding(
+            candidate_id="seeded_numbered_region_4_c4",
+            matched_text="Software Engineer Specialist - Integration",
+            point={"x": 891, "y": 706},
+        ),
+    )
+
+    assert result.allowed is True
+    assert "candidate_goal_action_mismatch" not in result.candidate_decisions[0].reasons
+    assert "pre_click_checks_passed" in result.candidate_decisions[0].reasons
+
+
 def test_pre_click_decision_rejects_refined_point_outside_candidate_bbox() -> None:
     candidate = _candidate()
 
@@ -290,6 +339,96 @@ def test_pre_click_decision_removes_passed_reason_when_margin_later_rejects() ->
     assert result.allowed is False
     assert "top_candidate_margin_too_small" in result.candidate_decisions[0].reasons
     assert "pre_click_checks_passed" not in result.candidate_decisions[0].reasons
+
+
+def test_pre_click_decision_allows_low_margin_equivalent_duplicate_candidate() -> None:
+    top = _candidate(
+        candidate_id="candidate_title_text",
+        element_id="element_title_text",
+        label="Founding Data Engineer - Digital & Innovation",
+        role="text",
+        score=0.8541,
+        bbox=BBox(x=227, y=553, w=311, h=38),
+        click_point={"x": 382, "y": 572},
+    )
+    duplicate = _candidate(
+        candidate_id="candidate_title_link",
+        element_id="element_title_link",
+        label="Founding Data Engineer - Digital & Innovation",
+        role="link",
+        score=0.8541,
+        bbox=BBox(x=227, y=548, w=283, h=47),
+        click_point={"x": 368, "y": 571},
+    )
+    nearby_text = _candidate(
+        candidate_id="candidate_nearby_at",
+        element_id="element_nearby_at",
+        label="at",
+        role="text",
+        score=0.8481,
+        bbox=BBox(x=227, y=601, w=16, h=22),
+        click_point={"x": 235, "y": 612},
+    )
+    rank_result = CandidateRankResult(
+        goal="Click the first visible job card title: Founding Data Engineer - Digital & Innovation",
+        candidates=[top, duplicate, nearby_text],
+        recommended_candidate_id=top.candidate_id,
+        margin_to_second=0.0,
+    )
+    grounding = LocalGroundingResult(
+        goal=rank_result.goal,
+        results=[
+            LocalGroundingCandidateResult(
+                candidate_id=top.candidate_id,
+                element_id=top.element_id,
+                status="grounded",
+                crop_path="crop.png",
+                crop_bbox={"x": 210, "y": 530, "width": 330, "height": 70},
+                refined_click_point={"x": 382, "y": 572},
+                coordinate_source="local_ocr_text_center",
+                confidence=0.9,
+                matched_text="Founding Data Engineer - Digital & Innovation",
+                matched_text_bbox={"x": 227, "y": 553, "width": 311, "height": 38},
+            ),
+            LocalGroundingCandidateResult(
+                candidate_id=duplicate.candidate_id,
+                element_id=duplicate.element_id,
+                status="grounded",
+                crop_path="crop.png",
+                crop_bbox={"x": 210, "y": 530, "width": 330, "height": 70},
+                refined_click_point={"x": 368, "y": 571},
+                coordinate_source="local_ocr_text_center",
+                confidence=0.9,
+                matched_text="Founding Data Engineer - Digital & Innovation",
+                matched_text_bbox={"x": 227, "y": 548, "width": 283, "height": 47},
+            ),
+            LocalGroundingCandidateResult(
+                candidate_id=nearby_text.candidate_id,
+                element_id=nearby_text.element_id,
+                status="grounded",
+                crop_path="crop.png",
+                crop_bbox={"x": 220, "y": 590, "width": 30, "height": 40},
+                refined_click_point={"x": 235, "y": 612},
+                coordinate_source="local_ocr_text_center",
+                confidence=0.9,
+                matched_text="at",
+                matched_text_bbox={"x": 227, "y": 601, "width": 16, "height": 22},
+            ),
+        ],
+    )
+
+    result = decide_pre_click(goal=rank_result.goal, candidates=rank_result, grounding=grounding)
+
+    assert result.allowed is True
+    assert result.selected_candidate_id == top.candidate_id
+    assert "top_candidate_margin_equivalent_duplicate" in result.reasons
+    assert "top_candidate_margin_equivalent_duplicate" in result.candidate_decisions[0].reasons
+    assert result.summary["allowed_candidate_count"] == 2
+    assert result.summary["raw_top_margin_ok"] is False
+    assert result.summary["top_margin_ok"] is True
+    assert result.summary["equivalent_duplicate_margin_override_used"] is True
+    assert result.candidate_decisions[2].allowed is False
+    assert "top_candidate_margin_too_small" in result.candidate_decisions[2].reasons
 
 
 def test_pre_click_decision_can_allow_reviewed_low_margin_grounded_candidate() -> None:

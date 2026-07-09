@@ -1,0 +1,343 @@
+{
+  "case_id": "seek_results_observe_screen",
+  "screenshot_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\jobs-in-all-new-zealand-seek-3-microsoft-edge__observe-screen__edge__full-window__20260702-235059-572443.png",
+  "region_count": 14,
+  "regions": [
+    {
+      "region_no": 1,
+      "item_id": "uia_control_1",
+      "label": "Search keyword field",
+      "role": "input",
+      "evidence_level": "uia_control",
+      "rough_bbox_hint": {
+        "x": 633,
+        "y": 184,
+        "w": 850,
+        "h": 48
+      },
+      "precision_roi": {
+        "x": 537,
+        "y": 88,
+        "w": 1042,
+        "h": 240
+      },
+      "prompt": "You are locating one target inside numbered region #1. Target label: Search keyword field. Target role: input. Ignore the original full-screen bbox except as a rough area hint. Use OCR/UIA/visual boundaries inside this numbered region and return the tight actual control bbox and click point in full screenshot coordinates."
+    },
+    {
+      "region_no": 2,
+      "item_id": "uia_control_2",
+      "label": "SEEK search button",
+      "role": "button",
+      "evidence_level": "uia_control",
+      "rough_bbox_hint": {
+        "x": 1820,
+        "y": 184,
+        "w": 92,
+        "h": 48
+      },
+      "precision_roi": {
+        "x": 1724,
+        "y": 88,
+        "w": 284,
+        "h": 240
+      },
+      "prompt": "You are locating one target inside numbered region #2. Target label: SEEK search button. Target role: button. Ignore the original full-screen bbox except as a rough area hint. Use OCR/UIA/visual boundaries inside this numbered region and return the tight actual control bbox and click point in full screenshot coordinates."
+    },
+    {
+      "region_no": 3,
+      "item_id": "uia_control_3",
+      "label": "Pay filter",
+      "role": "button",
+      "evidence_level": "uia_control",
+      "rough_bbox_hint": {
+        "x": 632,
+        "y": 258,
+        "w": 78,
+        "h": 42
+      },
+      "precision_roi": {
+        "x": 536,
+        "y": 162,
+        "w": 270,
+        "h": 234
+      },
+      "prompt": "You are locating one target inside numbered region #3. Target label: Pay filter. Target role: button. Ignore the original full-screen bbox except as a rough area hint. Use OCR/UIA/visual boundaries inside this numbered region and return the tight actual control bbox and click point in full screenshot coordinates."
+    },
+    {
+      "region_no": 4,
+      "item_id": "c1",
+      "label": "Job search input field",
+      "role": "input",
+      "evidence_level": "semantic_region_only",
+      "rough_bbox_hint": {
+        "x": 512,
+        "y": 268,
+        "w": 640,
+        "h": 64
+      },
+      "precision_roi": {
+        "x": 416,
+        "y": 172,
+        "w": 832,
+        "h": 256
+      },
+      "prompt": "You are locating one target inside numbered region #4. Target label: Job search input field. Target role: input. Ignore the original full-screen bbox except as a rough area hint. Use OCR/UIA/visual boundaries inside this numbered region and return the tight actual control bbox and click point in full screenshot coordinates."
+    },
+    {
+      "region_no": 5,
+      "item_id": "c2",
+      "label": "Location filter",
+      "role": "input",
+      "evidence_level": "semantic_region_only",
+      "rough_bbox_hint": {
+        "x": 1168,
+        "y": 268,
+        "w": 240,
+        "h": 64
+      },
+      "precision_roi": {
+        "x": 1072,
+        "y": 172,
+        "w": 432,
+        "h": 256
+      },
+      "prompt": "You are locating one target inside numbered region #5. Target label: Location filter. Target role: input. Ignore the original full-screen bbox except as a rough area hint. Use OCR/UIA/visual boundaries inside this numbered region and return the tight actual control bbox and click point in full screenshot coordinates."
+    },
+    {
+      "region_no": 6,
+      "item_id": "c3",
+      "label": "SEEK button",
+      "role": "button",
+      "evidence_level": "semantic_region_only",
+      "rough_bbox_hint": {
+        "x": 1408,
+        "y": 268,
+        "w": 96,
+        "h": 64
+      },
+      "precision_roi": {
+        "x": 1312,
+        "y": 172,
+        "w": 288,
+        "h": 256
+      },
+      "prompt": "You are locating one target inside numbered region #6. Target label: SEEK button. Target role: button. Ignore the original full-screen bbox except as a rough area hint. Use OCR/UIA/visual boundaries inside this numbered region and return the tight actual control bbox and click point in full screenshot coordinates."
+    },
+    {
+      "region_no": 7,
+      "item_id": "c4",
+      "label": "Pay filter",
+      "role": "button",
+      "evidence_level": "semantic_region_only",
+      "rough_bbox_hint": {
+        "x": 512,
+        "y": 368,
+        "w": 80,
+        "h": 64
+      },
+      "precision_roi": {
+        "x": 416,
+        "y": 272,
+        "w": 272,
+        "h": 256
+      },
+      "prompt": "You are locating one target inside numbered region #7. Target label: Pay filter. Target role: button. Ignore the original full-screen bbox except as a rough area hint. Use OCR/UIA/visual boundaries inside this numbered region and return the tight actual control bbox and click point in full screenshot coordinates."
+    },
+    {
+      "region_no": 8,
+      "item_id": "c5",
+      "label": "Type filter",
+      "role": "button",
+      "evidence_level": "semantic_region_only",
+      "rough_bbox_hint": {
+        "x": 592,
+        "y": 368,
+        "w": 80,
+        "h": 64
+      },
+      "precision_roi": {
+        "x": 496,
+        "y": 272,
+        "w": 272,
+        "h": 256
+      },
+      "prompt": "You are locating one target inside numbered region #8. Target label: Type filter. Target role: button. Ignore the original full-screen bbox except as a rough area hint. Use OCR/UIA/visual boundaries inside this numbered region and return the tight actual control bbox and click point in full screenshot coordinates."
+    },
+    {
+      "region_no": 9,
+      "item_id": "c6",
+      "label": "Remote filter",
+      "role": "button",
+      "evidence_level": "semantic_region_only",
+      "rough_bbox_hint": {
+        "x": 672,
+        "y": 368,
+        "w": 80,
+        "h": 64
+      },
+      "precision_roi": {
+        "x": 576,
+        "y": 272,
+        "w": 272,
+        "h": 256
+      },
+      "prompt": "You are locating one target inside numbered region #9. Target label: Remote filter. Target role: button. Ignore the original full-screen bbox except as a rough area hint. Use OCR/UIA/visual boundaries inside this numbered region and return the tight actual control bbox and click point in full screenshot coordinates."
+    },
+    {
+      "region_no": 10,
+      "item_id": "c7",
+      "label": "Classification filter",
+      "role": "button",
+      "evidence_level": "semantic_region_only",
+      "rough_bbox_hint": {
+        "x": 752,
+        "y": 368,
+        "w": 120,
+        "h": 64
+      },
+      "precision_roi": {
+        "x": 656,
+        "y": 272,
+        "w": 312,
+        "h": 256
+      },
+      "prompt": "You are locating one target inside numbered region #10. Target label: Classification filter. Target role: button. Ignore the original full-screen bbox except as a rough area hint. Use OCR/UIA/visual boundaries inside this numbered region and return the tight actual control bbox and click point in full screenshot coordinates."
+    },
+    {
+      "region_no": 11,
+      "item_id": "c8",
+      "label": "Listing time filter",
+      "role": "button",
+      "evidence_level": "semantic_region_only",
+      "rough_bbox_hint": {
+        "x": 872,
+        "y": 368,
+        "w": 96,
+        "h": 64
+      },
+      "precision_roi": {
+        "x": 776,
+        "y": 272,
+        "w": 288,
+        "h": 256
+      },
+      "prompt": "You are locating one target inside numbered region #11. Target label: Listing time filter. Target role: button. Ignore the original full-screen bbox except as a rough area hint. Use OCR/UIA/visual boundaries inside this numbered region and return the tight actual control bbox and click point in full screenshot coordinates."
+    },
+    {
+      "region_no": 12,
+      "item_id": "c9",
+      "label": "Job listing card",
+      "role": "other",
+      "evidence_level": "semantic_region_only",
+      "rough_bbox_hint": {
+        "x": 512,
+        "y": 748,
+        "w": 360,
+        "h": 540
+      },
+      "precision_roi": {
+        "x": 416,
+        "y": 652,
+        "w": 552,
+        "h": 732
+      },
+      "prompt": "You are locating one target inside numbered region #12. Target label: Job listing card. Target role: other. Ignore the original full-screen bbox except as a rough area hint. Use OCR/UIA/visual boundaries inside this numbered region and return the tight actual control bbox and click point in full screenshot coordinates."
+    },
+    {
+      "region_no": 13,
+      "item_id": "c10",
+      "label": "Job listing card",
+      "role": "other",
+      "evidence_level": "semantic_region_only",
+      "rough_bbox_hint": {
+        "x": 656,
+        "y": 902,
+        "w": 460,
+        "h": 238
+      },
+      "precision_roi": {
+        "x": 560,
+        "y": 806,
+        "w": 652,
+        "h": 430
+      },
+      "prompt": "You are locating one target inside numbered region #13. Target label: Job listing card. Target role: other. Ignore the original full-screen bbox except as a rough area hint. Use OCR/UIA/visual boundaries inside this numbered region and return the tight actual control bbox and click point in full screenshot coordinates."
+    },
+    {
+      "region_no": 14,
+      "item_id": "c12",
+      "label": "Save this search button",
+      "role": "button",
+      "evidence_level": "semantic_region_only",
+      "rough_bbox_hint": {
+        "x": 778,
+        "y": 1308,
+        "w": 206,
+        "h": 42
+      },
+      "precision_roi": {
+        "x": 682,
+        "y": 1212,
+        "w": 398,
+        "h": 188
+      },
+      "prompt": "You are locating one target inside numbered region #14. Target label: Save this search button. Target role: button. Ignore the original full-screen bbox except as a rough area hint. Use OCR/UIA/visual boundaries inside this numbered region and return the tight actual control bbox and click point in full screenshot coordinates."
+    }
+  ],
+  "matched_precision_replay": [
+    {
+      "precision_label": "Search keyword field",
+      "precision_status": "valid_candidate",
+      "matched_region_no": 1,
+      "matched_region_label": "Search keyword field",
+      "match_score": 17,
+      "precision_bbox": {
+        "x": 633,
+        "y": 184,
+        "w": 850,
+        "h": 48
+      },
+      "precision_point": {
+        "x": 651,
+        "y": 184
+      },
+      "failure_category": null
+    },
+    {
+      "precision_label": "SEEK search button",
+      "precision_status": "rejected",
+      "matched_region_no": 2,
+      "matched_region_label": "SEEK search button",
+      "match_score": 17,
+      "precision_bbox": {
+        "x": 1820,
+        "y": 184,
+        "w": 92,
+        "h": 48
+      },
+      "precision_point": {
+        "x": 1810,
+        "y": 184
+      },
+      "failure_category": "point_outside_bbox"
+    },
+    {
+      "precision_label": "Pay filter",
+      "precision_status": "rejected",
+      "matched_region_no": 3,
+      "matched_region_label": "Pay filter",
+      "match_score": 15,
+      "precision_bbox": {
+        "x": 632,
+        "y": 258,
+        "w": 78,
+        "h": 42
+      },
+      "precision_point": {
+        "x": 893,
+        "y": 537
+      },
+      "failure_category": "point_outside_bbox"
+    }
+  ]
+}
