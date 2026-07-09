@@ -7,6 +7,7 @@ let lastLearningDraftObserveResponse = null;
 let lastLearningDraftObserveTracePath = "";
 let currentImagePath = "";
 let currentImageUrl = "";
+let learningSourceImagePath = "";
 let modelProfiles = [];
 let appCatalog = [];
 
@@ -2992,7 +2993,9 @@ function setCurrentImage(path, url = "") {
   currentImageUrl = url || (path ? panelFileUrl(path) : "");
   $("imagePath").value = currentImagePath;
   const learningImagePath = $("learningInterfaceImagePath");
-  if (learningImagePath) learningImagePath.value = currentImagePath;
+  if (learningImagePath && !isLearningDisplayOverlayPath(currentImagePath)) {
+    learningImagePath.value = currentImagePath;
+  }
   $("previewMeta").textContent = currentImagePath ? basename(currentImagePath) : t("no_image");
   const img = $("previewImage");
   const overlay = $("bboxOverlay");
@@ -3007,6 +3010,29 @@ function setCurrentImage(path, url = "") {
     previewBox();
   };
   img.src = currentImageUrl;
+}
+
+function isLearningDisplayOverlayPath(path) {
+  const normalized = String(path || "").replace(/\\/g, "/").toLowerCase();
+  return normalized.includes("/artifacts/review-overlays/")
+    || normalized.includes("artifacts/review-overlays/")
+    || normalized.includes("__two-stage-understanding__");
+}
+
+function firstLearningSourceImagePath(...candidates) {
+  return String(candidates.find((value) => {
+    const normalized = String(value || "").trim();
+    return normalized && !isLearningDisplayOverlayPath(normalized);
+  }) || "").trim();
+}
+
+function setLearningSourceImagePath(path) {
+  const normalized = firstLearningSourceImagePath(path);
+  if (!normalized) return;
+  learningSourceImagePath = normalized;
+  setLearningTrialImagePath(normalized);
+  const learningImagePath = $("learningInterfaceImagePath");
+  if (learningImagePath) learningImagePath.value = normalized;
 }
 
 function bboxFromInputs() {
@@ -8967,7 +8993,15 @@ function buildLearningDraftObservationEvidence() {
           trace_path: hasCalibratedTargets ? (nestedGet(result, ["learn_all_targets", "trace_path"]) || result.trace_path || "") : "",
         },
       },
-    current_image_path: String($("learningTrialImagePath")?.value || currentImagePath || result.image_path || "").trim(),
+    current_image_path: firstLearningSourceImagePath(
+      learningSourceImagePath,
+      $("learningTrialImagePath")?.value,
+      result.image_path,
+      nestedGet(result, ["capture", "image_path"]),
+      nestedGet(result, ["live_capture", "image_path"]),
+      currentImagePath,
+    ),
+    rejected_display_overlay_input_path: isLearningDisplayOverlayPath($("learningTrialImagePath")?.value || currentImagePath),
     screen_size: result.screen_size || result.viewport_size || result.image_size || nestedGet(result, ["capture", "image_size"]) || {},
     screen_summary: result.screen_summary || nestedGet(result, ["screen_map", "summary", "screen_summary"]) || nestedGet(result, ["screen_reading", "screen_summary"]) || "",
       screen_map: screenMap,
@@ -10070,7 +10104,7 @@ async function captureLearningDraftWindow() {
     || currentImagePath;
   if (imagePath) {
     setCurrentImage(imagePath);
-    setLearningTrialImagePath(imagePath);
+    setLearningSourceImagePath(imagePath);
   }
   lastLearningDraftObserveResponse = response;
   lastLearningDraftObserveTracePath = result.trace_path || nestedGet(response, ["data", "trace_path"]) || "";
@@ -10175,7 +10209,7 @@ async function runLearningDeepCalibration() {
   const profileId = profile?.profile_id || $("locateModelProfile")?.value || "";
   if (!(await ensureStageModelReady("locate", profileId))) return null;
   const payload = payloadFromShared("locate");
-  const imagePath = String($("learningTrialImagePath")?.value || currentImagePath || "").trim();
+  const imagePath = firstLearningSourceImagePath(learningSourceImagePath, $("learningTrialImagePath")?.value, currentImagePath);
   if (imagePath) {
     payload.capture_live = false;
     payload.image_path = imagePath;
@@ -10231,7 +10265,6 @@ async function runLearningTwoStageUnderstanding() {
   if (response?.success) {
     const overlayPath = learningTwoStageOverlayPath(response);
     if (overlayPath) {
-      setCurrentImage(overlayPath);
       renderLearningDraftScreenshotPath(overlayPath, "learning two-stage fused overlay");
     }
   }

@@ -158,6 +158,7 @@ def _audit_stage1_partition_adjacency(case_results: list[dict[str, Any]], *, wid
         return
     tolerance_x = max(12, int(width * 0.025))
     tolerance_y = max(12, int(height * 0.025))
+    lower_edge_tolerance_y = max(tolerance_y, 32, int(height * 0.035))
     left_boundary = max(
         (
             bbox["x"] + bbox["w"]
@@ -215,9 +216,11 @@ def _audit_stage1_partition_adjacency(case_results: list[dict[str, Any]], *, wid
         if bbox["y"] > top_boundary + tolerance_y:
             _mark_failed(item, "main_content_not_adjacent_to_top_boundary")
             item["notes"].append("main_content_must_start_at_topbar_bottom_even_when_empty")
-        if bbox["y"] + bbox["h"] < bottom_boundary - tolerance_y:
+        if bbox["y"] + bbox["h"] < bottom_boundary - lower_edge_tolerance_y:
             _mark_failed(item, "main_content_does_not_cover_lower_empty_area")
             item["notes"].append("main_content_must_cover_empty_visible_lower_area")
+        elif bbox["y"] + bbox["h"] < bottom_boundary:
+            item["notes"].append("main_content_lower_edge_within_system_border_tolerance")
 
 
 def _mark_failed(item: dict[str, Any], category: str) -> None:

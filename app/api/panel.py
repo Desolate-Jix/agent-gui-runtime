@@ -658,6 +658,21 @@ def run_learning_two_stage_understanding_endpoint(
             or report.get("overlay_path")
         )
         stage2 = report.get("stage2_numbering") if isinstance(report.get("stage2_numbering"), dict) else {}
+        learn_all_targets_payload = {
+            "status": "two_stage_stage1_gate_passed"
+            if stage1_gate.get("status") == "passed"
+            else "blocked_before_stage2_numbering",
+            "targets": [],
+            "target_count": 0,
+            "validated_count": 0,
+            "invalid_count": 0,
+            "review_boxes": review_boxes,
+            "review_box_count": len(review_boxes),
+            "overlay_path": overlay_path,
+            "trace_path": "",
+            "stage1_gate_status": stage1_gate.get("status"),
+            "stage2_numbered_region_count": len(stage2.get("regions") if isinstance(stage2.get("regions"), list) else []),
+        }
         saved_payload = {
             **report,
             "app_name": request.app_name,
@@ -674,6 +689,7 @@ def run_learning_two_stage_understanding_endpoint(
             "final_submit_forbidden": True,
             "source_type": "panel_live_observe_two_stage_understanding",
             "observe_bundle": bundle,
+            "learn_all_targets": learn_all_targets_payload,
         }
         report_path = _save_panel_learning_trial(saved_payload, app_name=request.app_name)
         trace_path = write_trace(
@@ -717,19 +733,8 @@ def run_learning_two_stage_understanding_endpoint(
                 "screen_size": bundle.get("screen_size") or {},
                 "screen_summary": ((bundle.get("screen_reading") or {}).get("screen_summary") if isinstance(bundle.get("screen_reading"), dict) else ""),
                 "learn_all_targets": {
-                    "status": "two_stage_stage1_gate_passed"
-                    if stage1_gate.get("status") == "passed"
-                    else "blocked_before_stage2_numbering",
-                    "targets": [],
-                    "target_count": 0,
-                    "validated_count": 0,
-                    "invalid_count": 0,
-                    "review_boxes": review_boxes,
-                    "review_box_count": len(review_boxes),
-                    "overlay_path": overlay_path,
+                    **learn_all_targets_payload,
                     "trace_path": trace_path,
-                    "stage1_gate_status": stage1_gate.get("status"),
-                    "stage2_numbered_region_count": len(stage2.get("regions") if isinstance(stage2.get("regions"), list) else []),
                 },
                 "summary": {
                     "app_name": request.app_name,

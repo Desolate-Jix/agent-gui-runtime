@@ -95,3 +95,31 @@ def test_stage1_region_selection_audit_requires_adjacent_partition_covering_empt
     assert "main_content_not_adjacent_to_top_boundary" in audit["failure_categories"]
     assert "main_content_does_not_cover_right_empty_area" in audit["failure_categories"]
     assert "main_content_does_not_cover_lower_empty_area" in audit["failure_categories"]
+
+
+def test_stage1_region_selection_audit_allows_small_lower_system_border_slack():
+    audit = audit_stage1_region_selection(
+        localized_regions=[
+            {
+                "region_id": "structure_region_left_sidebar",
+                "label": "Left navigation",
+                "bbox": {"x": 0, "y": 0, "w": 92, "h": 1005},
+            },
+            {
+                "region_id": "structure_region_top_bar",
+                "label": "Top bar",
+                "bbox": {"x": 92, "y": 0, "w": 1062, "h": 90},
+            },
+            {
+                "region_id": "structure_region_main_content",
+                "label": "Main content",
+                "bbox": {"x": 92, "y": 90, "w": 1062, "h": 887},
+            },
+        ],
+        screen_size={"width": 1154, "height": 1005},
+    )
+
+    assert audit["passed"] is True
+    assert "main_content_does_not_cover_lower_empty_area" not in audit["failure_categories"]
+    main_region = next(region for region in audit["regions"] if region["region_type"] == "main_content")
+    assert "main_content_lower_edge_within_system_border_tolerance" in main_region["notes"]

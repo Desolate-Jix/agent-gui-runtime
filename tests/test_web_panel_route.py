@@ -834,6 +834,32 @@ def test_panel_api_response_result_helper_preserves_two_stage_gate_data() -> Non
     assert 'nestedGet(result, ["stage2_numbering_skipped"]) !== true' in allows_body
 
 
+def test_learning_interface_keeps_display_overlay_out_of_source_image_path() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    assert "let learningSourceImagePath = \"\";" in panel_js
+    assert "function isLearningDisplayOverlayPath" in panel_js
+    assert "artifacts/review-overlays/" in panel_js
+    assert "__two-stage-understanding__" in panel_js
+    assert "function firstLearningSourceImagePath" in panel_js
+    assert "function setLearningSourceImagePath" in panel_js
+
+    set_current_start = panel_js.index("function setCurrentImage")
+    set_current_body = panel_js[set_current_start:panel_js.index("function isLearningDisplayOverlayPath", set_current_start)]
+    assert "learningImagePath && !isLearningDisplayOverlayPath(currentImagePath)" in set_current_body
+
+    two_stage_start = panel_js.index("async function runLearningTwoStageUnderstanding")
+    two_stage_body = panel_js[two_stage_start:panel_js.index("async function runLearningInterfaceFlow", two_stage_start)]
+    assert "renderLearningDraftScreenshotPath(overlayPath, \"learning two-stage fused overlay\")" in two_stage_body
+    assert "setCurrentImage(overlayPath)" not in two_stage_body
+
+    evidence_start = panel_js.index("function buildLearningDraftObservationEvidence")
+    evidence_body = panel_js[evidence_start:panel_js.index("function setLearningTrialResultPath", evidence_start)]
+    assert "current_image_path: firstLearningSourceImagePath(" in evidence_body
+    assert "rejected_display_overlay_input_path" in evidence_body
+    assert 'current_image_path: String($("learningTrialImagePath")?.value || currentImagePath' not in evidence_body
+
+
 def test_web_panel_saves_interface_map_with_edit_trace() -> None:
     client = TestClient(app)
     response = client.post(
@@ -2741,6 +2767,11 @@ def test_panel_two_stage_endpoint_returns_review_boxes_for_real_learning_flow(mo
     assert data["coordinate_overlay_path"] == "artifacts/review-overlays/demo_two_stage.png"
     assert data["real_clicks"] == 0
     assert data["promotion_allowed"] is False
+    saved_report = json.loads(Path(data["report_path"]).read_text(encoding="utf-8-sig"))
+    assert saved_report["learn_all_targets"]["review_box_count"] == 1
+    assert saved_report["learn_all_targets"]["review_boxes"][0]["label"] == "Main Card"
+    assert saved_report["learn_all_targets"]["overlay_path"] == "artifacts/review-overlays/demo_two_stage.png"
+    assert saved_report["learn_all_targets"]["stage1_gate_status"] == "passed"
 
 def test_seek_search_button_visual_asset_uses_real_source_screenshot() -> None:
     map_path = Path("artifacts/visual-match-smoke/live_seek_20260624/learned_interface_map_calibrated_real_crops.json")

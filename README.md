@@ -1,5 +1,24 @@
 # agent-gui-runtime
 
+## 2026-07-10 Learning Interface source-image / overlay separation
+
+The Learning Interface now keeps the captured source screenshot separate from display-only review overlays. Two-stage overlays under `artifacts/review-overlays` are rendered in the Learning Draft screenshot panel, but they are no longer promoted through `setCurrentImage()` into the next learning input path. `learningSourceImagePath` is the source-of-truth for the next recognition trial and Learn Deep dry-run, while fused overlays remain review-only evidence.
+
+Stage1 gate was also adjusted for small lower-edge system-border slack. The adjacent-partition invariant still requires `main_content` to cover the visible lane, but a tiny bottom remainder such as the AppleMusic 28px window/system edge is recorded as `main_content_lower_edge_within_system_border_tolerance` instead of blocking Stage2 before numbering.
+
+Follow-up root-cause fix: the two-stage endpoint now persists `learn_all_targets.review_boxes` into the saved `trial_result.json`, not only into the immediate API response. This repairs the real panel flow where Stage1/Stage2 could succeed, but the saved artifact and subsequent draft evidence still looked like `no_targets`.
+
+Verification:
+
+- `node --check app\web_panel\panel.js`: passed.
+- `uv run pytest tests/test_learn_stage1_region_selection_audit.py -q`: 5 passed.
+- `uv run pytest tests/test_web_panel_route.py::test_learning_interface_keeps_display_overlay_out_of_source_image_path tests/test_web_panel_route.py::test_panel_api_response_result_helper_preserves_two_stage_gate_data -q`: 2 passed.
+- `uv run pytest tests/test_web_panel_route.py::test_panel_two_stage_endpoint_returns_review_boxes_for_real_learning_flow -q`: passed.
+- AppleMusic failed-run replay through `/panel/run_learning_two_stage_understanding` using raw source `artifacts\screenshots\apple-music__observe-screen__applemusic__full-window__20260710-025330-992572.png`: `stage1_gate=passed`, `stage2_numbering_skipped=false`, generated overlay `artifacts\review-overlays\apple-music__observe-screen__applemusic__full-window__20260710-025330-992572__two-stage-understanding__20260710-030357-565581.png`.
+- Real panel service was restarted so port `8000` serves the new backend contract. Live smoke on raw source `artifacts\screenshots\apple-music__observe-screen__applemusic__full-window__20260710-030736-913719.png` generated `artifacts\learning-runs\panel_20260710-031524-222_applemusic\trial_result.json` with `stage1_gate=passed`, `stage2_numbering_skipped=false`, and persisted `learn_all_targets.review_box_count=33`. The next `/panel/run_learning_recognition_trial` generated `artifacts\learning-runs\panel_20260710-031553-941_applemusic\trial_result.json` with `screen_inventory_count=25` and `learning_draft.regions=25`.
+
+Boundary: display/review-only dataflow and gate fix. No live click, fill, submit, Execute authorization, Runtime PathGraph promotion, or recognition-accuracy claim.
+
 ## 2026-07-10 Learning Interface v92-style Stage2 default restored
 
 The Learning Interface panel now defaults back to the v92-style `stage2_region_strategy=partitioned` path. This preserves the protected AppleMusic strategy: complete Stage1 structure bars, direct numbering for top/sidebar bars, primary/main-content card grouping, and parent-child display demotion so child evidence does not visually compete with card/group parents.
