@@ -41,6 +41,7 @@ def build_learning_recognition_trial(
         bundle=bundle,
         screen_inventory=screen_inventory,
         layout_graph=layout_graph,
+        enable_ocr_content_recovery=True,
     )
     accepted_items = classification.get("accepted_for_grounding")
     accepted_items = accepted_items if isinstance(accepted_items, list) else []

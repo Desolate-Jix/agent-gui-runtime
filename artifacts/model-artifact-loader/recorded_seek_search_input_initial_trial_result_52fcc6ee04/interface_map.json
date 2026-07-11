@@ -3,16 +3,16 @@
   "app_id": "model_learning_benchmark",
   "page_type": "job_listing_page",
   "source": {
-    "trial_path": "logs/benchmarks/model_learning_template_loader_trials/8c6d360d2caf/recorded_seek_search_input_initial/trial_result.json",
+    "trial_path": "logs/benchmarks/model_learning_template_loader_trials/0314a9781bff/recorded_seek_search_input_initial/trial_result.json",
     "sha256": "52fcc6ee04fa4f7bee57c01868925ca35bf49738109d9d6a630f5265bde2caa9",
     "attempt_index": 0,
     "readonly": true,
     "posthoc_optimization_allowed": false,
-    "loaded_at": "2026-07-07T13:33:10.884346"
+    "loaded_at": "2026-07-12T00:24:55.121438"
   },
   "loader": {
     "contract_version": "model_learning_artifact_loader_v1",
-    "source_trial_path": "logs/benchmarks/model_learning_template_loader_trials/8c6d360d2caf/recorded_seek_search_input_initial/trial_result.json",
+    "source_trial_path": "logs/benchmarks/model_learning_template_loader_trials/0314a9781bff/recorded_seek_search_input_initial/trial_result.json",
     "source_sha256": "52fcc6ee04fa4f7bee57c01868925ca35bf49738109d9d6a630f5265bde2caa9",
     "source_attempt_index": 0,
     "source_artifact_readonly": true,

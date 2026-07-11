@@ -1,0 +1,118 @@
+{
+  "stage1_gate": {
+    "status": "passed",
+    "failure_categories": [],
+    "allow_stage2_numbering": true
+  },
+  "stage2_numbering_skipped": false,
+  "stage2_numbering": {
+    "regions": [
+      {
+        "region_id": "R1"
+      }
+    ]
+  },
+  "fusion": {
+    "compiled_overlay_path": "artifacts/review-overlays/demo_two_stage.png",
+    "fused_review_boxes": [
+      {
+        "id": "R1",
+        "label": "Main",
+        "role": "review_only",
+        "bbox": {
+          "x": 1,
+          "y": 2,
+          "w": 3,
+          "h": 4
+        }
+      }
+    ]
+  },
+  "source_trace_path": "panel_inline_observe_result.json",
+  "source_image_override": {
+    "applied": true,
+    "status": "applied",
+    "reason": "explicit_source_image_override",
+    "original_path": "artifacts/screenshots/stale.png",
+    "path": "C:\\Users\\DesolateJix\\AppData\\Local\\Temp\\pytest-of-DesolateJix\\pytest-3651\\test_panel_two_stage_endpoint_0\\override.png"
+  },
+  "screen_inventory_count": 1,
+  "layout_graph_summary": {
+    "node_count": 1,
+    "zone_count": 1,
+    "zones": {}
+  },
+  "fusion_status": {
+    "status": "available"
+  },
+  "model_grounding_evidence": {
+    "contract_version": "learn_model_grounding_evidence_status_v1",
+    "display_only": true,
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "not_accuracy": true,
+    "status": "not_valid_for_model_grounding_evidence",
+    "reason": "no_model_grounding_attempts_recorded",
+    "model_grounding_attempted_count": 0,
+    "stage1_region_count": 0,
+    "stage2_numbered_item_count": 0,
+    "model_grounded_region_ids": [],
+    "regions_without_model_grounding": [],
+    "model_names_with_recorded_grounding": [],
+    "model_call_plan_is_recommendation_only": false,
+    "interpretation": "This field only says whether the overlay can be used as model-grounding evidence. Recommendation-only model names, heuristic calibration, or parser cleanup do not prove model accuracy."
+  },
+  "app_name": "demo_app",
+  "state_hint": "home",
+  "artifact_type": "learn_two_stage_understanding",
+  "draft_only": true,
+  "draft_graph_preview": true,
+  "runtime_path_graph": false,
+  "promotion_allowed": false,
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "real_clicks": 0,
+  "live_safe_fill_attempted": 0,
+  "final_submit_forbidden": true,
+  "source_type": "panel_live_observe_two_stage_understanding",
+  "observe_bundle": {
+    "image_path": "C:\\Users\\DesolateJix\\AppData\\Local\\Temp\\pytest-of-DesolateJix\\pytest-3651\\test_panel_two_stage_endpoint_0\\override.png",
+    "source_image_path": "C:\\Users\\DesolateJix\\AppData\\Local\\Temp\\pytest-of-DesolateJix\\pytest-3651\\test_panel_two_stage_endpoint_0\\override.png",
+    "screen_size": {
+      "width": 111,
+      "height": 77
+    },
+    "screen_reading": {
+      "screen_summary": "demo screen"
+    },
+    "image_size": {
+      "width": 111,
+      "height": 77
+    }
+  },
+  "learn_all_targets": {
+    "status": "two_stage_stage1_gate_passed",
+    "targets": [],
+    "target_count": 0,
+    "validated_count": 0,
+    "invalid_count": 0,
+    "review_boxes": [
+      {
+        "id": "R1",
+        "label": "Main",
+        "role": "review_only",
+        "bbox": {
+          "x": 1,
+          "y": 2,
+          "w": 3,
+          "h": 4
+        }
+      }
+    ],
+    "review_box_count": 1,
+    "overlay_path": "artifacts/review-overlays/demo_two_stage.png",
+    "trace_path": "",
+    "stage1_gate_status": "passed",
+    "stage2_numbered_region_count": 1
+  }
+}

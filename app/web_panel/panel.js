@@ -5,6 +5,7 @@ let lastTracePath = "";
 let lastObserveTracePath = "";
 let lastLearningDraftObserveResponse = null;
 let lastLearningDraftObserveTracePath = "";
+let lastLearningTwoStageReportPath = "";
 let currentImagePath = "";
 let currentImageUrl = "";
 let learningSourceImagePath = "";
@@ -1593,8 +1594,8 @@ function clearTemplateReplayResidualDisplays(reason = "") {
   if ($("replayAgentPromptCompareVersion")) $("replayAgentPromptCompareVersion").value = "";
 }
 
-function clearScreenUnderstandingResidualDisplays(reason = "") {
-  clearLearningDraftTrialArtifacts(reason);
+function clearScreenUnderstandingResidualDisplays(reason = "", options = {}) {
+  clearLearningDraftTrialArtifacts(reason, options);
   clearTemplateReplayResidualDisplays(reason);
   clearSharedPathDetailDisplay();
   hideSharedPathSurface();
@@ -2011,11 +2012,32 @@ function resultOf(response) {
 
 function statusTextForResponse(response) {
   const result = resultOf(response);
+  const resultSummary = result?.summary && typeof result.summary === "object" ? result.summary : {};
+  const twoStageAttached = resultSummary?.two_stage_report_attached === true;
   const learnAllTargets = result?.learn_all_targets && typeof result.learn_all_targets === "object"
     ? result.learn_all_targets
     : null;
-  if (learnAllTargets && Number(learnAllTargets.target_count || 0) <= 0) {
-    return "no_targets";
+  if (learnAllTargets) {
+    const targetCount = Number(learnAllTargets.target_count || 0);
+    const reviewBoxCount = Number(learnAllTargets.review_box_count || 0);
+    const learnStatus = String(learnAllTargets.status || "").trim();
+    const stage1GateStatus = String(learnAllTargets.stage1_gate_status || nestedGet(result, ["stage1_gate", "status"]) || "").trim();
+    const numberedRegionCount = Number(learnAllTargets.stage2_numbered_region_count || 0);
+    if (stage1GateStatus === "blocked_before_stage2_numbering" || learnStatus === "blocked_before_stage2_numbering") {
+      return "stage1_blocked";
+    }
+    if (learnStatus === "two_stage_stage1_gate_passed" || reviewBoxCount > 0 || numberedRegionCount > 0) {
+      return "review_boxes_ready";
+    }
+    if (targetCount <= 0) {
+      return "no_targets";
+    }
+  }
+  if (twoStageAttached) {
+    return "review_boxes_ready";
+  }
+  if (result?.location_status === "learn_review_boxes_ready") {
+    return "review_boxes_ready";
   }
   if (
     result?.location_status === "learn_all_targets_ready"
@@ -8968,14 +8990,27 @@ function screenMapEvidenceCount(screenMap) {
 
 function buildLearningDraftObservationEvidence() {
   const result = resultOf(lastResponse);
+  const observeResult = resultOf(lastLearningDraftObserveResponse || {});
   const learnTargets = nestedGet(result, ["learn_all_targets", "targets"]) || [];
   const learnReviewBoxes = nestedGet(result, ["learn_all_targets", "review_boxes"]) || [];
   const pathReview = result.path_map_review && typeof result.path_map_review === "object" ? result.path_map_review : {};
   const observeReuse = result.observe_trace_reuse && typeof result.observe_trace_reuse === "object" ? result.observe_trace_reuse : {};
-  const screenMap = result.screen_map && typeof result.screen_map === "object" ? result.screen_map : null;
+  const screenMap = result.screen_map && typeof result.screen_map === "object"
+    ? result.screen_map
+    : observeResult.screen_map && typeof observeResult.screen_map === "object"
+      ? observeResult.screen_map
+      : null;
   const hasScreenMapEvidence = screenMapEvidenceCount(screenMap) > 0;
   const hasCalibratedTargets = Array.isArray(learnTargets) && learnTargets.length > 0;
   const hasReviewBoxes = Array.isArray(learnReviewBoxes) && learnReviewBoxes.length > 0;
+  const hasCoordinateReviewEvidence = hasCalibratedTargets
+    || hasReviewBoxes
+    || Boolean(result.coordinate_overlay_path || nestedGet(result, ["learn_all_targets", "overlay_path"]));
+  const coordinateCalibrationStatus = hasCalibratedTargets
+    ? "validated_targets_available"
+    : hasCoordinateReviewEvidence
+      ? "review_overlay_only_model_validation_not_run"
+      : "not_run";
   const evidence = {
     contract_version: "panel_learning_draft_observation_evidence_v1",
     evidence_source: "panel_current_learn_trace",
@@ -8990,20 +9025,24 @@ function buildLearningDraftObservationEvidence() {
           stage: "Learn Deep",
           model_profile_id: $("locateModelProfile")?.value || "",
           expected_model_family: "4B",
-          trace_path: hasCalibratedTargets ? (nestedGet(result, ["learn_all_targets", "trace_path"]) || result.trace_path || "") : "",
+          status: coordinateCalibrationStatus,
+          trace_path: hasCoordinateReviewEvidence ? (nestedGet(result, ["learn_all_targets", "trace_path"]) || result.trace_path || "") : "",
         },
       },
     current_image_path: firstLearningSourceImagePath(
       learningSourceImagePath,
       $("learningTrialImagePath")?.value,
+      observeResult.image_path,
+      nestedGet(observeResult, ["capture", "image_path"]),
+      nestedGet(observeResult, ["live_capture", "image_path"]),
       result.image_path,
       nestedGet(result, ["capture", "image_path"]),
       nestedGet(result, ["live_capture", "image_path"]),
       currentImagePath,
     ),
     rejected_display_overlay_input_path: isLearningDisplayOverlayPath($("learningTrialImagePath")?.value || currentImagePath),
-    screen_size: result.screen_size || result.viewport_size || result.image_size || nestedGet(result, ["capture", "image_size"]) || {},
-    screen_summary: result.screen_summary || nestedGet(result, ["screen_map", "summary", "screen_summary"]) || nestedGet(result, ["screen_reading", "screen_summary"]) || "",
+    screen_size: result.screen_size || result.viewport_size || result.image_size || nestedGet(result, ["capture", "image_size"]) || observeResult.screen_size || observeResult.viewport_size || observeResult.image_size || nestedGet(observeResult, ["capture", "image_size"]) || {},
+    screen_summary: result.screen_summary || nestedGet(result, ["screen_map", "summary", "screen_summary"]) || nestedGet(result, ["screen_reading", "screen_summary"]) || observeResult.screen_summary || nestedGet(observeResult, ["screen_map", "summary", "screen_summary"]) || nestedGet(observeResult, ["screen_reading", "screen_summary"]) || "",
       screen_map: screenMap,
     coordinate_overlay_path: result.coordinate_overlay_path || nestedGet(result, ["learn_all_targets", "overlay_path"]) || "",
     learn_all_targets_summary: {
@@ -9015,6 +9054,7 @@ function buildLearningDraftObservationEvidence() {
       filtered_noise_count: nestedGet(result, ["learn_all_targets", "filtered_noise_count"]) || 0,
       review_box_count: nestedGet(result, ["learn_all_targets", "review_box_count"]) || 0,
       visual_overlap_removal_count: nestedGet(result, ["learn_all_targets", "visual_overlap_removal_count"]) || 0,
+      coordinate_calibration_status: coordinateCalibrationStatus,
     },
     calibrated_targets: compactLearningDraftTargets(learnTargets, 24),
     review_boxes: compactLearningDraftTargets(learnReviewBoxes, 80),
@@ -10014,7 +10054,10 @@ function renderAssistedTemplateChecklistItem(item = {}, savedDecision = "pending
     </li>`;
 }
 
-function clearLearningDraftTrialArtifacts(reason = "") {
+function clearLearningDraftTrialArtifacts(reason = "", options = {}) {
+  if (!options.preserveTwoStageReportPath) {
+    lastLearningTwoStageReportPath = "";
+  }
   setLearningTrialResultPath("");
   setLearningDraftReviewSourcePath("");
   setLearningPathGraphCandidatePaths({});
@@ -10068,6 +10111,7 @@ function learningRecognitionTrialRequestPayload() {
     state_hint: String($("learningTrialState")?.value || $("observeState")?.value || "").trim(),
     summary: String($("learningTrialGoal")?.value || evidence.screen_summary || "learn a reusable UI workflow template from this screen").trim(),
     observation_evidence: evidence,
+    two_stage_report_path: String(lastLearningTwoStageReportPath || "").trim() || null,
   };
 }
 
@@ -10164,9 +10208,23 @@ function learningDeepCalibrationEvidenceSummary(response = {}) {
   const targets = result?.learn_all_targets && typeof result.learn_all_targets === "object"
     ? result.learn_all_targets
     : {};
+  const timingSteps = Array.isArray(result?.timings?.steps) ? result.timings.steps : [];
+  const modelReviewStep = timingSteps.find((step) => String(step?.name || "") === "learn_locate_model_review") || {};
+  const screenMapStep = timingSteps.find((step) => String(step?.name || "") === "learn_all_targets_from_screen_map") || {};
+  const vistaValidation = targets.vista_coordinate_validation && typeof targets.vista_coordinate_validation === "object"
+    ? targets.vista_coordinate_validation
+    : {};
+  const modelValidationStatus = modelReviewStep.enabled === false
+    ? "not_run"
+    : String(modelReviewStep.status || (Object.keys(modelReviewStep).length ? "attempted" : "not_reported"));
+  const vistaValidationStatus = screenMapStep.vista_validation_enabled === false
+    ? "not_run"
+    : String(vistaValidation.status || (Object.keys(vistaValidation).length ? "attempted" : "not_reported"));
   const targetCount = Number(targets.target_count || 0);
   return {
     status: String(targets.status || result?.location_status || "unknown"),
+    modelValidationStatus,
+    vistaValidationStatus,
     targetCount,
     rawCandidateCount: Number(targets.raw_candidate_count || 0),
     validatedCount: Number(targets.validated_count || 0),
@@ -10194,6 +10252,8 @@ function learningDeepCalibrationOverlayPath(response = {}) {
 
 function learningDeepCalibrationEvidenceStatusText(evidence = {}) {
   return [
+    `model_validation=${evidence.modelValidationStatus || "unknown"}`,
+    `vista_validation=${evidence.vistaValidationStatus || "unknown"}`,
     `raw=${Number(evidence.rawCandidateCount || 0)}`,
     `targets=${Number(evidence.targetCount || 0)}`,
     `validated=${Number(evidence.validatedCount || 0)}`,
@@ -10214,6 +10274,11 @@ async function runLearningDeepCalibration() {
     payload.capture_live = false;
     payload.image_path = imagePath;
   }
+  payload.agent_mode = "learn";
+  payload.learn_depth = "deep";
+  payload.app_name = String($("learningTrialApp")?.value || $("observeApp")?.value || payload.app_name || "").trim() || payload.app_name;
+  payload.state_hint = String($("learningTrialState")?.value || $("observeState")?.value || payload.state_hint || "").trim() || payload.state_hint;
+  payload.observe_trace_path = lastLearningDraftObserveTracePath || lastObserveTracePath || payload.observe_trace_path || null;
   payload.dry_run = true;
   payload.trace = true;
   payload.metadata = {
@@ -10221,6 +10286,8 @@ async function runLearningDeepCalibration() {
     learning_interface_flow: true,
     no_live_click_authorization: true,
   };
+  payload.metadata.learn_all_targets = true;
+  payload.metadata.learn_all_targets_reason = "Learning interface flow must calibrate all numbered/review regions before draft fusion.";
   return api("POST", "/vision/locate_target", payload, {
     summary: "POST /vision/locate_target · Learn Deep calibration",
     workflowStep: "locate",
@@ -10230,10 +10297,19 @@ async function runLearningDeepCalibration() {
 
 function learningTwoStageUnderstandingPayload() {
   const observeResult = resultOf(lastLearningDraftObserveResponse || lastResponse);
+  const sourceImagePath = firstLearningSourceImagePath(
+    learningSourceImagePath,
+    $("learningTrialImagePath")?.value,
+    observeResult.image_path,
+    nestedGet(observeResult, ["capture", "image_path"]),
+    nestedGet(observeResult, ["live_capture", "image_path"]),
+    currentImagePath,
+  );
   return {
     app_name: String($("learningTrialApp")?.value || $("observeApp")?.value || "unknown_app").trim() || "unknown_app",
     state_hint: String($("learningTrialState")?.value || $("observeState")?.value || "").trim(),
     trace_path: String(lastLearningDraftObserveTracePath || observeResult.trace_path || "").trim() || null,
+    source_image_path: sourceImagePath || null,
     observe_result: observeResult || {},
     require_stage1_gate: true,
     stage2_region_strategy: "partitioned",
@@ -10242,8 +10318,11 @@ function learningTwoStageUnderstandingPayload() {
 
 function learningTwoStageOverlayPath(response) {
   const result = resultOf(response);
-  return result.coordinate_overlay_path
+  return result.compiled_overlay_path
+    || nestedGet(result, ["fusion", "compiled_overlay_path"])
+    || result.coordinate_overlay_path
     || result.full_screen_understanding_overlay_path
+    || nestedGet(result, ["fusion", "full_screen_understanding_overlay_path"])
     || nestedGet(result, ["learn_all_targets", "overlay_path"])
     || nestedGet(result, ["summary", "overlay_path"])
     || "";
@@ -10263,6 +10342,7 @@ async function runLearningTwoStageUnderstanding() {
     timeoutSeconds: requestTimeoutSeconds(),
   });
   if (response?.success) {
+    lastLearningTwoStageReportPath = String(resultOf(response).report_path || "").trim();
     const overlayPath = learningTwoStageOverlayPath(response);
     if (overlayPath) {
       renderLearningDraftScreenshotPath(overlayPath, "learning two-stage fused overlay");
@@ -10308,14 +10388,36 @@ async function runLearningInterfaceFlow() {
     if (twoStageOverlayPath) {
       renderLearningDraftScreenshotPath(twoStageOverlayPath, "learning two-stage fused overlay");
     }
-    if (!learningTwoStageAllowsDraftTrial(twoStage)) {
+    const twoStageAllowed = learningTwoStageAllowsDraftTrial(twoStage);
+    if (!twoStageAllowed) {
       const status = nestedGet(resultOf(twoStage), ["stage1_gate", "status"]) || statusTextForResponse(twoStage);
-      setLearningInterfaceFlowStep("numbered_map", `Stage1 gate blocked Stage2 · ${status}`);
-      return trial;
+      setLearningInterfaceFlowStep("numbered_map", `Stage1 gate blocked Stage2 · ${status} · loading review overlay`);
     }
 
-    setLearningInterfaceFlowStep("fusion", "two-stage boxes accepted for draft review");
-    const fusedTrial = await runLearningDraftTrial();
+    setLearningInterfaceFlowStep("precise_calibration", `${t("learning_flow_precise_calibration")} · dry-run`);
+    const calibration = await runLearningDeepCalibration();
+    if (!calibration?.success) {
+      setLearningInterfaceFlowStep("precise_calibration", `calibration failed · ${statusTextForResponse(calibration || {})}`);
+      return await completeLearningInterfaceReadonlyFlow({
+        fallbackResult: trial,
+        statusNote: "calibration failed; using screen understanding draft",
+      });
+    }
+    const calibrationEvidence = learningDeepCalibrationEvidenceSummary(calibration);
+    const calibrationOverlayPath = learningDeepCalibrationOverlayPath(calibration);
+    if (calibrationOverlayPath) {
+      renderLearningDraftScreenshotPath(calibrationOverlayPath, "learning deep calibration overlay");
+    }
+    setLearningInterfaceFlowStep(
+      "precise_calibration",
+      `${t("learning_flow_precise_calibration")} · ${learningDeepCalibrationEvidenceStatusText(calibrationEvidence)}`
+    );
+
+    setLearningInterfaceFlowStep(
+      "fusion",
+      twoStageAllowed ? "two-stage boxes accepted for draft review" : "two-stage review overlay attached · no Execute"
+    );
+    const fusedTrial = await runLearningDraftTrial({ preserveTwoStageReportPath: true });
     if (!fusedTrial) {
       setLearningInterfaceFlowStep("fusion", "two-stage draft generation failed");
       return await completeLearningInterfaceReadonlyFlow({
@@ -10328,7 +10430,9 @@ async function runLearningInterfaceFlow() {
     }
     return await completeLearningInterfaceReadonlyFlow({
       fallbackResult: fusedTrial,
-      statusNote: "two-stage fused draft · Stage1 gate passed",
+      statusNote: twoStageAllowed
+        ? "two-stage fused draft · Stage1 gate passed"
+        : "two-stage review overlay attached · Stage1 gate blocked Execute",
     });
   } finally {
     if (button) button.disabled = previousDisabled;
@@ -10354,9 +10458,11 @@ async function completeLearningInterfaceReadonlyFlow({ fallbackResult = null, st
   return scaffold || pageDetail || fallbackResult;
 }
 
-async function runLearningDraftTrial() {
+async function runLearningDraftTrial(options = {}) {
   const payload = learningRecognitionTrialRequestPayload();
-  clearScreenUnderstandingResidualDisplays("not_loaded · generating learning draft");
+  clearScreenUnderstandingResidualDisplays("not_loaded · generating learning draft", {
+    preserveTwoStageReportPath: Boolean(options.preserveTwoStageReportPath),
+  });
   const response = await api("POST", "/panel/run_learning_recognition_trial", payload, {
     summary: "POST /panel/run_learning_recognition_trial",
     workflowStep: "run_learning_recognition_trial",
@@ -11249,6 +11355,16 @@ function learningDraftRegionRefs(state = {}) {
   return [];
 }
 
+function learningDraftRegionId(region = {}, index = 0) {
+  return String(
+    region.region_id
+      || region.id
+      || region.source_item_id
+      || learningReviewItemId(region, index, "region")
+      || ""
+  ).trim();
+}
+
 function learningDraftActionRegionId(action = {}) {
   return String(
     action.region_id
@@ -11314,7 +11430,7 @@ function learningDraftRegionsForState(state = {}, regions = [], stateCount = 0) 
   if (state.derived_from_transition_hint) return [];
   const refs = new Set(learningDraftRegionRefs(state));
   if (refs.size) {
-    return regions.filter((region, index) => refs.has(learningReviewItemId(region, index, "region")));
+    return regions.filter((region, index) => refs.has(learningDraftRegionId(region, index)));
   }
   const stateId = String(state.state_id || "");
   const direct = regions.filter((region) => String(region.state_id || region.page_state_id || "").trim() === stateId);
@@ -11325,7 +11441,7 @@ function learningDraftRegionsForState(state = {}, regions = [], stateCount = 0) 
 function learningDraftActionsForState(state = {}, actions = [], regions = [], stateCount = 0) {
   if (state.derived_from_transition_hint) return [];
   const stateId = String(state.state_id || "");
-  const regionIds = new Set(regions.map((region, index) => learningReviewItemId(region, index, "region")));
+  const regionIds = new Set(regions.map((region, index) => learningDraftRegionId(region, index)));
   const matched = actions.filter((action) => {
     const actionStateId = String(action.state_id || action.page_state_id || "").trim();
     if (actionStateId && actionStateId === stateId) return true;
@@ -13371,7 +13487,8 @@ async function createPreciseUnderstandingCandidate() {
 
 async function createPageDetailCandidate() {
   const sourcePath = String(
-    $("learningPathGraphCandidatePath")?.value
+    lastLearningTwoStageReportPath
+    || $("learningPathGraphCandidatePath")?.value
     || $("learningDetailObserveCandidatePath")?.value
     || learningDraftReviewSourcePath()
     || ""

@@ -9,7 +9,20 @@ import scripts.report_learn_fusion_calibration_pre_run_check as pre_run_check
 from scripts.report_learn_fusion_calibration_pre_run_check import report_learn_fusion_calibration_pre_run_check
 
 
-def test_calibration_pre_run_check_accepts_ready_approval_packet(tmp_path: Path) -> None:
+def test_calibration_pre_run_check_accepts_ready_approval_packet(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        pre_run_check,
+        "_model_runtime_snapshot",
+        lambda: {
+            "contract_version": "model_runtime_snapshot_v1",
+            "checked_ports": [],
+            "listening_ports": [],
+            "suspected_model_processes": [],
+            "model_ports_clear": True,
+            "model_processes_clear": True,
+            "interpretation": "test fixture; no model runtime was contacted",
+        },
+    )
     tasks = _write_json(tmp_path / "logs" / "tasks.json", {"contract_version": "tasks_v1", "tasks": []})
     batch_plan = _write_json(tmp_path / "logs" / "batch_plan.json", {"contract_version": "batch_plan_v1"})
     rerun_report = tmp_path / "logs" / "future" / "numbered_region_calibration_report.json"

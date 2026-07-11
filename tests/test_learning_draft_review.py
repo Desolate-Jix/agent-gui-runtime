@@ -661,6 +661,184 @@ def test_panel_learning_recognition_trial_loads_as_review_and_candidate() -> Non
     assert candidate["final_submit_forbidden"] is True
 
 
+def test_panel_learning_recognition_trial_attaches_two_stage_fusion_status(tmp_path: Path, monkeypatch) -> None:
+    from app.api import panel as panel_api
+
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    report_path = tmp_path / "logs" / "benchmarks" / "two_stage" / "report.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(
+            {
+                "contract_version": "learn_two_stage_screen_understanding_v1",
+                "fusion_status": {
+                    "contract_version": "learn_precise_understanding_fusion_status_report_v1",
+                    "compiled_overlay_path": "artifacts/review-overlays/fused_overlay.png",
+                    "full_screen_understanding_overlay_path": "artifacts/review-overlays/full_overlay.png",
+                    "summary": {"fused_review_box_count": 2},
+                    "display_only": True,
+                    "execute_binding_enabled": False,
+                    "artifact_is_authorization": False,
+                },
+                "stage1_gate": {"status": "blocked_before_stage2_numbering"},
+                "stage2_numbering_skipped": True,
+                "fusion": {
+                    "fused_review_boxes": [
+                        {"region_id": "review_1"},
+                        {"region_id": "review_2"},
+                    ]
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/panel/run_learning_recognition_trial",
+        json={
+            "app_name": "python_org",
+            "state_hint": "python_homepage",
+            "summary": "Python homepage with a search input.",
+            "two_stage_report_path": "logs/benchmarks/two_stage/report.json",
+            "observation_evidence": {
+                "contract_version": "panel_learning_draft_observation_evidence_v1",
+                "screen_size": {"width": 1200, "height": 800},
+                "current_image_path": "artifacts/screenshots/sample_python_homepage.png",
+                "review_boxes": [
+                    {
+                        "candidate_id": "hero_panel",
+                        "label": "Hero panel",
+                        "role": "review_only",
+                        "bbox": {"x": 100, "y": 160, "w": 500, "h": 240},
+                        "execute_binding_enabled": False,
+                        "artifact_is_authorization": False,
+                    }
+                ],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["data"]["summary"]["two_stage_report_attached"] is True
+    assert body["data"]["summary"]["two_stage_stage1_gate_status"] == "blocked_before_stage2_numbering"
+    assert body["data"]["summary"]["two_stage_stage2_numbering_skipped"] is True
+    assert body["data"]["summary"]["two_stage_review_box_count"] == 2
+    assert body["data"]["summary"]["precise_understanding_status"] == "review_overlay_attached_stage1_blocked"
+    trial_path = body["data"]["trial_path"]
+    saved = json.loads((tmp_path / trial_path).read_text(encoding="utf-8"))
+    assert saved["precise_understanding_status"] == "review_overlay_attached_stage1_blocked"
+    attached = saved["learning_draft"]["page_details"]["pipeline_audit"]["precise_understanding_fusion_status"]
+    assert attached["compiled_overlay_path"] == "artifacts/review-overlays/fused_overlay.png"
+    assert attached["source_two_stage_report_path"] == "logs/benchmarks/two_stage/report.json"
+    assert attached["stage1_gate_status"] == "blocked_before_stage2_numbering"
+    assert attached["stage2_numbering_skipped"] is True
+    assert attached["review_box_count"] == 2
+
+    review_response = client.post("/panel/load_learning_draft_review", json={"source_path": trial_path})
+    assert review_response.status_code == 200
+    review = review_response.json()["data"]
+    preview = review["screen_understanding_preview"]
+    assert preview["compiled_overlay_path"] == "artifacts/review-overlays/fused_overlay.png"
+    assert preview["full_screen_understanding_overlay_path"] == "artifacts/review-overlays/full_overlay.png"
+    assert preview["display_only"] is True
+    assert preview["execute_binding_enabled"] is False
+    assert preview["artifact_is_authorization"] is False
+
+
+def test_panel_learning_recognition_trial_uses_two_stage_numbered_items_when_calibration_has_no_targets(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from app.api import panel as panel_api
+
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    report_path = tmp_path / "logs" / "benchmarks" / "two_stage" / "report.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(
+            {
+                "contract_version": "learn_two_stage_screen_understanding_v1",
+                "stage1_gate": {"status": "passed"},
+                "stage2_numbering_skipped": False,
+                "stage2_numbering": {
+                    "contract_version": "learn_stage2_region_numbering_v1",
+                    "region_count": 1,
+                    "numbered_item_count": 1,
+                    "regions": [
+                        {
+                            "region_id": "structure_region_main_content",
+                            "label": "Main content",
+                            "bbox": {"x": 90, "y": 120, "w": 900, "h": 620},
+                            "numbered_items": [
+                                {
+                                    "number": "3.1",
+                                    "item_id": "stage2_card_1",
+                                    "label": "Featured album card",
+                                    "role": "recommendation_item",
+                                    "bbox": {"x": 160, "y": 220, "w": 220, "h": 260},
+                                    "review_only": True,
+                                    "execute_binding_enabled": False,
+                                    "artifact_is_authorization": False,
+                                }
+                            ],
+                        }
+                    ],
+                },
+                "fusion": {
+                    "compiled_overlay_path": "artifacts/review-overlays/fused_overlay.png",
+                    "fused_review_boxes": [],
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/panel/run_learning_recognition_trial",
+        json={
+            "app_name": "apple_music",
+            "state_hint": "apple_music_home",
+            "summary": "Apple Music home screen with cards.",
+            "two_stage_report_path": "logs/benchmarks/two_stage/report.json",
+            "observation_evidence": {
+                "contract_version": "panel_learning_draft_observation_evidence_v1",
+                "screen_size": {"width": 1000, "height": 800},
+                "current_image_path": "artifacts/screenshots/apple_music.png",
+                "calibrated_targets": [],
+                "review_boxes": [],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    data = body["data"]
+    assert data["summary"]["two_stage_report_attached"] is True
+    assert data["summary"]["screen_inventory_count"] >= 1
+    assert data["summary"]["draft_section_counts"]["regions"] >= 1
+    assert data["summary"]["grounding_validation_count"] == 0
+    assert data["learn_all_targets"]["status"] == "review_boxes_ready"
+    assert data["learn_all_targets"]["target_count"] == 0
+    assert data["learn_all_targets"]["review_box_count"] == 1
+    assert data["learn_all_targets"]["artifact_is_authorization"] is False
+    assert data["learn_all_targets"]["execute_binding_enabled"] is False
+
+    saved = json.loads((tmp_path / data["trial_path"]).read_text(encoding="utf-8"))
+    labels = {item["label"] for item in saved["learning_draft"]["regions"]}
+    assert "Featured album card" in labels
+    assert saved["learning_draft"]["execute_binding_enabled"] is False
+    assert saved["learning_draft"]["artifact_is_authorization"] is False
+
+
 def test_panel_learning_recognition_trial_uses_review_boxes_as_read_only_inventory() -> None:
     client = TestClient(app)
 
@@ -1411,7 +1589,7 @@ def test_panel_lists_recent_learning_draft_sources(tmp_path: Path, monkeypatch) 
     monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
 
     client = TestClient(app)
-    payload = client.get("/panel/learning_draft_sources").json()
+    payload = client.get("/panel/learning_draft_sources", params={"limit": 16, "include_recent": "true"}).json()
 
     assert payload["success"] is True
     data = payload["data"]
@@ -1448,6 +1626,8 @@ def test_panel_lists_recent_learning_draft_sources(tmp_path: Path, monkeypatch) 
     assert candidate_entry["preflight_status"] == "ready_for_explicit_model_start"
     assert candidate_entry["preflight_may_start_model_after_user_approval"] is True
     assert candidate_entry["preflight_may_run_calibration_batch_now"] is False
+
+
     assert candidate_entry["preflight_blocker_count"] == 0
     assert candidate_entry["demo_readiness_status"] == "ready_for_preflight_demo"
     assert candidate_entry["demo_readiness_may_run_calibration_batch_now"] is False
@@ -1509,6 +1689,42 @@ def test_panel_lists_recent_learning_draft_sources(tmp_path: Path, monkeypatch) 
     assert first["execute_binding_enabled"] is False
     assert first["artifact_is_authorization"] is False
     assert data["skipped_count"] == 1
+
+
+def test_panel_pins_current_three_interface_demo_scaffolds_first() -> None:
+    import app.api.panel as panel_api
+
+    assert panel_api.PINNED_LEARNING_DRAFT_SOURCE_PATHS[:3] == [
+        "logs/benchmarks/learn_three_interface_scaffold_20260711/applemusic/learn_mode_demo_scaffold.json",
+        "logs/benchmarks/learn_three_interface_scaffold_20260711/qq/learn_mode_demo_scaffold.json",
+        "logs/benchmarks/learn_three_interface_scaffold_20260711/python_org/learn_mode_demo_scaffold.json",
+    ]
+
+
+def test_panel_learning_draft_sources_limits_pinned_entries_to_current_demo_set(tmp_path: Path, monkeypatch) -> None:
+    import app.api.panel as panel_api
+
+    pinned_paths = [
+        "logs/benchmarks/current_a/learn_mode_demo_scaffold.json",
+        "logs/benchmarks/current_b/learn_mode_demo_scaffold.json",
+        "logs/benchmarks/current_c/learn_mode_demo_scaffold.json",
+        "logs/benchmarks/legacy_v105/learn_mode_demo_scaffold.json",
+    ]
+    for index, path_text in enumerate(pinned_paths):
+        path = tmp_path / path_text
+        _write_detail_surface_trial(path)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["best_learning_draft"]["screen_summary"] = f"pinned {index}"
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    monkeypatch.setattr(panel_api, "PINNED_LEARNING_DRAFT_SOURCE_PATHS", pinned_paths)
+
+    data = panel_api._list_recent_learning_draft_sources(limit=10)
+    pinned_sources = [item for item in data["sources"] if item.get("pinned") is True]
+
+    assert data["max_pinned_sources"] == 3
+    assert [item["source_path"] for item in pinned_sources] == pinned_paths[:3]
+    assert pinned_paths[3] not in [item["source_path"] for item in data["sources"]]
 
 
 def test_direct_page_detail_and_scaffold_sources_load_as_review_only(tmp_path: Path, monkeypatch) -> None:
@@ -1587,7 +1803,12 @@ def test_direct_page_detail_and_scaffold_sources_load_as_review_only(tmp_path: P
     scaffold_review = load_learning_draft_review(scaffold.relative_to(tmp_path), project_root=tmp_path)
 
     assert page_review["draft"]["screen_summary"] == "Direct page detail source"
+    assert page_review["draft"]["states"][0]["region_refs"] == ["main_card"]
+    assert page_review["draft"]["states"][0]["action_template_refs"] == ["review_main_card"]
     assert page_review["draft"]["regions"][0]["region_id"] == "main_card"
+    assert page_review["draft"]["regions"][0]["state_id"] == "main_content"
+    assert page_review["draft"]["action_templates"][0]["state_id"] == "main_content"
+    assert page_review["draft"]["action_templates"][0]["target_region_id"] == "main_card"
     assert page_review["screen_understanding_preview"]["compiled_overlay_path"] == (
         "artifacts/review-overlays/compiled.png"
     )
@@ -1603,6 +1824,8 @@ def test_direct_page_detail_and_scaffold_sources_load_as_review_only(tmp_path: P
     assert scaffold_review["screen_understanding_preview"]["full_screen_understanding_overlay_path"] == (
         "artifacts/review-overlays/full.png"
     )
+    assert scaffold_review["draft"]["states"][0]["region_refs"] == ["main_card"]
+    assert scaffold_review["draft"]["states"][0]["action_template_refs"] == ["review_main_card"]
     assert scaffold_review["pathgraph_candidate_review"]["learn_mode_demo_scaffold"]["contract_version"] == (
         "learn_mode_demo_scaffold_v1"
     )
@@ -1610,7 +1833,7 @@ def test_direct_page_detail_and_scaffold_sources_load_as_review_only(tmp_path: P
         "section_id"
     ] == "main_content"
 
-    payload = TestClient(app).get("/panel/learning_draft_sources").json()
+    payload = TestClient(app).get("/panel/learning_draft_sources", params={"include_recent": "true"}).json()
 
     assert payload["success"] is True
     sources = {item["source_path"]: item for item in payload["data"]["sources"]}
@@ -1830,6 +2053,7 @@ def test_panel_create_model_start_approval_packet_endpoint_can_infer_from_candid
 
 def test_panel_create_calibration_pre_run_check_endpoint_is_no_execute(tmp_path: Path, monkeypatch) -> None:
     import app.api.panel as panel_api
+    import scripts.report_learn_fusion_calibration_pre_run_check as pre_run_check
 
     tasks = _write_json(tmp_path / "logs" / "tasks.json", {"contract_version": "tasks_v1", "tasks": []})
     batch_plan = _write_json(tmp_path / "logs" / "batch_plan.json", {"contract_version": "batch_plan_v1"})
@@ -1875,6 +2099,19 @@ def test_panel_create_calibration_pre_run_check_endpoint_is_no_execute(tmp_path:
         },
     )
     monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    monkeypatch.setattr(
+        pre_run_check,
+        "_model_runtime_snapshot",
+        lambda: {
+            "contract_version": "model_runtime_snapshot_v1",
+            "checked_ports": [],
+            "listening_ports": [],
+            "suspected_model_processes": [],
+            "model_ports_clear": True,
+            "model_processes_clear": True,
+            "interpretation": "test fixture; no model runtime was contacted",
+        },
+    )
 
     client = TestClient(app)
     response = client.post(

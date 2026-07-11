@@ -234,22 +234,32 @@ def _draft_from_page_detail_candidate(
     layout = page_detail.get("layout") if isinstance(page_detail.get("layout"), dict) else {}
     sections = _list_of_dicts(layout.get("sections"))
     regions = _list_of_dicts(layout.get("regions"))
+    section_ids = [
+        str(section.get("section_id") or f"section_{index + 1}")
+        for index, section in enumerate(sections)
+    ]
     states = [
         {
-            "state_id": str(section.get("section_id") or f"section_{index + 1}"),
+            "state_id": section_ids[index],
             "label": section.get("label") or section.get("section_id") or f"Section {index + 1}",
             "page_type": "learn_page_detail_section",
             "bbox": _normalized_bbox(section.get("bbox")),
+            "region_refs": [],
+            "action_template_refs": [],
             "display_only": True,
             "execute_binding_enabled": False,
             "artifact_is_authorization": False,
         }
         for index, section in enumerate(sections)
     ]
+    state_by_id = {str(state.get("state_id") or ""): state for state in states if str(state.get("state_id") or "")}
     draft_regions = []
     action_templates = []
     for index, region in enumerate(regions):
         region_id = str(region.get("region_id") or region.get("source_item_id") or f"region_{index + 1}")
+        source_section_id = str(region.get("source_section_id") or "")
+        if source_section_id not in state_by_id and len(section_ids) == 1:
+            source_section_id = section_ids[0]
         possible_operation = (
             region.get("possible_operation") if isinstance(region.get("possible_operation"), dict) else {}
         )
@@ -259,14 +269,16 @@ def _draft_from_page_detail_candidate(
             or region.get("possible_action")
             or "read_only"
         )
+        action_template_id = f"review_{region_id}"
         draft_regions.append(
             {
                 "region_id": region_id,
                 "label": region.get("label") or region_id,
                 "role": region.get("role") or "review_region",
                 "bbox": _normalized_bbox(region.get("bbox")) or {},
-                "source_section_id": region.get("source_section_id"),
+                "source_section_id": source_section_id or region.get("source_section_id"),
                 "source_section_label": region.get("source_section_label"),
+                "state_id": source_section_id,
                 "display_only": True,
                 "execute_binding_enabled": False,
                 "artifact_is_authorization": False,
@@ -274,16 +286,21 @@ def _draft_from_page_detail_candidate(
         )
         action_templates.append(
             {
-                "action_template_id": f"review_{region_id}",
+                "action_template_id": action_template_id,
                 "label": possible_operation.get("label") or f"Review {region.get('label') or region_id}",
                 "semantic_action": operation_kind,
                 "action_type": operation_kind,
                 "target_entity": region_id,
+                "target_region_id": region_id,
+                "state_id": source_section_id,
                 "display_only": True,
                 "execute_binding_enabled": False,
                 "artifact_is_authorization": False,
             }
         )
+        if source_section_id in state_by_id:
+            state_by_id[source_section_id]["region_refs"].append(region_id)
+            state_by_id[source_section_id]["action_template_refs"].append(action_template_id)
     summary = page_detail.get("summary") if isinstance(page_detail.get("summary"), dict) else {}
     scaffold_summary = scaffold.get("summary") if isinstance(scaffold, dict) and isinstance(scaffold.get("summary"), dict) else {}
     compiled_overlay_path = str(page_detail.get("compiled_overlay_path") or "").strip()

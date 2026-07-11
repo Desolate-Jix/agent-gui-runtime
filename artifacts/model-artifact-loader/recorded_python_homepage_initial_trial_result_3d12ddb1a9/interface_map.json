@@ -3,16 +3,16 @@
   "app_id": "model_learning_benchmark",
   "page_type": "homepage",
   "source": {
-    "trial_path": "logs/benchmarks/model_learning_template_loader_trials/8c6d360d2caf/recorded_python_homepage_initial/trial_result.json",
+    "trial_path": "logs/benchmarks/model_learning_template_loader_trials/0314a9781bff/recorded_python_homepage_initial/trial_result.json",
     "sha256": "3d12ddb1a9911f66d0628128a3ed8714532d4d8556d759bd8e57c9f6eba39d32",
     "attempt_index": 0,
     "readonly": true,
     "posthoc_optimization_allowed": false,
-    "loaded_at": "2026-07-07T13:33:10.904346"
+    "loaded_at": "2026-07-12T00:24:55.141438"
   },
   "loader": {
     "contract_version": "model_learning_artifact_loader_v1",
-    "source_trial_path": "logs/benchmarks/model_learning_template_loader_trials/8c6d360d2caf/recorded_python_homepage_initial/trial_result.json",
+    "source_trial_path": "logs/benchmarks/model_learning_template_loader_trials/0314a9781bff/recorded_python_homepage_initial/trial_result.json",
     "source_sha256": "3d12ddb1a9911f66d0628128a3ed8714532d4d8556d759bd8e57c9f6eba39d32",
     "source_attempt_index": 0,
     "source_artifact_readonly": true,

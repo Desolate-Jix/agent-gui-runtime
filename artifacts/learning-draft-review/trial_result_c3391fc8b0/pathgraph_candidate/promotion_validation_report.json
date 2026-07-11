@@ -1,0 +1,378 @@
+{
+  "contract_version": "pathgraph_candidate_validation_report_v1",
+  "validation_status": "passed_candidate",
+  "checks": [
+    {
+      "check_id": "states_present",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "count": 1
+      }
+    },
+    {
+      "check_id": "regions_present",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "count": 1
+      }
+    },
+    {
+      "check_id": "action_templates_present",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "count": 1
+      }
+    },
+    {
+      "check_id": "action_region_linkage",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "unlinked_actions": []
+      }
+    },
+    {
+      "check_id": "blockers_present",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "count": 2
+      }
+    },
+    {
+      "check_id": "verification_rules_present",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "count": 3
+      }
+    },
+    {
+      "check_id": "unsafe_final_actions_absent",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "unsafe_actions": []
+      }
+    },
+    {
+      "check_id": "artifact_is_authorization_false",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {}
+    },
+    {
+      "check_id": "execute_binding_disabled",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {}
+    },
+    {
+      "check_id": "final_submit_forbidden",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {}
+    },
+    {
+      "check_id": "source_not_pure_model_generated",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {}
+    },
+    {
+      "check_id": "precise_understanding_ready_for_pathgraph_candidate",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "precise_understanding_readiness_summary": {
+          "readiness_status": "not_covered",
+          "total_locator_cards": 0,
+          "calibrated_cases": 0,
+          "uncalibrated_locator_cards": 0,
+          "calibration_coverage_rate": "not_covered",
+          "pending_calibration_ready_count": 0,
+          "pending_calibration_review_count": 0,
+          "pathgraph_status": "missing",
+          "ready_for_runtime_pathgraph_promotion": false,
+          "display_only": true,
+          "not_accuracy": true,
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "model_start_runbook": {
+          "contract_version": "learning_draft_model_start_runbook_v1",
+          "runbook_status": "not_available",
+          "approval_required": false,
+          "may_start_model_after_user_approval": false,
+          "may_run_calibration_batch_now": false,
+          "next_manual_action": "repair_or_attach_model_start_runbook_before_calibration",
+          "ready_region_numbers": [],
+          "review_blocked_region_numbers": [],
+          "guards": {},
+          "safety": {
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false,
+            "model_started": false,
+            "live_clicks": 0,
+            "live_fills": 0,
+            "live_submits": 0
+          },
+          "blockers": [
+            "model_start_runbook_missing"
+          ],
+          "display_only": true,
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        }
+      }
+    },
+    {
+      "check_id": "precise_understanding_evidence_integrity_complete",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "evidence_integrity": {
+          "contract_version": "learn_precise_understanding_evidence_integrity_v1",
+          "status": "not_available",
+          "required_for_pathgraph_review": true,
+          "missing_declared_evidence": [],
+          "display_only": true,
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        }
+      }
+    },
+    {
+      "check_id": "no_dispatch_dry_run_preview_only",
+      "passed": true,
+      "severity": "hard_error",
+      "details": {
+        "operation_dispatch": "not_executed"
+      }
+    }
+  ],
+  "summary": {
+    "state_count": 1,
+    "region_count": 1,
+    "action_template_count": 1,
+    "blocker_count": 2,
+    "verification_rule_count": 3,
+    "failed_check_count": 0,
+    "operation_dispatch": "not_executed",
+    "candidate_only": true,
+    "manual_bbox_edit_summary": {
+      "contract_version": "manual_bbox_edit_summary_v1",
+      "edited_region_count": 0,
+      "edited_action_count": 0,
+      "edited_total": 0,
+      "point_inside_bbox_passed": 0,
+      "point_inside_bbox_failed": 0,
+      "invalid_geometry_count": 0,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false
+    },
+    "source_freshness_summary": {
+      "contract_version": "source_freshness_summary_v1",
+      "source_image_status": "missing_file",
+      "checksum_status": "missing",
+      "freshness_status": "warning",
+      "warning_count": 2,
+      "warnings": [
+        "source_image_file_missing",
+        "missing_source_image_sha256"
+      ],
+      "source_image_path": "artifacts/screenshots/sample_python_homepage.png",
+      "source_image_sha256": "",
+      "actual_source_image_sha256": "",
+      "source_image_evidence_source": "page_details.screen.image_path",
+      "checksum_binding_status": "missing",
+      "edited_geometry_requires_review": false,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false
+    },
+    "precise_understanding_summary": {
+      "contract_version": "precise_understanding_summary_v1",
+      "state_count": 1,
+      "region_count": 1,
+      "bbox_region_count": 1,
+      "action_template_count": 1,
+      "action_click_point_count": 1,
+      "open_detail_transition_hint_count": 0,
+      "blocker_count": 2,
+      "verification_rule_count": 3,
+      "semantic_actions": [
+        "fill_field"
+      ],
+      "candidate_only": true,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "final_submit_forbidden": true,
+      "interpretation": "review-only precise understanding summary; not Execute authorization"
+    },
+    "precise_understanding_readiness_summary": {
+      "readiness_status": "not_covered",
+      "total_locator_cards": 0,
+      "calibrated_cases": 0,
+      "uncalibrated_locator_cards": 0,
+      "calibration_coverage_rate": "not_covered",
+      "pending_calibration_ready_count": 0,
+      "pending_calibration_review_count": 0,
+      "pathgraph_status": "missing",
+      "ready_for_runtime_pathgraph_promotion": false,
+      "display_only": true,
+      "not_accuracy": true,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false
+    },
+    "evidence_integrity": {
+      "contract_version": "learn_precise_understanding_evidence_integrity_v1",
+      "status": "not_available",
+      "required_for_pathgraph_review": true,
+      "missing_declared_evidence": [],
+      "display_only": true,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false
+    },
+    "model_start_runbook": {
+      "contract_version": "learning_draft_model_start_runbook_v1",
+      "runbook_status": "not_available",
+      "approval_required": false,
+      "may_start_model_after_user_approval": false,
+      "may_run_calibration_batch_now": false,
+      "next_manual_action": "repair_or_attach_model_start_runbook_before_calibration",
+      "ready_region_numbers": [],
+      "review_blocked_region_numbers": [],
+      "guards": {},
+      "safety": {
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false,
+        "model_started": false,
+        "live_clicks": 0,
+        "live_fills": 0,
+        "live_submits": 0
+      },
+      "blockers": [
+        "model_start_runbook_missing"
+      ],
+      "display_only": true,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false
+    },
+    "pending_detail_observe_request_count": 0
+  },
+  "manual_bbox_edit_summary": {
+    "contract_version": "manual_bbox_edit_summary_v1",
+    "edited_region_count": 0,
+    "edited_action_count": 0,
+    "edited_total": 0,
+    "point_inside_bbox_passed": 0,
+    "point_inside_bbox_failed": 0,
+    "invalid_geometry_count": 0,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false
+  },
+  "source_freshness_summary": {
+    "contract_version": "source_freshness_summary_v1",
+    "source_image_status": "missing_file",
+    "checksum_status": "missing",
+    "freshness_status": "warning",
+    "warning_count": 2,
+    "warnings": [
+      "source_image_file_missing",
+      "missing_source_image_sha256"
+    ],
+    "source_image_path": "artifacts/screenshots/sample_python_homepage.png",
+    "source_image_sha256": "",
+    "actual_source_image_sha256": "",
+    "source_image_evidence_source": "page_details.screen.image_path",
+    "checksum_binding_status": "missing",
+    "edited_geometry_requires_review": false,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false
+  },
+  "precise_understanding_summary": {
+    "contract_version": "precise_understanding_summary_v1",
+    "state_count": 1,
+    "region_count": 1,
+    "bbox_region_count": 1,
+    "action_template_count": 1,
+    "action_click_point_count": 1,
+    "open_detail_transition_hint_count": 0,
+    "blocker_count": 2,
+    "verification_rule_count": 3,
+    "semantic_actions": [
+      "fill_field"
+    ],
+    "candidate_only": true,
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "final_submit_forbidden": true,
+    "interpretation": "review-only precise understanding summary; not Execute authorization"
+  },
+  "precise_understanding_readiness_summary": {
+    "readiness_status": "not_covered",
+    "total_locator_cards": 0,
+    "calibrated_cases": 0,
+    "uncalibrated_locator_cards": 0,
+    "calibration_coverage_rate": "not_covered",
+    "pending_calibration_ready_count": 0,
+    "pending_calibration_review_count": 0,
+    "pathgraph_status": "missing",
+    "ready_for_runtime_pathgraph_promotion": false,
+    "display_only": true,
+    "not_accuracy": true,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false
+  },
+  "evidence_integrity": {
+    "contract_version": "learn_precise_understanding_evidence_integrity_v1",
+    "status": "not_available",
+    "required_for_pathgraph_review": true,
+    "missing_declared_evidence": [],
+    "display_only": true,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false
+  },
+  "model_start_runbook": {
+    "contract_version": "learning_draft_model_start_runbook_v1",
+    "runbook_status": "not_available",
+    "approval_required": false,
+    "may_start_model_after_user_approval": false,
+    "may_run_calibration_batch_now": false,
+    "next_manual_action": "repair_or_attach_model_start_runbook_before_calibration",
+    "ready_region_numbers": [],
+    "review_blocked_region_numbers": [],
+    "guards": {},
+    "safety": {
+      "display_only": true,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false,
+      "model_started": false,
+      "live_clicks": 0,
+      "live_fills": 0,
+      "live_submits": 0
+    },
+    "blockers": [
+      "model_start_runbook_missing"
+    ],
+    "display_only": true,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false
+  },
+  "pending_detail_observe_requests": [],
+  "safety": {
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "final_submit_forbidden": true,
+    "real_action_requires_gate": true
+  },
+  "paths": {
+    "runtime_path_graph_candidate_path": "artifacts/learning-draft-review/trial_result_c3391fc8b0/pathgraph_candidate/runtime_path_graph_candidate.json",
+    "interface_map_candidate_path": "artifacts/learning-draft-review/trial_result_c3391fc8b0/pathgraph_candidate/interface_map_candidate.json"
+  }
+}

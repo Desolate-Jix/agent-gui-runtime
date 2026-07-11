@@ -1,0 +1,1187 @@
+{
+  "contract_version": "learn_page_detail_candidate_v1",
+  "source_path": "artifacts/learning-runs/panel_20260711-135725-613_python_org/trial_result.json",
+  "source_detail_shape": "learning_template_draft_v1",
+  "precise_understanding_candidate_path": "",
+  "screen_summary": "Auto-generated page detail candidate from Learn Mode full-screen understanding and calibration evidence.",
+  "layout_mode": "spatial_bbox_order",
+  "readiness_status": "needs_page_detail_review",
+  "screenshot_path": "artifacts\\learning-runs\\new_site_python_org_20260702\\python_org_home.png",
+  "full_screen_understanding_overlay_path": "artifacts\\review-overlays\\python_org_home__two-stage-understanding__20260711-135725-305730.png",
+  "compiled_overlay_path": "artifacts\\review-overlays\\python_org_home__two-stage-understanding__20260711-135725-305730.png",
+  "summary": {
+    "region_count": 12,
+    "section_count": 3,
+    "display_group_count": 0,
+    "list_group_count": 0,
+    "container_group_count": 0,
+    "spatial_preview_suppressed_region_count": 0,
+    "possible_operation_count": 12,
+    "pending_calibration_count": null,
+    "review_blocked_count": null,
+    "pathgraph_candidate_review_ready_count": null,
+    "runtime_pathgraph_promotion": false,
+    "display_only": true,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false
+  },
+  "layout": {
+    "bounds": {
+      "x": 567,
+      "y": 140,
+      "w": 820,
+      "h": 906
+    },
+    "sections": [
+      {
+        "section_id": "top_search_and_filters",
+        "label": "Top Search And Filters",
+        "bbox": {
+          "x": 646,
+          "y": 258,
+          "w": 551,
+          "h": 39
+        },
+        "region_count": 5,
+        "region_numbers": [
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "possible_operations": [
+          "read_only"
+        ],
+        "operation_summary": {
+          "kind_counts": {
+            "read_only": 5
+          },
+          "readiness_counts": {
+            "review_required": 5
+          }
+        },
+        "operation_links": [
+          {
+            "region_no": 3,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c3",
+            "label": "About link",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 4,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c4",
+            "label": "Downloads link",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 5,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c5",
+            "label": "Documentation link",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 6,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c6",
+            "label": "Community link",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 7,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c7",
+            "label": "Success Stories link",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "regions": [
+          {
+            "region_no": 3,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c3",
+            "source_item_id": "two_stage_review_structure_region_main_content_c3",
+            "label": "About link",
+            "role": "link",
+            "bbox": {
+              "x": 646,
+              "y": 258,
+              "w": 63,
+              "h": 39
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              258,
+              646
+            ],
+            "description": "About link · role=link · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 4,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c4",
+            "source_item_id": "two_stage_review_structure_region_main_content_c4",
+            "label": "Downloads link",
+            "role": "link",
+            "bbox": {
+              "x": 741,
+              "y": 258,
+              "w": 78,
+              "h": 39
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              258,
+              741
+            ],
+            "description": "Downloads link · role=link · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 5,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c5",
+            "source_item_id": "two_stage_review_structure_region_main_content_c5",
+            "label": "Documentation link",
+            "role": "link",
+            "bbox": {
+              "x": 851,
+              "y": 258,
+              "w": 94,
+              "h": 39
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              258,
+              851
+            ],
+            "description": "Documentation link · role=link · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 6,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c6",
+            "source_item_id": "two_stage_review_structure_region_main_content_c6",
+            "label": "Community link",
+            "role": "link",
+            "bbox": {
+              "x": 977,
+              "y": 258,
+              "w": 94,
+              "h": 39
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              258,
+              977
+            ],
+            "description": "Community link · role=link · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 7,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c7",
+            "source_item_id": "two_stage_review_structure_region_main_content_c7",
+            "label": "Success Stories link",
+            "role": "link",
+            "bbox": {
+              "x": 1103,
+              "y": 258,
+              "w": 94,
+              "h": 39
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              258,
+              1103
+            ],
+            "description": "Success Stories link · role=link · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "section_id": "right_detail_panel",
+        "label": "Right Detail Panel",
+        "bbox": {
+          "x": 1134,
+          "y": 140,
+          "w": 253,
+          "h": 689
+        },
+        "region_count": 5,
+        "region_numbers": [
+          1,
+          2,
+          8,
+          9,
+          10
+        ],
+        "possible_operations": [
+          "fill_field",
+          "read_only",
+          "submit_search"
+        ],
+        "operation_summary": {
+          "kind_counts": {
+            "fill_field": 1,
+            "read_only": 3,
+            "submit_search": 1
+          },
+          "readiness_counts": {
+            "review_required": 5
+          }
+        },
+        "operation_links": [
+          {
+            "region_no": 1,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c1",
+            "label": "Search input",
+            "operation_kind": "fill_field",
+            "operation_label": "Type or edit search/filter text",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 2,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c2",
+            "label": "Search button",
+            "operation_kind": "submit_search",
+            "operation_label": "Run search",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 8,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c8",
+            "label": "News link",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 9,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c9",
+            "label": "Events link",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 10,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c10",
+            "label": "Learn More button",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "regions": [
+          {
+            "region_no": 1,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c1",
+            "source_item_id": "two_stage_review_structure_region_main_content_c1",
+            "label": "Search input",
+            "role": "input",
+            "bbox": {
+              "x": 1134,
+              "y": 140,
+              "w": 178,
+              "h": 39
+            },
+            "candidate_point": {},
+            "layout_zone": "right_detail_panel",
+            "visual_order_key": [
+              140,
+              1134
+            ],
+            "description": "Search input · role=input · operation=fill_field · readiness=review_required",
+            "possible_operation": {
+              "kind": "fill_field",
+              "label": "Type or edit search/filter text",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 2,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c2",
+            "source_item_id": "two_stage_review_structure_region_main_content_c2",
+            "label": "Search button",
+            "role": "button",
+            "bbox": {
+              "x": 1312,
+              "y": 140,
+              "w": 59,
+              "h": 39
+            },
+            "candidate_point": {},
+            "layout_zone": "right_detail_panel",
+            "visual_order_key": [
+              140,
+              1312
+            ],
+            "description": "Search button · role=button · operation=submit_search · readiness=review_required",
+            "possible_operation": {
+              "kind": "submit_search",
+              "label": "Run search",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 8,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c8",
+            "source_item_id": "two_stage_review_structure_region_main_content_c8",
+            "label": "News link",
+            "role": "link",
+            "bbox": {
+              "x": 1229,
+              "y": 258,
+              "w": 63,
+              "h": 39
+            },
+            "candidate_point": {},
+            "layout_zone": "right_detail_panel",
+            "visual_order_key": [
+              258,
+              1229
+            ],
+            "description": "News link · role=link · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 9,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c9",
+            "source_item_id": "two_stage_review_structure_region_main_content_c9",
+            "label": "Events link",
+            "role": "link",
+            "bbox": {
+              "x": 1324,
+              "y": 258,
+              "w": 63,
+              "h": 39
+            },
+            "candidate_point": {},
+            "layout_zone": "right_detail_panel",
+            "visual_order_key": [
+              258,
+              1324
+            ],
+            "description": "Events link · role=link · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 10,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c10",
+            "source_item_id": "two_stage_review_structure_region_main_content_c10",
+            "label": "Learn More button",
+            "role": "button",
+            "bbox": {
+              "x": 1134,
+              "y": 790,
+              "w": 95,
+              "h": 39
+            },
+            "candidate_point": {},
+            "layout_zone": "right_detail_panel",
+            "visual_order_key": [
+              790,
+              1134
+            ],
+            "description": "Learn More button · role=button · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "section_id": "middle_controls",
+        "label": "Middle Controls",
+        "bbox": {
+          "x": 567,
+          "y": 1007,
+          "w": 347,
+          "h": 39
+        },
+        "region_count": 2,
+        "region_numbers": [
+          11,
+          12
+        ],
+        "possible_operations": [
+          "read_only"
+        ],
+        "operation_summary": {
+          "kind_counts": {
+            "read_only": 2
+          },
+          "readiness_counts": {
+            "review_required": 2
+          }
+        },
+        "operation_links": [
+          {
+            "region_no": 11,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c11",
+            "label": "Get Started link",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 12,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c12",
+            "label": "Download link",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "regions": [
+          {
+            "region_no": 11,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c11",
+            "source_item_id": "two_stage_review_structure_region_main_content_c11",
+            "label": "Get Started link",
+            "role": "link",
+            "bbox": {
+              "x": 567,
+              "y": 1007,
+              "w": 126,
+              "h": 39
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              1007,
+              567
+            ],
+            "description": "Get Started link · role=link · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 12,
+            "region_id": "review_region_two_stage_review_structure_region_main_content_c12",
+            "source_item_id": "two_stage_review_structure_region_main_content_c12",
+            "label": "Download link",
+            "role": "link",
+            "bbox": {
+              "x": 788,
+              "y": 1007,
+              "w": 126,
+              "h": 39
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              1007,
+              788
+            ],
+            "description": "Download link · role=link · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      }
+    ],
+    "display_groups": [],
+    "regions": [
+      {
+        "region_no": 1,
+        "region_id": "review_region_two_stage_review_structure_region_main_content_c1",
+        "source_item_id": "two_stage_review_structure_region_main_content_c1",
+        "label": "Search input",
+        "role": "input",
+        "bbox": {
+          "x": 1134,
+          "y": 140,
+          "w": 178,
+          "h": 39
+        },
+        "candidate_point": {},
+        "layout_zone": "right_detail_panel",
+        "visual_order_key": [
+          140,
+          1134
+        ],
+        "description": "Search input · role=input · operation=fill_field · readiness=review_required",
+        "possible_operation": {
+          "kind": "fill_field",
+          "label": "Type or edit search/filter text",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 2,
+        "region_id": "review_region_two_stage_review_structure_region_main_content_c2",
+        "source_item_id": "two_stage_review_structure_region_main_content_c2",
+        "label": "Search button",
+        "role": "button",
+        "bbox": {
+          "x": 1312,
+          "y": 140,
+          "w": 59,
+          "h": 39
+        },
+        "candidate_point": {},
+        "layout_zone": "right_detail_panel",
+        "visual_order_key": [
+          140,
+          1312
+        ],
+        "description": "Search button · role=button · operation=submit_search · readiness=review_required",
+        "possible_operation": {
+          "kind": "submit_search",
+          "label": "Run search",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 3,
+        "region_id": "review_region_two_stage_review_structure_region_main_content_c3",
+        "source_item_id": "two_stage_review_structure_region_main_content_c3",
+        "label": "About link",
+        "role": "link",
+        "bbox": {
+          "x": 646,
+          "y": 258,
+          "w": 63,
+          "h": 39
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          258,
+          646
+        ],
+        "description": "About link · role=link · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 4,
+        "region_id": "review_region_two_stage_review_structure_region_main_content_c4",
+        "source_item_id": "two_stage_review_structure_region_main_content_c4",
+        "label": "Downloads link",
+        "role": "link",
+        "bbox": {
+          "x": 741,
+          "y": 258,
+          "w": 78,
+          "h": 39
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          258,
+          741
+        ],
+        "description": "Downloads link · role=link · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 5,
+        "region_id": "review_region_two_stage_review_structure_region_main_content_c5",
+        "source_item_id": "two_stage_review_structure_region_main_content_c5",
+        "label": "Documentation link",
+        "role": "link",
+        "bbox": {
+          "x": 851,
+          "y": 258,
+          "w": 94,
+          "h": 39
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          258,
+          851
+        ],
+        "description": "Documentation link · role=link · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 6,
+        "region_id": "review_region_two_stage_review_structure_region_main_content_c6",
+        "source_item_id": "two_stage_review_structure_region_main_content_c6",
+        "label": "Community link",
+        "role": "link",
+        "bbox": {
+          "x": 977,
+          "y": 258,
+          "w": 94,
+          "h": 39
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          258,
+          977
+        ],
+        "description": "Community link · role=link · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 7,
+        "region_id": "review_region_two_stage_review_structure_region_main_content_c7",
+        "source_item_id": "two_stage_review_structure_region_main_content_c7",
+        "label": "Success Stories link",
+        "role": "link",
+        "bbox": {
+          "x": 1103,
+          "y": 258,
+          "w": 94,
+          "h": 39
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          258,
+          1103
+        ],
+        "description": "Success Stories link · role=link · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 8,
+        "region_id": "review_region_two_stage_review_structure_region_main_content_c8",
+        "source_item_id": "two_stage_review_structure_region_main_content_c8",
+        "label": "News link",
+        "role": "link",
+        "bbox": {
+          "x": 1229,
+          "y": 258,
+          "w": 63,
+          "h": 39
+        },
+        "candidate_point": {},
+        "layout_zone": "right_detail_panel",
+        "visual_order_key": [
+          258,
+          1229
+        ],
+        "description": "News link · role=link · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 9,
+        "region_id": "review_region_two_stage_review_structure_region_main_content_c9",
+        "source_item_id": "two_stage_review_structure_region_main_content_c9",
+        "label": "Events link",
+        "role": "link",
+        "bbox": {
+          "x": 1324,
+          "y": 258,
+          "w": 63,
+          "h": 39
+        },
+        "candidate_point": {},
+        "layout_zone": "right_detail_panel",
+        "visual_order_key": [
+          258,
+          1324
+        ],
+        "description": "Events link · role=link · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 10,
+        "region_id": "review_region_two_stage_review_structure_region_main_content_c10",
+        "source_item_id": "two_stage_review_structure_region_main_content_c10",
+        "label": "Learn More button",
+        "role": "button",
+        "bbox": {
+          "x": 1134,
+          "y": 790,
+          "w": 95,
+          "h": 39
+        },
+        "candidate_point": {},
+        "layout_zone": "right_detail_panel",
+        "visual_order_key": [
+          790,
+          1134
+        ],
+        "description": "Learn More button · role=button · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 11,
+        "region_id": "review_region_two_stage_review_structure_region_main_content_c11",
+        "source_item_id": "two_stage_review_structure_region_main_content_c11",
+        "label": "Get Started link",
+        "role": "link",
+        "bbox": {
+          "x": 567,
+          "y": 1007,
+          "w": 126,
+          "h": 39
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          1007,
+          567
+        ],
+        "description": "Get Started link · role=link · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 12,
+        "region_id": "review_region_two_stage_review_structure_region_main_content_c12",
+        "source_item_id": "two_stage_review_structure_region_main_content_c12",
+        "label": "Download link",
+        "role": "link",
+        "bbox": {
+          "x": 788,
+          "y": 1007,
+          "w": 126,
+          "h": 39
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          1007,
+          788
+        ],
+        "description": "Download link · role=link · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      }
+    ]
+  },
+  "safety": {
+    "display_only": true,
+    "model_started": false,
+    "live_clicks": 0,
+    "live_fills": 0,
+    "live_submits": 0,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false,
+    "runtime_pathgraph_promotion": false
+  },
+  "display_only": true,
+  "execute_binding_enabled": false,
+  "artifact_is_authorization": false,
+  "not_accuracy": true,
+  "not_e2e_success": true,
+  "interpretation": "Template-like page detail candidate generated from model-produced learning artifacts and existing calibration evidence. It is arranged by source bbox layout for demo/review only; it does not start models, click, fill, submit, authorize Execute, or promote Runtime PathGraph.",
+  "report_path": "D:\\agent-gui-runtime\\artifacts\\learning-runs\\panel_20260711-135725-613_python_org\\learn_page_detail_candidate.json"
+}

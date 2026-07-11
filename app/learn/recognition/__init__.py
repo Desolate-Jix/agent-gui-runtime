@@ -21,6 +21,7 @@ from app.learn.recognition.two_stage import (
     build_stage1_region_localization_report,
     build_two_stage_screen_understanding,
     fusion_status_from_two_stage,
+    model_grounding_evidence_status_from_two_stage,
 )
 from app.learn.recognition.validator import validate_grounding_candidate
 
@@ -39,6 +40,7 @@ __all__ = [
     "build_two_stage_screen_understanding",
     "classify_inventory_items",
     "fusion_status_from_two_stage",
+    "model_grounding_evidence_status_from_two_stage",
     "local_point_from_grounding_result",
     "normalize_grounding_result_to_screen",
     "parse_existing_evidence_to_inventory",

@@ -1634,6 +1634,93 @@ def test_learn_all_targets_renders_non_actionable_review_boxes_when_no_targets(t
     assert result["overlay"]["review_box_count"] == 5
     assert result["overlay"]["total_box_count"] == 5
     assert result["overlay_path"]
+    assert vision_api._learn_all_targets_location_status(result) == "learn_review_boxes_ready"
+
+
+def test_learn_all_targets_locate_reports_review_boxes_ready_when_no_executable_targets(monkeypatch, tmp_path) -> None:
+    image_path = tmp_path / "review_only_locate.png"
+    vision_api.Image.new("RGB", (900, 600), (255, 255, 255)).save(image_path)
+    observe_trace = tmp_path / "observe_review_only.json"
+    observe_trace.write_text(
+        __import__("json").dumps(
+            {
+                "success": True,
+                "result": {
+                    "image_path": str(image_path),
+                    "image_size": {"width": 900, "height": 600},
+                    "texts": [
+                        {
+                            "id": "ocr_home_title",
+                            "text": "主页",
+                            "bbox": {"x": 94, "y": 98, "w": 68, "h": 38},
+                            "confidence": 0.99,
+                        }
+                    ],
+                    "screen_map": {
+                        "contract_version": "screen_map_v1",
+                        "state_id": "apple_music_home",
+                        "app_name": "apple_music",
+                        "candidates": [
+                            {
+                                "candidate_id": "album_card_1",
+                                "label": "ATLUS Sound Team",
+                                "role": "news_card",
+                                "bbox": {"x": 76, "y": 417, "w": 232, "h": 201},
+                                "click_point": {"x": 192, "y": 518},
+                                "section_id": "main_content",
+                                "source": "ocr_card_groups",
+                                "risk_class": "safe_dry_run_only",
+                                "screen_map_rule": "card_texts_grouped_as_single_candidate",
+                                "evidence": {
+                                    "interaction_policy": {
+                                        "allowed": None,
+                                        "reasons": ["card_group_candidate", "section:main_content"],
+                                    }
+                                },
+                            }
+                        ],
+                    },
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        vision_api,
+        "_image_path_for_live_or_saved",
+        lambda **_kwargs: (str(image_path), None),
+    )
+    monkeypatch.setattr(vision_api, "write_trace", lambda **_kwargs: "learn-review-boxes-trace.json")
+    monkeypatch.setattr(
+        vision_api,
+        "recognition_plan",
+        lambda _request: (_ for _ in ()).throw(AssertionError("Learn all-target locate should not run single-goal recognition")),
+    )
+
+    response = vision_api.locate_target(
+        VisionLocateTargetRequestModel(
+            goal="learn all visible controls",
+            app_name="apple_music",
+            agent_mode="learn",
+            learn_depth="deep",
+            metadata={"learn_all_targets": True, "learn_vista_coordinate_validation": False},
+            observe_trace_path=str(observe_trace),
+        )
+    )
+
+    assert response.success is True
+    result = response.data["result"]
+    assert result["location_status"] == "learn_review_boxes_ready"
+    assert result["learn_all_targets"]["target_count"] == 0
+    assert result["learn_all_targets"]["review_box_count"] >= 1
+    assert Path(result["learn_all_targets"]["overlay_path"]).exists()
+    assert result["path_map_review"]["summary"]["addition_count"] == 0
+    assert result["path_map_review"]["summary"]["review_box_count"] >= 1
+    assert result["path_map_review"]["summary"]["review_only_overlay_ready"] is True
+    assert result["execution_path"]["target_count"] == 0
+    assert result["execution_path"]["review_box_count"] >= 1
+    assert result["execution_path"]["review_only_overlay_ready"] is True
 
 
 def test_learn_review_boxes_keep_card_text_as_children_not_sibling_numbers(tmp_path) -> None:

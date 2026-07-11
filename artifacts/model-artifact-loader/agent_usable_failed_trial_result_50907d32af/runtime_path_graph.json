@@ -10,19 +10,19 @@
   },
   "loader": {
     "contract_version": "model_learning_artifact_loader_v1",
-    "source_trial_path": "logs/benchmarks/model_learning_template_loader_trials/669c8959a454/agent_usable_failed/trial_result.json",
+    "source_trial_path": "logs/benchmarks/model_learning_template_loader_trials/7ce733745142/agent_usable_failed/trial_result.json",
     "source_sha256": "50907d32afe1ee580f64838973aa36aa862339575cd3827a56151f00cce1402a",
     "source_attempt_index": 0,
     "source_artifact_readonly": true,
     "posthoc_optimization_allowed": false
   },
   "source": {
-    "trial_path": "logs/benchmarks/model_learning_template_loader_trials/669c8959a454/agent_usable_failed/trial_result.json",
+    "trial_path": "logs/benchmarks/model_learning_template_loader_trials/7ce733745142/agent_usable_failed/trial_result.json",
     "sha256": "50907d32afe1ee580f64838973aa36aa862339575cd3827a56151f00cce1402a",
     "attempt_index": 0,
     "readonly": true,
     "posthoc_optimization_allowed": false,
-    "loaded_at": "2026-07-07T13:33:10.692843"
+    "loaded_at": "2026-07-12T00:24:54.905438"
   },
   "page_details": {},
   "states": [

@@ -6876,6 +6876,19 @@ def _build_learn_all_targets_from_screen_map(
     }
 
 
+def _learn_all_targets_location_status(learn_all_targets: dict[str, Any]) -> str:
+    """区分可执行定位目标和学习模式只读识别框。"""
+
+    target_count = int(learn_all_targets.get("target_count") or 0)
+    invalid_count = int(learn_all_targets.get("invalid_count") or 0)
+    review_box_count = int(learn_all_targets.get("review_box_count") or 0)
+    if target_count:
+        return "learn_all_targets_ready" if invalid_count == 0 else "learn_all_targets_needs_review"
+    if review_box_count > 0:
+        return "learn_review_boxes_ready"
+    return "not_located"
+
+
 def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
@@ -6974,7 +6987,7 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
                 "recommended_target": None,
                 "located_bbox": None,
                 "located_point": None,
-                "location_status": "learn_all_targets_ready" if learn_all_targets["target_count"] else "not_located",
+                "location_status": _learn_all_targets_location_status(learn_all_targets),
                 "learn_all_targets": learn_all_targets,
                 "operation_context": operation_context,
                 "operation_trace_link": operation_trace_link(operation_context, result_status="success", evidence_refs=[image_path]),
@@ -6989,6 +7002,8 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
                     "review_source": "learn_locate_deep_calibration",
                     "summary": {
                         "addition_count": learn_all_targets["target_count"],
+                        "review_box_count": learn_all_targets.get("review_box_count", 0),
+                        "review_only_overlay_ready": bool(learn_all_targets.get("review_box_count") and learn_all_targets.get("overlay_path")),
                         "validated_count": learn_all_targets.get("validated_count", 0),
                         "invalid_count": learn_all_targets.get("invalid_count", 0),
                         "coordinate_overlay_path": learn_all_targets.get("overlay_path"),
@@ -7019,6 +7034,8 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
                     "action_executed": False,
                     "learn_all_targets_used": True,
                     "target_count": learn_all_targets["target_count"],
+                    "review_box_count": learn_all_targets.get("review_box_count", 0),
+                    "review_only_overlay_ready": bool(learn_all_targets.get("review_box_count") and learn_all_targets.get("overlay_path")),
                     "coordinate_source": "screen_map_v1.candidates",
                     "ocr_anchor_reused_from_observe": observe_reuse.get("status") == "ready",
                     "ocr_anchor_reuse_source": observe_reuse.get("anchor_source"),

@@ -3,16 +3,16 @@
   "app_id": "model_learning_benchmark",
   "page_type": "generic_homepage_search",
   "source": {
-    "trial_path": "logs/benchmarks/model_learning_template_loader_trials/124f439492c0/low_alignment_but_hard_requirements_passed/trial_result.json",
+    "trial_path": "logs/benchmarks/model_learning_template_loader_trials/8bd150a8ad92/low_alignment_but_hard_requirements_passed/trial_result.json",
     "sha256": "59a57a9428322ad48ffe8432f5e30143ead172e6d82625928ae66a57a61be862",
     "attempt_index": 0,
     "readonly": true,
     "posthoc_optimization_allowed": false,
-    "loaded_at": "2026-07-07T13:33:11.186005"
+    "loaded_at": "2026-07-12T00:24:55.410438"
   },
   "loader": {
     "contract_version": "model_learning_artifact_loader_v1",
-    "source_trial_path": "logs/benchmarks/model_learning_template_loader_trials/124f439492c0/low_alignment_but_hard_requirements_passed/trial_result.json",
+    "source_trial_path": "logs/benchmarks/model_learning_template_loader_trials/8bd150a8ad92/low_alignment_but_hard_requirements_passed/trial_result.json",
     "source_sha256": "59a57a9428322ad48ffe8432f5e30143ead172e6d82625928ae66a57a61be862",
     "source_attempt_index": 0,
     "source_artifact_readonly": true,

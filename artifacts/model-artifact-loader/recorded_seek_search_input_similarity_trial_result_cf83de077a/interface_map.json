@@ -3,16 +3,16 @@
   "app_id": "model_learning_benchmark",
   "page_type": "search_page",
   "source": {
-    "trial_path": "logs/benchmarks/model_learning_template_loader_trials/8c6d360d2caf/recorded_seek_search_input_similarity/trial_result.json",
+    "trial_path": "logs/benchmarks/model_learning_template_loader_trials/0314a9781bff/recorded_seek_search_input_similarity/trial_result.json",
     "sha256": "cf83de077ac52e35680c8683d6046cccbb3556f915a655d05690627705677f6e",
     "attempt_index": 0,
     "readonly": true,
     "posthoc_optimization_allowed": false,
-    "loaded_at": "2026-07-07T13:33:10.897346"
+    "loaded_at": "2026-07-12T00:24:55.135437"
   },
   "loader": {
     "contract_version": "model_learning_artifact_loader_v1",
-    "source_trial_path": "logs/benchmarks/model_learning_template_loader_trials/8c6d360d2caf/recorded_seek_search_input_similarity/trial_result.json",
+    "source_trial_path": "logs/benchmarks/model_learning_template_loader_trials/0314a9781bff/recorded_seek_search_input_similarity/trial_result.json",
     "source_sha256": "cf83de077ac52e35680c8683d6046cccbb3556f915a655d05690627705677f6e",
     "source_attempt_index": 0,
     "source_artifact_readonly": true,

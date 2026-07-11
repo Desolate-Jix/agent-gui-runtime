@@ -1,0 +1,2903 @@
+{
+  "contract_version": "learn_page_detail_candidate_v1",
+  "source_path": "artifacts/learning-runs/panel_20260711-085238-083_python_org/trial_result.json",
+  "source_detail_shape": "learning_template_draft_v1",
+  "precise_understanding_candidate_path": "",
+  "screen_summary": "Auto-generated page detail candidate from Learn Mode full-screen understanding and calibration evidence.",
+  "layout_mode": "spatial_bbox_order",
+  "readiness_status": "needs_page_detail_review",
+  "screenshot_path": "artifacts\\screenshots\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036.png",
+  "full_screen_understanding_overlay_path": "artifacts\\review-overlays\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036__two-stage-understanding__20260711-085235-280492.png",
+  "compiled_overlay_path": "artifacts\\review-overlays\\welcome-to-python-org-microsoft-edge__locate-target__python-org__full-window__20260703-173956-578036__two-stage-understanding__20260711-085235-280492.png",
+  "summary": {
+    "region_count": 32,
+    "section_count": 3,
+    "display_group_count": 0,
+    "list_group_count": 0,
+    "container_group_count": 0,
+    "spatial_preview_suppressed_region_count": 0,
+    "possible_operation_count": 32,
+    "pending_calibration_count": null,
+    "review_blocked_count": null,
+    "pathgraph_candidate_review_ready_count": null,
+    "runtime_pathgraph_promotion": false,
+    "display_only": true,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false
+  },
+  "layout": {
+    "bounds": {
+      "x": 702,
+      "y": 254,
+      "w": 1119,
+      "h": 815
+    },
+    "sections": [
+      {
+        "section_id": "top_search_and_filters",
+        "label": "Top Search And Filters",
+        "bbox": {
+          "x": 846,
+          "y": 255,
+          "w": 355,
+          "h": 28
+        },
+        "region_count": 3,
+        "region_numbers": [
+          3,
+          1,
+          2
+        ],
+        "possible_operations": [
+          "read_only"
+        ],
+        "operation_summary": {
+          "kind_counts": {
+            "read_only": 3
+          },
+          "readiness_counts": {
+            "review_required": 3
+          }
+        },
+        "operation_links": [
+          {
+            "region_no": 3,
+            "region_id": "review_region_learn_ocr_text_text_19",
+            "label": "Documentation",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 1,
+            "region_id": "review_region_learn_ocr_text_text_17",
+            "label": "About",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 2,
+            "region_id": "review_region_learn_ocr_text_text_18",
+            "label": "Downloads",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "regions": [
+          {
+            "region_no": 3,
+            "region_id": "review_region_learn_ocr_text_text_19",
+            "source_item_id": "learn_ocr_text_text_19",
+            "label": "Documentation",
+            "role": "text",
+            "bbox": {
+              "x": 1069,
+              "y": 255,
+              "w": 132,
+              "h": 28
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              255,
+              1069
+            ],
+            "description": "Documentation · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 1,
+            "region_id": "review_region_learn_ocr_text_text_17",
+            "source_item_id": "learn_ocr_text_text_17",
+            "label": "About",
+            "role": "text",
+            "bbox": {
+              "x": 846,
+              "y": 256,
+              "w": 58,
+              "h": 26
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              256,
+              846
+            ],
+            "description": "About · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 2,
+            "region_id": "review_region_learn_ocr_text_text_18",
+            "source_item_id": "learn_ocr_text_text_18",
+            "label": "Downloads",
+            "role": "text",
+            "bbox": {
+              "x": 938,
+              "y": 256,
+              "w": 96,
+              "h": 26
+            },
+            "candidate_point": {},
+            "layout_zone": "top_search_and_filters",
+            "visual_order_key": [
+              256,
+              938
+            ],
+            "description": "Downloads · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "section_id": "right_detail_panel",
+        "label": "Right Detail Panel",
+        "bbox": {
+          "x": 1235,
+          "y": 254,
+          "w": 586,
+          "h": 815
+        },
+        "region_count": 15,
+        "region_numbers": [
+          6,
+          4,
+          5,
+          7,
+          8,
+          10,
+          17,
+          18,
+          20,
+          22,
+          24,
+          26,
+          28,
+          29,
+          32
+        ],
+        "possible_operations": [
+          "read_only"
+        ],
+        "operation_summary": {
+          "kind_counts": {
+            "read_only": 15
+          },
+          "readiness_counts": {
+            "review_required": 15
+          }
+        },
+        "operation_links": [
+          {
+            "region_no": 6,
+            "region_id": "review_region_learn_ocr_text_text_22",
+            "label": "News",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 4,
+            "region_id": "review_region_learn_ocr_text_text_20",
+            "label": "Community",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 5,
+            "region_id": "review_region_learn_ocr_text_text_21",
+            "label": "Success Stories",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 7,
+            "region_id": "review_region_learn_ocr_text_text_23",
+            "label": "Events",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 8,
+            "region_id": "review_region_learn_ocr_text_text_25",
+            "label": "Quick&Easy toLearn",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 10,
+            "region_id": "review_region_learn_ocr_text_text_28",
+            "label": "Python very quickly, and beginners find the clean syntax and",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 17,
+            "region_id": "review_region_learn_ocr_text_text_41",
+            "label": "Docs",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 18,
+            "region_id": "review_region_learn_ocr_text_text_42",
+            "label": "Jobs",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 20,
+            "region_id": "review_region_learn_ocr_text_text_45",
+            "label": "Documentation for Python's",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 22,
+            "region_id": "review_region_learn_ocr_text_text_49",
+            "label": "standard library, along with tutorials",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 24,
+            "region_id": "review_region_learn_ocr_text_text_53",
+            "label": "and guides, are available online.",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 26,
+            "region_id": "review_region_learn_ocr_text_text_56",
+            "label": "docs.python.org",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 28,
+            "region_id": "review_region_learn_ocr_text_text_64",
+            "label": "Upcoming Events",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 29,
+            "region_id": "review_region_learn_ocr_text_text_65",
+            "label": ">>More",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 32,
+            "region_id": "review_region_learn_ocr_text_text_68",
+            "label": "2026-07-13",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "regions": [
+          {
+            "region_no": 6,
+            "region_id": "review_region_learn_ocr_text_text_22",
+            "source_item_id": "learn_ocr_text_text_22",
+            "label": "News",
+            "role": "text",
+            "bbox": {
+              "x": 1532,
+              "y": 254,
+              "w": 57,
+              "h": 29
+            },
+            "candidate_point": {},
+            "layout_zone": "right_detail_panel",
+            "visual_order_key": [
+              254,
+              1532
+            ],
+            "description": "News · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 4,
+            "region_id": "review_region_learn_ocr_text_text_20",
+            "source_item_id": "learn_ocr_text_text_20",
+            "label": "Community",
+            "role": "text",
+            "bbox": {
+              "x": 1235,
+              "y": 255,
+              "w": 99,
+              "h": 28
+            },
+            "candidate_point": {},
+            "layout_zone": "right_detail_panel",
+            "visual_order_key": [
+              255,
+              1235
+            ],
+            "description": "Community · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 5,
+            "region_id": "review_region_learn_ocr_text_text_21",
+            "source_item_id": "learn_ocr_text_text_21",
+            "label": "Success Stories",
+            "role": "text",
+            "bbox": {
+              "x": 1371,
+              "y": 255,
+              "w": 128,
+              "h": 28
+            },
+            "candidate_point": {},
+            "layout_zone": "right_detail_panel",
+            "visual_order_key": [
+              255,
+              1371
+            ],
+            "description": "Success Stories · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 7,
+            "region_id": "review_region_learn_ocr_text_text_23",
+            "source_item_id": "learn_ocr_text_text_23",
+            "label": "Events",
+            "role": "text",
+            "bbox": {
+              "x": 1622,
+              "y": 257,
+              "w": 62,
+              "h": 23
+            },
+            "candidate_point": {},
+            "layout_zone": "right_detail_panel",
+            "visual_order_key": [
+              257,
+              1622
+            ],
+            "description": "Events · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 8,
+            "region_id": "review_region_learn_ocr_text_text_25",
+            "source_item_id": "learn_ocr_text_text_25",
+            "label": "Quick&Easy toLearn",
+            "role": "text",
+            "bbox": {
+              "x": 1292,
+              "y": 315,
+              "w": 207,
+              "h": 26
+            },
+            "candidate_point": {},
+            "layout_zone": "right_detail_panel",
+            "visual_order_key": [
+              315,
+              1292
+            ],
+            "description": "Quick&Easy toLearn · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 10,
+            "region_id": "review_region_learn_ocr_text_text_28",
+            "source_item_id": "learn_ocr_text_text_28",
+            "label": "Python very quickly, and beginners find the clean syntax and",
+            "role": "text",
+            "bbox": {
+              "x": 1290,
+              "y": 375,
+              "w": 414,
+              "h": 26
+            },
+            "candidate_point": {},
+            "layout_zone": "right_detail_panel",
+            "visual_order_key": [
+              375,
+              1290
+            ],
+            "description": "Python very quickly, and beginners find the clean syntax and · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 17,
+            "region_id": "review_region_learn_ocr_text_text_41",
+            "source_item_id": "learn_ocr_text_text_41",
+            "label": "Docs",
+            "role": "text",
+            "bbox": {
+              "x": 1292,
+              "y": 751,
+              "w": 78,
+              "h": 29
+            },
+            "candidate_point": {},
+            "layout_zone": "right_detail_panel",
+            "visual_order_key": [
+              751,
+              1292
+            ],
+            "description": "Docs · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 18,
+            "region_id": "review_region_learn_ocr_text_text_42",
+            "source_item_id": "learn_ocr_text_text_42",
+            "label": "Jobs",
+            "role": "text",
+            "bbox": {
+              "x": 1611,
+              "y": 753,
+              "w": 48,
+              "h": 26
+            },
+            "candidate_point": {},
+            "layout_zone": "right_detail_panel",
+            "visual_order_key": [
+              753,
+              1611
+            ],
+            "description": "Jobs · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 20,
+            "region_id": "review_region_learn_ocr_text_text_45",
+            "source_item_id": "learn_ocr_text_text_45",
+            "label": "Documentation for Python's",
+            "role": "text",
+            "bbox": {
+              "x": 1292,
+              "y": 785,
+              "w": 184,
+              "h": 22
+            },
+            "candidate_point": {},
+            "layout_zone": "right_detail_panel",
+            "visual_order_key": [
+              785,
+              1292
+            ],
+            "description": "Documentation for Python's · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 22,
+            "region_id": "review_region_learn_ocr_text_text_49",
+            "source_item_id": "learn_ocr_text_text_49",
+            "label": "standard library, along with tutorials",
+            "role": "text",
+            "bbox": {
+              "x": 1292,
+              "y": 812,
+              "w": 237,
+              "h": 21
+            },
+            "candidate_point": {},
+            "layout_zone": "right_detail_panel",
+            "visual_order_key": [
+              812,
+              1292
+            ],
+            "description": "standard library, along with tutorials · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 24,
+            "region_id": "review_region_learn_ocr_text_text_53",
+            "source_item_id": "learn_ocr_text_text_53",
+            "label": "and guides, are available online.",
+            "role": "text",
+            "bbox": {
+              "x": 1292,
+              "y": 836,
+              "w": 207,
+              "h": 21
+            },
+            "candidate_point": {},
+            "layout_zone": "right_detail_panel",
+            "visual_order_key": [
+              836,
+              1292
+            ],
+            "description": "and guides, are available online. · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 26,
+            "region_id": "review_region_learn_ocr_text_text_56",
+            "source_item_id": "learn_ocr_text_text_56",
+            "label": "docs.python.org",
+            "role": "text",
+            "bbox": {
+              "x": 1289,
+              "y": 870,
+              "w": 114,
+              "h": 28
+            },
+            "candidate_point": {},
+            "layout_zone": "right_detail_panel",
+            "visual_order_key": [
+              870,
+              1289
+            ],
+            "description": "docs.python.org · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 28,
+            "region_id": "review_region_learn_ocr_text_text_64",
+            "source_item_id": "learn_ocr_text_text_64",
+            "label": "Upcoming Events",
+            "role": "text",
+            "bbox": {
+              "x": 1290,
+              "y": 1003,
+              "w": 193,
+              "h": 35
+            },
+            "candidate_point": {},
+            "layout_zone": "right_detail_panel",
+            "visual_order_key": [
+              1003,
+              1290
+            ],
+            "description": "Upcoming Events · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 29,
+            "region_id": "review_region_learn_ocr_text_text_65",
+            "source_item_id": "learn_ocr_text_text_65",
+            "label": ">>More",
+            "role": "text",
+            "bbox": {
+              "x": 1759,
+              "y": 1011,
+              "w": 62,
+              "h": 25
+            },
+            "candidate_point": {},
+            "layout_zone": "right_detail_panel",
+            "visual_order_key": [
+              1011,
+              1759
+            ],
+            "description": ">>More · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 32,
+            "region_id": "review_region_learn_ocr_text_text_68",
+            "source_item_id": "learn_ocr_text_text_68",
+            "label": "2026-07-13",
+            "role": "text",
+            "bbox": {
+              "x": 1292,
+              "y": 1048,
+              "w": 77,
+              "h": 21
+            },
+            "candidate_point": {},
+            "layout_zone": "right_detail_panel",
+            "visual_order_key": [
+              1048,
+              1292
+            ],
+            "description": "2026-07-13 · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "section_id": "middle_controls",
+        "label": "Middle Controls",
+        "bbox": {
+          "x": 702,
+          "y": 364,
+          "w": 441,
+          "h": 705
+        },
+        "region_count": 14,
+        "region_numbers": [
+          9,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          19,
+          21,
+          23,
+          25,
+          27,
+          30,
+          31
+        ],
+        "possible_operations": [
+          "read_only"
+        ],
+        "operation_summary": {
+          "kind_counts": {
+            "read_only": 14
+          },
+          "readiness_counts": {
+            "review_required": 14
+          }
+        },
+        "operation_links": [
+          {
+            "region_no": 9,
+            "region_id": "review_region_learn_ocr_text_text_27",
+            "label": "Hello, I'm Python!",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 11,
+            "region_id": "review_region_learn_ocr_text_text_29",
+            "label": "#Input, assignment",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 12,
+            "region_id": "review_region_learn_ocr_text_text_33",
+            "label": ">>> print(f'Hi, {name}.'",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 13,
+            "region_id": "review_region_learn_ocr_text_text_34",
+            "label": "What is your name?",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 14,
+            "region_id": "review_region_learn_ocr_text_text_35",
+            "label": "Python",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 15,
+            "region_id": "review_region_learn_ocr_text_text_36",
+            "label": "Hi, Python.",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 16,
+            "region_id": "review_region_learn_ocr_text_text_40",
+            "label": "Download",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 19,
+            "region_id": "review_region_learn_ocr_text_text_43",
+            "label": "Whether you're new to",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 21,
+            "region_id": "review_region_learn_ocr_text_text_47",
+            "label": "programming or an experienced",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 23,
+            "region_id": "review_region_learn_ocr_text_text_51",
+            "label": "developer, it's easy to learn and use",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 25,
+            "region_id": "review_region_learn_ocr_text_text_55",
+            "label": "Python.",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 27,
+            "region_id": "review_region_learn_ocr_text_text_60",
+            "label": "Start with our Beginner's Guide",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 30,
+            "region_id": "review_region_learn_ocr_text_text_66",
+            "label": "2026-07-02",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 31,
+            "region_id": "review_region_learn_ocr_text_text_67",
+            "label": "Thinking about running for the PSF Board? Let's talk!",
+            "operation_kind": "read_only",
+            "operation_label": "Read or inspect region",
+            "readiness": "review_required",
+            "candidate_point": {},
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "regions": [
+          {
+            "region_no": 9,
+            "region_id": "review_region_learn_ocr_text_text_27",
+            "source_item_id": "learn_ocr_text_text_27",
+            "label": "Hello, I'm Python!",
+            "role": "text",
+            "bbox": {
+              "x": 782,
+              "y": 364,
+              "w": 169,
+              "h": 28
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              364,
+              782
+            ],
+            "description": "Hello, I'm Python! · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 11,
+            "region_id": "review_region_learn_ocr_text_text_29",
+            "source_item_id": "learn_ocr_text_text_29",
+            "label": "#Input, assignment",
+            "role": "text",
+            "bbox": {
+              "x": 784,
+              "y": 415,
+              "w": 175,
+              "h": 21
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              415,
+              784
+            ],
+            "description": "#Input, assignment · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 12,
+            "region_id": "review_region_learn_ocr_text_text_33",
+            "source_item_id": "learn_ocr_text_text_33",
+            "label": ">>> print(f'Hi, {name}.'",
+            "role": "text",
+            "bbox": {
+              "x": 784,
+              "y": 460,
+              "w": 217,
+              "h": 27
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              460,
+              784
+            ],
+            "description": ">>> print(f'Hi, {name}.' · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 13,
+            "region_id": "review_region_learn_ocr_text_text_34",
+            "source_item_id": "learn_ocr_text_text_34",
+            "label": "What is your name?",
+            "role": "text",
+            "bbox": {
+              "x": 782,
+              "y": 485,
+              "w": 170,
+              "h": 27
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              485,
+              782
+            ],
+            "description": "What is your name? · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 14,
+            "region_id": "review_region_learn_ocr_text_text_35",
+            "source_item_id": "learn_ocr_text_text_35",
+            "label": "Python",
+            "role": "text",
+            "bbox": {
+              "x": 784,
+              "y": 510,
+              "w": 66,
+              "h": 25
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              510,
+              784
+            ],
+            "description": "Python · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 15,
+            "region_id": "review_region_learn_ocr_text_text_36",
+            "source_item_id": "learn_ocr_text_text_36",
+            "label": "Hi, Python.",
+            "role": "text",
+            "bbox": {
+              "x": 784,
+              "y": 534,
+              "w": 106,
+              "h": 25
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              534,
+              784
+            ],
+            "description": "Hi, Python. · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 16,
+            "region_id": "review_region_learn_ocr_text_text_40",
+            "source_item_id": "learn_ocr_text_text_40",
+            "label": "Download",
+            "role": "text",
+            "bbox": {
+              "x": 1000,
+              "y": 753,
+              "w": 119,
+              "h": 27
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              753,
+              1000
+            ],
+            "description": "Download · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 19,
+            "region_id": "review_region_learn_ocr_text_text_43",
+            "source_item_id": "learn_ocr_text_text_43",
+            "label": "Whether you're new to",
+            "role": "text",
+            "bbox": {
+              "x": 703,
+              "y": 786,
+              "w": 150,
+              "h": 22
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              786,
+              703
+            ],
+            "description": "Whether you're new to · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 21,
+            "region_id": "review_region_learn_ocr_text_text_47",
+            "source_item_id": "learn_ocr_text_text_47",
+            "label": "programming or an experienced",
+            "role": "text",
+            "bbox": {
+              "x": 702,
+              "y": 810,
+              "w": 211,
+              "h": 25
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              810,
+              702
+            ],
+            "description": "programming or an experienced · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 23,
+            "region_id": "review_region_learn_ocr_text_text_51",
+            "source_item_id": "learn_ocr_text_text_51",
+            "label": "developer, it's easy to learn and use",
+            "role": "text",
+            "bbox": {
+              "x": 703,
+              "y": 836,
+              "w": 230,
+              "h": 21
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              836,
+              703
+            ],
+            "description": "developer, it's easy to learn and use · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 25,
+            "region_id": "review_region_learn_ocr_text_text_55",
+            "source_item_id": "learn_ocr_text_text_55",
+            "label": "Python.",
+            "role": "text",
+            "bbox": {
+              "x": 703,
+              "y": 861,
+              "w": 57,
+              "h": 22
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              861,
+              703
+            ],
+            "description": "Python. · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 27,
+            "region_id": "review_region_learn_ocr_text_text_60",
+            "source_item_id": "learn_ocr_text_text_60",
+            "label": "Start with our Beginner's Guide",
+            "role": "text",
+            "bbox": {
+              "x": 704,
+              "y": 898,
+              "w": 201,
+              "h": 20
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              898,
+              704
+            ],
+            "description": "Start with our Beginner's Guide · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 30,
+            "region_id": "review_region_learn_ocr_text_text_66",
+            "source_item_id": "learn_ocr_text_text_66",
+            "label": "2026-07-02",
+            "role": "text",
+            "bbox": {
+              "x": 703,
+              "y": 1048,
+              "w": 77,
+              "h": 21
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              1048,
+              703
+            ],
+            "description": "2026-07-02 · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          },
+          {
+            "region_no": 31,
+            "region_id": "review_region_learn_ocr_text_text_67",
+            "source_item_id": "learn_ocr_text_text_67",
+            "label": "Thinking about running for the PSF Board? Let's talk!",
+            "role": "text",
+            "bbox": {
+              "x": 809,
+              "y": 1048,
+              "w": 334,
+              "h": 21
+            },
+            "candidate_point": {},
+            "layout_zone": "middle_controls",
+            "visual_order_key": [
+              1048,
+              809
+            ],
+            "description": "Thinking about running for the PSF Board? Let's talk! · role=text · operation=read_only · readiness=review_required",
+            "possible_operation": {
+              "kind": "read_only",
+              "label": "Read or inspect region",
+              "readiness": "review_required",
+              "execute_binding_enabled": false,
+              "artifact_is_authorization": false
+            },
+            "calibration_state": "learning_draft_review_only",
+            "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+            "required_next_step": "review_before_pathgraph_promotion",
+            "evidence": {
+              "source": "learning_draft.regions",
+              "action_template_id": null
+            },
+            "display_only": true,
+            "execute_binding_enabled": false,
+            "artifact_is_authorization": false
+          }
+        ],
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      }
+    ],
+    "display_groups": [],
+    "regions": [
+      {
+        "region_no": 1,
+        "region_id": "review_region_learn_ocr_text_text_17",
+        "source_item_id": "learn_ocr_text_text_17",
+        "label": "About",
+        "role": "text",
+        "bbox": {
+          "x": 846,
+          "y": 256,
+          "w": 58,
+          "h": 26
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          256,
+          846
+        ],
+        "description": "About · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 2,
+        "region_id": "review_region_learn_ocr_text_text_18",
+        "source_item_id": "learn_ocr_text_text_18",
+        "label": "Downloads",
+        "role": "text",
+        "bbox": {
+          "x": 938,
+          "y": 256,
+          "w": 96,
+          "h": 26
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          256,
+          938
+        ],
+        "description": "Downloads · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 3,
+        "region_id": "review_region_learn_ocr_text_text_19",
+        "source_item_id": "learn_ocr_text_text_19",
+        "label": "Documentation",
+        "role": "text",
+        "bbox": {
+          "x": 1069,
+          "y": 255,
+          "w": 132,
+          "h": 28
+        },
+        "candidate_point": {},
+        "layout_zone": "top_search_and_filters",
+        "visual_order_key": [
+          255,
+          1069
+        ],
+        "description": "Documentation · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 4,
+        "region_id": "review_region_learn_ocr_text_text_20",
+        "source_item_id": "learn_ocr_text_text_20",
+        "label": "Community",
+        "role": "text",
+        "bbox": {
+          "x": 1235,
+          "y": 255,
+          "w": 99,
+          "h": 28
+        },
+        "candidate_point": {},
+        "layout_zone": "right_detail_panel",
+        "visual_order_key": [
+          255,
+          1235
+        ],
+        "description": "Community · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 5,
+        "region_id": "review_region_learn_ocr_text_text_21",
+        "source_item_id": "learn_ocr_text_text_21",
+        "label": "Success Stories",
+        "role": "text",
+        "bbox": {
+          "x": 1371,
+          "y": 255,
+          "w": 128,
+          "h": 28
+        },
+        "candidate_point": {},
+        "layout_zone": "right_detail_panel",
+        "visual_order_key": [
+          255,
+          1371
+        ],
+        "description": "Success Stories · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 6,
+        "region_id": "review_region_learn_ocr_text_text_22",
+        "source_item_id": "learn_ocr_text_text_22",
+        "label": "News",
+        "role": "text",
+        "bbox": {
+          "x": 1532,
+          "y": 254,
+          "w": 57,
+          "h": 29
+        },
+        "candidate_point": {},
+        "layout_zone": "right_detail_panel",
+        "visual_order_key": [
+          254,
+          1532
+        ],
+        "description": "News · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 7,
+        "region_id": "review_region_learn_ocr_text_text_23",
+        "source_item_id": "learn_ocr_text_text_23",
+        "label": "Events",
+        "role": "text",
+        "bbox": {
+          "x": 1622,
+          "y": 257,
+          "w": 62,
+          "h": 23
+        },
+        "candidate_point": {},
+        "layout_zone": "right_detail_panel",
+        "visual_order_key": [
+          257,
+          1622
+        ],
+        "description": "Events · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 8,
+        "region_id": "review_region_learn_ocr_text_text_25",
+        "source_item_id": "learn_ocr_text_text_25",
+        "label": "Quick&Easy toLearn",
+        "role": "text",
+        "bbox": {
+          "x": 1292,
+          "y": 315,
+          "w": 207,
+          "h": 26
+        },
+        "candidate_point": {},
+        "layout_zone": "right_detail_panel",
+        "visual_order_key": [
+          315,
+          1292
+        ],
+        "description": "Quick&Easy toLearn · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 9,
+        "region_id": "review_region_learn_ocr_text_text_27",
+        "source_item_id": "learn_ocr_text_text_27",
+        "label": "Hello, I'm Python!",
+        "role": "text",
+        "bbox": {
+          "x": 782,
+          "y": 364,
+          "w": 169,
+          "h": 28
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          364,
+          782
+        ],
+        "description": "Hello, I'm Python! · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 10,
+        "region_id": "review_region_learn_ocr_text_text_28",
+        "source_item_id": "learn_ocr_text_text_28",
+        "label": "Python very quickly, and beginners find the clean syntax and",
+        "role": "text",
+        "bbox": {
+          "x": 1290,
+          "y": 375,
+          "w": 414,
+          "h": 26
+        },
+        "candidate_point": {},
+        "layout_zone": "right_detail_panel",
+        "visual_order_key": [
+          375,
+          1290
+        ],
+        "description": "Python very quickly, and beginners find the clean syntax and · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 11,
+        "region_id": "review_region_learn_ocr_text_text_29",
+        "source_item_id": "learn_ocr_text_text_29",
+        "label": "#Input, assignment",
+        "role": "text",
+        "bbox": {
+          "x": 784,
+          "y": 415,
+          "w": 175,
+          "h": 21
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          415,
+          784
+        ],
+        "description": "#Input, assignment · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 12,
+        "region_id": "review_region_learn_ocr_text_text_33",
+        "source_item_id": "learn_ocr_text_text_33",
+        "label": ">>> print(f'Hi, {name}.'",
+        "role": "text",
+        "bbox": {
+          "x": 784,
+          "y": 460,
+          "w": 217,
+          "h": 27
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          460,
+          784
+        ],
+        "description": ">>> print(f'Hi, {name}.' · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 13,
+        "region_id": "review_region_learn_ocr_text_text_34",
+        "source_item_id": "learn_ocr_text_text_34",
+        "label": "What is your name?",
+        "role": "text",
+        "bbox": {
+          "x": 782,
+          "y": 485,
+          "w": 170,
+          "h": 27
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          485,
+          782
+        ],
+        "description": "What is your name? · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 14,
+        "region_id": "review_region_learn_ocr_text_text_35",
+        "source_item_id": "learn_ocr_text_text_35",
+        "label": "Python",
+        "role": "text",
+        "bbox": {
+          "x": 784,
+          "y": 510,
+          "w": 66,
+          "h": 25
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          510,
+          784
+        ],
+        "description": "Python · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 15,
+        "region_id": "review_region_learn_ocr_text_text_36",
+        "source_item_id": "learn_ocr_text_text_36",
+        "label": "Hi, Python.",
+        "role": "text",
+        "bbox": {
+          "x": 784,
+          "y": 534,
+          "w": 106,
+          "h": 25
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          534,
+          784
+        ],
+        "description": "Hi, Python. · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 16,
+        "region_id": "review_region_learn_ocr_text_text_40",
+        "source_item_id": "learn_ocr_text_text_40",
+        "label": "Download",
+        "role": "text",
+        "bbox": {
+          "x": 1000,
+          "y": 753,
+          "w": 119,
+          "h": 27
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          753,
+          1000
+        ],
+        "description": "Download · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 17,
+        "region_id": "review_region_learn_ocr_text_text_41",
+        "source_item_id": "learn_ocr_text_text_41",
+        "label": "Docs",
+        "role": "text",
+        "bbox": {
+          "x": 1292,
+          "y": 751,
+          "w": 78,
+          "h": 29
+        },
+        "candidate_point": {},
+        "layout_zone": "right_detail_panel",
+        "visual_order_key": [
+          751,
+          1292
+        ],
+        "description": "Docs · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 18,
+        "region_id": "review_region_learn_ocr_text_text_42",
+        "source_item_id": "learn_ocr_text_text_42",
+        "label": "Jobs",
+        "role": "text",
+        "bbox": {
+          "x": 1611,
+          "y": 753,
+          "w": 48,
+          "h": 26
+        },
+        "candidate_point": {},
+        "layout_zone": "right_detail_panel",
+        "visual_order_key": [
+          753,
+          1611
+        ],
+        "description": "Jobs · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 19,
+        "region_id": "review_region_learn_ocr_text_text_43",
+        "source_item_id": "learn_ocr_text_text_43",
+        "label": "Whether you're new to",
+        "role": "text",
+        "bbox": {
+          "x": 703,
+          "y": 786,
+          "w": 150,
+          "h": 22
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          786,
+          703
+        ],
+        "description": "Whether you're new to · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 20,
+        "region_id": "review_region_learn_ocr_text_text_45",
+        "source_item_id": "learn_ocr_text_text_45",
+        "label": "Documentation for Python's",
+        "role": "text",
+        "bbox": {
+          "x": 1292,
+          "y": 785,
+          "w": 184,
+          "h": 22
+        },
+        "candidate_point": {},
+        "layout_zone": "right_detail_panel",
+        "visual_order_key": [
+          785,
+          1292
+        ],
+        "description": "Documentation for Python's · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 21,
+        "region_id": "review_region_learn_ocr_text_text_47",
+        "source_item_id": "learn_ocr_text_text_47",
+        "label": "programming or an experienced",
+        "role": "text",
+        "bbox": {
+          "x": 702,
+          "y": 810,
+          "w": 211,
+          "h": 25
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          810,
+          702
+        ],
+        "description": "programming or an experienced · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 22,
+        "region_id": "review_region_learn_ocr_text_text_49",
+        "source_item_id": "learn_ocr_text_text_49",
+        "label": "standard library, along with tutorials",
+        "role": "text",
+        "bbox": {
+          "x": 1292,
+          "y": 812,
+          "w": 237,
+          "h": 21
+        },
+        "candidate_point": {},
+        "layout_zone": "right_detail_panel",
+        "visual_order_key": [
+          812,
+          1292
+        ],
+        "description": "standard library, along with tutorials · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 23,
+        "region_id": "review_region_learn_ocr_text_text_51",
+        "source_item_id": "learn_ocr_text_text_51",
+        "label": "developer, it's easy to learn and use",
+        "role": "text",
+        "bbox": {
+          "x": 703,
+          "y": 836,
+          "w": 230,
+          "h": 21
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          836,
+          703
+        ],
+        "description": "developer, it's easy to learn and use · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 24,
+        "region_id": "review_region_learn_ocr_text_text_53",
+        "source_item_id": "learn_ocr_text_text_53",
+        "label": "and guides, are available online.",
+        "role": "text",
+        "bbox": {
+          "x": 1292,
+          "y": 836,
+          "w": 207,
+          "h": 21
+        },
+        "candidate_point": {},
+        "layout_zone": "right_detail_panel",
+        "visual_order_key": [
+          836,
+          1292
+        ],
+        "description": "and guides, are available online. · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 25,
+        "region_id": "review_region_learn_ocr_text_text_55",
+        "source_item_id": "learn_ocr_text_text_55",
+        "label": "Python.",
+        "role": "text",
+        "bbox": {
+          "x": 703,
+          "y": 861,
+          "w": 57,
+          "h": 22
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          861,
+          703
+        ],
+        "description": "Python. · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 26,
+        "region_id": "review_region_learn_ocr_text_text_56",
+        "source_item_id": "learn_ocr_text_text_56",
+        "label": "docs.python.org",
+        "role": "text",
+        "bbox": {
+          "x": 1289,
+          "y": 870,
+          "w": 114,
+          "h": 28
+        },
+        "candidate_point": {},
+        "layout_zone": "right_detail_panel",
+        "visual_order_key": [
+          870,
+          1289
+        ],
+        "description": "docs.python.org · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 27,
+        "region_id": "review_region_learn_ocr_text_text_60",
+        "source_item_id": "learn_ocr_text_text_60",
+        "label": "Start with our Beginner's Guide",
+        "role": "text",
+        "bbox": {
+          "x": 704,
+          "y": 898,
+          "w": 201,
+          "h": 20
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          898,
+          704
+        ],
+        "description": "Start with our Beginner's Guide · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 28,
+        "region_id": "review_region_learn_ocr_text_text_64",
+        "source_item_id": "learn_ocr_text_text_64",
+        "label": "Upcoming Events",
+        "role": "text",
+        "bbox": {
+          "x": 1290,
+          "y": 1003,
+          "w": 193,
+          "h": 35
+        },
+        "candidate_point": {},
+        "layout_zone": "right_detail_panel",
+        "visual_order_key": [
+          1003,
+          1290
+        ],
+        "description": "Upcoming Events · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 29,
+        "region_id": "review_region_learn_ocr_text_text_65",
+        "source_item_id": "learn_ocr_text_text_65",
+        "label": ">>More",
+        "role": "text",
+        "bbox": {
+          "x": 1759,
+          "y": 1011,
+          "w": 62,
+          "h": 25
+        },
+        "candidate_point": {},
+        "layout_zone": "right_detail_panel",
+        "visual_order_key": [
+          1011,
+          1759
+        ],
+        "description": ">>More · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 30,
+        "region_id": "review_region_learn_ocr_text_text_66",
+        "source_item_id": "learn_ocr_text_text_66",
+        "label": "2026-07-02",
+        "role": "text",
+        "bbox": {
+          "x": 703,
+          "y": 1048,
+          "w": 77,
+          "h": 21
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          1048,
+          703
+        ],
+        "description": "2026-07-02 · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 31,
+        "region_id": "review_region_learn_ocr_text_text_67",
+        "source_item_id": "learn_ocr_text_text_67",
+        "label": "Thinking about running for the PSF Board? Let's talk!",
+        "role": "text",
+        "bbox": {
+          "x": 809,
+          "y": 1048,
+          "w": 334,
+          "h": 21
+        },
+        "candidate_point": {},
+        "layout_zone": "middle_controls",
+        "visual_order_key": [
+          1048,
+          809
+        ],
+        "description": "Thinking about running for the PSF Board? Let's talk! · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      },
+      {
+        "region_no": 32,
+        "region_id": "review_region_learn_ocr_text_text_68",
+        "source_item_id": "learn_ocr_text_text_68",
+        "label": "2026-07-13",
+        "role": "text",
+        "bbox": {
+          "x": 1292,
+          "y": 1048,
+          "w": 77,
+          "h": 21
+        },
+        "candidate_point": {},
+        "layout_zone": "right_detail_panel",
+        "visual_order_key": [
+          1048,
+          1292
+        ],
+        "description": "2026-07-13 · role=text · operation=read_only · readiness=review_required",
+        "possible_operation": {
+          "kind": "read_only",
+          "label": "Read or inspect region",
+          "readiness": "review_required",
+          "execute_binding_enabled": false,
+          "artifact_is_authorization": false
+        },
+        "calibration_state": "learning_draft_review_only",
+        "pathgraph_candidate_review_state": "blocked_learning_draft_review_only",
+        "required_next_step": "review_before_pathgraph_promotion",
+        "evidence": {
+          "source": "learning_draft.regions",
+          "action_template_id": null
+        },
+        "display_only": true,
+        "execute_binding_enabled": false,
+        "artifact_is_authorization": false
+      }
+    ]
+  },
+  "safety": {
+    "display_only": true,
+    "model_started": false,
+    "live_clicks": 0,
+    "live_fills": 0,
+    "live_submits": 0,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false,
+    "runtime_pathgraph_promotion": false
+  },
+  "display_only": true,
+  "execute_binding_enabled": false,
+  "artifact_is_authorization": false,
+  "not_accuracy": true,
+  "not_e2e_success": true,
+  "interpretation": "Template-like page detail candidate generated from model-produced learning artifacts and existing calibration evidence. It is arranged by source bbox layout for demo/review only; it does not start models, click, fill, submit, authorize Execute, or promote Runtime PathGraph.",
+  "report_path": "D:\\agent-gui-runtime\\artifacts\\learning-runs\\panel_20260711-085238-083_python_org\\learn_page_detail_candidate.json"
+}

@@ -1,0 +1,56 @@
+{
+  "contract_version": "learn_page_detail_candidate_v1",
+  "source_path": "artifacts/learning-runs/panel_20260711-153912-864_nvidia_overlay/trial_result.json",
+  "source_detail_shape": "learn_two_stage_screen_understanding_v1",
+  "precise_understanding_candidate_path": "",
+  "screen_summary": "Auto-generated page detail candidate from Learn Mode full-screen understanding and calibration evidence.",
+  "layout_mode": "stage_parent_sections_spatial_bbox_order",
+  "readiness_status": "needs_page_detail_review",
+  "screenshot_path": "D:\\agent-gui-runtime\\artifacts\\screenshots\\nvidia-geforce-overlay-dt__observe-screen__nvidia-overlay__full-window__20260711-153834-588587.png",
+  "full_screen_understanding_overlay_path": "artifacts\\review-overlays\\nvidia-geforce-overlay-dt__observe-screen__nvidia-overlay__full-window__20260711-153834-588587__two-stage-understanding__20260711-153912-785025.png",
+  "compiled_overlay_path": "artifacts\\review-overlays\\nvidia-geforce-overlay-dt__observe-screen__nvidia-overlay__full-window__20260711-153834-588587__two-stage-understanding__20260711-153912-785025.png",
+  "summary": {
+    "region_count": 0,
+    "section_count": 0,
+    "display_group_count": 0,
+    "list_group_count": 0,
+    "container_group_count": 0,
+    "spatial_preview_suppressed_region_count": 0,
+    "possible_operation_count": 0,
+    "pending_calibration_count": null,
+    "review_blocked_count": null,
+    "pathgraph_candidate_review_ready_count": null,
+    "runtime_pathgraph_promotion": false,
+    "display_only": true,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false
+  },
+  "layout": {
+    "bounds": {
+      "x": 0,
+      "y": 0,
+      "w": 1,
+      "h": 1
+    },
+    "sections": [],
+    "display_groups": [],
+    "regions": []
+  },
+  "safety": {
+    "display_only": true,
+    "model_started": false,
+    "live_clicks": 0,
+    "live_fills": 0,
+    "live_submits": 0,
+    "execute_binding_enabled": false,
+    "artifact_is_authorization": false,
+    "runtime_pathgraph_promotion": false
+  },
+  "display_only": true,
+  "execute_binding_enabled": false,
+  "artifact_is_authorization": false,
+  "not_accuracy": true,
+  "not_e2e_success": true,
+  "interpretation": "Template-like page detail candidate generated from model-produced learning artifacts and existing calibration evidence. It is arranged by source bbox layout for demo/review only; it does not start models, click, fill, submit, authorize Execute, or promote Runtime PathGraph.",
+  "report_path": "D:\\agent-gui-runtime\\artifacts\\learning-runs\\panel_20260711-153912-864_nvidia_overlay\\learn_page_detail_candidate.json"
+}

@@ -17,6 +17,11 @@ def audit_stage1_region_selection(
         if not isinstance(region, dict):
             continue
         case_results.append(_audit_region(region, width=width, height=height))
+    structure_family_coverage = _structure_family_coverage(case_results)
+    if case_results and structure_family_coverage["recognized_region_count"] == 0:
+        for item in case_results:
+            _mark_failed(item, "unknown_only_structure")
+    _audit_single_region_structure(case_results, width=width, height=height)
     _audit_region_overlap(case_results)
     _audit_horizontal_bar_lane(case_results, width=width)
     _audit_stage1_partition_adjacency(case_results, width=width, height=height)
@@ -34,11 +39,28 @@ def audit_stage1_region_selection(
         "region_count": len(case_results),
         "failed_region_count": len(failed),
         "failure_categories": sorted({failure for item in failed for failure in item["failure_categories"]}),
+        "structure_family_coverage": structure_family_coverage,
         "regions": case_results,
         "interpretation": (
             "This audit checks generic structure-region completeness. It is not a model accuracy score, "
             "not item recognition, and not Execute authorization."
         ),
+    }
+
+
+def _structure_family_coverage(case_results: list[dict[str, Any]]) -> dict[str, Any]:
+    recognized = [
+        item
+        for item in case_results
+        if item.get("region_type") in {"top_bar", "bottom_bar", "left_sidebar", "right_sidebar", "main_content"}
+    ]
+    families = sorted({str(item.get("region_type") or "") for item in recognized})
+    return {
+        "contract_version": "learn_stage1_structure_family_coverage_v1",
+        "status": "covered" if recognized else "not_covered",
+        "recognized_region_count": len(recognized),
+        "recognized_families": families,
+        "unknown_region_count": sum(1 for item in case_results if item.get("region_type") == "other"),
     }
 
 
@@ -64,8 +86,20 @@ def _audit_region(region: dict[str, Any], *, width: int, height: int) -> dict[st
             if bbox["x"] + bbox["w"] < width - max(12, int(width * 0.02)):
                 failures.append("right_sidebar_not_right_aligned")
         elif region_type == "main_content":
-            if bbox["w"] < int(width * 0.35) or bbox["h"] < int(height * 0.35):
+            main_bbox_too_small = bbox["w"] < int(width * 0.35) or bbox["h"] < int(height * 0.35)
+            if main_bbox_too_small:
                 failures.append("main_region_too_small")
+            rough_bbox = _bbox(region.get("rough_bbox"))
+            if rough_bbox and (
+                rough_bbox["w"] < int(width * 0.35)
+                or rough_bbox["h"] < int(height * 0.35)
+            ):
+                if _main_bbox_covers_stage_lane(bbox, width=width, height=height) or bool(
+                    region.get("recovered_from_unknown_only")
+                ):
+                    notes.append("main_content_has_centered_rough_content_column")
+                elif not main_bbox_too_small:
+                    failures.append("main_region_too_small")
         if bbox["x"] < 0 or bbox["y"] < 0 or bbox["x"] + bbox["w"] > width or bbox["y"] + bbox["h"] > height:
             failures.append("region_bbox_outside_screen")
     if region_type in {"top_bar", "left_sidebar", "right_sidebar", "bottom_bar"}:
@@ -76,10 +110,37 @@ def _audit_region(region: dict[str, Any], *, width: int, height: int) -> dict[st
         "label": str(region.get("label") or ""),
         "region_type": region_type,
         "bbox": deepcopy(bbox or {}),
+        "rough_bbox": deepcopy(_bbox(region.get("rough_bbox")) or {}),
         "status": "passed" if not failures else "failed",
         "failure_categories": failures,
         "notes": notes,
     }
+
+
+def _audit_single_region_structure(case_results: list[dict[str, Any]], *, width: int, height: int) -> None:
+    if len(case_results) != 1 or width <= 0 or height <= 0:
+        return
+    item = case_results[0]
+    if item.get("region_type") != "main_content":
+        return
+    bbox = _bbox(item.get("bbox"))
+    rough_bbox = _bbox(item.get("rough_bbox"))
+    if not bbox or not rough_bbox or not _main_bbox_covers_stage_lane(bbox, width=width, height=height):
+        return
+    if rough_bbox["h"] < int(height * 0.35):
+        _mark_failed(item, "single_region_undersegmented")
+        item["notes"].append("full_screen_main_was_backfilled_from_shallow_observed_content")
+
+
+def _main_bbox_covers_stage_lane(bbox: dict[str, int], *, width: int, height: int) -> bool:
+    tolerance_x = max(12, int(width * 0.02))
+    tolerance_y = max(12, int(height * 0.02))
+    return (
+        bbox["x"] <= tolerance_x
+        and bbox["y"] <= tolerance_y
+        and bbox["x"] + bbox["w"] >= width - tolerance_x
+        and bbox["y"] + bbox["h"] >= height - tolerance_y
+    )
 
 
 def _audit_region_overlap(case_results: list[dict[str, Any]]) -> None:

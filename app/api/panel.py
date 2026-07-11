@@ -36,6 +36,7 @@ from app.learn.recognition import (
     build_learning_recognition_trial,
     build_two_stage_screen_understanding,
     fusion_status_from_two_stage,
+    model_grounding_evidence_status_from_two_stage,
 )
 from app.api.models.response import APIResponse, ErrorModel
 from scripts.report_learn_fusion_model_start_approval_packet import (
@@ -162,12 +163,14 @@ class PanelRunLearningRecognitionTrialRequest(BaseModel):
     summary: str = ""
     observation_evidence: dict[str, Any] = Field(default_factory=dict)
     crop_size: dict[str, Any] = Field(default_factory=dict)
+    two_stage_report_path: Optional[str] = None
 
 
 class PanelRunLearningTwoStageUnderstandingRequest(BaseModel):
     app_name: str = "unknown_app"
     state_hint: str = ""
     trace_path: Optional[str] = None
+    source_image_path: Optional[str] = None
     observe_result: dict[str, Any] = Field(default_factory=dict)
     require_stage1_gate: bool = True
     stage2_region_strategy: str = Field(default="partitioned", pattern="^(partitioned|global_no_partition)$")
@@ -337,10 +340,11 @@ def load_learning_draft_review_endpoint(request: PanelLoadLearningDraftReviewReq
 
 
 @router.get("/panel/learning_draft_sources", response_model=APIResponse)
-def list_learning_draft_sources_endpoint() -> APIResponse:
+def list_learning_draft_sources_endpoint(limit: int = 3, include_recent: bool = False) -> APIResponse:
     """List recent learning draft sources that can be loaded for review."""
     try:
-        result = _list_recent_learning_draft_sources()
+        bounded_limit = max(1, min(int(limit or 3), 50))
+        result = _list_recent_learning_draft_sources(limit=bounded_limit, include_recent=include_recent)
         return APIResponse(success=True, message="Learning draft sources listed", data=result, error=None)
     except Exception as exc:
         return APIResponse(
@@ -512,6 +516,10 @@ def run_learning_recognition_trial_endpoint(request: PanelRunLearningRecognition
     """Build a display-only learning draft from current observe/coordinate evidence."""
     try:
         observe_bundle = _panel_learning_recognition_observe_bundle(request)
+        two_stage_review_evidence = _attach_two_stage_numbered_review_regions_to_observe_bundle(
+            observe_bundle,
+            request.two_stage_report_path,
+        )
         summary = request.summary or _panel_learning_recognition_summary(request.observation_evidence)
         result = build_learning_recognition_trial(
             observe_bundle=observe_bundle,
@@ -519,6 +527,14 @@ def run_learning_recognition_trial_endpoint(request: PanelRunLearningRecognition
             summary=summary,
             grounding_adapter=_panel_calibrated_target_grounding_adapter,
             crop_size=request.crop_size if request.crop_size else None,
+        )
+        two_stage_fusion_status = _load_two_stage_fusion_status_for_learning_draft(request.two_stage_report_path)
+        if two_stage_fusion_status:
+            _attach_two_stage_fusion_status_to_learning_result(result, two_stage_fusion_status)
+        precise_understanding_status = _precise_understanding_status_from_fusion_status(two_stage_fusion_status)
+        learn_all_targets = _learning_recognition_review_box_status(
+            two_stage_review_evidence=two_stage_review_evidence,
+            two_stage_fusion_status=two_stage_fusion_status,
         )
         safety = {
             **(result.get("safety") if isinstance(result.get("safety"), dict) else {}),
@@ -546,6 +562,8 @@ def run_learning_recognition_trial_endpoint(request: PanelRunLearningRecognition
             "live_safe_fill_attempted": 0,
             "final_submit_forbidden": True,
             "real_action_requires_gate": True,
+            "precise_understanding_status": precise_understanding_status,
+            "learn_all_targets": learn_all_targets,
             "best_attempt_index": 0,
             "best_learning_draft": result.get("learning_draft"),
             "source_type": "panel_observe_coordinate_evidence",
@@ -599,10 +617,23 @@ def run_learning_recognition_trial_endpoint(request: PanelRunLearningRecognition
                 "final_submit_forbidden": True,
                 "real_action_requires_gate": True,
                 "safety": safety,
+                "learn_all_targets": learn_all_targets,
                 "summary": {
                     "app_name": request.app_name,
                     "state_hint": request.state_hint,
                     "screen_inventory_count": len(saved_payload.get("screen_inventory") or []),
+                    "two_stage_report_attached": bool(two_stage_fusion_status),
+                    "two_stage_review_region_count": _int_or_zero(two_stage_review_evidence.get("attached_count")),
+                    "two_stage_stage1_gate_status": (
+                        two_stage_fusion_status.get("stage1_gate_status") if two_stage_fusion_status else ""
+                    ),
+                    "two_stage_stage2_numbering_skipped": (
+                        bool(two_stage_fusion_status.get("stage2_numbering_skipped")) if two_stage_fusion_status else False
+                    ),
+                    "two_stage_review_box_count": (
+                        _int_or_zero(two_stage_fusion_status.get("review_box_count")) if two_stage_fusion_status else 0
+                    ),
+                    "precise_understanding_status": precise_understanding_status,
                     "accepted_for_grounding_count": int(
                         ((saved_payload.get("classification") or {}).get("summary") or {}).get("accepted_for_grounding_count") or 0
                     ),
@@ -629,6 +660,7 @@ def run_learning_two_stage_understanding_endpoint(
     try:
         observe_result, source_trace_path = _panel_two_stage_observe_result(request)
         bundle = _observe_bundle_from_trace_result(observe_result, trace_path=source_trace_path)
+        source_image_override = _panel_apply_source_image_override(bundle, request.source_image_path)
         screen_inventory = _stage1_inventory_from_trace_result(observe_result)
         layout_graph = build_inventory_layout_graph(screen_inventory, screen_size=bundle.get("screen_size"))
         report = build_two_stage_screen_understanding(
@@ -637,8 +669,10 @@ def run_learning_two_stage_understanding_endpoint(
             layout_graph=layout_graph,
             require_stage1_gate=request.require_stage1_gate,
             stage2_region_strategy=request.stage2_region_strategy,
+            enable_ocr_content_recovery=True,
         )
         report["source_trace_path"] = str(source_trace_path)
+        report["source_image_override"] = source_image_override
         report["screen_inventory_count"] = len(screen_inventory)
         report["layout_graph_summary"] = {
             "node_count": layout_graph.get("node_count"),
@@ -649,6 +683,7 @@ def run_learning_two_stage_understanding_endpoint(
             },
         }
         report["fusion_status"] = fusion_status_from_two_stage(report)
+        report["model_grounding_evidence"] = model_grounding_evidence_status_from_two_stage(report)
         fusion = report.get("fusion") if isinstance(report.get("fusion"), dict) else {}
         stage1_gate = report.get("stage1_gate") if isinstance(report.get("stage1_gate"), dict) else {}
         review_boxes = fusion.get("fused_review_boxes") if isinstance(fusion.get("fused_review_boxes"), list) else []
@@ -689,6 +724,7 @@ def run_learning_two_stage_understanding_endpoint(
             "final_submit_forbidden": True,
             "source_type": "panel_live_observe_two_stage_understanding",
             "observe_bundle": bundle,
+            "source_image_override": source_image_override,
             "learn_all_targets": learn_all_targets_payload,
         }
         report_path = _save_panel_learning_trial(saved_payload, app_name=request.app_name)
@@ -722,11 +758,13 @@ def run_learning_two_stage_understanding_endpoint(
                 "report_path": report_path,
                 "trace_path": trace_path,
                 "source_trace_path": str(source_trace_path),
+                "source_image_override": source_image_override,
                 "status": stage1_gate.get("status") or "unknown",
                 "stage1_gate": stage1_gate,
                 "stage1_gate_required": bool(request.require_stage1_gate),
                 "stage2_numbering_skipped": bool(report.get("stage2_numbering_skipped")),
                 "fusion_status": report.get("fusion_status"),
+                "model_grounding_evidence": report.get("model_grounding_evidence"),
                 "coordinate_overlay_path": overlay_path,
                 "full_screen_understanding_overlay_path": overlay_path,
                 "image_path": bundle.get("image_path") or bundle.get("source_image_path"),
@@ -745,6 +783,11 @@ def run_learning_two_stage_understanding_endpoint(
                     "stage1_failure_categories": stage1_gate.get("failure_categories") if isinstance(stage1_gate.get("failure_categories"), list) else [],
                     "stage2_numbering_skipped": bool(report.get("stage2_numbering_skipped")),
                     "overlay_path": overlay_path,
+                    "model_grounding_evidence_status": (
+                        report.get("model_grounding_evidence", {}).get("status")
+                        if isinstance(report.get("model_grounding_evidence"), dict)
+                        else "unknown"
+                    ),
                 },
                 "promotion_allowed": False,
                 "artifact_is_authorization": False,
@@ -1430,6 +1473,9 @@ def _resolve_under_root_path(path: str | Path) -> Path:
 
 
 PINNED_LEARNING_DRAFT_SOURCE_PATHS = [
+    "logs/benchmarks/learn_three_interface_scaffold_20260711/applemusic/learn_mode_demo_scaffold.json",
+    "logs/benchmarks/learn_three_interface_scaffold_20260711/qq/learn_mode_demo_scaffold.json",
+    "logs/benchmarks/learn_three_interface_scaffold_20260711/python_org/learn_mode_demo_scaffold.json",
     "logs/benchmarks/learn_two_stage_python_v105_readonly_pathgraph_scaffold/learn_mode_demo_scaffold.json",
     "logs/benchmarks/learn_two_stage_applemusic_v105_readonly_pathgraph_scaffold/learn_mode_demo_scaffold.json",
     "logs/benchmarks/learn_two_stage_qq_v105_readonly_pathgraph_scaffold/learn_mode_demo_scaffold.json",
@@ -1443,8 +1489,11 @@ PINNED_LEARNING_DRAFT_SOURCE_PATHS = [
     "logs/benchmarks/learn_pathgraph_readiness_with_handoff_20260706/actual_parser_output_with_fusion_status.json",
 ]
 
+MAX_PINNED_LEARNING_DRAFT_SOURCES = 3
+MAX_RECENT_LEARNING_DRAFT_CANDIDATE_ATTEMPTS = 6
 
-def _list_recent_learning_draft_sources(*, limit: int = 50) -> dict[str, Any]:
+
+def _list_recent_learning_draft_sources(*, limit: int = 16, include_recent: bool = True) -> dict[str, Any]:
     roots = [
         ROOT_DIR / "artifacts" / "learning-runs",
         ROOT_DIR / "artifacts" / "learning-draft-review",
@@ -1454,8 +1503,11 @@ def _list_recent_learning_draft_sources(*, limit: int = 50) -> dict[str, Any]:
     candidates: list[Path] = []
     sources: list[dict[str, Any]] = []
     skipped_count = 0
+    suppressed_pinned_count = 0
     seen_paths: set[str] = set()
     for path in pinned_paths:
+        if len(sources) >= min(MAX_PINNED_LEARNING_DRAFT_SOURCES, limit):
+            break
         if not path.exists() or not path.is_file():
             continue
         try:
@@ -1467,18 +1519,29 @@ def _list_recent_learning_draft_sources(*, limit: int = 50) -> dict[str, Any]:
         source["pinned"] = True
         sources.append(source)
         seen_paths.add(str(path.resolve()))
-    for root in roots:
-        if root.exists():
-            candidates.extend(path for path in root.rglob("*.json") if path.is_file() and _is_learning_draft_source_candidate_file(path))
-    if targeted_benchmark_root.exists():
-        for file_name in ("learn_page_detail_candidate.json", "learn_mode_demo_scaffold.json"):
-            candidates.extend(path for path in targeted_benchmark_root.rglob(file_name) if path.is_file())
-    candidates.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    for path in pinned_paths:
+        resolved_text = str(path.resolve())
+        if path.exists() and resolved_text not in seen_paths:
+            seen_paths.add(resolved_text)
+            suppressed_pinned_count += 1
+    if include_recent:
+        for root in roots:
+            if root.exists():
+                candidates.extend(path for path in root.rglob("*.json") if path.is_file() and _is_learning_draft_source_candidate_file(path))
+        if targeted_benchmark_root.exists():
+            for file_name in ("learn_page_detail_candidate.json", "learn_mode_demo_scaffold.json"):
+                candidates.extend(path for path in targeted_benchmark_root.rglob(file_name) if path.is_file())
+        candidates.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    candidate_attempt_limit = min(MAX_RECENT_LEARNING_DRAFT_CANDIDATE_ATTEMPTS, max(0, limit - len(sources)))
+    candidate_attempt_count = 0
     for path in candidates:
         if len(sources) >= limit:
             break
         if str(path.resolve()) in seen_paths:
             continue
+        if candidate_attempt_count >= candidate_attempt_limit:
+            break
+        candidate_attempt_count += 1
         try:
             source = _learning_draft_source_entry(path, pinned=False)
         except Exception:
@@ -1495,6 +1558,12 @@ def _list_recent_learning_draft_sources(*, limit: int = 50) -> dict[str, Any]:
         "sources": sources,
         "skipped_count": skipped_count,
         "limit": limit,
+        "include_recent": include_recent,
+        "candidate_attempt_limit": candidate_attempt_limit,
+        "candidate_attempt_count": candidate_attempt_count,
+        "max_pinned_sources": MAX_PINNED_LEARNING_DRAFT_SOURCES,
+        "max_recent_candidate_attempts": MAX_RECENT_LEARNING_DRAFT_CANDIDATE_ATTEMPTS,
+        "suppressed_pinned_count": suppressed_pinned_count,
         "artifact_is_authorization": False,
         "execute_binding_enabled": False,
     }
@@ -2061,12 +2130,12 @@ def _is_learning_draft_source_candidate_file(path: Path) -> bool:
 
 def _relative_panel_path(path: Path) -> str:
     try:
-        return str(path.resolve().relative_to(ROOT_DIR.resolve()))
+        return str(path.resolve().relative_to(ROOT_DIR.resolve())).replace("\\", "/")
     except ValueError:
-        return str(path)
+        return str(path).replace("\\", "/")
 
 
-def _resolve_panel_learning_image_path(path: str) -> Path:
+def _resolve_panel_artifact_file(path: str) -> Path:
     resolved = Path(path).expanduser()
     if not resolved.is_absolute():
         resolved = ROOT_DIR / resolved
@@ -2077,6 +2146,233 @@ def _resolve_panel_learning_image_path(path: str) -> Path:
     if not resolved.exists() or not resolved.is_file():
         raise FileNotFoundError(str(resolved))
     return resolved
+
+
+def _resolve_panel_learning_image_path(path: str) -> Path:
+    return _resolve_panel_artifact_file(path)
+
+
+def _load_two_stage_fusion_status_for_learning_draft(path: str | None) -> dict[str, Any] | None:
+    path_text = str(path or "").strip()
+    if not path_text:
+        return None
+    resolved = _resolve_panel_artifact_file(path_text)
+    report = json.loads(resolved.read_text(encoding="utf-8-sig"))
+    if not isinstance(report, dict):
+        raise ValueError("two-stage report must be a JSON object")
+    fusion_status = report.get("fusion_status") if isinstance(report.get("fusion_status"), dict) else {}
+    if not fusion_status:
+        fusion_status = fusion_status_from_two_stage(report)
+    fusion_status = dict(fusion_status)
+    fusion_status["source_two_stage_report_path"] = _relative_panel_path(resolved)
+    fusion_status["attachment_source"] = "panel_run_learning_recognition_trial.two_stage_report_path"
+    fusion_status["display_only"] = True
+    fusion_status["artifact_is_authorization"] = False
+    fusion_status["execute_binding_enabled"] = False
+    stage1_gate = report.get("stage1_gate") if isinstance(report.get("stage1_gate"), dict) else {}
+    stage2 = report.get("stage2_numbering") if isinstance(report.get("stage2_numbering"), dict) else {}
+    fusion = report.get("fusion") if isinstance(report.get("fusion"), dict) else {}
+    review_boxes = fusion.get("fused_review_boxes") if isinstance(fusion.get("fused_review_boxes"), list) else []
+    fusion_summary = fusion_status.get("summary") if isinstance(fusion_status.get("summary"), dict) else {}
+    fusion_status["stage1_gate_status"] = _str(stage1_gate.get("status"))
+    fusion_status["stage2_numbering_skipped"] = bool(report.get("stage2_numbering_skipped"))
+    fusion_status["review_box_count"] = len(review_boxes) or _int_or_zero(fusion_summary.get("fused_review_box_count"))
+    fusion_status["stage2_numbered_region_count"] = len(stage2.get("regions") if isinstance(stage2.get("regions"), list) else [])
+    return fusion_status
+
+
+def _attach_two_stage_numbered_review_regions_to_observe_bundle(
+    observe_bundle: dict[str, Any],
+    path: str | None,
+) -> dict[str, Any]:
+    path_text = str(path or "").strip()
+    if not path_text:
+        return {"attached_count": 0, "reason": "no_two_stage_report_path"}
+    resolved = _resolve_panel_artifact_file(path_text)
+    report = json.loads(resolved.read_text(encoding="utf-8-sig"))
+    if not isinstance(report, dict):
+        raise ValueError("two-stage report must be a JSON object")
+    review_regions = _two_stage_numbered_items_as_review_regions(report, source_path=_relative_panel_path(resolved))
+    if not review_regions:
+        _record_two_stage_review_evidence_summary(
+            observe_bundle,
+            source_path=_relative_panel_path(resolved),
+            attached_count=0,
+            skipped_reason="no_numbered_items",
+        )
+        return {"attached_count": 0, "reason": "no_numbered_items", "source_two_stage_report_path": _relative_panel_path(resolved)}
+    sources = observe_bundle.setdefault("sources", {})
+    if not isinstance(sources, dict):
+        sources = {}
+        observe_bundle["sources"] = sources
+    vision = sources.get("vision") if isinstance(sources.get("vision"), dict) else {}
+    regions = vision.get("regions") if isinstance(vision.get("regions"), list) else []
+    vision["regions"] = [*regions, *review_regions]
+    sources["vision"] = vision
+    _record_two_stage_review_evidence_summary(
+        observe_bundle,
+        source_path=_relative_panel_path(resolved),
+        attached_count=len(review_regions),
+        skipped_reason="",
+    )
+    return {
+        "attached_count": len(review_regions),
+        "reason": "attached_two_stage_numbered_items_as_review_only_regions",
+        "source_two_stage_report_path": _relative_panel_path(resolved),
+    }
+
+
+def _record_two_stage_review_evidence_summary(
+    observe_bundle: dict[str, Any],
+    *,
+    source_path: str,
+    attached_count: int,
+    skipped_reason: str,
+) -> None:
+    evidence = observe_bundle.get("panel_observation_evidence")
+    if not isinstance(evidence, dict):
+        evidence = {}
+        observe_bundle["panel_observation_evidence"] = evidence
+    evidence["two_stage_numbered_review_evidence"] = {
+        "contract_version": "panel_two_stage_numbered_review_evidence_v1",
+        "source_two_stage_report_path": source_path,
+        "attached_count": int(attached_count),
+        "skipped_reason": skipped_reason,
+        "display_only": True,
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+        "interpretation": (
+            "Stage2 numbered items are read-only learning draft evidence. They are not calibrated targets, "
+            "click authorization, or Runtime PathGraph promotion evidence."
+        ),
+    }
+
+
+def _two_stage_numbered_items_as_review_regions(report: dict[str, Any], *, source_path: str) -> list[dict[str, Any]]:
+    stage2 = report.get("stage2_numbering") if isinstance(report.get("stage2_numbering"), dict) else {}
+    regions = stage2.get("regions") if isinstance(stage2.get("regions"), list) else []
+    out: list[dict[str, Any]] = []
+    for region_index, region in enumerate(regions, start=1):
+        if not isinstance(region, dict):
+            continue
+        parent_region_id = _str(region.get("region_id") or f"stage2_region_{region_index}")
+        parent_label = _str(region.get("label") or parent_region_id)
+        items = region.get("numbered_items") if isinstance(region.get("numbered_items"), list) else []
+        for item_index, item in enumerate(items, start=1):
+            if not isinstance(item, dict):
+                continue
+            bbox = _normalized_bbox(item.get("bbox"))
+            if not bbox.get("w") or not bbox.get("h"):
+                continue
+            label = _str(item.get("label") or item.get("text") or item.get("name") or item.get("number"))
+            if not label:
+                continue
+            item_id = _str(item.get("item_id") or item.get("id") or item.get("number") or f"item_{item_index}")
+            out.append(
+                {
+                    "id": f"two_stage_review_{parent_region_id}_{item_id}",
+                    "region_id": f"two_stage_review_{parent_region_id}_{item_id}",
+                    "label": label,
+                    "role": _str(item.get("role") or "review_only"),
+                    "bbox": bbox,
+                    "description": f"Stage2 read-only item {item.get('number') or item_index} in {parent_label}",
+                    "parent_region_id": parent_region_id,
+                    "parent_region_label": parent_label,
+                    "stage2_number": _str(item.get("number")),
+                    "source": "two_stage_numbered_item_review_only",
+                    "source_two_stage_report_path": source_path,
+                    "review_only": True,
+                    "display_only": True,
+                    "artifact_is_authorization": False,
+                    "execute_binding_enabled": False,
+                    "no_click_authorization": True,
+                    "text_lines": [
+                        _str(line)
+                        for line in item.get("text_lines", [])
+                        if _str(line)
+                    ]
+                    if isinstance(item.get("text_lines"), list)
+                    else [],
+                }
+            )
+    return out
+
+
+def _precise_understanding_status_from_fusion_status(fusion_status: dict[str, Any] | None) -> str:
+    if not fusion_status:
+        return "not_attached"
+    if fusion_status.get("stage1_gate_status") == "blocked_before_stage2_numbering":
+        return "review_overlay_attached_stage1_blocked"
+    if _int_or_zero(fusion_status.get("review_box_count")) or fusion_status.get("compiled_overlay_path"):
+        return "review_overlay_attached"
+    return "attached_without_review_overlay"
+
+
+def _learning_recognition_review_box_status(
+    *,
+    two_stage_review_evidence: dict[str, Any],
+    two_stage_fusion_status: dict[str, Any] | None,
+) -> dict[str, Any]:
+    attached_count = _int_or_zero(two_stage_review_evidence.get("attached_count"))
+    fusion_status = two_stage_fusion_status if isinstance(two_stage_fusion_status, dict) else {}
+    fusion_summary = fusion_status.get("summary") if isinstance(fusion_status.get("summary"), dict) else {}
+    review_box_count = max(
+        attached_count,
+        _int_or_zero(fusion_status.get("review_box_count")),
+        _int_or_zero(fusion_summary.get("fused_review_box_count")),
+    )
+    numbered_region_count = _int_or_zero(fusion_status.get("stage2_numbered_region_count"))
+    stage1_gate_status = _str(fusion_status.get("stage1_gate_status"))
+    if stage1_gate_status == "blocked_before_stage2_numbering":
+        status = "blocked_before_stage2_numbering"
+    elif review_box_count or numbered_region_count:
+        status = "review_boxes_ready"
+    else:
+        status = "empty"
+    return {
+        "contract_version": "panel_learning_review_box_status_v1",
+        "status": status,
+        "target_count": 0,
+        "validated_count": 0,
+        "invalid_count": 0,
+        "review_box_count": review_box_count,
+        "stage1_gate_status": stage1_gate_status,
+        "stage2_numbered_region_count": numbered_region_count,
+        "source_two_stage_report_path": _str(fusion_status.get("source_two_stage_report_path")),
+        "display_only": True,
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+        "no_click_authorization": True,
+        "interpretation": (
+            "review boxes are learning-draft display evidence only; target_count remains zero until "
+            "separate grounding evidence creates executable candidates"
+        ),
+    }
+
+
+def _attach_two_stage_fusion_status_to_learning_result(
+    result: dict[str, Any],
+    fusion_status: dict[str, Any],
+) -> None:
+    draft = result.get("learning_draft") if isinstance(result.get("learning_draft"), dict) else {}
+    if not draft:
+        return
+    page_details = draft.get("page_details") if isinstance(draft.get("page_details"), dict) else {}
+    pipeline_audit = (
+        page_details.get("pipeline_audit")
+        if isinstance(page_details.get("pipeline_audit"), dict)
+        else {}
+    )
+    pipeline_audit["precise_understanding_fusion_status"] = fusion_status
+    page_details["pipeline_audit"] = pipeline_audit
+    if fusion_status.get("compiled_overlay_path"):
+        page_details["compiled_overlay_path"] = fusion_status.get("compiled_overlay_path")
+    if fusion_status.get("full_screen_understanding_overlay_path"):
+        page_details["full_screen_understanding_overlay_path"] = fusion_status.get(
+            "full_screen_understanding_overlay_path"
+        )
+    draft["page_details"] = page_details
+    result["learning_draft"] = draft
 
 
 def _save_panel_learning_trial(payload: dict[str, Any], *, app_name: str) -> str:
@@ -2140,6 +2436,36 @@ def _panel_two_stage_observe_result(
         raise ValueError("observe_result or trace_path is required")
     source_trace = _str(result.get("trace_path") or result.get("source_trace_path") or "panel_inline_observe_result.json")
     return result, Path(source_trace)
+
+
+def _panel_apply_source_image_override(bundle: dict[str, Any], source_image_path: str | None) -> dict[str, Any]:
+    override_text = _str(source_image_path).strip()
+    if not override_text:
+        return {"applied": False, "reason": "not_requested"}
+    resolved = _resolve_panel_learning_image_path(override_text)
+    original_path = _str(bundle.get("image_path") or bundle.get("source_image_path"))
+    bundle["image_path"] = str(resolved)
+    bundle["source_image_path"] = str(resolved)
+    try:
+        with Image.open(resolved) as image:
+            size = {"width": int(image.width), "height": int(image.height)}
+            bundle["screen_size"] = size
+            bundle["image_size"] = size
+    except Exception as exc:
+        return {
+            "applied": True,
+            "status": "image_size_unreadable",
+            "reason": str(exc),
+            "original_path": original_path,
+            "path": str(resolved),
+        }
+    return {
+        "applied": True,
+        "status": "applied",
+        "reason": "explicit_source_image_override",
+        "original_path": original_path,
+        "path": str(resolved),
+    }
 
 
 def _panel_learning_recognition_observe_bundle(request: PanelRunLearningRecognitionTrialRequest) -> dict[str, Any]:

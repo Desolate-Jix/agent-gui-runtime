@@ -762,6 +762,14 @@ def test_learning_interface_flow_has_unified_progress_and_simple_review_surface(
     assert "async function runLearningTwoStageUnderstanding" in panel_js
     assert "/panel/run_learning_two_stage_understanding" in panel_js
     assert "function learningTwoStageAllowsDraftTrial" in panel_js
+    two_stage_overlay_start = panel_js.index("function learningTwoStageOverlayPath")
+    two_stage_overlay_body = panel_js[
+        two_stage_overlay_start:panel_js.index("function learningTwoStageAllowsDraftTrial", two_stage_overlay_start)
+    ]
+    assert two_stage_overlay_body.index("result.compiled_overlay_path") < two_stage_overlay_body.index(
+        "result.coordinate_overlay_path"
+    )
+    assert "nestedGet(result, [\"fusion\", \"compiled_overlay_path\"])" in two_stage_overlay_body
     assert "Stage1 gate blocked Stage2" in panel_js
     assert "two-stage boxes accepted for draft review" in panel_js
     assert 'renderLearningDraftScreenshotPath(twoStageOverlayPath, "learning two-stage fused overlay")' in panel_js
@@ -772,6 +780,9 @@ def test_learning_interface_flow_has_unified_progress_and_simple_review_surface(
     assert "filtered_non_actionable" in panel_js
     assert "two-stage fused draft · Stage1 gate passed" in panel_js
     assert "function syncLearningInterfacePrepFromSharedControls" in panel_js
+    assert "function learningDraftRegionId" in panel_js
+    assert "learningDraftRegionId(region, index)" in panel_js
+    assert "const regionIds = new Set(regions.map((region, index) => learningDraftRegionId(region, index)))" in panel_js
     assert 'on("learningInterfaceRunBtn", "click", runLearningInterfaceFlow)' in panel_js
     assert 'on("learningInterfaceListWindowsBtn", "click", learningInterfaceListWindows)' in panel_js
     assert 'on("learningInterfaceBindWindowBtn", "click", learningInterfaceBindWindow)' in panel_js
@@ -834,6 +845,109 @@ def test_panel_api_response_result_helper_preserves_two_stage_gate_data() -> Non
     assert 'nestedGet(result, ["stage2_numbering_skipped"]) !== true' in allows_body
 
 
+def test_panel_two_stage_endpoint_records_explicit_source_image_override(monkeypatch, tmp_path) -> None:
+    client = TestClient(app)
+    override_image = tmp_path / "override.png"
+    Image.new("RGB", (111, 77), "white").save(override_image)
+
+    monkeypatch.setattr(panel_api, "_resolve_panel_learning_image_path", lambda path: Path(path))
+    monkeypatch.setattr(
+        panel_api,
+        "_observe_bundle_from_trace_result",
+        lambda result, trace_path: {
+            "image_path": "artifacts/screenshots/stale.png",
+            "source_image_path": "artifacts/screenshots/stale.png",
+            "screen_size": {"width": 320, "height": 240},
+            "screen_reading": {"screen_summary": "demo screen"},
+        },
+    )
+    monkeypatch.setattr(
+        panel_api,
+        "_stage1_inventory_from_trace_result",
+        lambda result: [{"item_id": "item_1", "label": "Main", "bbox": {"x": 0, "y": 0, "w": 111, "h": 77}}],
+    )
+    monkeypatch.setattr(
+        panel_api,
+        "build_inventory_layout_graph",
+        lambda inventory, screen_size=None: {"node_count": len(inventory), "zone_count": 1, "zones": {}},
+    )
+    captured_bundle = {}
+
+    def fake_two_stage(**kwargs):
+        captured_bundle.update(kwargs["bundle"])
+        return {
+            "stage1_gate": {"status": "passed", "failure_categories": [], "allow_stage2_numbering": True},
+            "stage2_numbering_skipped": False,
+            "stage2_numbering": {"regions": [{"region_id": "R1"}]},
+            "fusion": {
+                "compiled_overlay_path": "artifacts/review-overlays/demo_two_stage.png",
+                "fused_review_boxes": [
+                    {"id": "R1", "label": "Main", "role": "review_only", "bbox": {"x": 1, "y": 2, "w": 3, "h": 4}}
+                ],
+            },
+        }
+
+    monkeypatch.setattr(panel_api, "build_two_stage_screen_understanding", fake_two_stage)
+    monkeypatch.setattr(panel_api, "fusion_status_from_two_stage", lambda report: {"status": "available"})
+
+    response = client.post(
+        "/panel/run_learning_two_stage_understanding",
+        json={
+            "app_name": "demo_app",
+            "state_hint": "home",
+            "source_image_path": str(override_image),
+            "observe_result": {"image_path": "artifacts/screenshots/stale.png", "image_size": {"width": 320, "height": 240}},
+            "require_stage1_gate": True,
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["source_image_override"]["status"] == "applied"
+    assert data["source_image_override"]["original_path"] == "artifacts/screenshots/stale.png"
+    assert data["image_path"] == str(override_image)
+    assert captured_bundle["image_path"] == str(override_image)
+    assert captured_bundle["screen_size"] == {"width": 111, "height": 77}
+    saved_report = json.loads(Path(data["report_path"]).read_text(encoding="utf-8-sig"))
+    assert saved_report["source_image_override"]["status"] == "applied"
+    assert saved_report["observe_bundle"]["image_path"] == str(override_image)
+
+
+def test_panel_status_text_does_not_label_two_stage_review_boxes_as_no_targets() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    status_start = panel_js.index("function statusTextForResponse")
+    status_body = panel_js[status_start:panel_js.index("function nestedGet", status_start)]
+
+    assert 'return "stage1_blocked";' in status_body
+    assert 'return "review_boxes_ready";' in status_body
+    assert 'learnStatus === "two_stage_stage1_gate_passed"' in status_body
+    assert 'result?.location_status === "learn_review_boxes_ready"' in status_body
+    assert "reviewBoxCount > 0" in status_body
+    assert "numberedRegionCount > 0" in status_body
+    assert "twoStageAttached" in status_body
+    assert 'resultSummary?.two_stage_report_attached === true' in status_body
+    assert status_body.index('return "review_boxes_ready";') < status_body.index('return "no_targets";')
+
+
+def test_learning_deep_calibration_reports_when_model_validation_did_not_run() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    summary_start = panel_js.index("function learningDeepCalibrationEvidenceSummary")
+    summary_body = panel_js[summary_start:panel_js.index("function learningDeepCalibrationOverlayPath", summary_start)]
+    assert "modelValidationStatus" in summary_body
+    assert "vistaValidationStatus" in summary_body
+    assert "learn_locate_model_review" in summary_body
+    assert "vista_validation_enabled" in summary_body
+    assert 'model_validation=${evidence.modelValidationStatus || "unknown"}' in panel_js
+    assert 'vista_validation=${evidence.vistaValidationStatus || "unknown"}' in panel_js
+
+    evidence_start = panel_js.index("function buildLearningDraftObservationEvidence")
+    evidence_body = panel_js[evidence_start:panel_js.index("function setLearningTrialResultPath", evidence_start)]
+    assert "hasCoordinateReviewEvidence" in evidence_body
+    assert "hasCalibratedTargets ? " not in evidence_body
+    assert "coordinate_calibration_status" in evidence_body
+
+
 def test_learning_interface_keeps_display_overlay_out_of_source_image_path() -> None:
     panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
 
@@ -853,11 +967,42 @@ def test_learning_interface_keeps_display_overlay_out_of_source_image_path() -> 
     assert "renderLearningDraftScreenshotPath(overlayPath, \"learning two-stage fused overlay\")" in two_stage_body
     assert "setCurrentImage(overlayPath)" not in two_stage_body
 
+    calibration_start = panel_js.index("async function runLearningDeepCalibration")
+    calibration_body = panel_js[calibration_start:panel_js.index("function learningTwoStageUnderstandingPayload", calibration_start)]
+    assert "lastLearningDraftObserveTracePath || lastObserveTracePath" in calibration_body
+    assert "payload.agent_mode = \"learn\"" in calibration_body
+    assert "payload.learn_depth = \"deep\"" in calibration_body
+    assert "payload.metadata.learn_all_targets = true" in calibration_body
+
+    two_stage_payload_start = panel_js.index("function learningTwoStageUnderstandingPayload")
+    two_stage_payload_body = panel_js[two_stage_payload_start:panel_js.index("function learningTwoStageOverlayPath", two_stage_payload_start)]
+    assert "const observeResult = resultOf(lastLearningDraftObserveResponse || lastResponse);" in two_stage_payload_body
+    assert "const sourceImagePath = firstLearningSourceImagePath(" in two_stage_payload_body
+    assert "source_image_path: sourceImagePath || null" in two_stage_payload_body
+
     evidence_start = panel_js.index("function buildLearningDraftObservationEvidence")
     evidence_body = panel_js[evidence_start:panel_js.index("function setLearningTrialResultPath", evidence_start)]
+    assert "const observeResult = resultOf(lastLearningDraftObserveResponse || {});" in evidence_body
+    assert "observeResult.screen_map && typeof observeResult.screen_map === \"object\"" in evidence_body
     assert "current_image_path: firstLearningSourceImagePath(" in evidence_body
+    assert "observeResult.image_path" in evidence_body
     assert "rejected_display_overlay_input_path" in evidence_body
     assert 'current_image_path: String($("learningTrialImagePath")?.value || currentImagePath' not in evidence_body
+
+
+def test_learning_interface_flow_runs_deep_calibration_before_fusion_trial() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    flow_start = panel_js.index("async function runLearningInterfaceFlow")
+    flow_body = panel_js[flow_start:panel_js.index("async function completeLearningInterfaceReadonlyFlow", flow_start)]
+
+    assert "const calibration = await runLearningDeepCalibration()" in flow_body
+    assert "const calibrationEvidence = learningDeepCalibrationEvidenceSummary(calibration)" in flow_body
+    assert "const calibrationOverlayPath = learningDeepCalibrationOverlayPath(calibration)" in flow_body
+    assert "renderLearningDraftScreenshotPath(calibrationOverlayPath, \"learning deep calibration overlay\")" in flow_body
+    assert flow_body.index("const calibration = await runLearningDeepCalibration()") < flow_body.index(
+        "const fusedTrial = await runLearningDraftTrial"
+    )
 
 
 def test_web_panel_saves_interface_map_with_edit_trace() -> None:
@@ -2511,7 +2656,8 @@ def test_learning_draft_panel_renders_open_detail_transition_hints() -> None:
     assert "function buildLearningDraftObservationEvidence" in panel_js
     assert "function screenMapEvidenceCount" in panel_js
     assert "screen_map_available_no_recent_learn_deep" in panel_js
-    assert 'trace_path: hasCalibratedTargets ?' in panel_js
+    assert "hasCoordinateReviewEvidence" in panel_js
+    assert "coordinate_calibration_status" in panel_js
     assert "calibrated_targets: compactLearningDraftTargets" in panel_js
     assert "function learningTrialRequestPayload" not in panel_js
     assert "function learningRecognitionTrialRequestPayload" in panel_js
@@ -2549,16 +2695,39 @@ def test_learning_draft_panel_renders_open_detail_transition_hints() -> None:
     assert run_flow_body.index("clearLearningDraftWorkspaceForNewRun") < run_flow_body.index("captureLearningDraftWindow")
     assert 'clearScreenUnderstandingResidualDisplays("not_loaded · screen understanding started")' in capture_trial_body
     assert "await loadLearningDraftReview({ skipResponse: true })" in run_trial_body
-    assert 'clearScreenUnderstandingResidualDisplays("not_loaded · generating learning draft")' in run_trial_body
-    assert run_trial_body.index("const payload = learningRecognitionTrialRequestPayload()") < run_trial_body.index('clearScreenUnderstandingResidualDisplays("not_loaded · generating learning draft")')
+    assert 'clearScreenUnderstandingResidualDisplays("not_loaded · generating learning draft", {' in run_trial_body
+    assert "preserveTwoStageReportPath: Boolean(options.preserveTwoStageReportPath)" in run_trial_body
+    request_payload_start = panel_js.index("function learningRecognitionTrialRequestPayload")
+    capture_trial_start_for_payload = panel_js.index("async function captureLearningDraftWindow", request_payload_start)
+    request_payload_body = panel_js[request_payload_start:capture_trial_start_for_payload]
+    assert "two_stage_report_path: String(lastLearningTwoStageReportPath || \"\").trim() || null" in request_payload_body
+    assert run_trial_body.index("const payload = learningRecognitionTrialRequestPayload()") < run_trial_body.index(
+        'clearScreenUnderstandingResidualDisplays("not_loaded · generating learning draft", {'
+    )
     assert "const trialEvidence = learningInterfaceTrialEvidenceSummary(trial)" in run_flow_body
     assert "const twoStage = await runLearningTwoStageUnderstanding()" in run_flow_body
-    assert "if (!learningTwoStageAllowsDraftTrial(twoStage))" in run_flow_body
-    assert "const fusedTrial = await runLearningDraftTrial()" in run_flow_body
+    assert "const twoStageAllowed = learningTwoStageAllowsDraftTrial(twoStage)" in run_flow_body
+    assert "if (!twoStageAllowed)" in run_flow_body
+    blocked_stage_body = run_flow_body[
+        run_flow_body.index("if (!twoStageAllowed)"):
+        run_flow_body.index("setLearningInterfaceFlowStep(\n      \"fusion\"", run_flow_body.index("if (!twoStageAllowed)"))
+    ]
+    assert "return trial" not in blocked_stage_body
+    assert "loading review overlay" in blocked_stage_body
+    assert "const fusedTrial = await runLearningDraftTrial({ preserveTwoStageReportPath: true })" in run_flow_body
+    assert "let lastLearningTwoStageReportPath" in panel_js
+    assert 'lastLearningTwoStageReportPath = ""' in panel_js
+    assert 'lastLearningTwoStageReportPath = String(resultOf(response).report_path || "").trim()' in panel_js
+    create_page_detail_start = panel_js.index("async function createPageDetailCandidate")
+    create_demo_scaffold_start = panel_js.index("async function createLearningDemoScaffold")
+    create_page_detail_body = panel_js[create_page_detail_start:create_demo_scaffold_start]
+    assert create_page_detail_body.index("lastLearningTwoStageReportPath") < create_page_detail_body.index("learningPathGraphCandidatePath")
+    assert create_page_detail_body.index("lastLearningTwoStageReportPath") < create_page_detail_body.index("learningDetailObserveCandidatePath")
+    assert create_page_detail_body.index("lastLearningTwoStageReportPath") < create_page_detail_body.index("learningDraftReviewSourcePath()")
     assert 'stage2_region_strategy: "partitioned"' in panel_js
     assert 'stage2_region_strategy: "global_no_partition"' not in run_flow_body
-    assert run_flow_body.index("const twoStage = await runLearningTwoStageUnderstanding()") < run_flow_body.index("const fusedTrial = await runLearningDraftTrial()")
-    assert run_flow_body.index("if (!learningTwoStageAllowsDraftTrial(twoStage))") < run_flow_body.index("const fusedTrial = await runLearningDraftTrial()")
+    assert run_flow_body.index("const twoStage = await runLearningTwoStageUnderstanding()") < run_flow_body.index("const fusedTrial = await runLearningDraftTrial")
+    assert run_flow_body.index("if (!twoStageAllowed)") < run_flow_body.index("const fusedTrial = await runLearningDraftTrial")
     assert "replayModelArtifactPath" not in run_trial_body
     assert "loadReplayModelArtifact" not in run_trial_body
     assert "/execute/" not in run_trial_body
@@ -2654,7 +2823,9 @@ def test_learning_draft_panel_renders_open_detail_transition_hints() -> None:
     clear_residual_end = panel_js.index("function enterScreenUnderstandingStage")
     clear_residual_body = panel_js[clear_residual_start:clear_residual_end]
     assert 'setLearnReplaySubview("draft")' not in clear_residual_body
-    assert "clearLearningDraftTrialArtifacts(reason)" in clear_residual_body
+    assert "clearLearningDraftTrialArtifacts(reason, options)" in clear_residual_body
+    assert "preserveTwoStageReportPath" in clear_artifacts_body
+    assert 'lastLearningTwoStageReportPath = ""' in clear_artifacts_body
     assert "clearTemplateReplayResidualDisplays(reason)" in clear_residual_body
     assert "clearSharedPathDetailDisplay()" in clear_residual_body
     assert "hideSharedPathSurface()" in clear_residual_body
@@ -2765,9 +2936,12 @@ def test_panel_two_stage_endpoint_returns_review_boxes_for_real_learning_flow(mo
     assert data["learn_all_targets"]["review_box_count"] == 1
     assert data["learn_all_targets"]["review_boxes"][0]["label"] == "Main Card"
     assert data["coordinate_overlay_path"] == "artifacts/review-overlays/demo_two_stage.png"
+    assert data["model_grounding_evidence"]["status"] == "not_valid_for_model_grounding_evidence"
+    assert data["summary"]["model_grounding_evidence_status"] == "not_valid_for_model_grounding_evidence"
     assert data["real_clicks"] == 0
     assert data["promotion_allowed"] is False
     saved_report = json.loads(Path(data["report_path"]).read_text(encoding="utf-8-sig"))
+    assert saved_report["model_grounding_evidence"]["status"] == "not_valid_for_model_grounding_evidence"
     assert saved_report["learn_all_targets"]["review_box_count"] == 1
     assert saved_report["learn_all_targets"]["review_boxes"][0]["label"] == "Main Card"
     assert saved_report["learn_all_targets"]["overlay_path"] == "artifacts/review-overlays/demo_two_stage.png"
