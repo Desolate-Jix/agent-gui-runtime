@@ -30,10 +30,10 @@
 - `compile_hierarchical_regions(model_payload, candidates, image_size) -> dict`
 - `RegionFrame.get_region/get_region_children/crop_region`
 
-- [ ] Write tests for valid parent/child union, invalid references, disconnected union, overlap and crop.
-- [ ] Run the tests and confirm they fail because the module is absent.
-- [ ] Implement the minimal module.
-- [ ] Run the tests until green.
+- [x] Write tests for valid parent/child union, invalid references, disconnected union, overlap and crop.
+- [x] Run the tests and confirm they fail because the module is absent.
+- [x] Implement the minimal module.
+- [x] Run the tests until green.
 
 ### Task 2: One-shot evaluator and artifacts
 
@@ -45,9 +45,9 @@
 - CLI accepts `--case-manifest`, `--out`, `--model-profile`, `--offline-model-output`.
 - Report writes raw/parsed model output, candidate and region overlays, crops, validator and comparison JSON.
 
-- [ ] Write a failing CLI fixture test.
-- [ ] Implement candidate overlay, one-call model adapter and report writer.
-- [ ] Verify an offline fixture run.
+- [x] Write a failing CLI fixture test.
+- [x] Implement candidate overlay, one-call model adapter and report writer.
+- [x] Verify an offline fixture run.
 
 ### Task 3: Fixed screenshot shadow evaluation
 
@@ -55,9 +55,8 @@
 - Create locally under ignored output: `logs/region_partition_mvp/<run_id>/...`
 - Update: `CURRENT_STATE.md` and `NEXT_STEPS.md` with evidence-based conclusion.
 
-- [ ] Select saved Steam, WhatsApp, Apple Music, Notepad and one known-good multi-column sample.
-- [ ] Run one 8B organization call per valid sample.
-- [ ] Generate crops and comparison table.
-- [ ] Run focused regressions proving production Stage1 remains unchanged.
-- [ ] Record whether the direction is better, inconclusive or worse.
-
+- [x] Select saved Steam, WhatsApp, Apple Music, Notepad and one known-good multi-column sample.
+- [x] Run one 8B organization call per valid sample.
+- [x] Generate crops and comparison table.
+- [x] Run focused regressions proving production Stage1 remains unchanged.
+- [x] Record whether the direction is better, inconclusive or worse.

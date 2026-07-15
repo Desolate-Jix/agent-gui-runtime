@@ -64,6 +64,10 @@ Stop the manually started API with `Ctrl+C`. The runtime does not authorize real
 
 ## Results Preview
 
+### Hierarchical Region Partition Shadow MVP
+
+The 2026-07-16 read-only hybrid experiment is **not ready and did not outperform the current bar-first path** on five fixed screenshots. It partially grouped Apple Music content rows, but collapsed WhatsApp and Python.org into whole-window regions, omitted the Notepad editor, and produced invalid or duplicate hierarchy fields. No production pipeline was changed. See [the evidence-based result](docs/experiments/2026-07-16-hierarchical-region-partition-mvp-result.md).
+
 ### Current Stage
 
 The read-only Learning Mode phase is accepted with declared limitations.
