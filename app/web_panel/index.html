@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>OpenClaw Console</title>
-    <link rel="stylesheet" href="/panel/assets/panel.css?v=20260625-application-layout-4" />
+    <link rel="stylesheet" href="/panel/assets/panel.css?v=20260715-learning-fusion-2" />
   </head>
   <body>
     <div class="app-shell">
@@ -797,6 +797,14 @@
                   </div>
                 </div>
                 <div class="mode-help" data-i18n="learning_draft_path_preview_hint">Read-only preview generated from the learning draft. It does not load Template Replay, Execute, or click authorization.</div>
+                <section class="learning-draft-hierarchy-panel">
+                  <div class="panel-header compact">
+                    <h5 data-i18n="learning_ui_hierarchy_title">UI hierarchy</h5>
+                    <span id="learningDraftHierarchySummary"></span>
+                  </div>
+                  <div class="mode-help" data-i18n="learning_ui_hierarchy_hint">Screen, regions, sections, groups, components, and content are shown with their resolved parent-child ownership.</div>
+                  <div class="learning-draft-hierarchy-tree" id="learningDraftHierarchyTree"></div>
+                </section>
                 <div class="learning-draft-path-grid">
                   <div class="learning-draft-path-map" id="learningDraftPathMap"></div>
                   <div
@@ -1200,7 +1208,7 @@
         </div>
       </div>
     </div>
-    <script src="/panel/assets/panel.js?v=20260625-application-layout-4"></script>
+    <script src="/panel/assets/panel.js?v=20260715-learning-fusion-2"></script>
   </body>
 </html>
 

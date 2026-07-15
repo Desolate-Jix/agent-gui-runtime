@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from app.core.window_manager import BoundWindow, WindowManager, WindowRect
 import app.core.window_manager as window_manager_module
 
@@ -163,6 +165,8 @@ def test_focus_bound_window_preserves_non_minimized_window_state(monkeypatch) ->
     show_calls: list[tuple[int, int]] = []
 
     class FocusWin32Gui:
+        active_handle = 0
+
         @staticmethod
         def IsWindow(handle):
             return True
@@ -181,7 +185,7 @@ def test_focus_bound_window_preserves_non_minimized_window_state(monkeypatch) ->
 
         @staticmethod
         def GetForegroundWindow():
-            return 0
+            return FocusWin32Gui.active_handle
 
         @staticmethod
         def IsIconic(handle):
@@ -201,7 +205,7 @@ def test_focus_bound_window_preserves_non_minimized_window_state(monkeypatch) ->
 
         @staticmethod
         def SetForegroundWindow(handle):
-            return None
+            FocusWin32Gui.active_handle = handle
 
     class FocusWin32Process:
         @staticmethod
@@ -240,6 +244,8 @@ def test_focus_bound_window_restores_minimized_window(monkeypatch) -> None:
     show_calls: list[tuple[int, int]] = []
 
     class MinimizedWin32Gui:
+        active_handle = 0
+
         @staticmethod
         def IsWindow(handle):
             return True
@@ -258,7 +264,7 @@ def test_focus_bound_window_restores_minimized_window(monkeypatch) -> None:
 
         @staticmethod
         def GetForegroundWindow():
-            return 0
+            return MinimizedWin32Gui.active_handle
 
         @staticmethod
         def IsIconic(handle):
@@ -278,7 +284,7 @@ def test_focus_bound_window_restores_minimized_window(monkeypatch) -> None:
 
         @staticmethod
         def SetForegroundWindow(handle):
-            return None
+            MinimizedWin32Gui.active_handle = handle
 
     class FocusWin32Process:
         @staticmethod
@@ -302,3 +308,98 @@ def test_focus_bound_window_restores_minimized_window(monkeypatch) -> None:
 
     assert focused.handle == 654
     assert show_calls == [(654, window_manager_module.win32con.SW_RESTORE)]
+
+
+def test_focus_bound_window_rejects_foreground_mismatch(monkeypatch) -> None:
+    manager = WindowManager()
+    bound = BoundWindow(
+        handle=777,
+        title="Target window",
+        process_id=77,
+        process_name="target.exe",
+        rect=WindowRect(left=10, top=20, right=810, bottom=620),
+        is_active=False,
+    )
+
+    class MismatchedForegroundWin32Gui:
+        @staticmethod
+        def IsIconic(handle):
+            return False
+
+        @staticmethod
+        def BringWindowToTop(handle):
+            return None
+
+        @staticmethod
+        def SetWindowPos(*_args):
+            return None
+
+        @staticmethod
+        def SetForegroundWindow(handle):
+            return None
+
+        @staticmethod
+        def GetForegroundWindow():
+            return 999
+
+    monkeypatch.setattr(window_manager_module, "WINDOWS_BACKEND_AVAILABLE", True)
+    monkeypatch.setattr(window_manager_module, "win32gui", MismatchedForegroundWin32Gui)
+    monkeypatch.setattr(window_manager_module.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(manager, "get_bound_window", lambda: bound)
+
+    with pytest.raises(RuntimeError, match="foreground verification failed"):
+        manager.focus_bound_window()
+
+
+def test_activate_window_temporarily_attaches_input_threads(monkeypatch) -> None:
+    manager = WindowManager()
+    attach_calls = []
+
+    class FocusWin32Gui:
+        @staticmethod
+        def IsIconic(handle):
+            return False
+
+        @staticmethod
+        def GetForegroundWindow():
+            return 999
+
+        @staticmethod
+        def BringWindowToTop(handle):
+            return None
+
+        @staticmethod
+        def SetWindowPos(*_args):
+            return None
+
+        @staticmethod
+        def SetForegroundWindow(handle):
+            return None
+
+    class FocusWin32Process:
+        @staticmethod
+        def GetWindowThreadProcessId(handle):
+            return (21 if handle == 999 else 22, 1)
+
+        @staticmethod
+        def AttachThreadInput(source_thread, target_thread, attach):
+            attach_calls.append((source_thread, target_thread, attach))
+
+    class FocusWin32Api:
+        @staticmethod
+        def GetCurrentThreadId():
+            return 20
+
+    monkeypatch.setattr(window_manager_module, "WINDOWS_BACKEND_AVAILABLE", True)
+    monkeypatch.setattr(window_manager_module, "win32gui", FocusWin32Gui)
+    monkeypatch.setattr(window_manager_module, "win32process", FocusWin32Process)
+    monkeypatch.setattr(window_manager_module, "win32api", FocusWin32Api, raising=False)
+
+    manager._activate_window(777)
+
+    assert attach_calls == [
+        (20, 21, True),
+        (20, 22, True),
+        (20, 22, False),
+        (20, 21, False),
+    ]

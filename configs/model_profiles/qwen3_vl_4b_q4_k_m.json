@@ -1,5 +1,6 @@
 {
   "profile_id": "qwen3_vl_4b_q4_k_m",
+  "exclusive_resource_group": "gpu_vision",
   "label": "Qwen3-VL 4B Q4_K_M",
   "role": ["understanding", "fast_understanding"],
   "provider_mode": "local_understanding",

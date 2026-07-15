@@ -26,6 +26,51 @@ def test_parse_grounding_model_output_accepts_json_point_and_pair():
     }
 
 
+def test_actual_grounding_missing_screenshot_is_invalid_stale_fixture(tmp_path: Path):
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "cases": [
+                    {
+                        "case_id": "stale_fixture_case",
+                        "observe_bundle": {
+                            "contract_version": "learn_observe_bundle_v1",
+                            "screen_size": {"width": 1200, "height": 800},
+                            "sources": {},
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    missing_path = tmp_path / "missing.png"
+
+    report = run_actual_grounding_smoke(
+        manifest_path=manifest_path,
+        case_id="stale_fixture_case",
+        label="Search",
+        screenshot_path=missing_path,
+        out_dir=tmp_path / "out",
+        endpoint="http://127.0.0.1:1/v1/chat/completions",
+        model_name="fake-model",
+        model_caller=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("model must not run")),
+    )
+
+    assert report["status"] == "invalid"
+    assert report["source_type"] == "fixture_only"
+    assert report["actual_model_call_in_this_run"] is False
+    assert report["blocker"]["failure_category"] == "stale_fixture"
+    assert report["fixture_validity"] == {
+        "status": "invalid",
+        "failure_category": "stale_fixture",
+        "reason": "missing_screenshot",
+        "screenshot_path": str(missing_path),
+    }
+    assert Path(report["report_path"]).exists()
+
+
 def test_actual_grounding_smoke_with_fake_model_writes_reviewable_draft(tmp_path: Path):
     screenshot_path = tmp_path / "screen.png"
     Image.new("RGB", (1200, 800), color=(255, 255, 255)).save(screenshot_path)
@@ -749,27 +794,37 @@ def test_actual_grounding_smoke_accepts_calibrated_target_source(tmp_path: Path)
     assert report["learning_draft"]["action_templates"][0]["label"] == "Search button"
 
 
-def test_repository_vista_baseline_cases_mix_actual_and_blocked_paths():
+def test_repository_vista_baseline_cases_are_declared_stale_until_sources_are_replaced():
     cases_path = PROJECT_ROOT / "artifacts" / "benchmarks" / "learn_recognition_actual_grounding_vista_baseline_cases_v1.json"
     payload = json.loads(cases_path.read_text(encoding="utf-8"))
     cases = payload["cases"]
     outcomes = {case.get("expected_case_outcome") for case in cases}
 
     assert payload["profile_id"] == "learn_grounding_vista_4b_baseline"
+    assert payload["fixture_validity"] == {
+        "status": "invalid",
+        "failure_category": "stale_fixture",
+        "reason": "referenced Python.org screenshots are no longer present",
+        "invalid_cases_excluded_from_model_denominator": True,
+    }
     assert "actual_grounding_call" in outcomes
     assert "blocked_precondition" in outcomes
     assert sum(1 for case in cases if case.get("expected_case_outcome") == "actual_grounding_call") >= 2
     assert sum(1 for case in cases if case.get("expected_case_outcome") == "blocked_precondition") >= 2
     for case in cases:
-        assert (PROJECT_ROOT / case["screenshot_path"].replace("D:/agent-gui-runtime/", "")).exists()
+        screenshot_path = PROJECT_ROOT / case["screenshot_path"].replace("D:/agent-gui-runtime/", "")
+        assert not screenshot_path.exists()
 
 
-def test_repository_vista_seek_cases_use_saved_screenshot_and_actual_outcomes():
+def test_repository_vista_seek_cases_are_declared_stale_until_source_is_replaced():
     cases_path = PROJECT_ROOT / "artifacts" / "benchmarks" / "learn_recognition_actual_grounding_vista_seek_cases_v1.json"
     payload = json.loads(cases_path.read_text(encoding="utf-8"))
     cases = payload["cases"]
 
     assert payload["profile_id"] == "learn_grounding_vista_4b_baseline"
+    assert payload["fixture_validity"]["status"] == "invalid"
+    assert payload["fixture_validity"]["failure_category"] == "stale_fixture"
+    assert payload["fixture_validity"]["invalid_cases_excluded_from_model_denominator"] is True
     assert len(cases) == 3
     assert {case["expected_case_outcome"] for case in cases} == {"actual_grounding_call"}
     assert {case["label"] for case in cases} == {
@@ -781,16 +836,19 @@ def test_repository_vista_seek_cases_use_saved_screenshot_and_actual_outcomes():
         screenshot_path = Path(case["screenshot_path"])
         if not screenshot_path.is_absolute():
             screenshot_path = PROJECT_ROOT / screenshot_path
-        assert screenshot_path.exists()
+        assert not screenshot_path.exists()
         assert "pytest-" not in str(screenshot_path)
 
 
-def test_repository_alternative_grounding_candidate_set_keeps_hard_cases():
+def test_repository_alternative_grounding_candidate_set_keeps_hard_cases_but_is_stale():
     cases_path = PROJECT_ROOT / "artifacts" / "benchmarks" / "learn_recognition_alternative_grounding_candidates_v1.json"
     payload = json.loads(cases_path.read_text(encoding="utf-8"))
     cases = payload["cases"]
 
     assert payload["contract_version"] == "learn_recognition_alternative_grounding_candidates_v1"
+    assert payload["fixture_validity"]["status"] == "invalid"
+    assert payload["fixture_validity"]["failure_category"] == "stale_fixture"
+    assert payload["fixture_validity"]["invalid_cases_excluded_from_model_denominator"] is True
     assert payload["required_report_policy"] == {
         "separate_model_point_quality": True,
         "separate_validator_safety": True,
@@ -834,5 +892,5 @@ def test_repository_alternative_grounding_candidate_set_keeps_hard_cases():
         screenshot_path = Path(case["screenshot_path"])
         if not screenshot_path.is_absolute():
             screenshot_path = PROJECT_ROOT / screenshot_path
-        assert screenshot_path.exists()
+        assert not screenshot_path.exists()
         assert case.get("reason")

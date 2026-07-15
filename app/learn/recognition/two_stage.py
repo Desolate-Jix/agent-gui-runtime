@@ -11,7 +11,11 @@ from PIL import Image, ImageDraw, ImageFont
 
 from app.core.ocr_service import ocr_service
 from app.core.runtime_artifacts import ARTIFACTS_DIR
+from app.learn.hierarchy_draft import build_hierarchy_learning_draft
+from app.learn.recognition.interface_classification import classify_interface_surface
+from app.learn.recognition.ownership import resolve_group_ownership
 from app.learn.recognition.stage1_audit import audit_stage1_region_selection
+from app.learn.ui_hierarchy import build_ui_hierarchy_graph
 
 
 STAGE1_REGION_LOCALIZATION_PROMPT = """\
@@ -61,6 +65,8 @@ def build_two_stage_screen_understanding(
     items_by_id = _items_by_id(screen_inventory, layout_graph)
     screen_size = _screen_size_from_bundle(bundle)
     source_image_path = _source_image_path(bundle)
+    interface_classification = classify_interface_surface(bundle)
+    class_rule_profile = deepcopy(interface_classification.get("class_rule_profile") or {})
     supplemental_text_items = _bundle_screen_text_items(bundle)
     recovered_ocr_items, content_recovery = _recover_undercovered_content_with_ocr(
         enabled=enable_ocr_content_recovery,
@@ -69,12 +75,19 @@ def build_two_stage_screen_understanding(
         screen_size=screen_size,
     )
     supplemental_text_items.extend(recovered_ocr_items)
-    stage1 = _stage1_structure_regions(items_by_id=items_by_id, layout_graph=layout_graph, screen_size=screen_size)
+    stage1 = _stage1_structure_regions(
+        items_by_id=items_by_id,
+        layout_graph=layout_graph,
+        screen_size=screen_size,
+        source_image_path=source_image_path,
+        class_rule_profile=class_rule_profile,
+    )
     stage1_localization = _stage1_region_localization(
         stage1["structure_regions"],
         items_by_id=items_by_id,
         screen_size=screen_size,
         boundary_evidence_items=supplemental_text_items,
+        app_name=_bundle_app_name(bundle),
     )
     stage1_overlay_path = _render_stage1_region_localization_overlay(
         image_path=source_image_path,
@@ -120,6 +133,7 @@ def build_two_stage_screen_understanding(
             items_by_id=items_by_id,
             supplemental_text_items=supplemental_text_items,
             image_path=source_image_path,
+            class_rule_profile=class_rule_profile,
         )
     fusion = _fusion_boxes(stage1_localization["regions"], stage2["regions"])
     fusion["stage1_structure_overlay_path"] = stage1_overlay_path
@@ -142,6 +156,16 @@ def build_two_stage_screen_understanding(
         fusion["message_context_overlay"] = context_overlay
         fusion["message_context_overlay_path"] = context_overlay.get("overlay_path", "")
         fusion["message_context_zoom_path"] = context_overlay.get("zoom_path", "")
+    ui_hierarchy = build_ui_hierarchy_graph(
+        structure_regions=stage1_localization["regions"],
+        numbered_regions=stage2["regions"],
+        screen_size=screen_size,
+    )
+    learning_draft = build_hierarchy_learning_draft(
+        ui_hierarchy=ui_hierarchy,
+        source_image_path=source_image_path,
+        compiled_overlay_path=str(fusion.get("compiled_overlay_path") or ""),
+    )
     pipeline_contract = _two_pass_pipeline_contract()
     return {
         "contract_version": "learn_two_stage_screen_understanding_v1",
@@ -150,6 +174,8 @@ def build_two_stage_screen_understanding(
         "artifact_is_authorization": False,
         "execute_binding_enabled": False,
         "pipeline_contract": pipeline_contract,
+        "interface_classification": interface_classification,
+        "class_rule_profile": class_rule_profile,
         "flow_compliance": _two_pass_flow_compliance(stage1_localization, stage2),
         "content_recovery": content_recovery,
         "stage1_gate": stage1_gate,
@@ -180,6 +206,8 @@ def build_two_stage_screen_understanding(
             "stage1": {
                 "call_index": 1,
                 "purpose": "full_screen_structure_region_split",
+                "interface_category": interface_classification.get("category"),
+                "interface_category_source": interface_classification.get("source"),
                 "output": (
                     "top/left/right/bottom/center/modal structure regions only; "
                     "no inner button, card, or action numbering"
@@ -206,6 +234,9 @@ def build_two_stage_screen_understanding(
         "stage1_region_localization": stage1_localization,
         "stage2_numbering": stage2,
         "fusion": fusion,
+        "ui_hierarchy": ui_hierarchy,
+        "learning_draft": learning_draft,
+        "page_details": deepcopy(learning_draft.get("page_details") or {}),
         "interpretation": (
             "Two-stage learning output is display/review only; it is not a Runtime PathGraph, "
             "not click authorization, and not a recognition accuracy metric."
@@ -471,7 +502,14 @@ def build_stage1_region_localization_report(
 
     items_by_id = _items_by_id(screen_inventory, layout_graph)
     screen_size = _screen_size_from_bundle(bundle)
-    stage1 = _stage1_structure_regions(items_by_id=items_by_id, layout_graph=layout_graph, screen_size=screen_size)
+    interface_classification = classify_interface_surface(bundle)
+    stage1 = _stage1_structure_regions(
+        items_by_id=items_by_id,
+        layout_graph=layout_graph,
+        screen_size=screen_size,
+        source_image_path=_source_image_path(bundle),
+        class_rule_profile=interface_classification.get("class_rule_profile"),
+    )
     stage1_localization = _stage1_region_localization(
         stage1["structure_regions"],
         items_by_id=items_by_id,
@@ -702,6 +740,8 @@ def _stage1_structure_regions(
     items_by_id: dict[str, dict[str, Any]],
     layout_graph: dict[str, Any],
     screen_size: dict[str, int] | None = None,
+    source_image_path: str = "",
+    class_rule_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     zones = layout_graph.get("zones") if isinstance(layout_graph.get("zones"), dict) else {}
     corrected_zone_items: dict[str, list[str]] = {}
@@ -725,6 +765,12 @@ def _stage1_structure_regions(
             [],
         ).append(item_id)
 
+    _split_narrow_left_rail_from_visual_separator(
+        corrected_zone_items,
+        items_by_id=items_by_id,
+        screen_size=screen,
+        source_image_path=source_image_path,
+    )
     _discover_unlabelled_left_nav(
         corrected_zone_items,
         items_by_id=items_by_id,
@@ -754,17 +800,46 @@ def _stage1_structure_regions(
         items_by_id=items_by_id,
         screen_size=screen,
     )
+    _split_left_sidebar_region(
+        corrected_zone_items,
+        items_by_id=items_by_id,
+        screen_size=screen,
+    )
     _split_right_sidebar_region(
         corrected_zone_items,
         items_by_id=items_by_id,
         screen_size=screen,
     )
+    zone_corrections.extend(
+        _apply_stage1_class_zone_policy(
+            corrected_zone_items,
+            items_by_id=items_by_id,
+            class_rule_profile=class_rule_profile,
+        )
+    )
+    conversation_bottom_correction = _split_conversation_bottom_panel(
+        corrected_zone_items,
+        items_by_id=items_by_id,
+        screen_size=screen,
+        class_rule_profile=class_rule_profile,
+    )
+    if conversation_bottom_correction:
+        zone_corrections.append(conversation_bottom_correction)
 
     for zone_id, item_ids in corrected_zone_items.items():
         zone_items = [items_by_id[item_id] for item_id in item_ids if item_id in items_by_id]
         bbox = _bbox_union([item.get("bbox") for item in zone_items if isinstance(item, dict)])
         if not bbox:
             continue
+        if zone_id == "conversation_bottom_panel":
+            padding = max(6, int(_int(screen.get("height")) * 0.006))
+            top = max(0, bbox["y"] - padding)
+            bbox = {
+                "x": 0,
+                "y": top,
+                "w": _int(screen.get("width")) or bbox["x"] + bbox["w"],
+                "h": max(1, (_int(screen.get("height")) or bbox["y"] + bbox["h"]) - top),
+            }
         region_index = len(regions) + 1
         regions.append(
             {
@@ -801,6 +876,190 @@ def _stage1_structure_regions(
         "zone_correction_status": "passed_with_correction" if zone_corrections else "clean",
         "model_prompt_intent": "Identify only the page structure and coarse areas; do not enumerate every element yet.",
     }
+
+
+def _split_conversation_bottom_panel(
+    corrected_zone_items: dict[str, list[str]],
+    *,
+    items_by_id: dict[str, dict[str, Any]],
+    screen_size: dict[str, int],
+    class_rule_profile: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    profile = class_rule_profile if isinstance(class_rule_profile, dict) else {}
+    if profile.get("primary_content_strategy") != "conversation_rows":
+        return None
+    width = _int(screen_size.get("width"))
+    height = _int(screen_size.get("height"))
+    if width <= 0 or height <= 0:
+        return None
+    start_y = int(height * 0.84)
+    candidates_by_zone: dict[str, list[str]] = {}
+    candidate_boxes: list[dict[str, int]] = []
+    for zone_id, item_ids in corrected_zone_items.items():
+        if _is_top_zone(zone_id) or zone_id in {"browser_chrome", "bottom_bar", "conversation_bottom_panel"}:
+            continue
+        for item_id in item_ids:
+            item = items_by_id.get(item_id)
+            bbox = _bbox(item.get("bbox")) if isinstance(item, dict) else None
+            if not bbox or bbox["y"] < start_y or bbox["y"] >= height:
+                continue
+            candidates_by_zone.setdefault(zone_id, []).append(item_id)
+            candidate_boxes.append(bbox)
+    candidate_ids = [item_id for item_ids in candidates_by_zone.values() for item_id in item_ids]
+    if len(candidate_ids) < 3 or len(candidates_by_zone) < 2:
+        return None
+    if not _has_explicit_conversation_bottom_panel_boundary(
+        candidate_ids,
+        items_by_id=items_by_id,
+        screen_width=width,
+    ):
+        return None
+    for zone_id, selected_ids in candidates_by_zone.items():
+        selected = set(selected_ids)
+        corrected_zone_items[zone_id] = [item_id for item_id in corrected_zone_items[zone_id] if item_id not in selected]
+    corrected_zone_items["conversation_bottom_panel"] = candidate_ids
+    source_bbox = _bbox_union(candidate_boxes) or {}
+    return {
+        "contract_version": "learn_stage1_zone_correction_v1",
+        "correction": "cross_zone_conversation_bottom_panel_reunited",
+        "source_zones": list(candidates_by_zone),
+        "target_zone": "conversation_bottom_panel",
+        "item_ids": candidate_ids,
+        "source_bbox": deepcopy(source_bbox),
+        "reason": "conversation evidence in the same bottom band was split across structure zones",
+        "display_only": True,
+        "execute_binding_enabled": False,
+        "artifact_is_authorization": False,
+    }
+
+
+def _has_explicit_conversation_bottom_panel_boundary(
+    candidate_ids: list[str],
+    *,
+    items_by_id: dict[str, dict[str, Any]],
+    screen_width: int,
+) -> bool:
+    """只有存在明确分段证据时，才把底部内容提升为独立会话面板。"""
+
+    group_section_tokens = (
+        "group chat",
+        "group chats",
+        "group conversation",
+        "group conversations",
+        "群组聊天",
+        "群組聊天",
+        "群聊",
+    )
+    for item_id in candidate_ids:
+        item = items_by_id.get(item_id)
+        if not isinstance(item, dict):
+            continue
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        structural_value = " ".join(
+            [
+                str(item.get("item_id") or ""),
+                str(item.get("role") or ""),
+                str(item.get("item_type") or ""),
+                str(metadata.get("surface_zone") or ""),
+                str(metadata.get("layout_zone") or ""),
+            ]
+        ).casefold()
+        if "bottom_bar" in structural_value or "conversation_bottom_panel" in structural_value:
+            return True
+        label_value = " ".join(
+            [
+                str(item.get("label") or ""),
+                str(item.get("description") or ""),
+                str(item.get("ocr_text") or ""),
+            ]
+        ).casefold()
+        if any(token in label_value for token in group_section_tokens):
+            return True
+        if "separator" in structural_value:
+            bbox = _bbox(item.get("bbox"))
+            if bbox and bbox["w"] >= max(1, int(screen_width * 0.45)):
+                return True
+    return False
+
+
+def _apply_stage1_class_zone_policy(
+    corrected_zone_items: dict[str, list[str]],
+    *,
+    items_by_id: dict[str, dict[str, Any]],
+    class_rule_profile: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    profile = class_rule_profile if isinstance(class_rule_profile, dict) else {}
+    corrections: list[dict[str, Any]] = []
+    target_zone = next(
+        (zone_id for zone_id in ("main_content", "primary_area") if corrected_zone_items.get(zone_id)),
+        "",
+    )
+    if profile.get("stage1_nested_strip_policy") == "main_content_child" and target_zone:
+        source_ids = corrected_zone_items.get("promo_strip") or []
+        if source_ids:
+            existing = corrected_zone_items[target_zone]
+            existing.extend(item_id for item_id in source_ids if item_id not in existing)
+            corrected_zone_items.pop("promo_strip", None)
+            corrections.append(
+                {
+                    "contract_version": "learn_stage1_zone_correction_v1",
+                    "correction": "row_table_nested_strip_reassigned_to_main_content",
+                    "source_zone": "promo_strip",
+                    "target_zone": target_zone,
+                    "item_ids": list(source_ids),
+                    "reason": (
+                        "row-table interfaces treat search, address, and promotional strips as children "
+                        "of the primary content instead of top-level sibling regions"
+                    ),
+                    "display_only": True,
+                    "execute_binding_enabled": False,
+                    "artifact_is_authorization": False,
+                }
+            )
+    if profile.get("stage1_nested_sidebar_policy") == "main_content_child" and target_zone:
+        target_ids = corrected_zone_items.get(target_zone) or []
+        target_bbox = _bbox_union(
+            [
+                _bbox(items_by_id[item_id].get("bbox"))
+                for item_id in target_ids
+                if item_id in items_by_id and isinstance(items_by_id[item_id], dict)
+            ]
+        )
+        for source_zone in ("left_sidebar", "left_nav"):
+            source_ids = corrected_zone_items.get(source_zone) or []
+            source_bbox = _bbox_union(
+                [
+                    _bbox(items_by_id[item_id].get("bbox"))
+                    for item_id in source_ids
+                    if item_id in items_by_id and isinstance(items_by_id[item_id], dict)
+                ]
+            )
+            if not source_ids or not source_bbox or not target_bbox:
+                continue
+            same_left_origin = abs(source_bbox["x"] - target_bbox["x"]) <= max(16, int(target_bbox["w"] * 0.08))
+            if not same_left_origin or _bbox_containment_ratio(source_bbox, target_bbox) < 0.9:
+                continue
+            target_ids.extend(item_id for item_id in source_ids if item_id not in target_ids)
+            corrected_zone_items.pop(source_zone, None)
+            corrections.append(
+                {
+                    "contract_version": "learn_stage1_zone_correction_v1",
+                    "correction": "conversation_nested_sidebar_reassigned_to_main_content",
+                    "source_zone": source_zone,
+                    "target_zone": target_zone,
+                    "item_ids": list(source_ids),
+                    "source_bbox": deepcopy(source_bbox),
+                    "target_bbox": deepcopy(target_bbox),
+                    "reason": (
+                        "conversation rows sharing the same left origin and contained by the main list are one pane, "
+                        "not independent sibling regions"
+                    ),
+                    "display_only": True,
+                    "execute_binding_enabled": False,
+                    "artifact_is_authorization": False,
+                }
+            )
+    return corrections
 
 
 def _preferred_stage1_zone(
@@ -1149,6 +1408,10 @@ def _looks_like_browser_chrome_evidence(item: dict[str, Any]) -> bool:
             "tab",
             "new tab",
             "reload",
+            "调试此浏览器",
+            "自动测试软件控制",
+            "debugging this browser",
+            "controlled by automated test software",
         )
     )
 
@@ -1320,7 +1583,12 @@ def _split_right_sidebar_region(
         return
     if candidate_union["h"] < int(height * 0.35):
         return
-    if _right_strip_looks_like_card_grid(right_candidates, boxes):
+    dense_vertical_evidence = _strip_has_dense_vertical_text_evidence(
+        strip_bbox=candidate_union,
+        all_boxes=boxes,
+        height=height,
+    )
+    if _right_strip_looks_like_card_grid(right_candidates, boxes) and not dense_vertical_evidence:
         return
     left_context = [
         bbox
@@ -1338,6 +1606,254 @@ def _split_right_sidebar_region(
     )
     corrected_zone_items[source_zone] = [item_id for item_id in source_ids if item_id not in set(right_ids)]
     corrected_zone_items["right_sidebar"] = right_ids
+
+
+def _split_left_sidebar_region(
+    corrected_zone_items: dict[str, list[str]],
+    *,
+    items_by_id: dict[str, dict[str, Any]],
+    screen_size: dict[str, int],
+) -> None:
+    width = _int(screen_size.get("width"))
+    height = _int(screen_size.get("height"))
+    if width <= 0 or height <= 0 or any(
+        zone_id in corrected_zone_items for zone_id in ("left_nav", "left_sidebar")
+    ):
+        return
+    source_zone = next(
+        (zone_id for zone_id in ("primary_area", "main_content") if corrected_zone_items.get(zone_id)),
+        "",
+    )
+    if not source_zone:
+        return
+    source_ids = corrected_zone_items[source_zone]
+    boxes = [
+        (item_id, items_by_id[item_id], _bbox(items_by_id[item_id].get("bbox")))
+        for item_id in source_ids
+        if item_id in items_by_id and not _is_section_hint(items_by_id[item_id])
+    ]
+    boxes = [(item_id, item, bbox) for item_id, item, bbox in boxes if bbox]
+    left_candidates = [
+        (item_id, item, bbox)
+        for item_id, item, bbox in boxes
+        if bbox["x"] <= int(width * 0.32)
+        and bbox["x"] + bbox["w"] <= int(width * 0.36)
+        and bbox["w"] <= int(width * 0.32)
+        and bbox["h"] <= int(height * 0.25)
+        and bbox["y"] >= max(48, int(height * 0.08))
+    ]
+    if len(left_candidates) < 5:
+        return
+    candidate_union = _bbox_union([bbox for _, _, bbox in left_candidates])
+    if not candidate_union:
+        return
+    if (
+        candidate_union["x"] > int(width * 0.10)
+        or candidate_union["w"] > int(width * 0.36)
+        or candidate_union["h"] < int(height * 0.45)
+    ):
+        return
+    if _left_strip_looks_like_peer_grid(left_candidates, boxes):
+        return
+    left_ids = {item_id for item_id, _, _ in left_candidates}
+    corrected_zone_items[source_zone] = [item_id for item_id in source_ids if item_id not in left_ids]
+    corrected_zone_items["left_sidebar"] = [item_id for item_id in source_ids if item_id in left_ids]
+
+
+def _split_narrow_left_rail_from_visual_separator(
+    corrected_zone_items: dict[str, list[str]],
+    *,
+    items_by_id: dict[str, dict[str, Any]],
+    screen_size: dict[str, int],
+    source_image_path: str,
+) -> None:
+    width = _int(screen_size.get("width"))
+    height = _int(screen_size.get("height"))
+    if (
+        width <= 0
+        or height <= 0
+        or not source_image_path
+        or any(zone_id in corrected_zone_items for zone_id in ("left_nav", "left_sidebar"))
+    ):
+        return
+    divider_x = _persistent_left_vertical_divider(
+        source_image_path=source_image_path,
+        width=width,
+        height=height,
+    )
+    if divider_x <= 0:
+        return
+    source_zone = next(
+        (zone_id for zone_id in ("primary_area", "main_content") if corrected_zone_items.get(zone_id)),
+        "",
+    )
+    if not source_zone:
+        return
+    source_ids = corrected_zone_items[source_zone]
+    candidate_ids: list[str] = []
+    for item_id in source_ids:
+        item = items_by_id.get(item_id)
+        bbox = _bbox(item.get("bbox")) if isinstance(item, dict) else None
+        if not isinstance(item, dict) or not bbox or _is_section_hint(item):
+            continue
+        center_x = bbox["x"] + bbox["w"] / 2
+        if center_x >= divider_x or bbox["w"] > divider_x:
+            continue
+        candidate_ids.append(item_id)
+    if len(candidate_ids) < 3:
+        return
+    for item_id in candidate_ids:
+        item = items_by_id[item_id]
+        metadata = deepcopy(item.get("metadata")) if isinstance(item.get("metadata"), dict) else {}
+        metadata.update(
+            {
+                "surface_zone": "left_nav",
+                "visual_left_rail_boundary_x": divider_x,
+                "visual_left_rail_evidence": "persistent_vertical_separator_with_aligned_left_items",
+            }
+        )
+        item["metadata"] = metadata
+    candidate_set = set(candidate_ids)
+    corrected_zone_items[source_zone] = [item_id for item_id in source_ids if item_id not in candidate_set]
+    corrected_zone_items["left_nav"] = [item_id for item_id in source_ids if item_id in candidate_set]
+
+
+def _persistent_left_vertical_divider(*, source_image_path: str, width: int, height: int) -> int:
+    path = Path(source_image_path)
+    if not path.is_file():
+        return 0
+    try:
+        with Image.open(path) as image:
+            gray = image.convert("L")
+            if gray.size != (width, height):
+                gray = gray.resize((width, height))
+            pixels = gray.load()
+            y_start = max(1, int(height * 0.08))
+            y_values = range(y_start, height, 2)
+            scores: list[tuple[float, float, int]] = []
+            for x in range(max(2, int(width * 0.03)), min(width - 1, int(width * 0.18))):
+                differences = [abs(int(pixels[x, y]) - int(pixels[x - 1, y])) for y in y_values]
+                if not differences:
+                    continue
+                mean_difference = sum(differences) / len(differences)
+                persistent_ratio = sum(1 for value in differences if value > 12) / len(differences)
+                scores.append((mean_difference, persistent_ratio, x))
+    except (OSError, ValueError):
+        return 0
+    if not scores:
+        return 0
+    mean_difference, persistent_ratio, divider_x = max(scores, key=lambda value: (value[0], value[1], -value[2]))
+    return divider_x if mean_difference >= 35.0 and persistent_ratio >= 0.30 else 0
+
+
+def _left_strip_looks_like_peer_grid(
+    left_candidates: list[tuple[str, dict[str, Any], dict[str, int]]],
+    all_boxes: list[tuple[str, dict[str, Any], dict[str, int]]],
+) -> bool:
+    candidate_ids = {item_id for item_id, _, _ in left_candidates}
+    peer_rows = 0
+    has_multi_peer_row = False
+    for _, candidate, candidate_bbox in left_candidates:
+        if not _is_card_like_region_item(candidate):
+            continue
+        if _card_has_repeated_peer_text_columns(
+            candidate_bbox=candidate_bbox,
+            candidate_ids=candidate_ids,
+            all_boxes=all_boxes,
+        ):
+            return True
+        peer_count = sum(
+            1
+            for item_id, item, bbox in all_boxes
+            if (
+            item_id not in candidate_ids
+            and _is_card_like_region_item(item)
+            and bbox["x"] > candidate_bbox["x"] + candidate_bbox["w"]
+            and _vertical_overlap_ratio(candidate_bbox, bbox) >= 0.60
+            and min(candidate_bbox["h"], bbox["h"]) / max(candidate_bbox["h"], bbox["h"]) >= 0.60
+            and min(candidate_bbox["w"], bbox["w"]) / max(candidate_bbox["w"], bbox["w"]) >= 0.55
+            )
+        )
+        if peer_count:
+            peer_rows += 1
+        if peer_count >= 2:
+            has_multi_peer_row = True
+    return has_multi_peer_row or peer_rows >= 2
+
+
+def _card_has_repeated_peer_text_columns(
+    *,
+    candidate_bbox: dict[str, int],
+    candidate_ids: set[str],
+    all_boxes: list[tuple[str, dict[str, Any], dict[str, int]]],
+) -> bool:
+    vertical_pad = max(12, int(candidate_bbox["h"] * 0.10))
+    min_y = candidate_bbox["y"] - vertical_pad
+    max_y = candidate_bbox["y"] + candidate_bbox["h"] + vertical_pad
+    min_x = candidate_bbox["x"] + candidate_bbox["w"] + max(20, int(candidate_bbox["w"] * 0.08))
+    centers: list[float] = []
+    for item_id, item, bbox in all_boxes:
+        if item_id in candidate_ids or _is_section_hint(item) or _is_card_like_region_item(item):
+            continue
+        center_y = bbox["y"] + bbox["h"] / 2
+        if bbox["x"] < min_x or not (min_y <= center_y <= max_y):
+            continue
+        if bbox["h"] > max(40, int(candidate_bbox["h"] * 0.25)):
+            continue
+        centers.append(bbox["x"] + bbox["w"] / 2)
+    if len(centers) < 6:
+        return False
+    tolerance = max(28, int(candidate_bbox["w"] * 0.18))
+    columns: list[list[float]] = []
+    for center in sorted(centers):
+        column = next(
+            (group for group in columns if abs(sum(group) / len(group) - center) <= tolerance),
+            None,
+        )
+        if column is None:
+            columns.append([center])
+        else:
+            column.append(center)
+    repeated_columns = [column for column in columns if len(column) >= 2]
+    repeated_centers = sorted(sum(column) / len(column) for column in repeated_columns)
+    min_gap = candidate_bbox["w"] * 0.75
+    max_gap = candidate_bbox["w"] * 1.50
+    for first_index in range(len(repeated_centers) - 2):
+        for second_index in range(first_index + 1, len(repeated_centers) - 1):
+            for third_index in range(second_index + 1, len(repeated_centers)):
+                first_gap = repeated_centers[second_index] - repeated_centers[first_index]
+                second_gap = repeated_centers[third_index] - repeated_centers[second_index]
+                if not (min_gap <= first_gap <= max_gap and min_gap <= second_gap <= max_gap):
+                    continue
+                if max(first_gap, second_gap) / max(1.0, min(first_gap, second_gap)) <= 1.25:
+                    return True
+    return False
+
+
+def _strip_has_dense_vertical_text_evidence(
+    *,
+    strip_bbox: dict[str, int],
+    all_boxes: list[tuple[str, dict[str, Any], dict[str, int]]],
+    height: int,
+) -> bool:
+    rows: list[dict[str, int]] = []
+    for _, item, bbox in all_boxes:
+        if _is_section_hint(item) or _is_card_like_region_item(item):
+            continue
+        center_x = bbox["x"] + bbox["w"] / 2
+        if not (strip_bbox["x"] <= center_x <= strip_bbox["x"] + strip_bbox["w"]):
+            continue
+        if bbox["h"] > max(48, int(height * 0.08)):
+            continue
+        rows.append(bbox)
+    if len(rows) < 6:
+        return False
+    y_centers = sorted(bbox["y"] + bbox["h"] / 2 for bbox in rows)
+    distinct_bands: list[float] = []
+    for center in y_centers:
+        if not distinct_bands or center - distinct_bands[-1] >= 12:
+            distinct_bands.append(center)
+    return len(distinct_bands) >= 6 and y_centers[-1] - y_centers[0] >= int(height * 0.35)
 
 
 def _split_right_edge_floating_controls_region(
@@ -1491,6 +2007,7 @@ def _stage1_region_localization(
     items_by_id: dict[str, dict[str, Any]] | None = None,
     screen_size: dict[str, int] | None = None,
     boundary_evidence_items: list[dict[str, Any]] | None = None,
+    app_name: str = "",
 ) -> dict[str, Any]:
     localized_regions: list[dict[str, Any]] = []
     all_items = items_by_id if isinstance(items_by_id, dict) else {}
@@ -1514,10 +2031,12 @@ def _stage1_region_localization(
             "execute_binding_enabled": False,
             "artifact_is_authorization": False,
         }
-        for extra_key in ("right_edge_preservation",):
+        for extra_key in ("right_edge_preservation", "unsupported_tail_trimmed"):
             extra_value = calibration.get(extra_key)
             if isinstance(extra_value, dict):
                 coordinate_validation[extra_key] = deepcopy(extra_value)
+            elif isinstance(extra_value, int) and extra_value > 0:
+                coordinate_validation[extra_key] = extra_value
         localized_regions.append(
             {
                 **deepcopy(region),
@@ -1547,14 +2066,32 @@ def _stage1_region_localization(
                 "artifact_is_authorization": False,
             }
         )
+    localized_regions, surface_conflict_resolution = _resolve_stage1_surface_conflicts(
+        localized_regions,
+        items_by_id=all_items,
+        app_name=app_name,
+    )
+    localized_regions, structure_recovery = _recover_stage1_left_sidebar_from_list_container(
+        localized_regions,
+        items_by_id=all_items,
+        screen_size=screen,
+    )
+    _align_vertical_sibling_lanes_to_main_rough_bounds(localized_regions)
     _record_horizontal_bar_content_lane(localized_regions, screen_size=screen)
     _clamp_topbar_against_main_regions(localized_regions)
+    _clamp_topbar_against_adjacent_sidebar_start(localized_regions)
     _clamp_browser_chrome_against_page_topbar(localized_regions)
+    _partition_nested_page_topbar_below_browser_chrome(localized_regions)
     _partition_sidebars_against_horizontal_bars(localized_regions)
     _expand_main_regions_to_available_lane(localized_regions, screen_size=screen)
     _clamp_main_regions_against_sidebars(localized_regions)
     _extend_browser_page_header_to_primary_boundary(localized_regions, items_by_id=all_items, screen_size=screen)
-    _ensure_browser_right_edge_review_region(localized_regions, items_by_id=all_items, screen_size=screen)
+    _ensure_browser_right_edge_review_region(
+        localized_regions,
+        items_by_id=all_items,
+        screen_size=screen,
+        app_name=app_name,
+    )
     localized_regions, merged_same_family = _merge_overlapping_same_family_structure_regions(localized_regions)
     localized_regions, suppressed_duplicates = _suppress_contained_duplicate_structure_regions(localized_regions)
     localized_regions = _recover_shallow_fullscreen_main_partition(
@@ -1572,12 +2109,379 @@ def _stage1_region_localization(
         "merged_same_family_regions": merged_same_family,
         "suppressed_duplicate_region_count": len(suppressed_duplicates),
         "suppressed_duplicate_regions": suppressed_duplicates,
+        "surface_conflict_resolution": surface_conflict_resolution,
+        "structure_recovery": structure_recovery,
         "regions": localized_regions,
         "model_prompt": STAGE1_REGION_LOCALIZATION_PROMPT,
         "model_prompt_intent": (
             "For each coarse structure region, precisely localize the full visible region boundary before per-region numbering."
         ),
     }
+
+
+def _resolve_stage1_surface_conflicts(
+    localized_regions: list[dict[str, Any]],
+    *,
+    items_by_id: dict[str, dict[str, Any]],
+    app_name: str,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    browser_surface = _is_browser_app_name(app_name)
+    kept: list[dict[str, Any]] = []
+    suppressed: list[dict[str, Any]] = []
+    main_boxes = [
+        box
+        for candidate in localized_regions
+        for box in [_bbox(candidate.get("bbox") or candidate.get("precise_bbox"))]
+        if box and _stage1_region_family(candidate) == "main_content"
+    ]
+    for region in localized_regions:
+        region_id = str(region.get("region_id") or "")
+        region_items = [
+            items_by_id[item_id]
+            for item_id in region.get("item_ids", [])
+            if item_id in items_by_id and isinstance(items_by_id[item_id], dict)
+        ]
+        if (
+            _stage1_region_family(region) == "left_bar"
+            and region_items
+            and not _items_have_sidebar_structure_evidence(region_items)
+            and not _region_covers_left_edge_main_lane(region, main_boxes=main_boxes)
+        ):
+            suppressed.append(
+                {
+                    "contract_version": "learn_stage1_surface_conflict_resolution_v1",
+                    "region_id": region_id,
+                    "reason": "text_only_column_without_sidebar_structure_evidence",
+                    "app_name": app_name,
+                    "bbox": deepcopy(_bbox(region.get("bbox") or region.get("precise_bbox")) or {}),
+                    "display_only": True,
+                    "execute_binding_enabled": False,
+                    "artifact_is_authorization": False,
+                }
+            )
+            continue
+        if "browser_chrome" not in region_id.casefold():
+            kept.append(region)
+            continue
+        hard_evidence = _items_have_browser_chrome_hard_evidence(region_items)
+        if browser_surface or hard_evidence:
+            kept.append(region)
+            continue
+        if not str(app_name or "").strip():
+            review_region = deepcopy(region)
+            review_region["surface_classification"] = {
+                "status": "unknown_app_review_required",
+                "reason": "app_name_missing_browser_chrome_not_suppressed",
+                "display_only": True,
+                "execute_binding_enabled": False,
+                "artifact_is_authorization": False,
+            }
+            kept.append(review_region)
+            continue
+        suppressed.append(
+            {
+                "contract_version": "learn_stage1_surface_conflict_resolution_v1",
+                "region_id": region_id,
+                "reason": "native_surface_without_browser_chrome_hard_evidence",
+                "app_name": app_name,
+                "browser_surface": False,
+                "hard_evidence": False,
+                "bbox": deepcopy(_bbox(region.get("bbox") or region.get("precise_bbox")) or {}),
+                "display_only": True,
+                "execute_binding_enabled": False,
+                "artifact_is_authorization": False,
+            }
+        )
+    return kept, {
+        "contract_version": "learn_stage1_surface_conflict_resolution_v1",
+        "app_name": app_name,
+        "browser_surface": browser_surface,
+        "suppressed_region_count": len(suppressed),
+        "suppressed_regions": suppressed,
+        "policy": (
+            "Browser chrome on a known native surface requires address/URL hard evidence; "
+            "when app identity is unavailable the explicit region is retained for review; "
+            "a text-only column requires structural sidebar evidence before becoming a top-level sidebar."
+        ),
+    }
+
+
+def _is_browser_app_name(app_name: str) -> bool:
+    value = str(app_name or "").casefold()
+    known_browser_tokens = ("msedge", "chrome", "chromium", "firefox", "brave", "opera", "vivaldi", "safari")
+    if any(token in value for token in known_browser_tokens):
+        return True
+    normalized = " ".join(value.replace("_", " ").replace("-", " ").split())
+    if "file browser" in normalized or "file explorer" in normalized:
+        return False
+    words = set(normalized.split())
+    return "browser" in words and (
+        words == {"browser"} or bool(words.intersection({"web", "window", "surface", "host"}))
+    )
+
+
+def _items_have_browser_chrome_hard_evidence(items: list[dict[str, Any]]) -> bool:
+    for item in items:
+        value = " ".join(
+            str(item.get(key) or "").casefold()
+            for key in ("item_id", "role", "item_type", "label", "text")
+        )
+        if any(token in value for token in ("address_bar", "omnibox", "http://", "https://", "www.")):
+            return True
+    return False
+
+
+def _items_have_sidebar_structure_evidence(items: list[dict[str, Any]]) -> bool:
+    for item in items:
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        metadata_zone = str(metadata.get("surface_zone") or metadata.get("zone") or "").casefold()
+        zone_evidence = str(metadata.get("zone_evidence") or "").casefold()
+        if metadata_zone in {"left_nav", "left_sidebar", "right_nav", "right_sidebar"} and zone_evidence != "geometry_hint_only":
+            return True
+        value = " ".join(
+            str(item.get(key) or "").casefold()
+            for key in ("role", "item_type", "source")
+        )
+        if any(
+            token in value
+            for token in (
+                "nav",
+                "sidebar",
+                "rail",
+                "list",
+                "tree",
+                "menu",
+                "tab",
+                "button",
+                "control",
+                "link",
+                "conversation",
+            )
+        ):
+            return True
+    return False
+
+
+def _region_covers_left_edge_main_lane(
+    region: dict[str, Any],
+    *,
+    main_boxes: list[dict[str, int]],
+) -> bool:
+    bbox = _bbox(region.get("bbox") or region.get("precise_bbox"))
+    if not bbox or not main_boxes:
+        return False
+    main = max(main_boxes, key=lambda box: box["w"] * box["h"])
+    x_tolerance = max(24, int(main["w"] * 0.03))
+    y_tolerance = max(24, int(main["h"] * 0.05))
+    return (
+        bbox["x"] <= main["x"] + x_tolerance
+        and bbox["y"] <= main["y"] + y_tolerance
+        and bbox["y"] + bbox["h"] >= main["y"] + main["h"] - y_tolerance
+    )
+
+
+def _recover_stage1_left_sidebar_from_list_container(
+    localized_regions: list[dict[str, Any]],
+    *,
+    items_by_id: dict[str, dict[str, Any]],
+    screen_size: dict[str, int],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if any(_stage1_region_family(region) == "left_bar" for region in localized_regions):
+        return localized_regions, _stage1_structure_recovery_report([])
+    width = _int(screen_size.get("width"))
+    height = _int(screen_size.get("height"))
+    main_candidates = [
+        region
+        for region in localized_regions
+        if _stage1_region_family(region) == "main_content" and _bbox(region.get("bbox") or region.get("precise_bbox"))
+    ]
+    if width <= 0 or height <= 0 or not main_candidates:
+        return localized_regions, _stage1_structure_recovery_report([])
+    main_region = max(
+        main_candidates,
+        key=lambda region: (_bbox(region.get("bbox") or region.get("precise_bbox")) or {"w": 0, "h": 0})["w"],
+    )
+    main_bbox = _bbox(main_region.get("bbox") or main_region.get("precise_bbox"))
+    if not main_bbox or main_bbox["x"] > max(20, int(width * 0.03)) or main_bbox["w"] < int(width * 0.7):
+        return localized_regions, _stage1_structure_recovery_report([])
+    item_ids = main_region.get("item_ids") if isinstance(main_region.get("item_ids"), list) else []
+    list_candidates: list[tuple[dict[str, Any], dict[str, int]]] = []
+    for item_id in item_ids:
+        item = items_by_id.get(str(item_id))
+        bbox = _bbox(item.get("bbox")) if isinstance(item, dict) else None
+        role = str(item.get("role") or "").casefold() if isinstance(item, dict) else ""
+        if not bbox or role != "list":
+            continue
+        if bbox["x"] > main_bbox["x"] + max(24, int(width * 0.03)):
+            continue
+        if bbox["w"] < int(width * 0.08) or bbox["w"] > int(width * 0.45):
+            continue
+        if bbox["h"] < int(height * 0.25):
+            continue
+        child_count = sum(
+            1
+            for child_id in item_ids
+            for child in [items_by_id.get(str(child_id))]
+            for child_bbox in [_bbox(child.get("bbox")) if isinstance(child, dict) else None]
+            if child_bbox
+            and str(child.get("role") or "").casefold() in {"listitem", "menu item", "menu_item"}
+            and _bbox_containment_ratio(child_bbox, bbox) >= 0.8
+        )
+        if child_count >= 3:
+            list_candidates.append((item, bbox))
+    if not list_candidates:
+        return localized_regions, _stage1_structure_recovery_report([])
+    list_item, list_bbox = max(list_candidates, key=lambda entry: entry[1]["w"] * entry[1]["h"])
+    sidebar_right = list_bbox["x"] + list_bbox["w"]
+    if sidebar_right <= main_bbox["x"] + 80 or sidebar_right >= main_bbox["x"] + int(main_bbox["w"] * 0.48):
+        return localized_regions, _stage1_structure_recovery_report([])
+    sidebar_bbox = {
+        "x": main_bbox["x"],
+        "y": main_bbox["y"],
+        "w": sidebar_right - main_bbox["x"],
+        "h": main_bbox["h"],
+    }
+    owned_item_ids: list[str] = []
+    for item_id in item_ids:
+        item = items_by_id.get(str(item_id))
+        item_bbox = _bbox(item.get("bbox")) if isinstance(item, dict) else None
+        if not item_bbox:
+            continue
+        center_x = item_bbox["x"] + item_bbox["w"] / 2
+        if center_x <= sidebar_right and _bbox_containment_ratio(item_bbox, sidebar_bbox) >= 0.75:
+            owned_item_ids.append(str(item_id))
+    main_item_ids = [str(item_id) for item_id in item_ids if str(item_id) not in set(owned_item_ids)]
+    resolved: list[dict[str, Any]] = []
+    for region in localized_regions:
+        if region is not main_region:
+            resolved.append(region)
+            continue
+        updated_main = deepcopy(region)
+        updated_main_bbox = {
+            "x": sidebar_right,
+            "y": main_bbox["y"],
+            "w": main_bbox["x"] + main_bbox["w"] - sidebar_right,
+            "h": main_bbox["h"],
+        }
+        updated_main["bbox"] = deepcopy(updated_main_bbox)
+        updated_main["precise_bbox"] = deepcopy(updated_main_bbox)
+        updated_main["item_ids"] = main_item_ids
+        updated_main["item_count"] = len(main_item_ids)
+        updated_main["ownership_resolution"] = "left_list_container_items_reassigned_to_recovered_sidebar"
+        resolved.append(updated_main)
+    recovered_region = {
+        "contract_version": "learn_stage1_localized_structure_region_v1",
+        "region_id": "structure_region_recovered_left_sidebar",
+        "zone_id": "left_sidebar",
+        "label": "Left navigation/list sidebar",
+        "role": "left_sidebar",
+        "bbox": deepcopy(sidebar_bbox),
+        "precise_bbox": deepcopy(sidebar_bbox),
+        "rough_bbox": deepcopy(list_bbox),
+        "item_ids": owned_item_ids,
+        "item_count": len(owned_item_ids),
+        "stage": "stage1_whole_region_localization",
+        "source": "vertical_list_container_ownership_recovery",
+        "bbox_policy": "whole_structure_region_recovered_from_owned_vertical_list_container",
+        "display_only": True,
+        "execute_binding_enabled": False,
+        "artifact_is_authorization": False,
+    }
+    resolved.append(recovered_region)
+    event = {
+        "contract_version": "learn_stage1_structure_recovery_v1",
+        "region_id": recovered_region["region_id"],
+        "source_item_id": str(list_item.get("item_id") or ""),
+        "reason": "owned_vertical_list_container_with_repeated_list_items",
+        "bbox": deepcopy(sidebar_bbox),
+        "owned_item_count": len(owned_item_ids),
+    }
+    resolved.sort(key=lambda item: (_bbox_top(item), _bbox_left(item), str(item.get("region_id") or "")))
+    return resolved, _stage1_structure_recovery_report([event])
+
+
+def _stage1_structure_recovery_report(events: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "contract_version": "learn_stage1_structure_recovery_v1",
+        "recovered_region_count": len(events),
+        "recovered_regions": events,
+        "policy": "Recover a missing sidebar only from a bounded vertical list container with repeated owned list items.",
+        "display_only": True,
+        "execute_binding_enabled": False,
+        "artifact_is_authorization": False,
+    }
+
+
+def _align_vertical_sibling_lanes_to_main_rough_bounds(localized_regions: list[dict[str, Any]]) -> None:
+    main_region = next(
+        (region for region in localized_regions if _stage1_region_family(region) == "main_content"),
+        None,
+    )
+    side_regions = [
+        region
+        for region in localized_regions
+        if _stage1_region_family(region) in {"left_bar", "right_bar"}
+    ]
+    side_families = {_stage1_region_family(region) for region in side_regions}
+    main_rough = _bbox(main_region.get("rough_bbox")) if isinstance(main_region, dict) else None
+    if not main_region or not main_rough or side_families != {"left_bar", "right_bar"}:
+        return
+    shared_y = main_rough["y"]
+    shared_h = main_rough["h"]
+    source_region_id = str(main_region.get("region_id") or "")
+    left_regions = [region for region in side_regions if _stage1_region_family(region) == "left_bar"]
+    right_regions = [region for region in side_regions if _stage1_region_family(region) == "right_bar"]
+    all_boxes = [
+        bbox
+        for region in localized_regions
+        for bbox in [_bbox(region.get("rough_bbox")) or _bbox(region.get("bbox") or region.get("precise_bbox"))]
+        if bbox
+    ]
+    screen_left = min((bbox["x"] for bbox in all_boxes), default=0)
+    screen_right = max((bbox["x"] + bbox["w"] for bbox in all_boxes), default=main_rough["x"] + main_rough["w"])
+    left_right = max(
+        (
+            bbox["x"] + bbox["w"]
+            for region in left_regions
+            for bbox in [_bbox(region.get("bbox") or region.get("precise_bbox"))]
+            if bbox
+        ),
+        default=main_rough["x"],
+    )
+    right_left = min(
+        (
+            bbox["x"]
+            for region in right_regions
+            for bbox in [_bbox(region.get("bbox") or region.get("precise_bbox"))]
+            if bbox
+        ),
+        default=main_rough["x"] + main_rough["w"],
+    )
+    for region in [main_region, *side_regions]:
+        bbox = _bbox(region.get("bbox") or region.get("precise_bbox"))
+        if not bbox:
+            continue
+        aligned = {**bbox, "y": shared_y, "h": shared_h}
+        family = _stage1_region_family(region)
+        if family == "left_bar":
+            aligned.update({"x": screen_left, "w": max(1, left_right - screen_left)})
+        elif family == "right_bar":
+            aligned.update({"x": right_left, "w": max(1, screen_right - right_left)})
+        elif family == "main_content":
+            aligned.update({"x": left_right, "w": max(1, right_left - left_right)})
+        region["bbox"] = deepcopy(aligned)
+        region["precise_bbox"] = deepcopy(aligned)
+        validation = region.get("coordinate_validation") if isinstance(region.get("coordinate_validation"), dict) else {}
+        validation = deepcopy(validation)
+        validation["shared_vertical_lane"] = {
+            "contract_version": "learn_stage1_shared_vertical_lane_v1",
+            "source_region_id": source_region_id,
+            "previous_bbox": deepcopy(bbox),
+            "aligned_bbox": deepcopy(aligned),
+            "reason": "parallel_lanes_inherit_main_rough_vertical_bounds_including_empty_area",
+            "policy": "parallel_structure_lanes_share_top_and_bottom_boundaries",
+        }
+        region["coordinate_validation"] = validation
 
 
 def _recover_shallow_fullscreen_main_partition(
@@ -1840,6 +2744,52 @@ def _partition_sidebars_against_horizontal_bars(localized_regions: list[dict[str
         region["coordinate_validation"] = validation
 
 
+def _clamp_topbar_against_adjacent_sidebar_start(localized_regions: list[dict[str, Any]]) -> None:
+    sidebar_starts = [
+        rough["y"]
+        for region in localized_regions
+        if _stage1_region_family(region) in {"left_bar", "right_bar"}
+        if (rough := _bbox(region.get("rough_bbox"))) is not None
+        and rough["y"] > 0
+    ]
+    if not sidebar_starts:
+        return
+    for region in localized_regions:
+        if _stage1_region_family(region) != "top_bar":
+            continue
+        bbox = _bbox(region.get("bbox") or region.get("precise_bbox"))
+        rough = _bbox(region.get("rough_bbox"))
+        if not bbox or not rough:
+            continue
+        rough_bottom = rough["y"] + rough["h"]
+        tolerance = max(1, int(round(rough["h"] * 0.25)))
+        adjacent_starts = [
+            start
+            for start in sidebar_starts
+            if start > bbox["y"] and abs(start - rough_bottom) <= tolerance
+        ]
+        if not adjacent_starts:
+            continue
+        boundary = min(adjacent_starts)
+        if bbox["y"] + bbox["h"] <= boundary:
+            continue
+        clamped = {**bbox, "h": max(1, boundary - bbox["y"])}
+        region["bbox"] = deepcopy(clamped)
+        region["precise_bbox"] = deepcopy(clamped)
+        validation = region.get("coordinate_validation") if isinstance(region.get("coordinate_validation"), dict) else {}
+        validation = deepcopy(validation)
+        validation["adjacent_sidebar_clamp"] = {
+            "contract_version": "learn_stage1_adjacent_sidebar_boundary_v1",
+            "reason": "adjacent_sidebar_rough_start_prevents_expanded_topbar_from_absorbing_sidebar_items",
+            "sidebar_top_boundary": boundary,
+            "topbar_rough_bottom": rough_bottom,
+            "previous_bbox": deepcopy(bbox),
+            "clamped_bbox": deepcopy(clamped),
+            "policy": "adjacent_structure_regions_may_touch_but_must_not_overlap",
+        }
+        region["coordinate_validation"] = validation
+
+
 def _expand_main_regions_to_available_lane(
     localized_regions: list[dict[str, Any]],
     *,
@@ -1980,10 +2930,17 @@ def _ensure_browser_right_edge_review_region(
     *,
     items_by_id: dict[str, dict[str, Any]],
     screen_size: dict[str, Any],
+    app_name: str,
 ) -> None:
     width = _int(screen_size.get("width"))
     height = _int(screen_size.get("height"))
     if width <= 0 or height <= 0 or not _items_have_browser_chrome_evidence(items_by_id.values()):
+        return
+    has_retained_browser_region = any(
+        "browser_chrome" in str(region.get("region_id") or "").casefold()
+        for region in localized_regions
+    )
+    if not _is_browser_app_name(app_name) and not has_retained_browser_region:
         return
     families = {_stage1_region_family(region) for region in localized_regions}
     if "right_bar" in families or any(str(region.get("zone_id") or "") == "floating_controls" for region in localized_regions):
@@ -2057,13 +3014,13 @@ def _ensure_browser_right_edge_review_region(
 
 
 def _clamp_topbar_against_main_regions(localized_regions: list[dict[str, Any]]) -> None:
-    main_boxes = [
-        _bbox(region.get("bbox") or region.get("precise_bbox"))
+    main_regions = [
+        region
         for region in localized_regions
         if _stage1_region_family(region) == "main_content"
+        and _bbox(region.get("bbox") or region.get("precise_bbox"))
     ]
-    main_boxes = [box for box in main_boxes if box]
-    if not main_boxes:
+    if not main_regions:
         return
     for region in localized_regions:
         if _stage1_region_family(region) != "top_bar":
@@ -2071,15 +3028,134 @@ def _clamp_topbar_against_main_regions(localized_regions: list[dict[str, Any]]) 
         bbox = _bbox(region.get("bbox") or region.get("precise_bbox"))
         if not bbox:
             continue
-        overlapping_main_tops = [
-            box["y"]
-            for box in main_boxes
-            if box["y"] > bbox["y"]
+        overlapping_main_regions = [
+            main_region
+            for main_region in main_regions
+            for box in [_bbox(main_region.get("bbox") or main_region.get("precise_bbox"))]
+            if box
+            and box["y"] > bbox["y"]
             and _horizontal_overlap_ratio(bbox, box) >= 0.20
             and bbox["y"] + bbox["h"] > box["y"]
         ]
-        if not overlapping_main_tops:
+        if not overlapping_main_regions:
             continue
+        rough = _bbox(region.get("rough_bbox"))
+        top_bottom = bbox["y"] + bbox["h"]
+        rough_bottom = rough["y"] + rough["h"] if rough else 0
+        anchored_inner_header = bool(
+            rough
+            and rough["y"] > bbox["y"] + 4
+            and top_bottom >= rough_bottom
+            and top_bottom <= rough_bottom + max(12, rough["h"])
+        )
+        if anchored_inner_header:
+            moved_main_regions: list[dict[str, Any]] = []
+            for main_region in overlapping_main_regions:
+                main_bbox = _bbox(main_region.get("bbox") or main_region.get("precise_bbox"))
+                if not main_bbox:
+                    continue
+                main_bottom = main_bbox["y"] + main_bbox["h"]
+                if main_bottom <= top_bottom:
+                    continue
+                adjusted = {**main_bbox, "y": top_bottom, "h": max(1, main_bottom - top_bottom)}
+                main_region["bbox"] = deepcopy(adjusted)
+                main_region["precise_bbox"] = deepcopy(adjusted)
+                main_validation = (
+                    main_region.get("coordinate_validation")
+                    if isinstance(main_region.get("coordinate_validation"), dict)
+                    else {}
+                )
+                main_validation = deepcopy(main_validation)
+                main_validation["sibling_partition"] = {
+                    "contract_version": "learn_stage1_sibling_region_partition_v1",
+                    "reason": "main_content_must_follow_anchored_header_content",
+                    "header_bottom_boundary": top_bottom,
+                    "previous_bbox": deepcopy(main_bbox),
+                    "adjusted_bbox": deepcopy(adjusted),
+                    "policy": "adjacent_structure_regions_may_touch_but_must_not_overlap",
+                }
+                main_region["coordinate_validation"] = main_validation
+                moved_main_regions.append(
+                    {
+                        "region_id": main_region.get("region_id"),
+                        "previous_bbox": deepcopy(main_bbox),
+                        "adjusted_bbox": deepcopy(adjusted),
+                    }
+                )
+            if moved_main_regions:
+                validation = region.get("coordinate_validation") if isinstance(region.get("coordinate_validation"), dict) else {}
+                validation = deepcopy(validation)
+                validation["sibling_partition"] = {
+                    "contract_version": "learn_stage1_sibling_region_partition_v1",
+                    "reason": "anchored_header_content_must_precede_main_content",
+                    "header_bottom_boundary": top_bottom,
+                    "rough_header_bbox": deepcopy(rough),
+                    "adjusted_main_regions": moved_main_regions,
+                    "policy": "adjacent_structure_regions_may_touch_but_must_not_overlap",
+                }
+                region["coordinate_validation"] = validation
+                continue
+        shallow_overlap = all(
+            (
+                top_bottom
+                - (_bbox(main_region.get("bbox") or main_region.get("precise_bbox")) or {"y": top_bottom})["y"]
+            )
+            / max(1, bbox["h"])
+            <= 0.25
+            for main_region in overlapping_main_regions
+        )
+        if shallow_overlap:
+            adjusted_main_regions: list[dict[str, Any]] = []
+            for main_region in overlapping_main_regions:
+                main_bbox = _bbox(main_region.get("bbox") or main_region.get("precise_bbox"))
+                if not main_bbox:
+                    continue
+                main_bottom = main_bbox["y"] + main_bbox["h"]
+                if main_bottom <= top_bottom:
+                    continue
+                adjusted = {**main_bbox, "y": top_bottom, "h": max(1, main_bottom - top_bottom)}
+                main_region["bbox"] = deepcopy(adjusted)
+                main_region["precise_bbox"] = deepcopy(adjusted)
+                main_validation = (
+                    main_region.get("coordinate_validation")
+                    if isinstance(main_region.get("coordinate_validation"), dict)
+                    else {}
+                )
+                main_validation = deepcopy(main_validation)
+                main_validation["sibling_partition"] = {
+                    "contract_version": "learn_stage1_sibling_region_partition_v1",
+                    "reason": "main_content_must_follow_shallow_overlapping_horizontal_bar",
+                    "header_bottom_boundary": top_bottom,
+                    "previous_bbox": deepcopy(main_bbox),
+                    "adjusted_bbox": deepcopy(adjusted),
+                    "policy": "shallow_structure_overlap_preserves_complete_horizontal_bar",
+                }
+                main_region["coordinate_validation"] = main_validation
+                adjusted_main_regions.append(
+                    {
+                        "region_id": main_region.get("region_id"),
+                        "previous_bbox": deepcopy(main_bbox),
+                        "adjusted_bbox": deepcopy(adjusted),
+                    }
+                )
+            if adjusted_main_regions:
+                validation = region.get("coordinate_validation") if isinstance(region.get("coordinate_validation"), dict) else {}
+                validation = deepcopy(validation)
+                validation["sibling_partition"] = {
+                    "contract_version": "learn_stage1_sibling_region_partition_v1",
+                    "reason": "complete_horizontal_bar_wins_shallow_main_overlap",
+                    "header_bottom_boundary": top_bottom,
+                    "adjusted_main_regions": adjusted_main_regions,
+                    "policy": "shallow_structure_overlap_preserves_complete_horizontal_bar",
+                }
+                region["coordinate_validation"] = validation
+                continue
+        overlapping_main_tops = [
+            box["y"]
+            for main_region in overlapping_main_regions
+            for box in [_bbox(main_region.get("bbox") or main_region.get("precise_bbox"))]
+            if box
+        ]
         boundary = min(overlapping_main_tops)
         clamped = {**bbox, "h": max(1, boundary - bbox["y"])}
         if clamped == bbox:
@@ -2132,6 +3208,62 @@ def _clamp_browser_chrome_against_page_topbar(localized_regions: list[dict[str, 
             "policy": "adjacent_structure_regions_may_touch_but_must_not_overlap",
         }
         region["coordinate_validation"] = validation
+
+
+def _partition_nested_page_topbar_below_browser_chrome(localized_regions: list[dict[str, Any]]) -> None:
+    browser_regions = [
+        region
+        for region in localized_regions
+        if "browser_chrome" in str(region.get("region_id") or "").casefold()
+    ]
+    page_topbars = [
+        region
+        for region in localized_regions
+        if _stage1_region_family(region) == "top_bar"
+        and "browser_chrome" not in str(region.get("region_id") or "").casefold()
+    ]
+    for browser_region in browser_regions:
+        browser_bbox = _bbox(browser_region.get("bbox") or browser_region.get("precise_bbox"))
+        if not browser_bbox:
+            continue
+        browser_bottom = browser_bbox["y"] + browser_bbox["h"]
+        for page_topbar in page_topbars:
+            topbar_bbox = _bbox(page_topbar.get("bbox") or page_topbar.get("precise_bbox"))
+            if not topbar_bbox:
+                continue
+            topbar_bottom = topbar_bbox["y"] + topbar_bbox["h"]
+            horizontal_overlap = max(
+                0,
+                min(browser_bbox["x"] + browser_bbox["w"], topbar_bbox["x"] + topbar_bbox["w"])
+                - max(browser_bbox["x"], topbar_bbox["x"]),
+            )
+            overlap_ratio = horizontal_overlap / max(1, min(browser_bbox["w"], topbar_bbox["w"]))
+            same_top_origin = abs(topbar_bbox["y"] - browser_bbox["y"]) <= max(8, int(browser_bbox["h"] * 0.2))
+            has_distinct_page_lane = topbar_bottom - browser_bottom >= 24
+            if overlap_ratio < 0.8 or not same_top_origin or not has_distinct_page_lane:
+                continue
+            partitioned = {
+                **topbar_bbox,
+                "y": browser_bottom,
+                "h": topbar_bottom - browser_bottom,
+            }
+            page_topbar["bbox"] = deepcopy(partitioned)
+            page_topbar["precise_bbox"] = deepcopy(partitioned)
+            validation = (
+                page_topbar.get("coordinate_validation")
+                if isinstance(page_topbar.get("coordinate_validation"), dict)
+                else {}
+            )
+            validation = deepcopy(validation)
+            validation["browser_chrome_page_header_partition"] = {
+                "contract_version": "learn_stage1_sibling_region_partition_v1",
+                "reason": "page_topbar_contained_browser_chrome_from_same_top_origin",
+                "browser_chrome_bottom_boundary": browser_bottom,
+                "previous_bbox": deepcopy(topbar_bbox),
+                "partitioned_bbox": deepcopy(partitioned),
+                "policy": "adjacent_top_structure_regions_may_touch_but_must_not_overlap",
+            }
+            page_topbar["coordinate_validation"] = validation
 
 
 def _clamp_main_regions_against_sidebars(localized_regions: list[dict[str, Any]]) -> None:
@@ -2260,6 +3392,35 @@ def _same_family_structure_region_duplicate(
 ) -> bool:
     first_in_second = _bbox_containment_ratio(first, second)
     second_in_first = _bbox_containment_ratio(second, first)
+    first_region_id = str(first_region.get("region_id") or "").casefold()
+    second_region_id = str(second_region.get("region_id") or "").casefold()
+    if (
+        _stage1_region_family(first_region) == "top_bar"
+        and _stage1_region_family(second_region) == "top_bar"
+        and "browser_chrome" not in first_region_id
+        and "browser_chrome" not in second_region_id
+    ):
+        horizontal_overlap = max(
+            0,
+            min(first["x"] + first["w"], second["x"] + second["w"]) - max(first["x"], second["x"]),
+        )
+        horizontal_overlap_ratio = horizontal_overlap / max(1, min(first["w"], second["w"]))
+        if horizontal_overlap_ratio >= 0.98 and max(first_in_second, second_in_first) >= 0.98:
+            return True
+        first_rough = _bbox(first_region.get("rough_bbox"))
+        second_rough = _bbox(second_region.get("rough_bbox"))
+        if first_rough and second_rough and horizontal_overlap_ratio >= 0.98:
+            rough_first_in_second = _bbox_containment_ratio(first_rough, second_rough)
+            rough_second_in_first = _bbox_containment_ratio(second_rough, first_rough)
+            vertical_gap = max(
+                first["y"],
+                second["y"],
+            ) - min(
+                first["y"] + first["h"],
+                second["y"] + second["h"],
+            )
+            if max(rough_first_in_second, rough_second_in_first) >= 0.98 and vertical_gap <= 2:
+                return True
     first_area = max(1, first["w"] * first["h"])
     second_area = max(1, second["w"] * second["h"])
     area_ratio = min(first_area, second_area) / max(first_area, second_area)
@@ -2306,6 +3467,12 @@ def _suppress_contained_duplicate_structure_regions(
                 continue
             outer_area = outer_bbox["w"] * outer_bbox["h"]
             if outer_area <= inner_area:
+                precise_overlap = max(
+                    _bbox_containment_ratio(inner_bbox, outer_bbox),
+                    _bbox_containment_ratio(outer_bbox, inner_bbox),
+                )
+                if precise_overlap < 0.05:
+                    continue
                 rough_duplicate = _same_family_rough_contained_duplicate(inner_region, outer_region)
                 if not rough_duplicate:
                     continue
@@ -2435,7 +3602,23 @@ def _calibrated_stage1_bbox(
         icon_boxes = [box for box in icon_boxes if box]
         if icon_boxes:
             right = max(box["x"] + box["w"] for box in icon_boxes)
-            visual_rail_width = max(right + 18, int((width or right) * 0.08))
+            visual_boundaries = [
+                _int((item.get("metadata") or {}).get("visual_left_rail_boundary_x"))
+                for item in region_items
+                if isinstance(item.get("metadata"), dict)
+            ]
+            rough_right = rough["x"] + rough["w"]
+            rough_covers_full_lane = (
+                rough["x"] <= max(24, int((width or rough_right) * 0.03))
+                and rough["h"] >= max(120, int((height or rough["h"]) * 0.5))
+                and rough["w"] <= max(240, int((width or rough_right) * 0.45))
+            )
+            boundary_candidates = [right + 18, *visual_boundaries]
+            if rough_covers_full_lane:
+                boundary_candidates.append(rough_right)
+            else:
+                boundary_candidates.append(int((width or right) * 0.08))
+            visual_rail_width = max(boundary_candidates)
             calibrated = {
                 "x": 0,
                 "y": 0,
@@ -2483,12 +3666,13 @@ def _calibrated_stage1_bbox(
         }
 
     if zone_id in {"top_bar", "page_header"} or "header" in region_id:
-        top_h = rough["h"]
+        top_h = rough["y"] + rough["h"]
         item_boxes = [_bbox(item.get("bbox")) for item in region_items if not _is_section_hint(item)]
         item_boxes = [box for box in item_boxes if box]
-        if height > 0:
-            top_h = max(top_h, max(56, int(height * 0.09)))
         y = 0
+        strategy = "top_bar_height_clamped_before_content_title"
+        evidence = "top/header region is clamped so content title and cards are excluded"
+        unsupported_tail_trimmed = 0
         browser_surface = _items_have_browser_chrome_evidence(items_by_id.values())
         if item_boxes:
             min_item_y = min(box["y"] for box in item_boxes)
@@ -2496,14 +3680,33 @@ def _calibrated_stage1_bbox(
             if browser_surface and min_item_y > max(56, int((height or 0) * 0.045)):
                 y = max(0, min_item_y - 8)
                 top_h = max(1, max_item_bottom + 8 - y)
-            elif region.get("recovered_from_unknown_only"):
-                top_h = max(top_h, max_item_bottom + 8)
-        return {
+                strategy = "browser_page_header_contains_assigned_children"
+                evidence = "page header starts below browser chrome and contains every assigned child"
+            else:
+                trailing_padding = 8
+                if rough["y"] > 0 and min_item_y > 56:
+                    trailing_padding = max(8, min(48, max(box["h"] for box in item_boxes)))
+                evidence_boundary = max(56, max_item_bottom + trailing_padding)
+                unsupported_tail = max(0, top_h - evidence_boundary)
+                tail_tolerance = max(32, max(box["h"] for box in item_boxes) * 2)
+                if rough["y"] == 0 and unsupported_tail > tail_tolerance:
+                    top_h = evidence_boundary
+                    unsupported_tail_trimmed = unsupported_tail
+                    strategy = "top_bar_sparse_tail_trimmed_to_assigned_children"
+                    evidence = "coarse top/header tail had no assigned child evidence and was returned to main content"
+                else:
+                    top_h = max(top_h, evidence_boundary)
+                    strategy = "top_bar_contains_assigned_children"
+                    evidence = "top/header boundary contains every assigned child before sibling partitioning"
+        result = {
             "bbox": {"x": 0, "y": y, "w": width or rough["w"], "h": top_h},
             "status": "heuristic_calibrated_top_bar",
-            "strategy": "top_bar_height_clamped_before_content_title",
-            "evidence": "top/header region is clamped so content title and cards are excluded",
+            "strategy": strategy,
+            "evidence": evidence,
         }
+        if unsupported_tail_trimmed:
+            result["unsupported_tail_trimmed"] = unsupported_tail_trimmed
+        return result
 
     if zone_id in {"primary_area", "main_content", "lower_content"} or "main" in region_id or "primary" in region_id:
         browser_surface = _items_have_browser_chrome_evidence(items_by_id.values())
@@ -2974,7 +4177,7 @@ def _primary_subpane_evidence(
     items_by_id: dict[str, dict[str, Any]],
 ) -> list[str]:
     item_ids = region.get("item_ids") if isinstance(region.get("item_ids"), list) else []
-    text = " ".join(
+    item_texts = [
         " ".join(
             [
                 str(items_by_id.get(str(item_id), {}).get("role") or ""),
@@ -2983,13 +4186,22 @@ def _primary_subpane_evidence(
             ]
         ).casefold()
         for item_id in item_ids
-    )
+    ]
     evidence: list[str] = []
-    if any(token in text for token in ("conversation", "chat list", "session list", "会话", "联系人")):
+    if any(
+        any(token in item_text for token in ("conversation", "chat list", "session list", "会话", "联系人"))
+        for item_text in item_texts
+    ):
         evidence.append("conversation_or_list_pane_signal")
-    if any(token in text for token in ("message", "chat thread", "bubble", "消息", "聊天")):
+    if any(
+        any(token in item_text for token in ("message", "chat thread", "bubble", "消息", "聊天"))
+        for item_text in item_texts
+    ):
         evidence.append("message_thread_signal")
-    if any(token in text for token in ("composer", "input area", "send button", "输入框", "发送")):
+    if any(
+        any(token in item_text for token in ("composer", "input area", "send button", "输入框", "发送"))
+        for item_text in item_texts
+    ):
         evidence.append("bottom_composer_signal")
     return evidence
 
@@ -3055,6 +4267,31 @@ def _stage1_5_stage2_selection_report(
     localized_regions: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     region_by_id = {str(region.get("region_id") or ""): region for region in localized_regions if isinstance(region, dict)}
+    child_item_ids_by_parent: dict[str, set[str]] = {}
+    for subregion in subregions:
+        if not isinstance(subregion, dict):
+            continue
+        parent_region_id = str(subregion.get("parent_region_id") or "")
+        child_item_ids_by_parent.setdefault(parent_region_id, set()).update(
+            str(item_id) for item_id in (subregion.get("item_ids") or []) if str(item_id)
+        )
+    parent_evidence_coverage: dict[str, dict[str, Any]] = {}
+    for parent_region_id, parent_region in region_by_id.items():
+        parent_item_ids = {
+            str(item_id) for item_id in (parent_region.get("item_ids") or []) if str(item_id)
+        }
+        child_item_ids = child_item_ids_by_parent.get(parent_region_id, set())
+        if not parent_item_ids:
+            continue
+        covered_count = len(parent_item_ids.intersection(child_item_ids))
+        coverage = covered_count / len(parent_item_ids)
+        parent_evidence_coverage[parent_region_id] = {
+            "parent_item_count": len(parent_item_ids),
+            "covered_item_count": covered_count,
+            "coverage": round(float(coverage), 4),
+            "minimum_required": 0.5,
+            "sufficient_for_replacement": coverage >= 0.5,
+        }
     annotated: list[dict[str, Any]] = []
     accepted: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
@@ -3074,6 +4311,12 @@ def _stage1_5_stage2_selection_report(
         elif containment < 0.9:
             eligible = False
             reason = "stage1_5_subregion_not_contained_in_parent_region"
+        elif (
+            parent_region_id in parent_evidence_coverage
+            and not parent_evidence_coverage[parent_region_id]["sufficient_for_replacement"]
+        ):
+            eligible = False
+            reason = "stage1_5_partition_drops_parent_evidence"
         if eligible:
             reason = "stage1_5_main_content_partition_selected"
             accepted.append(
@@ -3099,6 +4342,7 @@ def _stage1_5_stage2_selection_report(
         item["stage2_numbering_selection_reason"] = reason
         item["stage2_parent_family"] = parent_family
         item["stage2_parent_containment"] = round(float(containment), 4)
+        item["stage2_parent_evidence_coverage"] = deepcopy(parent_evidence_coverage.get(parent_region_id) or {})
         annotated.append(item)
     return annotated, {
         "contract_version": "learn_stage1_5_stage2_selection_v1",
@@ -3108,6 +4352,7 @@ def _stage1_5_stage2_selection_report(
         "policy": "stage1_5_partitions_are_candidates; only stable main-content subregions may replace Stage2 input regions",
         "eligible_count": len(accepted),
         "rejected_count": len(rejected),
+        "parent_evidence_coverage": parent_evidence_coverage,
         "accepted": accepted,
         "rejected": rejected,
     }
@@ -3289,13 +4534,20 @@ def _stage1_5_content_column_subregions(
     union = _clip_bbox_to_parent(_bbox_union(boxes), parent_bbox)
     if not union or (width > 0 and not _looks_like_centered_page_content_column(union, width=width)):
         return []
+    covered_item_ids = [
+        str(item_id)
+        for item_id in item_ids
+        if (item := items_by_id.get(str(item_id))) is not None
+        and (item_bbox := _bbox(item.get("bbox"))) is not None
+        and _bbox_containment_ratio(item_bbox, union) >= 0.85
+    ]
     return [
         _stage1_5_subregion(
             region=region,
             role="content_column",
             label="Stage1.5 content column",
             bbox=union,
-            item_ids=[str(item.get("item_id") or item.get("candidate_id") or "") for item in candidates],
+            item_ids=covered_item_ids,
             source_issue="browser_primary_scope_ambiguous_full_page_vs_content_column",
             reason="centered_content_column_inside_full_width_primary",
         )
@@ -3905,13 +5157,102 @@ def _clip_bbox_to_parent(bbox: dict[str, int] | None, parent: dict[str, int]) ->
     return {"x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1}
 
 
+def _normalized_stage2_item_role(
+    role: str,
+    *,
+    region: dict[str, Any],
+    class_rule_profile: dict[str, Any],
+) -> str:
+    normalized = str(role or "review_only")
+    if not class_rule_profile.get("allow_chat_semantics"):
+        return normalized
+    if class_rule_profile.get("primary_content_strategy") != "conversation_rows":
+        return normalized
+    region_value = " ".join(
+        str(region.get(key) or "").casefold()
+        for key in ("region_id", "zone_id", "label")
+    )
+    if "conversation_bottom_panel" not in region_value:
+        return normalized
+    if normalized.casefold() in {"news_card", "recommendation_item", "card"}:
+        return "group_chat_row"
+    return normalized
+
+
+def _normalized_structural_evidence_role(item: dict[str, Any], role: str) -> str:
+    structure_text = " ".join(
+        str(item.get(key) or "").casefold().replace("-", "_")
+        for key in ("item_id", "candidate_id", "element_id", "layout", "section_id", "source")
+    )
+    if "bottom_bar" in structure_text or "status_bar" in structure_text:
+        return "status_bar_evidence"
+    return str(role or "review_only")
+
+
+def _suppress_unsupported_semantic_action_hypotheses(
+    items: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    kept: list[dict[str, Any]] = []
+    suppressed: list[dict[str, Any]] = []
+    actionable_roles = {
+        "button",
+        "checkbox",
+        "combobox",
+        "input",
+        "link",
+        "menu item",
+        "menu_item",
+        "radio",
+        "select",
+        "switch",
+        "tab",
+    }
+    for item in items:
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        role = str(item.get("role") or item.get("item_type") or "").strip().casefold()
+        source = str(item.get("source") or "").strip().casefold()
+        evidence_level = str(metadata.get("evidence_level") or "").strip().casefold()
+        uia_match = metadata.get("uia_match")
+        unsupported = (
+            source == "screen_reading.ui_elements"
+            and role in actionable_roles
+            and evidence_level == "semantic_region_only"
+            and not uia_match
+        )
+        if not unsupported:
+            kept.append(item)
+            continue
+        suppressed.append(
+            {
+                "item_id": str(item.get("item_id") or item.get("candidate_id") or ""),
+                "label": str(item.get("label") or item.get("text") or ""),
+                "role": role,
+                "bbox": deepcopy(item.get("bbox") if isinstance(item.get("bbox"), dict) else {}),
+                "source": source,
+                "evidence_level": evidence_level,
+            }
+        )
+    return kept, {
+        "contract_version": "learn_stage2_unsupported_semantic_action_suppression_v1",
+        "suppressed_count": len(suppressed),
+        "suppressed_item_ids": [item["item_id"] for item in suppressed],
+        "suppressed_items": suppressed,
+        "reason": "semantic_action_without_ocr_uia_or_visual_grounding_evidence",
+        "display_only": True,
+        "execute_binding_enabled": False,
+        "artifact_is_authorization": False,
+    }
+
+
 def _stage2_numbering(
     localized_regions: list[dict[str, Any]],
     *,
     items_by_id: dict[str, dict[str, Any]],
     supplemental_text_items: list[dict[str, Any]] | None = None,
     image_path: str = "",
+    class_rule_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    class_rule_profile = deepcopy(class_rule_profile) if isinstance(class_rule_profile, dict) else {}
     regions: list[dict[str, Any]] = []
     total = 0
     for region in localized_regions:
@@ -3920,6 +5261,9 @@ def _stage2_numbering(
         region_item_ids = region.get("item_ids") if isinstance(region.get("item_ids"), list) else []
         region_items = [items_by_id[str(item_id)] for item_id in region_item_ids if str(item_id) in items_by_id]
         region_items = [item for item in region_items if not _is_section_hint(item)]
+        region_items, unsupported_semantic_action_suppression = _suppress_unsupported_semantic_action_hypotheses(
+            region_items
+        )
         region_bbox = _bbox(region.get("bbox")) or _bbox(region.get("precise_bbox")) or {}
         region_items = [item for item in region_items if _item_belongs_to_region_bbox(item, region_bbox)]
         region_items = _append_supplemental_text_items_for_region(
@@ -3927,18 +5271,25 @@ def _stage2_numbering(
             supplemental_text_items or [],
             region_bbox=region_bbox,
         )
+        region_items, candidate_deduplication = _dedupe_region_items_by_semantic_overlap(region_items)
         region_items.sort(key=lambda item: (_bbox_top(item), _bbox_left(item), str(item.get("label") or "")))
         for item_index, item in enumerate(region_items, start=1):
             bbox = _bbox(item.get("bbox"))
             if not bbox:
                 continue
-            numbered_items.append(
-                {
+            original_role = str(item.get("role") or item.get("item_type") or "review_only")
+            normalized_role = _normalized_stage2_item_role(
+                original_role,
+                region=region,
+                class_rule_profile=class_rule_profile,
+            )
+            normalized_role = _normalized_structural_evidence_role(item, normalized_role)
+            numbered_item = {
                     "contract_version": "learn_stage2_numbered_item_v1",
                     "number": f"{region_no}.{item_index}",
                     "item_id": str(item.get("item_id") or item.get("candidate_id") or f"item_{region_no}_{item_index}"),
                     "label": str(item.get("label") or item.get("text") or ""),
-                    "role": str(item.get("role") or item.get("item_type") or "review_only"),
+                    "role": normalized_role,
                     "item_type": str(item.get("item_type") or ""),
                     "bbox": bbox,
                     "click_point": deepcopy(item.get("click_point") if isinstance(item.get("click_point"), dict) else {}),
@@ -3951,7 +5302,14 @@ def _stage2_numbering(
                     "execute_binding_enabled": False,
                     "artifact_is_authorization": False,
                 }
-            )
+            if normalized_role != original_role:
+                numbered_item["original_role"] = original_role
+                numbered_item["role_normalization_reason"] = (
+                    "structural_status_bar_evidence"
+                    if normalized_role == "status_bar_evidence"
+                    else "conversation_bottom_panel_semantics"
+                )
+            numbered_items.append(numbered_item)
         stage1_5_subregion = (
             region.get("input_stage1_5_subregion") if isinstance(region.get("input_stage1_5_subregion"), dict) else {}
         )
@@ -3967,7 +5325,11 @@ def _stage2_numbering(
         )
         region_processing_contract = _region_processing_contract(region, grouping_strategy=grouping_strategy)
         subregion_groups = (
-            _primary_content_subregion_groups(region=region, numbered_items=numbered_items)
+            _primary_content_subregion_groups(
+                region=region,
+                numbered_items=numbered_items,
+                class_rule_profile=class_rule_profile,
+            )
             if grouping_strategy == "primary_region_homogeneous_grouping_with_visual_card_segmenter"
             else []
         )
@@ -3985,34 +5347,60 @@ def _stage2_numbering(
                 region_bbox=_direct_region_control_search_bbox(region),
                 region_family=_stage1_region_family(region),
             )
-            subregion_groups = _semantic_parent_groups(region=region, numbered_items=numbered_items)
+            subregion_groups = _semantic_parent_groups(
+                region=region,
+                numbered_items=numbered_items,
+                class_rule_profile=class_rule_profile,
+            )
             main_content_subdivision = _main_content_subdivision_report(region, subregion_groups)
         elif grouping_strategy == "primary_region_homogeneous_grouping_with_visual_card_segmenter":
-            numbered_items, media_card_synthesis = _synthesize_primary_media_cards(
+            chat_semantics_allowed = bool(class_rule_profile.get("allow_chat_semantics")) or _stage2_region_has_chat_surface_evidence(
+                region,
                 numbered_items,
-                image_path=image_path,
-                region_bbox=region_bbox,
             )
+            if class_rule_profile.get("allow_media_card_synthesis") is False:
+                media_card_synthesis = {
+                    "applied": False,
+                    "reason": "disabled_by_interface_class_rule",
+                    "candidate_count": 0,
+                }
+            else:
+                numbered_items, media_card_synthesis = _synthesize_primary_media_cards(
+                    numbered_items,
+                    image_path=image_path,
+                    region_bbox=region_bbox,
+                )
             numbered_items, partial_card_synthesis = _synthesize_partial_visible_cards(
                 numbered_items,
                 image_path=image_path,
                 region_bbox=region_bbox,
             )
-            numbered_items, chat_image_synthesis = _synthesize_chat_image_messages(
-                numbered_items,
-                image_path=image_path,
-                region_bbox=region_bbox,
-            )
+            if chat_semantics_allowed:
+                numbered_items, chat_image_synthesis = _synthesize_chat_image_messages(
+                    numbered_items,
+                    image_path=image_path,
+                    region_bbox=region_bbox,
+                )
+            else:
+                chat_image_synthesis = {"applied": False, "reason": "chat_surface_evidence_missing", "candidate_count": 0}
             numbered_items, text_button_hit_area = _normalize_text_only_button_hit_areas(
                 numbered_items,
                 region_bbox=region_bbox,
             )
-            numbered_items, message_bubble_hit_area = _normalize_text_only_message_bubble_backgrounds(
-                numbered_items,
-                region_bbox=region_bbox,
+            if chat_semantics_allowed:
+                numbered_items, message_bubble_hit_area = _normalize_text_only_message_bubble_backgrounds(
+                    numbered_items,
+                    region_bbox=region_bbox,
+                )
+                numbered_items, message_card_boundary_clip = _clip_message_cards_at_following_start_anchors(numbered_items)
+            else:
+                message_bubble_hit_area = {"applied": False, "reason": "chat_surface_evidence_missing", "candidate_count": 0}
+                message_card_boundary_clip = {"applied": False, "reason": "chat_surface_evidence_missing", "candidate_count": 0}
+            subregion_groups = _primary_content_subregion_groups(
+                region=region,
+                numbered_items=numbered_items,
+                class_rule_profile=class_rule_profile,
             )
-            numbered_items, message_card_boundary_clip = _clip_message_cards_at_following_start_anchors(numbered_items)
-            subregion_groups = _primary_content_subregion_groups(region=region, numbered_items=numbered_items)
             main_content_subdivision = _main_content_subdivision_report(region, subregion_groups)
             visual_refinement["media_card_synthesis"] = media_card_synthesis
             visual_refinement["partial_visible_card_synthesis"] = partial_card_synthesis
@@ -4020,6 +5408,9 @@ def _stage2_numbering(
             visual_refinement["text_button_hit_area"] = text_button_hit_area
             visual_refinement["message_bubble_hit_area"] = message_bubble_hit_area
             visual_refinement["message_card_boundary_clip"] = message_card_boundary_clip
+        ownership_resolution = resolve_group_ownership(subregion_groups)
+        subregion_groups = ownership_resolution["accepted_groups"]
+        numbered_items = _normalize_tile_group_member_roles(numbered_items, subregion_groups)
         numbered_items, subregion_groups = _apply_semantic_group_child_roles(numbered_items, subregion_groups)
         numbered_items, subregion_groups, region_content_boundary = _enforce_region_content_boundary(
             numbered_items,
@@ -4049,12 +5440,16 @@ def _stage2_numbering(
                 ),
                 "input_stage1_5_subregion": deepcopy(stage1_5_subregion),
                 "grouping_strategy": grouping_strategy,
+                "class_rule_profile": deepcopy(class_rule_profile),
                 "region_processing_contract": region_processing_contract,
                 "bar_numbering": bar_numbering_report,
                 "main_content_subdivision": main_content_subdivision,
                 "subregion_groups": subregion_groups,
+                "ownership_resolution": ownership_resolution["audit"],
                 "region_content_boundary": region_content_boundary,
                 "visual_small_control_refinement": visual_refinement,
+                "unsupported_semantic_action_suppression": unsupported_semantic_action_suppression,
+                "candidate_deduplication": candidate_deduplication,
                 "numbered_item_count": len(numbered_items),
                 "numbered_items": numbered_items,
                 "model_prompt_intent": (
@@ -4072,6 +5467,97 @@ def _stage2_numbering(
         "numbered_item_count": total,
         "regions": regions,
     }
+
+
+def _dedupe_region_items_by_semantic_overlap(
+    items: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    suppressed: list[dict[str, Any]] = []
+    for raw_item in items:
+        if not isinstance(raw_item, dict):
+            continue
+        item = deepcopy(raw_item)
+        label = _normalized_stage2_item_label(item)
+        bbox = _bbox(item.get("bbox"))
+        duplicate_index = None
+        for index, existing in enumerate(deduped):
+            if not label or label != _normalized_stage2_item_label(existing):
+                continue
+            existing_bbox = _bbox(existing.get("bbox"))
+            if not bbox or not existing_bbox:
+                continue
+            if min(_bbox_overlap_ratio(bbox, existing_bbox), _bbox_overlap_ratio(existing_bbox, bbox)) < 0.72:
+                continue
+            duplicate_index = index
+            break
+        if duplicate_index is None:
+            item["merged_source_item_ids"] = [str(item.get("item_id") or item.get("candidate_id") or "")]
+            deduped.append(item)
+            continue
+        existing = deduped[duplicate_index]
+        existing_score = _stage2_item_source_quality(existing)
+        item_score = _stage2_item_source_quality(item)
+        winner, loser = (item, existing) if item_score > existing_score else (existing, item)
+        merged_ids = [
+            str(winner.get("item_id") or winner.get("candidate_id") or ""),
+            *[
+                str(item_id)
+                for item_id in existing.get("merged_source_item_ids", [])
+                if str(item_id) != str(winner.get("item_id") or winner.get("candidate_id") or "")
+            ],
+            str(loser.get("item_id") or loser.get("candidate_id") or ""),
+        ]
+        winner = deepcopy(winner)
+        winner["merged_source_item_ids"] = list(dict.fromkeys(item_id for item_id in merged_ids if item_id))
+        deduped[duplicate_index] = winner
+        suppressed.append(
+            {
+                "winner_item_id": str(winner.get("item_id") or winner.get("candidate_id") or ""),
+                "suppressed_item_id": str(loser.get("item_id") or loser.get("candidate_id") or ""),
+                "label": str(winner.get("label") or winner.get("text") or ""),
+                "reason": "same_semantic_label_and_overlapping_bbox",
+            }
+        )
+    return deduped, {
+        "contract_version": "learn_stage2_candidate_deduplication_v1",
+        "input_count": len([item for item in items if isinstance(item, dict)]),
+        "output_count": len(deduped),
+        "suppressed_duplicate_count": len(suppressed),
+        "suppressed_duplicates": suppressed,
+        "display_only": True,
+        "execute_binding_enabled": False,
+        "artifact_is_authorization": False,
+    }
+
+
+def _normalized_stage2_item_label(item: dict[str, Any]) -> str:
+    value = str(item.get("label") or item.get("text") or "").casefold()
+    return " ".join(value.split()).strip(" .,:;!?-_/\\|()[]{}")
+
+
+def _stage2_item_source_quality(item: dict[str, Any]) -> tuple[int, int, int]:
+    item_id = str(item.get("item_id") or item.get("candidate_id") or "").casefold()
+    role = str(item.get("role") or "").casefold()
+    item_type = str(item.get("item_type") or "").casefold()
+    source_score = 0
+    for prefix, score in (
+        ("action_uia", 6),
+        ("action_screen", 5),
+        ("element_", 4),
+        ("card_", 3),
+        ("page_text", 2),
+        ("ocr_text", 1),
+        ("text_", 1),
+    ):
+        if item_id.startswith(prefix):
+            source_score = score
+            break
+    semantic_score = int(item_type == "actionable") * 3 + int(
+        role in {"button", "input", "combobox", "listitem", "menu item", "menu_item", "link"}
+    ) * 2
+    bbox = _bbox(item.get("bbox")) or {"w": 0, "h": 0}
+    return source_score, semantic_score, bbox["w"] * bbox["h"]
 
 
 def _item_belongs_to_region_bbox(item: dict[str, Any], region_bbox: dict[str, int]) -> bool:
@@ -4548,7 +6034,7 @@ def _sibling_group_render_priority(group: dict[str, Any]) -> int:
         return 80
     if role in {"hero_text_panel", "hero_code_panel", "list_group", "list_row"}:
         return 70
-    if role in {"media_card_group", "message_item"}:
+    if role in {"media_card_group", "tile_card_group", "message_item"}:
         return 50
     if role in {"ungrouped_review_region"}:
         return 20
@@ -4618,12 +6104,15 @@ _DETAIL_PARENT_GROUP_ROLES = {
     "hero_code_panel",
     "section_parent",
     "media_card_group",
+    "tile_card_group",
+    "tile_card_parent",
     "list_group",
     "list_row",
     "member_list_region",
     "conversation_row",
     "message_item",
     "input_toolbar_region",
+    "settings_status_tile",
 }
 
 
@@ -4667,6 +6156,7 @@ _STRUCTURAL_CONTAINER_GROUP_ROLES = {
     "hero_panel",
     "section_parent",
     "list_group",
+    "tile_card_group",
 }
 
 
@@ -4757,21 +6247,41 @@ def _group_display_hierarchy(
 def _item_display_hierarchy(item: dict[str, Any], memberships: list[dict[str, str]]) -> dict[str, Any]:
     roles = {str(group.get("role") or "") for group in memberships}
     item_role = str(item.get("role") or "")
+    item_type = str(item.get("item_type") or "").casefold()
     parent_ids = [str(group.get("group_id") or "") for group in memberships if group.get("group_id")]
-    inside_ungrouped_review_region = "ungrouped_review_region" in roles
+    is_actionable_control = item_type == "actionable" and item_role.casefold() not in {"text", "icon", "image"}
+    inside_ungrouped_review_region = "ungrouped_review_region" in roles and not is_actionable_control
     is_model_card_text_evidence = bool(roles & _DETAIL_PARENT_GROUP_ROLES) and _is_model_card_like_text_evidence(item)
+    item_source = str(item.get("source") or "").casefold()
+    is_tile_parent_fragment = (
+        bool(roles & {"tile_card_parent", "tile_card_group", "media_card_group"})
+        and item_role in {
+            "card",
+            "tile_card",
+            "content_card",
+            "news_card",
+            "recommendation_item",
+        }
+        and item_source not in _PRIMARY_VISUAL_CARD_SOURCES
+        and not (item_role == "tile_card" and bool(item.get("children")))
+    )
     is_child_evidence = inside_ungrouped_review_region or (
         bool(roles & _DETAIL_PARENT_GROUP_ROLES)
         and (
             item_role in _DETAIL_CHILD_EVIDENCE_ROLES
             or (bool(roles & _HERO_PARENT_GROUP_ROLES) and item_role in _HERO_CHILD_EVIDENCE_EXTRA_ROLES)
             or is_model_card_text_evidence
+            or is_tile_parent_fragment
         )
     )
     demotion_reason = (
         "ungrouped_review_region_detail_only"
         if inside_ungrouped_review_region
-        else ("model_card_like_text_evidence_inside_parent_group" if is_model_card_text_evidence else "")
+        else (
+            "model_card_like_text_evidence_inside_parent_group"
+            if is_model_card_text_evidence
+            else ("tile_card_fragment_inside_semantic_parent" if is_tile_parent_fragment else "")
+        )
     )
     return {
         "contract_version": "learn_display_hierarchy_v1",
@@ -4791,6 +6301,105 @@ def _item_display_hierarchy(item: dict[str, Any], memberships: list[dict[str, st
             else {}
         ),
     }
+
+
+def partition_stage2_calibration_items(
+    region: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """按渲染层级拆分可校准主项和仅作说明的子证据。"""
+    numbered_items = region.get("numbered_items") if isinstance(region.get("numbered_items"), list) else []
+    groups = region.get("subregion_groups") if isinstance(region.get("subregion_groups"), list) else []
+    consolidated_parent_member_ids = {
+        str(item_id or "").strip()
+        for group in groups
+        if isinstance(group, dict)
+        and str(group.get("role") or "") in _DETAIL_PARENT_GROUP_ROLES
+        and group.get("adjacent_fragment_merged") is True
+        for item_id in group.get("member_item_ids", [])
+        if str(item_id or "").strip()
+    }
+    memberships = _group_membership_for_region(region)
+    calibratable: list[dict[str, Any]] = []
+    child_evidence: list[dict[str, Any]] = []
+    for item in numbered_items:
+        if not isinstance(item, dict):
+            continue
+        item_id = str(item.get("item_id") or "").strip()
+        hierarchy = _item_display_hierarchy(item, memberships.get(item_id, []))
+        explicit_hierarchy = item.get("display_hierarchy") if isinstance(item.get("display_hierarchy"), dict) else {}
+        if item_id in consolidated_parent_member_ids:
+            child_evidence.append(
+                {
+                    **item,
+                    "display_hierarchy": {
+                        **hierarchy,
+                        "display_layer": "child_evidence",
+                        "render_in_main_overlay": False,
+                        "page_detail_role": "child_evidence",
+                        "demotion_reason": "consolidated_parent_replaces_fragment_calibration",
+                    },
+                }
+            )
+            continue
+        explicitly_hidden = item.get("render_in_main_overlay") is False or explicit_hierarchy.get("render_in_main_overlay") is False
+        if explicitly_hidden or hierarchy.get("render_in_main_overlay") is False:
+            child_evidence.append({**item, "display_hierarchy": hierarchy})
+            continue
+        calibratable.append({**item, "display_hierarchy": hierarchy})
+
+    item_by_id = {
+        str(item.get("item_id") or ""): item
+        for item in numbered_items
+        if isinstance(item, dict) and str(item.get("item_id") or "").strip()
+    }
+    calibratable_ids = {str(item.get("item_id") or "") for item in calibratable}
+    for group in groups:
+        if not isinstance(group, dict) or str(group.get("role") or "") not in _DETAIL_PARENT_GROUP_ROLES:
+            continue
+        group_id = str(group.get("group_id") or "").strip()
+        group_bbox = _bbox(group.get("bbox"))
+        if not group_id or not group_bbox:
+            continue
+        hierarchy = _group_display_hierarchy(group, item_by_id)
+        if group.get("render_in_main_overlay") is False or hierarchy.get("render_in_main_overlay") is False:
+            continue
+        member_ids = [
+            str(item_id or "").strip()
+            for item_id in group.get("member_item_ids", [])
+            if str(item_id or "").strip()
+        ] if isinstance(group.get("member_item_ids"), list) else []
+        if any(item_id in calibratable_ids for item_id in member_ids):
+            continue
+        child_items = [item_by_id[item_id] for item_id in member_ids if item_id in item_by_id]
+        child_labels = [
+            str(item.get("label") or item.get("text") or "").strip()
+            for item in child_items
+            if str(item.get("label") or item.get("text") or "").strip()
+        ]
+        calibratable.append(
+            {
+                "item_id": group_id,
+                "number": group.get("number"),
+                "label": str(group.get("label") or (child_labels[0] if child_labels else group.get("role") or group_id)),
+                "role": group.get("role"),
+                "bbox": group_bbox,
+                "children": [
+                    {
+                        "child_id": item.get("item_id"),
+                        "label": item.get("label") or item.get("text"),
+                        "role": item.get("role"),
+                        "bbox": item.get("bbox"),
+                    }
+                    for item in child_items
+                ],
+                "source": "two_stage_parent_group",
+                "display_hierarchy": hierarchy,
+                "display_only": True,
+                "execute_binding_enabled": False,
+                "artifact_is_authorization": False,
+            }
+        )
+    return calibratable, child_evidence
 
 
 def _fusion_boxes(structure_regions: list[dict[str, Any]], numbered_regions: list[dict[str, Any]]) -> dict[str, Any]:
@@ -5623,25 +7232,33 @@ def _is_primary_region_id(region_id: str) -> bool:
     return any(token in lowered for token in ("primary", "main", "content"))
 
 
-def _primary_content_subregion_groups(*, region: dict[str, Any], numbered_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _primary_content_subregion_groups(
+    *,
+    region: dict[str, Any],
+    numbered_items: list[dict[str, Any]],
+    class_rule_profile: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    strategy = str((class_rule_profile or {}).get("primary_content_strategy") or "evidence_balanced")
     card_items = [item for item in numbered_items if _looks_like_card_item(item)]
     rows = _group_card_items_by_row(card_items)
     groups: list[dict[str, Any]] = []
-    for index, row in enumerate(rows, start=1):
+    for index, row in enumerate(rows if strategy != "text_structure_first" else [], start=1):
         if len(row) < 2:
             continue
         bbox = _bbox_union([item.get("bbox") for item in row])
         if not bbox:
             continue
-        partial_row = all(str(item.get("role") or "") == "partial_visible_card" for item in row)
+        group_kind = _card_row_semantic_kind(row)
+        partial_row = group_kind == "partial_visible_card"
+        media_row = group_kind == "media_card"
         groups.append(
             {
                 "contract_version": "learn_stage2_subregion_group_v1",
-                "group_id": f"{'partial_visible_card_row' if partial_row else 'visual_card_row'}_{index}",
-                "label": f"{'partial visible card row' if partial_row else 'visual media card row'} {index}",
-                "role": "partial_visible_card_group" if partial_row else "media_card_group",
+                "group_id": f"{'partial_visible_card_row' if partial_row else ('visual_card_row' if media_row else 'tile_card_row')}_{index}",
+                "label": f"{'partial visible card row' if partial_row else ('visual media card row' if media_row else 'tile card row')} {index}",
+                "role": "partial_visible_card_group" if partial_row else ("media_card_group" if media_row else "tile_card_group"),
                 "bbox": bbox,
-                "expected_item_role": "partial_visible_card" if partial_row else "media_card",
+                "expected_item_role": group_kind,
                 "homogeneity_rule": "same row and similar card/review item role from current screen inventory",
                 "member_numbers": [str(item.get("number") or "") for item in row],
                 "member_item_ids": [str(item.get("item_id") or "") for item in row],
@@ -5651,11 +7268,96 @@ def _primary_content_subregion_groups(*, region: dict[str, Any], numbered_items:
                 "artifact_is_authorization": False,
             }
         )
-    groups.extend(_semantic_parent_groups(region=region, numbered_items=numbered_items))
+    groups.extend(
+        _semantic_parent_groups(
+            region=region,
+            numbered_items=numbered_items,
+            class_rule_profile=class_rule_profile,
+        )
+    )
+    groups = _attach_card_row_child_groups(groups)
     groups.extend(_section_parent_groups(numbered_items=numbered_items, content_groups=groups))
     groups = _ensure_primary_items_have_subregion_parent(region=region, numbered_items=numbered_items, groups=groups)
     groups.sort(key=lambda group: (_bbox_top(group), _bbox_left(group), str(group.get("group_id") or "")))
     return groups
+
+
+def _attach_card_row_child_groups(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    card_parents = [group for group in groups if str(group.get("role") or "") == "tile_card_parent"]
+    if not card_parents:
+        return groups
+    result: list[dict[str, Any]] = []
+    for group in groups:
+        if str(group.get("role") or "") != "tile_card_group":
+            result.append(group)
+            continue
+        row_members = {
+            str(item_id or "").strip()
+            for item_id in group.get("member_item_ids", [])
+            if str(item_id or "").strip()
+        }
+        child_group_ids = [
+            str(parent.get("group_id") or "").strip()
+            for parent in card_parents
+            if str(parent.get("group_id") or "").strip()
+            and row_members.intersection(
+                {
+                    str(item_id or "").strip()
+                    for item_id in parent.get("member_item_ids", [])
+                    if str(item_id or "").strip()
+                }
+            )
+        ]
+        copied = deepcopy(group)
+        if child_group_ids:
+            copied["child_group_ids"] = child_group_ids
+            copied["parent_child_policy"] = "card_row_is_structural_when_individual_card_parents_exist"
+        result.append(copied)
+    return result
+
+
+def _card_row_semantic_kind(row: list[dict[str, Any]]) -> str:
+    roles = {str(item.get("role") or "").casefold() for item in row}
+    if roles == {"partial_visible_card"}:
+        return "partial_visible_card"
+    trusted_media_count = sum(
+        1
+        for item in row
+        if str(item.get("role") or "").casefold() == "media_card"
+        and str(item.get("source") or "").casefold() == "visual_card_segmenter"
+    )
+    return "media_card" if trusted_media_count >= 2 else "tile_card"
+
+
+def _normalize_tile_group_member_roles(
+    numbered_items: list[dict[str, Any]],
+    subregion_groups: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    tile_member_ids = {
+        str(item_id)
+        for group in subregion_groups
+        if str(group.get("role") or "") in {"tile_card_group", "tile_card_parent"}
+        for item_id in group.get("member_item_ids", [])
+        if str(item_id or "").strip()
+    }
+    generic_card_roles = {"news_card", "recommendation_item", "content_card"}
+    normalized: list[dict[str, Any]] = []
+    for item in numbered_items:
+        item_id = str(item.get("item_id") or "")
+        role = str(item.get("role") or "").casefold()
+        if item_id not in tile_member_ids or role not in generic_card_roles:
+            normalized.append(item)
+            continue
+        copied = deepcopy(item)
+        copied["original_role"] = str(copied.get("role") or "")
+        copied["role"] = "tile_card"
+        copied["role_policy"] = "generic_card_role_normalized_from_tile_group_ownership"
+        copied["review_only"] = True
+        copied["display_only"] = True
+        copied["execute_binding_enabled"] = False
+        copied["artifact_is_authorization"] = False
+        normalized.append(copied)
+    return normalized
 
 
 def _normalize_parallel_list_group_widths(
@@ -5751,7 +7453,7 @@ def _ensure_primary_items_have_subregion_parent(
                 containing_groups.append((max(1, group_bbox["w"] * group_bbox["h"]), group))
         if containing_groups:
             containing_groups.sort(key=lambda pair: pair[0])
-            _append_group_member(containing_groups[0][1], item)
+            _append_group_member(containing_groups[0][1], item, region_bbox=region_bbox)
             assigned.add(item_id)
         else:
             orphan_items.append(item)
@@ -5787,7 +7489,12 @@ def _ensure_primary_items_have_subregion_parent(
     return updated_groups
 
 
-def _append_group_member(group: dict[str, Any], item: dict[str, Any]) -> None:
+def _append_group_member(
+    group: dict[str, Any],
+    item: dict[str, Any],
+    *,
+    region_bbox: dict[str, int] | None = None,
+) -> None:
     number = str(item.get("number") or "").strip()
     item_id = str(item.get("item_id") or "").strip()
     member_numbers = group.setdefault("member_numbers", [])
@@ -5796,6 +7503,16 @@ def _append_group_member(group: dict[str, Any], item: dict[str, Any]) -> None:
     member_item_ids = group.setdefault("member_item_ids", [])
     if isinstance(member_item_ids, list) and item_id and item_id not in member_item_ids:
         member_item_ids.append(item_id)
+    previous_group_bbox = _bbox(group.get("bbox"))
+    item_bbox = _bbox(item.get("bbox"))
+    expanded_group_bbox = previous_group_bbox
+    if previous_group_bbox and item_bbox:
+        expanded_group_bbox = _bbox_union([previous_group_bbox, item_bbox])
+        if expanded_group_bbox and region_bbox:
+            expanded_group_bbox = _intersect_bbox(region_bbox, expanded_group_bbox)
+        if expanded_group_bbox:
+            group["bbox"] = expanded_group_bbox
+    bbox_expanded = bool(previous_group_bbox and expanded_group_bbox and expanded_group_bbox != previous_group_bbox)
     repairs = group.setdefault("membership_repairs", [])
     if isinstance(repairs, list):
         repairs.append(
@@ -5804,6 +7521,9 @@ def _append_group_member(group: dict[str, Any], item: dict[str, Any]) -> None:
                 "item_id": item_id,
                 "number": number,
                 "reason": "item_bbox_inside_group_bbox_but_missing_member_link",
+                "bbox_expanded": bbox_expanded,
+                "previous_group_bbox": deepcopy(previous_group_bbox) if previous_group_bbox else {},
+                "repaired_group_bbox": deepcopy(expanded_group_bbox) if expanded_group_bbox else {},
                 "display_only": True,
                 "execute_binding_enabled": False,
                 "artifact_is_authorization": False,
@@ -5839,46 +7559,648 @@ def _cluster_orphan_items_by_vertical_band(items: list[dict[str, Any]]) -> list[
     return clusters
 
 
-def _semantic_parent_groups(*, region: dict[str, Any], numbered_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _expand_settings_tile_visual_gutters(
+    *,
+    region: dict[str, Any],
+    numbered_items: list[dict[str, Any]],
+    groups: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    region_bbox = _bbox(region.get("precise_bbox")) or _bbox(region.get("bbox"))
+    tile_groups = [group for group in groups if str(group.get("role") or "") == "tile_card_parent"]
+    if not region_bbox or len(tile_groups) < 2:
+        return groups
+    heights = sorted(
+        bbox["h"]
+        for group in tile_groups
+        if (bbox := _bbox(group.get("bbox"))) is not None
+    )
+    if not heights:
+        return groups
+    typical_height = heights[len(heights) // 2]
+    inferred_width = max(36, min(72, int(round(typical_height * 0.75))))
+    updated = [deepcopy(group) for group in groups]
+    item_by_id = {
+        str(item.get("item_id") or ""): item
+        for item in numbered_items
+        if str(item.get("item_id") or "").strip()
+    }
+    used_visual_ids: set[str] = set()
+    for group in updated:
+        if str(group.get("role") or "") != "tile_card_parent":
+            continue
+        group_bbox = _bbox(group.get("bbox"))
+        if not group_bbox:
+            continue
+        anchor_x = _group_text_anchor_x(group, item_by_id=item_by_id)
+        if anchor_x is None:
+            continue
+        inferred_x = max(region_bbox["x"], anchor_x - inferred_width)
+        explicit_visuals = _leading_visual_items_for_group(
+            group_bbox=group_bbox,
+            text_anchor_x=anchor_x,
+            inferred_left=inferred_x,
+            numbered_items=numbered_items,
+            used_item_ids=used_visual_ids,
+        )
+        explicit_ids = [str(item.get("item_id") or "") for item in explicit_visuals]
+        used_visual_ids.update(explicit_ids)
+        target_x = min([group_bbox["x"], inferred_x, *[_bbox_left(item) for item in explicit_visuals]])
+        expanded_bbox = _bbox_union([group_bbox, *[item.get("bbox") for item in explicit_visuals]]) or group_bbox
+        right = expanded_bbox["x"] + expanded_bbox["w"]
+        expanded_bbox = {**expanded_bbox, "x": target_x, "w": max(1, right - target_x)}
+        bounded_bbox = _intersect_bbox(region_bbox, expanded_bbox) or group_bbox
+        group["bbox"] = bounded_bbox
+        _prepend_group_members(group, explicit_visuals)
+        group["leading_visual_gutter"] = {
+            "source": "class_repeated_layout_inference",
+            "class_strategy": "independent_control_cards",
+            "inferred_width": inferred_width,
+            "text_anchor_x": anchor_x,
+            "explicit_visual_member_ids": explicit_ids,
+            "previous_bbox": group_bbox,
+            "display_only": True,
+            "execute_binding_enabled": False,
+        }
+    return updated
+
+
+def _expand_conversation_row_visual_gutters(
+    *,
+    region: dict[str, Any],
+    numbered_items: list[dict[str, Any]],
+    groups: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    region_bbox = _bbox(region.get("precise_bbox")) or _bbox(region.get("bbox"))
+    if not region_bbox or len(groups) < 2:
+        return groups
+    item_by_id = {
+        str(item.get("item_id") or ""): item
+        for item in numbered_items
+        if str(item.get("item_id") or "").strip()
+    }
+    anchors = [
+        anchor
+        for group in groups
+        if (anchor := _group_text_anchor_x(group, item_by_id=item_by_id)) is not None
+    ]
+    top_values = sorted(
+        bbox["y"]
+        for group in groups
+        if (bbox := _bbox(group.get("bbox"))) is not None
+    )
+    steps = sorted(second - first for first, second in zip(top_values, top_values[1:]) if 0 < second - first <= 96)
+    if not anchors:
+        return groups
+    typical_step = steps[len(steps) // 2] if steps else 44
+    inferred_width = max(28, min(64, int(round(typical_step * 0.9))))
+    shared_left = max(region_bbox["x"], min(anchors) - inferred_width)
+    updated = [deepcopy(group) for group in groups]
+    used_visual_ids: set[str] = set()
+    for group in updated:
+        group_bbox = _bbox(group.get("bbox"))
+        anchor_x = _group_text_anchor_x(group, item_by_id=item_by_id)
+        if not group_bbox or anchor_x is None:
+            continue
+        explicit_visuals = _leading_visual_items_for_group(
+            group_bbox=group_bbox,
+            text_anchor_x=anchor_x,
+            inferred_left=shared_left,
+            numbered_items=numbered_items,
+            used_item_ids=used_visual_ids,
+        )
+        explicit_ids = [str(item.get("item_id") or "") for item in explicit_visuals]
+        used_visual_ids.update(explicit_ids)
+        target_x = min([group_bbox["x"], shared_left, *[_bbox_left(item) for item in explicit_visuals]])
+        expanded_bbox = _bbox_union([group_bbox, *[item.get("bbox") for item in explicit_visuals]]) or group_bbox
+        right = expanded_bbox["x"] + expanded_bbox["w"]
+        expanded_bbox = {**expanded_bbox, "x": target_x, "w": max(1, right - target_x)}
+        bounded_bbox = _intersect_bbox(region_bbox, expanded_bbox) or group_bbox
+        group["bbox"] = bounded_bbox
+        _prepend_group_members(group, explicit_visuals)
+        group["leading_visual_gutter"] = {
+            "source": "class_repeated_layout_inference",
+            "class_strategy": "conversation_rows",
+            "inferred_width": inferred_width,
+            "shared_track_x": shared_left,
+            "text_anchor_x": anchor_x,
+            "explicit_visual_member_ids": explicit_ids,
+            "previous_bbox": group_bbox,
+            "display_only": True,
+            "execute_binding_enabled": False,
+        }
+    return updated
+
+
+def _group_text_anchor_x(
+    group: dict[str, Any],
+    *,
+    item_by_id: dict[str, dict[str, Any]],
+) -> int | None:
+    anchors: list[int] = []
+    for item_id in group.get("member_item_ids", []) if isinstance(group.get("member_item_ids"), list) else []:
+        item = item_by_id.get(str(item_id or ""))
+        bbox = _bbox(item.get("bbox")) if isinstance(item, dict) else None
+        role = str((item or {}).get("role") or (item or {}).get("item_type") or "").casefold()
+        if bbox and any(token in role for token in ("text", "readable", "button", "tab", "label")):
+            anchors.append(bbox["x"])
+    return min(anchors) if anchors else None
+
+
+def _leading_visual_items_for_group(
+    *,
+    group_bbox: dict[str, int],
+    text_anchor_x: int,
+    inferred_left: int,
+    numbered_items: list[dict[str, Any]],
+    used_item_ids: set[str],
+) -> list[dict[str, Any]]:
+    matches: list[dict[str, Any]] = []
+    for item in numbered_items:
+        item_id = str(item.get("item_id") or "").strip()
+        bbox = _bbox(item.get("bbox"))
+        if not item_id or item_id in used_item_ids or not bbox or not _looks_like_leading_visual_item(item):
+            continue
+        if _vertical_overlap_ratio(group_bbox, bbox) < 0.45:
+            continue
+        if bbox["x"] < inferred_left - 8 or bbox["x"] >= text_anchor_x:
+            continue
+        if bbox["x"] + bbox["w"] > text_anchor_x + 8:
+            continue
+        matches.append(item)
+    matches.sort(
+        key=lambda item: (
+            abs(_bbox_center_y_value(_bbox(item.get("bbox")) or {}) - _bbox_center_y_value(group_bbox)),
+            -(_bbox(item.get("bbox")) or {}).get("x", 0),
+        )
+    )
+    return matches[:1]
+
+
+def _looks_like_leading_visual_item(item: dict[str, Any]) -> bool:
+    text = " ".join(
+        str(item.get(key) or "").casefold()
+        for key in ("role", "item_type", "label")
+    )
+    return any(token in text for token in ("icon", "avatar", "glyph", "thumbnail", "头像", "图标"))
+
+
+def _prepend_group_members(group: dict[str, Any], items: list[dict[str, Any]]) -> None:
+    if not items:
+        return
+    item_ids = [str(item.get("item_id") or "") for item in items if str(item.get("item_id") or "").strip()]
+    numbers = [str(item.get("number") or "") for item in items if str(item.get("number") or "").strip()]
+    existing_ids = group.get("member_item_ids") if isinstance(group.get("member_item_ids"), list) else []
+    existing_numbers = group.get("member_numbers") if isinstance(group.get("member_numbers"), list) else []
+    group["member_item_ids"] = item_ids + [value for value in existing_ids if value not in item_ids]
+    group["member_numbers"] = numbers + [value for value in existing_numbers if value not in numbers]
+
+
+def _semantic_parent_groups(
+    *,
+    region: dict[str, Any],
+    numbered_items: list[dict[str, Any]],
+    class_rule_profile: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    strategy = str((class_rule_profile or {}).get("primary_content_strategy") or "evidence_balanced")
     groups: list[dict[str, Any]] = []
-    groups.extend(_topbar_control_parent_groups(region=region, numbered_items=numbered_items))
-    tile_groups = _tile_card_parent_groups(region=region, numbered_items=numbered_items)
-    list_groups = _list_row_parent_groups(region=region, numbered_items=numbered_items)
-    groups.extend(_suppress_inferred_text_tiles_claimed_by_lists(tile_groups, list_groups))
+    topbar_groups = _topbar_control_parent_groups(region=region, numbered_items=numbered_items)
+    if strategy == "independent_control_cards":
+        settings_status_groups = _settings_topbar_status_tile_parent_groups(
+            region=region,
+            numbered_items=numbered_items,
+        )
+        status_member_ids = {
+            str(item_id)
+            for group in settings_status_groups
+            for item_id in group.get("member_item_ids", [])
+        }
+        topbar_groups = [
+            group
+            for group in topbar_groups
+            if str(group.get("role") or "") != "topbar_control_cluster"
+            or not status_member_ids.intersection(str(item_id) for item_id in group.get("member_item_ids", []))
+        ]
+        topbar_groups.extend(settings_status_groups)
+    groups.extend(topbar_groups)
+    groups.extend(
+        _tile_card_parent_groups(
+            region=region,
+            numbered_items=numbered_items,
+            include_inferred_text=strategy != "text_structure_first",
+        )
+    )
+    if strategy == "independent_control_cards":
+        groups = _expand_settings_tile_visual_gutters(
+            region=region,
+            numbered_items=numbered_items,
+            groups=groups,
+        )
+    table_groups = _dense_aligned_table_parent_groups(
+        region=region,
+        numbered_items=numbered_items,
+        minimum_row_count=4 if strategy == "row_table_first" else 8,
+    )
+    groups.extend(table_groups)
     groups.extend(_notice_parent_groups(region=region, numbered_items=numbered_items))
-    groups.extend(list_groups)
+    groups.extend(_list_row_parent_groups(region=region, numbered_items=numbered_items))
     groups.extend(_hero_panel_parent_groups(region=region, numbered_items=numbered_items))
     groups.extend(_member_list_parent_groups(region=region, numbered_items=numbered_items))
-    groups.extend(_conversation_row_parent_groups(region=region, numbered_items=numbered_items))
-    groups.extend(_message_parent_groups(region=region, numbered_items=numbered_items))
+    class_allows_chat_semantics = bool((class_rule_profile or {}).get("allow_chat_semantics")) and _is_primary_region_id(
+        str(region.get("region_id") or "")
+    )
+    if class_allows_chat_semantics or _stage2_region_has_chat_surface_evidence(region, numbered_items):
+        conversation_groups = _conversation_row_parent_groups(
+            region=region,
+            numbered_items=numbered_items,
+            treat_primary_as_conversation_list=class_allows_chat_semantics,
+        )
+        if strategy == "conversation_rows":
+            conversation_groups = _expand_conversation_row_visual_gutters(
+                region=region,
+                numbered_items=numbered_items,
+                groups=conversation_groups,
+            )
+        groups.extend(conversation_groups)
+        groups.extend(_message_parent_groups(region=region, numbered_items=numbered_items))
+        conversation_bboxes = [
+            bbox
+            for group in conversation_groups
+            if (bbox := _bbox(group.get("bbox"))) is not None
+        ]
+        if conversation_bboxes:
+            if strategy == "conversation_rows":
+                groups = [
+                    group
+                    for group in groups
+                    if str(group.get("role") or "") != "tile_card_parent"
+                    or not any(
+                        _bbox_containment_ratio(tile_bbox, row_bbox) >= 0.75
+                        or _bbox_overlap_ratio(row_bbox, tile_bbox) >= 0.45
+                        or _bbox_overlap_ratio(tile_bbox, row_bbox) >= 0.45
+                        for row_bbox in conversation_bboxes
+                        if (tile_bbox := _bbox(group.get("bbox"))) is not None
+                    )
+                ]
+            else:
+                groups = [
+                    group
+                    for group in groups
+                    if str(group.get("role") or "") != "tile_card_parent"
+                    or sum(
+                        1
+                        for row_bbox in conversation_bboxes
+                        if (tile_bbox := _bbox(group.get("bbox"))) is not None
+                        and _bbox_overlap_ratio(row_bbox, tile_bbox) >= 0.8
+                    )
+                    < 2
+                ]
     groups.extend(_input_toolbar_parent_groups(region=region, numbered_items=numbered_items))
-    return groups
-
-
-def _suppress_inferred_text_tiles_claimed_by_lists(
-    tile_groups: list[dict[str, Any]],
-    list_groups: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    claimed_item_ids = {
+    table_member_ids = {
         str(item_id)
-        for group in list_groups
-        if group.get("role") == "list_group"
+        for group in table_groups
+        if str(group.get("role") or "") == "table_group"
         for item_id in group.get("member_item_ids", [])
         if str(item_id or "").strip()
     }
-    if not claimed_item_ids:
-        return tile_groups
-    return [
-        group
-        for group in tile_groups
-        if not (
-            group.get("source") == "stage2_primary_text_tile_card_parent_grouping"
-            and claimed_item_ids.intersection(str(item_id) for item_id in group.get("member_item_ids", []))
+    if table_member_ids:
+        groups = [
+            group
+            for group in groups
+            if str(group.get("role") or "") != "tile_card_parent"
+            or not table_member_ids.intersection(str(item_id) for item_id in group.get("member_item_ids", []))
+        ]
+    if strategy == "text_structure_first":
+        list_bboxes = [
+            bbox
+            for group in groups
+            if str(group.get("role") or "") == "list_group"
+            if (bbox := _bbox(group.get("bbox"))) is not None
+        ]
+        groups = [
+            group
+            for group in groups
+            if str(group.get("role") or "") != "tile_card_parent"
+            or not any(
+                _bbox_overlap_ratio(tile_bbox, list_bbox) >= 0.25
+                for list_bbox in list_bboxes
+                if (tile_bbox := _bbox(group.get("bbox"))) is not None
+            )
+        ]
+    return groups
+
+
+def _settings_topbar_status_tile_parent_groups(
+    *,
+    region: dict[str, Any],
+    numbered_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if _bar_region_kind(str(region.get("region_id") or "")) != "top_bar":
+        return []
+    region_bbox = _bbox(region.get("bbox")) or _bbox(region.get("precise_bbox"))
+    if not region_bbox:
+        return []
+
+    items = [item for item in numbered_items if _bbox(item.get("bbox")) and str(item.get("item_id") or "")]
+    title_items = [
+        item
+        for item in items
+        if str(item.get("role") or "").casefold() in {"text", "text_action", "nav_text_action"}
+        and str(item.get("label") or "").strip()
+    ]
+    used_item_ids: set[str] = set()
+    groups: list[dict[str, Any]] = []
+    for title in title_items:
+        title_id = str(title.get("item_id") or "")
+        if title_id in used_item_ids:
+            continue
+        title_bbox = _bbox(title.get("bbox"))
+        if not title_bbox:
+            continue
+        support_candidates: list[tuple[float, dict[str, Any]]] = []
+        for item in items:
+            item_id = str(item.get("item_id") or "")
+            bbox = _bbox(item.get("bbox"))
+            if not bbox or item_id == title_id or item_id in used_item_ids:
+                continue
+            if not str(item.get("label") or "").strip() or _horizontal_overlap_ratio(title_bbox, bbox) < 0.65:
+                continue
+            vertical_distance = abs((bbox["y"] + bbox["h"] / 2) - (title_bbox["y"] + title_bbox["h"] / 2))
+            if vertical_distance > max(44, region_bbox["h"] * 0.32):
+                continue
+            if not item.get("children") and str(item.get("role") or "").casefold() not in {"text", "text_action"}:
+                continue
+            support_candidates.append((vertical_distance, item))
+        if not support_candidates:
+            continue
+        support = min(support_candidates, key=lambda pair: pair[0])[1]
+        support_bbox = _bbox(support.get("bbox"))
+        if not support_bbox:
+            continue
+
+        content_union = _bbox_union([title_bbox, support_bbox])
+        if not content_union:
+            continue
+        icon_candidates: list[tuple[float, dict[str, Any]]] = []
+        for item in items:
+            item_id = str(item.get("item_id") or "")
+            bbox = _bbox(item.get("bbox"))
+            if not bbox or item_id in {title_id, str(support.get("item_id") or "")} or item_id in used_item_ids:
+                continue
+            if str(item.get("role") or "").casefold() not in {"control", "icon", "icon_button"}:
+                continue
+            if bbox["w"] > region_bbox["w"] * 0.16 or bbox["h"] > region_bbox["h"] * 0.55:
+                continue
+            x_overlap = _horizontal_overlap_ratio(content_union, bbox)
+            center_delta = abs(
+                (bbox["x"] + bbox["w"] / 2) - (content_union["x"] + content_union["w"] / 2)
+            )
+            if x_overlap < 0.45 and center_delta > max(content_union["w"], bbox["w"]) * 0.35:
+                continue
+            if bbox["y"] > title_bbox["y"] or bbox["y"] + bbox["h"] < title_bbox["y"] - region_bbox["h"] * 0.28:
+                continue
+            icon_candidates.append((center_delta + abs(title_bbox["y"] - (bbox["y"] + bbox["h"])), item))
+        if not icon_candidates:
+            continue
+        icon = min(icon_candidates, key=lambda pair: pair[0])[1]
+        icon_bbox = _bbox(icon.get("bbox"))
+        if not icon_bbox:
+            continue
+
+        parent_union = _bbox_union([title_bbox, support_bbox, icon_bbox])
+        if not parent_union:
+            continue
+        horizontal_padding = max(12, round(icon_bbox["w"] * 0.25))
+        parent_bbox = _clip_bbox(
+            region_bbox,
+            {
+                "x": parent_union["x"] - horizontal_padding,
+                "y": parent_union["y"],
+                "w": parent_union["w"] + horizontal_padding * 2,
+                "h": parent_union["h"],
+            },
+        )
+        member_items = [icon, title, support]
+        member_ids = [str(item.get("item_id") or "") for item in member_items]
+        used_item_ids.update(member_ids)
+        groups.append(
+            {
+                "contract_version": "learn_stage2_subregion_group_v1",
+                "group_id": f"settings_status_tile_{len(groups) + 1}",
+                "label": str(title.get("label") or "settings status tile"),
+                "role": "settings_status_tile",
+                "bbox": parent_bbox,
+                "child_group_roles": _unique_roles(member_items),
+                "member_numbers": [str(item.get("number") or "") for item in member_items],
+                "member_item_ids": member_ids,
+                "adjacent_fragment_merged": True,
+                "parent_child_policy": "settings_status_icon_title_and_value_share_one_review_parent",
+                "bbox_policy": "settings_status_tile_union_with_visual_icon_gutter",
+                "source": "class_repeated_settings_status_tile",
+                "display_only": True,
+                "execute_binding_enabled": False,
+                "artifact_is_authorization": False,
+            }
+        )
+    return groups
+
+
+def _dense_aligned_table_parent_groups(
+    *,
+    region: dict[str, Any],
+    numbered_items: list[dict[str, Any]],
+    minimum_row_count: int,
+) -> list[dict[str, Any]]:
+    if not _is_primary_region_id(str(region.get("region_id") or "")):
+        return []
+    region_bbox = _bbox(region.get("precise_bbox")) or _bbox(region.get("bbox"))
+    if not region_bbox:
+        return []
+    text_items = [
+        item
+        for item in numbered_items
+        if str(item.get("role") or "").casefold() in {"text", "label", "cell"}
+        and _bbox(item.get("bbox"))
+    ]
+    rows: list[dict[str, Any]] = []
+    for item in sorted(text_items, key=lambda entry: (_bbox_top(entry), _bbox_left(entry))):
+        bbox = _bbox(item.get("bbox"))
+        if not bbox:
+            continue
+        center_y = _bbox_center_y_value(bbox)
+        row = min(rows, key=lambda candidate: abs(candidate["center_y"] - center_y), default=None)
+        tolerance = max(8, min(16, int(bbox["h"] * 0.7)))
+        if row is None or abs(row["center_y"] - center_y) > tolerance:
+            rows.append({"center_y": center_y, "items": [item]})
+            continue
+        row["items"].append(item)
+        centers = [_bbox_center_y_value(_bbox(entry.get("bbox")) or bbox) for entry in row["items"]]
+        row["center_y"] = sum(centers) / len(centers)
+
+    candidates = []
+    minimum_span = max(220, int(region_bbox["w"] * 0.18))
+    for row in rows:
+        members = sorted(row["items"], key=_bbox_left)
+        boxes = [_bbox(item.get("bbox")) for item in members]
+        boxes = [box for box in boxes if box]
+        if len(boxes) < 3:
+            continue
+        span = max(box["x"] + box["w"] for box in boxes) - min(box["x"] for box in boxes)
+        if span < minimum_span:
+            continue
+        candidates.append({"center_y": row["center_y"], "items": members})
+    if len(candidates) < max(4, minimum_row_count):
+        return []
+
+    column_lefts: list[int] = []
+    alignment_tolerance = max(48, int(region_bbox["w"] * 0.025))
+    for column_index in range(3):
+        values = sorted(_bbox_left(row["items"][column_index]) for row in candidates)
+        median = values[len(values) // 2]
+        aligned_count = sum(1 for value in values if abs(value - median) <= alignment_tolerance)
+        if aligned_count < max(minimum_row_count, int(len(values) * 0.8)):
+            return []
+        column_lefts.append(median)
+    if any(second - first < 80 for first, second in zip(column_lefts, column_lefts[1:])):
+        return []
+    candidates = [
+        row
+        for row in candidates
+        if all(
+            abs(_bbox_left(row["items"][column_index]) - column_lefts[column_index]) <= alignment_tolerance
+            for column_index in range(3)
         )
     ]
+    if len(candidates) < max(4, minimum_row_count):
+        return []
+
+    right_limit = min(
+        region_bbox["x"] + region_bbox["w"],
+        column_lefts[-1] + max(180, int(region_bbox["w"] * 0.15)),
+    )
+    row_groups: list[dict[str, Any]] = []
+    all_member_numbers: list[str] = []
+    all_member_ids: list[str] = []
+    for row_index, row in enumerate(sorted(candidates, key=lambda entry: entry["center_y"]), start=1):
+        members = [item for item in row["items"] if _bbox_left(item) < right_limit]
+        if len(members) < 3:
+            continue
+        bbox = _bbox_union([item.get("bbox") for item in members])
+        if not bbox:
+            continue
+        bbox = _clip_bbox(region_bbox, _expand_bbox(bbox, pad_x=8, pad_y=2))
+        member_numbers = [str(item.get("number") or "") for item in members]
+        member_ids = [str(item.get("item_id") or "") for item in members]
+        group_id = f"table_row_{row_index}"
+        row_groups.append(
+            {
+                "contract_version": "learn_stage2_subregion_group_v1",
+                "group_id": group_id,
+                "label": str(members[0].get("label") or f"table row {row_index}"),
+                "role": "table_row",
+                "bbox": bbox,
+                "member_numbers": member_numbers,
+                "member_item_ids": member_ids,
+                "source": "stage2_dense_aligned_table_row_synthesis",
+                "parent_child_policy": "aligned_multi_column_cells_bind_to_same_row_parent",
+                "display_only": True,
+                "execute_binding_enabled": False,
+                "artifact_is_authorization": False,
+            }
+        )
+        all_member_numbers.extend(member_numbers)
+        all_member_ids.extend(member_ids)
+    if len(row_groups) < max(4, minimum_row_count):
+        return []
+    table_bbox = _bbox_union([group.get("bbox") for group in row_groups])
+    if not table_bbox:
+        return []
+    table_group_id = "table_group_1"
+    for group in row_groups:
+        group["parent_group_id"] = table_group_id
+    table_group = {
+        "contract_version": "learn_stage2_subregion_group_v1",
+        "group_id": table_group_id,
+        "label": "aligned multi-column table",
+        "role": "table_group",
+        "bbox": table_bbox,
+        "child_group_ids": [str(group["group_id"]) for group in row_groups],
+        "child_group_roles": ["table_row" for _ in row_groups],
+        "member_numbers": [number for number in all_member_numbers if number],
+        "member_item_ids": [item_id for item_id in all_member_ids if item_id],
+        "source": "stage2_dense_aligned_table_parent_synthesis",
+        "parent_child_policy": "repeated_aligned_rows_form_table_group",
+        "display_only": True,
+        "execute_binding_enabled": False,
+        "artifact_is_authorization": False,
+    }
+    return [*row_groups, table_group]
 
 
-def _tile_card_parent_groups(*, region: dict[str, Any], numbered_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _stage2_region_has_chat_surface_evidence(
+    region: dict[str, Any],
+    numbered_items: list[dict[str, Any]],
+) -> bool:
+    stage1_5 = region.get("input_stage1_5_subregion") if isinstance(region.get("input_stage1_5_subregion"), dict) else {}
+    region_text = " ".join(
+        str(value or "").casefold()
+        for value in (
+            region.get("region_id"),
+            region.get("role"),
+            region.get("label"),
+            stage1_5.get("role"),
+            stage1_5.get("label"),
+        )
+    )
+    if any(token in region_text for token in ("conversation_list", "message_thread", "bottom_composer", "chat_surface")):
+        return True
+    evidence_categories: set[str] = set()
+    strong_chat_semantics = False
+    timestamp_count = 0
+    sender_context_count = 0
+    long_message_like_text_count = 0
+    for item in numbered_items:
+        item_text = " ".join(
+            str(item.get(key) or "").casefold()
+            for key in ("item_id", "role", "item_type")
+        )
+        label_text = str(item.get("label") or "").casefold()
+        bbox = _bbox(item.get("bbox"))
+        if _looks_like_timestamp_label(str(item.get("label") or "")):
+            timestamp_count += 1
+        if _looks_like_sender_or_level_context(item):
+            sender_context_count += 1
+        if (
+            bbox
+            and bbox["w"] >= 120
+            and str(item.get("role") or item.get("item_type") or "").casefold() in {"text", "readable", "message_text"}
+            and not _looks_like_timestamp_label(str(item.get("label") or ""))
+        ):
+            long_message_like_text_count += 1
+        if any(token in item_text for token in ("conversation_list", "conversation_row", "session_list")):
+            evidence_categories.add("conversation")
+        if any(token in item_text for token in ("message_thread", "message_bubble", "image_message", "chat_thread")):
+            evidence_categories.add("message")
+            strong_chat_semantics = True
+        if any(token in item_text for token in ("message_text", "sender_label", "message_time")):
+            evidence_categories.add("message")
+            strong_chat_semantics = True
+        if any(token in item_text for token in ("composer", "message_input", "send_button", "input_toolbar")):
+            evidence_categories.add("composer")
+        if any(
+            phrase in label_text
+            for phrase in ("chat history", "conversation history", "message history", "聊天记录", "会话列表")
+        ):
+            strong_chat_semantics = True
+    repeated_message_context = timestamp_count >= 2 and sender_context_count >= 1 and long_message_like_text_count >= 1
+    return strong_chat_semantics or len(evidence_categories) >= 2 or repeated_message_context
+
+
+def _tile_card_parent_groups(
+    *,
+    region: dict[str, Any],
+    numbered_items: list[dict[str, Any]],
+    include_inferred_text: bool = True,
+) -> list[dict[str, Any]]:
     family = _stage1_region_family(region)
     region_text = " ".join(
         str(region.get(key) or "").casefold()
@@ -5902,23 +8224,29 @@ def _tile_card_parent_groups(*, region: dict[str, Any], numbered_items: list[dic
             item
             for item in text_items
             if str(item.get("item_id") or "").strip() != card_id
-            and _bbox_center_inside(_bbox(item.get("bbox")), card_bbox)
-            and _bbox_containment_ratio(_bbox(item.get("bbox")) or {}, card_bbox) >= 0.55
+            and (
+                (
+                    _bbox_center_inside(_bbox(item.get("bbox")), card_bbox)
+                    and _bbox_containment_ratio(_bbox(item.get("bbox")) or {}, card_bbox) >= 0.55
+                )
+                or _is_attached_tile_parent_text_child(item, card_bbox)
+            )
         ]
         if not children:
             continue
         members = [card, *sorted(children, key=lambda item: (_bbox_top(item), _bbox_left(item)))]
+        parent_bbox = _bbox_union([member.get("bbox") for member in members]) or card_bbox
         groups.append(
             {
                 "contract_version": "learn_stage2_subregion_group_v1",
                 "group_id": f"tile_card_parent_{index}_{_slug(card_id)}",
                 "label": str(card.get("label") or f"tile card {index}"),
                 "role": "tile_card_parent",
-                "bbox": card_bbox,
+                "bbox": parent_bbox,
                 "member_numbers": [str(item.get("number") or "") for item in members],
                 "member_item_ids": [str(item.get("item_id") or "") for item in members],
                 "parent_child_policy": "single_tile_card_bbox_contains_internal_text_children",
-                "bbox_policy": "use_card_bbox_without_expanding_to_sibling_or_section",
+                "bbox_policy": "use_card_bbox_plus_directly_attached_internal_title_without_sibling_or_section",
                 "source": "stage2_primary_tile_card_parent_grouping",
                 "review_only": True,
                 "candidate_only": True,
@@ -5927,23 +8255,157 @@ def _tile_card_parent_groups(*, region: dict[str, Any], numbered_items: list[dic
                 "artifact_is_authorization": False,
             }
         )
-    groups.extend(
-        _repeated_text_column_parent_groups(
-            region=region,
-            numbered_items=numbered_items,
-            existing_groups=groups,
-            start_index=len(groups) + 1,
+    if include_inferred_text:
+        groups.extend(
+            _repeated_text_column_parent_groups(
+                region=region,
+                numbered_items=numbered_items,
+                existing_groups=groups,
+                start_index=len(groups) + 1,
+            )
         )
-    )
-    groups.extend(
-        _text_only_tile_card_parent_groups(
-            region=region,
-            numbered_items=numbered_items,
-            existing_groups=groups,
-            start_index=len(groups) + 1,
+        groups.extend(
+            _text_only_tile_card_parent_groups(
+                region=region,
+                numbered_items=numbered_items,
+                existing_groups=groups,
+                start_index=len(groups) + 1,
+            )
         )
-    )
-    return groups
+    deduplicated = _merge_duplicate_tile_card_parent_groups(groups)
+    return _merge_adjacent_tile_card_parent_fragments(deduplicated)
+
+
+def _is_attached_tile_parent_text_child(item: dict[str, Any], card_bbox: dict[str, int]) -> bool:
+    item_bbox = _bbox(item.get("bbox"))
+    if not item_bbox or item_bbox["y"] >= card_bbox["y"]:
+        return False
+    item_bottom = item_bbox["y"] + item_bbox["h"]
+    if item_bottom < card_bbox["y"] - 12:
+        return False
+    center_x = item_bbox["x"] + item_bbox["w"] / 2
+    if not card_bbox["x"] <= center_x <= card_bbox["x"] + card_bbox["w"]:
+        return False
+    if abs(item_bbox["x"] - card_bbox["x"]) > max(24, int(card_bbox["w"] * 0.16)):
+        return False
+    if _horizontal_overlap_ratio(item_bbox, card_bbox) < 0.45:
+        return False
+    return item_bbox["h"] <= max(48, int(card_bbox["h"] * 0.35))
+
+
+def _merge_duplicate_tile_card_parent_groups(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    for group in groups:
+        if str(group.get("role") or "") != "tile_card_parent":
+            merged.append(group)
+            continue
+        bbox = _bbox(group.get("bbox"))
+        duplicate = next(
+            (
+                existing
+                for existing in merged
+                if str(existing.get("role") or "") == "tile_card_parent"
+                and bbox
+                and (existing_bbox := _bbox(existing.get("bbox")))
+                and min(
+                    _bbox_containment_ratio(bbox, existing_bbox),
+                    _bbox_containment_ratio(existing_bbox, bbox),
+                )
+                >= 0.82
+            ),
+            None,
+        )
+        if duplicate is None:
+            merged.append(deepcopy(group))
+            continue
+        duplicate["bbox"] = _bbox_union([duplicate.get("bbox"), group.get("bbox")]) or duplicate.get("bbox")
+        for key in ("member_numbers", "member_item_ids"):
+            existing_values = duplicate.setdefault(key, [])
+            if not isinstance(existing_values, list):
+                existing_values = []
+                duplicate[key] = existing_values
+            for value in group.get(key, []) if isinstance(group.get(key), list) else []:
+                if value not in existing_values:
+                    existing_values.append(value)
+        merged_ids = duplicate.setdefault("merged_duplicate_group_ids", [])
+        if isinstance(merged_ids, list):
+            group_id = str(group.get("group_id") or "").strip()
+            if group_id and group_id not in merged_ids:
+                merged_ids.append(group_id)
+        duplicate["duplicate_evidence_merged"] = True
+        duplicate["duplicate_merge_policy"] = "same_layer_tile_parent_with_mutual_geometric_containment"
+    return merged
+
+
+def _merge_adjacent_tile_card_parent_fragments(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged = [deepcopy(group) for group in groups]
+    changed = True
+    while changed:
+        changed = False
+        for first_index, first in enumerate(merged):
+            if str(first.get("role") or "") != "tile_card_parent":
+                continue
+            first_bbox = _bbox(first.get("bbox"))
+            if not first_bbox:
+                continue
+            for second_index in range(first_index + 1, len(merged)):
+                second = merged[second_index]
+                if str(second.get("role") or "") != "tile_card_parent":
+                    continue
+                second_bbox = _bbox(second.get("bbox"))
+                if (
+                    not second_bbox
+                    or not _tile_parent_fragment_merge_source(first)
+                    or not _tile_parent_fragment_merge_source(second)
+                    or not _touching_fragments_share_content_column(first_bbox, second_bbox)
+                ):
+                    continue
+                first["bbox"] = _bbox_union([first_bbox, second_bbox]) or first_bbox
+                for key in ("member_numbers", "member_item_ids"):
+                    values = first.setdefault(key, [])
+                    if not isinstance(values, list):
+                        values = []
+                        first[key] = values
+                    for value in second.get(key, []) if isinstance(second.get(key), list) else []:
+                        if value not in values:
+                            values.append(value)
+                merged_ids = first.setdefault("merged_adjacent_fragment_group_ids", [])
+                if isinstance(merged_ids, list):
+                    for group_id in [second.get("group_id"), *second.get("merged_adjacent_fragment_group_ids", [])]:
+                        value = str(group_id or "").strip()
+                        if value and value not in merged_ids:
+                            merged_ids.append(value)
+                first["adjacent_fragment_merged"] = True
+                first["adjacent_fragment_merge_policy"] = (
+                    "same_column_strong_overlap_with_touching_vertical_spans"
+                )
+                merged.pop(second_index)
+                changed = True
+                break
+            if changed:
+                break
+    return merged
+
+
+def _tile_parent_fragment_merge_source(group: dict[str, Any]) -> bool:
+    return str(group.get("source") or "") in {
+        "stage2_primary_tile_card_parent_grouping",
+        "stage2_primary_text_tile_card_parent_grouping",
+    }
+
+
+def _touching_fragments_share_content_column(first: dict[str, int], second: dict[str, int]) -> bool:
+    if _horizontal_overlap_ratio(first, second) < 0.72:
+        return False
+    left_alignment_tolerance = max(12, int(min(first["w"], second["w"]) * 0.08))
+    if abs(first["x"] - second["x"]) > left_alignment_tolerance:
+        return False
+    upper, lower = sorted((first, second), key=lambda bbox: (bbox["y"], bbox["x"]))
+    vertical_gap = lower["y"] - (upper["y"] + upper["h"])
+    scale = min(upper["h"], lower["h"])
+    largest_touching_gap = max(8, int(scale * 0.15))
+    largest_fragment_overlap = max(24, int(scale * 0.70))
+    return -largest_fragment_overlap <= vertical_gap <= largest_touching_gap
 
 
 def _repeated_text_column_parent_groups(
@@ -6023,6 +8485,8 @@ def _repeated_text_column_parent_groups(
             column_members.append(members)
         if any(len(members) < 3 for members in column_members):
             continue
+        if any(_has_repeated_text_column_section_break(members) for members in column_members):
+            continue
 
         result: list[dict[str, Any]] = []
         for offset, members in enumerate(column_members):
@@ -6053,6 +8517,19 @@ def _repeated_text_column_parent_groups(
         if len(result) >= 3:
             return result
     return []
+
+
+def _has_repeated_text_column_section_break(members: list[dict[str, Any]]) -> bool:
+    centers = sorted(
+        _bbox_center_y_value(bbox)
+        for item in members
+        if (bbox := _bbox(item.get("bbox")))
+    )
+    gaps = [second - first for first, second in zip(centers, centers[1:]) if second > first]
+    if len(gaps) < 2:
+        return False
+    baseline_gap = min(gaps)
+    return max(gaps) >= max(60, baseline_gap * 2.2)
 
 
 def _text_only_tile_card_parent_groups(
@@ -6214,6 +8691,12 @@ def _looks_like_tile_card_parent_candidate(item: dict[str, Any]) -> bool:
         return False
     role = str(item.get("role") or "").casefold()
     item_type = str(item.get("item_type") or "").casefold()
+    structure_text = " ".join(
+        str(item.get(key) or "").casefold().replace("-", "_")
+        for key in ("item_id", "element_id", "layout", "section_id", "source")
+    )
+    if "bottom_bar" in structure_text or "status_bar" in structure_text:
+        return False
     if role in {"message_card", "message_card_content", "message_bubble", "image_message"}:
         return False
     if item_type == "section":
@@ -6235,11 +8718,15 @@ def _looks_like_tile_text_child(item: dict[str, Any]) -> bool:
         return False
     if role in {"message_bubble", "message_card", "message_card_content", "image_message"}:
         return False
+    action_text_evidence = (
+        role in {"button", "control", "action"}
+        or item_type in {"action", "action_uia", "button", "control"}
+    ) and bbox["h"] <= 64
     return role in {"text", "label", "heading", "nav_text_action", "readable"} or item_type in {
         "text",
         "readable",
         "heading",
-    }
+    } or action_text_evidence
 
 
 def _bbox_center_inside(inner: dict[str, int] | None, outer: dict[str, int]) -> bool:
@@ -6961,8 +9448,19 @@ def _topbar_control_child_role(item: dict[str, Any]) -> str:
 def _notice_parent_groups(*, region: dict[str, Any], numbered_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     groups: list[dict[str, Any]] = []
     used_numbers: set[str] = set()
+    region_family = _stage1_region_family(region)
     for anchor in sorted(numbered_items, key=lambda item: (_bbox_top(item), _bbox_left(item))):
         if not _looks_like_notice_anchor(anchor):
+            continue
+        anchor_role = str(anchor.get("role") or anchor.get("item_type") or "").casefold()
+        if region_family == "main_content" and anchor_role not in {
+            "alert",
+            "announcement",
+            "banner",
+            "notice",
+            "notice_item",
+            "pinned_notice",
+        }:
             continue
         anchor_number = str(anchor.get("number") or "")
         if anchor_number in used_numbers:
@@ -7693,14 +10191,149 @@ def _member_list_parent_groups(*, region: dict[str, Any], numbered_items: list[d
     return groups
 
 
-def _conversation_row_parent_groups(*, region: dict[str, Any], numbered_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _conversation_row_container_groups(
+    *,
+    region: dict[str, Any],
+    numbered_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """优先使用重复的完整列表行容器，避免把标题和预览文字拆成窄行。"""
+    region_bbox = _bbox(region.get("precise_bbox")) or _bbox(region.get("bbox"))
+    if not region_bbox:
+        return []
+    container_roles = {"dataitem", "listitem", "list_item", "conversation_row", "chat_row", "message_bubble"}
+    seed_roles = {"dataitem", "listitem", "list_item", "conversation_row", "chat_row"}
+
+    def role_of(item: dict[str, Any]) -> str:
+        return str(item.get("role") or item.get("item_type") or "").strip().casefold().replace(" ", "_")
+
+    def usable_container(item: dict[str, Any]) -> bool:
+        bbox = _bbox(item.get("bbox"))
+        role = role_of(item)
+        if not bbox or role not in container_roles:
+            return False
+        if bbox["h"] < 36 or bbox["h"] > 128 or bbox["w"] < 120:
+            return False
+        semantic_text = _semantic_item_text(item)
+        return not any(token in semantic_text for token in ("filter", "search", "筛选", "搜索"))
+
+    seeds = [item for item in numbered_items if usable_container(item) and role_of(item) in seed_roles]
+    if len(seeds) < 2:
+        return []
+
+    def similar_geometry(left: dict[str, Any], right: dict[str, Any]) -> bool:
+        left_bbox = _bbox(left.get("bbox"))
+        right_bbox = _bbox(right.get("bbox"))
+        if not left_bbox or not right_bbox:
+            return False
+        return (
+            abs(left_bbox["x"] - right_bbox["x"]) <= 14
+            and min(left_bbox["w"], right_bbox["w"]) / max(left_bbox["w"], right_bbox["w"]) >= 0.82
+            and min(left_bbox["h"], right_bbox["h"]) / max(left_bbox["h"], right_bbox["h"]) >= 0.62
+        )
+
+    clusters = [[candidate for candidate in seeds if similar_geometry(seed, candidate)] for seed in seeds]
+    cluster = max(
+        clusters,
+        key=lambda values: (
+            len(values),
+            sum((_bbox(item.get("bbox")) or {"w": 0})["w"] for item in values),
+        ),
+    )
+    if len(cluster) < 2:
+        return []
+    reference = max(cluster, key=lambda item: (_bbox(item.get("bbox")) or {"w": 0})["w"])
+    containers = [item for item in numbered_items if usable_container(item) and similar_geometry(reference, item)]
+    containers.sort(key=lambda item: (_bbox_top(item), _bbox_left(item)))
+
+    deduped: list[dict[str, Any]] = []
+    role_priority = {"dataitem": 4, "listitem": 4, "list_item": 4, "conversation_row": 4, "chat_row": 4, "message_bubble": 2}
+    for item in containers:
+        bbox = _bbox(item.get("bbox"))
+        if not bbox:
+            continue
+        duplicate_index = next(
+            (
+                index
+                for index, existing in enumerate(deduped)
+                if abs(_bbox_top(existing) - bbox["y"]) <= max(8, int(bbox["h"] * 0.3))
+            ),
+            None,
+        )
+        if duplicate_index is None:
+            deduped.append(item)
+            continue
+        existing = deduped[duplicate_index]
+        existing_bbox = _bbox(existing.get("bbox")) or {"w": 0}
+        item_rank = (role_priority.get(role_of(item), 0), bbox["w"])
+        existing_rank = (role_priority.get(role_of(existing), 0), existing_bbox["w"])
+        if item_rank > existing_rank:
+            deduped[duplicate_index] = item
+
+    if len(deduped) < 2:
+        return []
+    container_ids = {str(item.get("item_id") or "") for item in containers}
+    groups: list[dict[str, Any]] = []
+    for container in deduped:
+        bbox = _bbox(container.get("bbox"))
+        if not bbox:
+            continue
+        children = [
+            item
+            for item in numbered_items
+            if str(item.get("item_id") or "") not in container_ids
+            and (child_bbox := _bbox(item.get("bbox"))) is not None
+            and (
+                _bbox_containment_ratio(child_bbox, bbox) >= 0.78
+                or (
+                    bbox["x"] <= child_bbox["x"] + child_bbox["w"] / 2 <= bbox["x"] + bbox["w"]
+                    and bbox["y"] <= child_bbox["y"] + child_bbox["h"] / 2 <= bbox["y"] + bbox["h"]
+                )
+            )
+        ]
+        members = [container, *sorted(children, key=lambda item: (_bbox_top(item), _bbox_left(item)))]
+        groups.append(
+            {
+                "contract_version": "learn_stage2_subregion_group_v1",
+                "group_id": f"conversation_row_{len(groups) + 1}",
+                "label": _conversation_row_label(members),
+                "role": "conversation_row",
+                "bbox": bbox,
+                "child_group_roles": _unique_roles(members),
+                "member_numbers": [str(item.get("number") or "") for item in members],
+                "member_item_ids": [str(item.get("item_id") or "") for item in members],
+                "parent_child_policy": "repeated_full_row_container_owns_internal_evidence",
+                "adjacent_fragment_merged": True,
+                "source": "stage2_semantic_row_container_reconstruction",
+                "display_only": True,
+                "execute_binding_enabled": False,
+                "artifact_is_authorization": False,
+            }
+        )
+    return groups
+
+
+def _conversation_row_parent_groups(
+    *,
+    region: dict[str, Any],
+    numbered_items: list[dict[str, Any]],
+    treat_primary_as_conversation_list: bool = False,
+) -> list[dict[str, Any]]:
     if not _is_primary_region_id(str(region.get("region_id") or "")):
         return []
-    if _is_conversation_list_stage2_region(region):
+    is_conversation_list = treat_primary_as_conversation_list or _is_conversation_list_stage2_region(region)
+    if is_conversation_list:
+        container_groups = _conversation_row_container_groups(region=region, numbered_items=numbered_items)
+        if container_groups:
+            return container_groups
         candidates = [
             item
             for item in sorted(numbered_items, key=lambda entry: (_bbox_top(entry), _bbox_left(entry)))
-            if _bbox(item.get("bbox")) and _looks_like_conversation_row_fragment(item)
+            if _bbox(item.get("bbox"))
+            and _looks_like_conversation_row_fragment(item)
+            and (
+                "text" in str(item.get("role") or "").casefold()
+                or str(item.get("item_type") or "").casefold() in {"text", "readable"}
+            )
         ]
     else:
         explicit_candidates = [item for item in numbered_items if _looks_like_message_fragment(item)]
@@ -7714,34 +10347,65 @@ def _conversation_row_parent_groups(*, region: dict[str, Any], numbered_items: l
             if _bbox(item.get("bbox"))
             and _bbox_left(item) < message_column_min
             and _looks_like_conversation_row_fragment(item)
+            and (
+                "text" in str(item.get("role") or "").casefold()
+                or str(item.get("item_type") or "").casefold() in {"text", "readable"}
+            )
         ]
     if len(candidates) < 3:
         return []
     rows: list[list[dict[str, Any]]] = []
     current: list[dict[str, Any]] = []
-    current_bbox: dict[str, int] | None = None
+    current_top: int | None = None
+    top_values = sorted((_bbox(item.get("bbox")) or {"y": 0})["y"] for item in candidates)
+    positive_steps = sorted(
+        second - first
+        for first, second in zip(top_values, top_values[1:])
+        if second - first > 0
+    )
+    lower_steps = positive_steps[: max(1, (len(positive_steps) + 1) // 2)]
+    typical_inner_step = lower_steps[len(lower_steps) // 2] if lower_steps else 18
+    same_row_line_step = max(20, min(30, int(round(typical_inner_step * 1.2))))
     for item in candidates:
         bbox = _bbox(item.get("bbox"))
         if not bbox:
             continue
-        if not current or current_bbox is None:
+        if not current or current_top is None:
             current = [item]
-            current_bbox = bbox
+            current_top = bbox["y"]
             continue
-        row_gap = bbox["y"] - (current_bbox["y"] + current_bbox["h"])
-        same_row = abs((_bbox_center_y_value(bbox)) - (_bbox_center_y_value(current_bbox))) <= 24 or row_gap <= 12
+        same_row = bbox["y"] - current_top <= same_row_line_step
         if same_row:
             current.append(item)
-            current_bbox = _bbox_union([current_bbox, bbox])
+            current_top = bbox["y"]
         else:
             if len(current) >= 2:
                 rows.append(current)
             current = [item]
-            current_bbox = bbox
+            current_top = bbox["y"]
     if len(current) >= 2:
         rows.append(current)
+    if rows and is_conversation_list:
+        used_item_ids = {
+            str(item.get("item_id") or "")
+            for row in rows
+            for item in row
+        }
+        anchor_lefts = sorted(_bbox_left(row[0]) for row in rows if row)
+        anchor_left = anchor_lefts[len(anchor_lefts) // 2]
+        region_bbox = _bbox(region.get("precise_bbox")) or _bbox(region.get("bbox")) or {"w": 400}
+        singleton_tolerance = max(24, min(36, int(region_bbox["w"] * 0.08)))
+        rows.extend(
+            [item]
+            for item in candidates
+            if str(item.get("item_id") or "") not in used_item_ids
+            and abs(_bbox_left(item) - anchor_left) <= singleton_tolerance
+        )
+        rows.sort(key=lambda row: (_bbox_top(row[0]), _bbox_left(row[0])))
     groups: list[dict[str, Any]] = []
     for row in rows:
+        if _conversation_row_is_section_heading(row):
+            continue
         bbox = _bbox_union([item.get("bbox") for item in row])
         if not bbox:
             continue
@@ -7783,6 +10447,16 @@ def _near_notice_anchor(candidate_bbox: dict[str, int], anchor_bbox: dict[str, i
 
 
 def _looks_like_notice_anchor(item: dict[str, Any]) -> bool:
+    role = str(item.get("role") or item.get("item_type") or "").casefold()
+    if role in {
+        "card",
+        "tile_card",
+        "media_card",
+        "message_card",
+        "recommendation_item",
+        "news_card",
+    }:
+        return False
     text = _semantic_item_text(item)
     return any(token in text for token in ("notice", "announcement", "pinned", "公告", "通知", "群公告"))
 
@@ -8160,6 +10834,24 @@ def _conversation_row_label(items: list[dict[str, Any]]) -> str:
     return str(items[0].get("label") or "conversation row") if items else "conversation row"
 
 
+def _conversation_row_is_section_heading(items: list[dict[str, Any]]) -> bool:
+    labels = [str(item.get("label") or "").strip() for item in items]
+    labels = [label for label in labels if label]
+    if not labels:
+        return False
+    section_pattern = re.compile(
+        r"^(?:在线好友|离线好友|在线|离线|好友|游戏中|recent|online friends?|offline friends?|friends?)"
+        r"(?:\s*[\(\[（]\s*\d+\s*[\)\]）])?$",
+        re.IGNORECASE,
+    )
+    disclosure_labels = {"↓", "↑", "▼", "▲", "⌄", "⌃", ">", "<", "›", "‹", "v", "^"}
+    has_section_label = any(section_pattern.fullmatch(label) for label in labels)
+    return has_section_label and all(
+        section_pattern.fullmatch(label) or label.casefold() in disclosure_labels
+        for label in labels
+    )
+
+
 def _looks_like_timestamp_label(label: str) -> bool:
     stripped = label.strip()
     return bool(re.fullmatch(r"\d{1,2}:\d{2}", stripped) or re.fullmatch(r"\d{4}/\d{1,2}/\d{1,2}", stripped))
@@ -8393,7 +11085,31 @@ def _section_parent_groups(
     numbered_items: list[dict[str, Any]],
     content_groups: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    section_titles = [item for item in numbered_items if _looks_like_section_title(item)]
+    eligible_group_roles = {
+        "media_card_group",
+        "tile_card_group",
+        "partial_visible_card_group",
+        "list_group",
+        "form_group",
+        "table_group",
+    }
+    component_member_ids = {
+        str(item_id)
+        for group in content_groups
+        if str(group.get("role") or "") not in eligible_group_roles
+        for item_id in (
+            group.get("member_item_ids", [])
+            if isinstance(group.get("member_item_ids"), list)
+            else []
+        )
+        if str(item_id or "").strip()
+    }
+    section_titles = [
+        item
+        for item in numbered_items
+        if _looks_like_section_title(item)
+        and str(item.get("item_id") or item.get("number") or "") not in component_member_ids
+    ]
     if not section_titles or not content_groups:
         return []
     used_title_ids: set[str] = set()
@@ -8401,13 +11117,7 @@ def _section_parent_groups(
     eligible_groups = [
         group
         for group in content_groups
-        if str(group.get("role") or "") in {
-            "media_card_group",
-            "partial_visible_card_group",
-            "list_group",
-            "form_group",
-            "table_group",
-        }
+        if str(group.get("role") or "") in eligible_group_roles
     ]
     for group in sorted(eligible_groups, key=lambda item: (_bbox_top(item), _bbox_left(item))):
         group_bbox = _bbox(group.get("bbox"))
@@ -8533,6 +11243,7 @@ def _synthesize_primary_media_cards(
         if best_index is not None:
             child_groups[best_index].append(item)
     synthesized: list[dict[str, Any]] = []
+    structured_parent_reconciliation_count = 0
     for zero_based_index, card_bbox in enumerate(card_boxes):
         index = zero_based_index + 1
         child_items = child_groups.get(zero_based_index, [])
@@ -8544,8 +11255,19 @@ def _synthesize_primary_media_cards(
             child_items=child_items,
             parent_bbox=region_bbox,
         )
-        expanded_bbox = _media_card_bbox_with_children(slot_card_bbox, child_items, parent_bbox=region_bbox)
         label = _media_card_label(child_items, fallback=f"media card {index}")
+        visual_boundary_before_reconciliation = _bbox(slot_card_bbox)
+        structured_parent = _matching_structured_media_card_parent(
+            visual_boundary_before_reconciliation or card_bbox,
+            numbered_items,
+            label=label,
+        )
+        structured_parent_bbox = _bbox(structured_parent.get("bbox")) if structured_parent else None
+        if structured_parent_bbox:
+            slot_card_bbox = structured_parent_bbox
+            used_numbers.add(str(structured_parent.get("number") or ""))
+            structured_parent_reconciliation_count += 1
+        expanded_bbox = _media_card_bbox_with_children(slot_card_bbox, child_items, parent_bbox=region_bbox)
         completion = _media_card_completion_status(
             card_bbox=slot_card_bbox,
             expanded_bbox=expanded_bbox,
@@ -8584,6 +11306,20 @@ def _synthesize_primary_media_cards(
                 "artifact_is_authorization": False,
                 **(
                     {
+                        "bbox_reconciliation": {
+                            "contract_version": "learn_visual_structured_card_boundary_reconciliation_v1",
+                            "source_item_id": str(structured_parent.get("item_id") or ""),
+                            "source": str(structured_parent.get("source") or ""),
+                            "previous_visual_bbox": visual_boundary_before_reconciliation or {},
+                            "reconciled_bbox": deepcopy(expanded_bbox),
+                            "reason": "same_label_high_overlap_structured_parent_boundary",
+                        }
+                    }
+                    if structured_parent
+                    else {}
+                ),
+                **(
+                    {
                         "review_required": True,
                         "action_candidate": False,
                         "incomplete_reason": "missing_card_slot_or_click_area",
@@ -8613,8 +11349,51 @@ def _synthesize_primary_media_cards(
         "candidate_count": len(card_boxes),
         "synthesized_count": len(synthesized),
         "suppressed_child_item_count": len(used_numbers),
+        "structured_parent_reconciliation_count": structured_parent_reconciliation_count,
         "source": "visual_card_segmenter",
     }
+
+
+def _matching_structured_media_card_parent(
+    visual_bbox: dict[str, int],
+    numbered_items: list[dict[str, Any]],
+    *,
+    label: str,
+) -> dict[str, Any] | None:
+    normalized_label = " ".join(str(label or "").casefold().split())
+    if len(normalized_label) < 2 or normalized_label.startswith("media card "):
+        return None
+    visual_area = max(1, visual_bbox["w"] * visual_bbox["h"])
+    matches: list[tuple[bool, float, int, dict[str, Any]]] = []
+    for item in numbered_items:
+        role = str(item.get("role") or "").casefold()
+        item_type = str(item.get("item_type") or "").casefold()
+        source = str(item.get("source") or "").casefold()
+        item_bbox = _bbox(item.get("bbox"))
+        item_label = " ".join(str(item.get("label") or "").casefold().split())
+        if not item_bbox or source in _PRIMARY_VISUAL_CARD_SOURCES:
+            continue
+        if item_type != "actionable" or role in {"text", "icon", "image"}:
+            continue
+        if len(item_label) < 2 or not (
+            item_label == normalized_label
+            or item_label in normalized_label
+            or normalized_label in item_label
+        ):
+            continue
+        item_area = item_bbox["w"] * item_bbox["h"]
+        area_ratio = item_area / visual_area
+        if not 0.55 <= area_ratio <= 1.15:
+            continue
+        if _bbox_overlap_ratio(visual_bbox, item_bbox) < 0.75:
+            continue
+        if _bbox_overlap_ratio(item_bbox, visual_bbox) < 0.75:
+            continue
+        matches.append((item_label == normalized_label, abs(1.0 - area_ratio), item_area, item))
+    if not matches:
+        return None
+    matches.sort(key=lambda entry: (not entry[0], entry[1], entry[2], str(entry[3].get("item_id") or "")))
+    return matches[0][3]
 
 
 def _incomplete_card_overlay_style() -> dict[str, Any]:
@@ -8689,7 +11468,9 @@ def _infer_dense_row_placeholder_card_slot(
     prev_box = sorted_row[target_index - 1] if target_index > 0 else None
     next_box = sorted_row[target_index + 1] if target_index + 1 < len(sorted_row) else None
     target_width = int(round(median_width))
-    target_height = int(round(median_height))
+    child_bottom = child_union["y"] + child_union["h"]
+    evidence_height = max(1, child_bottom - int(round(median_top)))
+    target_height = int(round(max(median_visual_height, evidence_height)))
     inferred_x = int(round(min(child_union["x"], visual_center_x - target_width / 2)))
     if prev_box:
         inferred_x = max(inferred_x, prev_box["x"] + prev_box["w"] + 8)
@@ -8705,7 +11486,7 @@ def _infer_dense_row_placeholder_card_slot(
             "h": target_height,
         },
     )
-    if inferred["w"] < median_width * 0.75 or inferred["h"] < median_height * 0.75:
+    if inferred["w"] < median_width * 0.75 or inferred["h"] < target_height * 0.75:
         audit["reason"] = "inferred_slot_clipped_too_small"
         audit["candidate_slot_bbox"] = inferred
         return deepcopy(card_bbox), audit
@@ -8728,6 +11509,7 @@ def _infer_dense_row_placeholder_card_slot(
                 "expanded_top": median_top,
                 "visual_width": median_visual_width,
                 "visual_height": median_visual_height,
+                "evidence_height": evidence_height,
             },
         }
     )
@@ -9913,12 +12695,48 @@ def _media_card_bbox_with_children(
     )
     visual_bbox = _bbox(card_bbox.get("visual_bbox")) if isinstance(card_bbox.get("visual_bbox"), dict) else None
     base_bbox = inferred_slot_bbox or visual_bbox or {key: _int(card_bbox.get(key)) for key in ("x", "y", "w", "h")}
+    if inferred_slot_bbox is None:
+        base_bbox = _authoritative_media_card_parent_bbox(base_bbox, child_items) or base_bbox
     child_boxes = [_bbox(item.get("bbox")) for item in child_items]
     child_boxes = [box for box in child_boxes if box]
     if not child_boxes:
         return _clip_bbox(parent_bbox, base_bbox)
     union = _bbox_union([base_bbox, *child_boxes])
     return _clip_bbox(parent_bbox, union or base_bbox)
+
+
+def _authoritative_media_card_parent_bbox(
+    visual_bbox: dict[str, int],
+    child_items: list[dict[str, Any]],
+) -> dict[str, int] | None:
+    visual_area = max(1, visual_bbox["w"] * visual_bbox["h"])
+    candidates: list[dict[str, int]] = []
+    for item in child_items:
+        role = str(item.get("role") or "").casefold()
+        item_type = str(item.get("item_type") or "").casefold()
+        candidate_bbox = _bbox(item.get("bbox"))
+        if not candidate_bbox or item_type != "actionable" or role in {"text", "icon", "image"}:
+            continue
+        candidate_area = candidate_bbox["w"] * candidate_bbox["h"]
+        area_ratio = candidate_area / visual_area
+        if not 0.55 <= area_ratio <= 1.15:
+            continue
+        if _bbox_overlap_ratio(visual_bbox, candidate_bbox) < 0.75:
+            continue
+        if _bbox_overlap_ratio(candidate_bbox, visual_bbox) < 0.75:
+            continue
+        content_boxes = [
+            box
+            for child in child_items
+            if child is not item
+            if (box := _bbox(child.get("bbox"))) is not None
+        ]
+        if content_boxes and any(_bbox_overlap_ratio(box, candidate_bbox) < 0.9 for box in content_boxes):
+            continue
+        candidates.append(candidate_bbox)
+    if not candidates:
+        return None
+    return min(candidates, key=lambda bbox: (bbox["w"] * bbox["h"], bbox["y"], bbox["x"]))
 
 
 def _bbox_overlap_ratio(bbox: dict[str, int], parent_bbox: dict[str, int]) -> float:
@@ -10011,6 +12829,17 @@ def _refine_direct_region_small_controls(
     region_bbox: dict[str, int],
     region_family: str = "",
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    initial_model_item_count = len(numbered_items)
+    classic_menu_report = {
+        "applied": False,
+        "reason": "not_topbar_direct_region",
+        "menu_item_count": 0,
+    }
+    if region_family == "top_bar" and region_bbox:
+        numbered_items, classic_menu_report = _normalize_classic_menu_bar_items(
+            numbered_items,
+            region_bbox=region_bbox,
+        )
     if not image_path or not region_bbox:
         items, direct_bar_report = _normalize_direct_bar_items(
             numbered_items,
@@ -10024,11 +12853,39 @@ def _refine_direct_region_small_controls(
             "reason": _direct_refinement_reason("missing_image_or_region_bbox", direct_bar_report),
             "candidate_count": 0,
             "model_item_count": len(numbered_items),
+            "classic_menu_ocr_anchor": classic_menu_report,
             **direct_bar_report,
         }
     detection_bbox = _direct_region_control_detection_bbox(region_bbox)
     candidates = _visual_small_control_boxes(image_path=image_path, parent_bbox=detection_bbox)
-    if len(candidates) >= max(6, len(numbered_items) * 2):
+    leading_edge_candidates: list[dict[str, int]] = []
+    if detection_bbox["x"] > region_bbox["x"]:
+        leading_edge_width = min(
+            region_bbox["w"],
+            max(detection_bbox["x"] - region_bbox["x"], 96),
+        )
+        leading_edge_bbox = {
+            "x": region_bbox["x"],
+            "y": region_bbox["y"],
+            "w": leading_edge_width,
+            "h": region_bbox["h"],
+        }
+        leading_edge_candidates = _visual_small_control_boxes(
+            image_path=image_path,
+            parent_bbox=leading_edge_bbox,
+        )
+        candidates = _dedupe_bboxes([*candidates, *leading_edge_candidates], iou_threshold=0.72)
+    numbered_items, unmatched_visual_candidate_count = _append_unmatched_direct_visual_controls(
+        numbered_items,
+        candidates,
+        region_family=region_family,
+    )
+    candidate_coverage_report = {
+        "leading_edge_candidate_count": len(leading_edge_candidates),
+        "unmatched_visual_candidate_count": unmatched_visual_candidate_count,
+        "classic_menu_ocr_anchor": classic_menu_report,
+    }
+    if len(candidates) >= max(6, initial_model_item_count * 2):
         synthesized = _synthesize_direct_visual_controls(numbered_items, candidates, fallback_region_bbox=region_bbox)
         synthesized, direct_bar_report = _normalize_direct_bar_items(
             synthesized,
@@ -10041,12 +12898,13 @@ def _refine_direct_region_small_controls(
             "applied": True,
             "reason": "visual_candidates_replace_sparse_text_inventory",
             "candidate_count": len(candidates),
-            "model_item_count": len(numbered_items),
+            "model_item_count": initial_model_item_count,
             "refined_count": len(synthesized),
             "avg_model_visual_iou": 0.0,
             "low_overlap_count": len(synthesized),
             "orientation": "horizontal" if _is_horizontal_region(region_bbox) else "vertical",
             **direct_bar_report,
+            **candidate_coverage_report,
             "pairs": [
                 {
                     "number": item.get("number"),
@@ -10055,21 +12913,6 @@ def _refine_direct_region_small_controls(
                 }
                 for item in synthesized
             ],
-        }
-    if len(numbered_items) < 3:
-        items, direct_bar_report = _normalize_direct_bar_items(
-            numbered_items,
-            region_bbox=region_bbox,
-            region_family=region_family,
-            image_path=image_path,
-            reason="too_few_model_items",
-        )
-        return items, {
-            "applied": _direct_refinement_applied(False, direct_bar_report),
-            "reason": _direct_refinement_reason("too_few_model_items", direct_bar_report),
-            "candidate_count": len(candidates),
-            "model_item_count": len(numbered_items),
-            **direct_bar_report,
         }
     if len(candidates) < max(3, int(len(numbered_items) * 0.55)):
         items, direct_bar_report = _normalize_direct_bar_items(
@@ -10083,8 +12926,25 @@ def _refine_direct_region_small_controls(
             "applied": _direct_refinement_applied(False, direct_bar_report),
             "reason": _direct_refinement_reason("insufficient_visual_candidates", direct_bar_report),
             "candidate_count": len(candidates),
-            "model_item_count": len(numbered_items),
+            "model_item_count": initial_model_item_count,
             **direct_bar_report,
+            **candidate_coverage_report,
+        }
+    if len(numbered_items) < 3:
+        items, direct_bar_report = _normalize_direct_bar_items(
+            numbered_items,
+            region_bbox=region_bbox,
+            region_family=region_family,
+            image_path=image_path,
+            reason="too_few_model_items",
+        )
+        return items, {
+            "applied": _direct_refinement_applied(False, direct_bar_report),
+            "reason": _direct_refinement_reason("too_few_model_items", direct_bar_report),
+            "candidate_count": len(candidates),
+            "model_item_count": initial_model_item_count,
+            **direct_bar_report,
+            **candidate_coverage_report,
         }
     overlaps = [
         max((_iou(_bbox(item.get("bbox")) or {"x": 0, "y": 0, "w": 1, "h": 1}, candidate) for candidate in candidates), default=0.0)
@@ -10104,23 +12964,32 @@ def _refine_direct_region_small_controls(
             "applied": _direct_refinement_applied(False, direct_bar_report),
             "reason": _direct_refinement_reason("model_boxes_already_overlap_visual_candidates", direct_bar_report),
             "candidate_count": len(candidates),
-            "model_item_count": len(numbered_items),
+            "model_item_count": initial_model_item_count,
             "avg_model_visual_iou": avg_overlap,
             "low_overlap_count": low_overlap_count,
             **direct_bar_report,
+            **candidate_coverage_report,
         }
     horizontal = region_bbox["w"] >= region_bbox["h"] * 2.5
-    sorted_candidates = sorted(candidates, key=lambda box: (box["x"], box["y"]) if horizontal else (box["y"], box["x"]))
     sorted_items = sorted(
         [deepcopy(item) for item in numbered_items],
         key=lambda item: ((_bbox_left(item), _bbox_top(item)) if horizontal else (_bbox_top(item), _bbox_left(item))),
     )
     refined_by_number: dict[str, dict[str, Any]] = {}
     pairs: list[dict[str, Any]] = []
-    for item, candidate in zip(sorted_items, sorted_candidates):
+    available_candidates = [dict(candidate) for candidate in candidates]
+    for item in sorted_items:
         old_bbox = _bbox(item.get("bbox"))
-        if not old_bbox:
+        if not old_bbox or not _direct_item_accepts_visual_hit_area_refinement(item):
             continue
+        candidate = _nearest_compatible_direct_visual_candidate(
+            old_bbox,
+            available_candidates,
+            horizontal=horizontal,
+        )
+        if candidate is None:
+            continue
+        available_candidates.remove(candidate)
         item["bbox"] = candidate
         item["bbox_refinement"] = {
             "source": "visual_small_control_segmenter",
@@ -10145,14 +13014,230 @@ def _refine_direct_region_small_controls(
             direct_bar_report,
         ),
         "candidate_count": len(candidates),
-        "model_item_count": len(numbered_items),
+        "model_item_count": initial_model_item_count,
         "refined_count": len(pairs),
         "avg_model_visual_iou": avg_overlap,
         "low_overlap_count": low_overlap_count,
         "orientation": "horizontal" if horizontal else "vertical",
         **direct_bar_report,
+        **candidate_coverage_report,
         "pairs": pairs,
     }
+
+
+def _direct_item_accepts_visual_hit_area_refinement(item: dict[str, Any]) -> bool:
+    role = str(item.get("role") or "").strip().casefold().replace(" ", "_")
+    item_type = str(item.get("item_type") or "").strip().casefold().replace(" ", "_")
+    if role in {
+        "text",
+        "readable",
+        "label",
+        "menu_bar_evidence",
+        "status_bar_evidence",
+        "bottom_bar_evidence",
+        "title_bar",
+    }:
+        return False
+    return bool(
+        item_type in {"actionable", "button", "visual_control", "control"}
+        or any(token in role for token in ("button", "control", "menu_item", "nav_item", "tab"))
+    )
+
+
+def _nearest_compatible_direct_visual_candidate(
+    item_bbox: dict[str, int],
+    candidates: list[dict[str, int]],
+    *,
+    horizontal: bool,
+) -> dict[str, int] | None:
+    item_cx = item_bbox["x"] + item_bbox["w"] / 2
+    item_cy = item_bbox["y"] + item_bbox["h"] / 2
+    scored: list[tuple[float, dict[str, int]]] = []
+    for candidate in candidates:
+        candidate_cx = candidate["x"] + candidate["w"] / 2
+        candidate_cy = candidate["y"] + candidate["h"] / 2
+        x_gap = max(
+            0,
+            max(item_bbox["x"], candidate["x"])
+            - min(item_bbox["x"] + item_bbox["w"], candidate["x"] + candidate["w"]),
+        )
+        y_gap = max(
+            0,
+            max(item_bbox["y"], candidate["y"])
+            - min(item_bbox["y"] + item_bbox["h"], candidate["y"] + candidate["h"]),
+        )
+        if horizontal:
+            cross_overlap = max(
+                0,
+                min(item_bbox["y"] + item_bbox["h"], candidate["y"] + candidate["h"])
+                - max(item_bbox["y"], candidate["y"]),
+            )
+            cross_overlap_ratio = cross_overlap / max(1, min(item_bbox["h"], candidate["h"]))
+            cross_axis_limit = max(2, int(round(min(item_bbox["h"], candidate["h"]) * 0.08)))
+            primary_axis_limit = max(360, int(round(max(item_bbox["w"], candidate["w"]) * 3.0)))
+            if cross_overlap_ratio < 0.3 or y_gap > cross_axis_limit or x_gap > primary_axis_limit:
+                continue
+        else:
+            cross_overlap = max(
+                0,
+                min(item_bbox["x"] + item_bbox["w"], candidate["x"] + candidate["w"])
+                - max(item_bbox["x"], candidate["x"]),
+            )
+            cross_overlap_ratio = cross_overlap / max(1, min(item_bbox["w"], candidate["w"]))
+            cross_axis_limit = max(2, int(round(min(item_bbox["w"], candidate["w"]) * 0.08)))
+            primary_axis_limit = max(360, int(round(max(item_bbox["h"], candidate["h"]) * 3.0)))
+            if cross_overlap_ratio < 0.3 or x_gap > cross_axis_limit or y_gap > primary_axis_limit:
+                continue
+        center_distance = ((item_cx - candidate_cx) ** 2 + (item_cy - candidate_cy) ** 2) ** 0.5
+        overlap = _iou(item_bbox, candidate)
+        containment = max(_bbox_overlap_ratio(item_bbox, candidate), _bbox_overlap_ratio(candidate, item_bbox))
+        score = overlap * 3.0 + containment * 1.5 - center_distance / max(1.0, max(item_bbox["w"], item_bbox["h"]))
+        scored.append((score, candidate))
+    if not scored:
+        return None
+    return max(scored, key=lambda entry: entry[0])[1]
+
+
+def _append_unmatched_direct_visual_controls(
+    numbered_items: list[dict[str, Any]],
+    candidates: list[dict[str, int]],
+    *,
+    region_family: str,
+) -> tuple[list[dict[str, Any]], int]:
+    existing = [deepcopy(item) for item in numbered_items]
+    role = "nav_item" if region_family in {"left_bar", "right_bar"} else "control"
+    consumed_candidate_indexes: set[int] = set()
+    for candidate_index, candidate in enumerate(candidates):
+        if candidate["w"] > 128 or candidate["h"] > 96:
+            continue
+        covered_by_control = False
+        for item in existing:
+            item_bbox = _bbox(item.get("bbox"))
+            if not item_bbox or str(item.get("role") or "").strip().lower() in {"text", "label"}:
+                continue
+            if str(item.get("item_type") or "").strip().lower() == "readable":
+                continue
+            if (
+                _bbox_overlap_ratio(candidate, item_bbox) >= 0.45
+                or _bbox_overlap_ratio(item_bbox, candidate) >= 0.45
+            ):
+                covered_by_control = True
+                break
+        if covered_by_control:
+            continue
+
+        scored_labels: list[tuple[float, int, dict[str, int]]] = []
+        for item_index, item in enumerate(existing):
+            item_bbox = _bbox(item.get("bbox"))
+            if not item_bbox:
+                continue
+            item_role = str(item.get("role") or "").strip().lower()
+            item_type = str(item.get("item_type") or "").strip().lower()
+            item_source = str(item.get("source") or "").strip().lower()
+            item_id = str(item.get("item_id") or "").strip().lower()
+            if item_role not in {"text", "label"} and item_type != "readable":
+                continue
+            if "ocr" not in item_source and not item_id.startswith("ocr_"):
+                continue
+            overlap_x = max(
+                0,
+                min(candidate["x"] + candidate["w"], item_bbox["x"] + item_bbox["w"])
+                - max(candidate["x"], item_bbox["x"]),
+            )
+            overlap_y = max(
+                0,
+                min(candidate["y"] + candidate["h"], item_bbox["y"] + item_bbox["h"])
+                - max(candidate["y"], item_bbox["y"]),
+            )
+            x_overlap_ratio = overlap_x / max(1, min(candidate["w"], item_bbox["w"]))
+            y_overlap_ratio = overlap_y / max(1, min(candidate["h"], item_bbox["h"]))
+            x_gap = max(
+                0,
+                max(candidate["x"], item_bbox["x"])
+                - min(candidate["x"] + candidate["w"], item_bbox["x"] + item_bbox["w"]),
+            )
+            if y_overlap_ratio < 0.45 or (x_overlap_ratio < 0.35 and x_gap > 6):
+                continue
+            union = _bbox_union([candidate, item_bbox])
+            if not union:
+                continue
+            if union["w"] > max(candidate["w"] + 48, int(round(candidate["w"] * 1.6))):
+                continue
+            if union["h"] > max(candidate["h"] + 24, int(round(candidate["h"] * 1.35))):
+                continue
+            center_distance = abs(
+                (candidate["x"] + candidate["w"] / 2) - (item_bbox["x"] + item_bbox["w"] / 2)
+            )
+            score = y_overlap_ratio * 2.0 + x_overlap_ratio - center_distance / max(1, candidate["w"])
+            scored_labels.append((score, item_index, union))
+        if not scored_labels:
+            continue
+
+        _, item_index, union = max(scored_labels, key=lambda entry: entry[0])
+        label_item = deepcopy(existing[item_index])
+        label_item_id = str(label_item.get("item_id") or f"ocr_label_{candidate_index + 1}")
+        existing[item_index] = {
+            **existing[item_index],
+            "item_id": f"visual_control_with_ocr_label_{label_item_id}",
+            "role": role,
+            "item_type": "visual_control",
+            "bbox": union,
+            "click_point": {},
+            "children": [label_item],
+            "review_only": True,
+            "stage": "stage2_region_numbering",
+            "source": "visual_control_with_ocr_label",
+            "source_label_item_id": label_item_id,
+            "bbox_policy": "visual_control_parent_with_ocr_label",
+            "display_only": True,
+            "execute_binding_enabled": False,
+            "artifact_is_authorization": False,
+        }
+        consumed_candidate_indexes.add(candidate_index)
+
+    existing_boxes = [_bbox(item.get("bbox")) for item in existing]
+    existing_boxes = [box for box in existing_boxes if box]
+    unmatched: list[dict[str, int]] = []
+    for candidate_index, candidate in enumerate(candidates):
+        if candidate_index in consumed_candidate_indexes:
+            continue
+        center_x = candidate["x"] + candidate["w"] / 2
+        center_y = candidate["y"] + candidate["h"] / 2
+        matched = any(
+            (
+                box["x"] <= center_x <= box["x"] + box["w"]
+                and box["y"] <= center_y <= box["y"] + box["h"]
+            )
+            or _bbox_overlap_ratio(candidate, box) >= 0.45
+            or _bbox_overlap_ratio(box, candidate) >= 0.45
+            for box in existing_boxes
+        )
+        if not matched:
+            unmatched.append(candidate)
+    if not unmatched:
+        return existing, 0
+    region_no = str(existing[0].get("number") or "1").split(".", 1)[0] if existing else "1"
+    for index, candidate in enumerate(unmatched, start=1):
+        existing.append(
+            {
+                "contract_version": "learn_stage2_numbered_item_v1",
+                "number": f"{region_no}.{len(existing) + 1}",
+                "item_id": f"unmatched_visual_control_{region_no}_{index}",
+                "label": f"visual control {index}",
+                "role": role,
+                "item_type": "visual_control",
+                "bbox": dict(candidate),
+                "click_point": {},
+                "children": [],
+                "review_only": True,
+                "stage": "stage2_region_numbering",
+                "source": "visual_small_control_unmatched_candidate",
+                "display_only": True,
+                "execute_binding_enabled": False,
+                "artifact_is_authorization": False,
+            }
+        )
+    return existing, len(unmatched)
 
 
 def _synthesize_direct_visual_controls(
@@ -10243,6 +13328,168 @@ def _normalize_direct_bar_items(
     }
 
 
+_CLASSIC_MENU_ACCELERATOR_RE = re.compile(r"\(\s*([A-Za-z])\s*\)?")
+
+
+def _classic_menu_segments(label: str) -> list[dict[str, Any]]:
+    normalized = unicodedata.normalize("NFKC", str(label or "")).strip()
+    matches = list(_CLASSIC_MENU_ACCELERATOR_RE.finditer(normalized))
+    if len(matches) < 3:
+        return []
+    segments: list[dict[str, Any]] = []
+    cursor = 0
+    for match in matches:
+        raw_label = normalized[cursor : match.start()].strip(" \t\r\n()（）,，;；|/")
+        if not raw_label or len(raw_label) > 24:
+            return []
+        accelerator = match.group(1).upper()
+        segments.append(
+            {
+                "label": f"{raw_label}({accelerator})",
+                "semantic_key": _classic_menu_semantic_key(raw_label),
+                "span_start": cursor,
+                "span_end": match.end(),
+            }
+        )
+        cursor = match.end()
+    if len({segment["semantic_key"] for segment in segments}) != len(segments):
+        return []
+    return segments
+
+
+def _classic_menu_semantic_key(label: str) -> str:
+    normalized = unicodedata.normalize("NFKC", str(label or "")).casefold()
+    normalized = _CLASSIC_MENU_ACCELERATOR_RE.sub("", normalized)
+    return "".join(character for character in normalized if character.isalnum())
+
+
+def _normalize_classic_menu_bar_items(
+    numbered_items: list[dict[str, Any]],
+    *,
+    region_bbox: dict[str, int],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    anchor_candidates: list[tuple[int, dict[str, Any], dict[str, int], list[dict[str, Any]]]] = []
+    for index, item in enumerate(numbered_items):
+        bbox = _bbox(item.get("bbox"))
+        if not bbox:
+            continue
+        segments = _classic_menu_segments(str(item.get("label") or ""))
+        if not segments:
+            continue
+        role = str(item.get("role") or "").casefold().replace(" ", "_")
+        if role not in {"menu_item", "text", "readable", "label"}:
+            continue
+        if bbox["w"] < max(72, bbox["h"] * 3) or bbox["h"] > max(40, int(region_bbox["h"] * 0.7)):
+            continue
+        anchor_candidates.append((index, item, bbox, segments))
+    if not anchor_candidates:
+        return [deepcopy(item) for item in numbered_items], {
+            "applied": False,
+            "reason": "classic_menu_ocr_line_missing",
+            "menu_item_count": 0,
+        }
+
+    anchor_index, anchor_item, anchor_bbox, segments = max(
+        anchor_candidates,
+        key=lambda entry: (len(entry[3]), entry[2]["w"]),
+    )
+    segment_keys = {str(segment["semantic_key"]) for segment in segments}
+    existing_by_key: dict[str, dict[str, Any]] = {}
+    for index, item in enumerate(numbered_items):
+        if index == anchor_index:
+            continue
+        key = _classic_menu_semantic_key(str(item.get("label") or ""))
+        if key in segment_keys and key not in existing_by_key:
+            existing_by_key[key] = item
+
+    normalized_label = unicodedata.normalize("NFKC", str(anchor_item.get("label") or ""))
+    label_length = max(1, len(normalized_label))
+    corrected_items: list[dict[str, Any]] = []
+    corrected_count = 0
+    for segment_index, segment in enumerate(segments, start=1):
+        key = str(segment["semantic_key"])
+        template = deepcopy(existing_by_key.get(key) or {})
+        estimated_x = anchor_bbox["x"] + int(round(anchor_bbox["w"] * int(segment["span_start"]) / label_length))
+        estimated_right = anchor_bbox["x"] + int(round(anchor_bbox["w"] * int(segment["span_end"]) / label_length))
+        estimated_bbox = {
+            "x": estimated_x,
+            "y": anchor_bbox["y"],
+            "w": max(24, estimated_right - estimated_x),
+            "h": anchor_bbox["h"],
+        }
+        existing_bbox = _bbox(template.get("bbox"))
+        target_bbox = _clip_bbox(region_bbox, estimated_bbox)
+        if existing_bbox != target_bbox:
+            corrected_count += 1
+        template.update(
+            {
+                "contract_version": "learn_stage2_numbered_item_v1",
+                "number": str(template.get("number") or f"1.{segment_index}"),
+                "item_id": str(template.get("item_id") or f"classic_menu_item_{segment_index}_{key}"),
+                "label": str(segment["label"]),
+                "role": "menu_item",
+                "item_type": "actionable",
+                "bbox": target_bbox,
+                "click_point": {},
+                "review_only": True,
+                "source": "classic_menu_ocr_anchor",
+                "bbox_policy": "classic_menu_item_anchored_inside_ocr_menu_line",
+                "display_only": True,
+                "execute_binding_enabled": False,
+                "artifact_is_authorization": False,
+            }
+        )
+        if existing_bbox and existing_bbox != target_bbox:
+            template["bbox_refinement"] = {
+                "source": "classic_menu_ocr_anchor",
+                "previous_bbox": existing_bbox,
+                "reason": "menu_item_bbox_must_remain_inside_ocr_menu_line",
+            }
+        corrected_items.append(template)
+
+    evidence_item = deepcopy(anchor_item)
+    evidence_item.update(
+        {
+            "role": "menu_bar_evidence",
+            "item_type": "readable",
+            "review_only": True,
+            "grounding_eligible": False,
+            "source": "classic_menu_ocr_anchor",
+            "bbox_policy": "combined_ocr_menu_line_is_evidence_not_click_target",
+            "display_only": True,
+            "execute_binding_enabled": False,
+            "artifact_is_authorization": False,
+        }
+    )
+    result: list[dict[str, Any]] = []
+    inserted = False
+    for index, item in enumerate(numbered_items):
+        key = _classic_menu_semantic_key(str(item.get("label") or ""))
+        if index == anchor_index:
+            result.append(evidence_item)
+            result.extend(corrected_items)
+            inserted = True
+            continue
+        if key in segment_keys:
+            continue
+        result.append(deepcopy(item))
+    if not inserted:
+        result.extend([evidence_item, *corrected_items])
+    result = _renumber_stage2_items(result, horizontal=True)
+    return result, {
+        "applied": True,
+        "reason": "classic_menu_items_split_and_anchored_to_ocr_line",
+        "anchor_item_id": str(anchor_item.get("item_id") or ""),
+        "anchor_bbox": anchor_bbox,
+        "menu_item_count": len(corrected_items),
+        "corrected_bbox_count": corrected_count,
+        "menu_labels": [item["label"] for item in corrected_items],
+        "display_only": True,
+        "execute_binding_enabled": False,
+        "artifact_is_authorization": False,
+    }
+
+
 def _normalize_topbar_direct_items(
     numbered_items: list[dict[str, Any]],
     *,
@@ -10274,6 +13521,9 @@ def _normalize_topbar_direct_items(
         for index, item in enumerate(ordered):
             bbox = _bbox(item.get("bbox"))
             if not bbox:
+                normalized.append(item)
+                continue
+            if not _direct_item_accepts_visual_hit_area_refinement(item):
                 normalized.append(item)
                 continue
             neighbor_gaps: list[float] = []
@@ -10521,9 +13771,8 @@ def _sidebar_hit_area_bbox(
         "w": target_width,
         "h": target_height,
     }
-    clipped = _clip_bbox(region_bbox, target)
-    expanded = clipped != row_bbox
-    return clipped, expanded
+    expanded = target != row_bbox
+    return target, expanded
 
 
 def _merged_sidebar_label(items: list[dict[str, Any]]) -> str:
@@ -10602,6 +13851,11 @@ def _sidebar_review_item_should_merge(item: dict[str, Any]) -> bool:
     item_id = str(item.get("item_id") or "")
     if item_id.startswith("merged_"):
         return False
+    if (
+        str(item.get("role") or "") == "sidebar_review_region"
+        and str(item.get("item_type") or "") == "actionable"
+    ):
+        return True
     value = " ".join(
         str(item.get(key) or "").casefold()
         for key in ("role", "item_type", "source")
@@ -10832,6 +14086,21 @@ def _iou(left: dict[str, int], right: dict[str, int]) -> float:
     intersection = max(0, x2 - x1) * max(0, y2 - y1)
     union = max(1, left["w"] * left["h"] + right["w"] * right["h"] - intersection)
     return intersection / union
+
+
+def _bundle_app_name(bundle: dict[str, Any]) -> str:
+    screen_reading = bundle.get("screen_reading") if isinstance(bundle.get("screen_reading"), dict) else {}
+    request = bundle.get("request") if isinstance(bundle.get("request"), dict) else {}
+    result = bundle.get("result") if isinstance(bundle.get("result"), dict) else {}
+    result_screen_reading = result.get("screen_reading") if isinstance(result.get("screen_reading"), dict) else {}
+    return str(
+        bundle.get("app_name")
+        or request.get("app_name")
+        or result.get("app_name")
+        or screen_reading.get("app_name")
+        or result_screen_reading.get("app_name")
+        or ""
+    ).strip()
 
 
 def _screen_size_from_bundle(bundle: dict[str, Any]) -> dict[str, int]:

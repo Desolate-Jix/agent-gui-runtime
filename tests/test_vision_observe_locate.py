@@ -2,12 +2,176 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PIL import Image, ImageDraw
+
 from app.api import vision as vision_api
 from app.api.models.request import OCRRegionRequest, ROIModel, VisionLocateTargetRequestModel, VisionObserveScreenRequestModel
 from app.api.models.request import VisionRecognitionPlanRequestModel
 from app.api.models.response import APIResponse, ErrorModel
 from app.vision.schemas import ImageSize, VisionAnalyzeResponse
 from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
+
+
+def test_vista_client_timeout_allows_for_image_encoding_and_response_flush() -> None:
+    assert vision_api._vista_client_timeout_seconds(12.0) == 42.0
+    assert vision_api._vista_client_timeout_seconds(30.0) == 90.0
+
+
+def test_learning_grounding_config_uses_requested_learn_only_profile(monkeypatch) -> None:
+    config = {
+        "vision": {
+            "local_grounding": {
+                "profile_id": "vista_4b_transformers",
+                "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                "model_name": "inclusionAI/VISTA-4B",
+            }
+        }
+    }
+    monkeypatch.setattr(
+        vision_api,
+        "load_model_profiles",
+        lambda: [
+            {
+                "profile_id": "learn_mode_uground_2b",
+                "mode_scope": "learn_only",
+                "provider_mode": "local_grounding",
+                "endpoint": "http://127.0.0.1:1245/v1/chat/completions",
+                "model_name": "osunlp/UGround-V1-2B",
+                "output_contract": "learn_grounding_result_v1",
+            }
+        ],
+    )
+    request = VisionLocateTargetRequestModel(
+        goal="learn all visible controls",
+        agent_mode="learn",
+        learn_depth="deep",
+        metadata={"learn_grounding_profile_id": "learn_mode_uground_2b"},
+    )
+
+    selected = vision_api._selected_learning_grounding_config(config, request)
+
+    assert selected["profile_id"] == "learn_mode_uground_2b"
+    assert selected["endpoint"] == "http://127.0.0.1:1245/v1/chat/completions"
+    assert selected["model_name"] == "osunlp/UGround-V1-2B"
+    options = vision_api._learn_vista_coordinate_validation_options(request, selected)
+    assert options["enabled"] is True
+
+
+def test_learning_grounding_config_does_not_override_execute_mode(monkeypatch) -> None:
+    config = {
+        "vision": {
+            "local_grounding": {
+                "profile_id": "vista_4b_transformers",
+                "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+            }
+        }
+    }
+    monkeypatch.setattr(
+        vision_api,
+        "load_model_profiles",
+        lambda: [
+            {
+                "profile_id": "learn_mode_uground_2b",
+                "mode_scope": "learn_only",
+                "provider_mode": "local_grounding",
+                "endpoint": "http://127.0.0.1:1245/v1/chat/completions",
+            }
+        ],
+    )
+    request = VisionLocateTargetRequestModel(
+        goal="locate button",
+        agent_mode="execute",
+        metadata={"learn_grounding_profile_id": "learn_mode_uground_2b"},
+    )
+
+    selected = vision_api._selected_learning_grounding_config(config, request)
+
+    assert selected["profile_id"] == "vista_4b_transformers"
+    assert selected["endpoint"] == "http://127.0.0.1:1244/v1/chat/completions"
+
+
+def test_learning_capture_readiness_rejects_splash_and_accepts_loaded_ui(tmp_path: Path) -> None:
+    splash_path = tmp_path / "splash.png"
+    splash = Image.new("RGB", (800, 600), (0, 120, 215))
+    ImageDraw.Draw(splash).rectangle((385, 285, 415, 315), fill=(220, 230, 235))
+    splash.save(splash_path)
+
+    loaded_path = tmp_path / "loaded.png"
+    loaded = Image.new("RGB", (800, 600), "white")
+    draw = ImageDraw.Draw(loaded)
+    draw.rectangle((0, 0, 800, 64), fill=(225, 230, 238))
+    for row in range(4):
+        for column in range(5):
+            x = 40 + column * 145
+            y = 95 + row * 115
+            draw.rectangle((x, y, x + 112, y + 82), fill=(40 + row * 35, 70 + column * 20, 120 + row * 20))
+    loaded.save(loaded_path)
+
+    assert vision_api._learning_capture_visual_readiness(splash_path)["ready"] is False
+    assert vision_api._learning_capture_visual_readiness(loaded_path)["ready"] is True
+
+
+def test_learning_capture_readiness_rejects_titled_splash_with_center_icon(tmp_path: Path) -> None:
+    splash_path = tmp_path / "titled_splash.png"
+    splash = Image.new("RGB", (900, 1000), (0, 120, 215))
+    draw = ImageDraw.Draw(splash)
+    draw.rectangle((0, 0, 900, 42), fill=(0, 120, 215))
+    draw.line((0, 42, 900, 42), fill=(205, 220, 230), width=1)
+    draw.rectangle((815, 12, 828, 25), outline=(235, 245, 250), width=1)
+    draw.line((852, 12, 865, 25), fill=(235, 245, 250), width=1)
+    draw.line((865, 12, 852, 25), fill=(235, 245, 250), width=1)
+    draw.rounded_rectangle((421, 470, 479, 530), radius=4, fill=(65, 90, 105))
+    draw.rectangle((429, 478, 471, 489), fill=(215, 230, 235))
+    for row in range(3):
+        for column in range(3):
+            x = 429 + column * 14
+            y = 494 + row * 11
+            draw.rectangle((x, y, x + 9, y + 7), fill=(190, 205, 215))
+    splash.save(splash_path)
+
+    readiness = vision_api._learning_capture_visual_readiness(splash_path)
+
+    assert readiness["ready"] is False
+    assert readiness["reason"] == "low_information_startup_surface"
+
+
+def test_learning_observe_capture_retries_until_window_is_visually_ready(monkeypatch, tmp_path: Path) -> None:
+    splash_path = tmp_path / "splash.png"
+    Image.new("RGB", (640, 480), (0, 120, 215)).save(splash_path)
+    loaded_path = tmp_path / "loaded.png"
+    loaded = Image.new("RGB", (640, 480), "white")
+    draw = ImageDraw.Draw(loaded)
+    for index in range(12):
+        x = 20 + (index % 4) * 150
+        y = 40 + (index // 4) * 130
+        draw.rectangle((x, y, x + 120, y + 90), fill=(30 + index * 8, 80, 150))
+    loaded.save(loaded_path)
+
+    monkeypatch.setattr(
+        vision_api,
+        "_image_path_for_live_or_saved",
+        lambda **_kwargs: (str(splash_path), {"image_path": str(splash_path)}),
+    )
+    monkeypatch.setattr(
+        vision_api.screenshot_service,
+        "capture_window",
+        lambda **_kwargs: {"image_path": str(loaded_path), "image_width": 640, "image_height": 480},
+    )
+    monkeypatch.setattr(vision_api.time, "sleep", lambda _seconds: None)
+
+    image_path, live_capture = vision_api._learning_observe_image_source(
+        VisionObserveScreenRequestModel(
+            app_name="calculator",
+            capture_live=True,
+            agent_mode="learn",
+            metadata={"learning_studio_draft_capture": True},
+        )
+    )
+
+    assert image_path == str(loaded_path)
+    assert live_capture["capture_readiness"]["ready"] is True
+    assert live_capture["capture_readiness"]["attempt_count"] == 2
+    assert len(live_capture["capture_readiness"]["attempts"]) == 2
 
 
 def test_observe_screen_wraps_live_capture_and_screen_reading(monkeypatch) -> None:
@@ -20,6 +184,7 @@ def test_observe_screen_wraps_live_capture_and_screen_reading(monkeypatch) -> No
 
     def fake_screen_reading(request):
         assert request.image_path == "screen.png"
+        assert request.provider_mode == "local_understanding"
         assert request.metadata["ocr_anchors"]["enabled"] is True
         return APIResponse(
             success=True,
@@ -91,7 +256,7 @@ def test_observe_screen_wraps_live_capture_and_screen_reading(monkeypatch) -> No
 
     monkeypatch.setattr(vision_api, "screen_reading", fake_screen_reading)
 
-    response = vision_api.observe_screen(VisionObserveScreenRequestModel(app_name="demo"))
+    response = vision_api.observe_screen(VisionObserveScreenRequestModel(app_name="demo", provider_mode="local"))
 
     assert response.success is True
     result = response.data["result"]
@@ -104,7 +269,11 @@ def test_observe_screen_wraps_live_capture_and_screen_reading(monkeypatch) -> No
     assert result["suggested_state_hint"] == "job results list"
     assert result["screen_map"]["contract_version"] == "screen_map_v1"
     assert result["screen_map"]["state_id"].startswith("state_")
-    assert result["screen_map"]["summary"]["section_count"] >= 3
+    assert result["screen_map"]["summary"]["section_count"] >= 2
+    assert not any(
+        section["section_id"] == "bottom_bar"
+        for section in result["screen_map"]["sections"]
+    )
     assert result["screen_map"]["summary"]["candidate_count"] >= 6
     assert result["screen_map"]["sections"][0]["contract_version"] == "screen_map_section_v1"
     assert result["screen_map"]["candidates"][0]["label"] == "Filter"
@@ -337,6 +506,62 @@ def test_screen_map_uses_application_sections_for_non_browser_layout() -> None:
     assert accel["section_id"] == "top_bar"
     assert start_game["section_id"] == "primary_area"
     assert join["section_id"] == "primary_area"
+
+
+def test_sparse_application_sections_follow_visible_menu_and_status_bar_evidence() -> None:
+    result = {
+        "app_name": "plain_text_editor",
+        "suggested_state_hint": "blank document",
+        "screen_summary": "Blank text editor with menu bar and status bar",
+        "image_size": {"width": 2576, "height": 1416},
+        "texts": [
+            {"id": "title", "text": "Untitled", "bbox": {"x": 10, "y": 10, "w": 111, "h": 23}},
+            {"id": "menu", "text": "File Edit Format View Help", "bbox": {"x": 12, "y": 33, "w": 263, "h": 22}},
+            {"id": "line", "text": "Ln 1, Col 1", "bbox": {"x": 2146, "y": 1389, "w": 99, "h": 22}},
+            {"id": "encoding", "text": "100% Windows (CRLF)", "bbox": {"x": 2279, "y": 1376, "w": 283, "h": 37}},
+        ],
+        "ui_elements": [
+            {
+                "id": "menu_file",
+                "type": "menu_item",
+                "role_guess": "menu_item",
+                "label": "File",
+                "bbox": {"x": 20, "y": 40, "w": 60, "h": 20},
+            },
+            {
+                "id": "menu_edit",
+                "type": "menu_item",
+                "role_guess": "menu_item",
+                "label": "Edit",
+                "bbox": {"x": 80, "y": 40, "w": 61, "h": 20},
+            },
+        ],
+        "model_io": {
+            "raw_response": {
+                "model_json": {
+                    "regions": [
+                        {
+                            "region_id": "status",
+                            "role": "status_bar",
+                            "diagonal": {"x1": 1711, "y1": 1368, "x2": 2576, "y2": 1416},
+                        }
+                    ]
+                }
+            }
+        },
+    }
+
+    sections = vision_api._screen_map_sections(result)
+    by_id = {section["section_id"]: section for section in sections}
+
+    assert by_id["top_bar"]["bbox"]["h"] <= 80
+    assert by_id["primary_area"]["bbox"]["y"] == by_id["top_bar"]["bbox"]["h"]
+    assert by_id["bottom_bar"]["bbox"]["y"] >= 1360
+    assert by_id["bottom_bar"]["role"] == "status"
+    assert (
+        by_id["primary_area"]["bbox"]["y"] + by_id["primary_area"]["bbox"]["h"]
+        == by_id["bottom_bar"]["bbox"]["y"]
+    )
 
 
 def test_more_text_is_button_before_card_grouping() -> None:
@@ -1248,11 +1473,919 @@ def test_learn_deep_locate_validates_each_target_with_vista_point(monkeypatch, t
     start = next(target for target in targets if target["candidate_id"] == "start_btn")
     help_target = next(target for target in targets if target["candidate_id"] == "help_btn")
     assert start["click_point"] == {"x": 72, "y": 59}
-    assert start["coordinate_source"] == "vista_point_v1"
+    assert start["coordinate_source"] == "precise_locator_v1"
+    assert start["vista_coordinate_validation"]["precise_locator_evidence"]["dry_run_gate"]["status"] == "locate_review_pass"
+    assert start["vista_coordinate_validation"]["precise_locator_evidence"]["click_performed"] is False
     assert start["vista_coordinate_validation"]["status"] == "valid"
     assert start["vista_coordinate_validation"]["model_io"]["raw_text"] == "[225, 328]"
     assert help_target["click_point"] == {"x": 200, "y": 58}
     assert help_target["vista_coordinate_validation"]["status"] == "needs_review"
+
+
+def test_learn_deep_locate_calibrates_stage2_numbered_review_items(monkeypatch, tmp_path) -> None:
+    image_path = tmp_path / "screen.png"
+    vision_api.Image.new("RGB", (320, 200), (255, 255, 255)).save(image_path)
+    observe_trace = tmp_path / "observe.json"
+    observe_trace.write_text(
+        __import__("json").dumps(
+            {
+                "success": True,
+                "result": {
+                    "image_path": str(image_path),
+                    "image_size": {"width": 320, "height": 200},
+                    "screen_map": {
+                        "contract_version": "screen_map_v1",
+                        "state_id": "state_demo",
+                        "candidates": [],
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    two_stage_report = tmp_path / "two_stage_report.json"
+    two_stage_report.write_text(
+        __import__("json").dumps(
+            {
+                "contract_version": "learn_two_stage_understanding_v1",
+                "source_image_path": str(image_path),
+                "stage2_numbering": {
+                    "regions": [
+                        {
+                            "region_id": "structure_region_main_content",
+                            "label": "Main content",
+                            "numbered_items": [
+                                {
+                                    "item_id": "generic_control",
+                                    "number": "1.0",
+                                    "label": "control 1",
+                                    "role": "control",
+                                    "bbox": {"x": 20, "y": 30, "w": 48, "h": 36},
+                                    "review_only": True,
+                                    "execute_binding_enabled": False,
+                                },
+                                {
+                                    "item_id": "search_button",
+                                    "number": "1.1",
+                                    "label": "Search",
+                                    "role": "button",
+                                    "bbox": {"x": 220, "y": 30, "w": 70, "h": 36},
+                                    "review_only": True,
+                                    "execute_binding_enabled": False,
+                                }
+                            ],
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls: list[dict] = []
+
+    def fake_vista(**kwargs):
+        calls.append(kwargs)
+        return {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": kwargs["provider_name"],
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(image_path),
+            "goal": kwargs["goal"],
+            "prompt": kwargs["prompt"],
+            "raw_text": "[797, 240]",
+            "raw_response": {"choices": [{"message": {"content": "[797, 240]"}}]},
+            "parsed": {"contract_version": "vista_point_v1", "point": {"x": 255.0, "y": 48.0, "coordinate_space": "pixel"}},
+            "point": {"x": 255, "y": 48},
+            "image_size": {"width": 320, "height": 200},
+        }
+
+    monkeypatch.setattr(vision_api, "_image_path_for_live_or_saved", lambda **_kwargs: (str(image_path), None))
+    monkeypatch.setattr(vision_api, "write_trace", lambda **_kwargs: "stage2-calibration-trace.json")
+    monkeypatch.setattr(
+        vision_api.VisionProviderFactory,
+        "load_config",
+        lambda: {
+            "vision": {
+                "timeout_seconds": 60,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr(vision_api, "_call_vista_point_prompt", fake_vista)
+
+    response = vision_api.locate_target(
+        VisionLocateTargetRequestModel(
+            goal="calibrate numbered regions",
+            app_name="demo",
+            agent_mode="learn",
+            learn_depth="deep",
+            provider_mode="local_grounding",
+            metadata={
+                "learn_all_targets": True,
+                "learn_locate_model_review": False,
+                "two_stage_report_path": str(two_stage_report),
+                "learn_vista_coordinate_validation": {"max_targets": 1, "stop_on_failure": False},
+            },
+            observe_trace_path=str(observe_trace),
+        )
+    )
+
+    assert response.success is True
+    learned = response.data["result"]["learn_all_targets"]
+    assert len(calls) == 1
+    assert learned["target_count"] == 0
+    assert learned["calibration_target_count"] == 2
+    assert learned["calibration_targets"][0]["candidate_id"].endswith("search_button")
+    assert learned["calibration_targets"][0]["calibration_only"] is True
+    assert learned["calibration_targets"][0]["execute_binding_enabled"] is False
+    assert learned["calibration_targets"][0]["vista_coordinate_validation"]["status"] == "valid"
+    assert learned["overlay"]["model_validated_calibration_count"] == 1
+    assert learned["overlay"]["pending_calibration_count"] == 1
+    assert response.data["result"]["execution_path"]["action_executed"] is False
+
+
+def test_learn_vista_validation_can_cover_every_calibration_target(monkeypatch, tmp_path) -> None:
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (320, 200), color="white").save(image_path)
+    targets = [
+        {
+            "candidate_id": f"candidate_{index}",
+            "label": f"Target {index}",
+            "role": "review_only",
+            "bbox": {"x": 20 + index * 60, "y": 40, "w": 40, "h": 40},
+            "click_point": {"x": 40 + index * 60, "y": 60},
+            "locator_prompt": f"Locate exact numbered target {index} inside the main region",
+        }
+        for index in range(3)
+    ]
+    long_prompt = "Locate exact numbered target 0 inside the main region. " + ("Keep all sibling context. " * 8)
+    targets[0]["locator_prompt"] = long_prompt
+    calls: list[str] = []
+
+    def fake_vista(**kwargs):
+        calls.append(kwargs["prompt"])
+        index = len(calls) - 1
+        point = {"x": 40 + index * 60, "y": 60}
+        return {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": kwargs["provider_name"],
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(image_path),
+            "goal": kwargs["goal"],
+            "prompt": kwargs["prompt"],
+                "raw_text": __import__("json").dumps([point["x"], point["y"]]),
+            "raw_response": {},
+            "parsed": {"contract_version": "vista_point_v1", "point": point},
+            "point": point,
+            "image_size": {"width": 320, "height": 200},
+        }
+
+    monkeypatch.setattr(vision_api, "_call_vista_point_prompt", fake_vista)
+
+    summary = vision_api._apply_vista_coordinate_validation_to_learn_targets(
+        targets,
+        image_path=str(image_path),
+        image_size={"width": 320, "height": 200},
+        local_config={"model_name": "inclusionAI/VISTA-4B", "output_contract": "vista_point_v1"},
+        options={
+            "enabled": True,
+            "max_targets": 1,
+            "validate_all_targets": True,
+            "stop_on_failure": False,
+        },
+        timeout_seconds=12,
+    )
+
+    assert len(calls) == 3
+    assert calls[0] == long_prompt.strip()
+    assert summary["validated_count"] == 3
+    assert summary["skipped_count"] == 0
+    assert summary["validation_scope"] == "all_targets"
+
+
+def test_learn_vista_validation_options_preserve_all_target_scope() -> None:
+    request = VisionLocateTargetRequestModel(
+        goal="calibrate every numbered region",
+        agent_mode="learn",
+        learn_depth="deep",
+        metadata={
+            "learn_vista_coordinate_validation": {
+                "enabled": True,
+                "max_targets": "all",
+                "stop_on_failure": False,
+            }
+        },
+    )
+
+    options = vision_api._learn_vista_coordinate_validation_options(
+        request,
+        {"runtime": "transformers", "output_contract": "vista_point_v1"},
+    )
+
+    assert options["validate_all_targets"] is True
+    assert options["stop_on_failure"] is False
+    assert options["use_numbered_overlay"] is False
+
+
+def test_learn_vista_validation_aborts_batch_on_model_busy_even_when_continue_requested(monkeypatch, tmp_path) -> None:
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (320, 200), color="white").save(image_path)
+    targets = [
+        {
+            "candidate_id": f"target-{index}",
+            "label": f"Target {index}",
+            "role": "button",
+            "bbox": {"x": 20 + index * 70, "y": 40, "w": 50, "h": 40},
+            "click_point": {"x": 45 + index * 70, "y": 60},
+        }
+        for index in range(3)
+    ]
+    calls = []
+
+    def busy_vista(**kwargs):
+        calls.append(kwargs)
+        raise RuntimeError(
+            'local vision endpoint returned HTTP 503: {"error":{"type":"model_busy"}}'
+        )
+
+    monkeypatch.setattr(vision_api, "_call_vista_point_prompt", busy_vista)
+
+    summary = vision_api._apply_vista_coordinate_validation_to_learn_targets(
+        targets,
+        image_path=str(image_path),
+        image_size={"width": 320, "height": 200},
+        local_config={"model_name": "inclusionAI/VISTA-4B", "output_contract": "vista_point_v1"},
+        options={"enabled": True, "validate_all_targets": True, "stop_on_failure": False},
+        timeout_seconds=12,
+    )
+
+    assert len(calls) == 1
+    assert summary["status"] == "blocked"
+    assert summary["batch_aborted"] is True
+    assert summary["abort_reason"] == "model_busy"
+    assert summary["failed_count"] == 1
+    assert summary["skipped_count"] == 2
+    assert targets[0]["vista_coordinate_validation"]["failure_category"] == "model_busy"
+
+
+def test_learn_all_targets_location_status_reports_blocked_vista_calibration() -> None:
+    result = {
+        "target_count": 0,
+        "invalid_count": 0,
+        "review_box_count": 0,
+        "calibration_target_count": 4,
+        "vista_coordinate_validation": {
+            "status": "blocked",
+            "batch_aborted": True,
+            "abort_reason": "request_timeout",
+        },
+    }
+
+    assert vision_api._learn_all_targets_location_status(result) == "learn_calibration_blocked"
+
+
+def test_two_stage_calibration_candidates_keep_region_and_child_locator_context(tmp_path) -> None:
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (320, 200), color="white").save(image_path)
+    numbered_overlay_path = tmp_path / ("long-numbered-overlay-directory-" * 6) / "numbered.png"
+    numbered_overlay_path.parent.mkdir(parents=True)
+    Image.new("RGB", (320, 200), color="gray").save(numbered_overlay_path)
+    assert len(str(numbered_overlay_path)) > 160
+    report_path = tmp_path / "two_stage.json"
+    report_path.write_text(
+        __import__("json").dumps(
+            {
+                "source_image_path": str(image_path),
+                "fusion": {"compiled_overlay_path": str(numbered_overlay_path)},
+                "stage2_numbering": {
+                    "regions": [
+                        {
+                            "region_id": "structure_region_main",
+                            "label": "Main content",
+                            "bbox": {"x": 10, "y": 20, "w": 300, "h": 170},
+                            "numbered_items": [
+                                {
+                                    "item_id": "card_1",
+                                    "number": "3.4",
+                                    "label": "Music",
+                                    "role": "media_card",
+                                    "bbox": {"x": 20, "y": 30, "w": 120, "h": 140},
+                                    "children": [
+                                        {"label": "专属心情好歌"},
+                                        {"label": "乐享悠闲"},
+                                    ],
+                                },
+                                {
+                                    "item_id": "card_2",
+                                    "number": "3.5",
+                                    "label": "Music",
+                                    "role": "media_card",
+                                    "bbox": {"x": 160, "y": 30, "w": 120, "h": 140},
+                                    "children": [{"label": "专属推荐"}],
+                                },
+                            ],
+                        }
+                    ]
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    attached = vision_api._attach_two_stage_calibration_candidates(
+        {"screen_map": {"candidates": []}},
+        report_path_value=str(report_path),
+        image_path=str(image_path),
+    )
+
+    candidates = attached["screen_map"]["calibration_candidates"]
+    first = next(item for item in candidates if item["candidate_id"].endswith("card_1"))
+    second = next(item for item in candidates if item["candidate_id"].endswith("card_2"))
+    assert first["locator_context"]["region_label"] == "Main content"
+    assert first["locator_context"]["region_bbox"] == {"x": 10, "y": 20, "w": 300, "h": 170}
+    assert first["numbered_overlay_path"] == str(numbered_overlay_path)
+    assert first["locator_context"]["child_labels"] == ["专属心情好歌", "乐享悠闲"]
+    assert "Main content" in first["locator_prompt"]
+    assert "3.4" in first["locator_prompt"]
+    assert "专属心情好歌" in first["locator_prompt"]
+    assert "乐享悠闲" in first["locator_prompt"]
+    assert first["locator_prompt"] != second["locator_prompt"]
+    converted = vision_api._screen_map_calibration_candidate_to_target(first, 0)
+    assert converted is not None
+    assert converted["locator_prompt"] == first["locator_prompt"]
+    assert converted["locator_context"] == first["locator_context"]
+    assert converted["numbered_overlay_path"] == str(numbered_overlay_path)
+
+
+def test_two_stage_calibration_candidates_exclude_child_evidence_items(tmp_path) -> None:
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (320, 200), color="white").save(image_path)
+    report_path = tmp_path / "two_stage.json"
+    report_path.write_text(
+        __import__("json").dumps(
+            {
+                "source_image_path": str(image_path),
+                "stage2_numbering": {
+                    "regions": [
+                        {
+                            "region_id": "structure_region_main",
+                            "label": "Main content",
+                            "bbox": {"x": 0, "y": 0, "w": 320, "h": 200},
+                            "subregion_groups": [
+                                {
+                                    "group_id": "tile_card_row_1",
+                                    "role": "tile_card_parent",
+                                    "bbox": {"x": 20, "y": 30, "w": 130, "h": 80},
+                                    "member_item_ids": ["card_1", "card_1_title"],
+                                },
+                                {
+                                    "group_id": "text_card_parent_1",
+                                    "role": "tile_card_parent",
+                                    "label": "Applications card",
+                                    "bbox": {"x": 170, "y": 30, "w": 130, "h": 80},
+                                    "member_item_ids": ["text_card_title", "text_card_subtitle"],
+                                },
+                            ],
+                            "numbered_items": [
+                                {
+                                    "item_id": "card_1",
+                                    "number": "2.1",
+                                    "label": "Settings card",
+                                    "role": "tile_card",
+                                    "bbox": {"x": 20, "y": 30, "w": 130, "h": 80},
+                                    "children": [{"label": "System"}, {"label": "Display and sound"}],
+                                },
+                                {
+                                    "item_id": "card_1_title",
+                                    "number": "2.2",
+                                    "label": "System",
+                                    "role": "text",
+                                    "bbox": {"x": 55, "y": 42, "w": 48, "h": 18},
+                                },
+                                {
+                                    "item_id": "text_card_title",
+                                    "number": "2.3",
+                                    "label": "Applications",
+                                    "role": "text",
+                                    "bbox": {"x": 185, "y": 42, "w": 80, "h": 18},
+                                },
+                                {
+                                    "item_id": "text_card_subtitle",
+                                    "number": "2.4",
+                                    "label": "Uninstall and defaults",
+                                    "role": "text",
+                                    "bbox": {"x": 185, "y": 66, "w": 100, "h": 18},
+                                },
+                            ],
+                        }
+                    ]
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    attached = vision_api._attach_two_stage_calibration_candidates(
+        {"screen_map": {"candidates": []}},
+        report_path_value=str(report_path),
+        image_path=str(image_path),
+    )
+
+    candidates = attached["screen_map"]["calibration_candidates"]
+    assert {item["candidate_id"] for item in candidates} == {
+        "stage2:structure_region_main:card_1",
+        "stage2:structure_region_main:text_card_parent_1",
+    }
+    visual_card = next(item for item in candidates if item["candidate_id"].endswith(":card_1"))
+    assert visual_card["locator_context"]["child_labels"] == ["System", "Display and sound"]
+    source = attached["two_stage_calibration_source"]
+    assert source["candidate_count"] == 2
+    assert source["suppressed_child_evidence_count"] == 3
+
+
+def test_two_stage_calibration_candidates_use_merged_parent_instead_of_card_fragments(tmp_path) -> None:
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (420, 260), color="white").save(image_path)
+    report_path = tmp_path / "two_stage.json"
+    report_path.write_text(
+        __import__("json").dumps(
+            {
+                "source_image_path": str(image_path),
+                "stage2_numbering": {
+                    "regions": [
+                        {
+                            "region_id": "structure_region_main",
+                            "label": "Main content",
+                            "bbox": {"x": 0, "y": 0, "w": 420, "h": 260},
+                            "subregion_groups": [
+                                {
+                                    "group_id": "merged_info_card",
+                                    "role": "tile_card_parent",
+                                    "label": "Get Started",
+                                    "bbox": {"x": 40, "y": 50, "w": 160, "h": 150},
+                                    "member_item_ids": ["card_top", "text_top", "card_bottom", "text_bottom"],
+                                    "adjacent_fragment_merged": True,
+                                    "merged_adjacent_fragment_group_ids": ["card_bottom_parent"],
+                                }
+                            ],
+                            "numbered_items": [
+                                {
+                                    "item_id": "card_top",
+                                    "number": "2.1",
+                                    "label": "Whether you are new",
+                                    "role": "tile_card",
+                                    "bbox": {"x": 40, "y": 50, "w": 150, "h": 80},
+                                },
+                                {
+                                    "item_id": "text_top",
+                                    "number": "2.2",
+                                    "label": "Get Started",
+                                    "role": "text",
+                                    "bbox": {"x": 52, "y": 62, "w": 100, "h": 20},
+                                },
+                                {
+                                    "item_id": "card_bottom",
+                                    "number": "2.3",
+                                    "label": "Beginner guide",
+                                    "role": "tile_card",
+                                    "bbox": {"x": 40, "y": 126, "w": 160, "h": 74},
+                                },
+                                {
+                                    "item_id": "text_bottom",
+                                    "number": "2.4",
+                                    "label": "Start with our guide",
+                                    "role": "text",
+                                    "bbox": {"x": 52, "y": 158, "w": 120, "h": 20},
+                                },
+                            ],
+                        }
+                    ]
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    attached = vision_api._attach_two_stage_calibration_candidates(
+        {"screen_map": {"candidates": []}},
+        report_path_value=str(report_path),
+        image_path=str(image_path),
+    )
+
+    candidates = attached["screen_map"]["calibration_candidates"]
+    assert [item["candidate_id"] for item in candidates] == [
+        "stage2:structure_region_main:merged_info_card"
+    ]
+    assert candidates[0]["bbox"] == {"x": 40, "y": 50, "w": 160, "h": 150}
+    assert attached["two_stage_calibration_source"]["suppressed_child_evidence_count"] == 4
+
+
+def test_learn_vista_validation_defaults_to_raw_parent_region_roi_and_restores_full_screen_point(monkeypatch, tmp_path) -> None:
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (400, 240), color="white").save(image_path)
+    numbered_overlay_path = tmp_path / "numbered.png"
+    Image.new("RGB", (400, 240), color="gray").save(numbered_overlay_path)
+    target = {
+        "candidate_id": "top_control_2",
+        "label": "Play",
+        "role": "control",
+        "bbox": {"x": 140, "y": 30, "w": 40, "h": 30},
+        "click_point": {"x": 160, "y": 45},
+        "locator_prompt": "Locate the exact Play control in the top bar.",
+        "numbered_overlay_path": str(numbered_overlay_path),
+        "locator_context": {
+            "region_label": "Top bar",
+            "region_bbox": {"x": 80, "y": 10, "w": 260, "h": 70},
+        },
+    }
+    calls: list[dict] = []
+
+    def fake_vista(**kwargs):
+        calls.append(kwargs)
+        transform = kwargs["coordinate_transform"]
+        assert kwargs["image_size"].to_dict() == {"width": 280, "height": 90}
+        assert kwargs["original_image_size"].to_dict() == {"width": 400, "height": 240}
+        assert transform["origin_original"] == {"x": 70, "y": 0}
+        assert kwargs["image_preprocess"]["numbered_overlay_source_path"] == ""
+        assert kwargs["image_preprocess"]["original_image_path"] == str(image_path)
+        return {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": kwargs["provider_name"],
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(kwargs["image_path"]),
+            "goal": kwargs["goal"],
+            "prompt": kwargs["prompt"],
+            "raw_text": "[321, 500]",
+            "raw_response": {},
+            "parsed": {"contract_version": "vista_point_v1"},
+            "processed_point": {"x": 90, "y": 45},
+            "point": {"x": 160, "y": 45},
+            "image_size": {"width": 400, "height": 240},
+            "inference_image_size": {"width": 280, "height": 90},
+            "coordinate_transform": transform,
+            "image_preprocess": kwargs["image_preprocess"],
+        }
+
+    monkeypatch.setattr(vision_api, "_call_vista_point_prompt", fake_vista)
+
+    summary = vision_api._apply_vista_coordinate_validation_to_learn_targets(
+        [target],
+        image_path=str(image_path),
+        image_size={"width": 400, "height": 240},
+        local_config={"model_name": "inclusionAI/VISTA-4B", "output_contract": "vista_point_v1"},
+        options={"enabled": True, "max_targets": 1, "stop_on_failure": False, "region_roi_padding": 10},
+        timeout_seconds=12,
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["image_path"] != image_path
+    assert summary["inside_count"] == 1
+    assert target["click_point"] == {"x": 160, "y": 45}
+    validation = target["vista_coordinate_validation"]
+    assert validation["inference_scope"] == "parent_region_roi"
+    assert validation["inference_visual_source"] == "source_screenshot"
+    assert validation["coordinate_transform"]["origin_original"] == {"x": 70, "y": 0}
+    assert validation["precise_locator_evidence"]["contract_version"] == "precise_locator_evidence_v1"
+    assert validation["precise_locator_evidence"]["click_performed"] is False
+
+
+def test_learn_vista_validation_uses_numbered_overlay_only_when_debug_option_is_explicit(monkeypatch, tmp_path) -> None:
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (300, 180), color="white").save(image_path)
+    numbered_overlay_path = tmp_path / "numbered.png"
+    Image.new("RGB", (300, 180), color="gray").save(numbered_overlay_path)
+    target = {
+        "candidate_id": "search",
+        "label": "Search",
+        "role": "button",
+        "bbox": {"x": 20, "y": 20, "w": 80, "h": 40},
+        "click_point": {"x": 60, "y": 40},
+        "numbered_overlay_path": str(numbered_overlay_path),
+        "locator_context": {
+            "region_label": "Header",
+            "region_bbox": {"x": 0, "y": 0, "w": 300, "h": 90},
+        },
+    }
+
+    def fake_vista(**kwargs):
+        assert kwargs["image_preprocess"]["numbered_overlay_source_path"] == str(numbered_overlay_path)
+        crop = kwargs["image_preprocess"]["crop_bounds_original"]
+        assert crop["w"] < 300
+        assert crop["x"] <= target["bbox"]["x"]
+        assert crop["x"] + crop["w"] >= target["bbox"]["x"] + target["bbox"]["w"]
+        return {
+            "point": {"x": 60, "y": 40},
+            "coordinate_transform": kwargs["coordinate_transform"],
+            "image_preprocess": kwargs["image_preprocess"],
+        }
+
+    monkeypatch.setattr(vision_api, "_call_vista_point_prompt", fake_vista)
+
+    vision_api._apply_vista_coordinate_validation_to_learn_targets(
+        [target],
+        image_path=str(image_path),
+        image_size={"width": 300, "height": 180},
+        local_config={"model_name": "inclusionAI/VISTA-4B", "output_contract": "vista_point_v1"},
+        options={
+            "enabled": True,
+            "max_targets": 1,
+            "stop_on_failure": False,
+            "use_numbered_overlay": True,
+        },
+        timeout_seconds=12,
+    )
+
+    validation = target["vista_coordinate_validation"]
+    assert validation["inference_visual_source"] == "numbered_overlay"
+    assert validation["precise_locator_evidence"]["numbered_overlay_used"] is True
+
+
+def test_learn_vista_dense_list_row_validation_uses_compact_column_roi(monkeypatch, tmp_path) -> None:
+    image_path = tmp_path / "documentation_portal.png"
+    Image.new("RGB", (2521, 1300), color="white").save(image_path)
+    numbered_overlay_path = tmp_path / "documentation_portal_numbered.png"
+    Image.new("RGB", (2521, 1300), color="white").save(numbered_overlay_path)
+    target = {
+        "candidate_id": "list_row_1",
+        "label": "2026-06-29 Python Packaging Council Inaugural Election Dates",
+        "role": "list_row",
+        "bbox": {"x": 698, "y": 962, "w": 428, "h": 22},
+        "click_point": {"x": 912, "y": 973},
+        "locator_prompt": "Locate the exact list row in the left column.",
+        "numbered_overlay_path": str(numbered_overlay_path),
+        "locator_context": {
+            "region_label": "Primary Area",
+            "region_bbox": {"x": 0, "y": 210, "w": 2521, "h": 1090},
+        },
+    }
+
+    def fake_vista(**kwargs):
+        crop = kwargs["image_preprocess"]["crop_bounds_original"]
+        assert crop == {"x": 645, "y": 952, "w": 534, "h": 42}
+        assert crop["x"] + crop["w"] < 1319
+        assert kwargs["coordinate_transform"]["origin_original"] == {"x": 645, "y": 952}
+        return {
+            "point": {"x": 912, "y": 973},
+            "coordinate_transform": kwargs["coordinate_transform"],
+            "image_preprocess": kwargs["image_preprocess"],
+        }
+
+    monkeypatch.setattr(vision_api, "_call_vista_point_prompt", fake_vista)
+
+    summary = vision_api._apply_vista_coordinate_validation_to_learn_targets(
+        [target],
+        image_path=str(image_path),
+        image_size={"width": 2521, "height": 1300},
+        local_config={"model_name": "inclusionAI/VISTA-4B", "output_contract": "vista_point_v1"},
+        options={
+            "enabled": True,
+            "max_targets": 1,
+            "stop_on_failure": False,
+            "use_numbered_overlay": True,
+            "region_roi_padding": 10,
+        },
+        timeout_seconds=12,
+    )
+
+    validation = target["vista_coordinate_validation"]
+    assert summary["inside_count"] == 1
+    assert validation["inference_scope"] == "target_context_roi"
+    assert validation["image_preprocess"]["crop_bounds_original"] == {
+        "x": 645,
+        "y": 952,
+        "w": 534,
+        "h": 42,
+    }
+
+
+def test_learn_vista_menu_item_uses_raw_screenshot_when_number_overlay_would_cover_small_text(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (300, 180), color="white").save(image_path)
+    numbered_overlay_path = tmp_path / "numbered.png"
+    Image.new("RGB", (300, 180), color="gray").save(numbered_overlay_path)
+    target = {
+        "candidate_id": "file_menu",
+        "label": "File(F)",
+        "role": "menu_item",
+        "bbox": {"x": 20, "y": 30, "w": 60, "h": 38},
+        "click_point": {"x": 50, "y": 49},
+        "numbered_overlay_path": str(numbered_overlay_path),
+        "locator_context": {
+            "region_label": "Header",
+            "region_bbox": {"x": 0, "y": 0, "w": 300, "h": 68},
+        },
+    }
+
+    def fake_vista(**kwargs):
+        assert kwargs["image_preprocess"]["numbered_overlay_source_path"] == ""
+        assert kwargs["image_preprocess"]["original_image_path"] == str(image_path)
+        return {
+            "point": {"x": 50, "y": 49},
+            "coordinate_transform": kwargs["coordinate_transform"],
+            "image_preprocess": kwargs["image_preprocess"],
+        }
+
+    monkeypatch.setattr(vision_api, "_call_vista_point_prompt", fake_vista)
+
+    vision_api._apply_vista_coordinate_validation_to_learn_targets(
+        [target],
+        image_path=str(image_path),
+        image_size={"width": 300, "height": 180},
+        local_config={"model_name": "inclusionAI/VISTA-4B", "output_contract": "vista_point_v1"},
+        options={
+            "enabled": True,
+            "max_targets": 1,
+            "stop_on_failure": False,
+            "use_numbered_overlay": True,
+        },
+        timeout_seconds=12,
+    )
+
+    validation = target["vista_coordinate_validation"]
+    assert validation["inference_visual_source"] == "source_screenshot"
+    assert validation["inference_scope"] == "target_context_roi"
+    assert validation["precise_locator_evidence"]["numbered_overlay_used"] is False
+
+
+def test_learn_vista_compact_direct_bar_control_uses_raw_candidate_centered_roi(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (400, 180), color="white").save(image_path)
+    numbered_overlay_path = tmp_path / "numbered.png"
+    Image.new("RGB", (400, 180), color="gray").save(numbered_overlay_path)
+    target = {
+        "candidate_id": "top_control_11",
+        "label": "control 11",
+        "role": "control",
+        "bbox": {"x": 180, "y": 12, "w": 48, "h": 52},
+        "click_point": {"x": 204, "y": 38},
+        "locator_prompt": (
+            "Locate the exact control numbered 1.11 in Top/header area. "
+            "Return one point inside this exact item, not a nearby sibling."
+        ),
+        "numbered_overlay_path": str(numbered_overlay_path),
+        "locator_context": {
+            "region_label": "Top/header area",
+            "region_bbox": {"x": 0, "y": 0, "w": 400, "h": 90},
+        },
+    }
+
+    def fake_vista(**kwargs):
+        assert kwargs["image_preprocess"]["numbered_overlay_source_path"] == ""
+        assert kwargs["image_preprocess"]["original_image_path"] == str(image_path)
+        crop = kwargs["image_preprocess"]["crop_bounds_original"]
+        assert crop["w"] < 120
+        assert crop["x"] <= target["bbox"]["x"]
+        assert crop["x"] + crop["w"] >= target["bbox"]["x"] + target["bbox"]["w"]
+        assert "closest to the center of this crop" in kwargs["prompt"]
+        assert "numbered 1.11" not in kwargs["prompt"]
+        return {
+            "point": {"x": 204, "y": 38},
+            "coordinate_transform": kwargs["coordinate_transform"],
+            "image_preprocess": kwargs["image_preprocess"],
+        }
+
+    monkeypatch.setattr(vision_api, "_call_vista_point_prompt", fake_vista)
+
+    vision_api._apply_vista_coordinate_validation_to_learn_targets(
+        [target],
+        image_path=str(image_path),
+        image_size={"width": 400, "height": 180},
+        local_config={"model_name": "inclusionAI/VISTA-4B", "output_contract": "vista_point_v1"},
+        options={
+            "enabled": True,
+            "max_targets": 1,
+            "stop_on_failure": False,
+            "use_numbered_overlay": True,
+        },
+        timeout_seconds=12,
+    )
+
+    validation = target["vista_coordinate_validation"]
+    assert validation["inference_visual_source"] == "source_screenshot"
+    assert validation["inference_scope"] == "target_context_roi"
+    assert validation["precise_locator_evidence"]["numbered_overlay_used"] is False
+
+
+def test_learn_vista_validation_reranks_current_ocr_candidate_instead_of_treating_source_bbox_as_answer(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (360, 220), color="white").save(image_path)
+    target = {
+        "candidate_id": "search",
+        "label": "Search",
+        "role": "nav_item",
+        "bbox": {"x": 10, "y": 20, "w": 72, "h": 36},
+        "click_point": {"x": 46, "y": 38},
+        "confidence": 0.6,
+        "source": "stage2_visual",
+        "locator_context": {
+            "region_label": "Left navigation",
+            "region_bbox": {"x": 0, "y": 0, "w": 190, "h": 220},
+        },
+    }
+
+    def fake_vista(**kwargs):
+        return {
+            "point": {"x": 130, "y": 126},
+            "coordinate_transform": kwargs["coordinate_transform"],
+            "image_preprocess": kwargs["image_preprocess"],
+        }
+
+    monkeypatch.setattr(vision_api, "_call_vista_point_prompt", fake_vista)
+
+    summary = vision_api._apply_vista_coordinate_validation_to_learn_targets(
+        [target],
+        image_path=str(image_path),
+        image_size={"width": 360, "height": 220},
+        local_config={"model_name": "inclusionAI/VISTA-4B", "output_contract": "vista_point_v1"},
+        options={"enabled": True, "max_targets": 1, "stop_on_failure": False},
+        timeout_seconds=12,
+        evidence_context={
+            "screen_map": {"candidates": []},
+            "observe_result": {
+                "texts": [
+                    {
+                        "id": "ocr-search",
+                        "text": "Search",
+                        "bbox": {"x": 104, "y": 112, "w": 52, "h": 28},
+                        "confidence": 0.98,
+                    }
+                ]
+            },
+        },
+    )
+
+    validation = target["vista_coordinate_validation"]
+    assert summary["precise_review_pass_count"] == 1
+    assert validation["vista_point_inside_bbox"] is False
+    assert validation["precise_locator_evidence"]["selected_candidate"]["candidate_id"] == "ocr-search"
+    assert validation["precise_locator_evidence"]["source_bbox_quality"]["classification"] == "candidate_bbox_misaligned"
+    assert target["bbox"] == {"x": 96, "y": 104, "w": 68, "h": 44}
+    assert target["click_point"] == {"x": 130, "y": 126}
+    assert target["coordinate_source"] == "precise_locator_v1"
+
+
+def test_learn_vista_validation_separates_geometry_outside_from_gate_review(monkeypatch, tmp_path) -> None:
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (360, 220), color="white").save(image_path)
+    target = {
+        "candidate_id": "control-3",
+        "label": "control 3",
+        "role": "control",
+        "bbox": {"x": 120, "y": 40, "w": 48, "h": 52},
+        "click_point": {"x": 144, "y": 66},
+        "confidence": 0.9,
+        "source": "stage2_visual",
+        "locator_context": {
+            "region_label": "Top bar",
+            "region_bbox": {"x": 0, "y": 0, "w": 360, "h": 100},
+        },
+    }
+
+    monkeypatch.setattr(
+        vision_api,
+        "_call_vista_point_prompt",
+        lambda **_kwargs: {
+            "point": {"x": 144, "y": 66},
+            "coordinate_transform": None,
+            "image_preprocess": None,
+        },
+    )
+
+    summary = vision_api._apply_vista_coordinate_validation_to_learn_targets(
+        [target],
+        image_path=str(image_path),
+        image_size={"width": 360, "height": 220},
+        local_config={"model_name": "inclusionAI/VISTA-4B", "output_contract": "vista_point_v1"},
+        options={"enabled": True, "max_targets": 1, "stop_on_failure": False},
+        timeout_seconds=12,
+    )
+
+    assert target["vista_coordinate_validation"]["status"] == "needs_review"
+    assert summary["inside_count"] == 1
+    assert summary["outside_count"] == 0
+    assert summary["needs_review_count"] == 1
 
 
 def test_learn_path_overlap_rule_removes_non_containment_overlap_but_keeps_children() -> None:
@@ -1383,6 +2516,105 @@ def test_learn_all_targets_visual_preview_removes_contained_parent_card(tmp_path
     assert result["visual_overlap_removals"][0]["reason"] == "contained_visual_parent_removed"
 
 
+def test_learn_target_overlay_uses_matching_two_stage_numbered_overlay_as_fusion_base(tmp_path, monkeypatch) -> None:
+    from app.api import vision as vision_api
+
+    source_path = tmp_path / "source.png"
+    numbered_path = tmp_path / "numbered.png"
+    Image.new("RGB", (160, 100), color="white").save(source_path)
+    Image.new("RGB", (160, 100), color=(41, 52, 63)).save(numbered_path)
+    monkeypatch.setattr(
+        vision_api,
+        "build_review_overlay_path",
+        lambda **_: tmp_path / "fused.png",
+    )
+
+    overlay = vision_api._render_learn_all_targets_overlay(
+        image_path=str(source_path),
+        targets=[
+            {
+                "candidate_id": "stage2:header:search",
+                "role": "button",
+                "bbox": {"x": 20, "y": 20, "w": 40, "h": 24},
+                "click_point": {"x": 40, "y": 32},
+                "calibration_only": True,
+                "numbered_overlay_path": str(numbered_path),
+                "coordinate_validation": {"status": "valid"},
+                "vista_coordinate_validation": {"status": "valid"},
+            }
+        ],
+        name_hint="fusion",
+    )
+
+    assert overlay["status"] == "ready"
+    assert overlay["base_visual_source"] == "two_stage_numbered_overlay"
+    assert overlay["base_overlay_path"] == str(numbered_path.resolve())
+    assert overlay["final_fusion_overlay"] is True
+    with Image.open(overlay["output_path"]) as rendered:
+        assert rendered.getpixel((120, 80)) == (41, 52, 63)
+
+
+def test_learn_target_overlay_avoids_duplicate_success_labels_on_numbered_fusion_base(tmp_path, monkeypatch) -> None:
+    from app.api import vision as vision_api
+
+    source_path = tmp_path / "source.png"
+    numbered_path = tmp_path / "numbered.png"
+    Image.new("RGB", (160, 100), color="white").save(source_path)
+    Image.new("RGB", (160, 100), color=(41, 52, 63)).save(numbered_path)
+    monkeypatch.setattr(
+        vision_api,
+        "build_review_overlay_path",
+        lambda **_: tmp_path / "fused.png",
+    )
+    labels: list[str] = []
+    monkeypatch.setattr(
+        vision_api,
+        "_draw_learn_target_overlay_label",
+        lambda _draw, _x, _y, label, **_kwargs: labels.append(label),
+    )
+
+    overlay = vision_api._render_learn_all_targets_overlay(
+        image_path=str(source_path),
+        targets=[
+            {
+                "candidate_id": "stage2:header:search",
+                "role": "button",
+                "bbox": {"x": 20, "y": 20, "w": 40, "h": 24},
+                "click_point": {"x": 40, "y": 32},
+                "calibration_only": True,
+                "numbered_overlay_path": str(numbered_path),
+                "coordinate_validation": {"status": "valid"},
+                "vista_coordinate_validation": {"status": "valid"},
+            },
+            {
+                "candidate_id": "stage2:header:review",
+                "role": "button",
+                "bbox": {"x": 80, "y": 20, "w": 40, "h": 24},
+                "click_point": {"x": 100, "y": 32},
+                "calibration_only": True,
+                "numbered_overlay_path": str(numbered_path),
+                "coordinate_validation": {"status": "valid"},
+                "vista_coordinate_validation": {"status": "needs_review"},
+            },
+            {
+                "candidate_id": "stage2:header:failed",
+                "role": "button",
+                "bbox": {"x": 125, "y": 20, "w": 30, "h": 24},
+                "click_point": {"x": 140, "y": 32},
+                "calibration_only": True,
+                "numbered_overlay_path": str(numbered_path),
+                "coordinate_validation": {"status": "valid"},
+                "vista_coordinate_validation": {"status": "failed"},
+            },
+        ],
+        name_hint="fusion",
+    )
+
+    assert overlay["status"] == "ready"
+    assert overlay["calibration_label_mode"] == "failed_status_badges_only"
+    assert labels == ["F"]
+
+
 def test_learn_all_targets_filters_browser_chrome_and_tiny_noise(tmp_path) -> None:
     image_path = tmp_path / "browser.png"
     vision_api.Image.new("RGB", (640, 360), (255, 255, 255)).save(image_path)
@@ -1461,6 +2693,68 @@ def test_learn_all_targets_filters_browser_chrome_and_tiny_noise(tmp_path) -> No
     assert result["target_count"] == 2
     assert result["filtered_browser_chrome_count"] == 3
     assert result["filtered_noise_count"] == 1
+
+
+def test_learn_all_targets_filters_browser_chrome_from_authoritative_calibration_candidates(tmp_path) -> None:
+    image_path = tmp_path / "authoritative_browser.png"
+    vision_api.Image.new("RGB", (1280, 720), (255, 255, 255)).save(image_path)
+    observe_reuse = {
+        "status": "ready",
+        "screen_map": {
+            "contract_version": "screen_map_v1",
+            "state_id": "python_homepage",
+            "app_name": "Welcome to Python.org",
+            "two_stage_calibration_authoritative": True,
+            "candidates": [
+                {
+                    "candidate_id": "stale_observe_candidate",
+                    "label": "Stale candidate",
+                    "role": "button",
+                    "bbox": {"x": 500, "y": 300, "w": 100, "h": 40},
+                    "click_point": {"x": 550, "y": 320},
+                    "section_id": "primary_area",
+                }
+            ],
+            "calibration_candidates": [
+                {
+                    "candidate_id": "stage2_browser_tab",
+                    "label": "Welcome to Python.org",
+                    "role": "button",
+                    "bbox": {"x": 70, "y": 8, "w": 180, "h": 28},
+                    "click_point": {"x": 160, "y": 22},
+                    "parent_region_id": "structure_region_browser_chrome",
+                },
+                {
+                    "candidate_id": "stage2_automation_banner",
+                    "label": "ChatGPT 已开始调试此浏览器",
+                    "role": "text",
+                    "bbox": {"x": 24, "y": 58, "w": 240, "h": 28},
+                    "click_point": {"x": 144, "y": 72},
+                    "parent_region_id": "structure_region_page_header",
+                },
+                {
+                    "candidate_id": "stage2_page_search",
+                    "label": "Search documentation",
+                    "role": "text_input",
+                    "bbox": {"x": 700, "y": 160, "w": 260, "h": 36},
+                    "click_point": {"x": 830, "y": 178},
+                    "parent_region_id": "structure_region_main_content",
+                },
+            ],
+        },
+    }
+
+    result = vision_api._build_learn_all_targets_from_screen_map(
+        observe_reuse,
+        image_path=str(image_path),
+        vista_validation={"options": {"enabled": False}},
+    )
+
+    assert {item["candidate_id"] for item in result["calibration_targets"]} == {"stage2_page_search"}
+    assert result["raw_calibration_candidate_count"] == 3
+    assert result["filtered_calibration_browser_chrome_count"] == 2
+    assert result["filtered_browser_chrome_count"] == 2
+    assert result["calibration_target_count"] == 1
 
 
 def test_learn_all_targets_excludes_dry_run_only_content_cards(tmp_path) -> None:
@@ -1791,6 +3085,14 @@ def test_learn_review_boxes_include_left_nav_rail_icons_without_ocr(tmp_path) ->
             "state_id": "desktop_app_home",
             "app_name": "desktop_app",
             "candidates": [],
+            "two_stage_structure_regions": [
+                {
+                    "region_id": "structure_region_left_navigation",
+                    "label": "Left navigation",
+                    "role": "left_navigation",
+                    "bbox": {"x": 0, "y": 0, "w": 56, "h": 480},
+                }
+            ],
         },
     }
 
@@ -1804,6 +3106,294 @@ def test_learn_review_boxes_include_left_nav_rail_icons_without_ocr(tmp_path) ->
     assert len(nav_boxes) >= 3
     assert all(item["execute_binding_enabled"] is False for item in nav_boxes)
     assert all(item["artifact_is_authorization"] is False for item in nav_boxes)
+
+
+def test_learn_review_boxes_do_not_invent_left_nav_without_structure_region(tmp_path) -> None:
+    image_path = tmp_path / "no_left_nav_region.png"
+    image = vision_api.Image.new("RGB", (640, 480), (255, 255, 255))
+    draw = vision_api.ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 56, 479), fill=(245, 245, 245))
+    draw.rectangle((22, 96, 36, 110), fill=(30, 30, 30))
+    draw.rectangle((22, 146, 36, 160), fill=(30, 30, 30))
+    draw.rectangle((22, 196, 36, 210), fill=(30, 30, 30))
+    image.save(image_path)
+    observe_reuse = {
+        "status": "ready",
+        "observe_result": {"image_size": {"width": 640, "height": 480}, "texts": []},
+        "screen_map": {
+            "contract_version": "screen_map_v1",
+            "state_id": "settings_home",
+            "app_name": "settings",
+            "candidates": [],
+            "two_stage_structure_regions": [
+                {
+                    "region_id": "structure_region_top_bar",
+                    "label": "Top/header area",
+                    "role": "top_bar",
+                    "bbox": {"x": 0, "y": 0, "w": 640, "h": 80},
+                },
+                {
+                    "region_id": "structure_region_primary_area",
+                    "label": "Primary Area",
+                    "role": "primary_area",
+                    "bbox": {"x": 0, "y": 80, "w": 640, "h": 400},
+                },
+            ],
+        },
+    }
+
+    result = vision_api._build_learn_all_targets_from_screen_map(
+        observe_reuse,
+        image_path=str(image_path),
+        vista_validation={"options": {"enabled": False}},
+    )
+
+    assert not any(item["role"] == "nav_rail_icon_review_only" for item in result["review_boxes"])
+
+
+def test_learn_final_overlay_uses_authoritative_two_stage_candidates_without_raw_review_mix(tmp_path) -> None:
+    image_path = tmp_path / "authoritative_two_stage.png"
+    Image.new("RGB", (320, 200), color="white").save(image_path)
+    observe_reuse = {
+        "status": "ready",
+        "observe_result": {
+            "image_size": {"width": 320, "height": 200},
+            "texts": [
+                {"id": "raw_title", "text": "Applications", "bbox": {"x": 50, "y": 60, "w": 80, "h": 18}},
+            ],
+        },
+        "screen_map": {
+            "contract_version": "screen_map_v1",
+            "state_id": "settings_home",
+            "candidates": [
+                {
+                    "candidate_id": "raw_text_candidate",
+                    "label": "Applications",
+                    "role": "text",
+                    "bbox": {"x": 50, "y": 60, "w": 80, "h": 18},
+                    "click_point": {"x": 90, "y": 69},
+                    "source": "ocr_text",
+                }
+            ],
+            "calibration_candidates": [
+                {
+                    "candidate_id": "stage2:main:applications_parent",
+                    "label": "Applications card",
+                    "role": "tile_card_parent",
+                    "bbox": {"x": 30, "y": 40, "w": 150, "h": 90},
+                    "click_point": {"x": 105, "y": 85},
+                    "source": "two_stage_parent_group",
+                    "calibration_only": True,
+                    "review_only": True,
+                }
+            ],
+            "two_stage_calibration_authoritative": True,
+        },
+    }
+
+    result = vision_api._build_learn_all_targets_from_screen_map(
+        observe_reuse,
+        image_path=str(image_path),
+        vista_validation={"options": {"enabled": False}},
+    )
+
+    assert result["calibration_target_count"] == 1
+    assert result["target_count"] == 0
+    assert result["review_boxes"] == []
+    assert result["raw_candidates_suppressed_by_authoritative_two_stage_count"] == 1
+
+
+def test_learn_vista_dense_row_context_excludes_adjacent_rows() -> None:
+    context = vision_api._learn_vista_target_context_bbox(
+        {"x": 12, "y": 326, "w": 368, "h": 33},
+        parent_bbox={"x": 0, "y": 120, "w": 800, "h": 740},
+        target_role="conversation_row",
+    )
+
+    assert context == {"x": 0, "y": 326, "w": 736, "h": 33}
+
+
+def test_learn_vista_dense_list_row_context_excludes_parallel_column() -> None:
+    context = vision_api._learn_vista_target_context_bbox(
+        {"x": 698, "y": 962, "w": 428, "h": 22},
+        parent_bbox={"x": 0, "y": 210, "w": 2521, "h": 1090},
+        target_role="list_row",
+    )
+
+    assert context == {"x": 655, "y": 962, "w": 514, "h": 22}
+    assert context["x"] <= 698
+    assert context["x"] + context["w"] >= 1126
+    assert context["x"] + context["w"] < 1319
+
+
+def test_learn_vista_menu_item_context_is_local_to_adjacent_menu_strip() -> None:
+    context = vision_api._learn_vista_target_context_bbox(
+        {"x": 20, "y": 30, "w": 60, "h": 38},
+        parent_bbox={"x": 0, "y": 0, "w": 2576, "h": 68},
+        target_role="menu_item",
+    )
+
+    assert context == {"x": 2, "y": 16, "w": 96, "h": 52}
+
+
+def test_learn_vista_compact_direct_bar_control_context_excludes_adjacent_controls() -> None:
+    context = vision_api._learn_vista_target_context_bbox(
+        {"x": 877, "y": 9, "w": 48, "h": 52},
+        parent_bbox={"x": 0, "y": 0, "w": 1154, "h": 90},
+        target_role="control",
+    )
+
+    assert context == {"x": 865, "y": 2, "w": 72, "h": 65}
+
+
+def test_learn_vista_does_not_ground_status_bar_evidence() -> None:
+    assert vision_api._learn_vista_target_ineligibility_reason(
+        {
+            "candidate_id": "stage2:main:status_bar",
+            "label": "第 1 行，第 1 列 100% Windows (CRLF)",
+            "role": "status_bar_evidence",
+            "bbox": {"x": 1200, "y": 742, "w": 400, "h": 58},
+        },
+        image_size={"width": 1600, "height": 800},
+    ) == "structural_status_bar_review_only"
+
+
+def test_learn_vista_does_not_ground_combined_menu_bar_evidence() -> None:
+    assert vision_api._learn_vista_target_ineligibility_reason(
+        {
+            "candidate_id": "stage2:topbar:combined_menu",
+            "label": "文件(F) 编辑(E) 格式(O) 查看(V) 帮助(H)",
+            "role": "menu_bar_evidence",
+            "bbox": {"x": 12, "y": 33, "w": 263, "h": 22},
+        },
+        image_size={"width": 2576, "height": 1416},
+    ) == "structural_menu_bar_review_only"
+
+
+def test_learn_vista_only_receives_locatable_targets_while_review_evidence_stays_visible(monkeypatch, tmp_path) -> None:
+    image_path = tmp_path / "locatable_targets.png"
+    Image.new("RGB", (320, 200), color="white").save(image_path)
+    calibration_candidates = [
+        {
+            "candidate_id": "button_target",
+            "label": "Open chat",
+            "role": "button",
+            "bbox": {"x": 20, "y": 20, "w": 80, "h": 36},
+            "click_point": {"x": 60, "y": 38},
+            "source": "two_stage_stage2_numbering",
+        },
+        {
+            "candidate_id": "conversation_row_target",
+            "label": "Project group",
+            "role": "conversation_row",
+            "bbox": {"x": 20, "y": 70, "w": 180, "h": 58},
+            "click_point": {"x": 110, "y": 99},
+            "source": "two_stage_parent_group",
+        },
+        {
+            "candidate_id": "plain_text_evidence",
+            "label": "Latest message",
+            "role": "text",
+            "bbox": {"x": 50, "y": 90, "w": 90, "h": 18},
+            "click_point": {"x": 95, "y": 99},
+            "source": "two_stage_stage2_numbering",
+        },
+        {
+            "candidate_id": "layout_separator",
+            "label": "separator",
+            "role": "separator",
+            "bbox": {"x": 10, "y": 140, "w": 200, "h": 2},
+            "click_point": {"x": 110, "y": 141},
+            "source": "two_stage_stage2_numbering",
+        },
+        {
+            "candidate_id": "window_shell",
+            "label": "title bar",
+            "role": "pane",
+            "bbox": {"x": 220, "y": 0, "w": 90, "h": 42},
+            "click_point": {"x": 265, "y": 21},
+            "source": "two_stage_stage2_numbering",
+        },
+        {
+            "candidate_id": "partial_visible_card_1",
+            "label": "partially visible conversation",
+            "role": "message_card",
+            "bbox": {"x": 20, "y": 178, "w": 180, "h": 22},
+            "click_point": {"x": 110, "y": 189},
+            "source": "bottom_edge_partial_card_reconciliation",
+        },
+        {
+            "candidate_id": "chat_list_filters_container",
+            "label": "chat-list-filters",
+            "role": "message_bubble",
+            "bbox": {"x": 10, "y": 145, "w": 200, "h": 32},
+            "click_point": {"x": 110, "y": 161},
+            "source": "two_stage_stage2_numbering",
+        },
+    ]
+    observe_reuse = {
+        "status": "ready",
+        "observe_result": {"image_size": {"width": 320, "height": 200}},
+        "screen_map": {
+            "contract_version": "screen_map_v1",
+            "state_id": "conversation_workspace",
+            "candidates": [],
+            "calibration_candidates": calibration_candidates,
+            "two_stage_calibration_authoritative": True,
+        },
+    }
+    calls: list[str] = []
+
+    def fake_vista(**kwargs):
+        calls.append(kwargs["prompt"])
+        point = {"x": 60, "y": 38} if len(calls) == 1 else {"x": 110, "y": 99}
+        return {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": kwargs["provider_name"],
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(image_path),
+            "goal": kwargs["goal"],
+            "prompt": kwargs["prompt"],
+            "raw_text": f"[{point['x']}, {point['y']}]",
+            "raw_response": {"choices": [{"message": {"content": f"[{point['x']}, {point['y']}]"}}]},
+            "parsed": {
+                "contract_version": "vista_point_v1",
+                "point": {"x": float(point["x"]), "y": float(point["y"]), "coordinate_space": "pixel"},
+            },
+            "point": point,
+            "image_size": {"width": 320, "height": 200},
+        }
+
+    monkeypatch.setattr(vision_api, "_call_vista_point_prompt", fake_vista)
+
+    result = vision_api._build_learn_all_targets_from_screen_map(
+        observe_reuse,
+        image_path=str(image_path),
+        vista_validation={
+            "local_config": {"profile_id": "vista-test", "model_name": "inclusionAI/VISTA-4B"},
+            "options": {"enabled": True, "validate_all_targets": True, "stop_on_failure": False},
+            "timeout_seconds": 30,
+        },
+    )
+
+    summary = result["vista_coordinate_validation"]
+    assert result["calibration_target_count"] == 7
+    assert len(calls) == 2
+    assert summary["eligible_target_count"] == 2
+    assert summary["review_only_not_sent_to_vista_count"] == 5
+    assert {item["candidate_id"] for item in summary["review_only_not_sent_to_vista"]} == {
+        "plain_text_evidence",
+        "layout_separator",
+        "window_shell",
+        "partial_visible_card_1",
+        "chat_list_filters_container",
+    }
+    by_id = {item["candidate_id"]: item for item in result["calibration_targets"]}
+    assert by_id["plain_text_evidence"]["vista_coordinate_validation"]["status"] == "skipped"
+    assert by_id["partial_visible_card_1"]["vista_coordinate_validation"]["reason"] == "partial_visible_review_only"
+    assert result["overlay_path"]
 
 
 def test_learn_all_targets_excludes_blocked_visual_icons_but_keeps_cards_as_review_boxes(tmp_path) -> None:
@@ -1825,6 +3415,14 @@ def test_learn_all_targets_excludes_blocked_visual_icons_but_keeps_cards_as_revi
             "contract_version": "screen_map_v1",
             "state_id": "apple_music_home",
             "app_name": "apple_music",
+            "two_stage_structure_regions": [
+                {
+                    "region_id": "structure_region_left_navigation",
+                    "label": "Left navigation",
+                    "role": "left_navigation",
+                    "bbox": {"x": 0, "y": 0, "w": 58, "h": 650},
+                }
+            ],
             "candidates": [
                 {
                     "candidate_id": "visual_left_icon_home",

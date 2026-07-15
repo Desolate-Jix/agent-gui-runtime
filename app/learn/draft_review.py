@@ -303,12 +303,27 @@ def _draft_from_page_detail_candidate(
             state_by_id[source_section_id]["action_template_refs"].append(action_template_id)
     summary = page_detail.get("summary") if isinstance(page_detail.get("summary"), dict) else {}
     scaffold_summary = scaffold.get("summary") if isinstance(scaffold, dict) and isinstance(scaffold.get("summary"), dict) else {}
+    page_detail_review_only_regions = [
+        {
+            **deepcopy(region),
+            "region_id": str(region.get("region_id") or region.get("source_item_id") or f"region_{index + 1}"),
+            "review_only": True,
+            "grounding_eligible": False,
+            "grounding_block_reason": "page_detail_candidate_requires_human_review",
+            "display_only": True,
+            "execute_binding_enabled": False,
+            "artifact_is_authorization": False,
+        }
+        for index, region in enumerate(regions)
+    ]
     compiled_overlay_path = str(page_detail.get("compiled_overlay_path") or "").strip()
     full_overlay_path = str(page_detail.get("full_screen_understanding_overlay_path") or compiled_overlay_path).strip()
+    calibration_overlay_path = str(page_detail.get("calibration_overlay_path") or "").strip()
     fusion_status = {
         "contract_version": "learning_draft_page_detail_fusion_status_v1",
         "compiled_overlay_path": compiled_overlay_path,
         "full_screen_understanding_overlay_path": full_overlay_path,
+        "calibration_overlay_path": calibration_overlay_path,
         "summary": {
             "source": "learn_page_detail_candidate",
             "region_count": summary.get("region_count"),
@@ -340,6 +355,9 @@ def _draft_from_page_detail_candidate(
         "operation_skills": ["review_page_detail"],
         "gate_contracts": ["no_execute_binding", "final_submit_forbidden"],
         "learning_source": "learn_page_detail_candidate",
+        "ui_hierarchy": deepcopy(page_detail.get("ui_hierarchy"))
+        if isinstance(page_detail.get("ui_hierarchy"), dict)
+        else {},
         "page_details": {
             "contract_version": "learning_draft_page_details_v1",
             "screen": {
@@ -347,12 +365,23 @@ def _draft_from_page_detail_candidate(
                 "image_path": page_detail.get("screenshot_path"),
                 "compiled_overlay_path": compiled_overlay_path,
                 "full_screen_understanding_overlay_path": full_overlay_path,
+                "calibration_overlay_path": calibration_overlay_path,
             },
             "compiled_overlay_path": compiled_overlay_path,
             "full_screen_understanding_overlay_path": full_overlay_path,
+            "calibration_overlay_path": calibration_overlay_path,
             "precise_understanding_fusion_status": fusion_status,
             "layout": deepcopy(layout),
             "summary": deepcopy(summary),
+            "inventory_summary": {
+                "screen_inventory_count": len(page_detail_review_only_regions),
+                "accepted_for_grounding_count": 0,
+                "rejected_non_actionable_count": len(page_detail_review_only_regions),
+                "grounding_validation_count": 0,
+            },
+            "review_only_regions": page_detail_review_only_regions,
+            "grounding_candidates": [],
+            "danger_zones": [],
             "source_contract_version": page_detail.get("contract_version"),
             "display_only": True,
             "execute_binding_enabled": False,
@@ -1182,6 +1211,7 @@ def _normalized_draft(draft: dict[str, Any]) -> dict[str, Any]:
         "operation_skills": _list_of_dicts_or_strings(draft.get("operation_skills")),
         "gate_contracts": _list_of_dicts_or_strings(draft.get("gate_contracts")),
         "learning_source": draft.get("learning_source") or "observe_model",
+        "ui_hierarchy": deepcopy(draft.get("ui_hierarchy")) if isinstance(draft.get("ui_hierarchy"), dict) else {},
         "page_details": deepcopy(draft.get("page_details")) if isinstance(draft.get("page_details"), dict) else {},
         "notes": _list_of_dicts_or_strings(draft.get("notes")),
         "safety": safety,
@@ -1192,6 +1222,7 @@ def _screen_understanding_preview(payload: dict[str, Any], *, root: Path) -> dic
     classification = payload.get("classification") if isinstance(payload.get("classification"), dict) else {}
     inventory = payload.get("screen_inventory") if isinstance(payload.get("screen_inventory"), list) else []
     draft, _ = _select_draft(payload)
+    page_details = draft.get("page_details") if isinstance(draft.get("page_details"), dict) else {}
     fusion_status = _preview_fusion_status(draft, root=root)
     preview = {
         "contract_version": "screen_understanding_preview_v1",
@@ -1214,7 +1245,36 @@ def _screen_understanding_preview(payload: dict[str, Any], *, root: Path) -> dic
     if fusion_status:
         preview.update(fusion_status)
     if not classification:
-        if fusion_status:
+        preview["review_only_regions"] = _preview_items(
+            page_details.get("review_only_regions"),
+            default_policy="review_only",
+        )
+        preview["grounding_candidates"] = _preview_items(
+            page_details.get("grounding_candidates"),
+            default_policy="grounding_candidate",
+        )
+        preview["danger_zones"] = _preview_items(
+            page_details.get("danger_zones"),
+            default_policy="danger_zone",
+        )
+        inventory_summary = (
+            page_details.get("inventory_summary")
+            if isinstance(page_details.get("inventory_summary"), dict)
+            else {}
+        )
+        inventory_count = _int_or_none(inventory_summary.get("screen_inventory_count"))
+        if inventory_count is None:
+            inventory_count = len(inventory) or sum(
+                len(preview[key])
+                for key in ("review_only_regions", "grounding_candidates", "danger_zones")
+            )
+        preview["counts"] = {
+            "inventory_items": inventory_count,
+            "review_only_regions": len(preview["review_only_regions"]),
+            "grounding_candidates": len(preview["grounding_candidates"]),
+            "danger_zones": len(preview["danger_zones"]),
+        }
+        if fusion_status or any(preview[key] for key in ("review_only_regions", "grounding_candidates", "danger_zones")):
             preview["source_status"] = "available"
         return preview
     preview["source_status"] = "available"
@@ -1279,6 +1339,10 @@ def _preview_fusion_status(draft: dict[str, Any], *, root: Path) -> dict[str, An
         return {
             "full_screen_understanding_overlay_path": _preview_artifact_path(full_overlay, root=root),
             "compiled_overlay_path": _preview_artifact_path(compiled_overlay, root=root),
+            "calibration_overlay_path": _preview_artifact_path(
+                str(status.get("calibration_overlay_path") or "").strip(),
+                root=root,
+            ),
             "fusion_summary": deepcopy(status.get("summary")) if isinstance(status.get("summary"), dict) else {},
             "calibration_backlog_summary": deepcopy(backlog.get("summary")) if isinstance(backlog.get("summary"), dict) else {},
             "calibration_backlog_items": _list_of_dicts(backlog.get("items")),
@@ -1310,6 +1374,23 @@ def _preview_fusion_status(draft: dict[str, Any], *, root: Path) -> dict[str, An
             if isinstance(status.get("display_readiness"), dict)
             else {},
             "fusion_not_accuracy": status.get("not_accuracy") is not False,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    screen = page_details.get("screen") if isinstance(page_details.get("screen"), dict) else {}
+    source_image = str(
+        screen.get("source_image_path")
+        or screen.get("image_path")
+        or screen.get("screenshot_path")
+        or ""
+    ).strip()
+    compiled_overlay = str(screen.get("compiled_overlay_path") or screen.get("overlay_path") or "").strip()
+    if source_image or compiled_overlay:
+        return {
+            "source_image_path": _preview_artifact_path(source_image, root=root),
+            "compiled_overlay_path": _preview_artifact_path(compiled_overlay, root=root),
+            "fusion_summary": {},
+            "fusion_not_accuracy": True,
             "artifact_is_authorization": False,
             "execute_binding_enabled": False,
         }
@@ -1590,7 +1671,7 @@ def _preview_item(item: dict[str, Any], *, default_policy: str) -> dict[str, Any
     metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
     cross_evidence = metadata.get("cross_evidence") if isinstance(metadata.get("cross_evidence"), dict) else {}
     return {
-        "item_id": str(item.get("item_id") or ""),
+        "item_id": str(item.get("item_id") or item.get("region_id") or item.get("source_item_id") or item.get("id") or ""),
         "label": str(item.get("label") or item.get("text") or ""),
         "item_type": str(item.get("item_type") or ""),
         "role": str(item.get("role") or ""),
@@ -1945,6 +2026,14 @@ def _draft_source_image_sha256(draft: dict[str, Any]) -> str:
 
 def _fusion_source_statuses(page_details: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     statuses: list[tuple[str, dict[str, Any]]] = []
+    two_stage = (
+        page_details.get("two_stage_understanding")
+        if isinstance(page_details.get("two_stage_understanding"), dict)
+        else {}
+    )
+    current_fusion = two_stage.get("fusion") if isinstance(two_stage.get("fusion"), dict) else {}
+    if current_fusion:
+        statuses.append(("page_details.two_stage_understanding.fusion", current_fusion))
     direct = page_details.get("precise_understanding_fusion_status")
     if isinstance(direct, dict):
         statuses.append(("page_details.precise_understanding_fusion_status", direct))
@@ -1952,7 +2041,13 @@ def _fusion_source_statuses(page_details: dict[str, Any]) -> list[tuple[str, dic
     nested = audit.get("precise_understanding_fusion_status") if isinstance(audit.get("precise_understanding_fusion_status"), dict) else {}
     if nested:
         statuses.append(("page_details.pipeline_audit.precise_understanding_fusion_status", nested))
-    return statuses
+    return sorted(
+        statuses,
+        key=lambda entry: 0
+        if entry[1].get("final_fusion_overlay") is True
+        and entry[1].get("display_overlay_source") == "two_stage_plus_precise_calibration"
+        else 1,
+    )
 
 
 def _resolve_optional_under_root(path_value: str, root: Path) -> Path:

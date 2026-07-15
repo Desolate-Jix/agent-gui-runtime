@@ -6,7 +6,9 @@ param(
     [int]$Port = 1244,
     [string]$Device = "auto",
     [string]$DType = "bfloat16",
-    [int]$MaxNewTokens = 32
+    [int]$MaxNewTokens = 32,
+    [int]$GpuMemoryGiB = 0,
+    [int]$CpuMemoryGiB = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,6 +28,8 @@ $python = if (Test-Path $venvPython) { $venvPython } else { "python" }
     --port $Port `
     --device $Device `
     --dtype $DType `
-    --max-new-tokens $MaxNewTokens
+    --max-new-tokens $MaxNewTokens `
+    --gpu-memory-gib $GpuMemoryGiB `
+    --cpu-memory-gib $CpuMemoryGiB
 
 exit $LASTEXITCODE

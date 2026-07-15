@@ -67,6 +67,7 @@ def refine_vision_regions_with_ocr(
         image_size=vision.image_size,
         screen_summary=vision.screen_summary,
         state_guess=vision.state_guess,
+        interface_classification=dict(vision.interface_classification),
         regions=refined_regions,
         targets=list(vision.targets),
         observers=list(vision.observers),

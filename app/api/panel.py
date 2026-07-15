@@ -520,6 +520,7 @@ def run_learning_recognition_trial_endpoint(request: PanelRunLearningRecognition
             observe_bundle,
             request.two_stage_report_path,
         )
+        authoritative_two_stage_report = _load_two_stage_report_for_learning_draft(request.two_stage_report_path)
         summary = request.summary or _panel_learning_recognition_summary(request.observation_evidence)
         result = build_learning_recognition_trial(
             observe_bundle=observe_bundle,
@@ -527,9 +528,14 @@ def run_learning_recognition_trial_endpoint(request: PanelRunLearningRecognition
             summary=summary,
             grounding_adapter=_panel_calibrated_target_grounding_adapter,
             crop_size=request.crop_size if request.crop_size else None,
+            two_stage_understanding_override=authoritative_two_stage_report,
         )
         two_stage_fusion_status = _load_two_stage_fusion_status_for_learning_draft(request.two_stage_report_path)
         if two_stage_fusion_status:
+            two_stage_fusion_status = _attach_current_calibrated_fusion_overlay(
+                two_stage_fusion_status,
+                request.observation_evidence,
+            )
             _attach_two_stage_fusion_status_to_learning_result(result, two_stage_fusion_status)
         precise_understanding_status = _precise_understanding_status_from_fusion_status(two_stage_fusion_status)
         learn_all_targets = _learning_recognition_review_box_status(
@@ -546,6 +552,8 @@ def run_learning_recognition_trial_endpoint(request: PanelRunLearningRecognition
             "final_submit_forbidden": True,
             "real_action_requires_gate": True,
         }
+        model_provenance = _panel_model_provenance_from_observe_bundle(observe_bundle)
+        actual_model_call = model_provenance["actual_model_call_evidence_count"] > 0
         saved_payload = {
             **result,
             "app_name": request.app_name,
@@ -567,11 +575,18 @@ def run_learning_recognition_trial_endpoint(request: PanelRunLearningRecognition
             "best_attempt_index": 0,
             "best_learning_draft": result.get("learning_draft"),
             "source_type": "panel_observe_coordinate_evidence",
+            "actual_model_call_in_this_run": actual_model_call,
+            "model_generated": actual_model_call,
+            "source_after_review": "mixed" if actual_model_call else "fixture_only",
+            "counts_as_pure_model_generated": False,
+            "model_provenance": model_provenance,
             "panel_learning_studio": {
                 "contract_version": "panel_learning_recognition_trial_v1",
                 "draft_graph_preview": True,
                 "display_only": True,
                 "source": "panel_run_learning_recognition_trial",
+                "two_stage_report_path": _str(request.two_stage_report_path),
+                "two_stage_report_authoritative": bool(authoritative_two_stage_report),
                 "uses_execute_mode": False,
                 "live_clicks": 0,
                 "live_safe_fill": 0,
@@ -660,6 +675,8 @@ def run_learning_two_stage_understanding_endpoint(
     try:
         observe_result, source_trace_path = _panel_two_stage_observe_result(request)
         bundle = _observe_bundle_from_trace_result(observe_result, trace_path=source_trace_path)
+        bundle["app_name"] = request.app_name
+        bundle["state_hint"] = request.state_hint
         source_image_override = _panel_apply_source_image_override(bundle, request.source_image_path)
         screen_inventory = _stage1_inventory_from_trace_result(observe_result)
         layout_graph = build_inventory_layout_graph(screen_inventory, screen_size=bundle.get("screen_size"))
@@ -778,6 +795,7 @@ def run_learning_two_stage_understanding_endpoint(
                     "app_name": request.app_name,
                     "state_hint": request.state_hint,
                     "screen_inventory_count": len(screen_inventory),
+                    "stage2_numbered_item_count": int(stage2.get("numbered_item_count") or 0),
                     "review_box_count": len(review_boxes),
                     "stage1_gate_status": stage1_gate.get("status"),
                     "stage1_failure_categories": stage1_gate.get("failure_categories") if isinstance(stage1_gate.get("failure_categories"), list) else [],
@@ -2008,6 +2026,16 @@ def _learning_draft_source_entry(path: Path, *, pinned: bool) -> dict[str, Any]:
             if isinstance(fresh_model_replacement_plan.get("sources_to_replace"), list)
             else []
         )
+        presentation_acceptance = (
+            candidate_demo_goal_readiness.get("presentation_acceptance")
+            if isinstance(candidate_demo_goal_readiness.get("presentation_acceptance"), dict)
+            else {}
+        )
+        presentation_blockers = (
+            presentation_acceptance.get("blocking_reasons")
+            if isinstance(presentation_acceptance.get("blocking_reasons"), list)
+            else []
+        )
         goal_chain = (
             candidate_demo_goal_readiness.get("demo_chain_manifest")
             if isinstance(candidate_demo_goal_readiness.get("demo_chain_manifest"), dict)
@@ -2086,6 +2114,26 @@ def _learning_draft_source_entry(path: Path, *, pinned: bool) -> dict[str, Any]:
                     "fresh_model_source_breakdown_recorded_model_output": fresh_model_source_breakdown.get(
                         "recorded_model_output"
                     ),
+                }
+            )
+        if presentation_acceptance:
+            entry.update(
+                {
+                    "presentation_acceptance_status": presentation_acceptance.get("acceptance_status"),
+                    "presentation_accepted": presentation_acceptance.get("accepted") is True,
+                    "presentation_same_source_three_image_evidence": (
+                        presentation_acceptance.get("same_source_three_image_evidence") is True
+                    ),
+                    "presentation_frontend_revision_matches": (
+                        presentation_acceptance.get("frontend_revision_matches") is True
+                    ),
+                    "presentation_desktop_viewport_covered": (
+                        presentation_acceptance.get("desktop_viewport_covered") is True
+                    ),
+                    "presentation_narrow_viewport_covered": (
+                        presentation_acceptance.get("narrow_viewport_covered") is True
+                    ),
+                    "presentation_blocker_count": len(presentation_blockers),
                 }
             )
             if fresh_model_replacement_plan:
@@ -2179,6 +2227,73 @@ def _load_two_stage_fusion_status_for_learning_draft(path: str | None) -> dict[s
     fusion_status["review_box_count"] = len(review_boxes) or _int_or_zero(fusion_summary.get("fused_review_box_count"))
     fusion_status["stage2_numbered_region_count"] = len(stage2.get("regions") if isinstance(stage2.get("regions"), list) else [])
     return fusion_status
+
+
+def _attach_current_calibrated_fusion_overlay(
+    fusion_status: dict[str, Any],
+    observation_evidence: dict[str, Any],
+) -> dict[str, Any]:
+    """仅把真实完成的 Stage2 + VISTA 融合图登记为最终展示图。"""
+
+    result = dict(fusion_status)
+    overlay_evidence = (
+        observation_evidence.get("coordinate_overlay")
+        if isinstance(observation_evidence.get("coordinate_overlay"), dict)
+        else {}
+    )
+    target_summary = (
+        observation_evidence.get("learn_all_targets_summary")
+        if isinstance(observation_evidence.get("learn_all_targets_summary"), dict)
+        else {}
+    )
+    qualifies = (
+        _str(result.get("stage1_gate_status")) == "passed"
+        and overlay_evidence.get("status") == "ready"
+        and overlay_evidence.get("base_visual_source") == "two_stage_numbered_overlay"
+        and overlay_evidence.get("final_fusion_overlay") is True
+        and target_summary.get("coordinate_calibration_status") == "model_validation_completed"
+        and _int_or_zero(target_summary.get("calibration_target_count")) > 0
+        and _int_or_zero(target_summary.get("vista_validated_count")) > 0
+    )
+    overlay_value = _str(observation_evidence.get("coordinate_overlay_path"))
+    if not qualifies or not overlay_value:
+        return result
+
+    overlay_path = _resolve_panel_learning_image_path(overlay_value)
+    relative_overlay = _relative_panel_path(overlay_path)
+    previous_compiled = _str(result.get("compiled_overlay_path"))
+    previous_full = _str(result.get("full_screen_understanding_overlay_path"))
+    result.update(
+        {
+            "stage2_compiled_overlay_path": previous_compiled or previous_full,
+            "stage2_full_screen_understanding_overlay_path": previous_full or previous_compiled,
+            "calibration_overlay_path": relative_overlay,
+            "precise_calibration_overlay_path": relative_overlay,
+            "compiled_overlay_path": relative_overlay,
+            "full_screen_understanding_overlay_path": relative_overlay,
+            "display_overlay_source": "two_stage_plus_precise_calibration",
+            "final_fusion_overlay": True,
+            "calibration_evidence_status": "model_validation_completed",
+        }
+    )
+    return result
+
+
+def _load_two_stage_report_for_learning_draft(path: str | None) -> dict[str, Any] | None:
+    path_text = str(path or "").strip()
+    if not path_text:
+        return None
+    resolved = _resolve_panel_artifact_file(path_text)
+    report = json.loads(resolved.read_text(encoding="utf-8-sig"))
+    if not isinstance(report, dict):
+        raise ValueError("two-stage report must be a JSON object")
+    report = dict(report)
+    report["source_two_stage_report_path"] = _relative_panel_path(resolved)
+    report["attachment_source"] = "panel_run_learning_recognition_trial.two_stage_report_path"
+    report["display_only"] = True
+    report["artifact_is_authorization"] = False
+    report["execute_binding_enabled"] = False
+    return report
 
 
 def _attach_two_stage_numbered_review_regions_to_observe_bundle(
@@ -2363,12 +2478,44 @@ def _attach_two_stage_fusion_status_to_learning_result(
         if isinstance(page_details.get("pipeline_audit"), dict)
         else {}
     )
-    pipeline_audit["precise_understanding_fusion_status"] = fusion_status
+    current_status = (
+        pipeline_audit.get("precise_understanding_fusion_status")
+        if isinstance(pipeline_audit.get("precise_understanding_fusion_status"), dict)
+        else {}
+    )
+    attached_status = dict(fusion_status)
+    current_values = {
+        key: value
+        for key, value in current_status.items()
+        if value not in (None, "", [], {})
+    }
+    if attached_status.get("final_fusion_overlay") is True:
+        final_overlay_keys = {
+            "compiled_overlay_path",
+            "full_screen_understanding_overlay_path",
+            "calibration_overlay_path",
+            "precise_calibration_overlay_path",
+            "stage2_compiled_overlay_path",
+            "stage2_full_screen_understanding_overlay_path",
+            "display_overlay_source",
+            "final_fusion_overlay",
+            "calibration_evidence_status",
+        }
+        attached_status.update(
+            {
+                key: value
+                for key, value in current_values.items()
+                if key not in final_overlay_keys or key not in attached_status
+            }
+        )
+    else:
+        attached_status.update(current_values)
+    pipeline_audit["precise_understanding_fusion_status"] = attached_status
     page_details["pipeline_audit"] = pipeline_audit
-    if fusion_status.get("compiled_overlay_path"):
-        page_details["compiled_overlay_path"] = fusion_status.get("compiled_overlay_path")
-    if fusion_status.get("full_screen_understanding_overlay_path"):
-        page_details["full_screen_understanding_overlay_path"] = fusion_status.get(
+    if attached_status.get("compiled_overlay_path"):
+        page_details["compiled_overlay_path"] = attached_status.get("compiled_overlay_path")
+    if attached_status.get("full_screen_understanding_overlay_path"):
+        page_details["full_screen_understanding_overlay_path"] = attached_status.get(
             "full_screen_understanding_overlay_path"
         )
     draft["page_details"] = page_details
@@ -2526,11 +2673,118 @@ def _panel_learning_recognition_summary(evidence: dict[str, Any]) -> str:
     )
 
 
+def _panel_model_provenance_from_observe_bundle(observe_bundle: dict[str, Any]) -> dict[str, Any]:
+    observation = (
+        observe_bundle.get("panel_observation_evidence")
+        if isinstance(observe_bundle.get("panel_observation_evidence"), dict)
+        else {}
+    )
+    model_roles = observation.get("model_roles") if isinstance(observation.get("model_roles"), dict) else {}
+    evidence: list[dict[str, Any]] = []
+    for role, role_data in model_roles.items():
+        if not isinstance(role_data, dict):
+            continue
+        trace_value = _str(role_data.get("trace_path"))
+        entry: dict[str, Any] = {
+            "role": _str(role),
+            "model_profile_id": _str(role_data.get("model_profile_id")),
+            "trace_path": trace_value,
+            "actual_model_call_in_this_run": False,
+        }
+        if not trace_value:
+            entry["reason"] = "trace_path_missing"
+            evidence.append(entry)
+            continue
+        try:
+            trace_path = _resolve_panel_artifact_file(trace_value)
+            trace_payload = json.loads(trace_path.read_text(encoding="utf-8-sig"))
+        except (FileNotFoundError, ValueError, OSError, json.JSONDecodeError) as exc:
+            entry["reason"] = f"trace_unavailable:{type(exc).__name__}"
+            evidence.append(entry)
+            continue
+        result = trace_payload.get("result") if isinstance(trace_payload, dict) and isinstance(trace_payload.get("result"), dict) else {}
+        model_io = result.get("model_io") if isinstance(result.get("model_io"), dict) else {}
+        learn_all_targets = result.get("learn_all_targets") if isinstance(result.get("learn_all_targets"), dict) else {}
+        vista = (
+            learn_all_targets.get("vista_coordinate_validation")
+            if isinstance(learn_all_targets.get("vista_coordinate_validation"), dict)
+            else {}
+        )
+        qwen_actual = (
+            trace_payload.get("success") is True
+            and model_io.get("status") == "success"
+            and bool(_str(model_io.get("raw_text")))
+        )
+        vista_results = vista.get("results") if isinstance(vista.get("results"), list) else []
+        vista_attempted = int(vista.get("attempted_count") or 0)
+        vista_actual = (
+            trace_payload.get("success") is True
+            and vista.get("status") == "ready"
+            and vista_attempted > 0
+            and any(isinstance(item, dict) and isinstance(item.get("vista_point"), dict) for item in vista_results)
+        )
+        if qwen_actual:
+            entry.update(
+                {
+                    "actual_model_call_in_this_run": True,
+                    "evidence_type": "screen_understanding_model_io",
+                    "provider": _str(model_io.get("provider")),
+                    "model_name": _str(model_io.get("model_name")),
+                    "status": _str(model_io.get("status")),
+                }
+            )
+        elif vista_actual:
+            entry.update(
+                {
+                    "actual_model_call_in_this_run": True,
+                    "evidence_type": "vista_point_grounding_batch",
+                    "provider": "local_grounding",
+                    "model_name": _str(vista.get("model_name")),
+                    "status": _str(vista.get("status")),
+                    "attempted_count": vista_attempted,
+                    "validated_count": int(vista.get("validated_count") or 0),
+                }
+            )
+        else:
+            entry["reason"] = "trace_does_not_prove_model_inference"
+        entry["trace_path"] = _relative_panel_path(trace_path)
+        evidence.append(entry)
+    actual_count = sum(1 for item in evidence if item.get("actual_model_call_in_this_run") is True)
+    return {
+        "contract_version": "panel_learning_model_provenance_v1",
+        "source_type": "mixed" if actual_count else "fixture_only",
+        "actual_model_call_evidence_count": actual_count,
+        "evidence": evidence,
+        "counts_as_pure_model_generated": False,
+        "interpretation": (
+            "Verified model traces prove inference occurred in this panel run. The saved learning draft also includes "
+            "OCR, UIA, calibration, and deterministic rules, so it is mixed rather than pure model output."
+        ),
+    }
+
+
 def _panel_calibrated_target_grounding_adapter(*, item: dict[str, Any], roi_crop: dict[str, Any]) -> dict[str, Any]:
     metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
-    point = metadata.get("click_point") if isinstance(metadata.get("click_point"), dict) else {}
+    layout_cleanup = metadata.get("layout_cleanup") if isinstance(metadata.get("layout_cleanup"), dict) else {}
+    merged_support = (
+        layout_cleanup.get("merged_support")
+        if isinstance(layout_cleanup.get("merged_support"), dict)
+        else {}
+    )
+    if isinstance(metadata.get("click_point"), dict):
+        point = metadata["click_point"]
+        point_source = "metadata.click_point"
+        coordinate_source = metadata.get("coordinate_source")
+    elif isinstance(merged_support.get("click_point"), dict):
+        point = merged_support["click_point"]
+        point_source = "layout_cleanup.merged_support.click_point"
+        coordinate_source = merged_support.get("coordinate_source")
+    else:
+        point = {}
+        point_source = "missing"
+        coordinate_source = ""
     return {
-        "screen_point": _normalized_point(point),
+        "screen_point": _normalized_point(point) if point else {},
         "screen_bbox": item.get("bbox") if isinstance(item.get("bbox"), dict) else {},
         "evidence": {
             "coordinate_transform_replay": True,
@@ -2541,6 +2795,8 @@ def _panel_calibrated_target_grounding_adapter(*, item: dict[str, Any], roi_crop
         "debug": {
             "adapter": "panel_calibrated_target_replay",
             "roi_contract": roi_crop.get("contract_version"),
+            "point_source": point_source,
+            "coordinate_source": _str(coordinate_source),
         },
     }
 

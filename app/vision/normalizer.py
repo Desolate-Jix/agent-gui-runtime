@@ -33,6 +33,11 @@ class VisionResultNormalizer:
             image_size=resolved_image_size,
             screen_summary=str(raw.get("screen_summary") or ""),
             state_guess=raw.get("state_guess"),
+            interface_classification=(
+                dict(raw.get("interface_classification"))
+                if isinstance(raw.get("interface_classification"), dict)
+                else {}
+            ),
             regions=regions,
             targets=targets,
             observers=observers,

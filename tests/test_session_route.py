@@ -61,6 +61,32 @@ def test_bind_window_route_returns_operation_context(monkeypatch) -> None:
     assert response.data["operation_trace_link"]["result_status"] == "success"
 
 
+def test_bind_window_route_prefers_exact_handle(monkeypatch) -> None:
+    bound = _bound("Exact")
+    handle_calls: list[int] = []
+    fuzzy_calls: list[tuple[str | None, str | None]] = []
+    monkeypatch.setattr(session_api.window_manager, "list_visible_windows", lambda: [{"handle": 123, "title": "Exact"}])
+    monkeypatch.setattr(
+        session_api.window_manager,
+        "bind_window_by_handle",
+        lambda handle: handle_calls.append(handle) or bound,
+    )
+    monkeypatch.setattr(
+        session_api.window_manager,
+        "bind_window",
+        lambda process_name, title: fuzzy_calls.append((process_name, title)) or bound,
+    )
+
+    response = session_api.bind_window(
+        BindWindowRequest(handle=123, process_name="msedge.exe", title="Exact")
+    )
+
+    assert response.success is True
+    assert handle_calls == [123]
+    assert fuzzy_calls == []
+    assert response.data["handle"] == 123
+
+
 def test_resize_bound_window_route_reports_failure(monkeypatch) -> None:
     monkeypatch.setattr(session_api.window_manager, "get_bound_window", lambda: None)
 

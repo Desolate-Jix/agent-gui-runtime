@@ -31,15 +31,17 @@ def build_learn_page_detail_candidate(
     out.mkdir(parents=True, exist_ok=True)
     source_payload = _read_json(source_file)
     page_details = _learning_draft_page_details(source_payload)
+    two_stage_source = _two_stage_source(source_payload)
     precise: dict[str, Any] = {}
-    if _is_two_stage_source(source_payload):
-        regions = _regions_from_fused_review_boxes(source_payload)
+    if two_stage_source:
+        regions = _regions_from_fused_review_boxes(two_stage_source)
         if not regions:
-            regions = _regions_from_two_stage(source_payload)
+            regions = _regions_from_two_stage(two_stage_source)
+        regions = _overlay_precise_locator_regions(regions, source_payload)
         regions = _resolve_page_detail_sibling_panel_overlaps(regions)
         regions = _resolve_page_detail_overlapping_row_shells(regions)
-        sections = _layout_sections_from_two_stage(source_payload, regions)
-        source_detail_shape = str(source_payload.get("contract_version") or "learn_two_stage_screen_understanding_v1")
+        sections = _layout_sections_from_two_stage(two_stage_source, regions)
+        source_detail_shape = str(two_stage_source.get("contract_version") or "learn_two_stage_screen_understanding_v1")
     else:
         regions = _regions_from_learning_draft(source_payload)
         sections = []
@@ -68,6 +70,35 @@ def build_learn_page_detail_candidate(
     ) or ("needs_page_detail_review" if regions else "unknown")
     output_path = out / REPORT_NAME
     source_visuals = _source_visual_paths(source_payload, root)
+    calibration_overlay_path = _source_calibration_overlay_path(source_payload)
+    if two_stage_source and not _source_has_precise_locator_targets(source_payload):
+        calibration_overlay_path = ""
+    two_stage_fusion = _dict(two_stage_source.get("fusion"))
+    verified_final_fusion = _verified_final_fusion_status(source_payload)
+    if verified_final_fusion:
+        calibration_overlay_path = str(
+            verified_final_fusion.get("calibration_overlay_path")
+            or verified_final_fusion.get("compiled_overlay_path")
+            or calibration_overlay_path
+            or ""
+        ).strip()
+    fused_compiled_overlay_path = str(
+        verified_final_fusion.get("compiled_overlay_path")
+        or two_stage_fusion.get("compiled_overlay_path")
+        or two_stage_fusion.get("full_screen_understanding_overlay_path")
+        or page_details.get("compiled_overlay_path")
+        or page_details.get("full_screen_understanding_overlay_path")
+        or ""
+    ).strip()
+    fused_full_overlay_path = str(
+        verified_final_fusion.get("full_screen_understanding_overlay_path")
+        or verified_final_fusion.get("compiled_overlay_path")
+        or two_stage_fusion.get("full_screen_understanding_overlay_path")
+        or two_stage_fusion.get("compiled_overlay_path")
+        or page_details.get("full_screen_understanding_overlay_path")
+        or page_details.get("compiled_overlay_path")
+        or ""
+    ).strip()
     payload = {
         "contract_version": "learn_page_detail_candidate_v1",
         "source_path": _relative_path(source_file, root),
@@ -82,12 +113,23 @@ def build_learn_page_detail_candidate(
         or screen.get("image_path")
         or source_payload.get("screenshot_path")
         or source_visuals.get("screenshot_path"),
-        "full_screen_understanding_overlay_path": precise.get("full_screen_understanding_overlay_path")
-        or page_details.get("full_screen_understanding_overlay_path")
+        "full_screen_understanding_overlay_path": fused_full_overlay_path
+        or calibration_overlay_path
+        or precise.get("full_screen_understanding_overlay_path")
         or source_visuals.get("full_screen_understanding_overlay_path"),
-        "compiled_overlay_path": precise.get("compiled_overlay_path")
-        or page_details.get("compiled_overlay_path")
+        "compiled_overlay_path": fused_compiled_overlay_path
+        or calibration_overlay_path
+        or precise.get("compiled_overlay_path")
         or source_visuals.get("compiled_overlay_path"),
+        "calibration_overlay_path": calibration_overlay_path,
+        "final_fusion_overlay": bool(verified_final_fusion),
+        "display_overlay_source": str(verified_final_fusion.get("display_overlay_source") or ""),
+        "stage2_compiled_overlay_path": str(
+            verified_final_fusion.get("stage2_compiled_overlay_path")
+            or two_stage_fusion.get("compiled_overlay_path")
+            or ""
+        ),
+        "ui_hierarchy": _source_ui_hierarchy(two_stage_source or source_payload),
         "summary": {
             "region_count": len(regions),
             "section_count": len(sections),
@@ -159,6 +201,24 @@ def _learning_draft_page_details(source: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def _verified_final_fusion_status(source: dict[str, Any]) -> dict[str, Any]:
+    draft = _dict(source.get("learning_draft"))
+    page_details = _dict(draft.get("page_details"))
+    pipeline_audit = _dict(page_details.get("pipeline_audit"))
+    candidates = [
+        _dict(page_details.get("precise_understanding_fusion_status")),
+        _dict(pipeline_audit.get("precise_understanding_fusion_status")),
+    ]
+    for status in candidates:
+        if (
+            status.get("final_fusion_overlay") is True
+            and status.get("display_overlay_source") == "two_stage_plus_precise_calibration"
+            and str(status.get("compiled_overlay_path") or "").strip()
+        ):
+            return status
+    return {}
+
+
 def _source_visual_paths(source: dict[str, Any], root: Path) -> dict[str, str]:
     visuals: dict[str, str] = {}
     fusion = _dict(source.get("fusion"))
@@ -199,6 +259,26 @@ def _source_visual_paths(source: dict[str, Any], root: Path) -> dict[str, str]:
     return visuals
 
 
+def _source_calibration_overlay_path(source: dict[str, Any]) -> str:
+    observe_bundle = _dict(source.get("observe_bundle"))
+    observation_evidence = _dict(observe_bundle.get("panel_observation_evidence"))
+    calibrated_source = _dict(_dict(observe_bundle.get("sources")).get("calibrated_targets"))
+    return str(
+        observation_evidence.get("coordinate_overlay_path")
+        or calibrated_source.get("source_overlay_path")
+        or source.get("coordinate_overlay_path")
+        or ""
+    ).strip()
+
+
+def _source_has_precise_locator_targets(source: dict[str, Any]) -> bool:
+    calibrated_source = _dict(_dict(_dict(source.get("observe_bundle")).get("sources")).get("calibrated_targets"))
+    return any(
+        str(item.get("coordinate_source") or "") == "precise_locator_v1" and bool(_dict(item.get("bbox")))
+        for item in _list_of_dicts(calibrated_source.get("targets"))
+    )
+
+
 def _load_json_if_exists(path: str, root: Path) -> dict[str, Any]:
     try:
         resolved = _resolve_path(path, root)
@@ -223,10 +303,21 @@ def _trace_screenshot_path(trace: dict[str, Any]) -> str:
     return ""
 
 
-def _is_two_stage_source(source: dict[str, Any]) -> bool:
+def _two_stage_source(source: dict[str, Any]) -> dict[str, Any]:
     if source.get("contract_version") == "learn_two_stage_screen_understanding_v1":
-        return True
-    return isinstance(source.get("stage2_numbering"), dict) and isinstance(source.get("fusion"), dict)
+        return source
+    if isinstance(source.get("stage2_numbering"), dict) and isinstance(source.get("fusion"), dict):
+        return source
+    nested = _dict(source.get("two_stage_understanding"))
+    if nested.get("contract_version") == "learn_two_stage_screen_understanding_v1":
+        return nested
+    if isinstance(nested.get("stage2_numbering"), dict) and isinstance(nested.get("fusion"), dict):
+        return nested
+    return {}
+
+
+def _is_two_stage_source(source: dict[str, Any]) -> bool:
+    return bool(_two_stage_source(source))
 
 
 def _load_or_build_precise_candidate(*, source_file: Path, out_dir: Path, root: Path) -> dict[str, Any]:
@@ -246,6 +337,7 @@ _PAGE_DETAIL_PARENT_GROUP_ROLES = {
     "hero_code_panel",
     "section_parent",
     "media_card_group",
+    "tile_card_group",
     "list_group",
     "list_row",
     "member_list_region",
@@ -829,6 +921,182 @@ def _regions_from_fused_review_boxes(source: dict[str, Any]) -> list[dict[str, A
             regions.append(region)
             next_region_no += 1
     return regions
+
+
+def _overlay_precise_locator_regions(
+    regions: list[dict[str, Any]],
+    source: dict[str, Any],
+) -> list[dict[str, Any]]:
+    calibrated_source = _dict(_dict(_dict(source.get("observe_bundle")).get("sources")).get("calibrated_targets"))
+    precise_targets = [
+        item
+        for item in _list_of_dicts(calibrated_source.get("targets"))
+        if str(item.get("coordinate_source") or "") == "precise_locator_v1" and _dict(item.get("bbox"))
+    ]
+    if not precise_targets:
+        return regions
+    target_by_key: dict[str, dict[str, Any]] = {}
+    for target in precise_targets:
+        for key in _calibrated_target_match_keys(target):
+            target_by_key.setdefault(key, target)
+    output: list[dict[str, Any]] = []
+    used_target_ids: set[str] = set()
+    for region in regions:
+        target = next(
+            (
+                target_by_key[key]
+                for key in _page_detail_region_match_keys(region)
+                if key in target_by_key and _precise_target_identity(target_by_key[key]) not in used_target_ids
+            ),
+            None,
+        )
+        if not target:
+            target = _geometric_precise_target_for_region(
+                region,
+                precise_targets,
+                used_target_ids=used_target_ids,
+            )
+        if not target:
+            output.append(region)
+            continue
+        used_target_ids.add(_precise_target_identity(target))
+        updated = dict(region)
+        bbox = _dict(target.get("bbox"))
+        updated["bbox"] = bbox
+        updated["candidate_point"] = _dict(target.get("click_point"))
+        updated["visual_order_key"] = [int(bbox.get("y") or 0), int(bbox.get("x") or 0)]
+        updated["page_detail_source"] = "precise_locator_calibrated_target"
+        evidence = dict(_dict(updated.get("evidence")))
+        evidence.update(
+            {
+                "calibrated_candidate_id": target.get("candidate_id") or target.get("id"),
+                "coordinate_source": "precise_locator_v1",
+                "coordinate_validation": _dict(target.get("coordinate_validation")),
+                "precise_locator_evidence": _dict(target.get("precise_locator_evidence")),
+            }
+        )
+        updated["evidence"] = evidence
+        parent_bbox = _dict(target.get("parent_bbox")) or _dict(
+            next(
+                (
+                    item.get("bbox")
+                    for item in _list_of_dicts(updated.get("child_evidence"))
+                    if item.get("source_item_id") == updated.get("source_parent_region_id")
+                ),
+                {},
+            )
+        )
+        if not parent_bbox:
+            parent_bbox = _dict(updated.get("source_parent_bbox"))
+        if parent_bbox:
+            ratio = _bbox_containment_ratio(bbox, parent_bbox)
+            updated["source_section_containment_ratio"] = round(ratio, 4)
+            updated["inside_source_section"] = ratio >= 0.85
+        output.append(updated)
+    return output
+
+
+def _geometric_precise_target_for_region(
+    region: dict[str, Any],
+    targets: list[dict[str, Any]],
+    *,
+    used_target_ids: set[str],
+) -> dict[str, Any] | None:
+    region_bbox = _dict(region.get("bbox"))
+    if not region_bbox:
+        return None
+    matches: list[tuple[float, dict[str, Any]]] = []
+    for target in targets:
+        if _precise_target_identity(target) in used_target_ids:
+            continue
+        if not _page_detail_roles_compatible(str(region.get("role") or ""), str(target.get("role") or "")):
+            continue
+        overlap = _page_detail_bbox_iou(region_bbox, _dict(target.get("bbox")))
+        if overlap >= 0.72:
+            matches.append((overlap, target))
+    if not matches:
+        return None
+    matches.sort(key=lambda item: item[0], reverse=True)
+    if len(matches) > 1 and matches[0][0] - matches[1][0] < 0.08:
+        return None
+    return matches[0][1]
+
+
+def _precise_target_identity(target: dict[str, Any]) -> str:
+    return str(target.get("candidate_id") or target.get("id") or id(target))
+
+
+def _page_detail_roles_compatible(region_role: str, target_role: str) -> bool:
+    return _page_detail_role_family(region_role) == _page_detail_role_family(target_role)
+
+
+def _page_detail_role_family(role: str) -> str:
+    value = str(role or "").casefold()
+    if "partial" in value and "card" in value:
+        return "partial_card"
+    if "card" in value or "recommendation" in value or "tile" in value:
+        return "card"
+    if "nav" in value or "sidebar" in value or "menu" in value:
+        return "navigation"
+    if "text" in value or value in {"label", "heading"}:
+        return "text"
+    if "input" in value or "field" in value or "search_box" in value:
+        return "input"
+    if "control" in value or "button" in value or "icon" in value:
+        return "control"
+    return value
+
+
+def _page_detail_bbox_iou(left: dict[str, Any], right: dict[str, Any]) -> float:
+    if not left or not right:
+        return 0.0
+    left_x1 = float(left.get("x") or 0)
+    left_y1 = float(left.get("y") or 0)
+    left_x2 = left_x1 + max(0.0, float(left.get("w") or 0))
+    left_y2 = left_y1 + max(0.0, float(left.get("h") or 0))
+    right_x1 = float(right.get("x") or 0)
+    right_y1 = float(right.get("y") or 0)
+    right_x2 = right_x1 + max(0.0, float(right.get("w") or 0))
+    right_y2 = right_y1 + max(0.0, float(right.get("h") or 0))
+    intersection = max(0.0, min(left_x2, right_x2) - max(left_x1, right_x1)) * max(
+        0.0,
+        min(left_y2, right_y2) - max(left_y1, right_y1),
+    )
+    union = max(0.0, (left_x2 - left_x1) * (left_y2 - left_y1)) + max(
+        0.0,
+        (right_x2 - right_x1) * (right_y2 - right_y1),
+    ) - intersection
+    return intersection / union if union > 0 else 0.0
+
+
+def _calibrated_target_match_keys(target: dict[str, Any]) -> set[str]:
+    candidate_id = str(target.get("candidate_id") or target.get("id") or "").strip()
+    if not candidate_id:
+        return set()
+    keys = {_normalized_match_key(candidate_id)}
+    parts = [part for part in candidate_id.replace("/", ":").split(":") if part]
+    if len(parts) >= 2:
+        keys.add(_normalized_match_key("_".join(parts[-2:])))
+    return {key for key in keys if key}
+
+
+def _page_detail_region_match_keys(region: dict[str, Any]) -> set[str]:
+    values = [region.get("region_id"), region.get("source_item_id")]
+    values.extend(item.get("source_item_id") for item in _list_of_dicts(region.get("child_evidence")))
+    keys: set[str] = set()
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        keys.add(_normalized_match_key(text))
+        prefix = "two_stage_review_"
+        if text.casefold().startswith(prefix):
+            keys.add(_normalized_match_key(text[len(prefix) :]))
+    return {key for key in keys if key}
+
+
+def _normalized_match_key(value: Any) -> str:
+    return "".join(char for char in str(value or "").casefold() if char.isalnum())
 
 
 def _region_from_fused_review_box(box: dict[str, Any], *, index: int) -> dict[str, Any]:
@@ -1544,6 +1812,17 @@ def _display_path(value: Any, *, root: Path) -> str:
 
 def _dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _source_ui_hierarchy(payload: dict[str, Any]) -> dict[str, Any]:
+    for candidate in (
+        payload.get("ui_hierarchy"),
+        _dict(payload.get("learning_draft")).get("ui_hierarchy"),
+        _dict(payload.get("fusion")).get("ui_hierarchy"),
+    ):
+        if isinstance(candidate, dict) and candidate.get("contract_version") == "ui_hierarchy_graph_v1":
+            return candidate
+    return {}
 
 
 def _list(value: Any) -> list[Any]:

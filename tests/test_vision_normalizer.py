@@ -160,6 +160,11 @@ def test_prompt_builder_includes_resolution_and_required_schema() -> None:
     assert "image width = 1440" in prompt
     assert "image height = 900" in prompt
     assert 'contract_version must be "vision_regions_v1"' in prompt
+    assert "interface_classification" in prompt
+    assert "media_catalog" in prompt
+    assert "documentation_portal" in prompt
+    assert "settings_dashboard" in prompt
+    assert "conversation_workspace" in prompt
     assert "possible_destinations" in prompt
     assert "anchor_relations" in prompt
     assert "grounding_constraints" in prompt
@@ -171,6 +176,27 @@ def test_prompt_builder_includes_resolution_and_required_schema() -> None:
     assert "relative_frame_position" in prompt
     assert 'Case A, visual icon/object has no text inside it' in prompt
     assert 'Case B, the target visually includes text' in prompt
+
+
+def test_normalizer_preserves_model_interface_classification() -> None:
+    raw = {
+        "provider": "local",
+        "contract_version": "vision_regions_v1",
+        "image_size": {"width": 640, "height": 480},
+        "screen_summary": "Media library with album rows",
+        "state_guess": "library home",
+        "interface_classification": {
+            "category": "media_catalog",
+            "confidence": 0.88,
+            "reason": "repeated visual media cards",
+        },
+        "regions": [],
+    }
+
+    result = normalizer.normalize(raw, "local")
+
+    assert result.interface_classification == raw["interface_classification"]
+    assert result.to_dict()["interface_classification"] == raw["interface_classification"]
 
 
 def test_prompt_builder_strengthens_grid_coordinate_guidance() -> None:
@@ -362,6 +388,10 @@ def test_observe_prompt_uses_compact_candidate_contract_without_grounding_proof(
     )
 
     assert "fast screen-understanding stage" in prompt
+    assert '"interface_classification"' in prompt
+    assert '"category": "media_catalog|documentation_portal|settings_dashboard|conversation_workspace|file_browser|form_workflow|generic"' in prompt
+    assert '"confidence": 0.0' in prompt
+    assert '"reason": "short visible evidence"' in prompt
     assert "at most 12 independently clickable candidate controls" in prompt
     assert "later POST /vision/locate_target state_hint field" in prompt
     assert "do not emit ocr_text" in prompt
@@ -369,6 +399,23 @@ def test_observe_prompt_uses_compact_candidate_contract_without_grounding_proof(
     assert '"t":"Home"' in prompt
     assert "anchor_relations must be a list" not in prompt
     assert "grounding_constraints must be an object" not in prompt
+
+
+def test_observe_prompt_distinguishes_people_lists_from_file_browser_rows() -> None:
+    prompt = build_region_analysis_prompt(
+        VisionAnalyzeRequest(
+            image_path="screen.png",
+            task="observe_screen",
+        ),
+        ImageSize(width=800, height=600),
+        max_regions=12,
+    )
+
+    assert '"structure_signals"' in prompt
+    assert '"file_or_folder_rows"' in prompt
+    assert '"people_or_conversation_rows"' in prompt
+    assert "friend, contact, participant, presence, or online-status rows are conversation_workspace" in prompt
+    assert "they are not file_browser merely because they form a dense list" in prompt
 
 
 def test_normalizer_skips_non_object_region_target_and_observer_items() -> None:

@@ -26,6 +26,7 @@ def build_learning_recognition_trial(
     summary: str,
     grounding_adapter: GroundingAdapter | None = None,
     crop_size: dict[str, Any] | None = None,
+    two_stage_understanding_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """把学习模式前半段的识别结果串成只读学习草稿。"""
 
@@ -37,11 +38,15 @@ def build_learning_recognition_trial(
     grounding_eligibility_gate = summarize_grounding_eligibility(_classified_items(classification))
     layout_graph = build_inventory_layout_graph(screen_inventory, screen_size=_source_image_size(bundle))
     locator_task_cards = build_locator_task_cards(screen_inventory)
-    two_stage_understanding = build_two_stage_screen_understanding(
-        bundle=bundle,
-        screen_inventory=screen_inventory,
-        layout_graph=layout_graph,
-        enable_ocr_content_recovery=True,
+    two_stage_understanding = (
+        deepcopy(two_stage_understanding_override)
+        if isinstance(two_stage_understanding_override, dict) and two_stage_understanding_override
+        else build_two_stage_screen_understanding(
+            bundle=bundle,
+            screen_inventory=screen_inventory,
+            layout_graph=layout_graph,
+            enable_ocr_content_recovery=True,
+        )
     )
     accepted_items = classification.get("accepted_for_grounding")
     accepted_items = accepted_items if isinstance(accepted_items, list) else []

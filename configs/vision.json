@@ -17,7 +17,11 @@
     "local_understanding": {
       "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
       "endpoint": "http://127.0.0.1:1240/v1/chat/completions",
-      "profile_id": "qwen3_vl_8b_q4_k_m"
+      "profile_id": "qwen3_vl_8b_q4_k_m",
+      "provider_mode": "local_understanding",
+      "input_format": "openai_compatible_vision",
+      "supports_ocr_anchors": true,
+      "model_path": "models/qwen3-vl-8b-instruct-q4_k_m-gguf/Qwen3VL-8B-Instruct-Q4_K_M.gguf"
     },
     "local_grounding": {
       "model_name": "inclusionAI/VISTA-4B",

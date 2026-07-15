@@ -385,19 +385,27 @@ def learning_model_trial(
 
 
 @router.get("/models", response_model=APIResponse)
-def model_status() -> APIResponse:
+def model_status(profile_id: str | None = None) -> APIResponse:
     """Return configured local vision model profiles and current /v1/models status."""
     timer = RuntimeTimer()
     results = []
     with timer.step("load_model_profiles"):
         profiles = load_model_profiles()
+    requested_profile_id = str(profile_id or "").strip()
+    if requested_profile_id:
+        profiles = [profile for profile in profiles if str(profile.get("profile_id") or "") == requested_profile_id]
     for profile in profiles:
         with timer.step("check_model_server", profile_id=profile.get("profile_id")):
             results.append({"profile": profile, "status": check_model_server(profile)})
     return APIResponse(
         success=True,
         message="Model server status collected",
-        data={"contract_version": "runtime_model_status_v1", "models": results, "timings": timer.to_dict()},
+        data={
+            "contract_version": "runtime_model_status_v1",
+            "requested_profile_id": requested_profile_id or None,
+            "models": results,
+            "timings": timer.to_dict(),
+        },
         error=None,
     )
 
@@ -415,12 +423,21 @@ def start_model(request: ModelServerRequest) -> APIResponse:
                 wait_seconds=request.wait_seconds,
             )
         result["timings"] = timer.to_dict()
+        after_status = str(((result.get("after") or {}).get("status") or "")).casefold()
+        waited_start_failed = bool(request.wait_until_ready and result.get("after") and after_status != "running")
         result["trace_path"] = write_trace(
             category="runtime",
             operation="start_model",
-            payload={"success": True, "request": request.model_dump(), "result": result},
+            payload={"success": not waited_start_failed, "request": request.model_dump(), "result": result},
             name_hint=request.stage,
         )
+        if waited_start_failed:
+            return APIResponse(
+                success=False,
+                message="Model server did not become ready",
+                data=result,
+                error=ErrorModel(code="model_server_not_ready", details=str(result.get("after") or {})),
+            )
         return APIResponse(success=True, message="Model server ensure completed", data=result, error=None)
     except Exception as exc:
         timings = timer.to_dict()

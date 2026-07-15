@@ -79,13 +79,18 @@ def _surface_zone(item: dict[str, Any], screen_size: dict[str, Any]) -> str:
     role = str(item.get("role") or "").casefold()
     if role in {"address_bar", "browser_tab", "browser_toolbar", "extension_button"}:
         return "browser_chrome"
+    label = str(item.get("label") or item.get("text") or "").strip().casefold()
+    if label.startswith(("http://", "https://", "www.")) or label.endswith(
+        (" - microsoft edge", " - google chrome", " - mozilla firefox")
+    ):
+        return "browser_chrome"
     height = _float(screen_size.get("height"))
     bbox = item.get("bbox") if isinstance(item.get("bbox"), dict) else {}
     y = _float(bbox.get("y"))
     if height <= 0:
         return "unknown"
     if y < height * 0.12:
-        return "browser_chrome"
+        return "page_header"
     if y < height * 0.32:
         return "page_header"
     if y < height * 0.9:

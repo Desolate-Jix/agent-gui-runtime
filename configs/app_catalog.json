@@ -36,6 +36,16 @@
       "process_name": "notepad.exe",
       "title_hint": "Notepad",
       "capabilities": ["text_editing", "file_text_review"]
+    },
+    {
+      "app_id": "calculator",
+      "name": "Calculator",
+      "description": "Windows Calculator for desktop GUI recognition and learning tasks.",
+      "launch_command": ["calc.exe"],
+      "process_name": "ApplicationFrameHost.exe",
+      "title_hints": ["Calculator", "计算器"],
+      "require_title_match": true,
+      "capabilities": ["calculation", "desktop_ui"]
     }
   ]
 }

@@ -151,6 +151,7 @@ class VisionAnalyzeResponse:
     provider: str
     screen_summary: str
     state_guess: Optional[str]
+    interface_classification: dict[str, Any] = field(default_factory=dict)
     contract_version: str = "vision_regions_v1"
     image_size: Optional[ImageSize] = None
     regions: list[VisionRegion] = field(default_factory=list)
@@ -168,6 +169,7 @@ class VisionAnalyzeResponse:
             "image_size": self.image_size.to_dict() if self.image_size is not None else None,
             "screen_summary": self.screen_summary,
             "state_guess": self.state_guess,
+            "interface_classification": dict(self.interface_classification),
             "regions": [item.to_dict() for item in self.regions],
             "targets": [item.to_dict() for item in self.targets],
             "observers": [item.to_dict() for item in self.observers],

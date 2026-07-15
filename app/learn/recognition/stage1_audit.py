@@ -21,8 +21,10 @@ def audit_stage1_region_selection(
     if case_results and structure_family_coverage["recognized_region_count"] == 0:
         for item in case_results:
             _mark_failed(item, "unknown_only_structure")
+    _resolve_vertical_bar_completion(case_results, width=width, height=height)
     _audit_single_region_structure(case_results, width=width, height=height)
     _audit_region_overlap(case_results)
+    _audit_top_origin_coverage(case_results, height=height)
     _audit_horizontal_bar_lane(case_results, width=width)
     _audit_stage1_partition_adjacency(case_results, width=width, height=height)
     failed = [item for item in case_results if item["status"] != "passed"]
@@ -132,6 +134,46 @@ def _audit_single_region_structure(case_results: list[dict[str, Any]], *, width:
         item["notes"].append("full_screen_main_was_backfilled_from_shallow_observed_content")
 
 
+def _resolve_vertical_bar_completion(case_results: list[dict[str, Any]], *, width: int, height: int) -> None:
+    if width <= 0 or height <= 0:
+        return
+    tolerance_x = max(12, int(width * 0.025))
+    tolerance_y = max(12, int(height * 0.025))
+    bottom_bars = [
+        item
+        for item in case_results
+        if item.get("region_type") == "bottom_bar" and _bbox(item.get("bbox"))
+    ]
+    for item in case_results:
+        region_type = str(item.get("region_type") or "")
+        if region_type not in {"left_sidebar", "right_sidebar"}:
+            continue
+        failure = "sidebar_bbox_too_short" if region_type == "left_sidebar" else "right_sidebar_bbox_too_short"
+        failures = item.get("failure_categories")
+        if not isinstance(failures, list) or failure not in failures:
+            continue
+        sidebar_bbox = _bbox(item.get("bbox"))
+        if not sidebar_bbox:
+            continue
+        sidebar_bottom = sidebar_bbox["y"] + sidebar_bbox["h"]
+        for bottom_item in bottom_bars:
+            bottom_bbox = _bbox(bottom_item.get("bbox"))
+            if not bottom_bbox:
+                continue
+            covers_sidebar_lane = (
+                bottom_bbox["x"] <= sidebar_bbox["x"] + tolerance_x
+                and bottom_bbox["x"] + bottom_bbox["w"] >= sidebar_bbox["x"] + sidebar_bbox["w"] - tolerance_x
+            )
+            touches_sidebar = abs(bottom_bbox["y"] - sidebar_bottom) <= tolerance_y
+            reaches_screen_bottom = bottom_bbox["y"] + bottom_bbox["h"] >= height - tolerance_y
+            if not (covers_sidebar_lane and touches_sidebar and reaches_screen_bottom):
+                continue
+            failures.remove(failure)
+            item["status"] = "passed" if not failures else "failed"
+            item["notes"].append("vertical_lane_completed_by_adjacent_bottom_bar")
+            break
+
+
 def _main_bbox_covers_stage_lane(bbox: dict[str, int], *, width: int, height: int) -> bool:
     tolerance_x = max(12, int(width * 0.02))
     tolerance_y = max(12, int(height * 0.02))
@@ -161,6 +203,25 @@ def _audit_region_overlap(case_results: list[dict[str, Any]]) -> None:
                 item["status"] = "failed"
                 item["failure_categories"].append("structure_region_overlap")
                 item["notes"].append(f"overlaps_neighbor:{other['region_id']}")
+
+
+def _audit_top_origin_coverage(case_results: list[dict[str, Any]], *, height: int) -> None:
+    if height <= 0:
+        return
+    top_regions = [
+        item
+        for item in case_results
+        if item.get("region_type") == "top_bar" and _bbox(item.get("bbox"))
+    ]
+    if not top_regions:
+        return
+    tolerance = max(12, int(height * 0.025))
+    top_edge = min(_bbox(item.get("bbox"))["y"] for item in top_regions)
+    if top_edge <= tolerance:
+        return
+    for item in top_regions:
+        _mark_failed(item, "top_structure_does_not_cover_screen_origin")
+        item["notes"].append("top_level_structure_must_include_visible_space_above_first_topbar")
 
 
 def _regions_may_overlap(first_type: str, second_type: str) -> bool:

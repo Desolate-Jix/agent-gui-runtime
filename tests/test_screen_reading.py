@@ -24,6 +24,11 @@ def test_screen_reading_exposes_ui_layer_with_reserved_icon_and_learning_slots()
         provider="dummy",
         screen_summary="Browser page with toolbar and a Start button.",
         state_guess="demo",
+        interface_classification={
+            "category": "documentation_portal",
+            "confidence": 0.91,
+            "reason": "navigation plus documentation content",
+        },
         image_size=ImageSize(width=420, height=220),
         regions=[
             VisionRegion(
@@ -94,6 +99,11 @@ def test_screen_reading_exposes_ui_layer_with_reserved_icon_and_learning_slots()
     )
 
     assert result["contract_version"] == "screen_reading_v1"
+    assert result["interface_classification"] == {
+        "category": "documentation_portal",
+        "confidence": 0.91,
+        "reason": "navigation plus documentation content",
+    }
     assert result["ui"]["summary"]["element_count"] == 2
     assert result["ui"]["summary"]["icon_candidate_count"] == 1
     assert "icon_library" not in result["ui"]["provider_slots"]

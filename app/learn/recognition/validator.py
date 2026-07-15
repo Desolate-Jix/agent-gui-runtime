@@ -13,9 +13,12 @@ def validate_grounding_candidate(
     item_bbox = _normalize_bbox(item.get("bbox") if isinstance(item, dict) else {})
     screen_bbox = _normalize_bbox(grounding.get("screen_bbox") if isinstance(grounding, dict) else {})
     candidate_bbox = screen_bbox if screen_bbox["w"] and screen_bbox["h"] else item_bbox
-    screen_point = _normalize_point(grounding.get("screen_point") if isinstance(grounding, dict) else {})
+    raw_screen_point = grounding.get("screen_point") if isinstance(grounding, dict) else None
+    point_present = _point_mapping_present(raw_screen_point)
+    screen_point = _normalize_point(raw_screen_point)
     checks = {
-        "point_inside_bbox": _point_inside_bbox(screen_point, candidate_bbox),
+        "point_present": point_present,
+        "point_inside_bbox": point_present and _point_inside_bbox(screen_point, candidate_bbox),
         "bbox_inside_image": bool(candidate_bbox["w"] and candidate_bbox["h"]),
         "ocr_anchor_overlap": _optional_bool(evidence.get("ocr_anchor_overlap"), default=True),
         "uia_or_dom_or_parser_overlap": _optional_bool(evidence.get("uia_or_dom_or_parser_overlap"), default=True),
@@ -49,6 +52,8 @@ def _failure_category(checks: dict[str, bool]) -> str | None:
         return "stale_or_unreplayable_evidence"
     if not checks["bbox_inside_image"]:
         return "invalid_bbox"
+    if not checks["point_present"]:
+        return "missing_grounding_point"
     if not checks["point_inside_bbox"]:
         return "point_outside_bbox"
     if not checks["ocr_anchor_overlap"] or not checks["uia_or_dom_or_parser_overlap"]:
@@ -124,6 +129,10 @@ def _normalize_bbox(value: dict[str, Any] | None) -> dict[str, int]:
 def _normalize_point(value: dict[str, Any] | None) -> dict[str, int]:
     value = value if isinstance(value, dict) else {}
     return {"x": _int_or_zero(value.get("x")), "y": _int_or_zero(value.get("y"))}
+
+
+def _point_mapping_present(value: Any) -> bool:
+    return isinstance(value, dict) and "x" in value and "y" in value
 
 
 def _int_or_zero(value: Any) -> int:

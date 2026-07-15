@@ -60,16 +60,38 @@ def _message_text_and_image(messages: list[dict[str, Any]]) -> tuple[str, Any | 
 
 
 def _vista_prompt(instruction: str) -> str:
-    if "Output the center point of the position corresponding to the instruction" in instruction:
-        return instruction
+    official_prefix = "Output the center point of the position corresponding to the instruction:"
+    cleaned = str(instruction or "").strip()
+    if cleaned.startswith(official_prefix):
+        return cleaned
+    goal_match = re.search(r"(?im)^\s*Goal\s*:\s*(.+?)\s*$", cleaned)
+    target_instruction = goal_match.group(1).strip() if goal_match else cleaned
+    target_instruction = target_instruction.rstrip(" .")
     return (
-        "Output the center point of the position corresponding to the instruction: "
-        f"{instruction}. The output should just be the coordinates of a point, in the format [x,y]."
+        f"{official_prefix} {target_instruction}. "
+        "The output should just be the coordinates of a point, in the format [x,y]."
     )
+
+
+def _coordinate_output_complete(text: str) -> bool:
+    return re.search(r"\[\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*\]", str(text or "")) is not None
+
+
+def _request_timeout_seconds(payload: dict[str, Any], *, default: float) -> float:
+    try:
+        requested = float(payload.get("request_timeout_seconds") or 0)
+    except (TypeError, ValueError):
+        requested = 0.0
+    return min(300.0, requested) if requested > 0 else max(1.0, float(default))
 
 
 def _point_payload(text: str, *, instruction: str = "") -> dict[str, Any]:
     match = re.search(r"\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]", text)
+    parse_repair = {"applied": False, "reason": None}
+    if match is None:
+        match = re.fullmatch(r"\s*\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*", text)
+        if match is not None:
+            parse_repair = {"applied": True, "reason": "missing_closing_bracket"}
     point = None
     if match:
         point = {
@@ -82,6 +104,7 @@ def _point_payload(text: str, *, instruction: str = "") -> dict[str, Any]:
         "status": "ready" if point else "unparsed",
         "point": point,
         "raw_text": text,
+        "parse_repair": parse_repair,
     }
 
 
@@ -94,8 +117,15 @@ def _requested_coordinate_space(instruction: str) -> str:
     return "normalized_0_1000"
 
 
-def _generate(messages: list[dict[str, Any]], *, max_tokens: int, temperature: float) -> str:
+def _generate(
+    messages: list[dict[str, Any]],
+    *,
+    max_tokens: int,
+    temperature: float,
+    timeout_seconds: float,
+) -> str:
     import torch
+    from transformers import StoppingCriteria, StoppingCriteriaList
 
     if MODEL is None or PROCESSOR is None:
         raise RuntimeError("model is not loaded")
@@ -121,7 +151,16 @@ def _generate(messages: list[dict[str, Any]], *, max_tokens: int, temperature: f
     generate_kwargs: dict[str, Any] = {
         "max_new_tokens": max(1, min(int(max_tokens or MAX_NEW_TOKENS), MAX_NEW_TOKENS)),
         "do_sample": temperature > 0,
+        "max_time": max(1.0, float(timeout_seconds)),
     }
+
+    class CoordinateCompleteStoppingCriteria(StoppingCriteria):
+        def __call__(self, input_ids, scores, **kwargs):
+            generated_ids = input_ids[:, inputs["input_ids"].shape[1] :]
+            generated_text = PROCESSOR.batch_decode(generated_ids, skip_special_tokens=True)[0]
+            return _coordinate_output_complete(generated_text)
+
+    generate_kwargs["stopping_criteria"] = StoppingCriteriaList([CoordinateCompleteStoppingCriteria()])
     if temperature > 0:
         generate_kwargs["temperature"] = float(temperature)
     with torch.inference_mode():
@@ -194,10 +233,12 @@ class VistaHandler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length") or "0")
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            request_timeout_seconds = _request_timeout_seconds(payload, default=30.0)
             ACTIVE_REQUEST = {
                 "started_at": time.time(),
                 "client": self.client_address[0] if self.client_address else None,
                 "max_tokens": int(payload.get("max_tokens") or MAX_NEW_TOKENS),
+                "request_timeout_seconds": request_timeout_seconds,
             }
             messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
             instruction, _ = _message_text_and_image(messages)
@@ -205,6 +246,7 @@ class VistaHandler(BaseHTTPRequestHandler):
                 messages,
                 max_tokens=int(payload.get("max_tokens") or MAX_NEW_TOKENS),
                 temperature=float(payload.get("temperature") or 0.0),
+                timeout_seconds=request_timeout_seconds,
             )
             wants_json = (payload.get("response_format") or {}).get("type") == "json_object"
             content = json.dumps(_point_payload(text, instruction=instruction), ensure_ascii=False) if wants_json else text
@@ -259,6 +301,8 @@ def main() -> int:
     parser.add_argument("--device", default="auto")
     parser.add_argument("--dtype", default="bfloat16")
     parser.add_argument("--max-new-tokens", type=int, default=32)
+    parser.add_argument("--gpu-memory-gib", type=int, default=0)
+    parser.add_argument("--cpu-memory-gib", type=int, default=0)
     args = parser.parse_args()
 
     global MODEL, PROCESSOR, MODEL_NAME, MAX_NEW_TOKENS
@@ -281,11 +325,22 @@ def main() -> int:
 
     dtype = _torch_dtype(args.dtype)
     device_map = "auto" if args.device == "auto" else None
-    model_kwargs: dict[str, Any] = {"trust_remote_code": True}
+    model_kwargs: dict[str, Any] = {
+        "trust_remote_code": True,
+        "low_cpu_mem_usage": True,
+        "offload_state_dict": True,
+    }
     if dtype != "auto":
         model_kwargs["torch_dtype"] = dtype
     if device_map:
         model_kwargs["device_map"] = device_map
+        max_memory: dict[Any, str] = {}
+        if args.gpu_memory_gib > 0:
+            max_memory[0] = f"{args.gpu_memory_gib}GiB"
+        if args.cpu_memory_gib > 0:
+            max_memory["cpu"] = f"{args.cpu_memory_gib}GiB"
+        if max_memory:
+            model_kwargs["max_memory"] = max_memory
     print(f"Loading VISTA model from {model_path} on device={args.device} dtype={args.dtype}", flush=True)
     try:
         PROCESSOR = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)

@@ -129,6 +129,66 @@ def test_eligibility_gate_allows_cross_evidence_job_card_for_open_detail_review(
     assert item["eligible_for"] == ["roi_grounding"]
     assert item["evidence_strength"] == "human_calibrated_interactable"
     assert item["execute_binding_enabled"] is False
+    summary = summarize_grounding_eligibility(gated)
+    assert summary["non_actionable_leaked_to_grounding"]["leaked_count"] == 0
+
+
+def test_eligibility_gate_blocks_calibrated_text_and_group_without_direct_action_evidence():
+    gated = apply_grounding_eligibility_gate(
+        [
+            {
+                "item_id": "page_title",
+                "label": "WhatsApp",
+                "item_type": "actionable",
+                "role": "text",
+                "source_evidence": ["vision", "calibrated_target"],
+                "evidence_level": "cross_evidence_grounded",
+                "interactable_evidence": {
+                    "calibrated_target_validated": True,
+                    "cross_evidence_overlap": True,
+                },
+            },
+            {
+                "item_id": "container_group",
+                "label": "group",
+                "item_type": "actionable",
+                "role": "group",
+                "source_evidence": ["calibrated_target"],
+                "evidence_level": "calibrated_target",
+                "interactable_evidence": {
+                    "calibrated_target_validated": True,
+                },
+            },
+        ]
+    )
+
+    assert [item["grounding_eligible"] for item in gated] == [False, False]
+    assert [item["review_only"] for item in gated] == [True, True]
+    assert {item["grounding_block_reason"] for item in gated} == {
+        "non_actionable_role_without_direct_interactable_evidence"
+    }
+    summary = summarize_grounding_eligibility(gated)
+    assert summary["non_actionable_leaked_to_grounding"]["leaked_count"] == 0
+
+
+def test_eligibility_gate_allows_directly_invokable_text_without_reporting_a_leak():
+    gated = apply_grounding_eligibility_gate(
+        [
+            {
+                "item_id": "direct_text_control",
+                "label": "Chat",
+                "item_type": "actionable",
+                "role": "text",
+                "source_evidence": ["uia"],
+                "evidence_level": "uia_control",
+                "interactable_evidence": {"uia_invokable": True},
+            }
+        ]
+    )
+
+    assert gated[0]["grounding_eligible"] is True
+    summary = summarize_grounding_eligibility(gated)
+    assert summary["non_actionable_leaked_to_grounding"]["leaked_count"] == 0
 
 
 def test_eligibility_summary_reports_non_actionable_leakage_metrics():

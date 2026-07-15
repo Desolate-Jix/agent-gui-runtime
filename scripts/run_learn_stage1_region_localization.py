@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -85,6 +86,7 @@ def _observe_bundle_from_trace_result(result: dict[str, Any], *, trace_path: Pat
         image_size = nested_bundle.get("screen_size") if isinstance(nested_bundle.get("screen_size"), dict) else {}
     bundle = {
         "contract_version": "learn_stage1_region_localization_input_v1",
+        "app_name": str(result.get("app_name") or nested_bundle.get("app_name") or "").strip(),
         "image_path": str(
             result.get("image_path")
             or result.get("screenshot_path")
@@ -99,6 +101,25 @@ def _observe_bundle_from_trace_result(result: dict[str, Any], *, trace_path: Pat
         "source_trace_path": str(trace_path),
     }
     screen_reading = result.get("screen_reading") if isinstance(result.get("screen_reading"), dict) else {}
+    if not screen_reading:
+        semantic_keys = (
+            "screen_summary",
+            "state_guess",
+            "interface_classification",
+            "ui",
+            "ui_elements",
+            "modules",
+            "relationships",
+            "execution_relevance",
+            "uncertainties",
+            "source_layers",
+            "raw_refs",
+        )
+        screen_reading = {
+            key: deepcopy(result[key])
+            for key in semantic_keys
+            if key in result
+        }
     if screen_reading:
         bundle["screen_reading"] = screen_reading
     texts = result.get("texts") if isinstance(result.get("texts"), list) else []
@@ -213,6 +234,13 @@ def _items_from_observe_screen_inventory(screen_inventory: dict[str, Any]) -> li
             if not label or not bbox.get("w") or not bbox.get("h"):
                 continue
             item_id = str(value.get("id") or value.get("item_id") or f"{group_name}_{index + 1}")
+            raw_metadata = deepcopy(value.get("metadata")) if isinstance(value.get("metadata"), dict) else {}
+            original_source = str(value.get("source") or raw_metadata.get("source") or source_name)
+            evidence_level = str(value.get("evidence_level") or raw_metadata.get("evidence_level") or "")
+            raw_metadata.setdefault("source", original_source)
+            raw_metadata.setdefault("source_id", item_id)
+            if evidence_level:
+                raw_metadata.setdefault("evidence_level", evidence_level)
             items.append(
                 {
                     "item_id": item_id,
@@ -223,10 +251,9 @@ def _items_from_observe_screen_inventory(screen_inventory: dict[str, Any]) -> li
                     "review_only": True,
                     "grounding_eligible": False,
                     "source_evidence": [source_name],
-                    "metadata": {
-                        "source": source_name,
-                        "source_id": item_id,
-                    },
+                    "source": original_source,
+                    "evidence_level": evidence_level,
+                    "metadata": raw_metadata,
                 }
             )
     return items

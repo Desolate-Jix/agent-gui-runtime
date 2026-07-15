@@ -549,6 +549,8 @@ def test_load_learning_draft_review_exposes_full_screen_fusion_overlay_preview(t
     assert preview["calibration_handoff_report"]["safe_to_start_after_user_approval"] is True
     assert preview["calibration_handoff_report"]["ready_region_numbers"] == [1, 2, 3, 6, 8, 9]
     assert preview["calibration_handoff_report"]["future_outputs"]["rerun_report_status"] == "awaiting_future_calibration_output"
+
+
     assert preview["calibration_handoff_report"]["safety"]["real_clicks"] == 0
     assert preview["calibration_batch_acceptance_report"]["acceptance_status"] == "awaiting_future_calibration_output"
     assert preview["calibration_batch_acceptance_report"]["ready_for_post_batch_refresh"] is False
@@ -587,6 +589,57 @@ def test_load_learning_draft_review_exposes_full_screen_fusion_overlay_preview(t
     assert preview["execute_binding_enabled"] is False
     assert preview["artifact_is_authorization"] is False
     assert preview["interpretation"].startswith("screen understanding preview only")
+
+
+def test_load_learning_draft_review_prefers_current_two_stage_fusion_overlay(tmp_path: Path) -> None:
+    current_overlay = tmp_path / "artifacts" / "review-overlays" / "current_fusion.png"
+    previous_overlay = tmp_path / "artifacts" / "review-overlays" / "previous_fusion.png"
+    current_overlay.parent.mkdir(parents=True, exist_ok=True)
+    current_overlay.write_bytes(b"current fusion")
+    previous_overlay.write_bytes(b"previous fusion")
+    source_path = tmp_path / "artifacts" / "learning-runs" / "trial_result.json"
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    source_path.write_text(
+        json.dumps(
+            {
+                "contract_version": "learn_recognition_trial_result_v1",
+                "learning_draft": {
+                    "contract_version": "learning_template_draft_v1",
+                    "screen_summary": "Current learning run.",
+                    "state_guess": "current_state",
+                    "states": [],
+                    "regions": [],
+                    "action_templates": [],
+                    "blockers": [],
+                    "verification_rules": [],
+                    "page_details": {
+                        "two_stage_understanding": {
+                            "fusion": {
+                                "compiled_overlay_path": "artifacts/review-overlays/current_fusion.png",
+                                "full_screen_understanding_overlay_path": "artifacts/review-overlays/current_fusion.png",
+                                "summary": {"fused_review_box_count": 8},
+                            }
+                        },
+                        "precise_understanding_fusion_status": {
+                            "compiled_overlay_path": "artifacts/review-overlays/previous_fusion.png",
+                            "full_screen_understanding_overlay_path": "artifacts/review-overlays/previous_fusion.png",
+                            "summary": {"fused_review_box_count": 2},
+                        },
+                    },
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    review = load_learning_draft_review(source_path, project_root=tmp_path)
+    preview = review["screen_understanding_preview"]
+
+    assert preview["compiled_overlay_path"] == "artifacts/review-overlays/current_fusion.png"
+    assert preview["full_screen_understanding_overlay_path"] == "artifacts/review-overlays/current_fusion.png"
+    assert preview["fusion_summary"] == {"fused_review_box_count": 8}
 
 
 def test_panel_learning_recognition_trial_loads_as_review_and_candidate() -> None:
@@ -659,6 +712,61 @@ def test_panel_learning_recognition_trial_loads_as_review_and_candidate() -> Non
     assert candidate["validation_status"] == "passed_candidate"
     assert candidate["execute_binding_enabled"] is False
     assert candidate["final_submit_forbidden"] is True
+
+
+def test_panel_learning_recognition_trial_records_verified_model_trace_provenance(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from app.api import panel as panel_api
+
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    trace_path = _write_json(
+        tmp_path / "logs" / "traces" / "vision" / "observe.json",
+        {
+            "success": True,
+            "result": {
+                "image_path": "artifacts/screenshots/current.png",
+                "model_io": {
+                    "contract_version": "model_io_trace_v1",
+                    "status": "success",
+                    "provider": "local",
+                    "model_name": "Qwen3VL-8B",
+                    "raw_text": "{\"contract_version\":\"vision_regions_v1\"}",
+                },
+            },
+        },
+    )
+
+    response = TestClient(app).post(
+        "/panel/run_learning_recognition_trial",
+        json={
+            "app_name": "sample_app",
+            "state_hint": "sample_state",
+            "summary": "Sample surface.",
+            "observation_evidence": {
+                "contract_version": "panel_learning_draft_observation_evidence_v1",
+                "screen_size": {"width": 800, "height": 600},
+                "current_image_path": "artifacts/screenshots/current.png",
+                "model_roles": {
+                    "screen_understanding": {
+                        "model_profile_id": "qwen3_vl_8b_q4_k_m",
+                        "trace_path": str(trace_path.relative_to(tmp_path)),
+                    }
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    saved = json.loads((tmp_path / data["trial_path"]).read_text(encoding="utf-8-sig"))
+    assert saved["actual_model_call_in_this_run"] is True
+    assert saved["model_generated"] is True
+    assert saved["model_provenance"]["actual_model_call_evidence_count"] == 1
+    assert saved["model_provenance"]["evidence"][0]["model_name"] == "Qwen3VL-8B"
+    assert saved["real_clicks"] == 0
+    assert saved["execute_binding_enabled"] is False
 
 
 def test_panel_learning_recognition_trial_attaches_two_stage_fusion_status(tmp_path: Path, monkeypatch) -> None:
@@ -750,6 +858,195 @@ def test_panel_learning_recognition_trial_attaches_two_stage_fusion_status(tmp_p
     assert preview["artifact_is_authorization"] is False
 
 
+def test_panel_learning_recognition_trial_persists_current_calibrated_fusion_overlay(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from app.api import panel as panel_api
+
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    report_path = tmp_path / "artifacts" / "learning-runs" / "two-stage" / "trial_result.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(
+            {
+                "contract_version": "learn_two_stage_screen_understanding_v1",
+                "fusion_status": {
+                    "compiled_overlay_path": "artifacts/review-overlays/stage2.png",
+                    "full_screen_understanding_overlay_path": "artifacts/review-overlays/stage2.png",
+                    "summary": {"fused_review_box_count": 3},
+                },
+                "stage1_gate": {"status": "passed"},
+                "stage2_numbering": {"regions": [{"region_id": "main"}]},
+                "fusion": {"fused_review_boxes": [{"region_id": "review_1"}]},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    overlay_path = tmp_path / "artifacts" / "review-overlays" / "calibrated-fusion.png"
+    overlay_path.parent.mkdir(parents=True, exist_ok=True)
+    overlay_path.write_bytes(b"calibrated fusion")
+
+    response = TestClient(app).post(
+        "/panel/run_learning_recognition_trial",
+        json={
+            "app_name": "steamwebhelper",
+            "state_hint": "friends",
+            "two_stage_report_path": "artifacts/learning-runs/two-stage/trial_result.json",
+            "observation_evidence": {
+                "contract_version": "panel_learning_draft_observation_evidence_v1",
+                "current_image_path": "artifacts/screenshots/steam.png",
+                "coordinate_overlay_path": "artifacts/review-overlays/calibrated-fusion.png",
+                "coordinate_overlay": {
+                    "contract_version": "learn_target_coordinate_overlay_v1",
+                    "status": "ready",
+                    "base_visual_source": "two_stage_numbered_overlay",
+                    "final_fusion_overlay": True,
+                },
+                "learn_all_targets_summary": {
+                    "calibration_target_count": 4,
+                    "vista_validated_count": 4,
+                    "coordinate_calibration_status": "model_validation_completed",
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    saved = json.loads((tmp_path / body["data"]["trial_path"]).read_text(encoding="utf-8"))
+    status = saved["learning_draft"]["page_details"]["pipeline_audit"][
+        "precise_understanding_fusion_status"
+    ]
+    assert status["compiled_overlay_path"] == "artifacts/review-overlays/calibrated-fusion.png"
+    assert status["full_screen_understanding_overlay_path"] == "artifacts/review-overlays/calibrated-fusion.png"
+    assert status["calibration_overlay_path"] == "artifacts/review-overlays/calibrated-fusion.png"
+    assert status["stage2_compiled_overlay_path"] == "artifacts/review-overlays/stage2.png"
+    assert status["display_overlay_source"] == "two_stage_plus_precise_calibration"
+
+    review = TestClient(app).post(
+        "/panel/load_learning_draft_review",
+        json={"source_path": body["data"]["trial_path"]},
+    ).json()["data"]
+    assert review["screen_understanding_preview"]["compiled_overlay_path"] == (
+        "artifacts/review-overlays/calibrated-fusion.png"
+    )
+
+
+def test_attach_two_stage_fusion_status_keeps_current_pipeline_overlay() -> None:
+    from app.api import panel as panel_api
+
+    result = {
+        "learning_draft": {
+            "page_details": {
+                "pipeline_audit": {
+                    "precise_understanding_fusion_status": {
+                        "compiled_overlay_path": "artifacts/review-overlays/current_fusion.png",
+                        "full_screen_understanding_overlay_path": "artifacts/review-overlays/current_full.png",
+                        "summary": {"fused_review_box_count": 7},
+                    }
+                }
+            }
+        }
+    }
+    previous_report = {
+        "compiled_overlay_path": "artifacts/review-overlays/previous_fusion.png",
+        "full_screen_understanding_overlay_path": "artifacts/review-overlays/previous_full.png",
+        "stage1_gate_status": "passed",
+        "source_two_stage_report_path": "artifacts/learning-runs/previous/report.json",
+    }
+
+    panel_api._attach_two_stage_fusion_status_to_learning_result(result, previous_report)
+
+    page_details = result["learning_draft"]["page_details"]
+    attached = page_details["pipeline_audit"]["precise_understanding_fusion_status"]
+    assert attached["compiled_overlay_path"] == "artifacts/review-overlays/current_fusion.png"
+    assert attached["full_screen_understanding_overlay_path"] == "artifacts/review-overlays/current_full.png"
+    assert attached["summary"] == {"fused_review_box_count": 7}
+    assert attached["stage1_gate_status"] == "passed"
+    assert attached["source_two_stage_report_path"] == "artifacts/learning-runs/previous/report.json"
+    assert page_details["compiled_overlay_path"] == "artifacts/review-overlays/current_fusion.png"
+    assert page_details["full_screen_understanding_overlay_path"] == "artifacts/review-overlays/current_full.png"
+
+
+def test_attach_two_stage_fusion_status_prefers_verified_calibrated_fusion_over_stale_current_overlay() -> None:
+    from app.api import panel as panel_api
+
+    result = {
+        "learning_draft": {
+            "page_details": {
+                "pipeline_audit": {
+                    "precise_understanding_fusion_status": {
+                        "compiled_overlay_path": "artifacts/review-overlays/stage2.png",
+                        "full_screen_understanding_overlay_path": "artifacts/review-overlays/stage2.png",
+                    }
+                }
+            }
+        }
+    }
+    calibrated = {
+        "compiled_overlay_path": "artifacts/review-overlays/calibrated-fusion.png",
+        "full_screen_understanding_overlay_path": "artifacts/review-overlays/calibrated-fusion.png",
+        "stage2_compiled_overlay_path": "artifacts/review-overlays/stage2.png",
+        "final_fusion_overlay": True,
+        "display_overlay_source": "two_stage_plus_precise_calibration",
+    }
+
+    panel_api._attach_two_stage_fusion_status_to_learning_result(result, calibrated)
+
+    attached = result["learning_draft"]["page_details"]["pipeline_audit"][
+        "precise_understanding_fusion_status"
+    ]
+    assert attached["compiled_overlay_path"] == "artifacts/review-overlays/calibrated-fusion.png"
+    assert attached["final_fusion_overlay"] is True
+
+
+def test_load_learning_draft_review_prefers_verified_calibrated_fusion_over_two_stage_overlay(
+    tmp_path: Path,
+) -> None:
+    stage2 = tmp_path / "artifacts" / "review-overlays" / "stage2.png"
+    calibrated = tmp_path / "artifacts" / "review-overlays" / "calibrated.png"
+    stage2.parent.mkdir(parents=True, exist_ok=True)
+    stage2.write_bytes(b"stage2")
+    calibrated.write_bytes(b"calibrated")
+    source = tmp_path / "artifacts" / "learning-runs" / "trial_result.json"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text(
+        json.dumps(
+            {
+                "learning_draft": {
+                    "screen_summary": "test",
+                    "states": [],
+                    "regions": [],
+                    "action_templates": [],
+                    "blockers": [],
+                    "verification_rules": [],
+                    "page_details": {
+                        "two_stage_understanding": {
+                            "fusion": {"compiled_overlay_path": "artifacts/review-overlays/stage2.png"}
+                        },
+                        "pipeline_audit": {
+                            "precise_understanding_fusion_status": {
+                                "compiled_overlay_path": "artifacts/review-overlays/calibrated.png",
+                                "final_fusion_overlay": True,
+                                "display_overlay_source": "two_stage_plus_precise_calibration",
+                            }
+                        },
+                    },
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    preview = load_learning_draft_review(source, project_root=tmp_path)["screen_understanding_preview"]
+
+    assert preview["compiled_overlay_path"] == "artifacts/review-overlays/calibrated.png"
+
+
 def test_panel_learning_recognition_trial_uses_two_stage_numbered_items_when_calibration_has_no_targets(
     tmp_path: Path,
     monkeypatch,
@@ -763,6 +1060,7 @@ def test_panel_learning_recognition_trial_uses_two_stage_numbered_items_when_cal
         json.dumps(
             {
                 "contract_version": "learn_two_stage_screen_understanding_v1",
+                "report_identity": "authoritative_two_stage_fixture",
                 "stage1_gate": {"status": "passed"},
                 "stage2_numbering_skipped": False,
                 "stage2_numbering": {
@@ -833,10 +1131,44 @@ def test_panel_learning_recognition_trial_uses_two_stage_numbered_items_when_cal
     assert data["learn_all_targets"]["execute_binding_enabled"] is False
 
     saved = json.loads((tmp_path / data["trial_path"]).read_text(encoding="utf-8"))
+    assert saved["two_stage_understanding"]["report_identity"] == "authoritative_two_stage_fixture"
+    assert [
+        item["region_id"] for item in saved["two_stage_understanding"]["stage2_numbering"]["regions"]
+    ] == ["structure_region_main_content"]
     labels = {item["label"] for item in saved["learning_draft"]["regions"]}
     assert "Featured album card" in labels
     assert saved["learning_draft"]["execute_binding_enabled"] is False
     assert saved["learning_draft"]["artifact_is_authorization"] is False
+
+
+def test_panel_calibrated_target_replay_uses_merged_support_point() -> None:
+    from app.api import panel as panel_api
+
+    result = panel_api._panel_calibrated_target_grounding_adapter(
+        item={
+            "bbox": {"x": 1012, "y": 0, "w": 48, "h": 42},
+            "metadata": {
+                "source": "vision",
+                "layout_cleanup": {
+                    "status": "merged_duplicate",
+                    "merged_support": {
+                        "click_point": {"x": 1036, "y": 21},
+                        "coordinate_validation": {
+                            "status": "valid",
+                            "click_point_present": True,
+                            "click_point_inside_bbox": True,
+                        },
+                        "coordinate_source": "precise_locator_v1",
+                    },
+                },
+            },
+        },
+        roi_crop={"contract_version": "learn_roi_crop_v1"},
+    )
+
+    assert result["screen_point"] == {"x": 1036, "y": 21}
+    assert result["debug"]["point_source"] == "layout_cleanup.merged_support.click_point"
+    assert result["debug"]["coordinate_source"] == "precise_locator_v1"
 
 
 def test_panel_learning_recognition_trial_uses_review_boxes_as_read_only_inventory() -> None:
@@ -1523,6 +1855,16 @@ def test_panel_lists_recent_learning_draft_sources(tmp_path: Path, monkeypatch) 
                         ],
                     },
                 },
+                "presentation_acceptance": {
+                    "contract_version": "learning_interface_presentation_acceptance_v1",
+                    "accepted": False,
+                    "acceptance_status": "not_covered",
+                    "same_source_three_image_evidence": False,
+                    "frontend_revision_matches": False,
+                    "desktop_viewport_covered": False,
+                    "narrow_viewport_covered": False,
+                    "blocking_reasons": ["missing_presentation_evidence"],
+                },
                 "demo_chain_manifest": {
                     "contract_version": "learning_mode_demo_chain_manifest_v1",
                     "demo_stage_order": [
@@ -1679,6 +2021,13 @@ def test_panel_lists_recent_learning_draft_sources(tmp_path: Path, monkeypatch) 
     assert candidate_entry["fresh_model_replacement_sources_to_replace"] == ["assisted_or_human_review"]
     assert candidate_entry["fresh_model_replacement_required_source_type"] == "actual_model_call"
     assert candidate_entry["fresh_model_replacement_step_count"] == 4
+    assert candidate_entry["presentation_acceptance_status"] == "not_covered"
+    assert candidate_entry["presentation_accepted"] is False
+    assert candidate_entry["presentation_same_source_three_image_evidence"] is False
+    assert candidate_entry["presentation_frontend_revision_matches"] is False
+    assert candidate_entry["presentation_desktop_viewport_covered"] is False
+    assert candidate_entry["presentation_narrow_viewport_covered"] is False
+    assert candidate_entry["presentation_blocker_count"] == 1
     assert candidate_entry["fresh_model_replacement_command_executes_now_count"] == 0
     assert candidate_entry["candidate_validation_status"] == "blocked_pending_calibration"
     assert "artifacts/learning-runs/bad/trial_result.json" not in source_paths
@@ -1809,12 +2158,31 @@ def test_direct_page_detail_and_scaffold_sources_load_as_review_only(tmp_path: P
     assert page_review["draft"]["regions"][0]["state_id"] == "main_content"
     assert page_review["draft"]["action_templates"][0]["state_id"] == "main_content"
     assert page_review["draft"]["action_templates"][0]["target_region_id"] == "main_card"
+    page_details = page_review["draft"]["page_details"]
+    assert [item["region_id"] for item in page_details["review_only_regions"]] == ["main_card"]
+    assert page_details["grounding_candidates"] == []
+    assert page_details["danger_zones"] == []
+    assert page_details["inventory_summary"] == {
+        "screen_inventory_count": 1,
+        "accepted_for_grounding_count": 0,
+        "rejected_non_actionable_count": 1,
+        "grounding_validation_count": 0,
+    }
     assert page_review["screen_understanding_preview"]["compiled_overlay_path"] == (
         "artifacts/review-overlays/compiled.png"
     )
     assert page_review["screen_understanding_preview"]["full_screen_understanding_overlay_path"] == (
         "artifacts/review-overlays/full.png"
     )
+    assert page_review["screen_understanding_preview"]["counts"] == {
+        "inventory_items": 1,
+        "review_only_regions": 1,
+        "grounding_candidates": 0,
+        "danger_zones": 0,
+    }
+    assert [item["item_id"] for item in page_review["screen_understanding_preview"]["review_only_regions"]] == [
+        "main_card"
+    ]
     assert page_review["pathgraph_candidate_review"]["page_detail_candidate"]["contract_version"] == (
         "learn_page_detail_candidate_v1"
     )
@@ -1824,6 +2192,15 @@ def test_direct_page_detail_and_scaffold_sources_load_as_review_only(tmp_path: P
     assert scaffold_review["screen_understanding_preview"]["full_screen_understanding_overlay_path"] == (
         "artifacts/review-overlays/full.png"
     )
+    assert scaffold_review["screen_understanding_preview"]["counts"] == {
+        "inventory_items": 1,
+        "review_only_regions": 1,
+        "grounding_candidates": 0,
+        "danger_zones": 0,
+    }
+    assert [item["item_id"] for item in scaffold_review["screen_understanding_preview"]["review_only_regions"]] == [
+        "main_card"
+    ]
     assert scaffold_review["draft"]["states"][0]["region_refs"] == ["main_card"]
     assert scaffold_review["draft"]["states"][0]["action_template_refs"] == ["review_main_card"]
     assert scaffold_review["pathgraph_candidate_review"]["learn_mode_demo_scaffold"]["contract_version"] == (

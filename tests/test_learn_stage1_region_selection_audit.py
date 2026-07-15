@@ -29,6 +29,81 @@ def test_stage1_region_selection_audit_passes_complete_bars():
     assert audit["overlay_path"] == "overlay.png"
 
 
+def test_stage1_region_selection_audit_allows_sidebar_ending_at_adjacent_full_width_bottom_panel():
+    audit = audit_stage1_region_selection(
+        localized_regions=[
+            {
+                "region_id": "structure_region_top_bar",
+                "label": "Top bar",
+                "bbox": {"x": 0, "y": 0, "w": 800, "h": 109},
+            },
+            {
+                "region_id": "structure_region_left_sidebar",
+                "label": "Left sidebar",
+                "bbox": {"x": 12, "y": 117, "w": 252, "h": 736},
+            },
+            {
+                "region_id": "structure_region_main_content",
+                "label": "Main content",
+                "bbox": {"x": 264, "y": 109, "w": 536, "h": 744},
+            },
+            {
+                "region_id": "structure_region_conversation_bottom_panel",
+                "label": "Conversation bottom panel",
+                "bbox": {"x": 0, "y": 853, "w": 800, "h": 147},
+            },
+        ],
+        screen_size={"width": 800, "height": 1000},
+    )
+
+    assert audit["passed"] is True
+    assert "sidebar_bbox_too_short" not in audit["failure_categories"]
+    sidebar = next(region for region in audit["regions"] if region["region_type"] == "left_sidebar")
+    assert "vertical_lane_completed_by_adjacent_bottom_bar" in sidebar["notes"]
+
+
+def test_stage1_region_selection_audit_still_blocks_short_sidebar_without_bottom_coverage():
+    audit = audit_stage1_region_selection(
+        localized_regions=[
+            {
+                "region_id": "structure_region_left_sidebar",
+                "label": "Left sidebar",
+                "bbox": {"x": 0, "y": 100, "w": 120, "h": 650},
+            },
+            {
+                "region_id": "structure_region_main_content",
+                "label": "Main content",
+                "bbox": {"x": 120, "y": 100, "w": 880, "h": 900},
+            },
+        ],
+        screen_size={"width": 1000, "height": 1000},
+    )
+
+    assert audit["passed"] is False
+    assert "sidebar_bbox_too_short" in audit["failure_categories"]
+
+
+def test_stage1_region_selection_audit_blocks_topbar_that_leaves_unassigned_top_gap():
+    audit = audit_stage1_region_selection(
+        localized_regions=[
+            {
+                "region_id": "structure_region_top_bar",
+                "label": "Top bar",
+                "bbox": {"x": 0, "y": 122, "w": 1200, "h": 88},
+            },
+            {
+                "region_id": "structure_region_main_content",
+                "label": "Main content",
+                "bbox": {"x": 0, "y": 210, "w": 1200, "h": 590},
+            },
+        ],
+        screen_size={"width": 1200, "height": 800},
+    )
+
+    assert audit["passed"] is False
+    assert "top_structure_does_not_cover_screen_origin" in audit["failure_categories"]
+
+
 def test_stage1_region_selection_audit_flags_icon_only_sidebar():
     audit = audit_stage1_region_selection(
         localized_regions=[

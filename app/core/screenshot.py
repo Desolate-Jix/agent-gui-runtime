@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import time
+from pathlib import Path
 from typing import Any, Optional
 
 from loguru import logger
@@ -154,8 +156,9 @@ class ScreenshotService:
         }
 
     def _cleanup_old_captures(self) -> None:
+        protected = _benchmark_protected_screenshot_paths(self._capture_dir)
         captures = sorted(
-            self._capture_dir.glob("*.png"),
+            (path for path in self._capture_dir.glob("*.png") if path.resolve() not in protected),
             key=lambda path: path.stat().st_mtime,
             reverse=True,
         )
@@ -180,3 +183,35 @@ class ScreenshotService:
 
 
 screenshot_service = ScreenshotService()
+
+
+def _benchmark_protected_screenshot_paths(capture_dir: Path) -> set[Path]:
+    artifact_dir = capture_dir.parent
+    project_root = artifact_dir.parent
+    benchmark_dir = artifact_dir / "benchmarks"
+    protected: set[Path] = set()
+    if not benchmark_dir.exists():
+        return protected
+
+    def collect(value: Any, key: str = "") -> None:
+        if isinstance(value, dict):
+            for child_key, child_value in value.items():
+                collect(child_value, str(child_key))
+            return
+        if isinstance(value, list):
+            for child in value:
+                collect(child, key)
+            return
+        if key not in {"screenshot_path", "source_image_path"} or not isinstance(value, str) or not value.strip():
+            return
+        candidate = Path(value)
+        if not candidate.is_absolute():
+            candidate = project_root / candidate
+        protected.add(candidate.resolve())
+
+    for manifest_path in benchmark_dir.glob("*.json"):
+        try:
+            collect(json.loads(manifest_path.read_text(encoding="utf-8-sig")))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Failed to read benchmark screenshot references from {}: {}", manifest_path, exc)
+    return protected

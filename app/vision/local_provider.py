@@ -171,6 +171,7 @@ class LocalVisionProvider:
         *,
         max_tokens: int = 2048,
         temperature: float = 0.1,
+        request_timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
         payload = {
             "model": self.model_name,
@@ -195,6 +196,8 @@ class LocalVisionProvider:
                 },
             ],
         }
+        if request_timeout_seconds is not None and float(request_timeout_seconds) > 0:
+            payload["request_timeout_seconds"] = float(request_timeout_seconds)
         body = json.dumps(payload).encode("utf-8")
         loading_deadline = time.monotonic() + self.timeout_seconds
         while True:
@@ -252,6 +255,29 @@ class LocalVisionProvider:
                     parts.append(item["text"])
             return "\n".join(parts).strip()
         raise RuntimeError("local vision endpoint returned unsupported message content")
+
+    def _repair_model_utf8_text(self, text: str) -> tuple[str, dict[str, Any]]:
+        audit = {
+            "applied": False,
+            "method": "latin1_roundtrip_when_cjk_quality_improves",
+        }
+        try:
+            candidate = text.encode("latin-1").decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            return text, audit
+        if candidate == text or self._cjk_character_count(candidate) <= self._cjk_character_count(text):
+            return text, audit
+        audit["applied"] = True
+        return candidate, audit
+
+    def _cjk_character_count(self, text: str) -> int:
+        ranges = (
+            (0x3400, 0x4DBF),
+            (0x4E00, 0x9FFF),
+            (0xF900, 0xFAFF),
+            (0x20000, 0x2FA1F),
+        )
+        return sum(any(start <= ord(char) <= end for start, end in ranges) for char in text)
 
     def _raw_text_preview(self, text: str, *, limit: int = 300) -> str:
         compact = " ".join(str(text or "").split())
@@ -622,7 +648,10 @@ class LocalVisionProvider:
                     ),
                 }
                 raise error from exc
-            raw_text = self._extract_message_text(raw_response)
+            raw_text_original = self._extract_message_text(raw_response)
+            raw_text, utf8_repair = self._repair_model_utf8_text(raw_text_original)
+            if utf8_repair["applied"]:
+                attempt_notes.append("utf8_repair=latin1_roundtrip_when_cjk_quality_improves")
             try:
                 parsed_model_json = self._parse_json_object(raw_text)
             except Exception as exc:
@@ -639,6 +668,8 @@ class LocalVisionProvider:
                         max_tokens=max_tokens,
                         temperature=temperature,
                         raw_text=raw_text,
+                        raw_text_original=raw_text_original,
+                        utf8_repair=utf8_repair,
                         raw_response=raw_response,
                         parsed_model_json=None,
                         runtime_normalized_json=None,
@@ -669,6 +700,8 @@ class LocalVisionProvider:
                     max_tokens=max_tokens,
                     temperature=temperature,
                     raw_text=raw_text,
+                    raw_text_original=raw_text_original,
+                    utf8_repair=utf8_repair,
                     raw_response=raw_response,
                     parsed_model_json=raw_parsed_model_json,
                     runtime_normalized_json=parsed,
@@ -727,6 +760,8 @@ class LocalVisionProvider:
         max_tokens: int,
         temperature: float,
         raw_text: str,
+        raw_text_original: str | None = None,
+        utf8_repair: dict[str, Any] | None = None,
         raw_response: dict[str, Any] | None,
         parsed_model_json: dict[str, Any] | None,
         runtime_normalized_json: dict[str, Any] | None,
@@ -763,6 +798,8 @@ class LocalVisionProvider:
             },
             "output": {
                 "raw_text": raw_text,
+                "raw_text_original": raw_text if raw_text_original is None else raw_text_original,
+                "utf8_repair": utf8_repair,
                 "raw_response": raw_response,
                 "parsed_model_json": parsed_model_json,
                 "runtime_normalized_json": runtime_normalized_json,

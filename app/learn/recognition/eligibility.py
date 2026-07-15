@@ -31,6 +31,7 @@ def apply_grounding_eligibility_gate(items: list[dict[str, Any]]) -> list[dict[s
 def evaluate_grounding_eligibility(item: dict[str, Any]) -> dict[str, Any]:
     label = str(item.get("label") or item.get("text") or "")
     item_type = str(item.get("item_type") or "").casefold()
+    role = str(item.get("role") or "").casefold()
     evidence_level = str(item.get("evidence_level") or "").casefold()
     sources = _sources(item)
     interactable = item.get("interactable_evidence") if isinstance(item.get("interactable_evidence"), dict) else {}
@@ -49,6 +50,11 @@ def evaluate_grounding_eligibility(item: dict[str, Any]) -> dict[str, Any]:
         return _blocked(
             "semantic_region_only_without_interactable_evidence",
             evidence_strength="semantic_only",
+        )
+    if role in {"text", "section", "group"} and not _has_direct_interactable_evidence(interactable):
+        return _blocked(
+            "non_actionable_role_without_direct_interactable_evidence",
+            evidence_strength=_evidence_strength(sources, interactable),
         )
     if item_type in {"readable", "layout"} and not open_detail_card:
         strength = "semantic_only" if "vision" in sources else "ocr_text_anchor_only" if "ocr" in sources else "unknown_or_stale"
@@ -234,6 +240,23 @@ def _has_interactable_evidence(interactable: dict[str, Any]) -> bool:
     )
 
 
+def _has_direct_interactable_evidence(interactable: dict[str, Any]) -> bool:
+    """只接受能证明动作能力的证据；几何校准与重叠本身不代表可交互。"""
+
+    return any(
+        bool(interactable.get(key))
+        for key in (
+            "uia_invokable",
+            "uia_value_pattern",
+            "uia_editable",
+            "dom_clickable",
+            "dom_editable",
+            "omniparser_interactable",
+            "execute_candidate_ranked",
+        )
+    )
+
+
 def _has_multi_source_interactable_surrogate(sources: set[str]) -> bool:
     return len(sources.intersection({"ocr", "uia", "dom", "omniparser"})) >= 2
 
@@ -277,7 +300,12 @@ def _is_non_actionable(item: dict[str, Any]) -> bool:
     item_type = str(item.get("item_type") or "").casefold()
     role = str(item.get("role") or "").casefold()
     strength = str(item.get("evidence_strength") or "").casefold()
-    return item_type in {"readable", "layout"} or role in {"text", "card", "section", "group"} or strength in {"semantic_only", "ocr_text_anchor_only", "danger_zone"}
+    interactable = item.get("interactable_evidence") if isinstance(item.get("interactable_evidence"), dict) else {}
+    if _looks_like_open_detail_card(item, interactable=interactable):
+        return False
+    if role in {"text", "section", "group"}:
+        return not _has_direct_interactable_evidence(interactable)
+    return item_type in {"readable", "layout"} or strength in {"semantic_only", "ocr_text_anchor_only", "danger_zone"}
 
 
 def _rejection_metric(items: list[dict[str, Any]]) -> dict[str, Any]:

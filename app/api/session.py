@@ -42,19 +42,23 @@ def bind_window(request: BindWindowRequest) -> APIResponse:
     """Bind the runtime to a target window session."""
     candidates = window_manager.list_visible_windows()
 
-    if not request.process_name and not request.title:
+    if request.handle is None and not request.process_name and not request.title:
         return APIResponse(
             success=False,
             message="No binding criteria provided",
             data={"candidates": candidates},
             error=ErrorModel(
                 code="missing_binding_criteria",
-                details="Provide process_name and/or title, or inspect candidates in data.candidates",
+                details="Provide handle, process_name and/or title, or inspect candidates in data.candidates",
             ),
         )
 
     try:
-        bound = window_manager.bind_window(request.process_name, request.title)
+        bound = (
+            window_manager.bind_window_by_handle(request.handle)
+            if request.handle is not None
+            else window_manager.bind_window(request.process_name, request.title)
+        )
         data = _to_session_data(bound).model_dump()
         data["candidates"] = candidates
         operation_context = build_operation_runtime_context(

@@ -86,9 +86,12 @@ Task:
 Return JSON only. Do not return markdown.
 
 Required JSON shape:
-- top-level keys: provider, contract_version, image_size, screen_summary, state_guess, regions, targets, observers, notes
+- top-level keys: provider, contract_version, image_size, screen_summary, state_guess, interface_classification, regions, targets, observers, notes
 - contract_version must be "vision_regions_v1"
 - image_size must be {{"width": {image_size.width}, "height": {image_size.height}}}
+- interface_classification must be an object with category, confidence, reason, and structure_signals
+- interface_classification.category must be one of: media_catalog, documentation_portal, settings_dashboard, conversation_workspace, file_browser, form_workflow, generic
+- classify by the visible interface structure and task surface, never by a product-specific category name
 - each region must include: region_id, label, role, diagonal, description, ocr_text, text_lines, possible_destinations, anchor_relations, grounding_constraints, confidence
 - role must be one of: nav, button, input, tab, card, list, dialog, content, panel, icon, other
 - diagonal must be an object with integer keys x1, y1, x2, y2
@@ -452,6 +455,7 @@ Return JSON only with this compact shape:
   "image_size": {{"width": {image_size.width}, "height": {image_size.height}}},
   "screen_summary": "short purpose",
   "state_guess": "short localization state hint",
+  "interface_classification": {{"category": "media_catalog|documentation_portal|settings_dashboard|conversation_workspace|file_browser|form_workflow|generic", "confidence": 0.0, "reason": "short visible evidence", "structure_signals": {{"media_cards": false, "article_or_document_sections": false, "settings_controls": false, "people_or_conversation_rows": false, "file_or_folder_rows": false, "form_fields": false}}}},
   "regions": [
     {{"region_id": "c1", "label": "visible label or icon name", "role": "button|icon|input|tab|nav|menu_item|link|toggle|card|other", "diagonal": {{"x1": 0, "y1": 0, "x2": 1, "y2": 1}}, "description": "visible content plus likely action", "ocr_text": "short exact visible anchor", "text_lines": ["exact visible anchor text"], "boundary_definition": "tight visible boundary", "clickable_area_hint": "where a later locator should point", "confidence": 0.0}}
   ],
@@ -465,6 +469,12 @@ Rules:
 - return at most {max_regions} independently clickable candidate controls, not large containing panels
 - prioritize navigation, icon-only buttons, primary buttons, tabs, inputs, toggles, menus, and title-bar controls
 - keep screen_summary and state_guess under 12 words each
+- classify by visible interface structure, not the application or product name
+- use media_catalog for media libraries/catalogs, documentation_portal for text-heavy documentation/news portals, settings_dashboard for settings/control surfaces, conversation_workspace for chat or conversation workspaces, file_browser for file managers with navigation trees and dense row/column listings, form_workflow for field-driven forms, and generic when evidence is insufficient
+- set every structure_signals field from visible evidence before choosing category; the selected specialized category must have its corresponding signal set to true
+- friend, contact, participant, presence, or online-status rows are conversation_workspace; they are not file_browser merely because they form a dense list
+- file_browser requires visible file/folder semantics such as filenames, folder icons, path/address navigation, a directory tree, or file metadata columns
+- interface_classification.reason must cite one concise visible structural clue; use generic with lower confidence instead of inventing a specialized category
 - state_guess must be the best concise hint to pass into a later POST /vision/locate_target state_hint field
 - prefer spatial/functional area phrases such as "top navigation bar", "job results list", "chat title bar", "left sidebar", "settings dialog", or "main content list"
 - think of each region as input for a later locator task card: include enough visible evidence for another model to find the same target

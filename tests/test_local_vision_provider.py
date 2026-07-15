@@ -90,6 +90,56 @@ def test_local_provider_calls_openai_compatible_vision_endpoint(tmp_path, monkey
     assert attempt_io["output"]["parsed_model_json"]["screen_summary"] == "demo screen"
 
 
+def test_local_provider_repairs_reversible_utf8_mojibake_before_parsing(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (200, 120), color=(255, 255, 255)).save(image_path)
+    expected_text = "最近播放"
+    corrupted_text = expected_text.encode("utf-8").decode("latin-1")
+    model_json = {
+        "screen_summary": corrupted_text,
+        "state_guess": "home",
+        "regions": [],
+        "targets": [],
+        "observers": [],
+        "notes": [],
+    }
+    original_raw_text = json.dumps(model_json, ensure_ascii=False)
+
+    def fake_urlopen(request, timeout):
+        return _FakeHTTPResponse({"choices": [{"message": {"content": original_raw_text}}]})
+
+    monkeypatch.setattr("app.vision.local_provider.urlopen", fake_urlopen)
+
+    result = LocalVisionProvider(
+        endpoint="http://127.0.0.1:1234/v1/chat/completions",
+        model_name="Qwen3-VL-8B-Instruct-GGUF",
+        timeout_seconds=12,
+    ).analyze(VisionAnalyzeRequest(image_path=str(image_path), app_name="demo"))
+
+    assert result.screen_summary == expected_text
+    assert result.raw_text is not None
+    assert expected_text in result.raw_text
+    attempt_io = result.raw_response["attempts"][0]["model_io"]
+    assert attempt_io["output"]["raw_text_original"] == original_raw_text
+    assert attempt_io["output"]["raw_text"] == result.raw_text
+    assert attempt_io["output"]["utf8_repair"] == {
+        "applied": True,
+        "method": "latin1_roundtrip_when_cjk_quality_improves",
+    }
+
+
+def test_local_provider_does_not_rewrite_valid_utf8_text() -> None:
+    provider = LocalVisionProvider()
+
+    repaired, audit = provider._repair_model_utf8_text("最近播放 and café")
+
+    assert repaired == "最近播放 and café"
+    assert audit == {
+        "applied": False,
+        "method": "latin1_roundtrip_when_cjk_quality_improves",
+    }
+
+
 def test_local_provider_caps_fast_screen_understanding_output(tmp_path, monkeypatch) -> None:
     image_path = tmp_path / "observe.png"
     Image.new("RGB", (200, 120), color=(255, 255, 255)).save(image_path)

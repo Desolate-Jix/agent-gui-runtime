@@ -693,6 +693,8 @@ def _first_actual_model_source(audit: dict[str, Any], root: Path) -> Path | None
     for item in _list_of_dicts(audit.get("evidence")):
         if item.get("actual_model_call_in_this_run") is not True:
             continue
+        if item.get("counts_as_pure_model_generated") is False:
+            continue
         value = item.get("path")
         if isinstance(value, str) and value.strip():
             path = _resolve_path(value, root)
@@ -780,7 +782,13 @@ def _model_provenance_paths(*, source_file: Path, review: dict[str, Any], root: 
             value = payload_source.get(key)
             if isinstance(value, str) and value.strip():
                 queue.append((f"{role}.source.{key}", _resolve_path(value, root)))
-        for key in ("reviewed_template_candidate_path", "actual_parser_output_path", "actual_grounding_output_path"):
+        for key in (
+            "source_path",
+            "source_trial_path",
+            "reviewed_template_candidate_path",
+            "actual_parser_output_path",
+            "actual_grounding_output_path",
+        ):
             value = payload.get(key)
             if isinstance(value, str) and value.strip():
                 queue.append((f"{role}.{key}", _resolve_path(value, root)))

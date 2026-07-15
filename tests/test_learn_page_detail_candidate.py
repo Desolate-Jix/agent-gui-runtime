@@ -22,6 +22,11 @@ def test_page_detail_candidate_preserves_panel_trial_overlay_and_screenshot(tmp_
         tmp_path / "artifacts" / "learning-runs" / "panel_trial" / "trial_result.json",
         {
             "contract_version": "panel_learning_recognition_trial_run_v1",
+            "ui_hierarchy": {
+                "contract_version": "ui_hierarchy_graph_v1",
+                "nodes": [{"node_id": "screen", "node_type": "screen", "children": []}],
+                "roots": ["screen"],
+            },
             "observe_bundle": {
                 "source_image_path": "artifacts/screenshots/apple_music.png",
                 "sources": {
@@ -58,6 +63,251 @@ def test_page_detail_candidate_preserves_panel_trial_overlay_and_screenshot(tmp_
     assert result["compiled_overlay_path"] == "artifacts/review-overlays/apple_music_numbered.png"
     assert result["full_screen_understanding_overlay_path"] == "artifacts/review-overlays/apple_music_numbered.png"
     assert result["summary"]["region_count"] == 1
+    assert result["ui_hierarchy"]["contract_version"] == "ui_hierarchy_graph_v1"
+    assert result["ui_hierarchy"]["roots"] == ["screen"]
+    review = load_learning_draft_review(result["report_path"], project_root=tmp_path)
+    assert review["draft"]["ui_hierarchy"]["contract_version"] == "ui_hierarchy_graph_v1"
+
+
+def test_page_detail_candidate_uses_nested_two_stage_structure_from_fused_trial(tmp_path: Path) -> None:
+    source = _write_json(
+        tmp_path / "artifacts" / "learning-runs" / "fused_trial" / "trial_result.json",
+        {
+            "contract_version": "learn_recognition_pipeline_result_v1",
+            "observe_bundle": {
+                "source_image_path": "artifacts/screenshots/python.png",
+                "sources": {
+                    "calibrated_targets": {
+                        "targets": [{"target_id": "search", "validated": True}],
+                        "source_overlay_path": "artifacts/review-overlays/calibration.png",
+                    }
+                },
+            },
+            "learning_draft": {
+                "contract_version": "learning_template_draft_v1",
+                "regions": [
+                    {
+                        "region_id": "coarse_region",
+                        "label": "Coarse fallback",
+                        "role": "review_only",
+                        "bbox": {"x": 0, "y": 0, "w": 800, "h": 600},
+                    }
+                ],
+                "page_details": {
+                    "contract_version": "learning_draft_page_details_v1",
+                    "screen": {"image_path": "artifacts/screenshots/python.png"},
+                    "compiled_overlay_path": "artifacts/review-overlays/fused.png",
+                    "full_screen_understanding_overlay_path": "artifacts/review-overlays/fused.png",
+                },
+            },
+            "two_stage_understanding": {
+                "contract_version": "learn_two_stage_screen_understanding_v1",
+                "stage2_numbering": {
+                    "contract_version": "learn_stage2_region_numbering_v1",
+                    "regions": [
+                        {
+                            "region_id": "main",
+                            "label": "Main",
+                            "bbox": {"x": 0, "y": 100, "w": 800, "h": 500},
+                            "subregion_groups": [],
+                            "numbered_items": [],
+                        }
+                    ],
+                },
+                "fusion": {
+                    "contract_version": "learn_two_stage_fused_review_boxes_v1",
+                    "fused_review_boxes": [
+                        {
+                            "number": "1.1",
+                            "label": "Search",
+                            "role": "input",
+                            "bbox": {"x": 40, "y": 130, "w": 300, "h": 40},
+                            "parent_region_id": "main",
+                            "parent_region_label": "Main",
+                            "parent_region_bbox": {"x": 0, "y": 100, "w": 800, "h": 500},
+                        },
+                        {
+                            "number": "1.2",
+                            "label": "Result card",
+                            "role": "card",
+                            "bbox": {"x": 40, "y": 210, "w": 340, "h": 180},
+                            "parent_region_id": "main",
+                            "parent_region_label": "Main",
+                            "parent_region_bbox": {"x": 0, "y": 100, "w": 800, "h": 500},
+                        },
+                    ],
+                    "compiled_overlay_path": "artifacts/review-overlays/fused.png",
+                    "full_screen_understanding_overlay_path": "artifacts/review-overlays/fused.png",
+                },
+                "ui_hierarchy": {
+                    "contract_version": "ui_hierarchy_graph_v1",
+                    "root_node_id": "uih:screen",
+                    "nodes": [
+                        {"node_id": "uih:screen", "level": "screen"},
+                        {"node_id": "uih:structure:main", "level": "structure_region"},
+                        {"node_id": "uih:item:search", "level": "item"},
+                    ],
+                    "edges": [],
+                },
+            },
+        },
+    )
+
+    result = build_learn_page_detail_candidate(source_path=source, out_dir=source.parent, project_root=tmp_path)
+
+    assert result["source_detail_shape"] == "learn_two_stage_screen_understanding_v1"
+    assert result["summary"]["region_count"] == 2
+    assert {item["label"] for item in result["layout"]["regions"]} == {"Search", "Result card"}
+    assert result["ui_hierarchy"]["contract_version"] == "ui_hierarchy_graph_v1"
+    assert len(result["ui_hierarchy"]["nodes"]) == 3
+    assert result["compiled_overlay_path"] == "artifacts/review-overlays/fused.png"
+    assert result["screenshot_path"] == "artifacts/screenshots/python.png"
+
+
+def test_page_detail_candidate_overlays_matched_precise_locator_geometry_on_two_stage_regions(tmp_path: Path) -> None:
+    source = _write_json(
+        tmp_path / "artifacts" / "learning-runs" / "fused_precise_trial" / "trial_result.json",
+        {
+            "contract_version": "learn_recognition_pipeline_result_v1",
+            "observe_bundle": {
+                "source_image_path": "artifacts/screenshots/app.png",
+                "sources": {
+                    "calibrated_targets": {
+                        "source_overlay_path": "artifacts/review-overlays/precise.png",
+                        "targets": [
+                            {
+                                "candidate_id": "stage2:main:search_item",
+                                "label": "Search",
+                                "role": "input",
+                                "bbox": {"x": 52, "y": 142, "w": 286, "h": 34},
+                                "click_point": {"x": 195, "y": 159},
+                                "coordinate_source": "precise_locator_v1",
+                            },
+                            {
+                                "candidate_id": "stage2:main:renamed_result_card",
+                                "label": "Result card",
+                                "role": "card",
+                                "bbox": {"x": 43, "y": 213, "w": 334, "h": 174},
+                                "click_point": {"x": 210, "y": 300},
+                                "coordinate_source": "precise_locator_v1",
+                            },
+                        ],
+                    }
+                },
+                "panel_observation_evidence": {
+                    "coordinate_overlay_path": "artifacts/review-overlays/precise.png",
+                },
+            },
+            "two_stage_understanding": {
+                "contract_version": "learn_two_stage_screen_understanding_v1",
+                "stage2_numbering": {"regions": []},
+                "fusion": {
+                    "contract_version": "learn_two_stage_fused_review_boxes_v1",
+                    "fused_review_boxes": [
+                        {
+                            "number": "1.1",
+                            "label": "Search",
+                            "role": "input",
+                            "bbox": {"x": 40, "y": 130, "w": 300, "h": 40},
+                            "children": [
+                                {
+                                    "item_id": "two_stage_review_main_search_item",
+                                    "label": "Search",
+                                    "role": "input",
+                                    "bbox": {"x": 40, "y": 130, "w": 300, "h": 40},
+                                }
+                            ],
+                            "parent_region_id": "main",
+                            "parent_region_label": "Main",
+                            "parent_region_bbox": {"x": 0, "y": 100, "w": 800, "h": 500},
+                        },
+                        {
+                            "number": "1.2",
+                            "label": "Result card",
+                            "role": "card",
+                            "bbox": {"x": 40, "y": 210, "w": 340, "h": 180},
+                            "parent_region_id": "main",
+                            "parent_region_label": "Main",
+                            "parent_region_bbox": {"x": 0, "y": 100, "w": 800, "h": 500},
+                        },
+                    ],
+                    "compiled_overlay_path": "artifacts/review-overlays/coarse.png",
+                },
+            },
+        },
+    )
+
+    result = build_learn_page_detail_candidate(source_path=source, out_dir=source.parent, project_root=tmp_path)
+
+    by_label = {item["label"]: item for item in result["layout"]["regions"]}
+    assert result["compiled_overlay_path"] == "artifacts/review-overlays/coarse.png"
+    assert result["full_screen_understanding_overlay_path"] == "artifacts/review-overlays/coarse.png"
+    assert result["calibration_overlay_path"] == "artifacts/review-overlays/precise.png"
+    assert by_label["Search"]["bbox"] == {"x": 52, "y": 142, "w": 286, "h": 34}
+    assert by_label["Search"]["candidate_point"] == {"x": 195, "y": 159}
+    assert by_label["Search"]["page_detail_source"] == "precise_locator_calibrated_target"
+    assert by_label["Result card"]["bbox"] == {"x": 43, "y": 213, "w": 334, "h": 174}
+    assert by_label["Result card"]["page_detail_source"] == "precise_locator_calibrated_target"
+
+    review = load_learning_draft_review(result["report_path"], project_root=tmp_path)
+    preview = review["screen_understanding_preview"]
+    assert preview["compiled_overlay_path"] == "artifacts/review-overlays/coarse.png"
+    assert preview["calibration_overlay_path"] == "artifacts/review-overlays/precise.png"
+
+
+def test_page_detail_candidate_preserves_verified_final_calibration_fusion_overlay(tmp_path: Path) -> None:
+    source = _write_json(
+        tmp_path / "artifacts" / "learning-runs" / "verified_fusion" / "trial_result.json",
+        {
+            "contract_version": "learn_recognition_pipeline_result_v1",
+            "two_stage_understanding": {
+                "contract_version": "learn_two_stage_screen_understanding_v1",
+                "stage2_numbering": {"regions": []},
+                "fusion": {
+                    "fused_review_boxes": [
+                        {
+                            "number": "1.1",
+                            "label": "Search",
+                            "role": "input",
+                            "bbox": {"x": 40, "y": 30, "w": 180, "h": 36},
+                            "parent_region_id": "header",
+                            "parent_region_label": "Header",
+                            "parent_region_bbox": {"x": 0, "y": 0, "w": 640, "h": 100},
+                        }
+                    ],
+                    "compiled_overlay_path": "artifacts/review-overlays/stage2.png",
+                },
+            },
+            "learning_draft": {
+                "page_details": {
+                    "pipeline_audit": {
+                        "precise_understanding_fusion_status": {
+                            "compiled_overlay_path": "artifacts/review-overlays/calibrated-fusion.png",
+                            "full_screen_understanding_overlay_path": "artifacts/review-overlays/calibrated-fusion.png",
+                            "calibration_overlay_path": "artifacts/review-overlays/calibrated-fusion.png",
+                            "stage2_compiled_overlay_path": "artifacts/review-overlays/stage2.png",
+                            "display_overlay_source": "two_stage_plus_precise_calibration",
+                            "final_fusion_overlay": True,
+                        }
+                    }
+                }
+            },
+        },
+    )
+
+    result = build_learn_page_detail_candidate(
+        source_path=source,
+        out_dir=source.parent,
+        project_root=tmp_path,
+    )
+
+    assert result["compiled_overlay_path"] == "artifacts/review-overlays/calibrated-fusion.png"
+    assert result["full_screen_understanding_overlay_path"] == (
+        "artifacts/review-overlays/calibrated-fusion.png"
+    )
+    assert result["calibration_overlay_path"] == "artifacts/review-overlays/calibrated-fusion.png"
+    assert result["final_fusion_overlay"] is True
+    assert result["display_overlay_source"] == "two_stage_plus_precise_calibration"
 
 
 def test_page_detail_candidate_arranges_regions_by_source_layout(tmp_path: Path) -> None:

@@ -105,6 +105,7 @@ def build_screen_reading(
         "image_size": vision.image_size.to_dict() if vision.image_size is not None else None,
         "screen_summary": vision.screen_summary,
         "state_guess": vision.state_guess,
+        "interface_classification": dict(vision.interface_classification),
         "texts": texts,
         "ui": ui_payload,
         "ui_elements": elements,

@@ -3,14 +3,16 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from pathlib import Path
 from difflib import SequenceMatcher
 from typing import Any
 
 from fastapi import APIRouter
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageStat
 
 from app.core.ocr_service import ocr_service
+from app.core.model_server import load_model_profiles
 from app.core.runtime_artifacts import ARTIFACTS_DIR, RuntimeTimer, build_review_overlay_path, write_trace
 from app.core.screenshot import screenshot_service
 from app.gate.candidates import validate_action_candidate_freshness
@@ -19,6 +21,7 @@ from app.operation.runtime_context import build_operation_runtime_context, opera
 from app.operation.visual_asset_matching import match_visual_asset
 from app.learn.interface_map import build_learned_interface_map
 from app.learn.path_graph_resolver import resolve_runtime_path_graph
+from app.learn.recognition.two_stage import partition_stage2_calibration_items
 from app.learn.visual_asset_crops import build_visual_assets_from_screen_map
 from app.api.models.request import (
     VisionAnalyzeRequestModel,
@@ -33,6 +36,7 @@ from app.api.models.request import OCRRegionRequest
 from app.operation.page_structure import build_page_structure
 from app.operation.page_structure.schemas import InteractionPolicy, PageElement, PageStructure, VerificationHints
 from app.operation.recognition import CandidateRankRequest, LocalGroundingRequest, decide_pre_click, rank_candidates, run_local_grounding
+from app.operation.recognition.precise_locator import build_precise_locator_evidence
 from app.operation.recognition.schemas import CandidateRankResult, LocalGroundingCandidateResult, LocalGroundingResult, RecognitionCandidate, ScoreBreakdown
 from app.operation.recognition.plan_overlay import render_recognition_plan_overlay
 from app.operation.screen_inventory import build_screen_inventory
@@ -300,6 +304,109 @@ def _image_path_for_live_or_saved(
     raise ValueError("Provide image_path or set capture_live=true")
 
 
+def _learning_capture_visual_readiness(image_path: str | Path) -> dict[str, Any]:
+    """识别低信息启动页，避免把尚未绘制完成的窗口送入整屏理解。"""
+
+    path = Path(image_path)
+    with Image.open(path) as image:
+        sample = image.convert("RGB")
+        sample.thumbnail((160, 120))
+        quantized = sample.quantize(colors=32)
+        colors = quantized.getcolors(maxcolors=32) or []
+        total_pixels = max(1, sample.width * sample.height)
+        dominant_pixels = max((count for count, _color in colors), default=total_pixels)
+        dominant_color_ratio = dominant_pixels / total_pixels
+        color_bucket_count = len(colors)
+
+        grayscale = sample.convert("L")
+        margin_x = max(2, grayscale.width // 32)
+        margin_y = max(2, grayscale.height // 32)
+        core = grayscale.crop((margin_x, margin_y, grayscale.width - margin_x, grayscale.height - margin_y))
+        grid_size = 5
+        informative_tile_count = 0
+        for row in range(grid_size):
+            for column in range(grid_size):
+                tile = core.crop(
+                    (
+                        column * core.width // grid_size,
+                        row * core.height // grid_size,
+                        (column + 1) * core.width // grid_size,
+                        (row + 1) * core.height // grid_size,
+                    )
+                )
+                if ImageStat.Stat(tile).stddev[0] >= 8.0:
+                    informative_tile_count += 1
+
+    informative_tile_ratio = informative_tile_count / (grid_size * grid_size)
+    ready = dominant_color_ratio < 0.985 and informative_tile_count >= 3
+    return {
+        "contract_version": "learning_capture_visual_readiness_v2",
+        "ready": ready,
+        "dominant_color_ratio": round(dominant_color_ratio, 6),
+        "color_bucket_count": color_bucket_count,
+        "informative_tile_count": informative_tile_count,
+        "informative_tile_ratio": round(informative_tile_ratio, 6),
+        "reason": "visual_information_present" if ready else "low_information_startup_surface",
+    }
+
+
+def _learning_observe_image_source(
+    request: VisionObserveScreenRequestModel,
+    *,
+    max_attempts: int = 4,
+    retry_delay_seconds: float = 0.75,
+) -> tuple[str, dict | None]:
+    image_path, live_capture = _image_path_for_live_or_saved(
+        capture_live=request.capture_live,
+        image_path=request.image_path,
+        purpose="observe_screen",
+        app_name=request.app_name,
+    )
+    readiness_requested = bool(
+        isinstance(request.metadata, dict)
+        and (
+            request.metadata.get("learning_studio_draft_capture") is True
+            or request.metadata.get("require_capture_readiness") is True
+        )
+    )
+    if (
+        request.agent_mode != "learn"
+        or not request.capture_live
+        or not readiness_requested
+        or not Path(image_path).exists()
+    ):
+        return image_path, live_capture
+
+    attempts: list[dict[str, Any]] = []
+    capture_payload = dict(live_capture or {})
+    for attempt_index in range(max_attempts):
+        readiness = _learning_capture_visual_readiness(image_path)
+        attempts.append({"attempt": attempt_index + 1, "image_path": image_path, **readiness})
+        if readiness["ready"] is True:
+            capture_payload["image_path"] = image_path
+            capture_payload["capture_readiness"] = {
+                **readiness,
+                "attempt_count": attempt_index + 1,
+                "attempts": attempts,
+            }
+            return image_path, capture_payload
+        if attempt_index + 1 < max_attempts:
+            time.sleep(retry_delay_seconds)
+            capture_payload = screenshot_service.capture_window(
+                save_image=True,
+                purpose="observe_screen_ready_retry",
+                name_hint=request.app_name or "learning_observe",
+            )
+            image_path = str(capture_payload.get("image_path") or "")
+            if not image_path or not Path(image_path).exists():
+                raise RuntimeError("Learning capture readiness retry did not create an image")
+
+    raise RuntimeError(
+        "Learning capture stayed on a low-information startup surface after "
+        f"{max_attempts} attempts"
+    )
+
+
 def _load_observe_trace_reuse(trace_path_value: str | None, *, image_path: str, goal: str | None = None) -> dict[str, Any]:
     if not trace_path_value:
         return {}
@@ -428,11 +535,23 @@ def _build_path_graph_recall(
 
 
 def _path_graph_candidate_is_browser_chrome(candidate: dict[str, Any]) -> bool:
-    section_id = str(candidate.get("section_id") or candidate.get("section") or "").strip().lower()
-    if section_id == "browser_chrome":
-        return True
-    source = str(candidate.get("source") or "").strip().lower()
-    if source == "browser_chrome":
+    for key in ("section_id", "section", "source", "parent_region_id", "zone_id", "surface_zone"):
+        value = str(candidate.get(key) or "").strip().casefold().replace("-", "_").replace(" ", "_")
+        if value == "browser_chrome" or "browser_chrome" in value:
+            return True
+    text = " ".join(
+        str(candidate.get(key) or "")
+        for key in ("label", "text", "description")
+    ).casefold()
+    if any(
+        token in text
+        for token in (
+            "调试此浏览器",
+            "自动测试软件控制",
+            "debugging this browser",
+            "controlled by automated test software",
+        )
+    ):
         return True
     return False
 
@@ -837,11 +956,49 @@ def _selected_local_vision_config(config: dict[str, Any], provider_mode: str | N
     return vision.get("local") or {}
 
 
+def _selected_learning_grounding_config(
+    config: dict[str, Any],
+    request: VisionLocateTargetRequestModel,
+) -> dict[str, Any]:
+    selected = dict(_selected_local_vision_config(config, request.provider_mode or "local_grounding"))
+    metadata = request.metadata if isinstance(request.metadata, dict) else {}
+    profile_id = str(metadata.get("learn_grounding_profile_id") or "").strip()
+    if request.agent_mode != "learn" or not profile_id:
+        return selected
+    profile = next(
+        (item for item in load_model_profiles() if str(item.get("profile_id") or "").strip() == profile_id),
+        None,
+    )
+    if profile is None:
+        raise ValueError(f"unknown learning grounding profile: {profile_id}")
+    if str(profile.get("provider_mode") or "").strip() != "local_grounding":
+        raise ValueError(f"learning grounding profile is not local_grounding: {profile_id}")
+    default_profile_id = str(selected.get("profile_id") or "").strip()
+    if str(profile.get("mode_scope") or "").strip() != "learn_only" and profile_id != default_profile_id:
+        raise ValueError(f"learning grounding override must be learn_only: {profile_id}")
+    if not str(profile.get("endpoint") or "").strip():
+        raise ValueError(f"learning grounding profile has no endpoint: {profile_id}")
+    return {**selected, **profile}
+
+
 def _uses_vista_point_grounding(local_config: dict[str, Any]) -> bool:
     contract = str(local_config.get("output_contract") or "").strip().lower()
     model_name = str(local_config.get("model_name") or local_config.get("model_path") or "").casefold()
     runtime = str(local_config.get("runtime") or "").strip().lower()
     return contract == "vista_point_v1" or ("vista" in model_name and runtime == "transformers")
+
+
+def _uses_learning_point_grounding(local_config: dict[str, Any]) -> bool:
+    if _uses_vista_point_grounding(local_config):
+        return True
+    model_family = str(local_config.get("model_family") or "").strip().casefold()
+    model_name = str(local_config.get("model_name") or local_config.get("model_path") or "").casefold()
+    grounding_role = str(local_config.get("grounding_role") or "").strip().casefold()
+    return (
+        model_family == "uground"
+        or "uground" in model_name
+        or grounding_role in {"roi_point_grounding", "roi_point_grounding_baseline"}
+    )
 
 
 def _candidate_bbox_for_prompt(candidate: RecognitionCandidate, coordinate_transform: dict[str, Any] | None = None) -> dict[str, int]:
@@ -928,6 +1085,12 @@ def _call_vista_point_grounding(
     )
 
 
+def _vista_client_timeout_seconds(server_timeout_seconds: float) -> float:
+    server_timeout = max(1.0, float(server_timeout_seconds))
+    client_grace = max(30.0, min(60.0, server_timeout * 2.0))
+    return server_timeout + client_grace
+
+
 def _call_vista_point_prompt(
     *,
     local_config: dict[str, Any],
@@ -947,8 +1110,18 @@ def _call_vista_point_prompt(
     if not endpoint:
         raise ValueError("VISTA point grounding requires local_config.endpoint")
     model_name = str(local_config.get("model_name") or "inclusionAI/VISTA-4B")
-    provider = LocalVisionProvider(endpoint=endpoint, model_name=model_name, timeout_seconds=timeout_seconds)
-    raw_response = provider._call_openai_compatible_endpoint(image_path, prompt, max_tokens=max_tokens)
+    server_timeout_seconds = max(1.0, float(timeout_seconds))
+    provider = LocalVisionProvider(
+        endpoint=endpoint,
+        model_name=model_name,
+        timeout_seconds=_vista_client_timeout_seconds(server_timeout_seconds),
+    )
+    raw_response = provider._call_openai_compatible_endpoint(
+        image_path,
+        prompt,
+        max_tokens=max_tokens,
+        request_timeout_seconds=server_timeout_seconds,
+    )
     raw_text = provider._extract_message_text(raw_response).strip()
     parsed = _parse_vista_point_text(raw_text)
     processed_point = _vista_point_to_original_pixel(parsed, image_size=image_size)
@@ -1193,6 +1366,22 @@ def _candidate_bbox(candidate: RecognitionCandidate) -> dict[str, int]:
     return candidate.refined_bbox or candidate.element.bbox.to_dict()
 
 
+def _vista_union_roi_requires_full_resolution(
+    roi: dict[str, int],
+    *,
+    image_size: ImageSize,
+    roi_source: str,
+) -> bool:
+    if roi_source != "union_top_candidates":
+        return False
+    image_width = max(1, int(image_size.width))
+    image_height = max(1, int(image_size.height))
+    width_ratio = int(roi.get("w") or 0) / image_width
+    height_ratio = int(roi.get("h") or 0) / image_height
+    area_ratio = width_ratio * height_ratio
+    return area_ratio >= 0.45 or (width_ratio >= 0.75 and height_ratio >= 0.45)
+
+
 def _expand_bbox_roi(
     bbox: dict[str, int],
     *,
@@ -1252,11 +1441,23 @@ def _prepare_vista_candidate_roi_image(
         padding=padding,
         min_size=min_size,
     )
+    preserve_full_resolution = _vista_union_roi_requires_full_resolution(
+        roi,
+        image_size=image_size,
+        roi_source=roi_source,
+    )
+    if preserve_full_resolution:
+        roi = {"x": 0, "y": 0, "w": int(image_size.width), "h": int(image_size.height)}
     max_edge = int(max_edge or 0)
     crop_width = int(roi["w"])
     crop_height = int(roi["h"])
     longest = max(crop_width, crop_height)
-    if max_edge > 0 and longest > max_edge:
+    if preserve_full_resolution:
+        scale = 1.0
+        processed_width = crop_width
+        processed_height = crop_height
+        strategy = "pathgraph_union_full_screen_preserve_resolution"
+    elif max_edge > 0 and longest > max_edge:
         scale = float(max_edge) / float(longest)
         processed_width = max(1, int(round(crop_width * scale)))
         processed_height = max(1, int(round(crop_height * scale)))
@@ -1303,6 +1504,8 @@ def _prepare_vista_candidate_roi_image(
         "roi_source": roi_source,
         "roi_padding_px": int(padding),
         "max_edge": max_edge,
+        "full_resolution_preserved": preserve_full_resolution,
+        "full_resolution_reason": "ambiguous_union_roi_covers_large_screen_fraction" if preserve_full_resolution else None,
         "original_image_path": str(image_path),
         "processed_image_path": str(processed_path),
         "original_size": image_size.to_dict(),
@@ -1312,6 +1515,76 @@ def _prepare_vista_candidate_roi_image(
         "transform": {
             "contract_version": "vista_coordinate_transform_v1",
             "type": "pathgraph_candidate_crop_resize" if scale != 1.0 else "pathgraph_candidate_crop",
+            "origin_original": {"x": int(roi["x"]), "y": int(roi["y"])},
+            "scale_original_to_processed": {"x": scale_x, "y": scale_y},
+            "scale_processed_to_original": {
+                "x": 1.0 / scale_x if scale_x else 1.0,
+                "y": 1.0 / scale_y if scale_y else 1.0,
+            },
+        },
+    }
+
+
+def _prepare_vista_region_roi_image(
+    image_path: Path,
+    image_size: ImageSize,
+    *,
+    region_bbox: dict[str, int],
+    padding: int,
+    max_edge: int,
+) -> dict[str, Any]:
+    roi = _expand_bbox_roi(
+        region_bbox,
+        image_size=image_size,
+        padding=max(0, int(padding)),
+        min_size=1,
+    )
+    crop_width = int(roi["w"])
+    crop_height = int(roi["h"])
+    max_edge = max(0, int(max_edge or 0))
+    longest = max(crop_width, crop_height)
+    if max_edge > 0 and longest > max_edge:
+        scale = float(max_edge) / float(longest)
+        processed_width = max(1, int(round(crop_width * scale)))
+        processed_height = max(1, int(round(crop_height * scale)))
+        strategy = "learn_parent_region_roi_resize_max_edge"
+    else:
+        scale = 1.0
+        processed_width = crop_width
+        processed_height = crop_height
+        strategy = "learn_parent_region_roi"
+
+    digest_source = (
+        f"{image_path.resolve()}:{image_path.stat().st_mtime_ns}:"
+        f"learn-region-{roi['x']}-{roi['y']}-{roi['w']}x{roi['h']}:"
+        f"max{max_edge}:{processed_width}x{processed_height}"
+    )
+    digest = hashlib.sha1(digest_source.encode("utf-8")).hexdigest()[:10]
+    VISTA_DIRECT_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    processed_path = VISTA_DIRECT_IMAGES_DIR / (
+        f"{image_path.stem}__vista-learn-region-roi-"
+        f"{roi['x']}-{roi['y']}-{roi['w']}x{roi['h']}-max{max_edge}__{digest}.png"
+    )
+    with Image.open(image_path) as image:
+        crop = image.convert("RGB").crop((roi["x"], roi["y"], roi["x"] + roi["w"], roi["y"] + roi["h"]))
+        if scale != 1.0:
+            crop = crop.resize((processed_width, processed_height), Image.Resampling.LANCZOS)
+        crop.save(processed_path)
+
+    scale_x = processed_width / max(1, crop_width)
+    scale_y = processed_height / max(1, crop_height)
+    return {
+        "contract_version": "vista_direct_image_preprocess_v1",
+        "status": "processed",
+        "strategy": strategy,
+        "original_image_path": str(image_path),
+        "processed_image_path": str(processed_path),
+        "original_size": image_size.to_dict(),
+        "crop_bounds_original": roi,
+        "processed_size": {"width": processed_width, "height": processed_height},
+        "transform": {
+            "contract_version": "vista_coordinate_transform_v1",
+            "type": "learn_parent_region_crop_resize" if scale != 1.0 else "learn_parent_region_crop",
             "origin_original": {"x": int(roi["x"]), "y": int(roi["y"])},
             "scale_original_to_processed": {"x": scale_x, "y": scale_y},
             "scale_processed_to_original": {
@@ -3050,18 +3323,22 @@ def screen_reading(request: VisionAnalyzeRequestModel) -> APIResponse:
         )
 
 
+def _observe_screen_provider_mode(provider_mode: str | None) -> str:
+    """整屏观察必须使用理解模型，不能继承最近一次定位模型切换。"""
+
+    requested = str(provider_mode or "").strip().casefold()
+    if requested in {"", "local", "local_grounding"}:
+        return "local_understanding"
+    return str(provider_mode).strip()
+
+
 @router.post("/observe_screen", response_model=APIResponse)
 def observe_screen(request: VisionObserveScreenRequestModel) -> APIResponse:
     """Capture or read a screen and return broad UI understanding for agent planning."""
     timer = RuntimeTimer()
     try:
         with timer.step("resolve_image_source", capture_live=request.capture_live):
-            image_path, live_capture = _image_path_for_live_or_saved(
-                capture_live=request.capture_live,
-                image_path=request.image_path,
-                purpose="observe_screen",
-                app_name=request.app_name,
-            )
+            image_path, live_capture = _learning_observe_image_source(request)
         operation_context = build_operation_runtime_context(
             request=request,
             skill_id="observe_screen",
@@ -3078,7 +3355,7 @@ def observe_screen(request: VisionObserveScreenRequestModel) -> APIResponse:
             app_name=request.app_name,
             goal="understand the current interface, visible controls, and likely actions",
             state_hint=request.state_hint,
-            provider_mode=request.provider_mode or "local_understanding",
+            provider_mode=_observe_screen_provider_mode(request.provider_mode),
             agent_mode=request.agent_mode,
             learn_depth=request.learn_depth,
             write_policy=request.write_policy,
@@ -4787,8 +5064,9 @@ def _screen_map_has_right_sidebar_evidence(result: dict[str, Any], *, width: int
 
 
 def _application_screen_map_sections(result: dict[str, Any], *, width: int, height: int) -> list[dict[str, Any]]:
-    top_bar_bottom = min(height, max(120, round(height * 0.16)))
-    content_bottom = min(height, max(top_bar_bottom + 220, round(height * 0.86)))
+    top_bar_bottom = _application_top_bar_bottom(result, width=width, height=height)
+    bottom_bar_top = _application_bottom_bar_top(result, height=height)
+    content_bottom = bottom_bar_top if bottom_bar_top is not None else height
     sections = [
         _screen_map_section(
             "top_bar",
@@ -4807,12 +5085,12 @@ def _application_screen_map_sections(result: dict[str, Any], *, width: int, heig
             result,
         ),
     ]
-    if content_bottom < height:
+    if bottom_bar_top is not None:
         sections.append(
             _screen_map_section(
                 "bottom_bar",
                 "Bottom bar",
-                "content",
+                "status",
                 "Lower application area with secondary actions, status, or footer controls.",
                 {"x": 0, "y": content_bottom, "w": width, "h": max(1, height - content_bottom)},
                 result,
@@ -4822,6 +5100,63 @@ def _application_screen_map_sections(result: dict[str, Any], *, width: int, heig
     if floating:
         sections.append(floating)
     return sections
+
+
+def _application_top_bar_bottom(result: dict[str, Any], *, width: int, height: int) -> int:
+    top_limit = max(80, round(height * 0.24))
+    evidence_boxes: list[dict[str, int]] = []
+    element_sources = [_as_list(result.get("ui_elements"))]
+    screen_reading = result.get("screen_reading") if isinstance(result.get("screen_reading"), dict) else {}
+    element_sources.append(_as_list(screen_reading.get("ui_elements")))
+    screen_reading_ui = screen_reading.get("ui") if isinstance(screen_reading.get("ui"), dict) else {}
+    element_sources.append(_as_list(screen_reading_ui.get("elements")))
+    for source in element_sources:
+        for item in source:
+            if not isinstance(item, dict):
+                continue
+            bbox = _normalize_map_bbox(item.get("bbox"))
+            if not bbox or bbox["y"] >= top_limit:
+                continue
+            role = " ".join(str(item.get(key) or "") for key in ("type", "role", "role_guess")).casefold()
+            if not any(token in role for token in ("menu", "tab", "nav", "button", "input", "search", "control")):
+                continue
+            # 左侧窄轨道上的纵向图标属于侧栏，不能把上栏向下拉长。
+            narrow_left_icon = (
+                "menu" not in role
+                and bbox["x"] + bbox["w"] <= max(72, round(width * 0.12))
+                and bbox["y"] >= max(56, round(height * 0.06))
+            )
+            if not narrow_left_icon:
+                evidence_boxes.append(bbox)
+    text_limit = min(top_limit, max(128, round(height * 0.12)))
+    for item in _screen_map_texts(result):
+        if not isinstance(item, dict):
+            continue
+        bbox = _normalize_map_bbox(item.get("bbox"))
+        if bbox and bbox["y"] < text_limit:
+            evidence_boxes.append(bbox)
+    if evidence_boxes:
+        evidence_bottom = max(box["y"] + box["h"] for box in evidence_boxes)
+        return min(height, max(56, evidence_bottom + 8))
+    return min(height, max(72, round(height * 0.10)))
+
+
+def _application_bottom_bar_top(result: dict[str, Any], *, height: int) -> int | None:
+    model_io = result.get("model_io") if isinstance(result.get("model_io"), dict) else {}
+    raw_response = model_io.get("raw_response") if isinstance(model_io.get("raw_response"), dict) else {}
+    model_json = raw_response.get("model_json") if isinstance(raw_response.get("model_json"), dict) else {}
+    candidates: list[int] = []
+    for item in _as_list(model_json.get("regions")):
+        if not isinstance(item, dict):
+            continue
+        role = " ".join(str(item.get(key) or "") for key in ("role", "label", "region_id")).casefold()
+        if not any(token in role for token in ("status_bar", "status bar", "bottom_bar", "bottom bar", "footer")):
+            continue
+        diagonal = item.get("diagonal") if isinstance(item.get("diagonal"), dict) else {}
+        top = int(_number(diagonal.get("y1")) or 0)
+        if top >= round(height * 0.70):
+            candidates.append(top)
+    return min(candidates) if candidates else None
 
 
 def _screen_map_section(section_id: str, label: str, role: str, description: str, bbox: dict[str, int], result: dict[str, Any]) -> dict[str, Any]:
@@ -5782,6 +6117,216 @@ def _learn_all_targets_requested(request: VisionLocateTargetRequestModel, metada
     return bool(metadata.get("learn_all_targets") or metadata.get("learn_all_subpath_targets"))
 
 
+def _stage2_calibration_locator_context(
+    item: dict[str, Any],
+    *,
+    region_label: str,
+    region_bbox: dict[str, int] | None,
+    item_index: int,
+    item_count: int,
+) -> tuple[str, dict[str, Any]]:
+    label = _first_compact_text(item.get("label"), item.get("text"), item.get("number"), item.get("item_id"))
+    role = _first_compact_text(item.get("role"), "review_only")
+    number = _first_compact_text(item.get("number"), str(item_index))
+    child_labels: list[str] = []
+    seen: set[str] = set()
+    for child in _as_list(item.get("children")):
+        if not isinstance(child, dict):
+            continue
+        child_label = _first_compact_text(child.get("label"), child.get("text"))
+        key = child_label.casefold()
+        if not child_label or key == label.casefold() or key in seen:
+            continue
+        seen.add(key)
+        child_labels.append(child_label)
+        if len(child_labels) >= 5:
+            break
+    prompt_parts = [
+        f"Locate the exact {role} numbered {number} in {region_label or 'the current region'}.",
+        f"It is item {item_index} of {item_count} in that region.",
+    ]
+    if child_labels:
+        prompt_parts.append(f"It contains visible text: {' | '.join(child_labels)}.")
+    elif label:
+        prompt_parts.append(f"Its visible label is {label}.")
+    prompt_parts.append("Return one point inside this exact item, not a nearby sibling.")
+    context = {
+        "contract_version": "stage2_calibration_locator_context_v1",
+        "region_label": region_label,
+        "region_bbox": region_bbox,
+        "item_number": number,
+        "item_index": item_index,
+        "item_count": item_count,
+        "child_labels": child_labels,
+    }
+    return " ".join(prompt_parts), context
+
+
+def _attach_two_stage_calibration_candidates(
+    observe_reuse: dict[str, Any],
+    *,
+    report_path_value: Any,
+    image_path: str,
+) -> dict[str, Any]:
+    report_path_text = str(report_path_value or "").strip()
+    if not report_path_text:
+        return observe_reuse
+    report_path = Path(report_path_text)
+    if not report_path.is_absolute():
+        report_path = Path.cwd() / report_path
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8-sig"))
+    except Exception as exc:
+        return {
+            **observe_reuse,
+            "two_stage_calibration_source": {
+                "status": "invalid",
+                "reason": f"two_stage_report_unreadable: {exc}",
+                "report_path": str(report_path),
+            },
+        }
+    if not isinstance(report, dict):
+        return observe_reuse
+    source_image_text = str(report.get("source_image_path") or "").strip()
+    if source_image_text:
+        source_image = Path(source_image_text)
+        if not source_image.is_absolute():
+            source_image = Path.cwd() / source_image
+        if source_image.resolve() != Path(image_path).resolve():
+            return {
+                **observe_reuse,
+                "two_stage_calibration_source": {
+                    "status": "stale_fixture",
+                    "reason": "two_stage_source_image_mismatch",
+                    "report_path": str(report_path),
+                    "expected_image_path": str(Path(image_path).resolve()),
+                    "actual_image_path": str(source_image.resolve()),
+                },
+            }
+    stage2 = report.get("stage2_numbering") if isinstance(report.get("stage2_numbering"), dict) else {}
+    stage1_localization = report.get("stage1_region_localization") if isinstance(report.get("stage1_region_localization"), dict) else {}
+    stage1_structure = report.get("stage1_structure") if isinstance(report.get("stage1_structure"), dict) else {}
+    structure_regions = [
+        item
+        for item in _as_list(stage1_localization.get("regions") or stage1_structure.get("structure_regions"))
+        if isinstance(item, dict)
+    ]
+    fusion = report.get("fusion") if isinstance(report.get("fusion"), dict) else {}
+    numbered_overlay_value = str(
+        fusion.get("compiled_overlay_path")
+        or fusion.get("full_screen_understanding_overlay_path")
+        or ""
+    ).strip()
+    numbered_overlay_path = ""
+    if numbered_overlay_value:
+        numbered_overlay = Path(numbered_overlay_value)
+        if not numbered_overlay.is_absolute():
+            numbered_overlay = Path.cwd() / numbered_overlay
+        numbered_overlay_path = str(numbered_overlay.resolve())
+    calibration_candidates: list[dict[str, Any]] = []
+    suppressed_child_evidence: list[dict[str, Any]] = []
+    for region in _as_list(stage2.get("regions")):
+        if not isinstance(region, dict):
+            continue
+        region_id = _first_compact_text(region.get("region_id"), f"region_{len(calibration_candidates) + 1}")
+        region_label = _first_compact_text(region.get("label"), region_id)
+        region_bbox = _normalize_map_bbox(region.get("bbox"))
+        calibratable_items, child_evidence_items = partition_stage2_calibration_items(region)
+        suppressed_child_evidence.extend(
+            {
+                "region_id": region_id,
+                "item_id": _first_compact_text(item.get("item_id"), item.get("number")),
+                "label": _first_compact_text(item.get("label"), item.get("text")),
+                "reason": "child_evidence_is_calibrated_through_parent_region",
+            }
+            for item in child_evidence_items
+        )
+        for item_index, item in enumerate(calibratable_items, start=1):
+            if not isinstance(item, dict):
+                continue
+            bbox = _normalize_map_bbox(item.get("bbox"))
+            if not bbox:
+                continue
+            item_id = _first_compact_text(item.get("item_id"), item.get("number"), f"item_{len(calibration_candidates) + 1}")
+            locator_prompt, locator_context = _stage2_calibration_locator_context(
+                item,
+                region_label=region_label,
+                region_bbox=region_bbox,
+                item_index=item_index,
+                item_count=len(calibratable_items),
+            )
+            calibration_candidates.append(
+                {
+                    "contract_version": "screen_map_calibration_candidate_v1",
+                    "candidate_id": f"stage2:{region_id}:{item_id}",
+                    "label": _first_compact_text(item.get("label"), item.get("text"), item.get("number"), item_id),
+                    "role": _first_compact_text(item.get("role"), "review_only"),
+                    "bbox": bbox,
+                    "click_point": _normalize_map_point(item.get("click_point"), bbox),
+                    "section_id": region_id,
+                    "source": "two_stage_stage2_numbering",
+                    "confidence": item.get("confidence"),
+                    "locator_prompt": locator_prompt,
+                    "locator_context": locator_context,
+                    "numbered_overlay_path": numbered_overlay_path,
+                    "calibration_only": True,
+                    "review_only": True,
+                    "execute_binding_enabled": False,
+                    "artifact_is_authorization": False,
+                }
+            )
+    calibration_candidates.sort(key=_stage2_calibration_candidate_priority, reverse=True)
+    screen_map = observe_reuse.get("screen_map") if isinstance(observe_reuse.get("screen_map"), dict) else {}
+    return {
+        **observe_reuse,
+        "screen_map": {
+            **screen_map,
+            "calibration_candidates": calibration_candidates,
+            "two_stage_calibration_authoritative": bool(calibration_candidates),
+            "two_stage_structure_regions": structure_regions,
+        },
+        "two_stage_calibration_source": {
+            "status": "ready" if calibration_candidates else "empty",
+            "report_path": str(report_path.resolve()),
+            "candidate_count": len(calibration_candidates),
+            "suppressed_child_evidence_count": len(suppressed_child_evidence),
+            "suppressed_child_evidence": suppressed_child_evidence,
+            "source_image_path": str(Path(image_path).resolve()),
+            "numbered_overlay_path": numbered_overlay_path,
+            "numbered_overlay_available": bool(numbered_overlay_path and Path(numbered_overlay_path).exists()),
+        },
+    }
+
+
+def _stage2_calibration_candidate_priority(candidate: dict[str, Any]) -> tuple[int, int, int]:
+    label = _first_compact_text(candidate.get("label")).casefold()
+    role = _first_compact_text(candidate.get("role")).casefold()
+    generic_label = bool(re.fullmatch(r"(?:control|item|button|card)\s*\d+", label))
+    weak_label = label in {"", "music", "mus", "unknown"}
+    partial = "partial" in role or "partial" in label
+    semantic_role = role in {
+        "button",
+        "icon_button",
+        "nav_item",
+        "menu_item",
+        "media_card",
+        "card",
+        "tile",
+        "input",
+        "text_input",
+    }
+    score = 100
+    if generic_label:
+        score -= 80
+    if weak_label:
+        score -= 40
+    if partial:
+        score -= 30
+    if semantic_role:
+        score += 20
+    return score, min(len(label), 80), -int((_normalize_map_bbox(candidate.get("bbox")) or {}).get("y") or 0)
+
+
 def _screen_map_candidate_to_learn_target(candidate: dict[str, Any], index: int) -> dict[str, Any] | None:
     bbox = _normalize_map_bbox(candidate.get("bbox") or candidate.get("bounding_box") or candidate.get("bounds"))
     point = _normalize_map_point(candidate.get("click_point") or candidate.get("clickPoint"), bbox)
@@ -5802,6 +6347,23 @@ def _screen_map_candidate_to_learn_target(candidate: dict[str, Any], index: int)
         "description": _first_compact_text(candidate.get("description"), candidate.get("meaning"), candidate.get("purpose")),
         "coordinate_source": "screen_map_v1.candidates",
         "location_status": "coordinate_ready" if point else "bbox_missing_click_point",
+    }
+
+
+def _screen_map_calibration_candidate_to_target(candidate: dict[str, Any], index: int) -> dict[str, Any] | None:
+    target = _screen_map_candidate_to_learn_target(candidate, index)
+    if target is None:
+        return None
+    return {
+        **target,
+        "locator_prompt": " ".join(str(candidate.get("locator_prompt") or "").split())[:600],
+        "locator_context": candidate.get("locator_context") if isinstance(candidate.get("locator_context"), dict) else {},
+        "numbered_overlay_path": str(candidate.get("numbered_overlay_path") or ""),
+        "calibration_only": True,
+        "review_only": True,
+        "execute_binding_enabled": False,
+        "artifact_is_authorization": False,
+        "coordinate_source": "two_stage_stage2_numbering",
     }
 
 
@@ -5914,6 +6476,32 @@ def _learn_review_child_identity(review_boxes: list[dict[str, Any]]) -> tuple[se
             if label and bbox:
                 child_box_keys.add(f"{label}|{bbox}")
     return child_ids, child_box_keys
+
+
+def _screen_map_has_side_navigation_region(screen_map: dict[str, Any]) -> bool:
+    regions = _as_list(screen_map.get("two_stage_structure_regions"))
+    side_navigation_tokens = {
+        "left_navigation",
+        "right_navigation",
+        "side_navigation",
+        "navigation_rail",
+        "left_sidebar",
+        "right_sidebar",
+        "sidebar",
+        "side_bar",
+    }
+    for region in regions:
+        if not isinstance(region, dict):
+            continue
+        fields = {
+            str(region.get("region_id") or "").casefold().replace(" ", "_"),
+            str(region.get("role") or "").casefold().replace(" ", "_"),
+            str(region.get("region_type") or "").casefold().replace(" ", "_"),
+            str(region.get("label") or "").casefold().replace(" ", "_"),
+        }
+        if any(token in field for field in fields for token in side_navigation_tokens):
+            return True
+    return False
 
 
 def _learn_nav_rail_review_boxes_from_image(image_path: str, *, existing_count: int = 0) -> list[dict[str, Any]]:
@@ -6217,22 +6805,25 @@ def _validate_learn_target_coordinates(target: dict[str, Any], *, image_size: di
 def _learn_vista_coordinate_validation_options(request: VisionLocateTargetRequestModel, local_config: dict[str, Any]) -> dict[str, Any]:
     if request.learn_depth != "deep":
         return {"enabled": False, "reason": "not_learn_deep"}
-    if not _uses_vista_point_grounding(local_config):
-        return {"enabled": False, "reason": "local_grounding_is_not_vista_point"}
+    if not _uses_learning_point_grounding(local_config):
+        return {"enabled": False, "reason": "local_grounding_is_not_supported_point_model"}
     metadata = request.metadata if isinstance(request.metadata, dict) else {}
     raw = metadata.get("learn_vista_coordinate_validation", True)
     if raw is False:
         return {"enabled": False, "reason": "disabled_by_metadata"}
     if isinstance(raw, dict):
         raw_max_targets = raw.get("max_targets") or raw.get("max_candidates") or 5
-        max_targets = 9999 if str(raw_max_targets).casefold() == "all" else int(raw_max_targets)
+        validate_all_targets = str(raw_max_targets).casefold() == "all"
+        max_targets = 9999 if validate_all_targets else int(raw_max_targets)
         return {
             "enabled": raw.get("enabled", True) is not False,
             "max_targets": max_targets,
+            "validate_all_targets": validate_all_targets,
             "update_click_point": raw.get("update_click_point", True) is not False,
             "padding": int(raw.get("padding") or 10),
             "per_target_timeout_seconds": float(raw.get("per_target_timeout_seconds") or 12),
             "stop_on_failure": raw.get("stop_on_failure", True) is not False,
+            "use_numbered_overlay": raw.get("use_numbered_overlay") is True,
         }
     return {
         "enabled": True,
@@ -6241,6 +6832,221 @@ def _learn_vista_coordinate_validation_options(request: VisionLocateTargetReques
         "padding": 10,
         "per_target_timeout_seconds": 12.0,
         "stop_on_failure": True,
+        "use_numbered_overlay": False,
+    }
+
+
+def _learn_precise_locator_text_similarity(left: str, right: str) -> float:
+    left_text = "".join(character for character in str(left or "").casefold() if character.isalnum())
+    right_text = "".join(character for character in str(right or "").casefold() if character.isalnum())
+    if not left_text or not right_text:
+        return 0.0
+    if left_text in right_text or right_text in left_text:
+        return min(len(left_text), len(right_text)) / max(len(left_text), len(right_text))
+    return SequenceMatcher(None, left_text, right_text).ratio()
+
+
+def _learn_precise_locator_bbox_inside_parent(bbox: dict[str, int], parent_bbox: dict[str, int]) -> bool:
+    return (
+        parent_bbox["x"] <= bbox["x"]
+        and parent_bbox["y"] <= bbox["y"]
+        and bbox["x"] + bbox["w"] <= parent_bbox["x"] + parent_bbox["w"]
+        and bbox["y"] + bbox["h"] <= parent_bbox["y"] + parent_bbox["h"]
+    )
+
+
+def _learn_vista_target_context_bbox(
+    target_bbox: dict[str, int],
+    *,
+    parent_bbox: dict[str, int],
+    target_role: str | None = None,
+) -> dict[str, int]:
+    target_center_x = target_bbox["x"] + target_bbox["w"] / 2
+    target_center_y = target_bbox["y"] + target_bbox["h"] / 2
+    normalized_role = str(target_role or "").strip().casefold().replace("-", "_").replace(" ", "_")
+    compact_direct_control = _learn_vista_is_compact_direct_control(target_bbox, target_role=target_role)
+    dense_column_row = normalized_role in {"list_row", "table_row", "file_row"}
+    if normalized_role == "menu_item":
+        context_width = min(parent_bbox["w"], max(72, int(round(target_bbox["w"] * 1.6))))
+        context_height = min(parent_bbox["h"], max(48, int(round(target_bbox["h"] * 1.36))))
+    elif compact_direct_control:
+        context_width = min(parent_bbox["w"], max(72, int(round(target_bbox["w"] * 1.5))))
+        context_height = min(parent_bbox["h"], max(56, int(round(target_bbox["h"] * 1.25))))
+    elif dense_column_row:
+        horizontal_padding = min(48, max(16, int(round(target_bbox["w"] * 0.1))))
+        context_width = min(parent_bbox["w"], max(96, target_bbox["w"] + horizontal_padding * 2))
+    else:
+        context_width = min(parent_bbox["w"], max(160, int(round(target_bbox["w"] * 2.0))))
+    if normalized_role in {"conversation_row", "list_row", "table_row", "file_row", "message_item"}:
+        context_height = min(parent_bbox["h"], max(1, int(target_bbox["h"])))
+    elif normalized_role != "menu_item" and not compact_direct_control:
+        context_height = min(parent_bbox["h"], max(100, int(round(target_bbox["h"] * 1.8))))
+    max_x = parent_bbox["x"] + parent_bbox["w"] - context_width
+    max_y = parent_bbox["y"] + parent_bbox["h"] - context_height
+    context_x = max(parent_bbox["x"], min(int(round(target_center_x - context_width / 2)), max_x))
+    context_y = max(parent_bbox["y"], min(int(round(target_center_y - context_height / 2)), max_y))
+    return {
+        "x": context_x,
+        "y": context_y,
+        "w": context_width,
+        "h": context_height,
+    }
+
+
+def _learn_vista_is_compact_direct_control(
+    target_bbox: dict[str, int],
+    *,
+    target_role: str | None,
+) -> bool:
+    normalized_role = str(target_role or "").strip().casefold().replace("-", "_").replace(" ", "_")
+    return (
+        normalized_role in {"button", "control", "icon_button", "tab"}
+        and int(target_bbox.get("w") or 0) <= 72
+        and int(target_bbox.get("h") or 0) <= 72
+    )
+
+
+def _learn_vista_compact_control_prompt(label: str, role: str) -> str:
+    normalized_label = " ".join(str(label or "").split())
+    generic_label = re.fullmatch(r"(?:visual\s+)?control(?:\s+\d+)?", normalized_label, flags=re.IGNORECASE)
+    target_text = "the visible control" if generic_label else f'the visible {role} "{normalized_label}"'
+    return (
+        f"Locate {target_text} closest to the center of this crop. "
+        "The crop is centered on the current candidate; return one point inside that candidate, not an adjacent control."
+    )
+
+
+def _learn_precise_locator_expand_ocr_bbox(
+    bbox: dict[str, int],
+    *,
+    parent_bbox: dict[str, int],
+    padding: int = 8,
+) -> dict[str, int] | None:
+    x1 = max(parent_bbox["x"], bbox["x"] - padding)
+    y1 = max(parent_bbox["y"], bbox["y"] - padding)
+    x2 = min(parent_bbox["x"] + parent_bbox["w"], bbox["x"] + bbox["w"] + padding)
+    y2 = min(parent_bbox["y"] + parent_bbox["h"], bbox["y"] + bbox["h"] + padding)
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return {"x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1}
+
+
+def _learn_precise_locator_evidence_candidates(
+    target: dict[str, Any],
+    *,
+    all_targets: list[dict[str, Any]],
+    evidence_context: dict[str, Any] | None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    locator_context = target.get("locator_context") if isinstance(target.get("locator_context"), dict) else {}
+    parent_bbox = _normalize_map_bbox(locator_context.get("region_bbox"))
+    if parent_bbox is None:
+        return [], {
+            "ocr": "not_available_parent_region_missing",
+            "uia": "not_available_missing_binding_evidence",
+            "visual": "not_available_parent_region_missing",
+        }
+    target_id = str(target.get("candidate_id") or "")
+    target_label = _first_compact_text(target.get("label"), target_id)
+    target_role = _first_compact_text(target.get("role"), "unknown")
+    child_labels = [
+        _first_compact_text(item)
+        for item in _as_list(locator_context.get("child_labels"))
+        if _first_compact_text(item)
+    ]
+    query_labels = [target_label, *child_labels]
+    for part in re.split(r"[/|]", target_label):
+        compact = _first_compact_text(part)
+        if compact:
+            query_labels.append(compact)
+
+    candidates: list[dict[str, Any]] = []
+    for sibling in all_targets:
+        if str(sibling.get("candidate_id") or "") == target_id:
+            continue
+        sibling_context = sibling.get("locator_context") if isinstance(sibling.get("locator_context"), dict) else {}
+        sibling_parent_bbox = _normalize_map_bbox(sibling_context.get("region_bbox"))
+        sibling_bbox = _normalize_map_bbox(sibling.get("bbox"))
+        if sibling_parent_bbox != parent_bbox or sibling_bbox is None:
+            continue
+        candidates.append(
+            {
+                "candidate_id": sibling.get("candidate_id"),
+                "label": sibling.get("label"),
+                "role": sibling.get("role"),
+                "bbox": sibling_bbox,
+                "click_point": sibling.get("click_point"),
+                "confidence": sibling.get("confidence") or 0.5,
+                "source": "same_region_visual_candidate",
+                "freshness": "current_capture",
+            }
+        )
+
+    context = evidence_context if isinstance(evidence_context, dict) else {}
+    observe_result = context.get("observe_result") if isinstance(context.get("observe_result"), dict) else {}
+    ocr_count = 0
+    for index, text_item in enumerate(_as_list(observe_result.get("texts"))):
+        if not isinstance(text_item, dict):
+            continue
+        text = _first_compact_text(text_item.get("text"))
+        text_bbox = _normalize_map_bbox(text_item.get("bbox"))
+        if not text or text_bbox is None or not _learn_precise_locator_bbox_inside_parent(text_bbox, parent_bbox):
+            continue
+        similarity = max((_learn_precise_locator_text_similarity(text, query) for query in query_labels), default=0.0)
+        if similarity < 0.58:
+            continue
+        expanded_bbox = _learn_precise_locator_expand_ocr_bbox(text_bbox, parent_bbox=parent_bbox)
+        if expanded_bbox is None:
+            continue
+        candidates.append(
+            {
+                "candidate_id": _first_compact_text(text_item.get("id"), f"ocr-{index}"),
+                "label": text,
+                "role": target_role,
+                "bbox": expanded_bbox,
+                "click_point": {
+                    "x": expanded_bbox["x"] + expanded_bbox["w"] // 2,
+                    "y": expanded_bbox["y"] + expanded_bbox["h"] // 2,
+                },
+                "confidence": float(text_item.get("confidence") or 0.0),
+                "source": "ocr_anchor",
+                "freshness": "current_capture",
+                "evidence": {"text_similarity": round(similarity, 4), "raw_text_bbox": text_bbox},
+            }
+        )
+        ocr_count += 1
+
+    screen_map = context.get("screen_map") if isinstance(context.get("screen_map"), dict) else {}
+    visual_count = 0
+    for index, item in enumerate(_as_list(screen_map.get("candidates"))):
+        if not isinstance(item, dict) or str(item.get("candidate_id") or "") == target_id:
+            continue
+        item_bbox = _normalize_map_bbox(item.get("bbox"))
+        item_label = _first_compact_text(item.get("label"))
+        if item_bbox is None or not _learn_precise_locator_bbox_inside_parent(item_bbox, parent_bbox):
+            continue
+        similarity = _learn_precise_locator_text_similarity(item_label, target_label)
+        if similarity < 0.35:
+            continue
+        candidates.append(
+            {
+                "candidate_id": _first_compact_text(item.get("candidate_id"), f"visual-{index}"),
+                "label": item_label,
+                "role": _first_compact_text(item.get("role"), target_role),
+                "bbox": item_bbox,
+                "click_point": item.get("click_point"),
+                "confidence": float(item.get("confidence") or 0.0),
+                "source": _first_compact_text(item.get("source"), "observe_visual_candidate"),
+                "freshness": "current_capture",
+            }
+        )
+        visual_count += 1
+
+    return candidates, {
+        "ocr": "available" if ocr_count else "no_semantic_match",
+        "uia": "not_available_missing_binding_evidence",
+        "visual": "available" if (visual_count or candidates) else "no_semantic_match",
+        "ocr_candidate_count": ocr_count,
+        "visual_candidate_count": visual_count,
     }
 
 
@@ -6252,6 +7058,7 @@ def _apply_vista_coordinate_validation_to_learn_targets(
     local_config: dict[str, Any],
     options: dict[str, Any],
     timeout_seconds: float,
+    evidence_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not options.get("enabled"):
         return {
@@ -6261,6 +7068,7 @@ def _apply_vista_coordinate_validation_to_learn_targets(
             "validated_count": 0,
             "inside_count": 0,
             "outside_count": 0,
+            "needs_review_count": 0,
             "skipped_count": len(targets),
             "results": [],
         }
@@ -6273,15 +7081,21 @@ def _apply_vista_coordinate_validation_to_learn_targets(
             "validated_count": 0,
             "inside_count": 0,
             "outside_count": 0,
+            "needs_review_count": 0,
             "skipped_count": len(targets),
             "results": [],
         }
-    max_targets = max(0, int(options.get("max_targets") or 40))
+    validate_all_targets = options.get("validate_all_targets") is True
+    max_targets = len(targets) if validate_all_targets else max(0, int(options.get("max_targets") or 40))
     padding = max(0, int(options.get("padding") or 10))
     update_click_point = options.get("update_click_point", True) is not False
     per_target_timeout = max(1.0, float(options.get("per_target_timeout_seconds") or timeout_seconds))
+    region_roi_padding = max(0, int(options.get("region_roi_padding") or 10))
+    region_roi_max_edge = max(0, int(options.get("region_roi_max_edge") or 0))
     stop_on_failure = options.get("stop_on_failure", True) is not False
+    use_numbered_overlay = options.get("use_numbered_overlay") is True
     results: list[dict[str, Any]] = []
+    abort_reason: str | None = None
     validated_targets = targets[:max_targets]
     for index, target in enumerate(validated_targets, start=1):
         bbox = _normalize_map_bbox(target.get("bbox"))
@@ -6298,29 +7112,145 @@ def _apply_vista_coordinate_validation_to_learn_targets(
             results.append(result)
             continue
         role = _first_compact_text(target.get("role"), "control")
+        normalized_target_role = role.strip().casefold().replace("-", "_").replace(" ", "_")
+        compact_direct_control = _learn_vista_is_compact_direct_control(bbox, target_role=role)
+        target_uses_numbered_overlay = (
+            use_numbered_overlay
+            and normalized_target_role != "menu_item"
+            and not compact_direct_control
+        )
         goal = f"Click {label}"
-        prompt = f"Click {label}" if role in {"button", "link", "tab", "menu_item", "nav text action"} else f"Locate {label}"
+        locator_prompt = " ".join(str(target.get("locator_prompt") or "").split())[:600]
+        if compact_direct_control and use_numbered_overlay:
+            prompt = _learn_vista_compact_control_prompt(label, role)
+        else:
+            prompt = locator_prompt or (
+                f"Click {label}" if role in {"button", "link", "tab", "menu_item", "nav text action"} else f"Locate {label}"
+            )
         try:
+            locator_context = target.get("locator_context") if isinstance(target.get("locator_context"), dict) else {}
+            region_bbox = _normalize_map_bbox(locator_context.get("region_bbox"))
+            inference_path = Path(image_path)
+            inference_size = image_size_model
+            coordinate_transform = None
+            image_preprocess = None
+            inference_scope = "full_screen"
+            inference_visual_source = "source_screenshot"
+            numbered_overlay_text = str(target.get("numbered_overlay_path") or "").strip()
+            visual_source_path = Path(image_path)
+            if target_uses_numbered_overlay and numbered_overlay_text:
+                numbered_overlay_path = Path(numbered_overlay_text)
+                if not numbered_overlay_path.exists():
+                    raise ValueError("numbered_overlay_path_missing")
+                with Image.open(numbered_overlay_path) as numbered_image:
+                    if numbered_image.size != (image_size_model.width, image_size_model.height):
+                        raise ValueError("numbered_overlay_size_mismatch")
+                visual_source_path = numbered_overlay_path
+                inference_visual_source = "numbered_overlay"
+            inference_bbox = region_bbox
+            if use_numbered_overlay:
+                inference_bbox = _learn_vista_target_context_bbox(
+                    bbox,
+                    parent_bbox=region_bbox
+                    or {
+                        "x": 0,
+                        "y": 0,
+                        "w": image_size_model.width,
+                        "h": image_size_model.height,
+                    },
+                    target_role=role,
+                )
+            if inference_bbox is not None:
+                if not _bbox_inside_image(inference_bbox, image_size):
+                    raise ValueError("parent_region_bbox_outside_image")
+                region_preprocess = _prepare_vista_region_roi_image(
+                    visual_source_path,
+                    image_size_model,
+                    region_bbox=inference_bbox,
+                    padding=region_roi_padding,
+                    max_edge=region_roi_max_edge,
+                )
+                inference_path = Path(region_preprocess["processed_image_path"])
+                processed_size = region_preprocess["processed_size"]
+                inference_size = ImageSize(width=int(processed_size["width"]), height=int(processed_size["height"]))
+                coordinate_transform = region_preprocess["transform"]
+                image_preprocess = region_preprocess
+                image_preprocess["numbered_overlay_source_path"] = (
+                    str(visual_source_path) if inference_visual_source == "numbered_overlay" else ""
+                )
+                image_preprocess["coordinate_reference_image_path"] = str(Path(image_path))
+                inference_scope = "target_context_roi" if use_numbered_overlay else "parent_region_roi"
+            elif inference_visual_source == "numbered_overlay":
+                inference_path = visual_source_path
             vista_payload = _call_vista_point_prompt(
                 local_config=local_config,
-                image_path=Path(image_path),
+                image_path=inference_path,
                 goal=goal,
                 prompt=prompt,
-                image_size=image_size_model,
+                image_size=inference_size,
+                original_image_size=image_size_model,
+                coordinate_transform=coordinate_transform,
+                image_preprocess=image_preprocess,
                 timeout_seconds=per_target_timeout,
                 max_tokens=int(local_config.get("max_new_tokens") or 32),
-                provider_name="vista_learn_coordinate_validation",
+                provider_name=f"{str(local_config.get('profile_id') or 'vista').strip()}_learn_coordinate_validation",
             )
             point = vista_payload["point"]
             inside = _point_inside_map_bbox(point, bbox, padding=padding)
             previous_point = _normalize_map_point(target.get("click_point"), bbox)
-            if inside and update_click_point:
+            precise_candidates, evidence_availability = _learn_precise_locator_evidence_candidates(
+                target,
+                all_targets=targets,
+                evidence_context=evidence_context,
+            )
+            precise_evidence = build_precise_locator_evidence(
+                capture_id=str(Path(image_path)),
+                image_size=image_size,
+                goal=goal,
+                target={
+                    "target_id": target.get("candidate_id"),
+                    "label": label,
+                    "role": role,
+                    "parent_region_id": locator_context.get("region_label"),
+                    "parent_region_bbox": region_bbox
+                    or {
+                        "x": 0,
+                        "y": 0,
+                        "w": int(image_size.get("width") or 0),
+                        "h": int(image_size.get("height") or 0),
+                    },
+                },
+                source_candidate={
+                    "candidate_id": target.get("candidate_id"),
+                    "label": label,
+                    "role": role,
+                    "bbox": bbox,
+                    "click_point": previous_point,
+                    "confidence": float(target.get("confidence") or 0.5),
+                    "source": _first_compact_text(target.get("source"), "stage2_visual"),
+                    "freshness": "current_capture",
+                },
+                evidence_candidates=precise_candidates,
+                vista_point=point,
+                mode="learn",
+                numbered_overlay_used=inference_visual_source == "numbered_overlay",
+            )
+            precise_evidence["evidence_availability"] = evidence_availability
+            selected_candidate = (
+                precise_evidence.get("selected_candidate")
+                if isinstance(precise_evidence.get("selected_candidate"), dict)
+                else None
+            )
+            precise_gate = precise_evidence.get("dry_run_gate") if isinstance(precise_evidence.get("dry_run_gate"), dict) else {}
+            precise_pass = precise_gate.get("status") == "locate_review_pass"
+            if precise_pass and selected_candidate is not None and update_click_point:
+                target["bbox"] = dict(selected_candidate["bbox"])
                 target["click_point"] = point
-                target["coordinate_source"] = "vista_point_v1"
+                target["coordinate_source"] = "precise_locator_v1"
                 target = _validate_learn_target_coordinates(target, image_size=image_size)
             result = {
                 "contract_version": "learn_vista_target_coordinate_validation_v1",
-                "status": "valid" if inside else "needs_review",
+                "status": "valid" if precise_pass else "needs_review",
                 "candidate_id": target.get("candidate_id"),
                 "label": label,
                 "role": target.get("role"),
@@ -6328,12 +7258,21 @@ def _apply_vista_coordinate_validation_to_learn_targets(
                 "previous_click_point": previous_point,
                 "vista_point": point,
                 "vista_point_inside_bbox": inside,
+                "vista_point_inside_selected_bbox": bool(
+                    selected_candidate and _point_inside_map_bbox(point, selected_candidate["bbox"], padding=0)
+                ),
                 "vista_instruction": prompt,
+                "inference_scope": inference_scope,
+                "inference_visual_source": inference_visual_source,
+                "coordinate_transform": vista_payload.get("coordinate_transform"),
+                "image_preprocess": vista_payload.get("image_preprocess"),
                 "padding": padding,
-                "updated_click_point": bool(inside and update_click_point),
+                "updated_click_point": bool(precise_pass and selected_candidate is not None and update_click_point),
+                "precise_locator_evidence": precise_evidence,
                 "model_io": _vista_model_io_trace(vista_payload),
             }
         except Exception as exc:
+            failure_category = _vista_validation_failure_category(exc)
             result = {
                 "contract_version": "learn_vista_target_coordinate_validation_v1",
                 "status": "failed",
@@ -6343,30 +7282,64 @@ def _apply_vista_coordinate_validation_to_learn_targets(
                 "error": str(exc),
                 "model_io": _model_io_failure_payload(exc),
             }
+            if failure_category:
+                result["failure_category"] = failure_category
         target["vista_coordinate_validation"] = result
         results.append(result)
+        if result.get("failure_category"):
+            abort_reason = str(result["failure_category"])
+            break
         if result.get("status") == "failed" and stop_on_failure:
             break
     skipped_count = max(0, len(targets) - len(results))
     inside_count = sum(1 for item in results if item.get("vista_point_inside_bbox") is True)
+    outside_count = sum(1 for item in results if item.get("vista_point_inside_bbox") is False)
+    needs_review_count = sum(1 for item in results if item.get("status") == "needs_review")
     failed_count = sum(1 for item in results if item.get("status") == "failed")
-    outside_count = sum(1 for item in results if item.get("status") == "needs_review")
+    precise_review_pass_count = sum(
+        1
+        for item in results
+        if ((item.get("precise_locator_evidence") or {}).get("dry_run_gate") or {}).get("status") == "locate_review_pass"
+    )
     return {
         "contract_version": "learn_vista_coordinate_validation_v1",
-        "status": "ready" if results and failed_count == 0 else ("partial" if results else "empty"),
+        "status": "blocked" if abort_reason else ("ready" if results and failed_count == 0 else ("partial" if results else "empty")),
+        "grounding_profile_id": local_config.get("profile_id"),
+        "grounding_model_family": local_config.get("model_family") or "VISTA",
         "model_name": local_config.get("model_name"),
         "output_contract": local_config.get("output_contract") or "vista_point_v1",
         "validated_count": len(results),
+        "attempted_count": len(results),
         "inside_count": inside_count,
         "outside_count": outside_count,
+        "needs_review_count": needs_review_count,
+        "precise_review_pass_count": precise_review_pass_count,
         "failed_count": failed_count,
         "skipped_count": skipped_count,
+        "validation_scope": "all_targets" if validate_all_targets else "capped",
         "update_click_point": update_click_point,
         "padding": padding,
         "per_target_timeout_seconds": per_target_timeout,
         "stop_on_failure": stop_on_failure,
+        "batch_aborted": abort_reason is not None,
+        "abort_reason": abort_reason,
+        "use_numbered_overlay": use_numbered_overlay,
+        "interpretation": "dry-run locator evidence only; no click authorization and no action executed",
         "results": results,
     }
+
+
+def _vista_validation_failure_category(exc: Exception) -> str | None:
+    text = str(exc or "").casefold()
+    if "model_busy" in text or "already processing another request" in text:
+        return "model_busy"
+    if "timed out" in text or "timeout" in text:
+        return "request_timeout"
+    if "failed to reach local vision endpoint" in text or "connection refused" in text:
+        return "model_unreachable"
+    if "http 502" in text or "http 503" in text or "http 504" in text:
+        return "model_unavailable"
+    return None
 
 
 def _draw_learn_target_overlay_label(
@@ -6409,27 +7382,78 @@ def _render_learn_all_targets_overlay(
             "total_box_count": len(targets) + len(review_boxes),
         }
 
+    base_image = source_image
+    base_visual_source = "source_screenshot"
+    base_overlay_path = ""
+    numbered_overlay_paths = {
+        str(Path(path_value).expanduser().resolve())
+        for target in targets
+        if (path_value := str(target.get("numbered_overlay_path") or "").strip())
+        and Path(path_value).expanduser().exists()
+    }
+    if len(numbered_overlay_paths) == 1:
+        candidate_base = Path(next(iter(numbered_overlay_paths)))
+        try:
+            with Image.open(source_image) as source_probe, Image.open(candidate_base) as overlay_probe:
+                if source_probe.size == overlay_probe.size:
+                    base_image = candidate_base
+                    base_visual_source = "two_stage_numbered_overlay"
+                    base_overlay_path = str(candidate_base.resolve())
+        except Exception:
+            base_image = source_image
+    calibration_label_mode = (
+        "failed_status_badges_only"
+        if base_visual_source == "two_stage_numbered_overlay"
+        else "full_status_labels"
+    )
+
     output_path = build_review_overlay_path(name_hint=name_hint or source_image.stem, suffix="learn-target-coordinates")
     try:
-        with Image.open(source_image) as image:
+        with Image.open(base_image) as image:
             annotated = image.convert("RGB")
             draw = ImageDraw.Draw(annotated)
             font = ImageFont.load_default()
             for index, target in enumerate(targets, start=1):
                 validation = target.get("coordinate_validation") if isinstance(target.get("coordinate_validation"), dict) else {}
-                color = (0, 170, 110) if validation.get("status") == "valid" else (215, 40, 40)
+                calibration_only = target.get("calibration_only") is True
+                vista_validation = target.get("vista_coordinate_validation") if isinstance(target.get("vista_coordinate_validation"), dict) else {}
+                vista_status = str(vista_validation.get("status") or "not_attempted")
+                if calibration_only:
+                    color = (
+                        (0, 170, 110)
+                        if vista_status == "valid"
+                        else ((215, 40, 40) if vista_status in {"failed", "needs_review"} else (24, 114, 204))
+                    )
+                else:
+                    color = (0, 170, 110) if validation.get("status") == "valid" else (215, 40, 40)
                 bbox = _normalize_map_bbox(target.get("bbox"))
                 if not bbox:
                     continue
                 rect = (bbox["x"], bbox["y"], bbox["x"] + bbox["w"], bbox["y"] + bbox["h"])
                 draw.rectangle(rect, outline=color, width=4)
-                point = _normalize_map_point(target.get("click_point"), bbox)
+                point = (
+                    _normalize_map_point(target.get("click_point"), bbox)
+                    if not calibration_only or vista_status in {"valid", "needs_review"}
+                    else None
+                )
                 if point:
                     px = int(point["x"])
                     py = int(point["y"])
                     draw.ellipse((px - 5, py - 5, px + 5, py + 5), fill=(0, 100, 255), outline=(255, 255, 255), width=2)
-                label = f"{index} {target.get('role') or 'control'} ({bbox['x']},{bbox['y']},{bbox['w']},{bbox['h']})"
-                _draw_learn_target_overlay_label(draw, bbox["x"], bbox["y"], label, font=font, color=color)
+                if calibration_only:
+                    status_label = {
+                        "valid": "OK",
+                        "needs_review": "R",
+                        "failed": "F",
+                    }.get(vista_status, "P")
+                    if calibration_label_mode == "failed_status_badges_only":
+                        label = status_label if vista_status == "failed" else ""
+                    else:
+                        label = f"C:{status_label}"
+                else:
+                    label = f"{index} {target.get('role') or 'control'} ({bbox['x']},{bbox['y']},{bbox['w']},{bbox['h']})"
+                if label:
+                    _draw_learn_target_overlay_label(draw, bbox["x"], bbox["y"], label, font=font, color=color)
             review_color = (217, 119, 6)
             for index, review_box in enumerate(review_boxes, start=1):
                 bbox = _normalize_map_bbox(review_box.get("bbox"))
@@ -6457,11 +7481,33 @@ def _render_learn_all_targets_overlay(
         "status": "ready",
         "image_path": str(source_image.resolve()),
         "output_path": str(output_path.resolve()),
+        "base_visual_source": base_visual_source,
+        "base_overlay_path": base_overlay_path,
+        "final_fusion_overlay": base_visual_source == "two_stage_numbered_overlay",
+        "calibration_label_mode": calibration_label_mode,
         "target_count": len(targets),
         "review_box_count": len(review_boxes),
         "total_box_count": len(targets) + len(review_boxes),
         "valid_count": sum(1 for item in targets if (item.get("coordinate_validation") or {}).get("status") == "valid"),
         "invalid_count": sum(1 for item in targets if (item.get("coordinate_validation") or {}).get("status") != "valid"),
+        "model_validated_calibration_count": sum(
+            1
+            for item in targets
+            if item.get("calibration_only") is True
+            and (item.get("vista_coordinate_validation") or {}).get("status") == "valid"
+        ),
+        "model_review_calibration_count": sum(
+            1
+            for item in targets
+            if item.get("calibration_only") is True
+            and (item.get("vista_coordinate_validation") or {}).get("status") in {"needs_review", "failed"}
+        ),
+        "pending_calibration_count": sum(
+            1
+            for item in targets
+            if item.get("calibration_only") is True
+            and not isinstance(item.get("vista_coordinate_validation"), dict)
+        ),
     }
 
 
@@ -6751,6 +7797,48 @@ def _apply_learn_locate_model_review_to_screen_map(
     }
 
 
+def _learn_vista_target_ineligibility_reason(
+    target: dict[str, Any],
+    *,
+    image_size: dict[str, int],
+) -> str:
+    """区分需要显示的审阅证据和适合点定位的目标。"""
+    candidate_id = str(target.get("candidate_id") or "").strip().casefold()
+    source = str(target.get("source") or "").strip().casefold()
+    role = str(target.get("role") or "").strip().casefold().replace(" ", "_")
+    bbox = _normalize_map_bbox(target.get("bbox"))
+    if "partial_visible" in candidate_id or "partial_card" in source or "bottom_edge_partial" in source:
+        return "partial_visible_review_only"
+    if role in {"separator", "sidebar_review_region"}:
+        return "structural_separator_review_only"
+    if role in {"status_bar", "status_bar_evidence", "bottom_bar", "bottom_bar_evidence"}:
+        return "structural_status_bar_review_only"
+    if role in {"menu_bar", "menu_bar_evidence"}:
+        return "structural_menu_bar_review_only"
+    if bbox and (bbox["h"] <= 3 or bbox["w"] <= 3):
+        return "structural_separator_review_only"
+    if role in {
+        "text",
+        "readable",
+        "label",
+        "pane",
+        "group",
+        "message_card_content",
+        "window_shell",
+        "title_bar",
+    }:
+        return "non_actionable_semantic_evidence"
+    label_text = str(target.get("label") or "").strip().casefold()
+    if role in {"message_bubble", "group"} and any(token in label_text for token in ("list-filter", "list_filter", "filters", "筛选组")):
+        return "semantic_container_review_only"
+    image_height = int(image_size.get("height") or 0)
+    if bbox and image_height > 0 and role in {"message_bubble", "list", "list_container"} and bbox["h"] >= int(image_height * 0.45):
+        return "broad_container_review_only"
+    if bbox and image_height > 0 and bbox["y"] + bbox["h"] >= image_height and bbox["h"] < max(24, int(image_height * 0.04)):
+        return "partial_visible_review_only"
+    return ""
+
+
 def _build_learn_all_targets_from_screen_map(
     observe_reuse: dict[str, Any],
     *,
@@ -6759,12 +7847,20 @@ def _build_learn_all_targets_from_screen_map(
 ) -> dict[str, Any]:
     screen_map = observe_reuse.get("screen_map") if isinstance(observe_reuse.get("screen_map"), dict) else {}
     image_size = _learn_target_image_size(image_path)
-    raw_candidates = [item for item in _as_list(screen_map.get("candidates")) if isinstance(item, dict)]
+    raw_observe_candidates = [item for item in _as_list(screen_map.get("candidates")) if isinstance(item, dict)]
+    raw_calibration_candidates = [
+        item for item in _as_list(screen_map.get("calibration_candidates")) if isinstance(item, dict)
+    ]
+    authoritative_two_stage = bool(
+        screen_map.get("two_stage_calibration_authoritative") and raw_calibration_candidates
+    )
+    raw_candidates = [] if authoritative_two_stage else raw_observe_candidates
     filtered_browser_chrome: list[dict[str, Any]] = []
     filtered_noise: list[dict[str, Any]] = []
     filtered_non_actionable: list[dict[str, Any]] = []
     filtered_blocked_review_only: list[dict[str, Any]] = []
     filtered_ungrounded: list[dict[str, Any]] = []
+    filtered_calibration_browser_chrome: list[dict[str, Any]] = []
     candidates: list[dict[str, Any]] = []
     for candidate in raw_candidates:
         if _learn_target_candidate_is_tiny_noise(candidate):
@@ -6783,10 +7879,21 @@ def _build_learn_all_targets_from_screen_map(
             filtered_ungrounded.append(candidate)
             continue
         candidates.append(candidate)
+    calibration_candidates: list[dict[str, Any]] = []
+    for candidate in raw_calibration_candidates:
+        if _learn_target_candidate_is_browser_chrome(candidate, image_size=image_size, screen_map=screen_map):
+            filtered_calibration_browser_chrome.append(candidate)
+            continue
+        calibration_candidates.append(candidate)
     targets = [
         _validate_learn_target_coordinates(target, image_size=image_size)
         for index, candidate in enumerate(candidates)
         if (target := _screen_map_candidate_to_learn_target(candidate, index)) is not None
+    ]
+    calibration_targets = [
+        _validate_learn_target_coordinates(target, image_size=image_size)
+        for index, candidate in enumerate(calibration_candidates)
+        if (target := _screen_map_calibration_candidate_to_target(candidate, index)) is not None
     ]
     review_boxes = [
         review_box
@@ -6805,64 +7912,114 @@ def _build_learn_all_targets_from_screen_map(
     }
     child_ids, child_box_keys = _learn_review_child_identity(review_boxes)
     observe_result = observe_reuse.get("observe_result") if isinstance(observe_reuse.get("observe_result"), dict) else {}
-    for index, text_item in enumerate(_screen_map_texts(observe_result)):
-        if not isinstance(text_item, dict):
-            continue
-        text_id = _first_compact_text(text_item.get("id"), text_item.get("text_id"))
-        if text_id and text_id in child_ids:
-            continue
-        review_box = _ocr_text_to_learn_review_box(text_item, index)
-        if review_box is None:
-            continue
-        key = f"{review_box.get('label')}|{review_box.get('bbox')}"
-        if key in child_box_keys:
-            continue
-        if key in review_box_keys:
-            continue
-        review_box_keys.add(key)
-        review_boxes.append(review_box)
-        if len(review_boxes) >= 80:
-            break
-    for review_box in _learn_nav_rail_review_boxes_from_image(image_path, existing_count=len(review_boxes)):
-        key = f"{review_box.get('label')}|{review_box.get('bbox')}"
-        if key in review_box_keys:
-            continue
-        review_box_keys.add(key)
-        review_boxes.append(review_box)
-        if len(review_boxes) >= 96:
-            break
+    if not authoritative_two_stage:
+        for index, text_item in enumerate(_screen_map_texts(observe_result)):
+            if not isinstance(text_item, dict):
+                continue
+            text_id = _first_compact_text(text_item.get("id"), text_item.get("text_id"))
+            if text_id and text_id in child_ids:
+                continue
+            review_box = _ocr_text_to_learn_review_box(text_item, index)
+            if review_box is None:
+                continue
+            key = f"{review_box.get('label')}|{review_box.get('bbox')}"
+            if key in child_box_keys:
+                continue
+            if key in review_box_keys:
+                continue
+            review_box_keys.add(key)
+            review_boxes.append(review_box)
+            if len(review_boxes) >= 80:
+                break
+    if not authoritative_two_stage and _screen_map_has_side_navigation_region(screen_map):
+        for review_box in _learn_nav_rail_review_boxes_from_image(image_path, existing_count=len(review_boxes)):
+            key = f"{review_box.get('label')}|{review_box.get('bbox')}"
+            if key in review_box_keys:
+                continue
+            review_box_keys.add(key)
+            review_boxes.append(review_box)
+            if len(review_boxes) >= 96:
+                break
     targets, visual_overlap_removals = _prune_learn_target_visual_overlaps(targets)
     vista_summary = None
     if isinstance(vista_validation, dict):
+        vista_options = vista_validation.get("options") if isinstance(vista_validation.get("options"), dict) else {"enabled": False}
+        all_vista_targets = [*calibration_targets, *targets]
+        vista_targets = all_vista_targets
+        review_only_not_sent_to_vista: list[dict[str, Any]] = []
+        if vista_options.get("enabled"):
+            vista_targets = []
+            for target in all_vista_targets:
+                reason = _learn_vista_target_ineligibility_reason(target, image_size=image_size)
+                if reason:
+                    skipped = {
+                        "contract_version": "learn_vista_target_coordinate_validation_v1",
+                        "status": "skipped",
+                        "reason": reason,
+                        "candidate_id": target.get("candidate_id"),
+                        "label": target.get("label"),
+                        "role": target.get("role"),
+                        "bbox": target.get("bbox"),
+                    }
+                    target["vista_coordinate_validation"] = skipped
+                    review_only_not_sent_to_vista.append(skipped)
+                    continue
+                vista_targets.append(target)
         vista_summary = _apply_vista_coordinate_validation_to_learn_targets(
-            targets,
+            vista_targets,
             image_path=image_path,
             image_size=image_size,
             local_config=vista_validation.get("local_config") if isinstance(vista_validation.get("local_config"), dict) else {},
-            options=vista_validation.get("options") if isinstance(vista_validation.get("options"), dict) else {"enabled": False},
+            options=vista_options,
             timeout_seconds=float(vista_validation.get("timeout_seconds") or 600),
+            evidence_context={
+                "screen_map": screen_map,
+                "observe_result": observe_result,
+                "source_trace_path": observe_reuse.get("trace_path"),
+            },
         )
+        vista_summary = {
+            **vista_summary,
+            "display_target_count": len(all_vista_targets),
+            "eligible_target_count": len(vista_targets),
+            "review_only_not_sent_to_vista_count": len(review_only_not_sent_to_vista),
+            "review_only_not_sent_to_vista": review_only_not_sent_to_vista,
+            "interpretation": "VISTA validates locatable targets only; skipped review evidence remains visible in the fused overlay.",
+        }
     overlay = _render_learn_all_targets_overlay(
         image_path=image_path,
-        targets=targets,
+        targets=[*targets, *calibration_targets],
         name_hint=f"{screen_map.get('state_id') or Path(image_path).stem}-learn-targets",
         review_boxes=review_boxes,
     )
     valid_count = sum(1 for item in targets if (item.get("coordinate_validation") or {}).get("status") == "valid")
     invalid_count = len(targets) - valid_count
+    calibration_valid_count = sum(
+        1 for item in calibration_targets if (item.get("coordinate_validation") or {}).get("status") == "valid"
+    )
+    vista_blocked = bool(isinstance(vista_summary, dict) and vista_summary.get("status") == "blocked")
     return {
         "contract_version": "learn_all_target_locations_v1",
-        "status": "ready" if targets and invalid_count == 0 else ("needs_review" if targets else "empty"),
+        "status": "blocked" if vista_blocked else (
+            "ready" if (targets or calibration_targets) and invalid_count == 0 else ("needs_review" if targets else "empty")
+        ),
         "state_id": screen_map.get("state_id"),
         "source_trace_path": observe_reuse.get("trace_path"),
         "image_size": image_size,
-        "raw_candidate_count": len(raw_candidates),
-        "filtered_browser_chrome_count": len(filtered_browser_chrome),
+        "raw_candidate_count": len(raw_observe_candidates),
+        "raw_candidates_suppressed_by_authoritative_two_stage_count": (
+            len(raw_observe_candidates) if authoritative_two_stage else 0
+        ),
+        "raw_calibration_candidate_count": len(raw_calibration_candidates),
+        "filtered_browser_chrome_count": len(filtered_browser_chrome) + len(filtered_calibration_browser_chrome),
+        "filtered_calibration_browser_chrome_count": len(filtered_calibration_browser_chrome),
         "filtered_noise_count": len(filtered_noise),
         "filtered_non_actionable_count": len(filtered_non_actionable),
         "filtered_blocked_review_only_count": len(filtered_blocked_review_only),
         "filtered_ungrounded_count": len(filtered_ungrounded),
         "target_count": len(targets),
+        "calibration_target_count": len(calibration_targets),
+        "calibration_valid_count": calibration_valid_count,
         "review_box_count": len(review_boxes),
         "validated_count": valid_count,
         "invalid_count": invalid_count,
@@ -6871,6 +8028,7 @@ def _build_learn_all_targets_from_screen_map(
         "overlay": overlay,
         "overlay_path": overlay.get("output_path") if overlay.get("status") == "ready" else None,
         "targets": targets,
+        "calibration_targets": calibration_targets,
         "review_boxes": review_boxes,
         "vista_coordinate_validation": vista_summary,
     }
@@ -6879,11 +8037,21 @@ def _build_learn_all_targets_from_screen_map(
 def _learn_all_targets_location_status(learn_all_targets: dict[str, Any]) -> str:
     """区分可执行定位目标和学习模式只读识别框。"""
 
+    vista_validation = (
+        learn_all_targets.get("vista_coordinate_validation")
+        if isinstance(learn_all_targets.get("vista_coordinate_validation"), dict)
+        else {}
+    )
+    if vista_validation.get("status") == "blocked" or vista_validation.get("batch_aborted") is True:
+        return "learn_calibration_blocked"
     target_count = int(learn_all_targets.get("target_count") or 0)
     invalid_count = int(learn_all_targets.get("invalid_count") or 0)
     review_box_count = int(learn_all_targets.get("review_box_count") or 0)
+    calibration_target_count = int(learn_all_targets.get("calibration_target_count") or 0)
     if target_count:
         return "learn_all_targets_ready" if invalid_count == 0 else "learn_all_targets_needs_review"
+    if calibration_target_count:
+        return "learn_calibration_targets_ready"
     if review_box_count > 0:
         return "learn_review_boxes_ready"
     return "not_located"
@@ -6918,6 +8086,11 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
         with timer.step("load_observe_trace_reuse", has_observe_trace=bool(request.observe_trace_path)):
             observe_reuse = _load_observe_trace_reuse(request.observe_trace_path, image_path=image_path, goal=request.goal)
         metadata = dict(request.metadata or {})
+        observe_reuse = _attach_two_stage_calibration_candidates(
+            observe_reuse,
+            report_path_value=metadata.get("two_stage_report_path"),
+            image_path=image_path,
+        )
         if observe_reuse.get("status") == "ready":
             metadata["reused_ocr_anchors"] = observe_reuse["ocr_anchors"]
             metadata["reused_ocr_source_trace_path"] = observe_reuse["trace_path"]
@@ -6929,7 +8102,7 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
         if _learn_all_targets_requested(request, metadata):
             vision_config = VisionProviderFactory.load_config()
             learn_grounding_mode = str(request.provider_mode or "local_grounding")
-            learn_grounding_config = _selected_local_vision_config(vision_config, learn_grounding_mode)
+            learn_grounding_config = _selected_learning_grounding_config(vision_config, request)
             vista_validation_options = _learn_vista_coordinate_validation_options(request, learn_grounding_config)
             learn_locate_model_review: dict[str, Any] = {
                 "contract_version": "learn_locate_model_review_v1",
@@ -7002,6 +8175,7 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
                     "review_source": "learn_locate_deep_calibration",
                     "summary": {
                         "addition_count": learn_all_targets["target_count"],
+                        "calibration_target_count": learn_all_targets.get("calibration_target_count", 0),
                         "review_box_count": learn_all_targets.get("review_box_count", 0),
                         "review_only_overlay_ready": bool(learn_all_targets.get("review_box_count") and learn_all_targets.get("overlay_path")),
                         "validated_count": learn_all_targets.get("validated_count", 0),
@@ -7016,8 +8190,10 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
                         "vista_validated_count": int((learn_all_targets.get("vista_coordinate_validation") or {}).get("validated_count") or 0),
                         "vista_inside_count": int((learn_all_targets.get("vista_coordinate_validation") or {}).get("inside_count") or 0),
                         "vista_outside_count": int((learn_all_targets.get("vista_coordinate_validation") or {}).get("outside_count") or 0),
+                        "vista_needs_review_count": int((learn_all_targets.get("vista_coordinate_validation") or {}).get("needs_review_count") or 0),
                     },
                     "additions": learn_all_targets["targets"],
+                    "calibration_targets": learn_all_targets.get("calibration_targets", []),
                     "removals": learn_locate_delta.get("removals") or [],
                     "updates": learn_locate_delta.get("updates") or [],
                     "kept": [],
@@ -7034,6 +8210,7 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
                     "action_executed": False,
                     "learn_all_targets_used": True,
                     "target_count": learn_all_targets["target_count"],
+                    "calibration_target_count": learn_all_targets.get("calibration_target_count", 0),
                     "review_box_count": learn_all_targets.get("review_box_count", 0),
                     "review_only_overlay_ready": bool(learn_all_targets.get("review_box_count") and learn_all_targets.get("overlay_path")),
                     "coordinate_source": "screen_map_v1.candidates",

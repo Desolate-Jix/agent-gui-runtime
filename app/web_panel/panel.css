@@ -5178,6 +5178,93 @@ label {
   font-weight: 700;
 }
 
+.learning-draft-hierarchy-panel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #d8e2ef;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.learning-draft-hierarchy-panel h5 {
+  margin: 0;
+  font-size: 13px;
+}
+
+#learningDraftHierarchySummary {
+  color: #52637a;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.learning-draft-hierarchy-tree {
+  display: grid;
+  gap: 5px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.learning-hierarchy-node {
+  min-width: 0;
+  margin-left: calc(var(--hierarchy-depth, 0) * 14px);
+  border-left: 2px solid #b9c9dd;
+  background: #f8fafc;
+}
+
+.learning-hierarchy-node > summary,
+.learning-hierarchy-leaf {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 6px 8px;
+  cursor: default;
+}
+
+.learning-hierarchy-node > summary {
+  cursor: pointer;
+}
+
+.learning-hierarchy-node strong,
+.learning-hierarchy-leaf strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.learning-hierarchy-node small,
+.learning-hierarchy-leaf small {
+  color: #667085;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.learning-hierarchy-children {
+  display: grid;
+  gap: 4px;
+  padding: 0 6px 6px;
+}
+
+@media (max-width: 700px) {
+  .learning-hierarchy-node {
+    margin-left: calc(var(--hierarchy-depth, 0) * 6px);
+  }
+
+  .learning-hierarchy-node > summary,
+  .learning-hierarchy-leaf {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .learning-hierarchy-node small,
+  .learning-hierarchy-leaf small {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
 .learning-draft-path-grid {
   display: grid;
   --learning-draft-path-map-width: 32%;
@@ -5573,6 +5660,15 @@ label {
   border: 1px solid #dbe4f0;
   border-radius: 6px;
   background: #f8fbff;
+}
+
+.learning-demo-presentation-acceptance {
+  display: grid;
+  gap: 6px;
+  padding: 7px;
+  border: 1px solid #d9e3d8;
+  border-radius: 6px;
+  background: #fbfefb;
 }
 
 .learning-demo-fresh-replacement-plan {

@@ -23,6 +23,19 @@ def test_actual_parser_smoke_with_fake_model_writes_inventory_and_draft(tmp_path
             "image_size": {"width": 400, "height": 300},
             "screen_summary": "Search page",
             "state_guess": "search homepage",
+            "interface_classification": {
+                "category": "documentation_portal",
+                "confidence": 0.91,
+                "reason": "structured search and article surface",
+                "structure_signals": {
+                    "media_cards": False,
+                    "article_or_document_sections": True,
+                    "settings_controls": False,
+                    "people_or_conversation_rows": False,
+                    "file_or_folder_rows": False,
+                    "form_fields": False,
+                },
+            },
             "regions": [
                 {
                     "region_id": "search_area",
@@ -89,6 +102,7 @@ def test_actual_parser_smoke_with_fake_model_writes_inventory_and_draft(tmp_path
     output_path = Path(report["actual_parser_output_path"])
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["source_type"] == "actual_parser_call"
+    assert payload["observe_bundle"]["sources"]["vision"]["interface_classification"]["category"] == "documentation_portal"
     assert payload["observe_bundle"]["sources"]["vision"]["regions"][0]["label"] == "Search input"
     assert payload["raw_screen_inventory"][0]["label"] == "Search input"
     assert payload["layout_cleanup"]["input_count"] == 1

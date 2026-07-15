@@ -59,6 +59,16 @@ DEFAULT_APP_CATALOG = {
             "title_hint": "Notepad",
             "capabilities": ["text_editing", "file_text_review"],
         },
+        {
+            "app_id": "calculator",
+            "name": "Calculator",
+            "description": "Windows Calculator for desktop GUI recognition and learning tasks.",
+            "launch_command": ["calc.exe"],
+            "process_name": "ApplicationFrameHost.exe",
+            "title_hints": ["Calculator", "计算器"],
+            "require_title_match": True,
+            "capabilities": ["calculation", "desktop_ui"],
+        },
     ],
 }
 
@@ -129,7 +139,9 @@ def open_app(request: OpenAppRequest) -> APIResponse:
         bind_error = None
         maximize_error = None
         process_name = request.process_name or app.get("process_name")
-        title = request.title or app.get("title_hint")
+        title_hints = _app_title_hints(app, request)
+        title = title_hints[0] if title_hints else None
+        title_required = bool(request.title) or bool(app.get("require_title_match"))
         if request.bind_after_open:
             try:
                 with timer.step(
@@ -141,7 +153,8 @@ def open_app(request: OpenAppRequest) -> APIResponse:
                     bound = _bind_opened_window(
                         process_name=process_name,
                         title=title,
-                        title_required=bool(request.title),
+                        title_hints=title_hints,
+                        title_required=title_required,
                         before_windows=before_windows,
                         after_windows=windows,
                         prefer_new_window=request.prefer_new_window,
@@ -235,6 +248,18 @@ def _resolve_app(catalog: dict[str, Any], request: OpenAppRequest) -> dict[str, 
     raise ValueError("Provide app_id or command")
 
 
+def _app_title_hints(app: dict[str, Any], request: OpenAppRequest) -> list[str]:
+    if request.title:
+        return [request.title]
+    raw_hints = app.get("title_hints")
+    if isinstance(raw_hints, list):
+        hints = [str(item).strip() for item in raw_hints if str(item).strip()]
+        if hints:
+            return hints
+    title_hint = str(app.get("title_hint") or "").strip()
+    return [title_hint] if title_hint else []
+
+
 def _resolve_launch_command(app: dict[str, Any], request: OpenAppRequest) -> list[str] | None:
     command = list(request.command or app.get("launch_command") or [])
     if not command:
@@ -260,6 +285,7 @@ def _bind_opened_window(
     process_name: str | None,
     title: str | None,
     *,
+    title_hints: list[str] | None = None,
     title_required: bool,
     before_windows: list[dict[str, Any]] | None = None,
     after_windows: list[dict[str, Any]] | None = None,
@@ -269,12 +295,22 @@ def _bind_opened_window(
         new_window = _new_matching_window(before_windows or [], after_windows or [], process_name=process_name)
         if new_window and new_window.get("handle") is not None:
             return window_manager.bind_window_by_handle(int(new_window["handle"]))
-    try:
-        return window_manager.bind_window(process_name=process_name, title=title)
-    except Exception:
-        if title_required or not process_name or not title:
-            raise
-        return window_manager.bind_window(process_name=process_name, title=None)
+    candidates = title_hints or ([title] if title else [])
+    last_error: Exception | None = None
+    for candidate_title in candidates:
+        try:
+            return window_manager.bind_window(process_name=process_name, title=candidate_title)
+        except Exception as exc:
+            last_error = exc
+    if title_required:
+        if last_error is not None:
+            raise last_error
+        raise ValueError("A required window title hint was not configured")
+    if not process_name:
+        if last_error is not None:
+            raise last_error
+        raise ValueError("A process name or window title hint is required to bind the opened app")
+    return window_manager.bind_window(process_name=process_name, title=None)
 
 
 def _new_matching_window(

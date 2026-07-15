@@ -59,3 +59,27 @@ def test_layout_graph_groups_surface_zones_and_reading_order() -> None:
     assert graph["nodes"]["address_bar"]["surface_zone"] == "browser_chrome"
     assert graph["display_only"] is True
     assert graph["execute_binding_enabled"] is False
+
+
+def test_unzoned_top_text_is_not_invented_as_browser_chrome() -> None:
+    items = [
+        {
+            "item_id": "window_title",
+            "label": "Untitled - Text Editor",
+            "item_type": "readable",
+            "role": "text",
+            "bbox": {"x": 10, "y": 10, "w": 180, "h": 22},
+        },
+        {
+            "item_id": "file_menu",
+            "label": "File",
+            "item_type": "actionable",
+            "role": "menu_item",
+            "bbox": {"x": 20, "y": 40, "w": 60, "h": 20},
+        },
+    ]
+
+    graph = build_inventory_layout_graph(items, screen_size={"width": 1200, "height": 800})
+
+    assert graph["zones"]["browser_chrome"]["item_ids"] == []
+    assert graph["zones"]["page_header"]["item_ids"] == ["window_title", "file_menu"]

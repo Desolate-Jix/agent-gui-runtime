@@ -50,6 +50,37 @@ def test_stage1_inventory_reads_observe_screen_inventory() -> None:
     assert all(item["grounding_eligible"] is False for item in items)
 
 
+def test_stage1_inventory_preserves_action_grounding_evidence_from_observe_trace() -> None:
+    result = {
+        "image_size": {"width": 800, "height": 600},
+        "screen_inventory": {
+            "available_actions": [
+                {
+                    "id": "action_up",
+                    "label": "向上",
+                    "role": "button",
+                    "bbox": {"x": 451, "y": 257, "w": 32, "h": 33},
+                    "source": "screen_reading.ui_elements",
+                    "metadata": {
+                        "evidence_level": "semantic_region_only",
+                        "uia_match": None,
+                        "interaction_type": "click",
+                    },
+                }
+            ]
+        },
+    }
+
+    items = _stage1_inventory_from_trace_result(result)
+
+    assert len(items) == 1
+    assert items[0]["source"] == "screen_reading.ui_elements"
+    assert items[0]["evidence_level"] == "semantic_region_only"
+    assert items[0]["metadata"]["evidence_level"] == "semantic_region_only"
+    assert items[0]["metadata"]["uia_match"] is None
+    assert items[0]["metadata"]["interaction_type"] == "click"
+
+
 def test_stage1_inventory_reads_parser_screen_inventory_list() -> None:
     result = {
         "observe_bundle": {

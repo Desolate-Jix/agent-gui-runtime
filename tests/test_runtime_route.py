@@ -24,6 +24,32 @@ def test_model_status_reports_profiles(monkeypatch) -> None:
     assert response.data["timings"]["steps"][0]["name"] == "load_model_profiles"
 
 
+def test_model_status_checks_only_requested_profile(monkeypatch) -> None:
+    checked: list[str] = []
+    monkeypatch.setattr(
+        runtime_api,
+        "load_model_profiles",
+        lambda: [
+            {"profile_id": "qwen3_vl_8b_q4_k_m"},
+            {"profile_id": "vista_4b_transformers"},
+            {"profile_id": "unused_model"},
+        ],
+    )
+
+    def fake_check(profile):
+        checked.append(profile["profile_id"])
+        return {"status": "running", "model_id": profile["profile_id"]}
+
+    monkeypatch.setattr(runtime_api, "check_model_server", fake_check)
+
+    response = runtime_api.model_status(profile_id="vista_4b_transformers")
+
+    assert response.success is True
+    assert checked == ["vista_4b_transformers"]
+    assert [item["profile"]["profile_id"] for item in response.data["models"]] == ["vista_4b_transformers"]
+    assert response.data["requested_profile_id"] == "vista_4b_transformers"
+
+
 def test_observe_stage_defaults_to_learning_quality_understanding_profile() -> None:
     observe = profile_for_stage("observe")
     locate = profile_for_stage("locate")
@@ -64,6 +90,7 @@ def test_vista_transformers_profile_is_launchable() -> None:
     assert profile["start_script"] == "scripts/model_servers/start_transformers_vision_server.ps1"
     assert profile["endpoint"] == "http://127.0.0.1:1244/v1/chat/completions"
     assert Path(profile["model_path"]).exists()
+    assert (Path(profile["model_path"]) / "model.safetensors.index.json").exists()
 
 
 def test_start_model_ensures_stage(monkeypatch) -> None:
@@ -109,6 +136,8 @@ def test_start_model_server_passes_transformers_profile_args(monkeypatch) -> Non
             "device": "auto",
             "dtype": "bfloat16",
             "max_new_tokens": 32,
+            "gpu_memory_gib": 6,
+            "cpu_memory_gib": 6,
             "startup_exit_check_seconds": 0,
         }
     )
@@ -121,6 +150,8 @@ def test_start_model_server_passes_transformers_profile_args(monkeypatch) -> Non
     assert command[command.index("-Device") + 1] == "auto"
     assert command[command.index("-DType") + 1] == "bfloat16"
     assert command[command.index("-MaxNewTokens") + 1] == "32"
+    assert command[command.index("-GpuMemoryGiB") + 1] == "6"
+    assert command[command.index("-CpuMemoryGiB") + 1] == "6"
 
 
 def test_start_model_server_refreshes_pid_file_from_health(monkeypatch, tmp_path: Path) -> None:
@@ -278,6 +309,50 @@ def test_ensure_model_server_does_not_start_second_vista_when_busy(monkeypatch) 
     assert result["before"]["status"] == "busy"
 
 
+def test_ensure_model_server_stops_running_conflict_in_exclusive_resource_group(monkeypatch) -> None:
+    target = {
+        "profile_id": "vista_4b_transformers",
+        "exclusive_resource_group": "gpu_vision",
+    }
+    running_conflict = {
+        "profile_id": "qwen3_vl_8b_q4_k_m",
+        "exclusive_resource_group": "gpu_vision",
+    }
+    unrelated = {
+        "profile_id": "cpu_ocr",
+        "exclusive_resource_group": "cpu_ocr",
+    }
+    stopped: list[str] = []
+    started: list[str] = []
+
+    monkeypatch.setattr(model_server, "profile_for_stage", lambda stage, profile_id=None: target)
+    monkeypatch.setattr(model_server, "load_model_profiles", lambda: [target, running_conflict, unrelated])
+
+    def fake_check(profile, timeout=1.0):
+        if profile["profile_id"] == "qwen3_vl_8b_q4_k_m":
+            return {"status": "running"}
+        return {"status": "unreachable"}
+
+    monkeypatch.setattr(model_server, "check_model_server", fake_check)
+    monkeypatch.setattr(
+        model_server,
+        "stop_model_server",
+        lambda profile: stopped.append(profile["profile_id"]) or {"stopped": True, "returncode": 0},
+    )
+    monkeypatch.setattr(
+        model_server,
+        "start_model_server",
+        lambda profile: started.append(profile["profile_id"]) or {"pid": 456},
+    )
+
+    result = model_server.ensure_model_server(stage="locate", profile_id="vista_4b_transformers")
+
+    assert stopped == ["qwen3_vl_8b_q4_k_m"]
+    assert started == ["vista_4b_transformers"]
+    assert result["resource_switch"]["stopped_profile_ids"] == ["qwen3_vl_8b_q4_k_m"]
+    assert result["started"] is True
+
+
 def test_wait_for_model_server_refreshes_pid_file_from_health(monkeypatch, tmp_path: Path) -> None:
     pid_path = tmp_path / "uground.pid"
     monkeypatch.setattr(
@@ -328,6 +403,55 @@ def test_wait_for_model_server_retries_health_when_running_status_lacks_pid(monk
 
     assert result["health"]["pid"] == 444
     assert pid_path.read_text(encoding="utf-8") == "444"
+
+
+def test_wait_for_model_server_stops_when_started_process_exits(monkeypatch) -> None:
+    checks: list[int] = []
+    monkeypatch.setattr(
+        model_server,
+        "check_model_server",
+        lambda profile: checks.append(1) or {"status": "unreachable", "error": "connection refused"},
+    )
+    monkeypatch.setattr(model_server, "_process_is_alive", lambda pid: False)
+
+    result = model_server.wait_for_model_server(
+        {"profile_id": "vista_4b_transformers"},
+        wait_seconds=180,
+        expected_pid=12345,
+        log_path="logs/vista-start.log",
+    )
+
+    assert result["status"] == "startup_failed"
+    assert result["reason"] == "started_process_exited"
+    assert result["log_path"] == "logs/vista-start.log"
+    assert len(checks) == 1
+
+
+def test_start_model_reports_waited_startup_failure(monkeypatch) -> None:
+    monkeypatch.setattr(
+        runtime_api,
+        "ensure_model_server",
+        lambda **kwargs: {
+            "stage": kwargs["stage"],
+            "started": True,
+            "profile": {"profile_id": kwargs["profile_id"]},
+            "after": {"status": "startup_failed", "reason": "started_process_exited"},
+        },
+    )
+    monkeypatch.setattr(runtime_api, "write_trace", lambda **kwargs: "logs/traces/runtime/start-failed.json")
+
+    response = runtime_api.start_model(
+        ModelServerRequest(
+            stage="locate",
+            profile_id="vista_4b_transformers",
+            wait_until_ready=True,
+            wait_seconds=180,
+        )
+    )
+
+    assert response.success is False
+    assert response.error.code == "model_server_not_ready"
+    assert response.data["after"]["status"] == "startup_failed"
 
 
 def test_stop_script_keeps_explicit_port_scope() -> None:

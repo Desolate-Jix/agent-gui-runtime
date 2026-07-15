@@ -1,5 +1,6 @@
 {
   "profile_id": "learn_mode_qwen3_vl_8b",
+  "exclusive_resource_group": "gpu_vision",
   "label": "Learn Mode Qwen3-VL 8B candidate",
   "mode_scope": "learn_only",
   "role": [

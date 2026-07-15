@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -10,6 +11,198 @@ from app.main import app
 from scripts.build_learn_demo_scaffold import build_learn_demo_scaffold
 from scripts.report_learning_mode_demo_goal_readiness import report_learning_mode_demo_goal_readiness
 from tests.test_learn_demo_scaffold import _candidate_fixture
+
+
+def _complete_model_scaffold(tmp_path: Path) -> Path:
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    precise = artifacts / "precise.json"
+    page_detail = artifacts / "page_detail.json"
+    preview = artifacts / "pathgraph.json"
+    precise.write_text("{}\n", encoding="utf-8")
+    page_detail.write_text("{}\n", encoding="utf-8")
+    preview.write_text("{}\n", encoding="utf-8")
+    scaffold = {
+        "contract_version": "learn_mode_demo_scaffold_v1",
+        "flow": [{"step_id": "full_screen_understanding_numbered_regions", "status": "available"}],
+        "summary": {
+            "model_generated_pathgraph_preview_status": "model_generated_preview_ready",
+            "model_generated_pathgraph_preview_region_count": 4,
+            "model_generated_pathgraph_preview_action_count": 3,
+            "page_detail_section_count": 2,
+            "page_detail_possible_operation_count": 3,
+            "precise_pending_calibration_count": 0,
+        },
+        "display_readiness": {
+            "pathgraph_detail_can_show_page_detail": True,
+            "template_like_layout_available": True,
+            "model_only_demo_ready": True,
+        },
+        "model_only_demo_readiness": {
+            "ready": True,
+            "status": "model_only_demo_ready",
+            "model_preview_region_count": 4,
+            "model_preview_action_count": 3,
+            "model_page_detail_section_count": 2,
+            "model_page_detail_possible_operation_count": 3,
+        },
+        "model_provenance_audit": {
+            "status": "fully_system_model_generated",
+            "meets_fully_model_generated_demo_requirement": True,
+            "actual_model_call_evidence_count": 1,
+            "assisted_or_human_review_evidence_count": 0,
+            "blocking_reasons": [],
+        },
+        "generated_artifacts": {
+            "precise_understanding_candidate_path": str(precise),
+            "page_detail_candidate_path": str(page_detail),
+            "model_generated_pathgraph_preview_path": str(preview),
+        },
+        "safety": {
+            "model_started": False,
+            "live_clicks": 0,
+            "live_fills": 0,
+            "live_submits": 0,
+            "execute_binding_enabled": False,
+            "runtime_pathgraph_promotion": False,
+        },
+    }
+    path = tmp_path / "scaffold.json"
+    path.write_text(json.dumps(scaffold, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def _attach_current_presentation_evidence(scaffold_path: Path, tmp_path: Path) -> None:
+    frontend = tmp_path / "app" / "web_panel"
+    frontend.mkdir(parents=True, exist_ok=True)
+    panel_js = frontend / "panel.js"
+    panel_css = frontend / "panel.css"
+    panel_js.write_text("const currentPanel = true;\n", encoding="utf-8")
+    panel_css.write_text(".current-panel { display: grid; }\n", encoding="utf-8")
+    evidence_dir = tmp_path / "presentation"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    paths = {
+        "source_screenshot_path": evidence_dir / "source.png",
+        "stage1_overlay_path": evidence_dir / "stage1.png",
+        "final_fusion_overlay_path": evidence_dir / "final.png",
+        "trace_path": evidence_dir / "trace.json",
+        "desktop_panel_screenshot_path": evidence_dir / "desktop.png",
+        "narrow_panel_screenshot_path": evidence_dir / "narrow.png",
+    }
+    for index, path in enumerate(paths.values(), start=1):
+        path.write_bytes(f"evidence-{index}".encode("ascii"))
+    source_sha = hashlib.sha256(paths["source_screenshot_path"].read_bytes()).hexdigest()
+    payload = json.loads(scaffold_path.read_text(encoding="utf-8"))
+    payload["presentation_evidence"] = {
+        "contract_version": "learning_interface_presentation_evidence_v1",
+        **{key: str(value) for key, value in paths.items()},
+        "source_screenshot_sha256": source_sha,
+        "stage1_source_screenshot_sha256": source_sha,
+        "final_source_screenshot_sha256": source_sha,
+        "panel_js_sha256": hashlib.sha256(panel_js.read_bytes()).hexdigest(),
+        "panel_css_sha256": hashlib.sha256(panel_css.read_bytes()).hexdigest(),
+        "desktop_viewport": {"width": 1440, "height": 1000},
+        "narrow_viewport": {"width": 390, "height": 844},
+        "latest_fusion_loaded": True,
+        "pathgraph_resizer_verified": True,
+        "page_detail_bbox_geometry_verified": True,
+        "stale_template_content_absent": True,
+        "stale_draft_content_absent": True,
+    }
+    scaffold_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def test_final_goal_requires_current_presentation_evidence(tmp_path: Path) -> None:
+    scaffold_path = _complete_model_scaffold(tmp_path)
+    frontend = tmp_path / "app" / "web_panel"
+    frontend.mkdir(parents=True, exist_ok=True)
+    panel_js = frontend / "panel.js"
+    panel_css = frontend / "panel.css"
+    panel_js.write_text("const currentPanel = true;\n", encoding="utf-8")
+    panel_css.write_text(".current-panel { display: grid; }\n", encoding="utf-8")
+
+    report = report_learning_mode_demo_goal_readiness(
+        scaffold_path=scaffold_path,
+        out_dir=tmp_path / "report",
+        project_root=tmp_path,
+    )
+
+    assert report["display_demo_ready"] is True
+    assert report["fresh_model_chain_acceptance"]["accepted"] is True
+    assert report["fresh_model_chain_acceptance"]["model_chain_accepted"] is True
+    assert report["fresh_model_chain_acceptance"]["counts_as_final_goal_completion"] is False
+    assert report["presentation_acceptance"]["accepted"] is False
+    assert report["presentation_acceptance"]["acceptance_status"] == "not_covered"
+    assert "missing_presentation_evidence" in report["presentation_acceptance"]["blocking_reasons"]
+    assert report["summary"]["presentation_acceptance_status"] == "not_covered"
+    assert report["summary"]["presentation_accepted"] is False
+    assert report["summary"]["presentation_blocker_count"] == 1
+    assert report["demo_goal_status"] == "display_demo_ready_presentation_unverified"
+    assert report["final_goal_complete"] is False
+    assert "current_presentation_evidence_not_accepted" in report["blocking_reasons"]
+    assert report["next_action_status"] == "awaiting_presentation_verification"
+    actions = {item["action_id"]: item for item in report["next_actions"]}
+    assert actions["capture_current_presentation_evidence"]["requires_user_approval"] is True
+    assert actions["capture_current_presentation_evidence"]["may_run_without_user_approval"] is False
+    template = actions["capture_current_presentation_evidence"]["evidence_template"]
+    assert template["contract_version"] == "learning_interface_presentation_evidence_v1"
+    assert template["template_only"] is True
+    assert template["artifact_is_evidence"] is False
+    assert template["source_screenshot_path"] == ""
+    assert template["desktop_panel_screenshot_path"] == ""
+    assert template["narrow_panel_screenshot_path"] == ""
+    assert template["panel_js_sha256"] == hashlib.sha256(panel_js.read_bytes()).hexdigest()
+    assert template["panel_css_sha256"] == hashlib.sha256(panel_css.read_bytes()).hexdigest()
+    assert template["latest_fusion_loaded"] is False
+    assert template["pathgraph_resizer_verified"] is False
+    assert template["page_detail_bbox_geometry_verified"] is False
+
+
+def test_current_presentation_evidence_can_complete_final_goal(tmp_path: Path) -> None:
+    scaffold_path = _complete_model_scaffold(tmp_path)
+    _attach_current_presentation_evidence(scaffold_path, tmp_path)
+
+    report = report_learning_mode_demo_goal_readiness(
+        scaffold_path=scaffold_path,
+        out_dir=tmp_path / "report",
+        project_root=tmp_path,
+    )
+
+    acceptance = report["presentation_acceptance"]
+    assert acceptance["contract_version"] == "learning_interface_presentation_acceptance_v1"
+    assert acceptance["accepted"] is True
+    assert acceptance["acceptance_status"] == "accepted_current_presentation"
+    assert acceptance["same_source_three_image_evidence"] is True
+    assert acceptance["frontend_revision_matches"] is True
+    assert acceptance["desktop_viewport_covered"] is True
+    assert acceptance["narrow_viewport_covered"] is True
+    assert acceptance["blocking_reasons"] == []
+    assert report["fresh_model_chain_acceptance"]["model_chain_accepted"] is True
+    assert report["fresh_model_chain_acceptance"]["counts_as_final_goal_completion"] is True
+    assert report["demo_goal_status"] == "final_goal_complete"
+    assert report["final_goal_complete"] is True
+
+
+def test_external_presentation_evidence_is_loaded_without_mutating_scaffold(tmp_path: Path) -> None:
+    scaffold_path = _complete_model_scaffold(tmp_path)
+    _attach_current_presentation_evidence(scaffold_path, tmp_path)
+    scaffold = json.loads(scaffold_path.read_text(encoding="utf-8"))
+    evidence = scaffold.pop("presentation_evidence")
+    scaffold_path.write_text(json.dumps(scaffold, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    evidence_path = tmp_path / "presentation" / "presentation_evidence.json"
+    evidence_path.write_text(json.dumps(evidence, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    report = report_learning_mode_demo_goal_readiness(
+        scaffold_path=scaffold_path,
+        presentation_evidence_path=evidence_path,
+        out_dir=tmp_path / "report",
+        project_root=tmp_path,
+    )
+
+    assert "presentation_evidence" not in json.loads(scaffold_path.read_text(encoding="utf-8"))
+    assert report["source_presentation_evidence_path"] == "presentation/presentation_evidence.json"
+    assert report["presentation_acceptance"]["accepted"] is True
+    assert report["final_goal_complete"] is True
 
 
 def _force_pending_calibration(scaffold: dict) -> dict:

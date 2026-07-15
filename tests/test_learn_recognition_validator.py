@@ -13,6 +13,18 @@ def test_rejects_point_outside_bbox():
     assert result["failure_category"] == "point_outside_bbox"
 
 
+def test_rejects_missing_grounding_point_even_when_bbox_contains_origin():
+    result = validate_grounding_candidate(
+        item={"item_id": "top_left", "item_type": "actionable", "bbox": {"x": 0, "y": 0, "w": 68, "h": 46}},
+        grounding={"screen_bbox": {"x": 0, "y": 0, "w": 68, "h": 46}},
+        evidence={"screenshot_freshness": True, "coordinate_transform_replay": True},
+    )
+
+    assert result["status"] == "rejected"
+    assert result["failure_category"] == "missing_grounding_point"
+    assert result["checks"]["point_present"] is False
+
+
 def test_danger_zone_never_becomes_valid_action():
     result = validate_grounding_candidate(
         item={

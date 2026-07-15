@@ -6,6 +6,9 @@ let lastObserveTracePath = "";
 let lastLearningDraftObserveResponse = null;
 let lastLearningDraftObserveTracePath = "";
 let lastLearningTwoStageReportPath = "";
+let lastLearningTwoStageResponse = null;
+let lastLearningFusedTrialPath = "";
+let lastLearningDeepCalibrationResponse = null;
 let currentImagePath = "";
 let currentImageUrl = "";
 let learningSourceImagePath = "";
@@ -506,9 +509,15 @@ const translations = {
     learning_interface_flow_idle: "空闲 · 不会真实点击",
     learning_flow_bind_capture: "绑定 / 截图",
     learning_flow_screen_understanding: "整屏理解",
+    learning_flow_understanding_loading_model: "正在检查 / 加载整屏理解模型",
+    learning_flow_understanding_model_unavailable: "整屏理解模型不可用",
     learning_flow_numbered_map: "编号选择图",
     learning_flow_page_details: "界面详情",
     learning_flow_precise_calibration: "精准校准",
+    learning_flow_calibration_loading_model: "正在检查 / 加载定位模型",
+    learning_flow_calibration_running_chain: "正在执行 OCR + VISTA + rerank + gate dry-run",
+    learning_flow_calibration_candidate_count: "编号候选",
+    learning_flow_calibration_elapsed: "已等待",
     learning_flow_fusion: "融合结果",
     learning_flow_pathgraph_draft: "PathGraph 草稿",
     learning_flow_complete: "完成",
@@ -595,6 +604,8 @@ const translations = {
     learning_draft_verification_rules: "验证规则",
     learning_draft_safety_status: "安全 / 状态",
     learning_draft_path_preview_title: "草稿路径图预览",
+    learning_ui_hierarchy_title: "UI 层级结构",
+    learning_ui_hierarchy_hint: "按已裁决的父子归属展示屏幕、栏、分区、组件组、组件和内容。",
     learning_draft_path_preview_hint: "从学习草稿生成的只读预览；不加载模板回放，不绑定 Execute，也不授权点击。",
     learning_draft_not_executable: "候选 / 不可执行",
     learning_draft_node_detail: "页面详情",
@@ -1048,9 +1059,15 @@ const translations = {
     learning_interface_flow_idle: "idle · no live click",
     learning_flow_bind_capture: "Bind / screenshot",
     learning_flow_screen_understanding: "Full-screen understanding",
+    learning_flow_understanding_loading_model: "Checking / loading full-screen understanding model",
+    learning_flow_understanding_model_unavailable: "Full-screen understanding model unavailable",
     learning_flow_numbered_map: "Numbered selection map",
     learning_flow_page_details: "Interface details",
     learning_flow_precise_calibration: "Precise calibration",
+    learning_flow_calibration_loading_model: "Checking / loading locator model",
+    learning_flow_calibration_running_chain: "Running OCR + VISTA + rerank + gate dry-run",
+    learning_flow_calibration_candidate_count: "numbered candidates",
+    learning_flow_calibration_elapsed: "elapsed",
     learning_flow_fusion: "Fusion",
     learning_flow_pathgraph_draft: "PathGraph draft",
     learning_flow_complete: "Complete",
@@ -1137,6 +1154,8 @@ const translations = {
     learning_draft_verification_rules: "Verification rules",
     learning_draft_safety_status: "Safety / status",
     learning_draft_path_preview_title: "Draft PathGraph preview",
+    learning_ui_hierarchy_title: "UI hierarchy",
+    learning_ui_hierarchy_hint: "Screen, regions, sections, groups, components, and content are shown with their resolved parent-child ownership.",
     learning_draft_path_preview_hint: "Read-only preview generated from the learning draft. It does not load Template Replay, Execute, or click authorization.",
     learning_draft_not_executable: "candidate / not executable",
     learning_draft_node_detail: "Page detail",
@@ -2019,6 +2038,7 @@ function statusTextForResponse(response) {
     : null;
   if (learnAllTargets) {
     const targetCount = Number(learnAllTargets.target_count || 0);
+    const calibrationTargetCount = Number(learnAllTargets.calibration_target_count || 0);
     const reviewBoxCount = Number(learnAllTargets.review_box_count || 0);
     const learnStatus = String(learnAllTargets.status || "").trim();
     const stage1GateStatus = String(learnAllTargets.stage1_gate_status || nestedGet(result, ["stage1_gate", "status"]) || "").trim();
@@ -2029,7 +2049,7 @@ function statusTextForResponse(response) {
     if (learnStatus === "two_stage_stage1_gate_passed" || reviewBoxCount > 0 || numberedRegionCount > 0) {
       return "review_boxes_ready";
     }
-    if (targetCount <= 0) {
+    if (targetCount <= 0 && calibrationTargetCount <= 0) {
       return "no_targets";
     }
   }
@@ -2522,15 +2542,35 @@ async function openSelectedApp() {
 
 async function bindSelectedWindow() {
   syncLearningInterfacePrepToSharedControls();
-  syncWindowAppAndState(selectedWindowCandidate());
+  const expectedCandidate = selectedWindowCandidate();
+  const expectedHandle = Number(expectedCandidate?.handle || 0);
+  syncWindowAppAndState(expectedCandidate);
   if (navPathAppName) {
     const restored = restorePathGraph(navPathAppName);
     if (!restored) updatePathAppLabel();
   }
   const response = await api("POST", "/session/bind_window", {
+    handle: expectedHandle || null,
     process_name: $("bindProcess").value || null,
     title: $("bindTitle").value || null,
   }, { summary: "POST /session/bind_window", workflowStep: "open" });
+  const boundHandle = Number(nestedGet(response, ["data", "handle"]) || 0);
+  if (response?.success && expectedHandle > 0 && boundHandle !== expectedHandle) {
+    const mismatch = {
+      success: false,
+      message: "Bound window does not match the selected target",
+      data: {
+        contract_version: "window_binding_mismatch_v1",
+        expected_handle: expectedHandle,
+        actual_handle: boundHandle || null,
+        expected_candidate: expectedCandidate,
+      },
+      error: { code: "window_binding_mismatch", details: "Capture was blocked before screenshot." },
+    };
+    renderResponse(mismatch, "window binding mismatch");
+    syncLearningInterfacePrepFromSharedControls();
+    return mismatch;
+  }
   syncLearningInterfacePrepFromSharedControls();
   return response;
 }
@@ -2625,7 +2665,13 @@ async function ensureStageModelReady(stage, profileId) {
   if (!providerMode.startsWith("local")) return true;
 
   setStatus(`checking ${stage} model`);
-  const statusResponse = await api("GET", "/runtime/models", null, { summary: "GET /runtime/models", skipRender: true });
+  const modelStatusPath = profileId
+    ? `/runtime/models?profile_id=${encodeURIComponent(profileId)}`
+    : "/runtime/models";
+  const statusResponse = await api("GET", modelStatusPath, null, {
+    summary: profileId ? `GET /runtime/models?profile_id=${profileId}` : "GET /runtime/models",
+    skipRender: true,
+  });
   const models = nestedGet(statusResponse, ["data", "models"]) || [];
   const selected = selectedModelStatus(models, stage, profileId);
   if (selected?.status?.status === "running") return true;
@@ -3875,7 +3921,7 @@ function panelImageHtml(path, alt, className = "") {
   if (!source) return `<em>no image</em>`;
   return `
     <span class="panel-image-frame${className ? ` ${escapeHtml(className)}` : ""}">
-      <img src="${escapeHtml(traceImageUrl(source))}" alt="${safeAlt}" loading="eager" decoding="async" onerror="this.closest('.panel-image-frame').classList.add('image-missing')" />
+      <img src="${escapeHtml(traceImageUrl(source))}" alt="${safeAlt}" loading="eager" decoding="async" onload="this.closest('.panel-image-frame').classList.remove('image-missing')" onerror="this.closest('.panel-image-frame').classList.add('image-missing')" />
       <em>image missing</em>
     </span>`;
 }
@@ -8989,10 +9035,15 @@ function screenMapEvidenceCount(screenMap) {
 }
 
 function buildLearningDraftObservationEvidence() {
-  const result = resultOf(lastResponse);
+  const result = resultOf(lastLearningDeepCalibrationResponse || lastResponse);
   const observeResult = resultOf(lastLearningDraftObserveResponse || {});
   const learnTargets = nestedGet(result, ["learn_all_targets", "targets"]) || [];
+  const calibrationTargets = nestedGet(result, ["learn_all_targets", "calibration_targets"]) || [];
+  const calibrationEvidenceTargets = [...learnTargets, ...calibrationTargets];
   const learnReviewBoxes = nestedGet(result, ["learn_all_targets", "review_boxes"]) || [];
+  const coordinateOverlay = nestedGet(result, ["learn_all_targets", "overlay"]) || result.coordinate_overlay || {};
+  const vistaValidation = nestedGet(result, ["learn_all_targets", "vista_coordinate_validation"]) || {};
+  const vistaValidatedCount = Number(vistaValidation.validated_count || 0);
   const pathReview = result.path_map_review && typeof result.path_map_review === "object" ? result.path_map_review : {};
   const observeReuse = result.observe_trace_reuse && typeof result.observe_trace_reuse === "object" ? result.observe_trace_reuse : {};
   const screenMap = result.screen_map && typeof result.screen_map === "object"
@@ -9001,13 +9052,16 @@ function buildLearningDraftObservationEvidence() {
       ? observeResult.screen_map
       : null;
   const hasScreenMapEvidence = screenMapEvidenceCount(screenMap) > 0;
-  const hasCalibratedTargets = Array.isArray(learnTargets) && learnTargets.length > 0;
+  const hasCalibrationCandidates = calibrationEvidenceTargets.length > 0;
+  const hasModelCalibrationEvidence = vistaValidatedCount > 0;
   const hasReviewBoxes = Array.isArray(learnReviewBoxes) && learnReviewBoxes.length > 0;
-  const hasCoordinateReviewEvidence = hasCalibratedTargets
+  const hasCoordinateReviewEvidence = hasCalibrationCandidates
     || hasReviewBoxes
     || Boolean(result.coordinate_overlay_path || nestedGet(result, ["learn_all_targets", "overlay_path"]));
-  const coordinateCalibrationStatus = hasCalibratedTargets
-    ? "validated_targets_available"
+  const coordinateCalibrationStatus = hasModelCalibrationEvidence
+    ? "model_validation_completed"
+    : hasCalibrationCandidates
+      ? "calibration_candidates_available_model_validation_not_run"
     : hasCoordinateReviewEvidence
       ? "review_overlay_only_model_validation_not_run"
       : "not_run";
@@ -9045,18 +9099,34 @@ function buildLearningDraftObservationEvidence() {
     screen_summary: result.screen_summary || nestedGet(result, ["screen_map", "summary", "screen_summary"]) || nestedGet(result, ["screen_reading", "screen_summary"]) || observeResult.screen_summary || nestedGet(observeResult, ["screen_map", "summary", "screen_summary"]) || nestedGet(observeResult, ["screen_reading", "screen_summary"]) || "",
       screen_map: screenMap,
     coordinate_overlay_path: result.coordinate_overlay_path || nestedGet(result, ["learn_all_targets", "overlay_path"]) || "",
+    coordinate_overlay: {
+      contract_version: String(coordinateOverlay.contract_version || ""),
+      status: String(coordinateOverlay.status || ""),
+      base_visual_source: String(coordinateOverlay.base_visual_source || ""),
+      base_overlay_path: String(coordinateOverlay.base_overlay_path || ""),
+      final_fusion_overlay: coordinateOverlay.final_fusion_overlay === true,
+    },
+    calibration_evidence_source: lastLearningDeepCalibrationResponse ? "dedicated_latest_calibration_response" : "current_response",
     learn_all_targets_summary: {
       status: nestedGet(result, ["learn_all_targets", "status"]) || "",
       target_count: nestedGet(result, ["learn_all_targets", "target_count"]) || 0,
+      calibration_target_count: nestedGet(result, ["learn_all_targets", "calibration_target_count"]) || 0,
       validated_count: nestedGet(result, ["learn_all_targets", "validated_count"]) || 0,
       invalid_count: nestedGet(result, ["learn_all_targets", "invalid_count"]) || 0,
       filtered_browser_chrome_count: nestedGet(result, ["learn_all_targets", "filtered_browser_chrome_count"]) || 0,
       filtered_noise_count: nestedGet(result, ["learn_all_targets", "filtered_noise_count"]) || 0,
       review_box_count: nestedGet(result, ["learn_all_targets", "review_box_count"]) || 0,
       visual_overlap_removal_count: nestedGet(result, ["learn_all_targets", "visual_overlap_removal_count"]) || 0,
+      vista_validated_count: vistaValidatedCount,
+      vista_inside_count: Number(vistaValidation.inside_count || 0),
+      vista_outside_count: Number(vistaValidation.outside_count || 0),
+      vista_needs_review_count: Number(vistaValidation.needs_review_count || 0),
+      vista_failed_count: Number(vistaValidation.failed_count || 0),
+      vista_skipped_count: Number(vistaValidation.skipped_count || 0),
+      vista_validation_scope: String(vistaValidation.validation_scope || ""),
       coordinate_calibration_status: coordinateCalibrationStatus,
     },
-    calibrated_targets: compactLearningDraftTargets(learnTargets, 24),
+    calibrated_targets: compactLearningDraftTargets(calibrationEvidenceTargets, 96),
     review_boxes: compactLearningDraftTargets(learnReviewBoxes, 80),
     path_map_review_summary: pathReview.summary || {},
     path_map_review_removals: Array.isArray(pathReview.removals) ? pathReview.removals.slice(0, 20) : [],
@@ -9187,6 +9257,7 @@ function preferredLearningDraftReviewSource(items = []) {
   return sources.find((item) => (
     item.fresh_model_chain_accepted === true
     && item.fresh_model_counts_as_final_goal_completion === true
+    && item.presentation_accepted === true
   ))
     || sources.find((item) => (
     item.learning_demo_chain_can_be_demoed === true
@@ -9234,6 +9305,7 @@ function learningDraftSourceMetaText(source = {}) {
   const demoGoalStatus = String(source.learning_demo_goal_status || "").trim();
   const demoGoalPath = String(source.learning_demo_goal_path || "").trim();
   const freshModelAcceptance = String(source.fresh_model_acceptance_status || "").trim();
+  const presentationAcceptance = String(source.presentation_acceptance_status || "").trim();
   const calibrationPreRunCheckedAt = String(source.calibration_pre_run_checked_at || "").trim();
   const calibrationPreRunChecksumStatus = String(source.calibration_pre_run_approval_packet_checksum_status || "").trim();
   const rerun = String(source.rerun_report_status || "").trim();
@@ -9301,6 +9373,10 @@ function learningDraftSourceMetaText(source = {}) {
   if (demoGoalStatus) parts.push(`demo_goal=${demoGoalStatus}`);
   if (demoGoalPath) parts.push(`demo_goal_report=${demoGoalPath}`);
   if (freshModelAcceptance) parts.push(`fresh_acceptance=${freshModelAcceptance}`);
+  if (presentationAcceptance) parts.push(`presentation=${presentationAcceptance}`);
+  if (Object.prototype.hasOwnProperty.call(source, "presentation_accepted")) {
+    parts.push(`presentation_ready=${source.presentation_accepted === true ? "true" : "false"}`);
+  }
   if (Number.isFinite(pageDetailRegions)) parts.push(`page_regions=${pageDetailRegions}`);
   if (Number.isFinite(pageDetailSections)) parts.push(`page_sections=${pageDetailSections}`);
   if (Number.isFinite(pageDetailOperations)) parts.push(`page_ops=${pageDetailOperations}`);
@@ -10057,7 +10133,9 @@ function renderAssistedTemplateChecklistItem(item = {}, savedDecision = "pending
 function clearLearningDraftTrialArtifacts(reason = "", options = {}) {
   if (!options.preserveTwoStageReportPath) {
     lastLearningTwoStageReportPath = "";
+    lastLearningTwoStageResponse = null;
   }
+  lastLearningFusedTrialPath = "";
   setLearningTrialResultPath("");
   setLearningDraftReviewSourcePath("");
   setLearningPathGraphCandidatePaths({});
@@ -10075,6 +10153,7 @@ function clearLearningDraftTrialArtifacts(reason = "", options = {}) {
 }
 
 function clearLearningDraftWorkspaceForNewRun(reason = "") {
+  lastLearningDeepCalibrationResponse = null;
   clearLearningDraftTrialArtifacts(reason);
 }
 
@@ -10167,6 +10246,16 @@ function setLearningInterfaceFlowStep(stepId, statusText = "") {
   if (status) {
     status.textContent = statusText || t(`learning_flow_${stepId}`) || stepId || t("learning_interface_flow_idle");
   }
+  const normalizedStatus = String(statusText || "").toLowerCase();
+  const failed = ["failed", "blocked", "no usable", "失败", "阻止", "不可用"]
+    .some((token) => normalizedStatus.includes(token));
+  if (stepId === "complete") {
+    setStatus("ok", "ok");
+  } else if (failed) {
+    setStatus("failed", "error");
+  } else {
+    setStatus("running", "running");
+  }
 }
 
 function learningInterfaceTrialEvidenceSummary(trial = {}) {
@@ -10221,11 +10310,28 @@ function learningDeepCalibrationEvidenceSummary(response = {}) {
     ? "not_run"
     : String(vistaValidation.status || (Object.keys(vistaValidation).length ? "attempted" : "not_reported"));
   const targetCount = Number(targets.target_count || 0);
+  const calibrationTargetCount = Number(targets.calibration_target_count || 0);
+  const vistaValidatedCount = Number(vistaValidation.validated_count || 0);
+  const vistaInsideCount = Number(vistaValidation.inside_count || 0);
+  const vistaFailedCount = Number(vistaValidation.failed_count || 0);
+  const batchAborted = vistaValidation.batch_aborted === true;
+  const abortReason = String(vistaValidation.abort_reason || "").trim();
+  const isBlocked = batchAborted
+    || vistaValidationStatus === "blocked"
+    || String(targets.status || "") === "blocked"
+    || String(result?.location_status || "") === "learn_calibration_blocked";
   return {
     status: String(targets.status || result?.location_status || "unknown"),
     modelValidationStatus,
     vistaValidationStatus,
     targetCount,
+    calibrationTargetCount,
+    vistaValidatedCount,
+    vistaInsideCount,
+    vistaFailedCount,
+    batchAborted,
+    abortReason,
+    isBlocked,
     rawCandidateCount: Number(targets.raw_candidate_count || 0),
     validatedCount: Number(targets.validated_count || 0),
     invalidCount: Number(targets.invalid_count || 0),
@@ -10234,7 +10340,7 @@ function learningDeepCalibrationEvidenceSummary(response = {}) {
     filteredNoiseCount: Number(targets.filtered_noise_count || 0),
     filteredBlockedReviewOnlyCount: Number(targets.filtered_blocked_review_only_count || 0),
     filteredUngroundedCount: Number(targets.filtered_ungrounded_count || 0),
-    hasTargets: targetCount > 0,
+    hasTargets: targetCount > 0 || calibrationTargetCount > 0,
   };
 }
 
@@ -10256,6 +10362,12 @@ function learningDeepCalibrationEvidenceStatusText(evidence = {}) {
     `vista_validation=${evidence.vistaValidationStatus || "unknown"}`,
     `raw=${Number(evidence.rawCandidateCount || 0)}`,
     `targets=${Number(evidence.targetCount || 0)}`,
+    `calibration=${Number(evidence.vistaValidatedCount || 0)}/${Number(evidence.calibrationTargetCount || 0)}`,
+    `inside=${Number(evidence.vistaInsideCount || 0)}`,
+    `failed=${Number(evidence.vistaFailedCount || 0)}`,
+    `aborted=${evidence.batchAborted === true}`,
+    `abort_reason=${evidence.abortReason || "none"}`,
+    `pending=${Math.max(0, Number(evidence.calibrationTargetCount || 0) - Number(evidence.vistaValidatedCount || 0))}`,
     `validated=${Number(evidence.validatedCount || 0)}`,
     `filtered_non_actionable=${Number(evidence.filteredNonActionableCount || 0)}`,
     `filtered_blocked=${Number(evidence.filteredBlockedReviewOnlyCount || 0)}`,
@@ -10264,10 +10376,51 @@ function learningDeepCalibrationEvidenceStatusText(evidence = {}) {
   ].join(" · ");
 }
 
+function learningCalibrationTimeoutSeconds(candidateCount = 0) {
+  const count = Math.max(0, Number(candidateCount || 0));
+  const estimatedBatchSeconds = count * 20 + 60;
+  return Math.min(Math.max(120, requestTimeoutSeconds(), estimatedBatchSeconds), 900);
+}
+
+function learningTwoStageCalibrationTargetCount() {
+  const result = resultOf(lastLearningTwoStageResponse || {});
+  return Math.max(0, Number(
+    nestedGet(result, ["stage2_numbering", "numbered_item_count"])
+      || nestedGet(result, ["summary", "stage2_numbered_item_count"])
+      || 0
+  ));
+}
+
+async function runLearningCalibrationProgress(task, labelKey, options = {}) {
+  const startedAt = Date.now();
+  const candidateCount = Math.max(0, Number(options.candidateCount || 0));
+  const renderProgress = () => {
+    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    const candidateText = candidateCount > 0
+      ? ` · ${t("learning_flow_calibration_candidate_count")} ${candidateCount}`
+      : "";
+    setLearningInterfaceFlowStep(
+      "precise_calibration",
+      `${t("learning_flow_precise_calibration")} · ${t(labelKey)}${candidateText} · ${t("learning_flow_calibration_elapsed")} ${elapsedSeconds}s`
+    );
+  };
+  renderProgress();
+  const intervalId = window.setInterval(renderProgress, 1000);
+  try {
+    return await task();
+  } finally {
+    window.clearInterval(intervalId);
+  }
+}
+
 async function runLearningDeepCalibration() {
   const profile = syncStageProvider("locate");
   const profileId = profile?.profile_id || $("locateModelProfile")?.value || "";
-  if (!(await ensureStageModelReady("locate", profileId))) return null;
+  const modelReady = await runLearningCalibrationProgress(
+    () => ensureStageModelReady("locate", profileId),
+    "learning_flow_calibration_loading_model"
+  );
+  if (!modelReady) return null;
   const payload = payloadFromShared("locate");
   const imagePath = firstLearningSourceImagePath(learningSourceImagePath, $("learningTrialImagePath")?.value, currentImagePath);
   if (imagePath) {
@@ -10288,11 +10441,29 @@ async function runLearningDeepCalibration() {
   };
   payload.metadata.learn_all_targets = true;
   payload.metadata.learn_all_targets_reason = "Learning interface flow must calibrate all numbered/review regions before draft fusion.";
-  return api("POST", "/vision/locate_target", payload, {
-    summary: "POST /vision/locate_target · Learn Deep calibration",
-    workflowStep: "locate",
-    timeoutSeconds: requestTimeoutSeconds(),
-  });
+  payload.metadata.learn_grounding_profile_id = profileId;
+  if (lastLearningTwoStageReportPath) {
+    payload.metadata.two_stage_report_path = lastLearningTwoStageReportPath;
+  }
+  payload.metadata.learn_vista_coordinate_validation = {
+    enabled: true,
+    max_targets: "all",
+    stop_on_failure: false,
+    use_numbered_overlay: true,
+  };
+  const response = await runLearningCalibrationProgress(
+    () => api("POST", "/vision/locate_target", payload, {
+      summary: "POST /vision/locate_target · Learn Deep calibration",
+      workflowStep: "locate",
+      timeoutSeconds: learningCalibrationTimeoutSeconds(learningTwoStageCalibrationTargetCount()),
+    }),
+    "learning_flow_calibration_running_chain",
+    { candidateCount: learningTwoStageCalibrationTargetCount() }
+  );
+  if (response?.success) {
+    lastLearningDeepCalibrationResponse = response;
+  }
+  return response;
 }
 
 function learningTwoStageUnderstandingPayload() {
@@ -10342,6 +10513,7 @@ async function runLearningTwoStageUnderstanding() {
     timeoutSeconds: requestTimeoutSeconds(),
   });
   if (response?.success) {
+    lastLearningTwoStageResponse = response;
     lastLearningTwoStageReportPath = String(resultOf(response).report_path || "").trim();
     const overlayPath = learningTwoStageOverlayPath(response);
     if (overlayPath) {
@@ -10358,6 +10530,25 @@ async function runLearningInterfaceFlow() {
   try {
     clearLearningDraftWorkspaceForNewRun("not_loaded · new learning run started");
     setLearningInterfaceFlowStep("bind_capture", `${t("learning_flow_bind_capture")} · no live click`);
+    const binding = await bindSelectedWindow();
+    if (!binding?.success) {
+      setLearningInterfaceFlowStep("bind_capture", `bind failed · ${statusTextForResponse(binding || {})}`);
+      return null;
+    }
+    const understandingProfile = syncStageProvider("observe");
+    const understandingProfileId = understandingProfile?.profile_id || $("observeModelProfile")?.value || "";
+    setLearningInterfaceFlowStep(
+      "screen_understanding",
+      `${t("learning_flow_screen_understanding")} · ${t("learning_flow_understanding_loading_model")}`
+    );
+    const understandingReady = await ensureStageModelReady("observe", understandingProfileId);
+    if (!understandingReady) {
+      setLearningInterfaceFlowStep(
+        "screen_understanding",
+        `understanding model unavailable · ${t("learning_flow_understanding_model_unavailable")}`
+      );
+      return null;
+    }
     const capture = await captureLearningDraftWindow();
     if (!capture?.success) {
       setLearningInterfaceFlowStep("bind_capture", "capture failed");
@@ -10392,16 +10583,14 @@ async function runLearningInterfaceFlow() {
     if (!twoStageAllowed) {
       const status = nestedGet(resultOf(twoStage), ["stage1_gate", "status"]) || statusTextForResponse(twoStage);
       setLearningInterfaceFlowStep("numbered_map", `Stage1 gate blocked Stage2 · ${status} · loading review overlay`);
+      return twoStage;
     }
 
     setLearningInterfaceFlowStep("precise_calibration", `${t("learning_flow_precise_calibration")} · dry-run`);
     const calibration = await runLearningDeepCalibration();
     if (!calibration?.success) {
       setLearningInterfaceFlowStep("precise_calibration", `calibration failed · ${statusTextForResponse(calibration || {})}`);
-      return await completeLearningInterfaceReadonlyFlow({
-        fallbackResult: trial,
-        statusNote: "calibration failed; using screen understanding draft",
-      });
+      return calibration || trial;
     }
     const calibrationEvidence = learningDeepCalibrationEvidenceSummary(calibration);
     const calibrationOverlayPath = learningDeepCalibrationOverlayPath(calibration);
@@ -10412,6 +10601,13 @@ async function runLearningInterfaceFlow() {
       "precise_calibration",
       `${t("learning_flow_precise_calibration")} · ${learningDeepCalibrationEvidenceStatusText(calibrationEvidence)}`
     );
+    if (calibrationEvidence.isBlocked) {
+      setLearningInterfaceFlowStep(
+        "precise_calibration",
+        `calibration blocked · ${learningDeepCalibrationEvidenceStatusText(calibrationEvidence)}`
+      );
+      return calibration;
+    }
 
     setLearningInterfaceFlowStep(
       "fusion",
@@ -10424,9 +10620,6 @@ async function runLearningInterfaceFlow() {
         fallbackResult: trial,
         statusNote: "two-stage draft generation failed; using initial draft",
       });
-    }
-    if (twoStageOverlayPath) {
-      renderLearningDraftScreenshotPath(twoStageOverlayPath, "learning two-stage fused overlay");
     }
     return await completeLearningInterfaceReadonlyFlow({
       fallbackResult: fusedTrial,
@@ -10476,6 +10669,9 @@ async function runLearningDraftTrial(options = {}) {
   const data = response.data || {};
   const trialPath = String(data.trial_path || "").trim();
   if (trialPath) {
+    if (options.preserveTwoStageReportPath) {
+      lastLearningFusedTrialPath = trialPath;
+    }
     setLearningTrialResultPath(trialPath);
     setLearningDraftReviewSourcePath(trialPath);
     await loadLearningDraftReview({ skipResponse: true });
@@ -11508,6 +11704,10 @@ function renderLearningDraftStateTransitions(state = {}, actions = []) {
 
 function clearLearningDraftPathPreview(reason = "") {
   selectedLearningDraftNodeId = "";
+  if ($("learningDraftHierarchySummary")) $("learningDraftHierarchySummary").textContent = "not_available";
+  if ($("learningDraftHierarchyTree")) {
+    $("learningDraftHierarchyTree").innerHTML = `<p class="trace-idle">${escapeHtml(reason || "UI hierarchy not available")}</p>`;
+  }
   if ($("learningDraftPathMap")) {
     $("learningDraftPathMap").innerHTML = `<p class="trace-idle">${escapeHtml(reason || t("learning_draft_no_path_nodes"))}</p>`;
   }
@@ -11517,6 +11717,69 @@ function clearLearningDraftPathPreview(reason = "") {
   if ($("learningDraftPathPreviewStatus")) {
     $("learningDraftPathPreviewStatus").textContent = t("learning_draft_not_executable");
   }
+}
+
+function learningDraftUiHierarchy(draft = {}) {
+  if (draft?.ui_hierarchy && typeof draft.ui_hierarchy === "object") return draft.ui_hierarchy;
+  const pageDetails = draft?.page_details && typeof draft.page_details === "object" ? draft.page_details : {};
+  return pageDetails?.ui_hierarchy && typeof pageDetails.ui_hierarchy === "object" ? pageDetails.ui_hierarchy : {};
+}
+
+function renderLearningDraftHierarchy(draft = {}) {
+  const hierarchy = learningDraftUiHierarchy(draft);
+  const nodes = learningDraftArray(hierarchy.nodes);
+  const summary = hierarchy?.summary && typeof hierarchy.summary === "object" ? hierarchy.summary : {};
+  const validation = hierarchy?.validation && typeof hierarchy.validation === "object" ? hierarchy.validation : {};
+  if ($("learningDraftHierarchySummary")) {
+    $("learningDraftHierarchySummary").textContent = nodes.length
+      ? [
+          `nodes=${nodes.length}`,
+          `resolved_conflicts=${Number(summary.resolved_ownership_conflict_count || 0)}`,
+          `ambiguous=${Number(summary.ambiguous_ownership_tie_count || 0)}`,
+          `orphans=${Number(validation.orphan_node_count || 0)}`,
+          `duplicate_owners=${Number(validation.duplicate_primary_owner_count || 0)}`,
+          `outside_parent=${Number(validation.child_outside_parent_count || 0)}`,
+        ].join(" · ")
+      : "not_available";
+  }
+  if (!$("learningDraftHierarchyTree")) return;
+  if (!nodes.length || hierarchy.contract_version !== "ui_hierarchy_graph_v1") {
+    $("learningDraftHierarchyTree").innerHTML = `<p class="trace-idle">UI hierarchy not available</p>`;
+    return;
+  }
+  const byId = new Map(nodes.map((node) => [String(node.node_id || ""), node]));
+  const rootId = String(hierarchy.root_node_id || "uih:screen");
+  const root = byId.get(rootId);
+  const renderNode = (node, depth, ancestry = new Set()) => {
+    const nodeId = String(node?.node_id || "");
+    if (!nodeId || ancestry.has(nodeId)) return "";
+    const nextAncestry = new Set(ancestry);
+    nextAncestry.add(nodeId);
+    const childNodes = learningDraftArray(node.children).map((childId) => byId.get(String(childId))).filter(Boolean);
+    const bbox = node?.bbox && typeof node.bbox === "object" ? node.bbox : {};
+    const meta = [
+      String(node.level || "node"),
+      String(node.component_type || ""),
+      Number.isFinite(Number(bbox.w)) && Number.isFinite(Number(bbox.h)) ? `${Number(bbox.w)}x${Number(bbox.h)}` : "",
+      childNodes.length ? `children=${childNodes.length}` : "",
+      String(node.review_status || ""),
+    ].filter(Boolean).join(" · ");
+    const label = escapeHtml(String(node.label || node.source_ref || nodeId));
+    const row = `<strong>${label}</strong><small>${escapeHtml(meta)}</small>`;
+    if (!childNodes.length) {
+      return `<div class="learning-hierarchy-leaf" style="--hierarchy-depth:${depth}">${row}</div>`;
+    }
+    return `
+      <details class="learning-hierarchy-node" style="--hierarchy-depth:${depth}" ${depth < 2 ? "open" : ""}>
+        <summary>${row}</summary>
+        <div class="learning-hierarchy-children">
+          ${childNodes.map((child) => renderNode(child, depth + 1, nextAncestry)).join("")}
+        </div>
+      </details>`;
+  };
+  const roots = root ? [root] : nodes.filter((node) => !String(node.parent_id || ""));
+  $("learningDraftHierarchyTree").innerHTML = roots.map((node) => renderNode(node, 0)).join("") || `<p class="trace-idle">UI hierarchy not available</p>`;
+  $("learningDraftHierarchySummary").dataset.structureRegionCount = String(summary.structure_region_count || 0);
 }
 
 function renderLearningDraftPipelineAudit(audit = {}) {
@@ -11779,9 +12042,33 @@ function renderLearningPageDetailCandidate(review = {}) {
     </div>`;
 }
 
+function learningPageDetailSourceIdentity(pageDetail = {}) {
+  if (!pageDetail || typeof pageDetail !== "object") return "";
+  const source = pageDetail.source && typeof pageDetail.source === "object" ? pageDetail.source : {};
+  const sourcePath = String(
+    pageDetail.report_path
+    || pageDetail.source_path
+    || source.source_path
+    || source.original_draft_path
+    || ""
+  ).trim();
+  return sourcePath ? sourcePath.replace(/\\/g, "/").toLowerCase() : "";
+}
+
+function renderLearningPageDetailPreviewIfDistinct(pageDetail = {}, canonicalPageDetail = {}, options = {}) {
+  if (!pageDetail.contract_version) return "";
+  const previewIdentity = learningPageDetailSourceIdentity(pageDetail);
+  const canonicalIdentity = learningPageDetailSourceIdentity(canonicalPageDetail);
+  if (previewIdentity && canonicalIdentity && previewIdentity === canonicalIdentity) return "";
+  return renderLearningModelGeneratedPageDetailPreview(pageDetail, options);
+}
+
 function renderLearningDemoScaffold(review = {}) {
   const candidateReview = review?.pathgraph_candidate_review && typeof review.pathgraph_candidate_review === "object"
     ? review.pathgraph_candidate_review
+    : {};
+  const canonicalPageDetail = candidateReview.page_detail_candidate && typeof candidateReview.page_detail_candidate === "object"
+    ? candidateReview.page_detail_candidate
     : {};
   const scaffold = candidateReview.learn_mode_demo_scaffold && typeof candidateReview.learn_mode_demo_scaffold === "object"
     ? candidateReview.learn_mode_demo_scaffold
@@ -11852,8 +12139,8 @@ function renderLearningDemoScaffold(review = {}) {
       ${renderLearningModelOnlyDemoReadiness(modelOnlyReadiness)}
       ${provenanceEvidence.length ? `<div class="learning-demo-provenance">${provenanceEvidence.map(renderLearningDemoProvenanceEvidence).join("")}</div>` : ""}
       ${renderLearningPageDetailPathGraphCorrespondence(correspondence)}
-      ${renderLearningModelGeneratedPageDetailPreview(modelPageDetail)}
-      ${renderLearningModelGeneratedPageDetailPreview(readonlyPageDetail, {
+      ${renderLearningPageDetailPreviewIfDistinct(modelPageDetail, canonicalPageDetail)}
+      ${renderLearningPageDetailPreviewIfDistinct(readonlyPageDetail, canonicalPageDetail, {
         title: "Read-only PathGraph page detail preview",
         contractLabel: readonlyPreview.contract_version || "page_detail_readonly_pathgraph_preview_v1",
       })}
@@ -11900,6 +12187,12 @@ function renderLearningDemoGoalReadiness(readiness = {}) {
   const freshAcceptance = readiness.fresh_model_chain_acceptance && typeof readiness.fresh_model_chain_acceptance === "object"
     ? readiness.fresh_model_chain_acceptance
     : null;
+  const presentationAcceptance = readiness.presentation_acceptance && typeof readiness.presentation_acceptance === "object"
+    ? readiness.presentation_acceptance
+    : null;
+  const presentationBlockers = presentationAcceptance
+    ? learningDraftArray(presentationAcceptance.blocking_reasons)
+    : [];
   const chainManifest = readiness.demo_chain_manifest && typeof readiness.demo_chain_manifest === "object"
     ? readiness.demo_chain_manifest
     : null;
@@ -11913,6 +12206,8 @@ function renderLearningDemoGoalReadiness(readiness = {}) {
     `passed=${summary.passed_requirement_count ?? "n/a"}`,
     `failed=${summary.failed_requirement_count ?? "n/a"}`,
     `not_covered=${summary.not_covered_requirement_count ?? "n/a"}`,
+    `presentation_status=${presentationAcceptance?.acceptance_status || "not_covered"}`,
+    `presentation_blockers=${presentationBlockers.length}`,
   ];
   return `
     <div class="learning-demo-goal-readiness">
@@ -11921,11 +12216,32 @@ function renderLearningDemoGoalReadiness(readiness = {}) {
       <div class="learning-draft-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
       ${blockers.length ? `<small>${escapeHtml(`blockers=${blockers.join(" · ")}`)}</small>` : ""}
       ${freshAcceptance ? renderLearningFreshModelChainAcceptance(freshAcceptance) : ""}
+      ${presentationAcceptance ? renderLearningPresentationAcceptance(presentationAcceptance) : ""}
       ${chainManifest ? renderLearningDemoChainManifest(chainManifest) : ""}
       ${evidenceMap.length ? `<div class="learning-demo-evidence-map">${evidenceMap.map(renderLearningDemoEvidenceMapItem).join("")}</div>` : ""}
       ${nextActions.length ? `<div class="learning-demo-next-actions">${nextActions.map(renderLearningDemoNextAction).join("")}</div>` : ""}
       ${requirements.length ? `<div class="learning-demo-goal-requirements">${requirements.map(renderLearningDemoGoalRequirement).join("")}</div>` : ""}
       ${readiness.interpretation ? `<small>${escapeHtml(readiness.interpretation)}</small>` : ""}
+    </div>`;
+}
+
+function renderLearningPresentationAcceptance(acceptance = {}) {
+  if (!acceptance.contract_version) return "";
+  const blockers = learningDraftArray(acceptance.blocking_reasons);
+  const chips = [
+    `accepted=${acceptance.accepted === true}`,
+    `status=${acceptance.acceptance_status || "unknown"}`,
+    `same_source_three_image_evidence=${acceptance.same_source_three_image_evidence === true}`,
+    `frontend_revision_matches=${acceptance.frontend_revision_matches === true}`,
+    `desktop_viewport_covered=${acceptance.desktop_viewport_covered === true}`,
+    `narrow_viewport_covered=${acceptance.narrow_viewport_covered === true}`,
+  ];
+  return `
+    <div class="learning-demo-presentation-acceptance">
+      <strong>${escapeHtml(acceptance.contract_version)}</strong>
+      <div class="learning-draft-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      ${blockers.length ? `<small>${escapeHtml(`blockers=${blockers.join(" · ")}`)}</small>` : ""}
+      ${acceptance.interpretation ? `<small>${escapeHtml(acceptance.interpretation)}</small>` : ""}
     </div>`;
 }
 
@@ -12978,6 +13294,7 @@ function bindLearningDraftPathResize() {
 
 function renderLearningDraftPathPreview(review) {
   const draft = review?.draft || {};
+  renderLearningDraftHierarchy(draft);
   const states = learningDraftDisplayStates(draft);
   if (!states.length) {
     clearLearningDraftPathPreview();
@@ -12990,10 +13307,15 @@ function renderLearningDraftPathPreview(review) {
   const allActions = learningDraftArray(draft.action_templates);
   const primaryStateCount = learningDraftPrimaryStateCount(states);
   const candidatePath = String($("learningPathGraphCandidatePath")?.value || "").trim();
+  const scaffoldSummary = review?.pathgraph_candidate_review?.learn_mode_demo_scaffold?.summary;
+  const readonlyPreviewStatus = String(
+    scaffoldSummary?.page_detail_readonly_pathgraph_preview_status || ""
+  ).trim();
   if ($("learningDraftPathPreviewStatus")) {
     $("learningDraftPathPreviewStatus").textContent = [
       t("learning_draft_not_executable"),
       `states=${states.length}`,
+      `readonly_preview=${readonlyPreviewStatus || "not_generated"}`,
       candidatePath ? "pathgraph_candidate=ready" : "pathgraph_candidate=not_generated",
     ].join(" · ");
   }
@@ -13042,6 +13364,7 @@ function learningDraftNumberedMapImagePath(review = {}, draft = {}) {
     draft?.page_details?.precise_understanding_fusion_status?.full_screen_understanding_overlay_path,
     draft?.page_details?.compiled_overlay_path,
     draft?.page_details?.full_screen_understanding_overlay_path,
+    draft?.page_details?.screen?.compiled_overlay_path,
     learningDraftSourceImagePath(draft),
   ];
   return String(candidates.find((value) => String(value || "").trim()) || "").trim();
@@ -13487,7 +13810,8 @@ async function createPreciseUnderstandingCandidate() {
 
 async function createPageDetailCandidate() {
   const sourcePath = String(
-    lastLearningTwoStageReportPath
+    lastLearningFusedTrialPath
+    || lastLearningTwoStageReportPath
     || $("learningPathGraphCandidatePath")?.value
     || $("learningDetailObserveCandidatePath")?.value
     || learningDraftReviewSourcePath()

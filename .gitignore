@@ -4,6 +4,13 @@ __pycache__/
 *.pyd
 .venv/
 .python-version
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -13,9 +20,11 @@ __pycache__/
 .paddle-home/
 .coverage
 htmlcov/
-logs/
-models/
-tools/
+/logs/
+/artifacts/
+/models/
+/tools/
+.runtime-*.pid
 tmp_*.ps1
 logs/*.log
 logs/*.json
@@ -24,8 +33,6 @@ logs/*.json
 *.jpeg
 *.webp
 *.bmp
-!artifacts/golden-traces/
-!artifacts/golden-traces/**
 .DS_Store
 Thumbs.db
 PROJECT_SUMMARY.md

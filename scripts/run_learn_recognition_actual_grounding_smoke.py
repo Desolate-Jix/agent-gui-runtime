@@ -77,7 +77,29 @@ def run_actual_grounding_smoke(
             print(json.dumps(report, ensure_ascii=False, indent=2))
         return report
     if not screenshot_path.exists():
-        raise FileNotFoundError(str(screenshot_path))
+        report = _write_blocked_report(
+            out_dir=out_dir,
+            case_id=case_id,
+            label=label,
+            screenshot_path=screenshot_path,
+            blocker_category="stale_fixture",
+            message=f"screenshot fixture does not exist: {screenshot_path}",
+            model_config=base_model_config,
+            status="invalid",
+            source_type="fixture_only",
+            extra={
+                "fixture_validity": {
+                    "status": "invalid",
+                    "failure_category": "stale_fixture",
+                    "reason": "missing_screenshot",
+                    "screenshot_path": str(screenshot_path),
+                },
+                "interpretation": "invalid stale fixture; excluded from pass/fail and actual_model_call denominators",
+            },
+        )
+        if json_stdout:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        return report
 
     inventory = parse_existing_evidence_to_inventory(observe_bundle)
     classification = classify_inventory_items(inventory)
@@ -372,6 +394,7 @@ def _batch_summary(case_reports: list[dict[str, Any]]) -> dict[str, Any]:
         "passed": sum(1 for report in case_reports if report.get("status") == "passed"),
         "failed": sum(1 for report in case_reports if report.get("status") == "failed"),
         "blocked": sum(1 for report in case_reports if report.get("status") == "blocked"),
+        "invalid": sum(1 for report in case_reports if report.get("status") == "invalid"),
         "actual_model_call": {
             "passed": len(actual_passed),
             "attempted": len(actual_attempted),
@@ -472,7 +495,13 @@ def _actual_model_profile_breakdown(case_reports: list[dict[str, Any]]) -> dict[
         profile_id = str(profile.get("profile_id") or report.get("model_profile_id") or "").strip()
         if not profile_id:
             continue
-        bucket = "actual_model_call" if report.get("actual_model_call_in_this_run") is True else "blocked_or_precondition"
+        if report.get("actual_model_call_in_this_run") is True:
+            bucket = "actual_model_call"
+        elif report.get("status") == "invalid":
+            bucket = "invalid_fixture"
+        else:
+            bucket = "blocked_or_precondition"
+        breakdown.setdefault(bucket, {})
         breakdown[bucket][profile_id] = breakdown[bucket].get(profile_id, 0) + 1
     return breakdown
 
@@ -497,12 +526,14 @@ def _write_blocked_report(
     blocker_category: str,
     message: str,
     model_config: dict[str, Any],
+    status: str = "blocked",
+    source_type: str = "actual_grounding_call",
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     report = {
         "contract_version": "learn_actual_grounding_smoke_report_v1",
-        "status": "blocked",
-        "source_type": "actual_grounding_call",
+        "status": status,
+        "source_type": source_type,
         "actual_model_call_in_this_run": False,
         "blocker": {
             "failure_category": blocker_category,

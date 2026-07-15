@@ -1049,8 +1049,15 @@ def test_vision_recognition_plan_uses_path_graph_candidate_roi_for_vista(tmp_pat
     )
     monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
 
-    def fake_endpoint(self, request_image_path, prompt, max_tokens=32):
-        calls.append({"image_path": Path(request_image_path), "prompt": prompt, "max_tokens": max_tokens})
+    def fake_endpoint(self, request_image_path, prompt, max_tokens=32, request_timeout_seconds=None):
+        calls.append(
+            {
+                "image_path": Path(request_image_path),
+                "prompt": prompt,
+                "max_tokens": max_tokens,
+                "request_timeout_seconds": request_timeout_seconds,
+            }
+        )
         return {"choices": [{"message": {"content": "[500, 500]"}}]}
 
     monkeypatch.setattr("app.api.vision.LocalVisionProvider._call_openai_compatible_endpoint", fake_endpoint)
@@ -1075,6 +1082,7 @@ def test_vision_recognition_plan_uses_path_graph_candidate_roi_for_vista(tmp_pat
     assert payload["success"] is True
     result = payload["data"]["result"]
     assert len(calls) == 1
+    assert calls[0]["request_timeout_seconds"] == 600.0
     assert calls[0]["image_path"] != image_path
     assert "Candidate bboxes are in processed ROI image pixel coordinates" in calls[0]["prompt"]
     assert "bbox=[32,84,160,56]" in calls[0]["prompt"]
@@ -1335,6 +1343,26 @@ def test_vista_roi_policy_marks_ambiguous_pathgraph_union_as_fallback() -> None:
     assert union_policy["policy"] == "pathgraph_union_roi_fallback"
     assert union_policy["fallback_tier"] == "fallback"
     assert union_policy["max_edge"] == 640
+
+
+def test_large_ambiguous_union_roi_preserves_full_resolution() -> None:
+    image_size = vision_api.ImageSize(width=1154, height=1005)
+
+    assert vision_api._vista_union_roi_requires_full_resolution(
+        {"x": 28, "y": 50, "w": 1052, "h": 616},
+        image_size=image_size,
+        roi_source="union_top_candidates",
+    ) is True
+    assert vision_api._vista_union_roi_requires_full_resolution(
+        {"x": 90, "y": 80, "w": 320, "h": 260},
+        image_size=image_size,
+        roi_source="union_top_candidates",
+    ) is False
+    assert vision_api._vista_union_roi_requires_full_resolution(
+        {"x": 0, "y": 0, "w": 1154, "h": 1005},
+        image_size=image_size,
+        roi_source="top1_only",
+    ) is False
 
 
 def test_seeded_candidate_uses_seed_point_when_vista_roi_point_disagrees(tmp_path, monkeypatch) -> None:
@@ -1785,8 +1813,15 @@ def test_execute_recognition_plan_resizes_vista_direct_image_and_maps_point(tmp_
     )
     monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
 
-    def fake_endpoint(self, request_image_path, prompt, max_tokens=32):
-        calls.append({"image_path": Path(request_image_path), "prompt": prompt, "max_tokens": max_tokens})
+    def fake_endpoint(self, request_image_path, prompt, max_tokens=32, request_timeout_seconds=None):
+        calls.append(
+            {
+                "image_path": Path(request_image_path),
+                "prompt": prompt,
+                "max_tokens": max_tokens,
+                "request_timeout_seconds": request_timeout_seconds,
+            }
+        )
         return {"choices": [{"message": {"content": "[500, 500]"}}]}
 
     monkeypatch.setattr("app.api.vision.LocalVisionProvider._call_openai_compatible_endpoint", fake_endpoint)
@@ -1811,6 +1846,7 @@ def test_execute_recognition_plan_resizes_vista_direct_image_and_maps_point(tmp_
     assert payload["success"] is True
     result = payload["data"]["result"]
     assert len(calls) == 2
+    assert [call["request_timeout_seconds"] for call in calls] == [45.0, 45.0]
     assert calls[0]["image_path"] != image_path
     assert calls[0]["image_path"].exists()
     assert calls[1]["image_path"] != image_path

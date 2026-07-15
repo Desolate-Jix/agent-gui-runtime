@@ -1,5 +1,6 @@
 {
   "profile_id": "learn_mode_uground_2b",
+  "exclusive_resource_group": "gpu_vision",
   "label": "Learn Mode UGround V1 2B candidate",
   "mode_scope": "learn_only",
   "role": [

@@ -13,6 +13,7 @@ REPORT_NAME = "learning_mode_demo_goal_readiness_report.json"
 def report_learning_mode_demo_goal_readiness(
     *,
     scaffold_path: str | Path,
+    presentation_evidence_path: str | Path | None = None,
     out_dir: str | Path | None = None,
     project_root: str | Path | None = None,
     json_stdout: bool = False,
@@ -20,14 +21,34 @@ def report_learning_mode_demo_goal_readiness(
     root = Path(project_root).resolve() if project_root is not None else PROJECT_ROOT
     scaffold_file = _resolve_path(scaffold_path, root)
     scaffold = _attach_generated_artifacts(_read_json(scaffold_file), scaffold_file=scaffold_file, root=root)
+    presentation_evidence_file = (
+        _resolve_path(presentation_evidence_path, root) if presentation_evidence_path is not None else None
+    )
+    if presentation_evidence_file is not None:
+        scaffold["presentation_evidence"] = _read_json(presentation_evidence_file)
     out = _resolve_path(out_dir, root) if out_dir is not None else scaffold_file.parent
     out.mkdir(parents=True, exist_ok=True)
 
     requirements = _requirements(scaffold)
-    blocking_reasons = _blocking_reasons(scaffold, requirements)
-    next_actions = _next_actions(scaffold, blocking_reasons)
+    model_and_safety_blockers = _blocking_reasons(scaffold, requirements)
     evidence_map = _demo_evidence_map(scaffold, root=root, scaffold_file=scaffold_file)
-    fresh_model_acceptance = _fresh_model_chain_acceptance(scaffold, requirements, blocking_reasons)
+    fresh_model_acceptance = _fresh_model_chain_acceptance(scaffold, requirements, model_and_safety_blockers)
+    presentation_acceptance = _presentation_acceptance(scaffold, root=root, scaffold_file=scaffold_file)
+    model_chain_accepted = fresh_model_acceptance.get("accepted") is True
+    fresh_model_acceptance["model_chain_accepted"] = model_chain_accepted
+    fresh_model_acceptance["presentation_acceptance_required"] = True
+    fresh_model_acceptance["counts_as_final_goal_completion"] = (
+        model_chain_accepted and presentation_acceptance.get("accepted") is True
+    )
+    fresh_model_acceptance["interpretation"] = (
+        "Strict acceptance gate for the model-generated Learning Mode chain. Passing this gate proves only the model "
+        "chain; counts_as_final_goal_completion also requires current presentation acceptance."
+    )
+    blocking_reasons = list(model_and_safety_blockers)
+    if presentation_acceptance.get("accepted") is not True:
+        blocking_reasons.append("current_presentation_evidence_not_accepted")
+    blocking_reasons = _unique_text(blocking_reasons)
+    next_actions = _next_actions(scaffold, blocking_reasons, root=root)
     display_demo_ready = all(
         _requirement_status(requirements, requirement_id) == "passed"
         for requirement_id in (
@@ -40,9 +61,15 @@ def report_learning_mode_demo_goal_readiness(
             "no_execute_no_submit_safety",
         )
     )
-    final_goal_complete = display_demo_ready and fresh_model_acceptance.get("accepted") is True
+    final_goal_complete = (
+        display_demo_ready
+        and fresh_model_acceptance.get("accepted") is True
+        and presentation_acceptance.get("accepted") is True
+    )
     if final_goal_complete:
         status = "final_goal_complete"
+    elif display_demo_ready and fresh_model_acceptance.get("accepted") is True:
+        status = "display_demo_ready_presentation_unverified"
     elif display_demo_ready:
         status = "display_demo_ready_official_goal_blocked"
     else:
@@ -51,11 +78,15 @@ def report_learning_mode_demo_goal_readiness(
     report = {
         "contract_version": "learning_mode_demo_goal_readiness_v1",
         "source_scaffold_path": _relative_path(scaffold_file, root),
+        "source_presentation_evidence_path": (
+            _relative_path(presentation_evidence_file, root) if presentation_evidence_file is not None else None
+        ),
         "demo_goal_status": status,
         "display_demo_ready": display_demo_ready,
         "final_goal_complete": final_goal_complete,
         "demo_evidence_map": evidence_map,
         "fresh_model_chain_acceptance": fresh_model_acceptance,
+        "presentation_acceptance": presentation_acceptance,
         "demo_chain_manifest": _demo_chain_manifest(
             evidence_map=evidence_map,
             display_demo_ready=display_demo_ready,
@@ -74,6 +105,13 @@ def report_learning_mode_demo_goal_readiness(
             "passed_requirement_count": sum(1 for item in requirements if item.get("status") == "passed"),
             "failed_requirement_count": sum(1 for item in requirements if item.get("status") == "failed"),
             "not_covered_requirement_count": sum(1 for item in requirements if item.get("status") == "not_covered"),
+            "presentation_acceptance_status": presentation_acceptance.get("acceptance_status"),
+            "presentation_accepted": presentation_acceptance.get("accepted") is True,
+            "presentation_blocker_count": len(
+                presentation_acceptance.get("blocking_reasons")
+                if isinstance(presentation_acceptance.get("blocking_reasons"), list)
+                else []
+            ),
         },
         "requirements": requirements,
         "safety": {
@@ -89,7 +127,8 @@ def report_learning_mode_demo_goal_readiness(
         "interpretation": (
             "Goal-level demo readiness audit. A display-ready model-only PathGraph/page-detail preview is useful for "
             "demo review, but the final Learning Mode goal is not complete until the official candidate chain is "
-            "fully system-model generated, pending calibration is resolved, and safety remains no-execute/no-submit."
+            "fully system-model generated, pending calibration is resolved, current presentation evidence matches "
+            "the active frontend revision, and safety remains no-execute/no-submit."
         ),
     }
     output_path = out / REPORT_NAME
@@ -211,6 +250,143 @@ def _requirements(scaffold: dict[str, Any]) -> list[dict[str, Any]]:
             },
         ),
     ]
+
+
+def _presentation_acceptance(
+    scaffold: dict[str, Any],
+    *,
+    root: Path,
+    scaffold_file: Path,
+) -> dict[str, Any]:
+    evidence = _dict(scaffold.get("presentation_evidence"))
+    base = {
+        "contract_version": "learning_interface_presentation_acceptance_v1",
+        "accepted": False,
+        "acceptance_status": "not_covered",
+        "same_source_three_image_evidence": False,
+        "frontend_revision_matches": False,
+        "desktop_viewport_covered": False,
+        "narrow_viewport_covered": False,
+        "blocking_reasons": ["missing_presentation_evidence"],
+        "interpretation": (
+            "Current-revision presentation acceptance for the Learning Interface. It requires same-source original, "
+            "Stage1, and final-fusion evidence plus trace, desktop/narrow panel captures, current frontend hashes, "
+            "latest-fusion loading, resizer verification, and bbox-geometry verification."
+        ),
+    }
+    if not evidence:
+        return base
+
+    blockers: list[str] = []
+    if evidence.get("contract_version") != "learning_interface_presentation_evidence_v1":
+        blockers.append("invalid_presentation_evidence_contract")
+
+    required_paths = (
+        "source_screenshot_path",
+        "stage1_overlay_path",
+        "final_fusion_overlay_path",
+        "trace_path",
+        "desktop_panel_screenshot_path",
+        "narrow_panel_screenshot_path",
+    )
+    resolved_paths: dict[str, Path | None] = {}
+    artifact_evidence: dict[str, dict[str, Any]] = {}
+    for key in required_paths:
+        raw_path = str(evidence.get(key) or "").strip()
+        resolved = _resolve_generated_path(raw_path, root=root, scaffold_file=scaffold_file)
+        exists = bool(resolved and resolved.is_file())
+        resolved_paths[key] = resolved if exists else None
+        artifact_evidence[key] = {
+            "path": raw_path,
+            "resolved_path": str(resolved) if resolved else "",
+            "exists": exists,
+            "sha256_prefix": _sha256_prefix(resolved) if exists and resolved else "",
+        }
+        if not exists:
+            blockers.append(f"missing_{key}")
+
+    source_path = resolved_paths.get("source_screenshot_path")
+    actual_source_sha = _sha256(source_path) if source_path else ""
+    declared_source_hashes = [
+        str(evidence.get("source_screenshot_sha256") or "").strip().lower(),
+        str(evidence.get("stage1_source_screenshot_sha256") or "").strip().lower(),
+        str(evidence.get("final_source_screenshot_sha256") or "").strip().lower(),
+    ]
+    same_source = (
+        bool(actual_source_sha)
+        and all(len(value) == 64 for value in declared_source_hashes)
+        and len(set(declared_source_hashes)) == 1
+        and declared_source_hashes[0] == actual_source_sha
+    )
+    if not same_source:
+        blockers.append("same_source_three_image_evidence_failed")
+
+    distinct_visuals = {
+        str(resolved_paths.get("source_screenshot_path") or ""),
+        str(resolved_paths.get("stage1_overlay_path") or ""),
+        str(resolved_paths.get("final_fusion_overlay_path") or ""),
+    }
+    if "" in distinct_visuals or len(distinct_visuals) != 3:
+        blockers.append("original_stage1_final_paths_not_distinct")
+
+    panel_js = root / "app" / "web_panel" / "panel.js"
+    panel_css = root / "app" / "web_panel" / "panel.css"
+    current_panel_js_sha = _sha256(panel_js) if panel_js.is_file() else ""
+    current_panel_css_sha = _sha256(panel_css) if panel_css.is_file() else ""
+    frontend_matches = (
+        bool(current_panel_js_sha)
+        and bool(current_panel_css_sha)
+        and str(evidence.get("panel_js_sha256") or "").strip().lower() == current_panel_js_sha
+        and str(evidence.get("panel_css_sha256") or "").strip().lower() == current_panel_css_sha
+    )
+    if not frontend_matches:
+        blockers.append("frontend_revision_mismatch")
+
+    desktop_viewport = _dict(evidence.get("desktop_viewport"))
+    narrow_viewport = _dict(evidence.get("narrow_viewport"))
+    desktop_covered = (
+        resolved_paths.get("desktop_panel_screenshot_path") is not None
+        and _int_value(desktop_viewport.get("width")) >= 1000
+        and _int_value(desktop_viewport.get("height")) > 0
+    )
+    narrow_width = _int_value(narrow_viewport.get("width"))
+    narrow_covered = (
+        resolved_paths.get("narrow_panel_screenshot_path") is not None
+        and 0 < narrow_width <= 430
+        and _int_value(narrow_viewport.get("height")) > 0
+    )
+    if not desktop_covered:
+        blockers.append("desktop_viewport_not_covered")
+    if not narrow_covered:
+        blockers.append("narrow_viewport_not_covered")
+
+    boolean_requirements = (
+        "latest_fusion_loaded",
+        "pathgraph_resizer_verified",
+        "page_detail_bbox_geometry_verified",
+        "stale_template_content_absent",
+        "stale_draft_content_absent",
+    )
+    for key in boolean_requirements:
+        if evidence.get(key) is not True:
+            blockers.append(f"{key}_not_verified")
+
+    blockers = _unique_text(blockers)
+    accepted = not blockers
+    return {
+        **base,
+        "accepted": accepted,
+        "acceptance_status": "accepted_current_presentation" if accepted else "invalid_or_incomplete",
+        "same_source_three_image_evidence": same_source,
+        "frontend_revision_matches": frontend_matches,
+        "desktop_viewport_covered": desktop_covered,
+        "narrow_viewport_covered": narrow_covered,
+        "artifact_evidence": artifact_evidence,
+        "source_screenshot_sha256": actual_source_sha,
+        "desktop_viewport": desktop_viewport,
+        "narrow_viewport": narrow_viewport,
+        "blocking_reasons": blockers,
+    }
 
 
 def _requirement(requirement_id: str, passed: bool, *, evidence: dict[str, Any]) -> dict[str, Any]:
@@ -411,7 +587,7 @@ def _attach_generated_artifacts(scaffold: dict[str, Any], *, scaffold_file: Path
         "page_detail_candidate": generated.get("page_detail_candidate_path"),
     }
     for key, artifact_path in artifact_map.items():
-        if enriched.get(key):
+        if key == "current_evidence_packet" and enriched.get(key):
             continue
         resolved = _resolve_generated_path(artifact_path, root=root, scaffold_file=scaffold_file)
         if resolved and resolved.exists():
@@ -425,7 +601,37 @@ def _attach_generated_artifacts(scaffold: dict[str, Any], *, scaffold_file: Path
     return enriched
 
 
-def _next_actions(scaffold: dict[str, Any], blocking_reasons: list[str]) -> list[dict[str, Any]]:
+def _presentation_evidence_template(root: Path) -> dict[str, Any]:
+    panel_js = root / "app" / "web_panel" / "panel.js"
+    panel_css = root / "app" / "web_panel" / "panel.css"
+    return {
+        "contract_version": "learning_interface_presentation_evidence_v1",
+        "template_only": True,
+        "artifact_is_evidence": False,
+        "source_screenshot_path": "",
+        "stage1_overlay_path": "",
+        "final_fusion_overlay_path": "",
+        "trace_path": "",
+        "desktop_panel_screenshot_path": "",
+        "narrow_panel_screenshot_path": "",
+        "source_screenshot_sha256": "",
+        "stage1_source_screenshot_sha256": "",
+        "final_source_screenshot_sha256": "",
+        "panel_js_sha256": _sha256(panel_js) if panel_js.is_file() else "",
+        "panel_css_sha256": _sha256(panel_css) if panel_css.is_file() else "",
+        "desktop_viewport": {"width": 0, "height": 0},
+        "narrow_viewport": {"width": 0, "height": 0},
+        "latest_fusion_loaded": False,
+        "pathgraph_resizer_verified": False,
+        "page_detail_bbox_geometry_verified": False,
+        "stale_template_content_absent": False,
+        "stale_draft_content_absent": False,
+        "execute_binding_enabled": False,
+        "artifact_is_authorization": False,
+    }
+
+
+def _next_actions(scaffold: dict[str, Any], blocking_reasons: list[str], *, root: Path) -> list[dict[str, Any]]:
     summary = _dict(scaffold.get("summary"))
     generated = _dict(scaffold.get("generated_artifacts"))
     ready_regions = _ready_region_numbers(scaffold)
@@ -492,6 +698,37 @@ def _next_actions(scaffold: dict[str, Any], blocking_reasons: list[str]) -> list
                 "interpretation": "The model-only preview can be shown in demo, but the official candidate remains mixed until a fresh model chain replaces assisted/reviewed artifacts.",
             }
         )
+    if "current_presentation_evidence_not_accepted" in blocking_reasons:
+        actions.append(
+            {
+                "action_id": "capture_current_presentation_evidence",
+                "status": "required",
+                "requires_user_approval": True,
+                "may_run_without_user_approval": False,
+                "required_artifacts": [
+                    "source_screenshot",
+                    "stage1_overlay",
+                    "final_fusion_overlay",
+                    "trace",
+                    "desktop_panel_screenshot",
+                    "narrow_panel_screenshot",
+                ],
+                "required_checks": [
+                    "same_source_three_image_evidence",
+                    "latest_fusion_loaded",
+                    "pathgraph_resizer_verified",
+                    "page_detail_bbox_geometry_verified",
+                    "frontend_revision_matches",
+                    "stale_template_content_absent",
+                    "stale_draft_content_absent",
+                ],
+                "evidence_template": _presentation_evidence_template(root),
+                "interpretation": (
+                    "Run only after the user resumes live testing. This evidence is presentation verification, "
+                    "not click authorization, Execute readiness, model accuracy, or Runtime PathGraph promotion."
+                ),
+            }
+        )
     actions.append(
         {
             "action_id": "rerun_goal_readiness_audit",
@@ -506,6 +743,7 @@ def _next_actions(scaffold: dict[str, Any], blocking_reasons: list[str]) -> list
 
 def _demo_evidence_map(scaffold: dict[str, Any], *, root: Path, scaffold_file: Path) -> list[dict[str, Any]]:
     generated = _dict(scaffold.get("generated_artifacts"))
+    summary = _dict(scaffold.get("summary"))
     precise = _dict(scaffold.get("precise_understanding_candidate"))
     page_detail = _dict(scaffold.get("page_detail_candidate"))
     preview = _dict(scaffold.get("model_generated_pathgraph_preview"))
@@ -513,6 +751,8 @@ def _demo_evidence_map(scaffold: dict[str, Any], *, root: Path, scaffold_file: P
     preview_page_summary = _dict(preview_page_detail.get("summary"))
     model_only = _dict(scaffold.get("model_only_demo_readiness"))
     page_detail_fields = _page_detail_evidence_fields(page_detail)
+    if _int_value(summary.get("precise_pending_calibration_count")) > 0:
+        page_detail_fields["readiness_status"] = "needs_pending_calibration"
     return [
         _evidence_item(
             "full_screen_understanding_numbered_regions",
@@ -771,11 +1011,15 @@ def _evidence_item(
 
 
 def _sha256_prefix(path: Path) -> str:
+    return _sha256(path)[:12]
+
+
+def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
-    return digest.hexdigest()[:12]
+    return digest.hexdigest()
 
 
 def _calibration_command_preview(scaffold: dict[str, Any], *, ready_regions: list[int]) -> dict[str, Any]:
@@ -880,6 +1124,8 @@ def _next_action_status(next_actions: list[dict[str, Any]], final_goal_complete:
         return "complete"
     if any(item.get("action_id") == "request_explicit_model_start_approval" for item in next_actions):
         return "awaiting_explicit_model_start_approval"
+    if any(item.get("action_id") == "capture_current_presentation_evidence" for item in next_actions):
+        return "awaiting_presentation_verification"
     if any(str(item.get("status") or "").startswith("blocked") for item in next_actions):
         return "blocked_until_prior_artifact"
     return "ready_for_rerun"
@@ -998,10 +1244,19 @@ def _int_value(value: Any) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Audit Learning Mode demo goal readiness from a scaffold report.")
     parser.add_argument("--scaffold", required=True, help="Path to learn_mode_demo_scaffold.json.")
+    parser.add_argument(
+        "--presentation-evidence",
+        help="Optional standalone learning_interface_presentation_evidence_v1 JSON file.",
+    )
     parser.add_argument("--out", help="Directory for learning_mode_demo_goal_readiness_report.json.")
     parser.add_argument("--json", action="store_true", help="Print the report as JSON.")
     args = parser.parse_args()
-    report_learning_mode_demo_goal_readiness(scaffold_path=args.scaffold, out_dir=args.out, json_stdout=args.json)
+    report_learning_mode_demo_goal_readiness(
+        scaffold_path=args.scaffold,
+        presentation_evidence_path=args.presentation_evidence,
+        out_dir=args.out,
+        json_stdout=args.json,
+    )
 
 
 if __name__ == "__main__":

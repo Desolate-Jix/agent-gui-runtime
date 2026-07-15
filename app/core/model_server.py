@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import psutil
 import subprocess
 import time
 import urllib.error
@@ -108,16 +109,54 @@ def ensure_model_server(
             result["after"] = wait_for_model_server(profile, wait_seconds=wait_seconds)
         return result
 
+    resource_switch = _stop_exclusive_resource_conflicts(profile)
     start_result = start_model_server(profile)
     result = {
         "stage": stage,
         "profile": _public_profile(profile),
         "before": before,
+        "resource_switch": resource_switch,
         "started": True,
         "start": start_result,
     }
     if wait_until_ready:
-        result["after"] = wait_for_model_server(profile, wait_seconds=wait_seconds)
+        result["after"] = wait_for_model_server(
+            profile,
+            wait_seconds=wait_seconds,
+            expected_pid=start_result.get("pid"),
+            log_path=start_result.get("log_path"),
+        )
+    return result
+
+
+def _stop_exclusive_resource_conflicts(profile: dict[str, Any]) -> dict[str, Any]:
+    group = str(profile.get("exclusive_resource_group") or "").strip()
+    target_profile_id = str(profile.get("profile_id") or "").strip()
+    result: dict[str, Any] = {
+        "exclusive_resource_group": group or None,
+        "target_profile_id": target_profile_id or None,
+        "checked_profile_ids": [],
+        "stopped_profile_ids": [],
+    }
+    if not group:
+        return result
+
+    for candidate in load_model_profiles():
+        candidate_profile_id = str(candidate.get("profile_id") or "").strip()
+        if not candidate_profile_id or candidate_profile_id == target_profile_id:
+            continue
+        if str(candidate.get("exclusive_resource_group") or "").strip() != group:
+            continue
+        result["checked_profile_ids"].append(candidate_profile_id)
+        status = check_model_server(candidate, timeout=0.5)
+        if status.get("status") not in {"running", "loading", "busy"}:
+            continue
+        stop_result = stop_model_server(candidate)
+        if not stop_result.get("stopped"):
+            raise RuntimeError(
+                f"Could not release exclusive model resource {group} from profile {candidate_profile_id}"
+            )
+        result["stopped_profile_ids"].append(candidate_profile_id)
     return result
 
 
@@ -153,6 +192,8 @@ def start_model_server(profile: dict[str, Any]) -> dict[str, Any]:
         ("device", "-Device"),
         ("dtype", "-DType"),
         ("max_new_tokens", "-MaxNewTokens"),
+        ("gpu_memory_gib", "-GpuMemoryGiB"),
+        ("cpu_memory_gib", "-CpuMemoryGiB"),
     ]:
         value = profile.get(key)
         if value not in (None, ""):
@@ -234,7 +275,13 @@ def stop_model_server(profile: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def wait_for_model_server(profile: dict[str, Any], *, wait_seconds: float) -> dict[str, Any]:
+def wait_for_model_server(
+    profile: dict[str, Any],
+    *,
+    wait_seconds: float,
+    expected_pid: int | None = None,
+    log_path: str | None = None,
+) -> dict[str, Any]:
     deadline = time.monotonic() + float(wait_seconds)
     last = check_model_server(profile)
     while time.monotonic() < deadline:
@@ -242,12 +289,28 @@ def wait_for_model_server(profile: dict[str, Any], *, wait_seconds: float) -> di
             last = _refresh_running_status_health(profile, last)
             _sync_pid_file_from_health(profile, last)
             return last
+        if expected_pid and not _process_is_alive(expected_pid):
+            return {
+                **last,
+                "status": "startup_failed",
+                "reason": "started_process_exited",
+                "expected_pid": expected_pid,
+                "log_path": log_path,
+            }
         time.sleep(1.0)
         last = check_model_server(profile)
     if last.get("status") == "running":
         last = _refresh_running_status_health(profile, last)
     _sync_pid_file_from_health(profile, last)
     return last
+
+
+def _process_is_alive(pid: int) -> bool:
+    try:
+        process = psutil.Process(int(pid))
+        return process.is_running() and process.status() != psutil.STATUS_ZOMBIE
+    except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError, TypeError):
+        return False
 
 
 def _profile_supports_health_status(profile: dict[str, Any]) -> bool:

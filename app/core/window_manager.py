@@ -13,6 +13,7 @@ WINDOWS_BACKEND_IMPORT_ERROR: Optional[str] = None
 try:
     from pywinauto import Desktop
     from pywinauto.controls.hwndwrapper import HwndWrapper
+    import win32api
     import win32con
     import win32gui
     import win32process
@@ -21,6 +22,7 @@ try:
 except Exception as exc:  # pragma: no cover - depends on runtime platform/environment
     Desktop = None  # type: ignore[assignment]
     HwndWrapper = object  # type: ignore[assignment]
+    win32api = None  # type: ignore[assignment]
     win32con = None  # type: ignore[assignment]
     win32gui = None  # type: ignore[assignment]
     win32process = None  # type: ignore[assignment]
@@ -119,11 +121,27 @@ class WindowManager:
         logger.info("Focusing bound window: handle={}, title={}", bound.handle, bound.title)
         self._activate_window(bound.handle)
 
-        time.sleep(0.1)
-        refreshed = self.get_bound_window()
-        if refreshed is None:
-            raise ValueError("Bound window disappeared after focus attempt")
-        return refreshed
+        refreshed: Optional[BoundWindow] = None
+        active_handle = 0
+        for _attempt in range(5):
+            time.sleep(0.1)
+            refreshed = self.get_bound_window()
+            if refreshed is None:
+                raise ValueError("Bound window disappeared after focus attempt")
+            active_handle = int(win32gui.GetForegroundWindow() or 0)  # type: ignore[union-attr]
+            active_root = active_handle
+            if active_handle and hasattr(win32gui, "GetAncestor"):
+                try:
+                    active_root = int(win32gui.GetAncestor(active_handle, win32con.GA_ROOT) or active_handle)  # type: ignore[union-attr]
+                except Exception:
+                    active_root = active_handle
+            if active_handle == refreshed.handle or active_root == refreshed.handle:
+                return refreshed
+
+        raise RuntimeError(
+            "Bound window foreground verification failed: "
+            f"expected_handle={bound.handle}, actual_foreground_handle={active_handle}"
+        )
 
     def resize_bound_window(
         self,
@@ -337,6 +355,25 @@ class WindowManager:
         except Exception as exc:
             logger.warning("Window restore check failed for handle {}: {}", handle, exc)
 
+        attached_threads: list[int] = []
+        current_thread = 0
+        try:
+            current_thread = int(win32api.GetCurrentThreadId())  # type: ignore[union-attr]
+            foreground_handle = int(win32gui.GetForegroundWindow() or 0)  # type: ignore[union-attr]
+            foreground_thread = (
+                int(win32process.GetWindowThreadProcessId(foreground_handle)[0])  # type: ignore[union-attr]
+                if foreground_handle
+                else 0
+            )
+            target_thread = int(win32process.GetWindowThreadProcessId(handle)[0])  # type: ignore[union-attr]
+            for thread_id in (foreground_thread, target_thread):
+                if not thread_id or thread_id == current_thread or thread_id in attached_threads:
+                    continue
+                win32process.AttachThreadInput(current_thread, thread_id, True)  # type: ignore[union-attr]
+                attached_threads.append(thread_id)
+        except Exception as exc:
+            logger.warning("Input-thread attachment failed for handle {}: {}", handle, exc)
+
         try:
             win32gui.BringWindowToTop(handle)  # type: ignore[union-attr]
             win32gui.SetWindowPos(  # type: ignore[union-attr]
@@ -360,6 +397,12 @@ class WindowManager:
             win32gui.SetForegroundWindow(handle)  # type: ignore[union-attr]
         except Exception as exc:
             logger.warning("Foreground activation failed for handle {}: {}", handle, exc)
+        finally:
+            for thread_id in reversed(attached_threads):
+                try:
+                    win32process.AttachThreadInput(current_thread, thread_id, False)  # type: ignore[union-attr]
+                except Exception as exc:
+                    logger.warning("Input-thread detach failed for handle {}: {}", handle, exc)
 
     def _get_process_id(self, handle: int) -> Optional[int]:
         """Return the process id for a window handle."""

@@ -6,6 +6,16 @@ from app.api import apps as apps_api
 from app.api.models.request import OpenAppRequest
 
 
+def test_app_catalog_contains_safe_calculator_launcher() -> None:
+    catalog = apps_api._load_app_catalog()
+    calculator = next(app for app in catalog["apps"] if app["app_id"] == "calculator")
+
+    assert calculator["launch_command"] == ["calc.exe"]
+    assert calculator["process_name"] == "ApplicationFrameHost.exe"
+    assert {"Calculator", "计算器"}.issubset(set(calculator["title_hints"]))
+    assert calculator["require_title_match"] is True
+
+
 def test_list_apps_returns_catalog_and_running_windows(monkeypatch) -> None:
     monkeypatch.setattr(apps_api, "_load_app_catalog", lambda: {"contract_version": "app_catalog_v1", "apps": [{"app_id": "edge"}]})
     monkeypatch.setattr(apps_api.window_manager, "list_visible_windows", lambda: [{"title": "Edge", "process_name": "msedge.exe"}])
@@ -305,3 +315,57 @@ def test_open_app_can_skip_default_maximize(monkeypatch) -> None:
     assert response.success is True
     assert response.data["maximize_after_open"] is False
     assert maximize_calls == []
+
+
+def test_open_shared_host_app_tries_multilingual_titles_without_process_only_fallback(monkeypatch) -> None:
+    monkeypatch.setattr(
+        apps_api,
+        "_load_app_catalog",
+        lambda: {
+            "contract_version": "app_catalog_v1",
+            "apps": [
+                {
+                    "app_id": "calculator",
+                    "launch_command": ["calc.exe"],
+                    "process_name": "ApplicationFrameHost.exe",
+                    "title_hints": ["Calculator", "计算器"],
+                    "require_title_match": True,
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(apps_api.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(apps_api.subprocess, "Popen", lambda command: SimpleNamespace(pid=1234, command=command))
+    monkeypatch.setattr(
+        apps_api.window_manager,
+        "list_visible_windows",
+        lambda: [{"handle": 10, "title": "设置", "process_name": "ApplicationFrameHost.exe"}],
+    )
+    bound = SimpleNamespace(
+        handle=20,
+        title="计算器",
+        process_id=1700,
+        process_name="ApplicationFrameHost.exe",
+        rect=SimpleNamespace(left=0, top=0, right=100, bottom=100),
+        is_active=True,
+    )
+    calls: list[tuple[str | None, str | None]] = []
+
+    def fake_bind(process_name, title):
+        calls.append((process_name, title))
+        if title == "计算器":
+            return bound
+        raise ValueError("No matching visible top-level window found")
+
+    monkeypatch.setattr(apps_api.window_manager, "bind_window", fake_bind)
+    monkeypatch.setattr(apps_api.window_manager, "maximize_bound_window", lambda: bound)
+    monkeypatch.setattr(apps_api, "write_trace", lambda **_kwargs: "trace.json")
+
+    response = apps_api.open_app(OpenAppRequest(app_id="calculator", prefer_new_window=False))
+
+    assert response.success is True
+    assert response.data["bound_window"]["window_title"] == "计算器"
+    assert calls == [
+        ("ApplicationFrameHost.exe", "Calculator"),
+        ("ApplicationFrameHost.exe", "计算器"),
+    ]

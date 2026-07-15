@@ -1,5 +1,6 @@
 {
   "profile_id": "learn_grounding_vista_4b_baseline",
+  "exclusive_resource_group": "gpu_vision",
   "label": "Learn Recognition VISTA-4B grounding baseline",
   "mode_scope": "learn_only",
   "role": [
@@ -21,7 +22,7 @@
   "recommended_use": "Bounded actual-call baseline for Learn Recognition ROI grounding using the existing local VISTA endpoint.",
   "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
   "runtime": "transformers",
-  "model_path": "models/vista-4b-safetensors",
+  "model_path": "models/vista-4b-safetensors-sharded",
   "start_script": "scripts/model_servers/start_transformers_vision_server.ps1",
   "stop_script": "scripts/model_servers/stop_local_vision_server.ps1",
   "pid_file": "logs/learn-grounding-vista-4b-baseline-server.pid",
@@ -30,6 +31,8 @@
   "device": "auto",
   "dtype": "bfloat16",
   "max_new_tokens": 32,
+  "gpu_memory_gib": 10,
+  "cpu_memory_gib": 2,
   "download_status": "available_local_baseline",
   "launchable": true,
   "artifact_is_authorization": false,

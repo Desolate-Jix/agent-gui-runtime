@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.learn.draft_review import load_learning_draft_review
 from app.main import app
+from scripts import build_learn_demo_scaffold as scaffold_module
 from scripts.build_learn_demo_scaffold import build_learn_demo_scaffold
 
 
@@ -339,6 +340,41 @@ def test_learning_demo_scaffold_can_load_direct_page_detail_candidate(tmp_path: 
     assert result["safety"]["live_clicks"] == 0
     assert result["safety"]["runtime_pathgraph_promotion"] is False
     assert Path(result["report_path"]).exists()
+
+
+def test_model_provenance_follows_page_detail_source_path_to_actual_trial(tmp_path: Path) -> None:
+    trial = _write_json(
+        tmp_path / "artifacts" / "learning-runs" / "panel_run" / "trial_result.json",
+        {
+            "contract_version": "learn_recognition_pipeline_result_v1",
+            "source_type": "panel_observe_coordinate_evidence",
+            "actual_model_call_in_this_run": True,
+            "model_generated": True,
+            "best_learning_draft": {
+                "contract_version": "learning_template_draft_v1",
+                "states": [],
+                "regions": [],
+                "action_templates": [],
+            },
+        },
+    )
+    page_detail = _write_json(
+        tmp_path / "artifacts" / "learning-runs" / "panel_run" / "learn_page_detail_candidate.json",
+        {
+            "contract_version": "learn_page_detail_candidate_v1",
+            "source_path": str(trial.relative_to(tmp_path)),
+        },
+    )
+
+    audit = scaffold_module._model_provenance_audit(
+        source_file=page_detail,
+        review={},
+        root=tmp_path,
+    )
+
+    assert audit["actual_model_call_evidence_count"] == 1
+    assert audit["status"] == "fresh_model_generated_chain_evidence_present"
+    assert audit["evidence"][1]["path"] == str(trial.relative_to(tmp_path)).replace("\\", "/")
 
 
 def test_learning_demo_scaffold_endpoint_is_review_only(tmp_path: Path, monkeypatch) -> None:

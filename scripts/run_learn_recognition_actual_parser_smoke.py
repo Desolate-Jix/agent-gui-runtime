@@ -474,6 +474,11 @@ def _observe_bundle_from_vision_response(
             "contract_version": response_payload.get("contract_version"),
             "screen_summary": response_payload.get("screen_summary"),
             "state_guess": response_payload.get("state_guess"),
+            "interface_classification": (
+                response_payload.get("interface_classification")
+                if isinstance(response_payload.get("interface_classification"), dict)
+                else {}
+            ),
             "regions": response_payload.get("regions") if isinstance(response_payload.get("regions"), list) else [],
             "targets": response_payload.get("targets") if isinstance(response_payload.get("targets"), list) else [],
             "raw_response": response_payload.get("raw_response"),
