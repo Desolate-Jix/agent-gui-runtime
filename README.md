@@ -66,7 +66,7 @@ Stop the manually started API with `Ctrl+C`. The runtime does not authorize real
 
 ### Hierarchical Region Partition Shadow MVP
 
-The 2026-07-16 read-only hybrid experiment is **not ready and did not outperform the current bar-first path** on five fixed screenshots. It partially grouped Apple Music content rows, but collapsed WhatsApp and Python.org into whole-window regions, omitted the Notepad editor, and produced invalid or duplicate hierarchy fields. No production pipeline was changed. See [the evidence-based result](docs/experiments/2026-07-16-hierarchical-region-partition-mvp-result.md).
+The first 2026-07-16 read-only experiment showed that Qwen3-VL 8B could not reliably reconstruct regions from many atomic element boxes; it did not test true coarse proposals. MVP-2 added a deterministic anonymous coarse-proposal layer and compared element-only versus coarse evidence on WhatsApp, Notepad, and Python.org. Coarse proposals recovered missing geometry and improved visible structure, but the one-shot model outputs still failed the unchanged hierarchy validator. The status is **promising but the MVP-2 gate did not pass**. No production pipeline was changed. See [the input audit](docs/experiments/2026-07-16-hierarchical-region-partition-mvp-input-audit.md), [the first result](docs/experiments/2026-07-16-hierarchical-region-partition-mvp-result.md), and [the MVP-2 result](docs/experiments/2026-07-16-hierarchical-region-partition-mvp2-result.md).
 
 ### Current Stage
 

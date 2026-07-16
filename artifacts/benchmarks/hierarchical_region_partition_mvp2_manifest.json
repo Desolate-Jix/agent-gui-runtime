@@ -1,0 +1,17 @@
+{
+  "contract_version": "hierarchical_region_partition_mvp2_manifest_v1",
+  "cases": [
+    {
+      "case_id": "whatsapp",
+      "trial_result_path": "D:/agent-gui-runtime/artifacts/learning-runs/panel_20260715-195259-471_conversation_workspace_whatsapp_20260715/trial_result.json"
+    },
+    {
+      "case_id": "notepad",
+      "trial_result_path": "D:/agent-gui-runtime/artifacts/learning-runs/panel_20260715-195312-986_generic_notepad_blank/trial_result.json"
+    },
+    {
+      "case_id": "python_org",
+      "trial_result_path": "D:/agent-gui-runtime/artifacts/learning-runs/panel_20260715-192341-941_python_org/trial_result.json"
+    }
+  ]
+}

@@ -6,7 +6,7 @@ This was an isolated, read-only shadow experiment. It did not modify `bar_detect
 
 ## Result
 
-Verdict: **not ready, and not better than the current bar-first path on this evidence**.
+Verdict: **the element-only organization path is not ready; the coarse-proposal hypothesis was not tested by this run**.
 
 | Sample | Old issue | Hybrid result | Validator | Crop meaning | Verdict |
 | --- | --- | --- | --- | --- | --- |
@@ -16,7 +16,7 @@ Verdict: **not ready, and not better than the current bar-first path on this evi
 | Notepad | simple surface over-segmentation | toolbar/status duplicated; editor omitted | failed | unusable | worse |
 | Python.org | old control sample broadly usable | duplicate full-page regions; columns lost | failed | unusable | severe regression |
 
-The acceptance requirement of improving at least two known false/missed splits without severe regressions was not met.
+The element-only acceptance requirement of improving at least two known false/missed splits without severe regressions was not met. This result must not be interpreted as evidence that all hybrid hierarchical-region approaches are infeasible.
 
 ## Diagnosis
 
@@ -35,5 +35,4 @@ The acceptance requirement of improving at least two known false/missed splits w
 
 ## Next Experiment
 
-Do not integrate this MVP into production. The next bounded experiment should first create true anonymous region proposals from separators, whitespace, connected element clusters, and large containers, then constrain model output so candidate IDs and parent IDs cannot leave the supplied sets. Re-evaluate on the same development screenshots plus untouched holdout screenshots.
-
+Do not integrate this MVP into production. MVP-2 will create true anonymous region proposals from separators, whitespace, connected element clusters, and remainder areas, then compare one-shot element-only and coarse-proposal organization on WhatsApp, Notepad, and Python.org with the same model and validator.
