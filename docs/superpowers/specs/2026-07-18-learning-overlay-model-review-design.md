@@ -16,6 +16,46 @@ Stage2 JSON + 原始截图 + 合成框图
   -> 修订后的只读融合结果与 overlay
 ```
 
+## 删除与修复闭环
+
+删除只作用于错误的 Stage2 包装区域，不删除其原子元素。每一个 `remove` 必须生成一个 `removal_resolution`，并明确记录以下去向之一：
+
+- `children_reparented`：有效子元素保留并回到现有父区；
+- `relabel_replacement`：由同一完整 bbox 的受限重标结果替代；
+- `precise_locator`：缺失局部对象进入 OCR、VISTA/4B、rerank 与 Gate dry-run；
+- `stage1_repartition`：缺失栏或 pane 返回结构层重新分区；
+- `needs_human_review`：证据不足，不允许自动完成。
+
+`deleted_without_resolution` 是非法状态。只要存在未完成 repair、无内容去向的删除项、协议失败或替代覆盖未验证，工作流必须停在 `repair_pending`、`replacement_incomplete` 或 `needs_human_review`，不得生成完成状态。
+
+## 工作流状态
+
+```text
+pending
+  -> full_review
+  -> focused_review
+  -> patch_validated
+  -> repair_pending
+  -> repair_running
+  -> recomposing
+  -> replacement_verification
+  -> completed_review_only
+```
+
+失败状态包括 `protocol_failed`、`needs_human_review`、`repair_failed`、`replacement_incomplete` 和 `stale_evidence`。`completed_review_only` 仍然不授权 Execute 或 Runtime PathGraph。
+
+## 替代完整性 Gate
+
+Gate 必须验证：
+
+1. 每个删除区域都有唯一内容去向；
+2. `children_reparented` 引用的原子元素仍存在于审核后 Stage2；
+3. repair request 使用现有 Stage1 或精准定位输出，模型粗 ROI 不能直接成为最终 bbox；
+4. repair 未完成时不能重新组合为完成产物；
+5. 修复后重新运行 containment、ownership、overlap 与 coverage 检查；
+6. 重新生成融合图、界面详情和只读 PathGraph，不能继续展示旧 overlay；
+7. 所有产物保持 `display_only=true`、`execute_binding_enabled=false` 和 `artifact_is_authorization=false`。
+
 ## 模型权限
 
 模型可以：
