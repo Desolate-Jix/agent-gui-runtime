@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 用真实模型调用验证通用界面复核与确定性修复闭环，并在九界面无污染后把该闭环接入 Learn Mode 面板的 Stage2 与精准校准之间。
+**Goal:** 用真实模型调用验证通用界面复核与确定性修复闭环，并在九界面无污染及一个未参与调试的新界面 smoke 后，把该闭环接入 Learn Mode 面板的 Stage2 candidate graph 与精准校准之间。
 
-**Architecture:** 新增 holdout manifest/runner 统一调用现有 model review probe、validated patch、generic repair compiler 和 deterministic repair executor，并输出三图与分层结果。面板新增只读 review/repair endpoint，消费当前 Stage2 报告并保存 reviewed/repaired Stage2；前端只有在完整性 gate 通过后才继续精准校准。
+**Architecture:** 新增 development-validation manifest/runner 统一调用现有 model review probe、validated patch、generic repair compiler 和 deterministic repair executor，并输出三图与分层结果。复核前编号仅用于 before-review 展示；repair 与 integrity gate 后必须重新生成 final numbering 并绑定新的 graph revision。面板新增只读 review/repair endpoint，消费当前 Stage2 candidate graph 并保存 reviewed/repaired/final-numbered Stage2；前端只有在完整性 gate 通过后才继续精准校准。
 
 **Tech Stack:** Python 3.11、FastAPI/Pydantic、pytest、Pillow、原生 JavaScript、OpenAI-compatible local Qwen3-VL 8B endpoint。
 
@@ -17,23 +17,25 @@
 - 不允许应用名称、固定坐标、固定标题或 screenshot checksum 特判。
 - 每例必须保留 original、before-review fusion、final-repaired fusion 三图。
 - 报告不输出 accuracy；attempted=0 必须显示 not_covered。
+- 每次 actual model call 必须记录 capture checksum、prompt/schema/parser/repair 版本、模型版本、推理参数、raw response 和 graph revision。
+- 校准 target ID 必须来自 repair 后 final numbering；provisional numbering 不得跨 graph revision 复用。
 
 ---
 
-### Task 1: Holdout Contract And Runner
+### Task 1: Development Validation Contract And Runner
 
 **Files:**
-- Create: `artifacts/benchmarks/learning_model_review_holdout_manifest_v1.json`
-- Create: `scripts/run_learning_model_review_holdout.py`
-- Create: `tests/test_learning_model_review_holdout_runner.py`
+- Create: `artifacts/benchmarks/learning_model_review_development_manifest_v1.json`
+- Create: `scripts/run_learning_model_review_validation.py`
+- Create: `tests/test_learning_model_review_validation_runner.py`
 - Modify: `scripts/run_learning_review_repair_closure.py`
 
 **Interfaces:**
 - Consumes: checksum-pinned Stage2 source, original screenshot, fusion overlay, local model endpoint
-- Produces: `learning_model_review_holdout_report_v1` and per-case three-image evidence
+- Produces: `learning_model_review_development_validation_report_v1` and per-case three-image evidence
 
-- [ ] **Step 1:** Write failing tests for manifest checksum validation, actual model-call accounting, three-image completeness, invalid fixture exclusion, repair closure, and no-action safety counters.
-- [ ] **Step 2:** Run `uv run pytest tests/test_learning_model_review_holdout_runner.py -q` and confirm missing runner/contract failures.
+- [ ] **Step 1:** Write failing tests for manifest checksum validation, actual model-call accounting, provenance/version fields, three-image completeness, invalid fixture exclusion, repair closure, and no-action safety counters.
+- [ ] **Step 2:** Run `uv run pytest tests/test_learning_model_review_validation_runner.py -q` and confirm missing runner/contract failures.
 - [ ] **Step 3:** Implement a three-case manifest for Notepad, Python.org, and Apple Music using current frozen nine-interface evidence.
 - [ ] **Step 4:** Implement the runner so each case calls `run_probe`, then deterministic closure, then renders final repaired fusion from the final recomposed Stage2.
 - [ ] **Step 5:** Rerun the targeted tests until green.
@@ -58,14 +60,14 @@
 - [ ] **Step 2:** For each reusable failure, write the narrowest failing regression test before editing production code.
 - [ ] **Step 3:** Apply only common-contract fixes; reject unsupported role creation, ungrounded missing regions, duplicate ownership, parent escape, or child loss.
 - [ ] **Step 4:** Rerun the failing holdout and targeted tests after each fix.
-- [ ] **Step 5:** Accept the three-case gate only when at least two cases improve, no case regresses data integrity, and every unresolved case is explicitly safe-stopped.
+- [ ] **Step 5:** Allow expansion when at least two cases improve; require all three to have no data-integrity regression, no silent fallback, and every unresolved case explicitly safe-stopped.
 
 ### Task 3: Nine-Interface Model Review Regression
 
 **Files:**
-- Modify: `scripts/run_learning_model_review_holdout.py`
+- Modify: `scripts/run_learning_model_review_validation.py`
 - Create: `artifacts/benchmarks/learning_model_review_nine_interface_manifest_v1.json`
-- Test: `tests/test_learning_model_review_holdout_runner.py`
+- Test: `tests/test_learning_model_review_validation_runner.py`
 
 **Interfaces:**
 - Consumes: frozen nine-interface Stage2 evidence
@@ -77,7 +79,23 @@
 - [ ] **Step 4:** Classify all remaining failures and rerun only when a common-contract change has a regression test.
 - [ ] **Step 5:** Block panel integration if any case loses atomic children, escapes its parent, fabricates a region, or silently bypasses review uncertainty.
 
-### Task 4: Panel Review And Repair Stage
+### Task 4: Unseen Final Smoke
+
+**Files:**
+- Create: `artifacts/benchmarks/learning_model_review_unseen_smoke_v1.json`
+- Modify: `scripts/run_learning_model_review_validation.py`
+- Test: `tests/test_learning_model_review_validation_runner.py`
+
+**Interfaces:**
+- Consumes: one fixed screenshot not used while changing prompt, validator, or repair rules
+- Produces: one actual-model three-image smoke report with `used_for_tuning=false`
+
+- [ ] **Step 1:** Freeze one non-Calculator interface after the development and nine-interface rules are final.
+- [ ] **Step 2:** Run it exactly once with the selected configuration and record `used_for_tuning=false`.
+- [ ] **Step 3:** Require no data-integrity regression; improvement, unchanged, or explicit safe-stop are acceptable, silent degradation is not.
+- [ ] **Step 4:** Do not change prompt or repair behavior based on this result; record any failure as post-demo backlog.
+
+### Task 5: Panel Review And Repair Stage
 
 **Files:**
 - Modify: `app/api/panel.py`
@@ -89,15 +107,16 @@
 **Interfaces:**
 - Produces endpoint: `POST /panel/run_learning_model_review_repair`
 - Consumes: `two_stage_report_path`, screenshot path, model profile/endpoint
-- Produces: reviewed Stage2 report path, three-image evidence, integrity status, calibration permission
+- Produces: reviewed Stage2 report path, final numbering, graph revision, three-image evidence, integrity status, calibration permission
 
 - [ ] **Step 1:** Write failing endpoint tests for passed, needs-human-review, invalid model output, evidence missing, and no-action safety paths.
 - [ ] **Step 2:** Implement endpoint orchestration using the same runner components as the CLI, not a parallel panel-only algorithm.
 - [ ] **Step 3:** Write failing front-end route tests proving the review/repair stage runs after Stage2 and before precise calibration.
 - [ ] **Step 4:** Add one visible progress step and render the final repaired fusion image plus blocker explanation.
-- [ ] **Step 5:** Require `integrity_gate.passed=true` and `needs_human_review=0` before `runLearningDeepCalibration`; otherwise stop safely.
+- [ ] **Step 5:** Regenerate final numbering after repair, bind calibration candidates to the repaired graph revision, and reject stale provisional IDs.
+- [ ] **Step 6:** Require `integrity_gate.passed=true`, `needs_human_review=0`, complete repair resolution, unique atom ownership, preserved atom identity/count, current capture/revision references, trusted geometry provenance, and unchanged action/danger safety semantics before `runLearningDeepCalibration`; otherwise stop safely.
 
-### Task 5: End-To-End Verification And Documentation
+### Task 6: End-To-End Verification And Documentation
 
 **Files:**
 - Modify: `README.md`
