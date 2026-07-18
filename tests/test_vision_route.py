@@ -1304,6 +1304,9 @@ def test_vision_recognition_plan_visual_asset_fast_lane_skips_vista(tmp_path, mo
     assert result["visual_asset_recall"]["matches"][0]["current_roi_ref"]
     assert result["visual_asset_recall"]["matches"][0]["current_match_ref"]
     assert result["execution_path"]["visual_asset_fast_lane_used"] is True
+    assert result["execution_path"]["vision_model_used"] is False
+    assert result["execution_path"]["coordinate_source"] == "seeded_candidate_v1.selected_click_point"
+    assert result["execution_path"]["reviewed_test_execution_used"] is True
     assert result["candidate_result"]["summary"]["seeded_candidate_selected"] is True
     assert result["candidate_result"]["summary"]["vista_point_grounding_used"] is False
     assert result["model_io"]["status"] == "skipped"

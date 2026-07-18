@@ -2463,6 +2463,18 @@ def _recognition_plan_from_vista_point(
                 page_structure_generated=False,
                 ocr_region_refine_used=False,
             ),
+            "vision_provider_used": "seeded_candidate_fast_lane"
+            if allow_reviewed_seed_without_model and vista_payload is None
+            else "vista_point_grounding",
+            "vision_model_used": bool(vista_payload),
+            "coordinate_source": (
+                "seeded_candidate_v1.selected_click_point"
+                if allow_reviewed_seed_without_model and seeded_primary_point_used
+                else
+                narrow_search_result.results[0].coordinate_source
+                if narrow_search_result.results
+                else "unavailable"
+            ),
             "candidate_rank_used": True,
             "ocr_anchor_grounding_used": False,
             "ocr_anchor_grounding_fallback_used": False,
@@ -2504,7 +2516,7 @@ def _recognition_plan_from_vista_point(
             "vista_processed_size": vista_image_preprocess.get("processed_size"),
             "vista_crop_bounds_original": vista_image_preprocess.get("crop_bounds_original"),
             "pre_click_decision_used": True,
-            "reviewed_test_execution_used": allow_low_margin_when_grounded,
+            "reviewed_test_execution_used": allow_reviewed_seed_without_model or allow_low_margin_when_grounded,
             "action_executed": False,
         },
     }

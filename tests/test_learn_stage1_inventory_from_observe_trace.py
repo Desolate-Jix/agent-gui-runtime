@@ -1,10 +1,13 @@
 from app.learn.recognition.two_stage import _merge_overlapping_same_family_structure_regions
 from pathlib import Path
 
-from scripts.run_learn_stage1_region_localization import (
-    _observe_bundle_from_trace_result,
-    _stage1_inventory_from_trace_result,
+from app.learn.recognition.trace_input import (
+    observe_bundle_from_trace_result,
+    stage1_inventory_from_trace_result,
 )
+
+_observe_bundle_from_trace_result = observe_bundle_from_trace_result
+_stage1_inventory_from_trace_result = stage1_inventory_from_trace_result
 
 
 def test_stage1_inventory_reads_observe_screen_inventory() -> None:

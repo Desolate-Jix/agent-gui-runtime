@@ -18,7 +18,6 @@ from app.learn.recognition.parsers import parse_existing_evidence_to_inventory
 from app.learn.recognition.pipeline import build_learning_recognition_trial
 from app.learn.recognition.roi import build_roi_crop_metadata, restore_local_point_to_screen
 from app.learn.recognition.two_stage import (
-    build_stage1_region_localization_report,
     build_two_stage_screen_understanding,
     fusion_status_from_two_stage,
     model_grounding_evidence_status_from_two_stage,
@@ -36,7 +35,6 @@ __all__ = [
     "build_inventory_layout_graph",
     "build_locator_task_cards",
     "build_learning_recognition_trial",
-    "build_stage1_region_localization_report",
     "build_two_stage_screen_understanding",
     "classify_inventory_items",
     "fusion_status_from_two_stage",

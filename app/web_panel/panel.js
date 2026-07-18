@@ -84,6 +84,7 @@ const LEARNING_INTERFACE_FLOW_STEPS = [
   "pathgraph_draft",
   "complete",
 ];
+let currentLearningInterfaceFlowStep = "bind_capture";
 
 /* Navigation path graph state */
 // Each page node:
@@ -9002,6 +9003,28 @@ function setLearningTrialImagePath(path) {
   if ($("learningTrialImagePath")) $("learningTrialImagePath").value = String(path || "");
 }
 
+function compactVistaCoordinateValidation(validation) {
+  if (!validation || typeof validation !== "object") return null;
+  return {
+    contract_version: validation.contract_version || "",
+    status: validation.status || "",
+    reason: validation.reason || "",
+    candidate_id: validation.candidate_id || "",
+    label: validation.label || "",
+    role: validation.role || "",
+    bbox: validation.bbox || null,
+    previous_click_point: validation.previous_click_point || null,
+    vista_point: validation.vista_point || null,
+    vista_point_inside_bbox: validation.vista_point_inside_bbox === true,
+    vista_point_inside_selected_bbox: validation.vista_point_inside_selected_bbox === true,
+    coordinate_transform: validation.coordinate_transform || null,
+    updated_click_point: validation.updated_click_point === true,
+    gate_result: validation.gate_result || null,
+    overlay_path: validation.overlay_path || "",
+    debug_artifact_path: validation.debug_artifact_path || "",
+  };
+}
+
 function compactLearningDraftTargets(targets, limit = 24) {
   if (!Array.isArray(targets)) return [];
   return targets.slice(0, limit).map((target) => ({
@@ -9017,7 +9040,7 @@ function compactLearningDraftTargets(targets, limit = 24) {
     coordinate_source: target.coordinate_source || "",
     coordinate_validation: target.coordinate_validation && typeof target.coordinate_validation === "object" ? target.coordinate_validation : null,
     coordinate_validation_status: nestedGet(target, ["coordinate_validation", "status"]) || "",
-    vista_coordinate_validation: target.vista_coordinate_validation && typeof target.vista_coordinate_validation === "object" ? target.vista_coordinate_validation : null,
+    vista_coordinate_validation: compactVistaCoordinateValidation(target.vista_coordinate_validation),
     vista_status: nestedGet(target, ["vista_coordinate_validation", "status"]) || "",
   }));
 }
@@ -10236,6 +10259,7 @@ async function captureLearningDraftWindow() {
 
 function setLearningInterfaceFlowStep(stepId, statusText = "") {
   const stepIndex = LEARNING_INTERFACE_FLOW_STEPS.indexOf(stepId);
+  if (stepIndex >= 0) currentLearningInterfaceFlowStep = stepId;
   document.querySelectorAll("[data-learning-flow-step]").forEach((item) => {
     const itemStep = String(item.getAttribute("data-learning-flow-step") || "");
     const itemIndex = LEARNING_INTERFACE_FLOW_STEPS.indexOf(itemStep);
@@ -10384,11 +10408,14 @@ function learningCalibrationTimeoutSeconds(candidateCount = 0) {
 
 function learningTwoStageCalibrationTargetCount() {
   const result = resultOf(lastLearningTwoStageResponse || {});
-  return Math.max(0, Number(
+  const explicitCandidateCount =
+    nestedGet(result, ["stage2_numbering", "calibration_candidate_count"])
+      ?? nestedGet(result, ["summary", "stage2_calibration_candidate_count"]);
+  const numberedItemCount =
     nestedGet(result, ["stage2_numbering", "numbered_item_count"])
-      || nestedGet(result, ["summary", "stage2_numbered_item_count"])
-      || 0
-  ));
+      ?? nestedGet(result, ["summary", "stage2_numbered_item_count"])
+      ?? 0;
+  return Math.max(0, Number(explicitCandidateCount ?? numberedItemCount));
 }
 
 async function runLearningCalibrationProgress(task, labelKey, options = {}) {
@@ -10627,6 +10654,11 @@ async function runLearningInterfaceFlow() {
         ? "two-stage fused draft · Stage1 gate passed"
         : "two-stage review overlay attached · Stage1 gate blocked Execute",
     });
+  } catch (error) {
+    const message = `learning flow failed · ${String(error)}`;
+    setLearningInterfaceFlowStep(currentLearningInterfaceFlowStep, message);
+    renderResponse({ success: false, message, error: String(error) }, "Learning interface flow");
+    return { success: false, message, error: String(error) };
   } finally {
     if (button) button.disabled = previousDisabled;
   }
@@ -15803,8 +15835,6 @@ async function boot() {
 }
 
 boot();
-
-
 
 
 

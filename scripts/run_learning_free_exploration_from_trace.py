@@ -25,9 +25,9 @@ from scripts.check_learning_protected_set_review import (
     run_learning_protected_set_review,
 )
 from scripts.report_learning_free_exploration_sources import classify_learning_trace_source
-from scripts.run_learn_stage1_region_localization import (
-    _observe_bundle_from_trace_result,
-    _stage1_inventory_from_trace_result,
+from app.learn.recognition.trace_input import (
+    observe_bundle_from_trace_result as _observe_bundle_from_trace_result,
+    stage1_inventory_from_trace_result as _stage1_inventory_from_trace_result,
 )
 from scripts.run_learn_two_stage_replay import _overlay_status, _source_image_status
 

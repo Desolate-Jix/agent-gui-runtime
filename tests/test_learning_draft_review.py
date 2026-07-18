@@ -1141,6 +1141,155 @@ def test_panel_learning_recognition_trial_uses_two_stage_numbered_items_when_cal
     assert saved["learning_draft"]["artifact_is_authorization"] is False
 
 
+def test_panel_deterministic_partition_report_flows_into_page_detail_and_readonly_pathgraph(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from app.api import panel as panel_api
+
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    overlay_path = tmp_path / "artifacts" / "review-overlays" / "deterministic_fusion.png"
+    overlay_path.parent.mkdir(parents=True, exist_ok=True)
+    overlay_path.write_bytes(b"deterministic-fusion-overlay")
+    report_path = tmp_path / "logs" / "benchmarks" / "deterministic" / "report.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(
+            {
+                "contract_version": "learn_two_stage_screen_understanding_v1",
+                "report_identity": "deterministic_partition_fixture",
+                "stage1_source": "deterministic_root_partition_v1",
+                "stage1_gate": {"status": "passed"},
+                "stage1_regions": [
+                    {
+                        "region_id": "structure_region_main_content",
+                        "label": "Main content",
+                        "role": "primary_content",
+                        "bbox": {"x": 0, "y": 0, "w": 1000, "h": 800},
+                        "rough_bbox": {"x": 0, "y": 0, "w": 1000, "h": 800},
+                        "precise_bbox": {"x": 0, "y": 0, "w": 1000, "h": 800},
+                    }
+                ],
+                "stage2_numbering_skipped": False,
+                "stage2_numbering": {
+                    "contract_version": "learn_stage2_region_numbering_v1",
+                    "region_count": 1,
+                    "numbered_item_count": 2,
+                    "regions": [
+                        {
+                            "region_id": "structure_region_main_content",
+                            "label": "Main content",
+                            "role": "primary_content",
+                            "bbox": {"x": 0, "y": 0, "w": 1000, "h": 800},
+                            "numbered_items": [
+                                {
+                                    "number": "1.1",
+                                    "item_id": "stage2_search_input",
+                                    "label": "Search input",
+                                    "role": "text_input",
+                                    "bbox": {"x": 80, "y": 70, "w": 520, "h": 48},
+                                    "review_only": True,
+                                    "execute_binding_enabled": False,
+                                    "artifact_is_authorization": False,
+                                },
+                                {
+                                    "number": "1.2",
+                                    "item_id": "stage2_result_card",
+                                    "label": "Result card",
+                                    "role": "content_card",
+                                    "bbox": {"x": 80, "y": 160, "w": 520, "h": 180},
+                                    "review_only": True,
+                                    "execute_binding_enabled": False,
+                                    "artifact_is_authorization": False,
+                                },
+                            ],
+                        }
+                    ],
+                },
+                "execution_evidence": {
+                    "stage1_engine": "deterministic_root_partition_v1",
+                    "stage2_engine": "deterministic_partition_content_recognition_v1",
+                    "actual_model_calls": 0,
+                    "legacy_bar_postprocessing_applied": False,
+                },
+                "fusion": {
+                    "compiled_overlay_path": "artifacts/review-overlays/deterministic_fusion.png",
+                    "full_screen_understanding_overlay_path": "artifacts/review-overlays/deterministic_fusion.png",
+                    "fused_review_boxes": [],
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    client = TestClient(app)
+
+    trial_response = client.post(
+        "/panel/run_learning_recognition_trial",
+        json={
+            "app_name": "deterministic_fixture",
+            "state_hint": "search_results",
+            "summary": "Deterministic partition learning fixture.",
+            "two_stage_report_path": "logs/benchmarks/deterministic/report.json",
+            "observation_evidence": {
+                "contract_version": "panel_learning_draft_observation_evidence_v1",
+                "screen_size": {"width": 1000, "height": 800},
+                "current_image_path": "artifacts/screenshots/deterministic_fixture.png",
+                "calibrated_targets": [],
+                "review_boxes": [],
+            },
+        },
+    )
+    assert trial_response.status_code == 200
+    trial = trial_response.json()
+    assert trial["success"] is True
+    trial_path = trial["data"]["trial_path"]
+
+    page_detail_response = client.post(
+        "/panel/create_page_detail_candidate",
+        json={"source_path": trial_path},
+    )
+    assert page_detail_response.status_code == 200
+    page_detail = page_detail_response.json()
+    assert page_detail["success"] is True
+    page_detail_data = page_detail["data"]
+    assert page_detail_data["source_detail_shape"] == "learn_two_stage_screen_understanding_v1"
+    assert page_detail_data["summary"]["region_count"] == 2
+    assert page_detail_data["summary"]["section_count"] >= 1
+    assert page_detail_data["compiled_overlay_path"] == "artifacts/review-overlays/deterministic_fusion.png"
+
+    scaffold_response = client.post(
+        "/panel/create_learning_demo_scaffold",
+        json={"source_path": page_detail_data["report_path"]},
+    )
+    assert scaffold_response.status_code == 200
+    scaffold = scaffold_response.json()
+    assert scaffold["success"] is True
+    scaffold_data = scaffold["data"]
+    assert scaffold_data["display_readiness"]["pathgraph_detail_can_show_page_detail"] is True
+    assert scaffold_data["display_readiness"]["page_detail_readonly_pathgraph_preview_available"] is True
+    assert scaffold_data["summary"]["page_detail_readonly_pathgraph_preview_region_count"] == 2
+    assert scaffold_data["summary"]["page_detail_readonly_pathgraph_preview_action_count"] >= 1
+    assert scaffold_data["safety"]["live_clicks"] == 0
+    assert scaffold_data["safety"]["live_fills"] == 0
+    assert scaffold_data["safety"]["live_submits"] == 0
+
+    review_response = client.post(
+        "/panel/load_learning_draft_review",
+        json={"source_path": scaffold_data["report_path"]},
+    )
+    assert review_response.status_code == 200
+    review = review_response.json()
+    assert review["success"] is True
+    review_data = review["data"]
+    assert len(review_data["draft"]["regions"]) == 2
+    assert "pathgraph_candidate_review" in review_data
+    assert review_data["pathgraph_candidate_review"]["artifact_is_authorization"] is False
+    assert review_data["execute_binding_enabled"] is False
+    assert review_data["no_click_authorization"] is True
+
+
 def test_panel_calibrated_target_replay_uses_merged_support_point() -> None:
     from app.api import panel as panel_api
 

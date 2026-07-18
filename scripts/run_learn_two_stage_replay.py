@@ -17,9 +17,9 @@ from app.learn.recognition.two_stage import (
     fusion_status_from_two_stage,
     model_grounding_evidence_status_from_two_stage,
 )
-from scripts.run_learn_stage1_region_localization import (
-    _observe_bundle_from_trace_result,
-    _stage1_inventory_from_trace_result,
+from app.learn.recognition.trace_input import (
+    observe_bundle_from_trace_result as _observe_bundle_from_trace_result,
+    stage1_inventory_from_trace_result as _stage1_inventory_from_trace_result,
 )
 
 

@@ -17,9 +17,9 @@ if str(ROOT) not in sys.path:
 
 from app.learn.recognition.layout_graph import build_inventory_layout_graph
 from app.learn.recognition.two_stage import build_two_stage_screen_understanding
-from scripts.run_learn_stage1_region_localization import (
-    _observe_bundle_from_trace_result,
-    _stage1_inventory_from_trace_result,
+from app.learn.recognition.trace_input import (
+    observe_bundle_from_trace_result as _observe_bundle_from_trace_result,
+    stage1_inventory_from_trace_result as _stage1_inventory_from_trace_result,
 )
 
 

@@ -64,6 +64,43 @@ Stop the manually started API with `Ctrl+C`. The runtime does not authorize real
 
 ## Results Preview
 
+### Deterministic Hierarchy Checkpoint (2026-07-18)
+
+Learning Mode now uses `deterministic_root_partition_v1` as the authoritative Stage1 source. The production chain no longer asks a model to invent top-level bars or runs the former bar-localization postprocessor:
+
+```text
+observe trace / screenshot evidence
+  -> deterministic full-coverage root partition
+  -> Stage1 structure gate
+  -> Stage2 numbering inside each accepted root
+  -> fused learning draft
+  -> page details + read-only PathGraph
+  -> learned-artifact candidate + Gate dry-run
+```
+
+Current fixed-trace evidence:
+
+| Evidence | Result |
+| --- | --- |
+| Fixed interfaces | 9 attempted, 9 checksum-valid, 9 Stage1 gates passed |
+| Stage1 source | `deterministic_root_partition_v1` |
+| Model calls used for root partition | 0 |
+| Three-image sets | 9 original / root partition / final fusion sets |
+| Added holdouts | QQ, Steam Friends, Task Manager |
+| QQ regression | internal whitespace no longer creates a false root split |
+| Task Manager | 27 complete visible table rows plus one bottom partial row retained |
+| Learned-artifact operation | Gate-approved `dry_run=true`; `action_executed=false` |
+| Repository tests | 1585 passed |
+
+Reports and traces:
+
+- [Nine-interface deterministic benchmark](logs/benchmarks/deterministic_first_post_generalization_fix_v1/deterministic_first_recognition_report.json)
+- [QQ holdout](logs/benchmarks/generalization_holdout_v2/qq/learn_screenshot_exploration_report_20260718-031920.json)
+- [Task Manager holdout](logs/benchmarks/generalization_holdout_v2/task_manager/learn_screenshot_exploration_report_20260718-032003.json)
+- [Learned-artifact Gate dry-run trace](logs/traces/actions/20260718-031304-338751__execute-mode-plan-preview__python-org.json)
+
+These are structural and pipeline checks, not a general recognition-accuracy claim. The NVIDIA overlay screenshot is excluded because it contains a mixed/wrong surface. No live click, fill, submit, or Runtime PathGraph promotion occurred.
+
 ### Current Stage
 
 The read-only Learning Mode phase is accepted with declared limitations.
@@ -76,7 +113,7 @@ The read-only Learning Mode phase is accepted with declared limitations.
 | Read-only learning chains | 9 completed |
 | Review-ready cases | 8 |
 | Stress-only cases | 1, Python.org |
-| Repository tests | 1538 passed |
+| Repository tests | 1585 passed |
 | Strict final readiness | `final_goal_complete=false` |
 
 Authoritative reports:
@@ -126,8 +163,8 @@ Learning Mode uses a read-only chain:
 
 ```text
 Bind and capture
-  -> full-screen understanding
-  -> Stage1 structure regions
+  -> evidence inventory
+  -> deterministic full-coverage Stage1 structure regions
   -> Stage2 numbered regions
   -> page details
   -> OCR + VISTA + rerank + Gate dry-run

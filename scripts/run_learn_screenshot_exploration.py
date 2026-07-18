@@ -103,10 +103,15 @@ def _screenshot_exploration_status(report: dict[str, Any]) -> dict[str, Any]:
     fusion = report.get("fusion") if isinstance(report.get("fusion"), dict) else {}
     numbered = int(stage2.get("numbered_item_count") or 0)
     fused = int(fusion.get("fused_review_box_count") or 0)
-    if fused > 0:
+    review_evidence = sum(
+        1
+        for box in fusion.get("fused_review_boxes") or []
+        if isinstance(box, dict) and str(box.get("box_type") or "") != "structure_region"
+    )
+    if review_evidence > 0:
         status = "review_boxes_available"
         demo_readiness = "candidate_for_visual_review"
-        reason = "fused_review_boxes_present"
+        reason = "non_structural_fused_review_boxes_present"
     elif numbered > 0:
         status = "numbered_without_fusion"
         demo_readiness = "needs_fusion_review"
@@ -121,6 +126,7 @@ def _screenshot_exploration_status(report: dict[str, Any]) -> dict[str, Any]:
         "demo_readiness": demo_readiness,
         "numbered_item_count": numbered,
         "fused_review_box_count": fused,
+        "review_evidence_box_count": review_evidence,
         "reason": reason,
         "interpretation": (
             "A successful command only means the safe screenshot-only pipeline ran. "
