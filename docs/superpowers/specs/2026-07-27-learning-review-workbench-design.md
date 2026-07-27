@@ -59,10 +59,52 @@ The first version supports:
 - region/control/action summary;
 - blockers and verification rules;
 - outgoing transition action and target;
+- an operation toolbar for adding routine Agent actions;
+- a transition editor for defining the expected next interface;
+- a safe dry-run command that validates recognition and Gate evidence without clicking;
 - `Edit boxes`;
 - `Save review`.
 
 Saving must refresh the library entry, boxed screenshot, interface details, and PathGraph without requiring the user to reopen the editor.
+
+### Operation And Transition Toolbar
+
+The right inspector contains a compact operation toolbar for the selected interface node. It supports the routine Agent action taxonomy:
+
+- `read`;
+- `open_detail`;
+- `open_apply_flow`;
+- `fill_field`;
+- `select_option`;
+- `scroll`;
+- `back`;
+- `close_modal`;
+- `wait`;
+- `continue_next_step`.
+
+Each operation stores:
+
+- a human-readable label;
+- action taxonomy value;
+- target region or control reference when applicable;
+- preconditions;
+- expected success evidence;
+- failure and safe-stop conditions;
+- risk level and whether user confirmation is required;
+- the target interface node for a successful transition.
+
+The transition editor renders the relation as `current interface -> operation -> target interface`. It allows selecting an existing target node or creating a placeholder node marked `needs_learning`. Removing an operation removes only that transition and never deletes the referenced interface node.
+
+`Dry-run validation` is available after an operation is saved. It must:
+
+1. capture or require a fresh screenshot;
+2. run the existing recognition-plan chain for the operation target;
+3. run pre-click and Gate checks;
+4. record candidate freshness, bbox, click point, confidence, and trace evidence;
+5. return `ready_for_operator_review`, `safe_stop`, or `invalid`;
+6. keep `action_executed=false`.
+
+The toolbar must not expose direct live execution. `final_submit`, `send`, `confirm`, `payment`, and `delete` remain forbidden action types and are rejected by the review validator even if entered through a crafted request.
 
 ## Information Hierarchy
 
@@ -95,7 +137,9 @@ Trace remains available for development diagnosis, but it is not part of the nor
 4. The returned draft and interface-workflow review populate one shared selected-draft state.
 5. Selecting a workflow node changes the active evidence layer, details, PathGraph focus, and inspector.
 6. Box edits and metadata edits update a review patch only.
-7. Save writes a reviewed candidate, reloads that exact saved candidate, and refreshes all visible projections.
+7. Operation and transition edits update the same review patch and immediately update the read-only PathGraph preview.
+8. Save writes a reviewed candidate, reloads that exact saved candidate, and refreshes all visible projections.
+9. Dry-run validation uses the saved operation plus fresh evidence and stores a separate validation result; it never grants Execute authorization.
 
 The selected draft path and selected workflow node are the single source of truth. Template replay state, a previous draft, and current learning-run progress must not leak into the workbench.
 
@@ -128,6 +172,7 @@ The workbench edits learning-review artifacts only.
 - `artifact_is_authorization=false`
 - `execute_binding_enabled=false`
 - no live click, fill, submit, send, confirm, payment, or delete
+- dry-run validation always records `action_executed=false`
 - reviewed historical coordinates are never direct Execute coordinates
 - future execution must still use a fresh screenshot, fresh grounding, Gate, and post-action verification
 
@@ -143,6 +188,9 @@ The implementation must include:
 6. unsaved-change protection tests;
 7. responsive layout checks;
 8. browser smoke verification on the running local panel.
+9. operation-toolbar tests for allowed action types and transition editing;
+10. validator tests rejecting final submit, send, confirm, payment, and delete;
+11. dry-run tests proving fresh evidence is required and no action is executed.
 
 The browser smoke must demonstrate:
 
@@ -151,6 +199,8 @@ The browser smoke must demonstrate:
 - clicking another interface node changes the screenshot and details;
 - opening `Edit boxes` reaches the existing correction editor;
 - saving refreshes the workbench;
+- adding an operation and target node updates the PathGraph preview;
+- dry-run validation displays recognition and Gate evidence with `action_executed=false`;
 - no Execute authorization or real GUI action is produced.
 
 ## Delivery Boundary
