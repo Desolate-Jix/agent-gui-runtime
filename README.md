@@ -64,24 +64,36 @@ Stop the manually started API with `Ctrl+C`. The runtime does not authorize real
 
 ## Results Preview
 
-### Hierarchical Region Partition Shadow MVP
+### Deterministic First-Recognition Integration
 
-The first 2026-07-16 read-only experiment showed that Qwen3-VL 8B could not reliably reconstruct regions from many atomic element boxes; it did not test true coarse proposals. MVP-2 added a deterministic anonymous coarse-proposal layer and compared element-only versus coarse evidence on WhatsApp, Notepad, and Python.org. Coarse proposals recovered missing geometry and improved visible structure, but the one-shot model outputs still failed the unchanged hierarchy validator. The status is **promising but the MVP-2 gate did not pass**. No production pipeline was changed. See [the input audit](docs/experiments/2026-07-16-hierarchical-region-partition-mvp-input-audit.md), [the first result](docs/experiments/2026-07-16-hierarchical-region-partition-mvp-result.md), and [the MVP-2 result](docs/experiments/2026-07-16-hierarchical-region-partition-mvp2-result.md).
+`deterministic_root_partition_v1` is the only formal Stage1 root-partition path. There is no runtime strategy switch, hidden rollback path, or shadow output identity; recovery uses Git history. The reusable coarse-proposal builder lives in `app/learn/recognition/`, and Stage2, fusion, page details, and the read-only PathGraph preview consume the canonical Stage1 contract.
+
+A fixed-trace nine-interface replay covers Apple Music, Python.org, Windows Settings, File Explorer, Steam, WhatsApp, Notepad, WeChat, and Bilibili. The latest post-change run at `logs/region_partition_mvp/nine_interface_after_datagrid_visual_row_fix_20260717/` produced original / root-partition / final-fusion evidence for all nine cases; all nine passed the root validator and Stage1 gate and completed Stage2. Every root, numbering, calibration, fusion, page-detail, and learning-draft count remained unchanged from the preceding protected run. Bottom full-width activity bands are no longer promoted as one partial card, and dense table cells are rendered under row parents instead of repeated in the main overlay.
+
+The nine traces and screenshots remain privacy-sensitive local evidence under ignored `logs/` and `artifacts/`. This benchmark dispatched zero model calls and zero target-application clicks. It proves fixed-trace integration only, not general recognition accuracy, model reliability, Execute readiness, live GUI-operation success, or executable Runtime PathGraph readiness.
+
+An offline Calculator fixed-trace probe exposed two generic root-partition failures: equal-width keypad columns were promoted as a left navigation rail, and repeated keypad row separators created a false bottom bar. The common selector now rejects repeated grid-internal column cuts and excludes repeated row-sequence separators from bottom-bar calibration. The corrected three-image probe is under `logs/region_partition_mvp/new_interface_calculator_holdout_20260717/run_fixed2/`; all nine protected root bboxes and Stage2/fusion counts remained unchanged. Because this Calculator sample drove the fix, it is now a regression sample rather than independent holdout evidence.
+
+An untouched MDN JavaScript screenshot-only probe exposed a separate dataflow defect: conditional OCR recovery produced useful page elements, but Stage1 partitioning still read the pre-recovery empty inventory. Recovered OCR candidates now enter the deterministic root partition before Stage1, while remaining available to later numbering. The corrected probe produces a top bar plus main-content partition and is reviewed in `logs/region_partition_mvp/new_interface_mdn_javascript_20260717/mdn_javascript_triptych_fixed.png`. This is screenshot-only evidence with no bound-window observe trace, model call, or click, and is not proof of general website-recognition reliability.
+
+A live bound-window Task Manager probe exposed two generic defects. Stage1 first promoted data-grid columns as a false left rail; the root selector now rejects internal cuts inside a dominant tabular container. Stage2 then rejected the real table because two valid columns were only 51 pixels apart while the old detector required 80 pixels, allowing vertical text-card groups to take ownership. Explicit dominant DataGrid evidence now enables width-relative column validation, a hidden table parent, and visible horizontal row parents. When OCR/UIA row evidence ends before the visible DataGrid, Stage2 derives the established row interval and adds a review-only row only when the source image contains a matching horizontal content edge; blank tails are not extrapolated. The current three-image review is `logs/region_partition_mvp/task_manager_datagrid_visual_row_fix_20260717/task_manager_original_stage1_final.png`: 22 text-evidenced rows plus 6 visually evidenced rows cover the visible table and stop before the bottom action bar. This fixed-trace result remains review-only and is not recognition-reliability or Execute evidence.
 
 ### Current Stage
 
-The read-only Learning Mode phase is accepted with declared limitations.
+The deterministic first-recognition path is integrated into read-only Learning Mode with declared limitations.
 
 | Evidence | Current result |
 | --- | --- |
-| Phase status | `phase_acceptance_passed_with_declared_limitations` |
-| Protected regression | 9 checksum-pinned cases |
-| Three-image audits | 9 complete source / Stage1 / final sets |
-| Read-only learning chains | 9 completed |
-| Review-ready cases | 8 |
-| Stress-only cases | 1, Python.org |
-| Repository tests | 1538 passed |
-| Strict final readiness | `final_goal_complete=false` |
+| Integration status | `deterministic_root_partition_v1` is the only formal Stage1 path |
+| Protected first-recognition replay | 9 checksum-pinned fixed traces |
+| Three-image audits | 9 complete original / root / final sets |
+| New-interface debugging probes | Calculator fixed trace, MDN screenshot-only dataflow probe, and live bound Task Manager table-layout probe; all are now regression-only |
+| Root partitions accepted by manual review | 9 |
+| Final fusion images accepted by manual review | 8 |
+| Remaining review items | Bilibili has local bottom partial candidates; File Explorer expanded navigation remains visually dense |
+| Real no-click first recognition | 3 interfaces: Settings, File Explorer, Notepad |
+| Repository verification | 1579 tests passed after the Task Manager DataGrid visual-row completion correction |
+| Capability boundary | fixed-trace integration evidence, not general accuracy |
 
 Authoritative reports:
 

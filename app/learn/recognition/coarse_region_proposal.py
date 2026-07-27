@@ -47,7 +47,7 @@ def build_coarse_region_proposals(
         )
 
     return {
-        "contract_version": "coarse_region_proposal_mvp_v1",
+        "contract_version": "coarse_region_proposal_v1",
         "coordinate_space": "original_image",
         "image_size": {"width": width, "height": height},
         "proposals": proposals,

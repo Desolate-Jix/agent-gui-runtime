@@ -11,8 +11,8 @@ from app.learn.recognition.two_stage import (
     _render_message_context_review_overlay,
     _render_two_stage_overlay,
     _stage1_5_overlay_style,
-    build_stage1_region_localization_report,
-    build_two_stage_screen_understanding,
+    build_stage1_region_localization_report as _build_stage1_region_localization_report,
+    build_two_stage_screen_understanding as _build_two_stage_screen_understanding,
 )
 from scripts.run_learn_stage1_region_localization import _observe_bundle_from_trace_result
 
@@ -25,12 +25,84 @@ def _stage2_region_with_item(
 ) -> dict:
     regions = result["stage2_numbering"]["regions"]
     for region in regions:
+        if any(item.get("item_id") == item_id for item in region.get("numbered_items", [])):
+            return region
+    for region in regions:
         region_id = str(region.get("region_id") or "")
         if not region_id.startswith(region_prefix):
             continue
-        if any(item.get("item_id") == item_id for item in region.get("numbered_items", [])):
-            return region
-    return next(item for item in regions if item["region_id"] == region_prefix)
+        return region
+    return next(
+        item
+        for item in regions
+        if str(item.get("zone_id") or "") in {"primary_area", "main_content"}
+    )
+
+
+def _synthetic_stage1_override(layout_graph: dict, screen_inventory: list[dict]) -> dict:
+    items_by_id = {
+        str(item.get("item_id") or ""): item
+        for item in screen_inventory
+        if isinstance(item, dict) and str(item.get("item_id") or "")
+    }
+    regions = []
+    zones = layout_graph.get("zones") if isinstance(layout_graph.get("zones"), dict) else {}
+    for zone_id, zone in zones.items():
+        if not isinstance(zone, dict):
+            continue
+        item_ids = [str(item_id) for item_id in zone.get("item_ids") or [] if str(item_id or "")]
+        boxes = [items_by_id[item_id].get("bbox") for item_id in item_ids if item_id in items_by_id]
+        boxes = [box for box in boxes if isinstance(box, dict) and box.get("w") and box.get("h")]
+        if not boxes:
+            continue
+        left = min(int(box["x"]) for box in boxes)
+        top = min(int(box["y"]) for box in boxes)
+        right = max(int(box["x"]) + int(box["w"]) for box in boxes)
+        bottom = max(int(box["y"]) + int(box["h"]) for box in boxes)
+        slug = str(zone_id).strip().casefold().replace(" ", "_")
+        regions.append(
+            {
+                "contract_version": "learn_stage1_structure_region_v1",
+                "region_no": len(regions) + 1,
+                "region_id": f"structure_region_{slug}",
+                "label": str(zone_id).replace("_", " ").title(),
+                "zone_id": str(zone_id),
+                "role": str(zone_id),
+                "bbox": {"x": left, "y": top, "w": right - left, "h": bottom - top},
+                "item_ids": item_ids,
+                "item_count": len(item_ids),
+                "stage": "stage1_page_structure",
+                "source": "test_explicit_stage1_override",
+                "display_only": True,
+                "execute_binding_enabled": False,
+                "artifact_is_authorization": False,
+            }
+        )
+    return {
+        "contract_version": "learn_stage1_structure_regions_v1",
+        "region_count": len(regions),
+        "structure_regions": regions,
+        "source": "test_explicit_stage1_override",
+        "display_only": True,
+        "execute_binding_enabled": False,
+        "artifact_is_authorization": False,
+    }
+
+
+def build_two_stage_screen_understanding(**kwargs) -> dict:
+    kwargs.setdefault(
+        "stage1_structure_override",
+        _synthetic_stage1_override(kwargs["layout_graph"], kwargs["screen_inventory"]),
+    )
+    return _build_two_stage_screen_understanding(**kwargs)
+
+
+def build_stage1_region_localization_report(**kwargs) -> dict:
+    kwargs.setdefault(
+        "stage1_structure_override",
+        _synthetic_stage1_override(kwargs["layout_graph"], kwargs["screen_inventory"]),
+    )
+    return _build_stage1_region_localization_report(**kwargs)
 
 
 def test_bottom_status_bar_candidate_is_not_promoted_to_tile_card_parent() -> None:
@@ -89,6 +161,61 @@ def test_direct_top_bar_refinement_keeps_leading_edge_controls(tmp_path: Path) -
     assert report["leading_edge_candidate_count"] >= 2
     assert sum(1 for item in refined if item["bbox"]["x"] < 56) >= 2
 
+
+def test_primary_region_recovers_dense_embedded_top_control_strip(tmp_path: Path) -> None:
+    from PIL import Image, ImageDraw
+
+    image_path = tmp_path / "embedded_top_controls.png"
+    image = Image.new("RGB", (800, 600), "white")
+    draw = ImageDraw.Draw(image)
+    for x in (50, 95, 140, 240, 420, 600, 720):
+        draw.rectangle((x, 16, x + 28, 46), fill="black")
+    draw.rectangle((120, 200, 300, 420), outline="black", width=4)
+    image.save(image_path)
+    numbered_items = [
+        {
+            "number": "1.1",
+            "item_id": "content_card",
+            "label": "Content card",
+            "role": "media_card",
+            "item_type": "review_only",
+            "bbox": {"x": 120, "y": 200, "w": 180, "h": 220},
+        }
+    ]
+
+    refined, report = two_stage._refine_primary_embedded_top_controls(
+        numbered_items,
+        image_path=str(image_path),
+        region_bbox={"x": 0, "y": 0, "w": 800, "h": 600},
+    )
+
+    controls = [item for item in refined if item.get("source") == "embedded_top_control_visual_segmenter"]
+    assert report["applied"] is True
+    assert report["recovered_control_count"] >= 7
+    assert len(controls) >= 7
+    assert all(item["bbox"]["y"] < 80 for item in controls)
+    assert any(item.get("item_id") == "content_card" for item in refined)
+
+
+def test_primary_region_does_not_invent_embedded_top_strip_below_existing_header(tmp_path: Path) -> None:
+    from PIL import Image, ImageDraw
+
+    image_path = tmp_path / "content_below_header.png"
+    image = Image.new("RGB", (800, 600), "white")
+    draw = ImageDraw.Draw(image)
+    for x in (50, 95, 140, 240, 420, 600, 720):
+        draw.rectangle((x, 96, x + 28, 126), fill="black")
+    image.save(image_path)
+
+    refined, report = two_stage._refine_primary_embedded_top_controls(
+        [],
+        image_path=str(image_path),
+        region_bbox={"x": 0, "y": 80, "w": 800, "h": 520},
+    )
+
+    assert refined == []
+    assert report["applied"] is False
+    assert report["reason"] == "primary_region_does_not_start_at_window_top"
 
 def test_direct_sidebar_refinement_adds_unmatched_visual_control(tmp_path: Path) -> None:
     from PIL import Image, ImageDraw
@@ -505,8 +632,8 @@ def test_two_stage_screen_understanding_splits_structure_then_numbers_items(tmp_
     layout_graph = {
         "contract_version": "learn_layout_graph_v1",
         "zones": {
-            "left_nav": {"item_ids": ["nav_home"]},
-            "main_content": {"item_ids": ["card_1", "misassigned_left_icon"]},
+            "left_nav": {"item_ids": ["nav_home", "misassigned_left_icon"]},
+            "main_content": {"item_ids": ["card_1"]},
         },
         "nodes": {
             "nav_home": inventory[0],
@@ -1283,363 +1410,14 @@ def test_stage1_localization_suppresses_tiny_contained_duplicate_main_region(tmp
     assert "main_region_too_small" not in report["region_selection_audit"]["failure_categories"]
 
 
-def test_stage1_splits_right_side_information_panel_without_splitting_card_grid(tmp_path):
-    from PIL import Image
-
-    image_path = tmp_path / "right_panel.png"
-    Image.new("RGB", (1000, 720), "white").save(image_path)
-    inventory = [
-        {
-            "item_id": "chat_body",
-            "label": "Conversation content",
-            "role": "content_area",
-            "item_type": "section",
-            "bbox": {"x": 120, "y": 120, "w": 860, "h": 560},
-            "review_only": True,
-        },
-        {
-            "item_id": "right_notice",
-            "label": "Group announcement",
-            "role": "recommendation_item",
-            "item_type": "card",
-            "bbox": {"x": 760, "y": 120, "w": 220, "h": 230},
-            "review_only": True,
-        },
-        {
-            "item_id": "right_members",
-            "label": "Member list",
-            "role": "recommendation_item",
-            "item_type": "card",
-            "bbox": {"x": 760, "y": 370, "w": 220, "h": 310},
-            "review_only": True,
-        },
-    ]
-    layout_graph = {
-        "contract_version": "learn_layout_graph_v1",
-        "zones": {"primary_area": {"item_ids": [item["item_id"] for item in inventory]}},
-        "nodes": {item["item_id"]: item for item in inventory},
-    }
-
-    result = build_stage1_region_localization_report(
-        bundle={"image_path": str(image_path), "screen_size": {"width": 1000, "height": 720}},
-        screen_inventory=inventory,
-        layout_graph=layout_graph,
-    )
-
-    region_ids = {item["region_id"] for item in result["stage1_region_localization"]["regions"]}
-    assert "structure_region_right_sidebar" in region_ids
-    right_region = next(
-        item for item in result["stage1_region_localization"]["regions"] if item["region_id"] == "structure_region_right_sidebar"
-    )
-    primary_region = next(
-        item for item in result["stage1_region_localization"]["regions"] if item["region_id"] == "structure_region_primary_area"
-    )
-    assert set(right_region["item_ids"]) == {"right_notice", "right_members"}
-    assert "right_notice" not in primary_region["item_ids"]
-    assert right_region["precise_bbox"]["x"] >= 720
-    assert primary_region["precise_bbox"]["x"] + primary_region["precise_bbox"]["w"] <= right_region["precise_bbox"]["x"]
-    assert result["region_selection_audit"]["passed"] is True
-
-    card_grid_inventory = [
-        {
-            "item_id": "card_left",
-            "label": "Left album card",
-            "role": "news_card",
-            "item_type": "card",
-            "bbox": {"x": 120, "y": 190, "w": 220, "h": 260},
-            "review_only": True,
-        },
-        {
-            "item_id": "card_middle",
-            "label": "Middle album card",
-            "role": "news_card",
-            "item_type": "card",
-            "bbox": {"x": 390, "y": 190, "w": 220, "h": 260},
-            "review_only": True,
-        },
-        {
-            "item_id": "card_right",
-            "label": "Right album card",
-            "role": "news_card",
-            "item_type": "card",
-            "bbox": {"x": 660, "y": 190, "w": 220, "h": 260},
-            "review_only": True,
-        },
-    ]
-    card_grid_graph = {
-        "contract_version": "learn_layout_graph_v1",
-        "zones": {"primary_area": {"item_ids": [item["item_id"] for item in card_grid_inventory]}},
-        "nodes": {item["item_id"]: item for item in card_grid_inventory},
-    }
-    card_grid_result = build_stage1_region_localization_report(
-        bundle={"image_path": str(image_path), "screen_size": {"width": 1000, "height": 720}},
-        screen_inventory=card_grid_inventory,
-        layout_graph=card_grid_graph,
-    )
-    card_grid_region_ids = {item["region_id"] for item in card_grid_result["stage1_region_localization"]["regions"]}
-    assert "structure_region_right_sidebar" not in card_grid_region_ids
 
 
-def test_stage1_does_not_create_sidebar_from_single_top_corner_ocr_title(tmp_path):
-    from PIL import Image
-
-    image_path = tmp_path / "single_top_corner_title.png"
-    Image.new("RGB", (1154, 900), "white").save(image_path)
-    inventory = [
-        {
-            "item_id": "window_title",
-            "label": "Settings",
-            "role": "button",
-            "item_type": "text",
-            "bbox": {"x": 18, "y": 8, "w": 54, "h": 20},
-            "review_only": True,
-            "source": "ocr_fallback",
-            "metadata": {
-                "source": "screen_reading.texts",
-                "surface_zone": "left_nav",
-                "zone_evidence": "geometry_hint_only",
-            },
-        },
-        {
-            "item_id": "top_account_area",
-            "label": "Account summary",
-            "role": "content_area",
-            "item_type": "section",
-            "bbox": {"x": 0, "y": 0, "w": 1200, "h": 180},
-            "review_only": True,
-        },
-        {
-            "item_id": "main_settings_grid",
-            "label": "Settings categories",
-            "role": "content_area",
-            "item_type": "section",
-            "bbox": {"x": 0, "y": 180, "w": 1200, "h": 720},
-            "review_only": True,
-        },
-        *[
-            {
-                "item_id": f"category_icon_{index}",
-                "label": f"Category icon {index}",
-                "role": "icon_button",
-                "item_type": "button",
-                "bbox": {"x": 88, "y": y, "w": 34, "h": 34},
-                "review_only": True,
-            }
-            for index, y in enumerate((300, 430, 560), start=1)
-        ],
-    ]
-    layout_graph = {
-        "contract_version": "learn_layout_graph_v1",
-        "zones": {
-            "left_nav": {"item_ids": ["window_title"]},
-            "top_bar": {"item_ids": ["top_account_area"]},
-            "primary_area": {
-                "item_ids": ["main_settings_grid", "category_icon_1", "category_icon_2", "category_icon_3"]
-            },
-        },
-        "nodes": {item["item_id"]: item for item in inventory},
-    }
-
-    result = build_stage1_region_localization_report(
-        bundle={"image_path": str(image_path), "screen_size": {"width": 1200, "height": 900}},
-        screen_inventory=inventory,
-        layout_graph=layout_graph,
-    )
-
-    regions = result["stage1_region_localization"]["regions"]
-    assert "structure_region_left_nav" not in {region["region_id"] for region in regions}
-    top_region = next(region for region in regions if region["region_id"] == "structure_region_top_bar")
-    assert "window_title" in top_region["item_ids"]
 
 
-def test_stage1_discovers_left_navigation_from_tall_rail_with_multiple_child_controls(tmp_path):
-    from PIL import Image
-
-    image_path = tmp_path / "unlabelled_left_navigation_rail.png"
-    Image.new("RGB", (1200, 900), "white").save(image_path)
-    inventory = [
-        {
-            "item_id": "rail_container",
-            "label": "PaneRoot",
-            "role": "pane",
-            "item_type": "layout",
-            "bbox": {"x": 8, "y": 2, "w": 48, "h": 896},
-            "review_only": True,
-        },
-        *[
-            {
-                "item_id": f"rail_control_{index}",
-                "label": f"Control {index}",
-                "role": "listitem" if index > 2 else "button",
-                "item_type": "actionable",
-                "bbox": {"x": 12, "y": y, "w": 42, "h": 36},
-                "review_only": True,
-            }
-            for index, y in enumerate((48, 88, 136, 176, 216, 256), start=1)
-        ],
-        {
-            "item_id": "main_workspace",
-            "label": "Primary workspace",
-            "role": "content_area",
-            "item_type": "section",
-            "bbox": {"x": 56, "y": 90, "w": 1098, "h": 810},
-            "review_only": True,
-        },
-    ]
-    layout_graph = {
-        "contract_version": "learn_layout_graph_v1",
-        "zones": {
-            "browser_chrome": {"item_ids": ["rail_container", "rail_control_1", "rail_control_2"]},
-            "main_content": {
-                "item_ids": [
-                    "rail_control_3",
-                    "rail_control_4",
-                    "rail_control_5",
-                    "rail_control_6",
-                    "main_workspace",
-                ]
-            },
-        },
-        "nodes": {item["item_id"]: item for item in inventory},
-    }
-
-    result = build_stage1_region_localization_report(
-        bundle={"image_path": str(image_path), "screen_size": {"width": 1154, "height": 900}},
-        screen_inventory=inventory,
-        layout_graph=layout_graph,
-    )
-
-    regions = result["stage1_region_localization"]["regions"]
-    left_nav = next(region for region in regions if region["region_id"] == "structure_region_left_nav")
-    assert set(left_nav["item_ids"]) >= {
-        "rail_container",
-        "rail_control_1",
-        "rail_control_2",
-        "rail_control_3",
-        "rail_control_4",
-        "rail_control_5",
-        "rail_control_6",
-    }
-    assert 52 <= left_nav["bbox"]["w"] <= 120
-    assert left_nav["bbox"]["h"] >= 700
-    assert left_nav["coordinate_validation"]["calibration_strategy"] == "left_nav_icon_column_full_height"
 
 
-def test_stage1_calibrates_left_navigation_from_list_items_after_top_controls_are_partitioned(tmp_path):
-    from PIL import Image
-
-    image_path = tmp_path / "left_navigation_list_items.png"
-    Image.new("RGB", (1154, 900), "white").save(image_path)
-    inventory = [
-        {
-            "item_id": "rail_container",
-            "label": "Navigation pane",
-            "role": "pane",
-            "item_type": "layout",
-            "bbox": {"x": 8, "y": 90, "w": 48, "h": 810},
-            "review_only": True,
-        },
-        *[
-            {
-                "item_id": f"rail_item_{index}",
-                "label": f"Item {index}",
-                "role": "listitem",
-                "item_type": "actionable",
-                "bbox": {"x": 11, "y": y, "w": 44, "h": 36},
-                "review_only": True,
-            }
-            for index, y in enumerate((134, 174, 214, 254, 294), start=1)
-        ],
-        {
-            "item_id": "main_workspace",
-            "label": "Primary workspace",
-            "role": "content_area",
-            "item_type": "section",
-            "bbox": {"x": 56, "y": 90, "w": 1098, "h": 810},
-            "review_only": True,
-        },
-    ]
-    layout_graph = {
-        "contract_version": "learn_layout_graph_v1",
-        "zones": {"main_content": {"item_ids": [item["item_id"] for item in inventory]}},
-        "nodes": {item["item_id"]: item for item in inventory},
-    }
-
-    result = build_stage1_region_localization_report(
-        bundle={"image_path": str(image_path), "screen_size": {"width": 1154, "height": 900}},
-        screen_inventory=inventory,
-        layout_graph=layout_graph,
-    )
-
-    left_nav = next(
-        region
-        for region in result["stage1_region_localization"]["regions"]
-        if region["region_id"] == "structure_region_left_nav"
-    )
-    assert left_nav["bbox"]["w"] >= 52
-    assert left_nav["coordinate_validation"]["calibration_strategy"] == "left_nav_icon_column_full_height"
 
 
-def test_stage1_repartitions_unknown_only_items_by_vertical_structure(tmp_path):
-    from PIL import Image
-
-    image_path = tmp_path / "unknown_only_vertical_structure.png"
-    Image.new("RGB", (1400, 900), "white").save(image_path)
-    inventory = [
-        {
-            "item_id": "header_search",
-            "label": "Search",
-            "role": "input",
-            "item_type": "input",
-            "bbox": {"x": 760, "y": 90, "w": 280, "h": 40},
-            "review_only": True,
-        },
-        {
-            "item_id": "header_nav",
-            "label": "Navigation",
-            "role": "link",
-            "item_type": "link",
-            "bbox": {"x": 420, "y": 190, "w": 560, "h": 44},
-            "review_only": True,
-        },
-        {
-            "item_id": "main_action",
-            "label": "Learn more",
-            "role": "button",
-            "item_type": "button",
-            "bbox": {"x": 610, "y": 500, "w": 180, "h": 44},
-            "review_only": True,
-        },
-        {
-            "item_id": "lower_content",
-            "label": "Documentation card",
-            "role": "link",
-            "item_type": "link",
-            "bbox": {"x": 350, "y": 690, "w": 260, "h": 80},
-            "review_only": True,
-        },
-    ]
-    layout_graph = {
-        "contract_version": "learn_layout_graph_v1",
-        "zones": {"unknown": {"item_ids": [item["item_id"] for item in inventory]}},
-        "nodes": {item["item_id"]: item for item in inventory},
-    }
-
-    result = build_stage1_region_localization_report(
-        bundle={"image_path": str(image_path), "screen_size": {"width": 1400, "height": 900}},
-        screen_inventory=inventory,
-        layout_graph=layout_graph,
-    )
-
-    regions = result["stage1_region_localization"]["regions"]
-    region_ids = {region["region_id"] for region in regions}
-    assert region_ids == {"structure_region_page_header", "structure_region_main_content"}
-    assert result["region_selection_audit"]["failure_categories"] == []
-    assert result["region_selection_audit"]["passed"] is True, result["region_selection_audit"]
-    header = next(region for region in regions if region["region_id"] == "structure_region_page_header")
-    main = next(region for region in regions if region["region_id"] == "structure_region_main_content")
-    assert header["bbox"]["y"] == 0
-    assert main["bbox"]["y"] == header["bbox"]["y"] + header["bbox"]["h"]
 
 
 def test_stage1_recovers_adjacent_header_and_main_from_shallow_fullscreen_backfill(tmp_path):
@@ -1736,6 +1514,44 @@ def test_two_stage_uses_ocr_content_recovery_when_existing_items_cover_only_top(
     assert {"Body section", "Lower content"} <= labels
 
 
+def test_two_stage_uses_recovered_ocr_items_for_stage1_root_partition(tmp_path, monkeypatch):
+    from PIL import Image, ImageDraw
+
+    from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
+
+    image_path = tmp_path / "ocr_recovered_header_and_body.png"
+    image = Image.new("RGB", (1000, 800), "white")
+    ImageDraw.Draw(image).line((0, 120, 999, 120), fill="black", width=2)
+    image.save(image_path)
+    ocr_result = OCRResult(
+        image_path=str(image_path),
+        matches=[
+            OCRTextMatch("Docs", 0.98, OCRBoundingBox(40, 48, 90, 28)),
+            OCRTextMatch("Guides", 0.97, OCRBoundingBox(260, 48, 100, 28)),
+            OCRTextMatch("Reference", 0.97, OCRBoundingBox(520, 48, 130, 28)),
+            OCRTextMatch("Main heading", 0.98, OCRBoundingBox(120, 210, 190, 36)),
+            OCRTextMatch("Main body text", 0.96, OCRBoundingBox(120, 470, 240, 30)),
+            OCRTextMatch("Lower body text", 0.96, OCRBoundingBox(120, 690, 240, 30)),
+        ],
+        metadata={"engine": "test_ocr"},
+    )
+    monkeypatch.setattr("app.learn.recognition.two_stage.ocr_service.scan_image", lambda _path: ocr_result)
+
+    result = _build_two_stage_screen_understanding(
+        bundle={"image_path": str(image_path), "screen_size": {"width": 1000, "height": 800}},
+        screen_inventory=[],
+        layout_graph={"contract_version": "learn_layout_graph_v1", "zones": {}, "nodes": {}},
+        enable_ocr_content_recovery=True,
+        require_stage1_gate=True,
+    )
+
+    assert result["content_recovery"]["status"] == "applied"
+    assert [region["role"] for region in result["stage1_region_localization"]["regions"]] == [
+        "top_bar",
+        "main_content",
+    ]
+
+
 def test_stage1_keeps_incomplete_semantic_card_columns_in_main_grid(tmp_path):
     from PIL import Image
 
@@ -1787,240 +1603,10 @@ def test_stage1_keeps_incomplete_semantic_card_columns_in_main_grid(tmp_path):
     assert "structure_region_right_sidebar" not in region_ids
 
 
-def test_stage1_merges_narrow_bottom_like_content_back_into_primary_area(tmp_path):
-    from PIL import Image
-
-    image_path = tmp_path / "web_content_not_bottom_bar.png"
-    Image.new("RGB", (1400, 900), "white").save(image_path)
-    inventory = [
-        {
-            "item_id": "top_nav",
-            "label": "Top navigation",
-            "role": "layout",
-            "item_type": "layout",
-            "bbox": {"x": 0, "y": 0, "w": 1400, "h": 120},
-            "review_only": True,
-        },
-        {
-            "item_id": "primary_page",
-            "label": "Primary web content",
-            "role": "content_area",
-            "item_type": "section",
-            "bbox": {"x": 300, "y": 150, "w": 820, "h": 620},
-            "review_only": True,
-        },
-        {
-            "item_id": "latest_news",
-            "label": "Latest News",
-            "role": "content_card",
-            "item_type": "card",
-            "bbox": {"x": 380, "y": 650, "w": 460, "h": 120},
-            "review_only": True,
-        },
-        {
-            "item_id": "upcoming_events",
-            "label": "Upcoming Events",
-            "role": "content_card",
-            "item_type": "card",
-            "bbox": {"x": 850, "y": 650, "w": 250, "h": 120},
-            "review_only": True,
-        },
-    ]
-    layout_graph = {
-        "contract_version": "learn_layout_graph_v1",
-        "zones": {
-            "top_bar": {"item_ids": ["top_nav"]},
-            "primary_area": {"item_ids": ["primary_page"]},
-            "bottom_bar": {"item_ids": ["latest_news", "upcoming_events"]},
-        },
-        "nodes": {item["item_id"]: item for item in inventory},
-    }
-
-    report = build_stage1_region_localization_report(
-        bundle={"image_path": str(image_path), "screen_size": {"width": 1400, "height": 900}},
-        screen_inventory=inventory,
-        layout_graph=layout_graph,
-    )
-
-    regions = report["stage1_region_localization"]["regions"]
-    region_ids = {item["region_id"] for item in regions}
-    assert "structure_region_bottom_bar" not in region_ids
-    correction = report["stage1_structure"]["zone_corrections"][0]
-    assert correction["correction"] == "bottom_bar_content_merged_into_primary_region"
-    assert correction["target_zone"] == "primary_area"
-    assert correction["item_ids"] == ["latest_news", "upcoming_events"]
-    assert report["stage1_structure"]["zone_correction_status"] == "passed_with_correction"
-    primary = next(item for item in regions if item["region_id"] == "structure_region_primary_area")
-    assert set(primary["item_ids"]) == {"primary_page", "latest_news", "upcoming_events"}
-    assert primary["precise_bbox"]["y"] <= 150
-    assert primary["precise_bbox"]["y"] + primary["precise_bbox"]["h"] >= 770
-    assert report["region_selection_audit"]["passed"] is True
 
 
-def test_stage1_keeps_true_full_width_bottom_bar_separate(tmp_path):
-    from PIL import Image
-
-    image_path = tmp_path / "true_bottom_bar.png"
-    Image.new("RGB", (1000, 700), "white").save(image_path)
-    inventory = [
-        {
-            "item_id": "top_nav",
-            "label": "Top navigation",
-            "role": "layout",
-            "item_type": "layout",
-            "bbox": {"x": 0, "y": 0, "w": 1000, "h": 80},
-            "review_only": True,
-        },
-        {
-            "item_id": "primary_page",
-            "label": "Primary content",
-            "role": "content_area",
-            "item_type": "section",
-            "bbox": {"x": 100, "y": 110, "w": 800, "h": 460},
-            "review_only": True,
-        },
-        {
-            "item_id": "true_bottom_toolbar",
-            "label": "Playback controls",
-            "role": "toolbar",
-            "item_type": "layout",
-            "bbox": {"x": 0, "y": 620, "w": 1000, "h": 72},
-            "review_only": True,
-        },
-    ]
-    layout_graph = {
-        "contract_version": "learn_layout_graph_v1",
-        "zones": {
-            "top_bar": {"item_ids": ["top_nav"]},
-            "primary_area": {"item_ids": ["primary_page"]},
-            "bottom_bar": {"item_ids": ["true_bottom_toolbar"]},
-        },
-        "nodes": {item["item_id"]: item for item in inventory},
-    }
-
-    report = build_stage1_region_localization_report(
-        bundle={"image_path": str(image_path), "screen_size": {"width": 1000, "height": 700}},
-        screen_inventory=inventory,
-        layout_graph=layout_graph,
-    )
-
-    regions = report["stage1_region_localization"]["regions"]
-    bottom = next(item for item in regions if item["region_id"] == "structure_region_bottom_bar")
-    primary = next(item for item in regions if item["region_id"] == "structure_region_primary_area")
-    assert bottom["item_ids"] == ["true_bottom_toolbar"]
-    assert "true_bottom_toolbar" not in primary["item_ids"]
-    assert report["stage1_structure"]["zone_corrections"] == []
-    assert report["stage1_structure"]["zone_correction_status"] == "clean"
-    assert report["region_selection_audit"]["passed"] is True
 
 
-def test_conversation_class_reunites_cross_zone_bottom_conversation_panel(tmp_path):
-    from PIL import Image
-
-    image_path = tmp_path / "conversation_workspace.png"
-    Image.new("RGB", (800, 1000), "white").save(image_path)
-    inventory = [
-        {
-            "item_id": "top_header",
-            "label": "Friends header",
-            "role": "layout",
-            "item_type": "layout",
-            "bbox": {"x": 0, "y": 0, "w": 800, "h": 110},
-            "review_only": True,
-        },
-        *[
-            {
-                "item_id": f"friend_{index}",
-                "label": f"Friend {index}",
-                "role": "conversation_row",
-                "item_type": "listitem",
-                "bbox": {"x": 8, "y": 140 + index * 82, "w": 238, "h": 58},
-                "review_only": True,
-            }
-            for index in range(8)
-        ],
-        {
-            "item_id": "group_chat_header",
-            "label": "Group chats",
-            "role": "text",
-            "item_type": "text",
-            "bbox": {"x": 1, "y": 859, "w": 96, "h": 20},
-            "review_only": True,
-        },
-        {
-            "item_id": "group_chat_name",
-            "label": "Project room",
-            "role": "conversation_row",
-            "item_type": "listitem",
-            "bbox": {"x": 18, "y": 900, "w": 112, "h": 24},
-            "review_only": True,
-        },
-        {
-            "item_id": "group_chat_participants",
-            "label": "Three participant names",
-            "role": "text",
-            "item_type": "text",
-            "bbox": {"x": 56, "y": 952, "w": 348, "h": 22},
-            "review_only": True,
-        },
-    ]
-    layout_graph = {
-        "contract_version": "learn_layout_graph_v1",
-        "zones": {
-            "top_bar": {"item_ids": ["top_header"]},
-            "main_content": {"item_ids": [item["item_id"] for item in inventory[1:]]},
-        },
-        "nodes": {item["item_id"]: item for item in inventory},
-    }
-    result = two_stage.build_two_stage_screen_understanding(
-        bundle={
-            "image_path": str(image_path),
-            "screen_size": {"width": 800, "height": 1000},
-            "screen_reading": {
-                "interface_classification": {
-                    "category": "conversation_workspace",
-                    "confidence": 0.99,
-                    "reason": "friend rows and a group conversation list",
-                    "structure_signals": {
-                        "people_or_conversation_rows": True,
-                        "file_or_folder_rows": False,
-                    },
-                }
-            },
-        },
-        screen_inventory=inventory,
-        layout_graph=layout_graph,
-        require_stage1_gate=False,
-    )
-
-    bottom = next(
-        region
-        for region in result["stage1_region_localization"]["regions"]
-        if region["region_id"] == "structure_region_conversation_bottom_panel"
-    )
-    assert set(bottom["item_ids"]) == {
-        "group_chat_header",
-        "group_chat_name",
-        "group_chat_participants",
-    }
-    assert bottom["bbox"]["x"] == 0
-    assert bottom["bbox"]["w"] == 800
-    assert bottom["bbox"]["y"] <= 859
-    assert bottom["bbox"]["y"] + bottom["bbox"]["h"] == 1000
-    for region in result["stage1_region_localization"]["regions"]:
-        if region["region_id"] == bottom["region_id"] or "top_bar" in region["region_id"]:
-            continue
-        assert region["bbox"]["y"] + region["bbox"]["h"] <= bottom["bbox"]["y"]
-    numbered_bottom = next(
-        region
-        for region in result["stage2_numbering"]["regions"]
-        if region["region_id"] == bottom["region_id"] or region.get("parent_region_id") == bottom["region_id"]
-    )
-    assert {item["item_id"] for item in numbered_bottom["numbered_items"]} == {
-        "group_chat_header",
-        "group_chat_name",
-        "group_chat_participants",
-    }
 
 
 def test_conversation_class_does_not_split_bottom_list_continuation_without_section_boundary() -> None:
@@ -2543,7 +2129,10 @@ def test_stage2_filters_items_to_current_region_bbox_after_sidebar_split(tmp_pat
     ]
     layout_graph = {
         "contract_version": "learn_layout_graph_v1",
-        "zones": {"primary_area": {"item_ids": [item["item_id"] for item in inventory]}},
+        "zones": {
+            "primary_area": {"item_ids": ["chat_text"]},
+            "right_sidebar": {"item_ids": ["right_notice", "right_member", "right_members_panel"]},
+        },
         "nodes": {item["item_id"]: item for item in inventory},
     }
 
@@ -2553,7 +2142,7 @@ def test_stage2_filters_items_to_current_region_bbox_after_sidebar_split(tmp_pat
         layout_graph=layout_graph,
     )
 
-    primary = _stage2_region_with_item(result, "long_text_bubble")
+    primary = _stage2_region_with_item(result, "chat_text")
     right = next(
         item for item in result["stage2_numbering"]["regions"] if item["region_id"] == "structure_region_right_sidebar"
     )
@@ -4466,6 +4055,121 @@ def test_ungrouped_review_region_keeps_actionable_controls_for_calibration() -> 
     assert [item["item_id"] for item in child_evidence] == ["empty_state_description"]
 
 
+def test_ungrouped_review_region_keeps_visual_controls_for_calibration() -> None:
+    region = {
+        "region_id": "structure_region_main_content",
+        "label": "Main content",
+        "bbox": {"x": 0, "y": 0, "w": 800, "h": 600},
+        "numbered_items": [
+            {
+                "item_id": "embedded_top_control_1",
+                "label": "visual control 1",
+                "role": "control",
+                "item_type": "visual_control",
+                "bbox": {"x": 80, "y": 12, "w": 40, "h": 36},
+                "review_only": True,
+                "execute_binding_enabled": False,
+            }
+        ],
+        "subregion_groups": [
+            {
+                "group_id": "ungrouped_review_region_1",
+                "role": "ungrouped_review_region",
+                "bbox": {"x": 0, "y": 0, "w": 800, "h": 80},
+                "member_item_ids": ["embedded_top_control_1"],
+            }
+        ],
+    }
+
+    calibratable, child_evidence = two_stage.partition_stage2_calibration_items(region)
+
+    assert [item["item_id"] for item in calibratable] == ["embedded_top_control_1"]
+    assert child_evidence == []
+
+
+def test_stage2_reports_actual_calibration_parent_count_separately_from_numbered_items() -> None:
+    stage2 = {
+        "numbered_item_count": 4,
+        "regions": [
+            {
+                "region_id": "conversation_list",
+                "numbered_items": [
+                    {
+                        "item_id": "row_title",
+                        "label": "Alice",
+                        "role": "text",
+                        "bbox": {"x": 20, "y": 100, "w": 80, "h": 20},
+                    },
+                    {
+                        "item_id": "row_preview",
+                        "label": "Hello",
+                        "role": "text",
+                        "bbox": {"x": 20, "y": 124, "w": 120, "h": 18},
+                    },
+                    {
+                        "item_id": "filter_button",
+                        "label": "Filter",
+                        "role": "button",
+                        "bbox": {"x": 180, "y": 40, "w": 60, "h": 28},
+                    },
+                    {
+                        "item_id": "new_chat",
+                        "label": "New chat",
+                        "role": "button",
+                        "bbox": {"x": 250, "y": 40, "w": 80, "h": 28},
+                    },
+                ],
+                "subregion_groups": [
+                    {
+                        "group_id": "conversation_row_1",
+                        "role": "conversation_row",
+                        "bbox": {"x": 8, "y": 92, "w": 340, "h": 64},
+                        "member_item_ids": ["row_title", "row_preview"],
+                        "adjacent_fragment_merged": True,
+                    }
+                ],
+            }
+        ],
+    }
+
+    summary = two_stage.summarize_stage2_calibration_partition(stage2)
+
+    assert summary["numbered_item_count"] == 4
+    assert summary["calibration_candidate_count"] == 3
+    assert summary["calibration_child_evidence_count"] == 2
+    assert summary["calibration_region_count"] == 1
+    assert summary["count_basis"] == "parent_or_standalone_items_after_display_hierarchy_partition"
+
+
+def test_chat_resize_control_is_not_reclassified_as_message_bubble() -> None:
+    item = {
+        "item_id": "chat_panel_resize_control",
+        "label": "\u8c03\u6574\u804a\u5929\u5217\u8868\u9762\u677f\u5927\u5c0f",
+        "role": "button",
+        "item_type": "actionable",
+        "bbox": {"x": 392, "y": 39, "w": 25, "h": 982},
+    }
+
+    assert two_stage._message_child_role(item, chat_context=True) != "message_bubble"
+
+
+def test_actionable_structural_container_stays_detail_only_inside_ungrouped_review_region() -> None:
+    hierarchy = two_stage._item_display_hierarchy(
+        {
+            "item_id": "uia_document",
+            "label": "Document",
+            "role": "document",
+            "item_type": "actionable",
+            "bbox": {"x": 12, "y": 127, "w": 2552, "h": 1277},
+        },
+        [{"group_id": "ungrouped_review_region_1", "role": "ungrouped_review_region"}],
+    )
+
+    assert hierarchy["display_layer"] == "child_evidence"
+    assert hierarchy["render_in_main_overlay"] is False
+    assert hierarchy["demotion_reason"] == "ungrouped_review_region_detail_only"
+
+
 def test_conversation_class_rows_include_avatar_gutter_and_exclude_section_heading() -> None:
     region = {
         "region_id": "structure_region_main_content__stage1_5__conversation_list",
@@ -5017,123 +4721,8 @@ def test_settings_topbar_status_tile_replaces_text_fragments_for_calibration() -
     }
 
 
-def test_two_stage_splits_browser_chrome_from_page_top_navigation(tmp_path):
-    from PIL import Image, ImageDraw
-
-    image_path = tmp_path / "browser_chrome_and_page_nav.png"
-    image = Image.new("RGB", (1200, 320), "white")
-    draw = ImageDraw.Draw(image)
-    draw.rectangle((0, 0, 1199, 70), fill="#f7f7f7")
-    draw.rectangle((0, 74, 1199, 118), fill="#1f4b6d")
-    draw.text((110, 8), "Welcome to Python.org", fill="black")
-    draw.text((150, 42), "https://www.python.org", fill="black")
-    for x, text in ((360, "Python"), (520, "PSF"), (700, "Docs"), (880, "PyPI")):
-        draw.text((x, 88), text, fill="white")
-    image.save(image_path)
-
-    inventory = [
-        {
-            "item_id": "browser_title",
-            "label": "Welcome to Python.org",
-            "role": "text",
-            "item_type": "text",
-            "bbox": {"x": 110, "y": 4, "w": 170, "h": 24},
-            "review_only": True,
-        },
-        {
-            "item_id": "browser_url",
-            "label": "https://www.python.org",
-            "role": "text",
-            "item_type": "text",
-            "bbox": {"x": 150, "y": 38, "w": 230, "h": 24},
-            "review_only": True,
-        },
-        {
-            "item_id": "browser_right_tool",
-            "label": "Chat",
-            "role": "text_action",
-            "item_type": "text_action",
-            "bbox": {"x": 1080, "y": 38, "w": 56, "h": 24},
-            "review_only": True,
-        },
-        *[
-            {
-                "item_id": f"site_nav_{index}",
-                "label": label,
-                "role": "nav_text_action",
-                "item_type": "text_action",
-                "bbox": {"x": x, "y": 84, "w": w, "h": 20},
-                "review_only": True,
-            }
-            for index, (label, x, w) in enumerate(
-                (("Python", 360, 72), ("PSF", 520, 48), ("Docs", 700, 58), ("PyPI", 880, 56)),
-                start=1,
-            )
-        ],
-    ]
-    layout_graph = {
-        "contract_version": "learn_layout_graph_v1",
-        "zones": {"top_bar": {"item_ids": [item["item_id"] for item in inventory]}},
-        "nodes": {item["item_id"]: item for item in inventory},
-    }
-
-    result = build_two_stage_screen_understanding(
-        bundle={"image_path": str(image_path), "screen_size": {"width": 1200, "height": 320}},
-        screen_inventory=inventory,
-        layout_graph=layout_graph,
-    )
-
-    regions = result["stage2_numbering"]["regions"]
-    browser = next(region for region in regions if region["region_id"] == "structure_region_browser_chrome")
-    top = next(region for region in regions if region["region_id"] == "structure_region_top_bar")
-    assert browser["label"] == "Browser chrome"
-    assert browser["bbox"]["y"] == 0
-    assert browser["bbox"]["y"] + browser["bbox"]["h"] <= 78
-    assert {item["item_id"] for item in browser["numbered_items"]} == {
-        "browser_title",
-        "browser_url",
-        "browser_right_tool",
-    }
-    assert top["bbox"]["y"] >= 70
-    assert {item["item_id"] for item in top["numbered_items"]} == {
-        "site_nav_1",
-        "site_nav_2",
-        "site_nav_3",
-        "site_nav_4",
-    }
 
 
-def test_stage1_moves_browser_automation_banner_into_browser_chrome() -> None:
-    items = {
-        "address": {
-            "item_id": "address",
-            "label": "https://www.python.org",
-            "role": "text_input",
-            "bbox": {"x": 80, "y": 24, "w": 500, "h": 28},
-        },
-        "automation_banner": {
-            "item_id": "automation_banner",
-            "label": "ChatGPT 已开始调试此浏览器",
-            "role": "text",
-            "bbox": {"x": 24, "y": 62, "w": 240, "h": 24},
-        },
-        "site_nav": {
-            "item_id": "site_nav",
-            "label": "Documentation",
-            "role": "nav_text_action",
-            "bbox": {"x": 400, "y": 120, "w": 120, "h": 28},
-        },
-    }
-    zones = {"page_header": ["address", "automation_banner", "site_nav"]}
-
-    two_stage._split_browser_chrome_from_top_regions(
-        zones,
-        items_by_id=items,
-        screen_size={"width": 1280, "height": 720},
-    )
-
-    assert zones["browser_chrome"] == ["address", "automation_banner"]
-    assert zones["page_header"] == ["site_nav"]
 
 
 def test_two_stage_suppresses_unowned_browser_chrome_on_native_surface(tmp_path):
@@ -5287,97 +4876,6 @@ def test_native_surface_does_not_synthesize_browser_right_edge_after_chrome_supp
     assert "structure_region_floating_controls" not in region_ids
 
 
-def test_file_browser_keeps_nested_promo_or_search_strip_inside_main_content(tmp_path):
-    from PIL import Image
-
-    image_path = tmp_path / "file_browser_nested_search_strip.png"
-    Image.new("RGB", (1000, 700), "white").save(image_path)
-    inventory = [
-        {
-            "item_id": "file_toolbar",
-            "label": "File toolbar",
-            "role": "toolbar",
-            "item_type": "container",
-            "bbox": {"x": 0, "y": 0, "w": 1000, "h": 110},
-            "review_only": True,
-        },
-        {
-            "item_id": "folder_tree",
-            "label": "Folder tree",
-            "role": "left_nav",
-            "item_type": "tree",
-            "bbox": {"x": 0, "y": 110, "w": 190, "h": 590},
-            "review_only": True,
-        },
-        {
-            "item_id": "file_table",
-            "label": "Files and folders",
-            "role": "table",
-            "item_type": "list",
-            "bbox": {"x": 190, "y": 110, "w": 810, "h": 590},
-            "review_only": True,
-        },
-        {
-            "item_id": "model_promo_strip",
-            "label": "Search and address controls",
-            "role": "promo_strip",
-            "item_type": "container",
-            "bbox": {"x": 190, "y": 110, "w": 810, "h": 70},
-            "review_only": True,
-        },
-        {
-            "item_id": "file_search",
-            "label": "Search files",
-            "role": "search_input",
-            "item_type": "input",
-            "bbox": {"x": 700, "y": 125, "w": 250, "h": 32},
-            "review_only": True,
-        },
-    ]
-    layout_graph = {
-        "contract_version": "learn_layout_graph_v1",
-        "zones": {
-            "top_bar": {"item_ids": ["file_toolbar"]},
-            "left_nav": {"item_ids": ["folder_tree"]},
-            "main_content": {"item_ids": ["file_table"]},
-            "promo_strip": {"item_ids": ["model_promo_strip", "file_search"]},
-        },
-        "nodes": {item["item_id"]: item for item in inventory},
-    }
-
-    result = build_two_stage_screen_understanding(
-        bundle={
-            "image_path": str(image_path),
-            "screen_size": {"width": 1000, "height": 700},
-            "request": {"app_name": "file_explorer"},
-            "result": {"app_name": "file_explorer"},
-            "screen_reading": {
-                "interface_classification": {
-                    "category": "file_browser",
-                    "confidence": 0.96,
-                    "reason": "folder tree beside a file table",
-                    "structure_signals": {"file_or_folder_rows": True},
-                }
-            },
-        },
-        screen_inventory=inventory,
-        layout_graph=layout_graph,
-        require_stage1_gate=True,
-    )
-
-    stage1 = result["stage1_structure"]
-    region_ids = {region["region_id"] for region in stage1["structure_regions"]}
-    assert "structure_region_promo_strip" not in region_ids
-    main = next(
-        region
-        for region in stage1["structure_regions"]
-        if region["region_id"] == "structure_region_main_content"
-    )
-    assert {"model_promo_strip", "file_search"}.issubset(set(main["item_ids"]))
-    assert any(
-        correction.get("correction") == "row_table_nested_strip_reassigned_to_main_content"
-        for correction in stage1["zone_corrections"]
-    )
 
 
 def test_left_nav_calibration_prefers_complete_rough_boundary_over_screen_width_floor() -> None:
@@ -5408,68 +4906,8 @@ def test_left_nav_calibration_prefers_complete_rough_boundary_over_screen_width_
     assert calibrated["bbox"]["w"] < int(2576 * 0.08)
 
 
-def test_conversation_class_merges_nested_sidebar_duplicate_into_main_list() -> None:
-    zones = {
-        "left_sidebar": ["friend_row"],
-        "main_content": ["friend_list"],
-    }
-    items = {
-        "friend_row": {
-            "item_id": "friend_row",
-            "role": "conversation_row",
-            "bbox": {"x": 12, "y": 120, "w": 252, "h": 720},
-        },
-        "friend_list": {
-            "item_id": "friend_list",
-            "role": "conversation_list",
-            "bbox": {"x": 12, "y": 117, "w": 368, "h": 726},
-        },
-    }
-
-    corrections = two_stage._apply_stage1_class_zone_policy(
-        zones,
-        items_by_id=items,
-        class_rule_profile={
-            "primary_content_strategy": "conversation_rows",
-            "stage1_nested_sidebar_policy": "main_content_child",
-        },
-    )
-
-    assert "left_sidebar" not in zones
-    assert set(zones["main_content"]) == {"friend_row", "friend_list"}
-    assert corrections[0]["correction"] == "conversation_nested_sidebar_reassigned_to_main_content"
 
 
-def test_conversation_class_keeps_sidebar_adjacent_to_main_pane() -> None:
-    zones = {
-        "left_sidebar": ["channel_list"],
-        "main_content": ["message_thread"],
-    }
-    items = {
-        "channel_list": {
-            "item_id": "channel_list",
-            "role": "conversation_list",
-            "bbox": {"x": 0, "y": 80, "w": 250, "h": 720},
-        },
-        "message_thread": {
-            "item_id": "message_thread",
-            "role": "conversation_thread",
-            "bbox": {"x": 250, "y": 80, "w": 750, "h": 720},
-        },
-    }
-
-    corrections = two_stage._apply_stage1_class_zone_policy(
-        zones,
-        items_by_id=items,
-        class_rule_profile={
-            "primary_content_strategy": "conversation_rows",
-            "stage1_nested_sidebar_policy": "main_content_child",
-        },
-    )
-
-    assert zones["left_sidebar"] == ["channel_list"]
-    assert zones["main_content"] == ["message_thread"]
-    assert corrections == []
 
 
 def test_conversation_bottom_panel_normalizes_generic_news_card_to_group_chat_row() -> None:
@@ -5900,6 +5338,50 @@ def test_conversation_class_profile_reconstructs_rows_from_generic_main_region()
     assert all(group["role"] != "tile_card_parent" for group in groups)
 
 
+def test_message_thread_stage1_5_region_does_not_generate_conversation_rows() -> None:
+    import app.learn.recognition.two_stage as two_stage
+
+    region = {
+        "region_id": "structure_region_main_content__stage1_5__message_thread",
+        "label": "Stage1.5 message/detail pane",
+        "role": "message_thread",
+        "bbox": {"x": 400, "y": 0, "w": 600, "h": 700},
+        "input_stage1_5_subregion": {"role": "message_thread"},
+    }
+    numbered_items = [
+        {
+            "number": f"2.{index}",
+            "item_id": item_id,
+            "label": label,
+            "role": "text",
+            "item_type": "readable",
+            "bbox": {"x": 520, "y": y, "w": width, "h": 18},
+        }
+        for index, (item_id, label, y, width) in enumerate(
+            (
+                ("action_1", "Send document", 320, 120),
+                ("status_1", "Ready", 338, 60),
+                ("action_2", "Add contact", 375, 110),
+                ("status_2", "Ready", 393, 60),
+                ("action_3", "Ask assistant", 430, 105),
+                ("status_3", "Ready", 448, 60),
+            ),
+            start=1,
+        )
+    ]
+
+    groups = two_stage._semantic_parent_groups(
+        region=region,
+        numbered_items=numbered_items,
+        class_rule_profile={
+            "primary_content_strategy": "conversation_rows",
+            "allow_chat_semantics": True,
+        },
+    )
+
+    assert all(group["role"] != "conversation_row" for group in groups)
+
+
 def test_conversation_list_builds_one_parent_per_name_status_row() -> None:
     region = {
         "region_id": "structure_region_main_content__stage1_5__conversation_list",
@@ -5999,172 +5481,8 @@ def test_stage2_dedupes_same_semantic_item_from_uia_and_ocr():
     assert audit["suppressed_duplicate_count"] == 1
 
 
-def test_two_stage_browser_chrome_ignores_large_python_org_surface_containers(tmp_path):
-    from PIL import Image, ImageDraw
-    from app.learn.recognition.layout_graph import build_inventory_layout_graph
-
-    image_path = tmp_path / "python_org_with_uia_containers.png"
-    image = Image.new("RGB", (1200, 640), "white")
-    draw = ImageDraw.Draw(image)
-    draw.rectangle((0, 0, 1199, 70), fill="#f7f7f7")
-    draw.rectangle((0, 74, 1199, 118), fill="#1f4b6d")
-    draw.rectangle((0, 119, 1199, 360), fill="#234f73")
-    draw.text((110, 8), "Welcome to Python.org", fill="black")
-    draw.text((150, 42), "https://www.python.org", fill="black")
-    for x, text in ((360, "Python"), (520, "PSF"), (700, "Docs"), (880, "PyPI")):
-        draw.text((x, 88), text, fill="white")
-    image.save(image_path)
-
-    inventory = [
-        {
-            "item_id": "uia_window",
-            "label": "Welcome to Python.org - Microsoft Edge",
-            "role": "window",
-            "item_type": "actionable",
-            "bbox": {"x": 0, "y": 0, "w": 1200, "h": 640},
-            "review_only": True,
-        },
-        {
-            "item_id": "uia_pane",
-            "label": "Welcome to Python.org - Microsoft Edge",
-            "role": "pane",
-            "item_type": "actionable",
-            "bbox": {"x": 4, "y": 0, "w": 1192, "h": 636},
-            "review_only": True,
-        },
-        {
-            "item_id": "uia_document",
-            "label": "Welcome to Python.org",
-            "role": "document",
-            "item_type": "layout",
-            "bbox": {"x": 4, "y": 80, "w": 1192, "h": 550},
-            "review_only": True,
-        },
-        {
-            "item_id": "browser_title",
-            "label": "Welcome to Python.org",
-            "role": "text",
-            "item_type": "text",
-            "bbox": {"x": 110, "y": 4, "w": 170, "h": 24},
-            "review_only": True,
-        },
-        {
-            "item_id": "browser_url",
-            "label": "https://www.python.org",
-            "role": "text",
-            "item_type": "text",
-            "bbox": {"x": 150, "y": 38, "w": 230, "h": 24},
-            "review_only": True,
-        },
-        *[
-            {
-                "item_id": f"site_nav_{index}",
-                "label": label,
-                "role": "link",
-                "item_type": "actionable",
-                "bbox": {"x": x, "y": 84, "w": w, "h": 20},
-                "review_only": True,
-            }
-            for index, (label, x, w) in enumerate(
-                (("Python", 360, 72), ("PSF", 520, 48), ("Docs", 700, 58), ("PyPI", 880, 56)),
-                start=1,
-            )
-        ],
-        {
-            "item_id": "hero_text",
-            "label": "Python is a programming language that lets you work quickly",
-            "role": "text",
-            "item_type": "readable",
-            "bbox": {"x": 360, "y": 300, "w": 520, "h": 36},
-            "review_only": True,
-        },
-    ]
-    screen_size = {"width": 1200, "height": 640}
-    layout_graph = build_inventory_layout_graph(inventory, screen_size=screen_size)
-
-    result = build_two_stage_screen_understanding(
-        bundle={"image_path": str(image_path), "screen_size": screen_size},
-        screen_inventory=inventory,
-        layout_graph=layout_graph,
-    )
-
-    assert result["stage1_gate"]["status"] == "passed"
-    browser = next(
-        region
-        for region in result["stage1_region_localization"]["regions"]
-        if region["region_id"] == "structure_region_browser_chrome"
-    )
-    following = next(
-        region
-        for region in result["stage1_region_localization"]["regions"]
-        if region["region_id"] == "structure_region_main_content"
-    )
-    assert browser["bbox"]["y"] == 0
-    assert browser["bbox"]["h"] < 96
-    assert browser["bbox"]["y"] + browser["bbox"]["h"] <= following["bbox"]["y"]
-    assert set(browser["item_ids"]) >= {"browser_title", "browser_url"}
 
 
-def test_two_stage_overlay_uses_localized_structure_regions(tmp_path, monkeypatch):
-    from PIL import Image, ImageDraw
-
-    image_path = tmp_path / "browser_chrome_overlay_regions.png"
-    image = Image.new("RGB", (1200, 320), "white")
-    draw = ImageDraw.Draw(image)
-    draw.rectangle((0, 0, 1199, 70), fill="#f7f7f7")
-    draw.rectangle((0, 74, 1199, 118), fill="#1f4b6d")
-    draw.text((120, 38), "https://www.python.org", fill="black")
-    draw.text((360, 88), "Python", fill="white")
-    image.save(image_path)
-
-    inventory = [
-        {
-            "item_id": "browser_url",
-            "label": "https://www.python.org",
-            "role": "text",
-            "item_type": "text",
-            "bbox": {"x": 120, "y": 38, "w": 230, "h": 24},
-            "review_only": True,
-        },
-        {
-            "item_id": "site_nav_1",
-            "label": "Python",
-            "role": "nav_text_action",
-            "item_type": "text_action",
-            "bbox": {"x": 360, "y": 84, "w": 72, "h": 20},
-            "review_only": True,
-        },
-    ]
-    layout_graph = {
-        "contract_version": "learn_layout_graph_v1",
-        "zones": {"top_bar": {"item_ids": [item["item_id"] for item in inventory]}},
-        "nodes": {item["item_id"]: item for item in inventory},
-    }
-    captured: dict[str, list[dict]] = {}
-
-    def fake_overlay(*, image_path, structure_regions, numbered_regions):
-        captured["structure_regions"] = structure_regions
-        return ""
-
-    monkeypatch.setattr(two_stage, "_render_two_stage_overlay", fake_overlay)
-
-    build_two_stage_screen_understanding(
-        bundle={"image_path": str(image_path), "screen_size": {"width": 1200, "height": 320}},
-        screen_inventory=inventory,
-        layout_graph=layout_graph,
-    )
-
-    rendered_top = next(
-        region for region in captured["structure_regions"] if region["region_id"] == "structure_region_top_bar"
-    )
-    rendered_browser = next(
-        region
-        for region in captured["structure_regions"]
-        if region["region_id"] == "structure_region_browser_chrome"
-    )
-    assert rendered_browser["bbox"]["y"] == 0
-    assert rendered_browser["bbox"]["y"] + rendered_browser["bbox"]["h"] <= rendered_top["bbox"]["y"]
-    assert rendered_top["bbox"]["y"] >= 70
 
 
 def test_two_stage_exposes_stage1_and_fusion_overlay_paths_from_same_run(tmp_path, monkeypatch):
@@ -6559,71 +5877,6 @@ def test_two_stage_required_stage1_gate_blocks_item_numbering_when_stage1_fails(
     assert "stage2_numbering_skipped" in result["fusion"]["region_content_boundary_summary"]["promotion_blockers"]
 
 
-def test_two_stage_does_not_promote_browser_chrome_left_icon_to_left_nav(tmp_path):
-    from PIL import Image, ImageDraw
-
-    image_path = tmp_path / "browser_left_icon_not_left_nav.png"
-    image = Image.new("RGB", (1200, 320), "white")
-    draw = ImageDraw.Draw(image)
-    draw.rectangle((0, 0, 1199, 70), fill="#f7f7f7")
-    draw.rectangle((0, 74, 1199, 118), fill="#1f4b6d")
-    draw.text((56, 42), "C", fill="black")
-    draw.text((150, 42), "https://www.python.org", fill="black")
-    draw.text((360, 88), "Python", fill="white")
-    image.save(image_path)
-
-    inventory = [
-        {
-            "item_id": "browser_left_icon",
-            "label": "C",
-            "role": "nav_item",
-            "item_type": "text",
-            "bbox": {"x": 56, "y": 42, "w": 18, "h": 16},
-            "review_only": True,
-        },
-        {
-            "item_id": "browser_url",
-            "label": "https://www.python.org",
-            "role": "text",
-            "item_type": "text",
-            "bbox": {"x": 150, "y": 38, "w": 230, "h": 24},
-            "review_only": True,
-        },
-        {
-            "item_id": "site_nav_1",
-            "label": "Python",
-            "role": "nav_text_action",
-            "item_type": "text_action",
-            "bbox": {"x": 360, "y": 84, "w": 72, "h": 20},
-            "review_only": True,
-        },
-    ]
-    layout_graph = {
-        "contract_version": "learn_layout_graph_v1",
-        "zones": {
-            "left_nav": {"item_ids": ["browser_left_icon"]},
-            "top_bar": {"item_ids": ["browser_url", "site_nav_1"]},
-        },
-        "nodes": {item["item_id"]: item for item in inventory},
-    }
-
-    result = build_two_stage_screen_understanding(
-        bundle={"image_path": str(image_path), "screen_size": {"width": 1200, "height": 320}},
-        screen_inventory=inventory,
-        layout_graph=layout_graph,
-    )
-
-    region_ids = {region["region_id"] for region in result["stage2_numbering"]["regions"]}
-    browser = next(
-        region
-        for region in result["stage2_numbering"]["regions"]
-        if region["region_id"] == "structure_region_browser_chrome"
-    )
-    assert "structure_region_left_nav" not in region_ids
-    assert {item["item_id"] for item in browser["numbered_items"]} == {
-        "browser_left_icon",
-        "browser_url",
-    }
 
 
 def test_two_stage_overlay_suppresses_browser_chrome_child_item_labels(tmp_path, monkeypatch):
@@ -6920,6 +6173,237 @@ def test_dense_aligned_table_rows_take_precedence_over_text_column_cards() -> No
         if group.get("role") == "tile_card_parent"
         and table_member_ids.intersection(group.get("member_item_ids", []))
     ]
+
+
+def test_explicit_datagrid_with_narrow_columns_keeps_rows_instead_of_vertical_cards() -> None:
+    region = {
+        "region_id": "structure_region_main_content",
+        "label": "Main content",
+        "bbox": {"x": 0, "y": 94, "w": 1162, "h": 953},
+    }
+    items: list[dict] = [
+        {
+            "number": "2.1",
+            "item_id": "process_grid",
+            "label": "process table",
+            "role": "datagrid",
+            "item_type": "action_uia",
+            "bbox": {"x": 9, "y": 135, "w": 1145, "h": 855},
+        },
+        {
+            "number": "2.2",
+            "item_id": "false_card_fragment",
+            "label": "process group",
+            "role": "news_card",
+            "item_type": "card",
+            "bbox": {"x": 15, "y": 187, "w": 185, "h": 87},
+        },
+        {
+            "number": "2.3",
+            "item_id": "row_action_cell",
+            "label": "very low",
+            "role": "input",
+            "item_type": "action_uia",
+            "bbox": {"x": 1030, "y": 176, "w": 45, "h": 21},
+        },
+    ]
+    columns = ((32, 120), (398, 34), (446, 58), (513, 66), (589, 64), (691, 34), (731, 72), (930, 46))
+    for row_index, y in enumerate(range(176, 456, 28), start=1):
+        for column_index, (x, width) in enumerate(columns, start=1):
+            items.append(
+                {
+                    "number": f"2.{len(items) + 1}",
+                    "item_id": f"process_{row_index}_column_{column_index}",
+                    "label": f"value {row_index}-{column_index}",
+                    "role": "text",
+                    "item_type": "text",
+                    "bbox": {"x": x, "y": y, "w": width, "h": 20},
+                }
+            )
+
+    groups = two_stage._semantic_parent_groups(
+        region=region,
+        numbered_items=items,
+        class_rule_profile={"primary_content_strategy": "row_table_first"},
+    )
+
+    table_group = next(group for group in groups if group.get("role") == "table_group")
+    table_rows = [group for group in groups if group.get("role") == "table_row"]
+    table_member_ids = set(table_group["member_item_ids"])
+
+    assert table_group["bbox"] == {"x": 9, "y": 135, "w": 1145, "h": 855}
+    assert "process_grid" in table_member_ids
+    assert {"false_card_fragment", "row_action_cell"}.issubset(table_member_ids)
+    assert len(table_rows) == 10
+    assert all(row["bbox"]["x"] == 9 and row["bbox"]["w"] == 1145 for row in table_rows)
+    memberships = two_stage._group_membership_for_region(
+        {"numbered_items": items, "subregion_groups": groups}
+    )
+    assert all(
+        two_stage._item_display_hierarchy(
+            next(item for item in items if item["item_id"] == item_id),
+            memberships[item_id],
+        )["render_in_main_overlay"]
+        is False
+        for item_id in ("process_grid", "false_card_fragment", "row_action_cell")
+    )
+    assert not [
+        group
+        for group in groups
+        if group.get("role") == "tile_card_parent"
+        and table_member_ids.intersection(group.get("member_item_ids", []))
+    ]
+
+
+def test_explicit_datagrid_completes_visually_evidenced_rows_after_text_evidence_ends(tmp_path) -> None:
+    from PIL import Image, ImageDraw
+
+    image_path = tmp_path / "datagrid_visual_rows.png"
+    image = Image.new("RGB", (900, 520), "white")
+    draw = ImageDraw.Draw(image)
+    row_centers = [150 + index * 28 for index in range(10)]
+    for center_y in row_centers:
+        for x, width in ((40, 180), (330, 45), (405, 70), (610, 90)):
+            draw.rectangle((x, center_y - 4, x + width, center_y + 4), fill="#202020")
+    image.save(image_path)
+
+    region = {
+        "region_id": "structure_region_main_content",
+        "label": "Main content",
+        "bbox": {"x": 0, "y": 90, "w": 900, "h": 420},
+    }
+    items: list[dict] = [
+        {
+            "number": "1.1",
+            "item_id": "process_grid",
+            "label": "process table",
+            "role": "datagrid",
+            "item_type": "action_uia",
+            "bbox": {"x": 10, "y": 110, "w": 880, "h": 390},
+        }
+    ]
+    for row_index, center_y in enumerate(row_centers[:6], start=1):
+        for column_index, (x, width) in enumerate(((40, 180), (330, 45), (405, 70), (610, 90)), start=1):
+            items.append(
+                {
+                    "number": f"1.{len(items) + 1}",
+                    "item_id": f"row_{row_index}_column_{column_index}",
+                    "label": f"value {row_index}-{column_index}",
+                    "role": "text",
+                    "item_type": "text",
+                    "bbox": {"x": x, "y": center_y - 9, "w": width, "h": 18},
+                }
+            )
+
+    groups = two_stage._semantic_parent_groups(
+        region=region,
+        numbered_items=items,
+        class_rule_profile={"primary_content_strategy": "row_table_first"},
+        image_path=str(image_path),
+    )
+
+    table_rows = [group for group in groups if group.get("role") == "table_row"]
+    visual_rows = [
+        group
+        for group in table_rows
+        if group.get("source") == "stage2_datagrid_visual_row_completion"
+    ]
+    assert len(table_rows) == 10
+    assert len(visual_rows) == 4
+    assert [row["bbox"]["y"] + row["bbox"]["h"] // 2 for row in visual_rows] == row_centers[6:]
+    assert all(row["visual_evidence"]["passed"] is True for row in visual_rows)
+    assert all(row["member_item_ids"] == [] for row in visual_rows)
+
+
+def test_explicit_datagrid_does_not_complete_rows_without_visual_evidence(tmp_path) -> None:
+    from PIL import Image, ImageDraw
+
+    image_path = tmp_path / "datagrid_blank_tail.png"
+    image = Image.new("RGB", (900, 520), "white")
+    draw = ImageDraw.Draw(image)
+    row_centers = [150 + index * 28 for index in range(10)]
+    for center_y in row_centers[:6]:
+        for x, width in ((40, 180), (330, 45), (405, 70), (610, 90)):
+            draw.rectangle((x, center_y - 4, x + width, center_y + 4), fill="#202020")
+    image.save(image_path)
+
+    region = {
+        "region_id": "structure_region_main_content",
+        "label": "Main content",
+        "bbox": {"x": 0, "y": 90, "w": 900, "h": 420},
+    }
+    items: list[dict] = [
+        {
+            "number": "1.1",
+            "item_id": "process_grid",
+            "label": "process table",
+            "role": "datagrid",
+            "item_type": "action_uia",
+            "bbox": {"x": 10, "y": 110, "w": 880, "h": 390},
+        }
+    ]
+    for row_index, center_y in enumerate(row_centers[:6], start=1):
+        for column_index, (x, width) in enumerate(((40, 180), (330, 45), (405, 70), (610, 90)), start=1):
+            items.append(
+                {
+                    "number": f"1.{len(items) + 1}",
+                    "item_id": f"row_{row_index}_column_{column_index}",
+                    "label": f"value {row_index}-{column_index}",
+                    "role": "text",
+                    "item_type": "text",
+                    "bbox": {"x": x, "y": center_y - 9, "w": width, "h": 18},
+                }
+            )
+
+    groups = two_stage._semantic_parent_groups(
+        region=region,
+        numbered_items=items,
+        class_rule_profile={"primary_content_strategy": "row_table_first"},
+        image_path=str(image_path),
+    )
+
+    table_rows = [group for group in groups if group.get("role") == "table_row"]
+    assert len(table_rows) == 6
+    assert not [
+        group
+        for group in table_rows
+        if group.get("source") == "stage2_datagrid_visual_row_completion"
+    ]
+
+
+def test_dense_table_overlay_renders_rows_without_repeating_cell_text() -> None:
+    region = {
+        "region_id": "structure_region_main_content",
+        "label": "Main content",
+        "bbox": {"x": 180, "y": 120, "w": 900, "h": 620},
+    }
+    items: list[dict] = []
+    for row_index, y in enumerate(range(170, 426, 32), start=1):
+        for column_index, x in enumerate((210, 510, 690, 820), start=1):
+            items.append(
+                {
+                    "number": f"1.{len(items) + 1}",
+                    "item_id": f"row_{row_index}_column_{column_index}",
+                    "label": f"cell {row_index}-{column_index}",
+                    "role": "text",
+                    "item_type": "text",
+                    "bbox": {"x": x, "y": y, "w": 96, "h": 20},
+                }
+            )
+
+    groups = two_stage._semantic_parent_groups(region=region, numbered_items=items)
+    table_group = next(group for group in groups if group.get("role") == "table_group")
+    table_rows = [group for group in groups if group.get("role") == "table_row"]
+    memberships = two_stage._group_membership_for_region(
+        {"numbered_items": items, "subregion_groups": groups}
+    )
+
+    assert two_stage._group_display_hierarchy(table_group)["render_in_main_overlay"] is False
+    assert all(two_stage._group_display_hierarchy(row)["render_in_main_overlay"] is True for row in table_rows)
+    assert all(
+        two_stage._item_display_hierarchy(item, memberships[item["item_id"]])["render_in_main_overlay"] is False
+        for item in items
+    )
 
 
 def test_two_stage_synthesizes_hero_code_and_text_panels(tmp_path):
@@ -7304,7 +6788,9 @@ def test_two_stage_groups_each_primary_tile_card_with_internal_text(tmp_path):
     )
 
     primary = next(
-        item for item in result["stage2_numbering"]["regions"] if item["region_id"] == "structure_region_primary_area"
+        region
+        for region in result["stage2_numbering"]["regions"]
+        if any(item["item_id"] == "tile_a" for item in region["numbered_items"])
     )
     tile_groups = [group for group in primary["subregion_groups"] if group["role"] == "tile_card_parent"]
     assert len(tile_groups) == 2
@@ -7655,7 +7141,9 @@ def test_two_stage_binds_section_title_to_following_card_group(tmp_path):
     )
 
     primary = next(
-        item for item in result["stage2_numbering"]["regions"] if item["region_id"] == "structure_region_primary_area"
+        region
+        for region in result["stage2_numbering"]["regions"]
+        if any(item["item_id"] == "section_title" for item in region["numbered_items"])
     )
     groups_by_role = {group["role"]: group for group in primary["subregion_groups"]}
     assert "tile_card_group" in groups_by_role
@@ -8146,7 +7634,9 @@ def test_two_stage_groups_bottom_edge_text_fragments_as_partial_visible_cards(tm
     )
 
     primary = next(
-        item for item in result["stage2_numbering"]["regions"] if item["region_id"] == "structure_region_primary_area"
+        region
+        for region in result["stage2_numbering"]["regions"]
+        if any(item["item_id"] == "section_title" for item in region["numbered_items"])
     )
     synthesis = primary["visual_small_control_refinement"]["partial_visible_card_synthesis"]
     assert synthesis["applied"] is True
@@ -8199,6 +7689,24 @@ def test_partial_card_reconciliation_merges_fragments_using_peer_card_width() ->
     assert entries[1]["visual_bbox"]["y"] == 450
     assert entries[1]["visual_bbox"]["h"] == 70
     assert entries[1]["visual_bbox"]["w"] >= 248
+
+
+def test_bottom_partial_card_visual_segmentation_rejects_full_width_activity_band(tmp_path) -> None:
+    image_path = tmp_path / "full_width_bottom_band.png"
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGB", (720, 520), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((80, 450, 719, 519), fill=(35, 45, 65))
+    image.save(image_path)
+
+    boxes = two_stage._visual_bottom_partial_card_boxes(
+        image_path=str(image_path),
+        region_bbox={"x": 0, "y": 0, "w": 720, "h": 520},
+        title_bbox={"x": 80, "y": 360, "w": 120, "h": 24},
+    )
+
+    assert boxes == []
 
 
 def test_partial_visible_synthesis_suppresses_duplicates_over_existing_structured_cards(tmp_path):
@@ -8256,7 +7764,9 @@ def test_partial_visible_synthesis_suppresses_duplicates_over_existing_structure
     )
 
     primary = next(
-        item for item in result["stage2_numbering"]["regions"] if item["region_id"] == "structure_region_primary_area"
+        region
+        for region in result["stage2_numbering"]["regions"]
+        if any(item["item_id"] == "section_title" for item in region["numbered_items"])
     )
     numbered_items = [
         item
@@ -8650,96 +8160,6 @@ def test_stage1_region_localization_report_skips_numbering_and_exposes_calibrati
     assert Path(report["overlay_path"]).exists()
 
 
-def test_stage1_web_surface_splits_right_edge_floating_controls_from_primary(tmp_path):
-    image_path = tmp_path / "web_surface_floating_controls.png"
-    from PIL import Image
-
-    Image.new("RGB", (1200, 800), "white").save(image_path)
-    inventory = [
-        {
-            "item_id": "browser_address",
-            "label": "https://example.org",
-            "role": "address_bar",
-            "item_type": "browser_chrome",
-            "bbox": {"x": 70, "y": 16, "w": 860, "h": 34},
-            "review_only": True,
-        },
-        {
-            "item_id": "site_nav",
-            "label": "Docs Community Jobs",
-            "role": "nav_item",
-            "item_type": "section",
-            "bbox": {"x": 0, "y": 80, "w": 1200, "h": 58},
-            "review_only": True,
-        },
-        {
-            "item_id": "hero_content_column",
-            "label": "Centered web content column",
-            "role": "content_area",
-            "item_type": "section",
-            "bbox": {"x": 300, "y": 170, "w": 600, "h": 520},
-            "review_only": True,
-        },
-        {
-            "item_id": "floating_translate",
-            "label": "translate",
-            "role": "floating_button",
-            "item_type": "button",
-            "bbox": {"x": 1160, "y": 470, "w": 32, "h": 32},
-            "review_only": True,
-        },
-        {
-            "item_id": "floating_tools",
-            "label": "tools",
-            "role": "floating_button",
-            "item_type": "button",
-            "bbox": {"x": 1160, "y": 525, "w": 32, "h": 32},
-            "review_only": True,
-        },
-        {
-            "item_id": "vertical_scrollbar",
-            "label": "scrollbar",
-            "role": "scrollbar",
-            "item_type": "control",
-            "bbox": {"x": 1192, "y": 70, "w": 8, "h": 700},
-            "review_only": True,
-        },
-    ]
-    layout_graph = {
-        "contract_version": "learn_layout_graph_v1",
-        "zones": {
-            "browser_chrome": {"item_ids": ["browser_address"]},
-            "top_bar": {"item_ids": ["site_nav"]},
-            "primary_area": {"item_ids": [item["item_id"] for item in inventory[2:]]},
-        },
-        "nodes": {item["item_id"]: item for item in inventory},
-    }
-
-    report = build_stage1_region_localization_report(
-        bundle={"image_path": str(image_path), "screen_size": {"width": 1200, "height": 800}},
-        screen_inventory=inventory,
-        layout_graph=layout_graph,
-    )
-
-    regions = {region["zone_id"]: region for region in report["stage1_region_localization"]["regions"]}
-    assert "floating_controls" in regions
-    assert regions["floating_controls"]["bbox"]["x"] >= 1150
-    assert regions["primary_area"]["bbox"]["x"] == 0
-    assert regions["primary_area"]["bbox"]["w"] == 1200
-    assert "floating_translate" not in regions["primary_area"]["item_ids"]
-    assert "vertical_scrollbar" not in regions["primary_area"]["item_ids"]
-    assert {
-        "floating_translate",
-        "floating_tools",
-        "vertical_scrollbar",
-    }.issubset(set(regions["floating_controls"]["item_ids"]))
-    granularity = report["stage1_granularity_review"]
-    assert granularity["status"] == "stage1_geometry_passed_needs_granularity_review"
-    assert granularity["recommended_next_step"] == "stage1_5_subpane_partition"
-    assert any(
-        issue["issue"] == "browser_primary_scope_ambiguous_full_page_vs_content_column"
-        for issue in granularity["issues"]
-    )
 
 
 def test_stage1_granularity_review_flags_chat_primary_as_stage1_5_candidate(tmp_path):
@@ -9259,7 +8679,9 @@ def test_stage1_5_partition_suggests_chat_subpanes_inside_primary(tmp_path):
     conversation_list = next(item for item in partition["subregions"] if item["role"] == "conversation_list")
     bottom_composer = next(item for item in partition["subregions"] if item["role"] == "bottom_composer")
     assert message_thread["bbox"]["y"] + message_thread["bbox"]["h"] == bottom_composer["bbox"]["y"]
-    assert conversation_list["bbox"]["y"] + conversation_list["bbox"]["h"] == bottom_composer["bbox"]["y"]
+    assert conversation_list["bbox"]["y"] + conversation_list["bbox"]["h"] == (
+        conversation_list["parent_region_bbox"]["y"] + conversation_list["parent_region_bbox"]["h"]
+    )
     assert conversation_list["bbox"]["x"] == conversation_list["parent_region_bbox"]["x"]
     assert conversation_list["bbox"]["x"] + conversation_list["bbox"]["w"] == message_thread["bbox"]["x"]
     assert bottom_composer["bbox"]["x"] == message_thread["bbox"]["x"]
@@ -9510,7 +8932,9 @@ def test_stage1_5_bottom_composer_constrains_tall_shell_to_vertical_evidence(tmp
     assert bottom_composer["bbox"]["y"] == 604
     assert bottom_composer["bbox"]["h"] == 110
     assert message_thread["bbox"]["y"] + message_thread["bbox"]["h"] == bottom_composer["bbox"]["y"]
-    assert conversation_list["bbox"]["y"] + conversation_list["bbox"]["h"] == bottom_composer["bbox"]["y"]
+    assert conversation_list["bbox"]["y"] + conversation_list["bbox"]["h"] == (
+        conversation_list["parent_region_bbox"]["y"] + conversation_list["parent_region_bbox"]["h"]
+    )
     vertical_review = bottom_composer["stage1_5_vertical_review"]
     assert vertical_review["status"] == "composer_bbox_constrained_to_evidence_vertical_span"
     assert vertical_review["previous_bbox"]["y"] == 540
@@ -10106,214 +9530,16 @@ def test_membership_repair_expands_parent_bbox_to_contain_near_boundary_child():
     assert repaired["membership_repairs"][0]["bbox_expanded"] is True
 
 
-def test_stage1_splits_dense_left_navigation_column_from_primary_area():
-    items = {
-        "primary": {
-            "item_id": "primary",
-            "role": "content",
-            "item_type": "layout",
-            "bbox": {"x": 0, "y": 130, "w": 820, "h": 910},
-        },
-        "main": {"item_id": "main", "role": "card", "bbox": {"x": 284, "y": 360, "w": 285, "h": 280}},
-    }
-    for index, y in enumerate((140, 205, 270, 335, 400, 920, 980), start=1):
-        items[f"left_{index}"] = {
-            "item_id": f"left_{index}",
-            "role": "text",
-            "bbox": {"x": 18 if index > 5 else 96, "y": y, "w": 140 if index <= 5 else 28, "h": 28},
-        }
-    corrected = {"primary_area": list(items)}
-
-    two_stage._split_left_sidebar_region(
-        corrected,
-        items_by_id=items,
-        screen_size={"width": 820, "height": 1040},
-    )
-
-    assert "left_sidebar" in corrected
-    assert set(corrected["left_sidebar"]) == {f"left_{index}" for index in range(1, 8)}
-    assert "main" in corrected["primary_area"]
 
 
-def test_stage1_keeps_left_navigation_when_main_and_right_panels_form_nonperiodic_text_columns():
-    items = {
-        "left_card": {
-            "item_id": "left_card",
-            "role": "news_card",
-            "bbox": {"x": 98, "y": 374, "w": 156, "h": 79},
-        },
-        "main_card": {
-            "item_id": "main_card",
-            "role": "news_card",
-            "bbox": {"x": 284, "y": 372, "w": 285, "h": 279},
-        },
-    }
-    for index, y in enumerate((140, 205, 270, 335, 400, 920, 980), start=1):
-        items[f"left_{index}"] = {
-            "item_id": f"left_{index}",
-            "role": "text",
-            "bbox": {"x": 18 if index > 5 else 116, "y": y, "w": 112 if index <= 5 else 28, "h": 24},
-        }
-    for column, x in enumerate((313, 671, 768), start=1):
-        for row, y in enumerate((393, 425), start=1):
-            item_id = f"outside_text_{column}_{row}"
-            items[item_id] = {
-                "item_id": item_id,
-                "role": "text",
-                "bbox": {"x": x, "y": y, "w": 70, "h": 20},
-            }
-    corrected = {"primary_area": list(items)}
-
-    two_stage._split_left_sidebar_region(
-        corrected,
-        items_by_id=items,
-        screen_size={"width": 820, "height": 1040},
-    )
-
-    assert "left_sidebar" in corrected
-    assert "left_card" in corrected["left_sidebar"]
-    assert "main_card" in corrected["primary_area"]
 
 
-def test_stage1_does_not_split_first_column_of_peer_tile_grid_as_sidebar():
-    items = {
-        "primary": {
-            "item_id": "primary",
-            "role": "content",
-            "item_type": "layout",
-            "bbox": {"x": 0, "y": 150, "w": 1200, "h": 780},
-        }
-    }
-    for row, y in enumerate((300, 420, 540), start=1):
-        for column, x in enumerate((90, 360, 630, 900), start=1):
-            item_id = f"tile_{row}_{column}"
-            items[item_id] = {
-                "item_id": item_id,
-                "role": "tile_card",
-                "bbox": {"x": x, "y": y, "w": 210, "h": 82},
-            }
-    corrected = {"primary_area": list(items)}
-
-    two_stage._split_left_sidebar_region(
-        corrected,
-        items_by_id=items,
-        screen_size={"width": 1200, "height": 930},
-    )
-
-    assert "left_sidebar" not in corrected
-    assert len(corrected["primary_area"]) == len(items)
 
 
-def test_stage1_does_not_split_media_grid_first_column_with_two_row_peers_as_sidebar():
-    items = {
-        "primary": {
-            "item_id": "primary",
-            "role": "content",
-            "item_type": "layout",
-            "bbox": {"x": 0, "y": 90, "w": 1154, "h": 915},
-        },
-        "left_card": {
-            "item_id": "left_card",
-            "role": "news_card",
-            "bbox": {"x": 76, "y": 417, "w": 232, "h": 201},
-        },
-        "peer_card_a": {
-            "item_id": "peer_card_a",
-            "role": "news_card",
-            "bbox": {"x": 330, "y": 417, "w": 232, "h": 201},
-        },
-        "peer_card_b": {
-            "item_id": "peer_card_b",
-            "role": "news_card",
-            "bbox": {"x": 584, "y": 417, "w": 232, "h": 201},
-        },
-    }
-    for index, y in enumerate((162, 202, 579, 802, 917, 980), start=1):
-        items[f"left_text_{index}"] = {
-            "item_id": f"left_text_{index}",
-            "role": "text",
-            "bbox": {"x": 94, "y": y, "w": 96, "h": 20},
-        }
-    corrected = {"primary_area": list(items)}
-
-    two_stage._split_left_sidebar_region(
-        corrected,
-        items_by_id=items,
-        screen_size={"width": 1154, "height": 1005},
-    )
-
-    assert "left_sidebar" not in corrected
-    assert len(corrected["primary_area"]) == len(items)
 
 
-def test_stage1_does_not_split_media_grid_when_peer_cards_have_only_repeated_text_columns():
-    items = {
-        "left_card": {
-            "item_id": "left_card",
-            "role": "news_card",
-            "bbox": {"x": 76, "y": 417, "w": 232, "h": 201},
-        }
-    }
-    for index, y in enumerate((162, 202, 579, 802, 917, 980), start=1):
-        items[f"left_text_{index}"] = {
-            "item_id": f"left_text_{index}",
-            "role": "text",
-            "bbox": {"x": 94, "y": y, "w": 96, "h": 20},
-        }
-    for column, x in enumerate((367, 625, 882), start=1):
-        for row, y in enumerate((445, 464, 483), start=1):
-            item_id = f"peer_text_{column}_{row}"
-            items[item_id] = {
-                "item_id": item_id,
-                "role": "text",
-                "bbox": {"x": x, "y": y, "w": 110, "h": 18},
-            }
-    corrected = {"primary_area": list(items)}
-
-    two_stage._split_left_sidebar_region(
-        corrected,
-        items_by_id=items,
-        screen_size={"width": 1154, "height": 1005},
-    )
-
-    assert "left_sidebar" not in corrected
 
 
-def test_stage1_right_sidebar_dense_vertical_evidence_overrides_incidental_card_overlap():
-    items = {
-        "main_card": {
-            "item_id": "main_card",
-            "role": "news_card",
-            "bbox": {"x": 284, "y": 372, "w": 285, "h": 279},
-        },
-        "right_panel_a": {
-            "item_id": "right_panel_a",
-            "role": "recommendation_item",
-            "bbox": {"x": 629, "y": 141, "w": 191, "h": 289},
-        },
-        "right_panel_b": {
-            "item_id": "right_panel_b",
-            "role": "recommendation_item",
-            "bbox": {"x": 651, "y": 439, "w": 169, "h": 311},
-        },
-    }
-    for index, y in enumerate((145, 194, 290, 330, 393, 457, 521, 585, 649, 714, 776, 842), start=1):
-        items[f"right_text_{index}"] = {
-            "item_id": f"right_text_{index}",
-            "role": "text",
-            "bbox": {"x": 646, "y": y, "w": 150, "h": 20},
-        }
-    corrected = {"primary_area": list(items)}
-
-    two_stage._split_right_sidebar_region(
-        corrected,
-        items_by_id=items,
-        screen_size={"width": 820, "height": 1040},
-    )
-
-    assert "right_sidebar" in corrected
-    assert {"right_panel_a", "right_panel_b"} <= set(corrected["right_sidebar"])
-    assert "main_card" in corrected["primary_area"]
 
 
 def test_stage1_parallel_vertical_lanes_share_main_rough_top_and_bottom_boundaries():

@@ -60,6 +60,7 @@ def main() -> int:
         "stage1_5_status": report.get("stage1_5_partition", {}).get("status"),
         "stage1_5_subregion_count": report.get("stage1_5_partition", {}).get("subregion_count"),
         "screen_inventory_count": len(screen_inventory),
+        "stage1_source": report.get("stage1_source"),
         "localized_region_count": report.get("stage1_region_localization", {}).get("localized_region_count"),
         "geometry_only_region_count": report.get("calibration_diagnostics", {}).get("geometry_only_region_count"),
         "needs_prompt_or_model_calibration": report.get("calibration_diagnostics", {}).get(

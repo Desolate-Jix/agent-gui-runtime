@@ -918,7 +918,11 @@ def test_panel_two_stage_endpoint_records_explicit_source_image_override(monkeyp
         return {
             "stage1_gate": {"status": "passed", "failure_categories": [], "allow_stage2_numbering": True},
             "stage2_numbering_skipped": False,
-            "stage2_numbering": {"numbered_item_count": 7, "regions": [{"region_id": "R1"}]},
+            "stage2_numbering": {
+                "numbered_item_count": 7,
+                "calibration_candidate_count": 3,
+                "regions": [{"region_id": "R1"}],
+            },
             "fusion": {
                 "compiled_overlay_path": "artifacts/review-overlays/demo_two_stage.png",
                 "fused_review_boxes": [
@@ -950,6 +954,8 @@ def test_panel_two_stage_endpoint_records_explicit_source_image_override(monkeyp
     assert captured_bundle["screen_size"] == {"width": 111, "height": 77}
     assert captured_bundle["app_name"] == "demo_app"
     assert captured_bundle["state_hint"] == "home"
+    assert data["summary"]["stage2_calibration_candidate_count"] == 3
+    assert data["learn_all_targets"]["stage2_calibration_candidate_count"] == 3
     saved_report = json.loads(Path(data["report_path"]).read_text(encoding="utf-8-sig"))
     assert saved_report["source_image_override"]["status"] == "applied"
     assert saved_report["observe_bundle"]["image_path"] == str(override_image)
@@ -1199,6 +1205,52 @@ def test_learning_interface_precise_calibration_reports_live_progress_and_stops_
     failure_body = flow_body[failure_start:failure_end]
     assert "completeLearningInterfaceReadonlyFlow" not in failure_body
     assert "return calibration || trial" in failure_body
+
+
+def test_learning_interface_uses_actual_calibration_candidate_count_for_progress() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    count_start = panel_js.index("function learningTwoStageCalibrationTargetCount")
+    count_end = panel_js.index("async function runLearningCalibrationProgress", count_start)
+    count_body = panel_js[count_start:count_end]
+
+    assert '["stage2_numbering", "calibration_candidate_count"]' in count_body
+    assert count_body.index('calibration_candidate_count') < count_body.index('numbered_item_count')
+    assert "const explicitCandidateCount" in count_body
+    assert "explicitCandidateCount ?? numberedItemCount" in count_body
+    assert "calibration_candidate_count\"]\n      ||" not in count_body
+
+
+def test_learning_draft_compacts_vista_evidence_before_fusion_payload() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    compact_start = panel_js.index("function compactVistaCoordinateValidation")
+    compact_end = panel_js.index("function compactLearningDraftTargets", compact_start)
+    vista_body = panel_js[compact_start:compact_end]
+    targets_start = compact_end
+    targets_end = panel_js.index("function screenMapEvidenceCount", targets_start)
+    targets_body = panel_js[targets_start:targets_end]
+
+    assert "coordinate_transform" in vista_body
+    assert "gate_result" in vista_body
+    assert "overlay_path" in vista_body
+    assert "model_io" not in vista_body
+    assert "precise_locator_evidence" not in vista_body
+    assert "compactVistaCoordinateValidation(target.vista_coordinate_validation)" in targets_body
+    assert "? target.vista_coordinate_validation : null" not in targets_body
+
+
+def test_learning_interface_flow_marks_unhandled_exception_as_terminal_failure() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    flow_start = panel_js.index("async function runLearningInterfaceFlow")
+    flow_end = panel_js.index("async function completeLearningInterfaceReadonlyFlow", flow_start)
+    flow_body = panel_js[flow_start:flow_end]
+
+    assert "catch (error)" in flow_body
+    assert 'setLearningInterfaceFlowStep(currentLearningInterfaceFlowStep' in flow_body
+    assert "learning flow failed" in flow_body
+    assert "return { success: false" in flow_body
 
 
 def test_learning_interface_step_status_keeps_global_status_in_sync() -> None:

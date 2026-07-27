@@ -450,6 +450,8 @@ Stage2 编号必须以已经校准的栏 bbox 为边界，不能继续把别的�
 规则：
 
 - `screen_map.sections` 这类结构区 hint 只用于 Stage1 分栏和栏级定位，不进入 Stage2 编号。
+- 当同次识别因初始 inventory 覆盖不足触发 OCR content recovery 时，去重后的 recovered OCR 候选必须先进入 Stage1 deterministic root partition，再进入后续 Stage2 supplemental numbering。Stage1 和 Stage2 不得分别读取恢复前、恢复后的两套候选集。
+- 当一个宽、高均占主要窗口面积的 `DataGrid` / table 容器存在时，容器内部的高支持列边界只能作为表格内部结构，不能直接升级为根级侧栏切线。只有与该容器真实左边界对齐的切线才可继续参与侧栏判断。顶部栏恢复必须同时具备宽顶部语义区域和同图水平分隔线证据，不能使用表格前几行推导出的 `top_end` 吞并主内容。
 - 每个 item 必须中心点落在当前栏 bbox 内，或与当前栏有足够交叠，才允许成为该栏的编号项。
 - 当 `right_sidebar` 从主内容中拆出时，右栏内部的 OCR/text 子项也必须随右栏一起归属，不能留在 `primary_area`。
 - 同级栏位之间没有父子关系时，编号结果不能跨栏重复展示同一个内容。

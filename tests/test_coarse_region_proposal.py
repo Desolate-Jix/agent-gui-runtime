@@ -1,12 +1,6 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
-from PIL import Image
-
-from app.learn.experiments.coarse_region_proposal_mvp import build_coarse_region_proposals
-from scripts.eval_hierarchical_region_partition_mvp2 import _build_coarse_prompt_payload, run_ab_case
+from app.learn.recognition.coarse_region_proposal import build_coarse_region_proposals
 
 
 def _item(item_id: str, x: int, y: int, w: int, h: int, source: str = "uia") -> dict:
@@ -141,90 +135,3 @@ def test_proposal_evidence_exposes_generation_sources_and_density() -> None:
         assert 0.0 <= proposal["evidence"]["whitespace_boundary_strength"] <= 1.0
         assert 0.0 <= proposal["evidence"]["element_density"] <= 1.0
 
-
-def test_coarse_prompt_payload_excludes_element_ids_and_semantic_names() -> None:
-    result = build_coarse_region_proposals(
-        [_item("private-element", 10, 10, 100, 30), _item("other-element", 10, 120, 100, 30)],
-        {"width": 300, "height": 200},
-    )
-
-    payload = _build_coarse_prompt_payload(result["proposals"], {"width": 300, "height": 200})
-    encoded = json.dumps(payload, ensure_ascii=False)
-
-    assert payload["evidence_kind"] == "coarse_region_proposal"
-    assert payload["candidate_count"] == len(result["proposals"])
-    assert "private-element" not in encoded
-    assert "contained_element_ids" not in encoded
-    assert "sidebar" not in encoded
-
-
-def test_ab_runner_calls_same_model_config_once_per_experiment_without_repair(tmp_path: Path) -> None:
-    image_path = tmp_path / "screen.png"
-    Image.new("RGB", (320, 180), "white").save(image_path)
-    trial_path = tmp_path / "trial.json"
-    trial_path.write_text(
-        json.dumps(
-            {
-                "observe_bundle": {"image_path": str(image_path)},
-                "screen_inventory": [
-                    _item("left-a", 0, 0, 80, 80),
-                    _item("left-b", 0, 90, 80, 80),
-                    _item("right-a", 180, 0, 140, 80),
-                    _item("right-b", 180, 90, 140, 80),
-                ],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-    calls: list[dict] = []
-
-    def model_caller(*, image_path: Path, prompt_text: str, max_tokens: int, temperature: float) -> str:
-        calls.append(
-            {
-                "image_path": str(image_path),
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-                "coarse": '"evidence_kind":"coarse_region_proposal"' in prompt_text,
-            }
-        )
-        ids = ["P1", "P2"] if calls[-1]["coarse"] else ["C1", "C2"]
-        return json.dumps(
-            {
-                "schema_version": "hierarchical_region_partition_mvp_v1",
-                "page_type": "generic surface",
-                "regions": [
-                    {
-                        "region_id": f"R{index}",
-                        "level": 1,
-                        "parent_id": "root",
-                        "source_candidate_ids": [candidate_id],
-                        "content_summary": "anonymous area",
-                        "optional_role": "unknown",
-                        "confidence": 0.8,
-                        "children": [],
-                    }
-                    for index, candidate_id in enumerate(ids, start=1)
-                ],
-                "unassigned_candidate_ids": [],
-                "candidate_gaps": [],
-            }
-        )
-
-    report = run_ab_case(
-        case={"case_id": "synthetic", "trial_result_path": str(trial_path)},
-        out_dir=tmp_path / "out",
-        model_caller=model_caller,
-    )
-
-    assert len(calls) == 2
-    assert calls[0]["max_tokens"] == calls[1]["max_tokens"] == 3072
-    assert calls[0]["temperature"] == calls[1]["temperature"] == 0.0
-    assert calls[0]["coarse"] is False
-    assert calls[1]["coarse"] is True
-    assert report["model_call_count"] == 2
-    assert report["repair_call_count"] == 0
-    assert report["experiment_a"]["source_type"] == "actual_model_call"
-    assert report["experiment_b"]["source_type"] == "actual_model_call"
-    assert Path(report["experiment_a"]["raw_response_path"]).exists()
-    assert Path(report["experiment_b"]["raw_response_path"]).exists()
