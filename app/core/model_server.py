@@ -94,6 +94,167 @@ def check_model_server(profile: dict[str, Any], *, timeout: float = 1.0) -> dict
         return {"status": "unreachable", "base_url": base_url, "error": str(exc)}
 
 
+def cancel_model_request(
+    *,
+    request_id: str,
+    task_kind: str,
+    payload: dict[str, Any],
+    timeout: float = 1.0,
+    verify_seconds: float = 1.5,
+) -> dict[str, Any]:
+    normalized_request_id = str(request_id or "").strip()
+    if not normalized_request_id:
+        raise ValueError("request_id is required")
+    matching_profiles = _request_cancel_profiles(task_kind=task_kind, payload=payload)
+    if not matching_profiles:
+        return {
+            "contract_version": "model_request_cancellation_v1",
+            "status": "not_supported",
+            "request_id": normalized_request_id,
+            "model_service_compute_termination": "not_supported",
+            "provider_results": [],
+        }
+
+    provider_results = [
+        _cancel_profile_request(
+            profile=profile,
+            request_id=normalized_request_id,
+            timeout=timeout,
+            verify_seconds=verify_seconds,
+        )
+        for profile in matching_profiles
+    ]
+    terminations = {
+        str(item.get("model_service_compute_termination") or "")
+        for item in provider_results
+    }
+    if "terminated" in terminations:
+        status = "terminated"
+    elif "cancellation_acknowledged_pending" in terminations:
+        status = "cancellation_acknowledged_pending"
+    elif "cancel_failed" in terminations:
+        status = "cancel_failed"
+    else:
+        status = "request_not_active"
+    return {
+        "contract_version": "model_request_cancellation_v1",
+        "status": status,
+        "request_id": normalized_request_id,
+        "model_service_compute_termination": status,
+        "provider_results": provider_results,
+    }
+
+
+def _request_cancel_profiles(
+    *,
+    task_kind: str,
+    payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    normalized_task_kind = str(task_kind or "").strip()
+    effective_payload = payload
+    if normalized_task_kind == "panel_learning_calibration_sequence":
+        nested_payload = payload.get("locate_payload")
+        effective_payload = nested_payload if isinstance(nested_payload, dict) else {}
+        normalized_task_kind = "vision_locate_target"
+    provider_mode = (
+        str(effective_payload.get("provider_mode") or "").strip().casefold()
+    )
+    if (
+        normalized_task_kind != "vision_locate_target"
+        or provider_mode != "local_grounding"
+    ):
+        return []
+    profiles = []
+    for profile in load_model_profiles():
+        if profile.get("request_cancel_supported") is not True:
+            continue
+        if not str(profile.get("request_cancel_endpoint") or "").strip():
+            continue
+        roles = {str(item).casefold() for item in profile.get("role") or []}
+        if roles.intersection({"locate", "grounding"}):
+            profiles.append(profile)
+    return profiles
+
+
+def _cancel_profile_request(
+    *,
+    profile: dict[str, Any],
+    request_id: str,
+    timeout: float,
+    verify_seconds: float,
+) -> dict[str, Any]:
+    profile_id = str(profile.get("profile_id") or "unknown")
+    endpoint = str(profile.get("request_cancel_endpoint") or "").strip()
+    body = json.dumps({"request_id": request_id}).encode("utf-8")
+    request = urllib.request.Request(
+        endpoint,
+        data=body,
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            acknowledgement = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        return {
+            "profile_id": profile_id,
+            "status": "cancel_failed",
+            "model_service_compute_termination": "cancel_failed",
+            "error": str(exc),
+        }
+
+    acknowledgement_status = str(acknowledgement.get("status") or "").strip()
+    if acknowledgement_status == "request_not_active":
+        return {
+            "profile_id": profile_id,
+            "status": "request_not_active",
+            "model_service_compute_termination": "request_not_active",
+            "acknowledgement": acknowledgement,
+        }
+    if acknowledgement_status != "cancellation_acknowledged":
+        return {
+            "profile_id": profile_id,
+            "status": "cancel_failed",
+            "model_service_compute_termination": "cancel_failed",
+            "acknowledgement": acknowledgement,
+        }
+
+    deadline = time.monotonic() + max(0.0, float(verify_seconds))
+    last_health: dict[str, Any] | None = None
+    while True:
+        server_status = check_model_server(profile, timeout=timeout)
+        health = server_status.get("health")
+        last_health = health if isinstance(health, dict) else None
+        active_request = (
+            last_health.get("active_request")
+            if isinstance(last_health, dict)
+            else None
+        )
+        active_request_id = (
+            str(active_request.get("request_id") or "")
+            if isinstance(active_request, dict)
+            else ""
+        )
+        if active_request_id != request_id:
+            return {
+                "profile_id": profile_id,
+                "status": "terminated",
+                "model_service_compute_termination": "terminated",
+                "acknowledgement": acknowledgement,
+                "health": last_health,
+            }
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+    return {
+        "profile_id": profile_id,
+        "status": "cancellation_acknowledged_pending",
+        "model_service_compute_termination": "cancellation_acknowledged_pending",
+        "acknowledgement": acknowledgement,
+        "health": last_health,
+    }
+
+
 def ensure_model_server(
     *,
     stage: str,
@@ -219,7 +380,7 @@ def start_model_server(profile: dict[str, Any]) -> dict[str, Any]:
     if returncode is not None:
         log_file.close()
         raise RuntimeError(f"Model start script exited immediately with code {returncode}; see log: {log_path}")
-    pid_path = _profile_pid_path(profile)
+    pid_path = model_profile_pid_path(profile)
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     pid_path.write_text(str(process.pid), encoding="utf-8")
     health_status: dict[str, Any] | None = None
@@ -331,7 +492,7 @@ def _sync_pid_file_from_health(
         pid = int(pid_value)
     except (TypeError, ValueError):
         return None
-    target = pid_path or _profile_pid_path(profile)
+    target = pid_path or model_profile_pid_path(profile)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(str(pid), encoding="utf-8")
     return {"pid": pid, "pid_path": str(target), "source": "health"}
@@ -355,13 +516,19 @@ def _resolve_path(path: str) -> Path:
     return ROOT_DIR / candidate
 
 
-def _profile_pid_path(profile: dict[str, Any]) -> Path:
+def model_profile_pid_path(
+    profile: dict[str, Any],
+    *,
+    root_dir: Path | None = None,
+) -> Path:
+    root = root_dir or ROOT_DIR
     pid_file = str(profile.get("pid_file") or "").strip()
     if pid_file:
-        return _resolve_path(pid_file)
+        candidate = Path(pid_file)
+        return candidate if candidate.is_absolute() else root / candidate
     profile_id = str(profile.get("profile_id") or "local-vision").strip() or "local-vision"
     safe_id = "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in profile_id)
-    return ROOT_DIR / "logs" / f"{safe_id}-server.pid"
+    return root / "logs" / f"{safe_id}-server.pid"
 
 
 def _public_profile(profile: dict[str, Any]) -> dict[str, Any]:

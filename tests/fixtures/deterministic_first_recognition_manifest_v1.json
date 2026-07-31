@@ -11,7 +11,7 @@
       "trace_sha256": "02079bc6bae2add31895c15bab520305bfd27b69881e031c717f58a8369a5dff",
       "screenshot_path": "artifacts/screenshots/apple-music__observe-screen__applemusic__full-window__20260710-032407-416762.png",
       "screenshot_sha256": "f279540de64d55377b00dcaef19dcf581a577a41d7729ce0c449677b35611e4f",
-      "expected_root_zones": ["left_nav", "main_content"]
+      "expected_root_zones": ["top_bar", "left_nav", "main_content"]
     },
     {
       "case_id": "documentation_portal_python_home",
@@ -38,7 +38,7 @@
       "trace_sha256": "3139abf4042d6cdb3c425d4d0cc76d3f7a1c637a80f986fcbd7ad07c37227ecf",
       "screenshot_path": "artifacts/screenshots/system-c__observe-screen__file-explorer__full-window__20260713-142602-464430.png",
       "screenshot_sha256": "8c8cc5343e54a0427ab2db54534635d3fedfd0afa732fcc97f9cf49ba97ba658",
-      "expected_root_zones": ["top_bar", "left_nav", "main_content"],
+      "expected_root_zones": ["top_bar", "left_nav", "main_content", "bottom_bar"],
       "reference_note": "The visible ribbon and address controls form a full-width top region above the navigation tree and file list."
     },
     {
@@ -57,7 +57,7 @@
       "trace_sha256": "a5e2d90c2d04ce095c5e3f23a0dd47654795705c8d775fe32c1978fac6b42640",
       "screenshot_path": "artifacts/screenshots/whatsapp__capture__full-window__20260715-065241-026915.png",
       "screenshot_sha256": "2fc272e5a4730b75ef88abddd89a22194216650c5f1f10b1d6971af04cfb57e4",
-      "expected_root_zones": ["left_nav", "main_content"]
+      "expected_root_zones": ["left_nav", "top_bar", "main_content"]
     },
     {
       "case_id": "generic_notepad_blank",
@@ -75,7 +75,7 @@
       "trace_sha256": "3096d63da27ec6baee3f545d0ac6a193cf2a62ab2cf8a57dce8186d32f2c7d01",
       "screenshot_path": "artifacts/screenshots/-68406df3__observe-screen__weixin__full-window__20260715-210809-909141.png",
       "screenshot_sha256": "e43ef7b5cee40e6ff6f887174a53e131cc084c4961c2d3755359fbae27c9ee00",
-      "expected_root_zones": ["left_nav", "main_content"]
+      "expected_root_zones": ["left_nav", "top_bar", "main_content"]
     },
     {
       "case_id": "media_portal_bilibili_home_20260715",

@@ -148,9 +148,17 @@ def build_learn_demo_scaffold(
     )
     page_detail_summary = _dict(page_detail.get("summary")) if page_detail else {}
     readonly_summary = _dict(page_detail_readonly_preview.get("summary")) if page_detail_readonly_preview else {}
+    source_identity = _dict(page_detail.get("source_identity")) if page_detail else {}
+    same_repaired_source_verified = bool(
+        source_identity.get("contract_version") == "learning_repaired_source_identity_v1"
+        and source_identity.get("final_numbering_revision")
+        and source_identity.get("compiled_overlay_path")
+        and source_identity.get("dual_stream_contract") == "learn_stage2_dual_streams_v1"
+    )
     report = {
         "contract_version": "learn_mode_demo_scaffold_v1",
         "source_path": _relative_path(source_file, root),
+        "source_identity": source_identity,
         "page_detail_candidate_source_path": _relative_path(page_detail_source, root),
         "report_path": str((out / REPORT_NAME).resolve()),
         "generated_artifacts": generated,
@@ -238,6 +246,7 @@ def build_learn_demo_scaffold(
             ),
             "model_generated_pathgraph_preview_available": bool(model_preview),
             "page_detail_readonly_pathgraph_preview_available": bool(page_detail_readonly_preview),
+            "same_repaired_source_verified": same_repaired_source_verified,
             "model_only_demo_ready": model_only_demo.get("ready") is True,
             "requires_pending_calibration": _int_value(_dict(precise.get("summary")).get("pending_calibration_count")) > 0
             if precise
@@ -355,13 +364,16 @@ def _build_page_detail_readonly_pathgraph_preview(*, page_detail: dict[str, Any]
     preview_dir = out_dir / "page_detail_readonly_pathgraph_preview"
     preview_dir.mkdir(parents=True, exist_ok=True)
     report_path = preview_dir / "page_detail_readonly_pathgraph_preview.json"
+    source_identity = _dict(page_detail.get("source_identity"))
     report = {
         "contract_version": "page_detail_readonly_pathgraph_preview_v1",
         "preview_status": preview_status,
         "source_type": "learn_page_detail_candidate_v1",
+        "source_identity": source_identity,
         "page_detail_preview": page_detail,
         "readonly_path_graph_preview": {
             "contract_version": "readonly_pathgraph_preview_v1",
+            "source_identity": source_identity,
             "states": states,
             "action_templates": actions,
             "transitions": [],

@@ -17,6 +17,8 @@ if str(ROOT) not in sys.path:
 
 from fastapi.testclient import TestClient
 
+from app.core.gpu_resources import build_model_resource_preflight
+from app.core.model_server import ensure_model_server, profile_for_stage
 from app.main import app
 
 
@@ -72,6 +74,189 @@ def build_manifest_cases(manifest_path: Path) -> list[ChainSmokeCase]:
     return cases
 
 
+def build_manifest_suite_cases(manifest_paths: list[Path]) -> list[ChainSmokeCase]:
+    """合并多个验收清单，并禁止重复样本缩小真实分母。"""
+    if not manifest_paths:
+        raise ValueError("acceptance suite requires at least one manifest")
+    cases: list[ChainSmokeCase] = []
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for manifest_path in manifest_paths:
+        for case in build_manifest_cases(manifest_path):
+            if case.case_id in seen:
+                duplicates.add(case.case_id)
+            else:
+                seen.add(case.case_id)
+                cases.append(case)
+    if duplicates:
+        raise ValueError(f"duplicate acceptance case ids: {', '.join(sorted(duplicates))}")
+    return cases
+
+
+def load_resume_completed_case_ids(
+    report_paths: list[Path],
+    *,
+    expected_manifest_paths: list[str],
+    known_case_ids: set[str],
+) -> list[str]:
+    """从同一验收清单的历史报告恢复已完成样本。"""
+    expected_manifests = {
+        str(_resolve_project_path(Path(value))).casefold() for value in expected_manifest_paths
+    }
+    completed: list[str] = []
+    seen: set[str] = set()
+    allowed_contracts = {
+        "learning_interface_chain_smoke_report_v2",
+        "learning_practical_acceptance_aggregate_v1",
+    }
+    for report_path in report_paths:
+        resolved_report = _resolve_project_path(report_path)
+        payload = _read_json(resolved_report)
+        contract_version = str(payload.get("contract_version") or "")
+        if contract_version not in allowed_contracts:
+            raise ValueError(f"unsupported acceptance resume report contract: {resolved_report}")
+        report_manifests = {
+            str(_resolve_project_path(Path(value))).casefold()
+            for value in payload.get("manifest_paths") or []
+            if str(value).strip()
+        }
+        if report_manifests != expected_manifests:
+            raise ValueError(f"acceptance resume report manifest set mismatch: {resolved_report}")
+        for raw_case_id in payload.get("completed_case_ids") or []:
+            case_id = str(raw_case_id).strip()
+            if case_id not in known_case_ids:
+                raise ValueError(f"acceptance resume report contains unknown completed case: {case_id}")
+            if case_id in seen:
+                raise ValueError(f"duplicate completed case across acceptance resume reports: {case_id}")
+            seen.add(case_id)
+            completed.append(case_id)
+    return completed
+
+
+def build_acceptance_batch_plan(
+    cases: list[ChainSmokeCase],
+    *,
+    resource_preflight: dict[str, Any],
+    requested_case_ids: list[str] | None = None,
+    completed_case_ids: list[str] | None = None,
+    requested_batch_size: int | None = None,
+    batch_index: int = 0,
+) -> dict[str, Any]:
+    """按资源建议和显式筛选生成可续跑验收批次。"""
+    if batch_index < 0:
+        raise ValueError("batch_index must be zero or greater")
+    requested = {str(case_id).strip() for case_id in requested_case_ids or [] if str(case_id).strip()}
+    known = {case.case_id for case in cases}
+    unknown = sorted(requested - known)
+    if unknown:
+        raise ValueError(f"unknown case ids: {', '.join(unknown)}")
+    eligible = [case for case in cases if not requested or case.case_id in requested]
+    if not eligible:
+        raise ValueError("acceptance batch contains no eligible cases")
+    completed = {str(case_id).strip() for case_id in completed_case_ids or [] if str(case_id).strip()}
+    if completed and batch_index != 0:
+        raise ValueError("batch_index must remain zero when completed_case_ids are supplied")
+    unknown_completed = sorted(completed - known)
+    if unknown_completed:
+        raise ValueError(f"unknown completed case ids: {', '.join(unknown_completed)}")
+    completed_in_scope = [case.case_id for case in eligible if case.case_id in completed]
+    remaining = [case for case in eligible if case.case_id not in completed]
+    if not remaining:
+        raise ValueError("all eligible acceptance cases are already completed")
+
+    recommended = max(1, int(resource_preflight.get("recommended_batch_size") or 1))
+    batch_size = max(1, int(requested_batch_size or recommended))
+    start = batch_index * batch_size
+    end = start + batch_size
+    selected = remaining[start:end]
+    if not selected:
+        raise ValueError(
+            f"batch_index {batch_index} is outside {len(remaining)} remaining cases with batch_size {batch_size}"
+        )
+    selected_ids = [case.case_id for case in selected]
+    return {
+        "contract_version": "learning_interface_acceptance_batch_plan_v1",
+        "resource_mode": str(resource_preflight.get("resource_mode") or "unknown"),
+        "model_launch_allowed": resource_preflight.get("model_launch_allowed") is True,
+        "recommended_batch_size": recommended,
+        "batch_size": batch_size,
+        "batch_index": batch_index,
+        "eligible_case_ids": [case.case_id for case in eligible],
+        "completed_case_ids": completed_in_scope,
+        "remaining_case_ids": [case.case_id for case in remaining],
+        "selected_case_ids": selected_ids,
+        "pending_case_ids": [case.case_id for case in remaining if case.case_id not in selected_ids],
+    }
+
+
+def build_resource_blocked_report(
+    *,
+    batch_plan: dict[str, Any],
+    resource_preflight: dict[str, Any],
+    out_dir: Path,
+    manifest_paths: list[str] | None = None,
+    resume_report_paths: list[str] | None = None,
+) -> dict[str, Any]:
+    """资源不足时在任何真实模型调用前记录可恢复暂停。"""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    report_path = out_dir / "learning_interface_chain_smoke_report.json"
+    report = {
+        "contract_version": "learning_interface_chain_smoke_report_v2",
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "status": "resource_blocked",
+        "case_count": 0,
+        "invalid_case_count": 0,
+        "model_calls_attempted": 0,
+        "completed_case_ids": [],
+        "pending_case_ids": list(
+            batch_plan.get("remaining_case_ids") or batch_plan.get("eligible_case_ids") or []
+        ),
+        "manifest_paths": list(manifest_paths or []),
+        "resume_report_paths": list(resume_report_paths or []),
+        "batch_plan": dict(batch_plan),
+        "resource_preflight": dict(resource_preflight),
+        "safety": _safety_boundary(),
+        "report_path": str(report_path),
+        "interpretation": (
+            "GPU resource gate stopped the acceptance batch before model launch; "
+            "pending cases are not counted as passed or failed."
+        ),
+    }
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return report
+
+
+def build_chain_model_resource_preflight() -> dict[str, Any]:
+    """使用精准定位模型配置执行同一套生产资源预检。"""
+    return build_model_resource_preflight(profile_for_stage("locate"))
+
+
+def ensure_acceptance_model_stage(stage: str, *, wait_seconds: float = 600.0) -> dict[str, Any]:
+    """启动并等待验收批次需要的真实模型，未就绪时禁止继续。"""
+
+    lifecycle = ensure_model_server(
+        stage=stage,
+        wait_until_ready=True,
+        wait_seconds=wait_seconds,
+    )
+    status_payload = lifecycle.get("after") if isinstance(lifecycle.get("after"), dict) else lifecycle.get("before")
+    status_payload = status_payload if isinstance(status_payload, dict) else {}
+    status = str(status_payload.get("status") or "unknown")
+    if status != "running":
+        raise RuntimeError(f"acceptance model stage {stage} is not ready: {status}")
+    profile = lifecycle.get("profile") if isinstance(lifecycle.get("profile"), dict) else {}
+    return {
+        "stage": stage,
+        "status": status,
+        "profile_id": str(profile.get("profile_id") or ""),
+        "model_id": str(status_payload.get("model_id") or ""),
+        "started": lifecycle.get("started") is True,
+        "resource_switch": lifecycle.get("resource_switch")
+        if isinstance(lifecycle.get("resource_switch"), dict)
+        else {},
+    }
+
+
 def evaluate_class_expectations(report: dict[str, Any], expectations: dict[str, Any]) -> dict[str, Any]:
     if not expectations:
         return {
@@ -95,8 +280,45 @@ def evaluate_class_expectations(report: dict[str, Any], expectations: dict[str, 
             role_counts[role] = role_counts.get(role, 0) + 1
     labels = "\n".join(str(node.get("label") or "") for node in nodes).casefold()
 
+    expected_bar_types = {
+        str(value or "").strip() for value in expectations.get("expected_bar_types") or []
+    } - {""}
+    expected_absent_bar_types = {
+        str(value or "").strip() for value in expectations.get("expected_absent_bar_types") or []
+    } - {""}
+    expected_sub_bar_roles = {
+        str(value or "").strip() for value in expectations.get("expected_sub_bar_roles") or []
+    } - {""}
+    known_bar_types = {"top_bar", "bottom_bar", "left_sidebar", "right_sidebar"}
+    declared_bar_types = expected_bar_types | expected_absent_bar_types | known_bar_types
+    actual_bar_types = sorted(set(structure_types) & declared_bar_types)
+
     actual_category = str(classification.get("category") or "").strip()
     actual_strategy = str(class_profile.get("primary_content_strategy") or "").strip()
+    stage1_5_partition = report.get("stage1_5_partition") if isinstance(report.get("stage1_5_partition"), dict) else {}
+    stage1_5_subregions = (
+        stage1_5_partition.get("subregions")
+        if isinstance(stage1_5_partition.get("subregions"), list)
+        else []
+    )
+    stage1_5_roles = {
+        str(item.get("role") or "").strip()
+        for item in stage1_5_subregions
+        if isinstance(item, dict) and str(item.get("role") or "").strip()
+    }
+    sub_bar_evidence_sources: dict[str, str] = {}
+    for role in expected_sub_bar_roles:
+        if role_counts.get(role, 0) > 0:
+            sub_bar_evidence_sources[role] = "ui_hierarchy"
+        elif role in stage1_5_roles:
+            sub_bar_evidence_sources[role] = "stage1_5_partition"
+    if (
+        "conversation_navigation_rail" in expected_sub_bar_roles
+        and actual_category == "conversation_workspace"
+        and "left_sidebar" in structure_types
+    ):
+        sub_bar_evidence_sources["conversation_navigation_rail"] = "conversation_workspace_left_sidebar_root"
+    actual_sub_bar_roles = sorted(sub_bar_evidence_sources)
     expected_category = str(expectations.get("expected_interface_category") or "").strip()
     expected_strategy = str(expectations.get("expected_class_strategy") or "").strip()
     issues: list[str] = []
@@ -116,6 +338,15 @@ def evaluate_class_expectations(report: dict[str, Any], expectations: dict[str, 
         normalized = str(required_type or "").strip()
         if normalized and normalized not in structure_types:
             issues.append(f"missing_structure_type:{normalized}")
+    for bar_type in sorted(expected_bar_types):
+        if bar_type not in structure_types:
+            issues.append(f"missing_expected_bar_type:{bar_type}")
+    for bar_type in sorted(expected_absent_bar_types):
+        if bar_type in structure_types:
+            issues.append(f"unexpected_bar_type:{bar_type}")
+    for role in sorted(expected_sub_bar_roles):
+        if role not in sub_bar_evidence_sources:
+            issues.append(f"missing_expected_sub_bar_role:{role}")
     required_roles = expectations.get("required_group_roles") if isinstance(expectations.get("required_group_roles"), dict) else {}
     for role, minimum in required_roles.items():
         normalized = str(role or "").strip()
@@ -145,6 +376,9 @@ def evaluate_class_expectations(report: dict[str, Any], expectations: dict[str, 
             "class_strategy": actual_strategy,
             "structure_region_count": len(structure_nodes),
             "structure_types": structure_types,
+            "bar_types": actual_bar_types,
+            "sub_bar_roles": actual_sub_bar_roles,
+            "sub_bar_evidence_sources": sub_bar_evidence_sources,
             "hierarchy_node_count": len(nodes),
             "group_role_counts": role_counts,
             "matched_forbidden_label_tokens": matched_forbidden_tokens,
@@ -687,13 +921,38 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run protected Learning Interface chain smoke for current recursive surfaces.")
     parser.add_argument(
         "--manifest",
-        default="artifacts/benchmarks/interface_class_recursive_manifest_v1.json",
-        help="Current checksum-validated recursive interface manifest.",
+        action="append",
+        default=[],
+        help="Checksum-validated interface manifest; repeat to combine protected and holdout cases.",
     )
     parser.add_argument(
         "--regression-root",
         default="",
         help="Legacy regression root containing applemusic/qq/python_org replay reports; overrides --manifest.",
+    )
+    parser.add_argument(
+        "--case-id",
+        action="append",
+        default=[],
+        help="Run only this case id; repeat the option to select more than one case.",
+    )
+    parser.add_argument(
+        "--resume-report",
+        action="append",
+        default=[],
+        help="Prior batch or aggregate report whose completed cases must be skipped; repeat as needed.",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=0,
+        help="Cases in this resumable batch; 0 uses the GPU resource recommendation.",
+    )
+    parser.add_argument(
+        "--batch-index",
+        type=int,
+        default=0,
+        help="Zero-based resumable batch index.",
     )
     parser.add_argument("--out", required=True, help="Output directory for reports and contact sheet.")
     parser.add_argument("--json", action="store_true", help="Print JSON summary.")
@@ -701,19 +960,62 @@ def main() -> int:
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
-    client = TestClient(app)
-    cases = (
+    manifest_values = list(args.manifest or []) or ["artifacts/benchmarks/interface_class_recursive_manifest_v1.json"]
+    manifest_paths = [str(_resolve_project_path(Path(value))) for value in manifest_values]
+    all_cases = (
         build_protected_cases(Path(args.regression_root))
         if str(args.regression_root or "").strip()
-        else build_manifest_cases(Path(args.manifest))
+        else build_manifest_suite_cases([Path(value) for value in manifest_values])
     )
+    resume_report_paths = [str(_resolve_project_path(Path(value))) for value in args.resume_report or []]
+    completed_case_ids = load_resume_completed_case_ids(
+        [Path(value) for value in resume_report_paths],
+        expected_manifest_paths=manifest_paths,
+        known_case_ids={case.case_id for case in all_cases},
+    )
+    resource_preflight = build_chain_model_resource_preflight()
+    batch_plan = build_acceptance_batch_plan(
+        all_cases,
+        resource_preflight=resource_preflight,
+        requested_case_ids=list(args.case_id or []),
+        completed_case_ids=completed_case_ids,
+        requested_batch_size=int(args.batch_size) if int(args.batch_size) > 0 else None,
+        batch_index=int(args.batch_index),
+    )
+    if resource_preflight.get("model_launch_allowed") is not True:
+        report = build_resource_blocked_report(
+            batch_plan=batch_plan,
+            resource_preflight=resource_preflight,
+            out_dir=out_dir,
+            manifest_paths=manifest_paths,
+            resume_report_paths=resume_report_paths,
+        )
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(f"status={report['status']}")
+            print(f"report_path={report['report_path']}")
+        return 2
+
+    selected_ids = set(batch_plan["selected_case_ids"])
+    cases = [case for case in all_cases if case.case_id in selected_ids]
+    model_lifecycle = ensure_acceptance_model_stage("locate")
+    client = TestClient(app)
     case_results = [run_case(client, case, out_dir) for case in cases]
     contact_sheet = create_contact_sheet(case_results, out_dir / "learning_interface_chain_contact_sheet.png")
     class_expectation_summary = summarize_class_expectation_audits(case_results)
     report = {
         "contract_version": "learning_interface_chain_smoke_report_v2",
         "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "status": "completed_batch",
         "case_count": len(case_results),
+        "completed_case_ids": [item.get("case_id") for item in case_results],
+        "pending_case_ids": list(batch_plan.get("pending_case_ids") or []),
+        "manifest_paths": manifest_paths,
+        "resume_report_paths": resume_report_paths,
+        "batch_plan": batch_plan,
+        "resource_preflight": resource_preflight,
+        "model_lifecycle": model_lifecycle,
         "three_image_audit_complete_count": sum(
             1 for item in case_results if (item.get("three_image_audit") or {}).get("complete") is True
         ),

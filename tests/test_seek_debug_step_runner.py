@@ -767,7 +767,9 @@ def test_read_detail_batch_updates_state_detail_for_match(monkeypatch, tmp_path:
     texts = [item["text"] for item in state_after["detail"]["description_sections"]]
     assert payload["merged_description_section_count"] == 3
     assert "You bring strong experience in integration or C# .NET development." in texts
-    assert state_after["detail"]["detail_bottom_reached"] is True
+    assert state_after["detail"]["detail_bottom_reached"] is False
+    assert state_after["detail"]["detail_read_state"] == "no_new_content"
+    assert state_after["detail"]["detail_read_completion"] == "incomplete"
     assert state_after["detail"]["trace_paths"] == ["ocr_trace.json"]
     assert state_after["detail"]["apply_button_state"]["label"] == "Apply"
     assert state_after["detail"]["apply_button_state"]["source"] == "read_detail_batch_ocr"

@@ -16,12 +16,14 @@ __pycache__/
 .ruff_cache/
 .uv-cache/
 .codegraph/
+.superpowers/
 .paddlex/
 .paddle-home/
 .coverage
 htmlcov/
 /logs/
 /artifacts/
+/runtime_state/
 /models/
 /tools/
 .runtime-*.pid

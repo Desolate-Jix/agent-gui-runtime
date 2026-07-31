@@ -1,0 +1,140 @@
+{
+  "contract_version": "learning_practical_targeted_rerun_manifest_v1",
+  "used_for_rule_tuning": false,
+  "holdout_used_for_tuning": false,
+  "purpose": "显卡空闲后对 WhatsApp、QQ 和 GitHub Desktop 执行小批量真实模型复跑。",
+  "interpretation": "Checksum-pinned targeted rerun inputs with expectations frozen from the original screenshots; this manifest contains no pass result and is not recognition accuracy evidence.",
+  "cases": [
+    {
+      "case_id": "conversation_workspace_whatsapp_20260715",
+      "app_family": "whatsapp",
+      "surface_type": "desktop_conversation_list_with_empty_detail_pane",
+      "source_type": "fixed_recorded_trace",
+      "original_source_type": "actual_model_call",
+      "expectation_source": "human_frozen_original_screenshot",
+      "trace_path": "logs/traces/vision/20260715-071121-563865__learn-mode-fast-observe__whatsapp-class-recursive.json",
+      "trace_sha256": "a5e2d90c2d04ce095c5e3f23a0dd47654795705c8d775fe32c1978fac6b42640",
+      "screenshot_path": "artifacts/screenshots/whatsapp__capture__full-window__20260715-065241-026915.png",
+      "screenshot_sha256": "2fc272e5a4730b75ef88abddd89a22194216650c5f1f10b1d6971af04cfb57e4",
+      "expected_root_zones": [
+        "left_nav",
+        "top_bar",
+        "main_content"
+      ],
+      "expectations": {
+        "expected_interface_category": "conversation_workspace",
+        "expected_class_strategy": "conversation_rows",
+        "min_structure_regions": 3,
+        "required_structure_types": [
+          "top_bar",
+          "left_sidebar",
+          "main_content"
+        ],
+        "min_hierarchy_nodes": 50,
+        "required_group_roles": {
+          "conversation_row": 1
+        },
+        "forbidden_group_roles": [
+          "media_card_group",
+          "list_group"
+        ],
+        "forbidden_label_tokens": [
+          "apple music",
+          "steam friends",
+          "python.org"
+        ],
+        "expected_bar_types": [
+          "top_bar",
+          "left_sidebar"
+        ],
+        "expected_absent_bar_types": [
+          "right_sidebar",
+          "bottom_bar"
+        ],
+        "expected_sub_bar_roles": [
+          "conversation_navigation_rail",
+          "conversation_list"
+        ]
+      }
+    },
+    {
+      "case_id": "holdout_qq_group_chat_20260720",
+      "app_family": "qq",
+      "surface_type": "desktop_group_chat_with_member_list",
+      "source_type": "fixed_recorded_trace",
+      "expectation_source": "human_frozen_original_screenshot",
+      "trace_path": "logs/traces/vision/20260720-175055-082918__learn-mode-fast-observe__qq.json",
+      "trace_sha256": "588578d0c2c49c1777018b7f674405413426c98d46238c924aaf9c3381bd8013",
+      "screenshot_path": "artifacts/screenshots/qq__observe-screen__qq__full-window__20260720-175027-838262.png",
+      "screenshot_sha256": "3e0a5baeccff48da4553614654cd78b758f358680b09b8c0980d209ece9b00f3",
+      "expected_root_zones": [
+        "left_nav",
+        "top_bar",
+        "main_content"
+      ],
+      "expectations": {
+        "expected_interface_category": "conversation_workspace",
+        "expected_class_strategy": "conversation_rows",
+        "min_structure_regions": 3,
+        "required_structure_types": [
+          "top_bar",
+          "left_sidebar",
+          "main_content"
+        ],
+        "min_hierarchy_nodes": 50,
+        "required_group_roles": {
+          "conversation_row": 10,
+          "message_item": 2
+        },
+        "forbidden_group_roles": [
+          "media_card_group",
+          "list_group"
+        ],
+        "expected_bar_types": [
+          "top_bar",
+          "left_sidebar"
+        ],
+        "expected_absent_bar_types": [
+          "bottom_bar"
+        ]
+      }
+    },
+    {
+      "case_id": "holdout_github_desktop_changes_20260718",
+      "app_family": "github_desktop",
+      "surface_type": "desktop_repository_file_list_and_diff",
+      "source_type": "fixed_recorded_trace",
+      "expectation_source": "human_frozen_original_screenshot",
+      "trace_path": "logs/traces/vision/20260718-163237-431888__learn-mode-fast-observe__githubdesktop.json",
+      "trace_sha256": "d20a11b329d2002a9bbda69b8211083edfded567383fc73b9e65b99e7d2057b8",
+      "screenshot_path": "artifacts/screenshots/github-desktop__observe-screen__githubdesktop__full-window__20260718-163211-323261.png",
+      "screenshot_sha256": "ba1bba1214182cc91f60301921f21ad795b287814fdb198bc7d1e313be783b71",
+      "expected_root_zones": [
+        "top_bar",
+        "main_content"
+      ],
+      "expectations": {
+        "expected_interface_category": "generic",
+        "expected_class_strategy": "evidence_balanced",
+        "min_structure_regions": 2,
+        "required_structure_types": [
+          "top_bar",
+          "main_content"
+        ],
+        "min_hierarchy_nodes": 25,
+        "forbidden_group_roles": [
+          "conversation_row",
+          "message_item",
+          "media_card_group"
+        ],
+        "expected_bar_types": [
+          "top_bar"
+        ],
+        "expected_absent_bar_types": [
+          "right_sidebar",
+          "bottom_bar"
+        ]
+      }
+    }
+  ]
+}

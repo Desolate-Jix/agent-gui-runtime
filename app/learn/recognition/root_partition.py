@@ -31,6 +31,14 @@ _BOTTOM_BAND_TOKENS = (
     "composer",
     "conversation_bottom_panel",
     "group_chat",
+    "群组聊天",
+)
+_SIDE_NAVIGATION_TOKENS = (
+    "navigation",
+    "nav_",
+    "sidebar",
+    "side_bar",
+    "nav_rail",
 )
 
 
@@ -39,6 +47,7 @@ def build_deterministic_root_partition(
     image_size: dict[str, Any],
     *,
     image_path: str = "",
+    class_rule_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """把现有原子证据编译为覆盖完整、同层不重叠的根级区域。"""
 
@@ -52,6 +61,7 @@ def build_deterministic_root_partition(
         width=width,
         height=height,
         image_path=image_path,
+        class_rule_profile=class_rule_profile,
     )
     diagnostics["root_selection"] = selection
     diagnostics["fallback"] = selection.get("fallback")
@@ -97,13 +107,32 @@ def _select_root_proposals(
     width: int,
     height: int,
     image_path: str = "",
+    class_rule_profile: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     screen = {"x": 0, "y": 0, "w": width, "h": height}
     elements = _normalize_elements(items, screen)
     x_cuts = _axis_cuts(elements, screen, axis="x")
     y_cuts = _axis_cuts(elements, screen, axis="y")
-    image_separator_cuts = _vertical_separator_cuts(image_path, width=width, height=height)
-    image_horizontal_cuts = _horizontal_separator_cuts(image_path, width=width, height=height)
+    color_vertical_cuts = _color_block_boundary_cuts(
+        image_path,
+        width=width,
+        height=height,
+        axis="x",
+    )
+    color_horizontal_cuts = _color_block_boundary_cuts(
+        image_path,
+        width=width,
+        height=height,
+        axis="y",
+    )
+    image_separator_cuts = [
+        *color_vertical_cuts,
+        *_vertical_separator_cuts(image_path, width=width, height=height),
+    ]
+    image_horizontal_cuts = [
+        *color_horizontal_cuts,
+        *_horizontal_separator_cuts(image_path, width=width, height=height),
+    ]
     raw_edge_bands = _edge_bands(elements, screen)
     edge_bands = _calibrate_edge_bands(
         raw_edge_bands,
@@ -111,6 +140,20 @@ def _select_root_proposals(
         height=height,
         require_bottom_image_evidence=bool(str(image_path or "").strip()),
     )
+    document_content_start = _full_width_document_content_start(
+        items,
+        width=width,
+        height=height,
+    )
+    if document_content_start is not None and isinstance(edge_bands.get("top_end"), int):
+        edge_bands["top_end"] = min(int(edge_bands["top_end"]), document_content_start)
+    aligned_bottom_status_start = _aligned_bottom_status_start(
+        items,
+        width=width,
+        height=height,
+    )
+    if edge_bands.get("bottom_start") is None and aligned_bottom_status_start is not None:
+        edge_bands["bottom_start"] = aligned_bottom_status_start
     boxes: list[dict[str, int]] = []
     source = ""
 
@@ -163,6 +206,72 @@ def _select_root_proposals(
         width=width,
         height=height,
     )
+    if document_content_start is not None:
+        if trusted_top_band_end is not None:
+            trusted_top_band_end = min(trusted_top_band_end, document_content_start)
+        if stacked_top_end is not None:
+            stacked_top_end = min(stacked_top_end, document_content_start)
+    edge_rail_top_end = _strong_top_boundary_for_edge_rail(
+        edge_bands=edge_bands,
+        image_horizontal_cuts=image_horizontal_cuts,
+        height=height,
+    )
+    centered_content_margin_pair = _centered_content_margin_pair(
+        items,
+        color_vertical_cuts=color_vertical_cuts,
+        width=width,
+        height=height,
+        content_start=(
+            edge_rail_top_end
+            or trusted_top_band_end
+            or stacked_top_end
+            or edge_bands.get("top_end")
+        ),
+    )
+    if centered_content_margin_pair is not None:
+        edge_cut = None
+        supported_columns = False
+    primary_content_strategy = str(
+        (class_rule_profile or {}).get("primary_content_strategy") or ""
+    ).strip()
+    class_rule_vertical_partition_suppressed = False
+    class_rule_edge_partition_suppressed_without_navigation_evidence = False
+    candidate_split_x = None
+    if edge_cut is not None:
+        candidate_split_x = int(edge_cut.get("point") or 0)
+    elif supported_columns and first_two_x:
+        candidate_split_x = int(first_two_x[0].get("point") or 0)
+    if primary_content_strategy and candidate_split_x is not None and candidate_split_x > 0:
+        content_start = int(
+            edge_rail_top_end
+            or trusted_top_band_end
+            or stacked_top_end
+            or edge_bands.get("top_end")
+            or 0
+        )
+        has_explicit_side_navigation = _has_vertical_band_semantics(
+            items,
+            start=0,
+            end=candidate_split_x,
+            content_start=content_start,
+            tokens=_SIDE_NAVIGATION_TOKENS,
+        )
+        if not has_explicit_side_navigation:
+            edge_cut = None
+            supported_columns = False
+            class_rule_edge_partition_suppressed_without_navigation_evidence = True
+            if primary_content_strategy == "independent_content_modules":
+                class_rule_vertical_partition_suppressed = True
+    bottom_start = edge_bands.get("bottom_start")
+    bottom_supported = isinstance(bottom_start, int) and (
+        (height - bottom_start) / height <= 0.08
+        or _has_band_semantics(
+            items,
+            start=bottom_start,
+            end=height,
+            tokens=_BOTTOM_BAND_TOKENS,
+        )
+    )
     if rejected_tabular_internal_cut and trusted_top_band_end is not None:
         boxes = [
             {"x": 0, "y": 0, "w": width, "h": trusted_top_band_end},
@@ -176,20 +285,76 @@ def _select_root_proposals(
         source = "supported_top_band_above_tabular_content"
     elif edge_cut is not None and stacked_top_end is not None:
         split_x = int(edge_cut.get("point") or 0)
+        content_bottom = int(bottom_start) if bottom_supported and int(bottom_start) > stacked_top_end else height
         boxes = [
             {"x": 0, "y": 0, "w": width, "h": stacked_top_end},
-            {"x": 0, "y": stacked_top_end, "w": split_x, "h": height - stacked_top_end},
+            {"x": 0, "y": stacked_top_end, "w": split_x, "h": content_bottom - stacked_top_end},
             {
                 "x": split_x,
                 "y": stacked_top_end,
                 "w": width - split_x,
-                "h": height - stacked_top_end,
+                "h": content_bottom - stacked_top_end,
             },
         ]
-        source = "stacked_top_controls_with_edge_rail"
-    elif edge_cut is not None and edge_cut.get("source") == "image_long_vertical_separator":
+        if content_bottom < height:
+            boxes.append({"x": 0, "y": content_bottom, "w": width, "h": height - content_bottom})
+        source = (
+            "stacked_top_controls_with_edge_rail_and_bottom"
+            if content_bottom < height
+            else "stacked_top_controls_with_edge_rail"
+        )
+    elif edge_cut is not None and trusted_top_band_end is not None:
+        split_x = int(edge_cut.get("point") or 0)
+        content_bottom = (
+            int(bottom_start)
+            if bottom_supported and int(bottom_start) > trusted_top_band_end
+            else height
+        )
+        boxes = [
+            {"x": 0, "y": 0, "w": width, "h": trusted_top_band_end},
+            {
+                "x": 0,
+                "y": trusted_top_band_end,
+                "w": split_x,
+                "h": content_bottom - trusted_top_band_end,
+            },
+            {
+                "x": split_x,
+                "y": trusted_top_band_end,
+                "w": width - split_x,
+                "h": content_bottom - trusted_top_band_end,
+            },
+        ]
+        if content_bottom < height:
+            boxes.append({"x": 0, "y": content_bottom, "w": width, "h": height - content_bottom})
+        source = (
+            "supported_top_band_with_edge_rail_and_bottom"
+            if content_bottom < height
+            else "supported_top_band_with_edge_rail"
+        )
+    elif edge_cut is not None and edge_rail_top_end is not None:
+        split_x = int(edge_cut.get("point") or 0)
+        boxes = [
+            {"x": 0, "y": 0, "w": split_x, "h": height},
+            {"x": split_x, "y": 0, "w": width - split_x, "h": edge_rail_top_end},
+            {
+                "x": split_x,
+                "y": edge_rail_top_end,
+                "w": width - split_x,
+                "h": height - edge_rail_top_end,
+            },
+        ]
+        source = "full_height_edge_rail_with_right_top"
+    elif edge_cut is not None and edge_cut.get("source") in {
+        "image_long_vertical_separator",
+        "image_color_block_boundary",
+    }:
         boxes = _cells_from_cuts(screen, "x", [edge_cut])
-        source = "supported_image_edge_rail"
+        source = (
+            "strong_color_block_vertical_partition"
+            if edge_cut.get("source") == "image_color_block_boundary"
+            else "supported_image_edge_rail"
+        )
     elif supported_columns:
         if int(first_two_x[0].get("point") or 0) <= width * 0.22:
             boxes = _cells_from_cuts(screen, "x", [first_two_x[0]])
@@ -204,19 +369,14 @@ def _select_root_proposals(
 
     if not boxes:
         top_end = edge_bands.get("top_end")
-        bottom_start = edge_bands.get("bottom_start")
         top_supported = isinstance(top_end, int) and (
             top_end / height <= 0.16
-            or _has_band_semantics(items, start=0, end=top_end, tokens=_TOP_BAND_TOKENS)
-        )
-        bottom_supported = isinstance(bottom_start, int) and (
-            (height - bottom_start) / height <= 0.08
-            or _has_band_semantics(
-                items,
-                start=bottom_start,
-                end=height,
-                tokens=_BOTTOM_BAND_TOKENS,
+            or _is_visually_supported_top_band(
+                top_end,
+                image_horizontal_cuts=image_horizontal_cuts,
+                height=height,
             )
+            or _has_band_semantics(items, start=0, end=top_end, tokens=_TOP_BAND_TOKENS)
         )
         boundaries = [0]
         if top_supported:
@@ -232,6 +392,28 @@ def _select_root_proposals(
                 if end > start
             ]
             source = "supported_horizontal_edge_bands"
+
+    if not boxes:
+        strong_color_horizontal = [
+            cut
+            for cut in color_horizontal_cuts
+            if (
+                height * 0.03 <= int(cut.get("point") or 0) <= height * 0.20
+                or height * 0.80 <= int(cut.get("point") or 0) <= height * 0.97
+            )
+            and float(cut.get("support") or 0.0) >= 0.72
+            and float(cut.get("color_distance") or 0.0) >= 40.0
+        ]
+        if strong_color_horizontal:
+            color_cut = max(
+                strong_color_horizontal,
+                key=lambda cut: (
+                    float(cut.get("support") or 0.0),
+                    float(cut.get("color_distance") or 0.0),
+                ),
+            )
+            boxes = _cells_from_cuts(screen, "y", [color_cut])
+            source = "strong_color_block_horizontal_partition"
 
     fallback = None
     if not boxes:
@@ -253,6 +435,8 @@ def _select_root_proposals(
         "x_cuts": x_cuts,
         "image_separator_cuts": image_separator_cuts,
         "image_horizontal_cuts": image_horizontal_cuts,
+        "color_vertical_cuts": color_vertical_cuts,
+        "color_horizontal_cuts": color_horizontal_cuts,
         "raw_edge_bands": raw_edge_bands,
         "y_cuts": y_cuts,
         "edge_bands": edge_bands,
@@ -260,7 +444,151 @@ def _select_root_proposals(
         "rejected_tabular_internal_cut": rejected_tabular_internal_cut,
         "dominant_tabular_bbox": dominant_tabular_bbox,
         "trusted_top_band_end": trusted_top_band_end,
+        "document_content_start": document_content_start,
+        "edge_rail_top_end": edge_rail_top_end,
+        "aligned_bottom_status_start": aligned_bottom_status_start,
+        "centered_content_margin_pair_rejected": centered_content_margin_pair is not None,
+        "centered_content_margin_pair": centered_content_margin_pair,
+        "primary_content_strategy": primary_content_strategy,
+        "class_rule_vertical_partition_suppressed": class_rule_vertical_partition_suppressed,
+        "class_rule_edge_partition_suppressed_without_navigation_evidence": (
+            class_rule_edge_partition_suppressed_without_navigation_evidence
+        ),
     }
+
+
+def _full_width_document_content_start(
+    items: list[dict[str, Any]],
+    *,
+    width: int,
+    height: int,
+) -> int | None:
+    """用全宽文档节点收紧被网页横幅放大的顶栏。"""
+
+    starts: list[int] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        bbox = _bbox(item.get("bbox"))
+        if (
+            bbox is None
+            or bbox["y"] < height * 0.03
+            or bbox["y"] > height * 0.30
+            or bbox["x"] > width * 0.03
+            or bbox["w"] < width * 0.80
+            or bbox["h"] < height * 0.50
+        ):
+            continue
+        semantic_text = " ".join(
+            str(item.get(key) or "").casefold()
+            for key in ("item_id", "candidate_id", "role", "item_type", "label", "layout")
+        )
+        if not any(token in semantic_text for token in ("document", "web_area", "web area")):
+            continue
+        starts.append(bbox["y"])
+    if not starts:
+        return None
+
+    candidate = min(starts)
+    top_control_evidence = 0
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        bbox = _bbox(item.get("bbox"))
+        if bbox is None or bbox["y"] + bbox["h"] > candidate + height * 0.02:
+            continue
+        semantic_text = " ".join(
+            str(item.get(key) or "").casefold()
+            for key in ("item_id", "candidate_id", "role", "item_type", "label", "layout")
+        )
+        if any(token in semantic_text for token in ("toolbar", "address", "input", "window control")):
+            top_control_evidence += 1
+    return candidate if top_control_evidence > 0 else None
+
+
+def _is_visually_supported_top_band(
+    top_end: int,
+    *,
+    image_horizontal_cuts: list[dict[str, Any]],
+    height: int,
+) -> bool:
+    if top_end <= 0 or top_end / max(1, height) > 0.2:
+        return False
+    return any(
+        abs(int(cut.get("point") or 0) - top_end) <= max(2, int(height * 0.005))
+        and float(cut.get("support") or 0.0) >= 0.45
+        for cut in image_horizontal_cuts
+    )
+
+
+def _aligned_bottom_status_start(
+    items: list[dict[str, Any]],
+    *,
+    width: int,
+    height: int,
+) -> int | None:
+    candidates: list[dict[str, int]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        bbox = _bbox(item.get("bbox"))
+        if bbox is None:
+            continue
+        center_y = bbox["y"] + bbox["h"] / 2
+        if (
+            center_y < height * 0.94
+            or bbox["h"] > height * 0.06
+            or bbox["w"] > width * 0.35
+        ):
+            continue
+        candidates.append(bbox)
+    if len(candidates) < 2:
+        return None
+
+    maximum_center_delta = max(6, int(height * 0.012))
+    minimum_center_span = width * 0.65
+    pairs: list[tuple[dict[str, int], dict[str, int]]] = []
+    for index, left in enumerate(candidates):
+        left_center_x = left["x"] + left["w"] / 2
+        left_center_y = left["y"] + left["h"] / 2
+        for right in candidates[index + 1 :]:
+            right_center_x = right["x"] + right["w"] / 2
+            right_center_y = right["y"] + right["h"] / 2
+            if (
+                abs(right_center_x - left_center_x) >= minimum_center_span
+                and abs(right_center_y - left_center_y) <= maximum_center_delta
+            ):
+                pairs.append((left, right))
+    if not pairs:
+        return None
+    pair = max(
+        pairs,
+        key=lambda values: min(
+            values[0]["y"] + values[0]["h"] / 2,
+            values[1]["y"] + values[1]["h"] / 2,
+        ),
+    )
+    padding = max(3, int(height * 0.006))
+    return max(int(height * 0.9), min(pair[0]["y"], pair[1]["y"]) - padding)
+
+
+def _strong_top_boundary_for_edge_rail(
+    *,
+    edge_bands: dict[str, Any],
+    image_horizontal_cuts: list[dict[str, Any]],
+    height: int,
+) -> int | None:
+    top_end = edge_bands.get("top_end")
+    if not isinstance(top_end, int) or top_end <= 0 or top_end > height * 0.35:
+        return None
+    limit = min(int(height * 0.2), top_end + max(2, int(height * 0.02)))
+    candidates = [
+        int(cut.get("point") or 0)
+        for cut in image_horizontal_cuts
+        if float(cut.get("support") or 0.0) >= 0.94
+        and height * 0.03 <= int(cut.get("point") or 0) <= limit
+    ]
+    return max(candidates) if candidates else None
 
 
 def _looks_like_repeated_grid_column_cuts(
@@ -362,6 +690,7 @@ def _trusted_top_band_end(
         if (
             bbox is None
             or bbox["y"] > height * 0.03
+            or bbox["x"] > width * 0.03
             or bbox["w"] < width * 0.8
             or bbox["h"] > height * 0.22
         ):
@@ -397,6 +726,16 @@ def _select_supported_edge_cut(
     width: int,
     image_separator_cuts: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
+    color_eligible = [
+        cut
+        for cut in image_separator_cuts or []
+        if cut.get("source") == "image_color_block_boundary"
+        and width * 0.045 <= int(cut.get("point") or 0) <= width * 0.35
+        and float(cut.get("support") or 0.0) >= 0.72
+        and float(cut.get("color_distance") or 0.0) >= 40.0
+    ]
+    if color_eligible:
+        return min(color_eligible, key=lambda cut: int(cut.get("point") or 0))
     image_eligible = [
         cut
         for cut in image_separator_cuts or []
@@ -423,6 +762,116 @@ def _select_supported_edge_cut(
             int(cut.get("point") or 0),
         ),
     )
+
+
+def _centered_content_margin_pair(
+    items: list[dict[str, Any]],
+    *,
+    color_vertical_cuts: list[dict[str, Any]],
+    width: int,
+    height: int,
+    content_start: Any,
+) -> dict[str, Any] | None:
+    """识别居中内容面板两侧的空白外边距，避免把外边距误当侧栏。"""
+
+    left_cuts = [
+        cut
+        for cut in color_vertical_cuts
+        if width * 0.045 <= int(cut.get("point") or 0) <= width * 0.35
+        and float(cut.get("support") or 0.0) >= 0.72
+        and float(cut.get("color_distance") or 0.0) >= 40.0
+    ]
+    right_cuts = [
+        cut
+        for cut in color_vertical_cuts
+        if width * 0.65 <= int(cut.get("point") or 0) <= width * 0.955
+        and float(cut.get("support") or 0.0) >= 0.72
+        and float(cut.get("color_distance") or 0.0) >= 40.0
+    ]
+    candidates: list[tuple[int, dict[str, Any], dict[str, Any], str]] = []
+    for left in left_cuts:
+        left_margin = int(left.get("point") or 0)
+        for right in right_cuts:
+            right_point = int(right.get("point") or 0)
+            right_margin = width - right_point
+            difference = abs(left_margin - right_margin)
+            tolerance = max(int(width * 0.04), int(min(left_margin, right_margin) * 0.20))
+            if right_point - left_margin < width * 0.40 or difference > tolerance:
+                continue
+            candidates.append((difference, left, right, "paired_visible_boundaries"))
+    if not candidates:
+        for left in left_cuts:
+            left_boundary = int(left.get("point") or 0)
+            mirrored_right = width - left_boundary
+            if mirrored_right - left_boundary < width * 0.40:
+                continue
+            candidates.append(
+                (
+                    0,
+                    left,
+                    {
+                        "point": mirrored_right,
+                        "support": left.get("support"),
+                        "color_distance": left.get("color_distance"),
+                        "source": "mirrored_centered_margin_boundary",
+                    },
+                    "single_visible_boundary_with_mirrored_empty_margin",
+                )
+            )
+        for right in right_cuts:
+            right_boundary = int(right.get("point") or 0)
+            mirrored_left = width - right_boundary
+            if right_boundary - mirrored_left < width * 0.40:
+                continue
+            candidates.append(
+                (
+                    0,
+                    {
+                        "point": mirrored_left,
+                        "support": right.get("support"),
+                        "color_distance": right.get("color_distance"),
+                        "source": "mirrored_centered_margin_boundary",
+                    },
+                    right,
+                    "single_visible_boundary_with_mirrored_empty_margin",
+                )
+            )
+    if not candidates:
+        return None
+
+    _, left_cut, right_cut, boundary_evidence = min(candidates, key=lambda value: value[0])
+    left_boundary = int(left_cut.get("point") or 0)
+    right_boundary = int(right_cut.get("point") or 0)
+    start_y = max(0, min(height - 1, int(content_start or height * 0.08)))
+    counts = {"left": 0, "center": 0, "right": 0}
+    for item in items:
+        bbox = _bbox(item.get("bbox")) if isinstance(item, dict) else None
+        if bbox is None or bbox["w"] >= width * 0.60:
+            continue
+        center_x = bbox["x"] + bbox["w"] / 2
+        center_y = bbox["y"] + bbox["h"] / 2
+        if center_y < start_y:
+            continue
+        if center_x < left_boundary:
+            counts["left"] += 1
+        elif center_x >= right_boundary:
+            counts["right"] += 1
+        else:
+            counts["center"] += 1
+
+    outer_count = counts["left"] + counts["right"]
+    if counts["center"] < 2 or outer_count > max(1, int(counts["center"] * 0.08)):
+        return None
+    return {
+        "left_boundary": left_boundary,
+        "right_boundary": right_boundary,
+        "left_margin": left_boundary,
+        "right_margin": width - right_boundary,
+        "content_start": start_y,
+        "evidence_counts": counts,
+        "boundary_evidence": boundary_evidence,
+        "reason": "symmetric_color_boundaries_with_empty_outer_margins",
+    }
 
 
 def _stacked_top_control_end(
@@ -470,6 +919,95 @@ def _stacked_top_control_end(
     if not cuts:
         return None
     return min(cuts, key=lambda point: abs(point - covered_end))
+
+
+def _color_block_boundary_cuts(
+    image_path: str,
+    *,
+    width: int,
+    height: int,
+    axis: str,
+) -> list[dict[str, Any]]:
+    """检测跨越大部分界面的明显 RGB 色块边界。"""
+
+    path = str(image_path or "").strip()
+    if not path or width <= 0 or height <= 0 or axis not in {"x", "y"}:
+        return []
+    try:
+        with Image.open(path) as image:
+            rgb = np.asarray(image.convert("RGB"), dtype=np.int16)
+    except (FileNotFoundError, OSError, ValueError):
+        return []
+    if rgb.shape[:2] != (height, width):
+        return []
+
+    # 只采样中心主体，避免窗口边框和角落装饰制造伪分区。
+    if axis == "x":
+        orthogonal_start = min(height - 1, max(0, int(height * 0.04)))
+        orthogonal_end = min(height, max(orthogonal_start + 1, int(height * 0.96)))
+        adjacent_delta = np.max(
+            np.abs(
+                rgb[orthogonal_start:orthogonal_end, 1:, :]
+                - rgb[orthogonal_start:orthogonal_end, :-1, :]
+            ),
+            axis=2,
+        )
+        axis_length = width
+    else:
+        orthogonal_start = min(width - 1, max(0, int(width * 0.04)))
+        orthogonal_end = min(width, max(orthogonal_start + 1, int(width * 0.96)))
+        adjacent_delta = np.max(
+            np.abs(
+                rgb[1:, orthogonal_start:orthogonal_end, :]
+                - rgb[:-1, orthogonal_start:orthogonal_end, :]
+            ),
+            axis=2,
+        ).T
+        axis_length = height
+
+    support = (adjacent_delta >= 36).mean(axis=0)
+    color_distance = adjacent_delta.mean(axis=0)
+    candidate_points = np.flatnonzero((support >= 0.72) & (color_distance >= 40.0))
+    minimum_point = max(1, int(axis_length * 0.03))
+    maximum_point = min(axis_length - 2, int(axis_length * 0.97))
+    candidates = [
+        int(value)
+        for value in candidate_points
+        if minimum_point <= int(value) <= maximum_point
+    ]
+    if not candidates:
+        return []
+
+    maximum_gap = max(2, int(axis_length * 0.004))
+    clusters: list[list[int]] = []
+    for value in candidates:
+        if not clusters or value - clusters[-1][-1] > maximum_gap:
+            clusters.append([value])
+        else:
+            clusters[-1].append(value)
+
+    cuts = []
+    for cluster in clusters:
+        strongest = max(
+            cluster,
+            key=lambda value: (float(support[value]), float(color_distance[value])),
+        )
+        point = strongest + 1
+        cuts.append(
+            {
+                "axis": axis,
+                "point": point,
+                "gap_start": min(cluster) + 1,
+                "gap_end": max(cluster) + 1,
+                "gap_ratio": round((max(cluster) - min(cluster) + 1) / axis_length, 4),
+                "support": round(float(support[strongest]), 4),
+                "color_distance": round(float(color_distance[strongest]), 4),
+                "remainder_supported": True,
+                "score": round(min(1.0, float(support[strongest]) + 0.15), 4),
+                "source": "image_color_block_boundary",
+            }
+        )
+    return cuts
 
 
 def _vertical_separator_cuts(
@@ -603,6 +1141,19 @@ def _horizontal_separator_cuts(
             }
         )
     return cuts
+
+
+def detect_horizontal_separator_cuts(
+    image_path: str,
+    *,
+    width: int,
+    height: int,
+) -> list[dict[str, Any]]:
+    return _horizontal_separator_cuts(
+        image_path,
+        width=width,
+        height=height,
+    )
 
 
 def _calibrate_edge_bands(
@@ -754,6 +1305,7 @@ def adapt_root_partition_to_stage1_contract(
         "source": source,
         "partition_contract": partition.get("contract_version"),
         "root_validator": validator,
+        "diagnostics": dict(partition.get("diagnostics") or {}),
     }
     return result
 
@@ -773,8 +1325,12 @@ def _assign_stage1_semantics(
     assignments: list[str] = []
     if len(resolved) == 1:
         assignments = ["main_content"]
+    elif _is_top_with_lower_edge_rail_and_bottom(boxes, width=width, height=height):
+        assignments = ["top_bar", "left_nav", "main_content", "bottom_bar"]
     elif _is_top_with_lower_edge_rail(boxes, width=width, height=height):
         assignments = ["top_bar", "left_nav", "main_content"]
+    elif _is_left_with_right_top(boxes, width=width, height=height):
+        assignments = ["left_nav", "top_bar", "main_content"]
     elif vertical_partition:
         for index, box in enumerate(boxes):
             if index == 0 and box and box["x"] <= width * 0.02 and box["w"] <= width * 0.35:
@@ -811,6 +1367,35 @@ def _assign_stage1_semantics(
     return resolved
 
 
+def _is_left_with_right_top(
+    boxes: list[dict[str, int] | None],
+    *,
+    width: int,
+    height: int,
+) -> bool:
+    if len(boxes) != 3 or any(box is None for box in boxes):
+        return False
+    left, top, main = boxes
+    if left is None or top is None or main is None:
+        return False
+    split_x = left["x"] + left["w"]
+    top_end = top["y"] + top["h"]
+    return (
+        left["x"] == 0
+        and left["y"] == 0
+        and left["h"] == height
+        and left["w"] <= width * 0.35
+        and top["x"] == split_x
+        and top["y"] == 0
+        and top["w"] == width - split_x
+        and top["h"] <= height * 0.35
+        and main["x"] == split_x
+        and main["y"] == top_end
+        and main["w"] == width - split_x
+        and main["y"] + main["h"] == height
+    )
+
+
 def _is_top_with_lower_edge_rail(
     boxes: list[dict[str, int] | None],
     *,
@@ -834,6 +1419,37 @@ def _is_top_with_lower_edge_rail(
         and left["x"] + left["w"] == main["x"]
         and main["x"] + main["w"] == width
         and left["w"] <= width * 0.35
+    )
+
+
+def _is_top_with_lower_edge_rail_and_bottom(
+    boxes: list[dict[str, int] | None],
+    *,
+    width: int,
+    height: int,
+) -> bool:
+    if len(boxes) != 4 or any(box is None for box in boxes):
+        return False
+    top, left, main, bottom = boxes
+    assert top is not None and left is not None and main is not None and bottom is not None
+    top_bottom = top["y"] + top["h"]
+    content_bottom = bottom["y"]
+    return (
+        top["x"] == 0
+        and top["y"] == 0
+        and top["w"] == width
+        and top["h"] <= height * 0.35
+        and left["x"] == 0
+        and left["y"] == top_bottom
+        and main["y"] == top_bottom
+        and left["h"] == main["h"] == content_bottom - top_bottom
+        and left["x"] + left["w"] == main["x"]
+        and main["x"] + main["w"] == width
+        and left["w"] <= width * 0.35
+        and bottom["x"] == 0
+        and bottom["w"] == width
+        and bottom["y"] + bottom["h"] == height
+        and bottom["h"] <= height * 0.25
     )
 
 
@@ -870,17 +1486,70 @@ def _has_band_semantics(
         if not start <= center_y <= end:
             continue
         metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        source_evidence = {
+            str(value or "").strip().casefold()
+            for value in item.get("source_evidence") or []
+            if str(value or "").strip()
+        }
+        metadata_source = str(metadata.get("source") or "").strip().casefold()
+        # 模型生成的 section 只是结构解释，不能单独证明真实栏存在。
+        if source_evidence and source_evidence <= {"screen_map_section"}:
+            continue
+        if not source_evidence and metadata_source == "screen_map.sections":
+            continue
         semantic_text = " ".join(
             str(value or "")
             for value in (
                 item.get("item_id"),
+                item.get("label"),
+                item.get("text"),
+                item.get("name"),
                 item.get("role"),
                 item.get("item_type"),
                 metadata.get("surface_zone"),
                 metadata.get("layout_zone"),
             )
         ).casefold()
-        if any(token in semantic_text for token in tokens):
+        normalized_semantic_text = semantic_text.replace("-", "_").replace(" ", "_")
+        if any(token in semantic_text or token in normalized_semantic_text for token in tokens):
+            return True
+    return False
+
+
+def _has_vertical_band_semantics(
+    items: list[dict[str, Any]],
+    *,
+    start: int,
+    end: int,
+    content_start: int,
+    tokens: tuple[str, ...],
+) -> bool:
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        bbox = _bbox(item.get("bbox"))
+        if bbox is None:
+            continue
+        center_x = bbox["x"] + bbox["w"] / 2
+        center_y = bbox["y"] + bbox["h"] / 2
+        if not start <= center_x <= end or center_y < content_start:
+            continue
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        semantic_text = " ".join(
+            str(value or "")
+            for value in (
+                item.get("item_id"),
+                item.get("label"),
+                item.get("text"),
+                item.get("name"),
+                item.get("role"),
+                item.get("item_type"),
+                metadata.get("surface_zone"),
+                metadata.get("layout_zone"),
+            )
+        ).casefold()
+        normalized_semantic_text = semantic_text.replace("-", "_").replace(" ", "_")
+        if any(token in semantic_text or token in normalized_semantic_text for token in tokens):
             return True
     return False
 

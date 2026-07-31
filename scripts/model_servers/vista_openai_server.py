@@ -21,6 +21,81 @@ MODEL_NAME = "inclusionAI/VISTA-4B"
 MAX_NEW_TOKENS = 32
 GENERATE_LOCK = threading.Lock()
 ACTIVE_REQUEST: dict[str, Any] | None = None
+ACTIVE_REQUEST_LOCK = threading.Lock()
+ACTIVE_CANCEL_EVENT: threading.Event | None = None
+
+
+class ModelRequestCancelled(RuntimeError):
+    """当前 VISTA 推理请求已收到匹配的取消信号。"""
+
+
+def _activate_request(
+    *,
+    request_id: str,
+    cancel_event: threading.Event,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    global ACTIVE_REQUEST, ACTIVE_CANCEL_EVENT
+    normalized_request_id = str(request_id or "").strip()
+    if not normalized_request_id:
+        raise ValueError("request_id is required")
+    active = {
+        "request_id": normalized_request_id,
+        **dict(metadata),
+    }
+    with ACTIVE_REQUEST_LOCK:
+        ACTIVE_REQUEST = active
+        ACTIVE_CANCEL_EVENT = cancel_event
+    return dict(active)
+
+
+def _active_request_snapshot() -> dict[str, Any] | None:
+    with ACTIVE_REQUEST_LOCK:
+        return dict(ACTIVE_REQUEST) if isinstance(ACTIVE_REQUEST, dict) else None
+
+
+def _cancel_active_request(request_id: str) -> dict[str, Any]:
+    normalized_request_id = str(request_id or "").strip()
+    with ACTIVE_REQUEST_LOCK:
+        active_request_id = str((ACTIVE_REQUEST or {}).get("request_id") or "")
+        if not active_request_id:
+            return {
+                "contract_version": "model_request_cancel_response_v1",
+                "status": "request_not_active",
+                "request_id": normalized_request_id or None,
+            }
+        if normalized_request_id != active_request_id:
+            return {
+                "contract_version": "model_request_cancel_response_v1",
+                "status": "request_id_mismatch",
+                "request_id": normalized_request_id or None,
+                "active_request_id": active_request_id,
+            }
+        if ACTIVE_CANCEL_EVENT is None:
+            return {
+                "contract_version": "model_request_cancel_response_v1",
+                "status": "cancel_failed",
+                "request_id": normalized_request_id,
+                "reason": "active_cancel_event_missing",
+            }
+        ACTIVE_CANCEL_EVENT.set()
+        return {
+            "contract_version": "model_request_cancel_response_v1",
+            "status": "cancellation_acknowledged",
+            "request_id": normalized_request_id,
+        }
+
+
+def _clear_active_request(request_id: str) -> bool:
+    global ACTIVE_REQUEST, ACTIVE_CANCEL_EVENT
+    normalized_request_id = str(request_id or "").strip()
+    with ACTIVE_REQUEST_LOCK:
+        active_request_id = str((ACTIVE_REQUEST or {}).get("request_id") or "")
+        if normalized_request_id != active_request_id:
+            return False
+        ACTIVE_REQUEST = None
+        ACTIVE_CANCEL_EVENT = None
+        return True
 
 
 def _load_image(url: str):
@@ -123,6 +198,7 @@ def _generate(
     max_tokens: int,
     temperature: float,
     timeout_seconds: float,
+    cancel_event: threading.Event | None = None,
 ) -> str:
     import torch
     from transformers import StoppingCriteria, StoppingCriteriaList
@@ -156,6 +232,8 @@ def _generate(
 
     class CoordinateCompleteStoppingCriteria(StoppingCriteria):
         def __call__(self, input_ids, scores, **kwargs):
+            if cancel_event is not None and cancel_event.is_set():
+                return True
             generated_ids = input_ids[:, inputs["input_ids"].shape[1] :]
             generated_text = PROCESSOR.batch_decode(generated_ids, skip_special_tokens=True)[0]
             return _coordinate_output_complete(generated_text)
@@ -165,6 +243,8 @@ def _generate(
         generate_kwargs["temperature"] = float(temperature)
     with torch.inference_mode():
         generated = MODEL.generate(**inputs, **generate_kwargs)
+    if cancel_event is not None and cancel_event.is_set():
+        raise ModelRequestCancelled("VISTA model request was cancelled")
     new_tokens = generated[:, inputs["input_ids"].shape[1] :]
     return PROCESSOR.batch_decode(new_tokens, skip_special_tokens=True)[0].strip()
 
@@ -191,7 +271,7 @@ class VistaHandler(BaseHTTPRequestHandler):
                     "status": "busy" if GENERATE_LOCK.locked() else "ok",
                     "model": MODEL_NAME,
                     "pid": os.getpid(),
-                    "active_request": ACTIVE_REQUEST,
+                    "active_request": _active_request_snapshot(),
                 },
             )
             return
@@ -213,7 +293,34 @@ class VistaHandler(BaseHTTPRequestHandler):
         self._send_json(404, {"error": {"message": f"unknown route: {self.path}"}})
 
     def do_POST(self) -> None:
-        global ACTIVE_REQUEST
+        if self.path.rstrip("/") in {"/v1/cancel", "/cancel"}:
+            try:
+                length = int(self.headers.get("Content-Length") or "0")
+                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                request_id = str(payload.get("request_id") or "").strip()
+                if not request_id:
+                    self._send_json(
+                        400,
+                        {
+                            "contract_version": "model_request_cancel_response_v1",
+                            "status": "invalid_request",
+                            "error": {"message": "request_id is required"},
+                        },
+                    )
+                    return
+                result = _cancel_active_request(request_id)
+                status_code = 200 if result["status"] != "request_id_mismatch" else 409
+                self._send_json(status_code, result)
+            except (ValueError, json.JSONDecodeError) as exc:
+                self._send_json(
+                    400,
+                    {
+                        "contract_version": "model_request_cancel_response_v1",
+                        "status": "invalid_request",
+                        "error": {"message": str(exc)},
+                    },
+                )
+            return
         if self.path.rstrip("/") not in {"/v1/chat/completions", "/chat/completions"}:
             self._send_json(404, {"error": {"message": f"unknown route: {self.path}"}})
             return
@@ -225,21 +332,32 @@ class VistaHandler(BaseHTTPRequestHandler):
                     "error": {
                         "message": "VISTA model is already processing another request",
                         "type": "model_busy",
-                        "active_request": ACTIVE_REQUEST,
+                        "active_request": _active_request_snapshot(),
                     }
                 },
             )
             return
+        request_id = ""
         try:
             length = int(self.headers.get("Content-Length") or "0")
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
             request_timeout_seconds = _request_timeout_seconds(payload, default=30.0)
-            ACTIVE_REQUEST = {
-                "started_at": time.time(),
-                "client": self.client_address[0] if self.client_address else None,
-                "max_tokens": int(payload.get("max_tokens") or MAX_NEW_TOKENS),
-                "request_timeout_seconds": request_timeout_seconds,
-            }
+            request_id = str(
+                payload.get("request_id")
+                or self.headers.get("X-Agent-GUI-Request-ID")
+                or f"vista-unmanaged-{int(time.time() * 1000)}"
+            ).strip()
+            cancel_event = threading.Event()
+            _activate_request(
+                request_id=request_id,
+                cancel_event=cancel_event,
+                metadata={
+                    "started_at": time.time(),
+                    "client": self.client_address[0] if self.client_address else None,
+                    "max_tokens": int(payload.get("max_tokens") or MAX_NEW_TOKENS),
+                    "request_timeout_seconds": request_timeout_seconds,
+                },
+            )
             messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
             instruction, _ = _message_text_and_image(messages)
             text = _generate(
@@ -247,6 +365,7 @@ class VistaHandler(BaseHTTPRequestHandler):
                 max_tokens=int(payload.get("max_tokens") or MAX_NEW_TOKENS),
                 temperature=float(payload.get("temperature") or 0.0),
                 timeout_seconds=request_timeout_seconds,
+                cancel_event=cancel_event,
             )
             wants_json = (payload.get("response_format") or {}).get("type") == "json_object"
             content = json.dumps(_point_payload(text, instruction=instruction), ensure_ascii=False) if wants_json else text
@@ -267,10 +386,21 @@ class VistaHandler(BaseHTTPRequestHandler):
                     "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
                 },
             )
+        except ModelRequestCancelled as exc:
+            self._send_json(
+                409,
+                {
+                    "contract_version": "model_request_cancel_response_v1",
+                    "status": "cancelled",
+                    "request_id": request_id or None,
+                    "error": {"message": str(exc), "type": exc.__class__.__name__},
+                },
+            )
         except Exception as exc:
             self._send_json(500, {"error": {"message": str(exc), "type": exc.__class__.__name__}})
         finally:
-            ACTIVE_REQUEST = None
+            if request_id:
+                _clear_active_request(request_id)
             GENERATE_LOCK.release()
 
     def log_message(self, format: str, *args: Any) -> None:

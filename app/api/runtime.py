@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Query
 
 from app.core.model_server import check_model_server, ensure_model_server, load_model_profiles, profile_for_stage, stop_model_server
+from app.core.gpu_resources import build_model_resource_preflight
 from app.core.runtime_artifacts import RuntimeTimer, write_trace
 from app.gate.contracts import build_gate_contract_catalog
 from app.api.models.request import ModelServerRequest, RuntimePrepareRequest
@@ -408,6 +409,31 @@ def model_status(profile_id: str | None = None) -> APIResponse:
         },
         error=None,
     )
+
+
+@router.get("/models/resource_preflight", response_model=APIResponse)
+def model_resource_preflight(
+    stage: str = Query(default="locate"),
+    profile_id: str | None = Query(default=None),
+) -> APIResponse:
+    """在启动真实模型前报告 GPU 与系统内存占用，并给出批次建议。"""
+
+    try:
+        profile = profile_for_stage(stage, profile_id)
+        result = build_model_resource_preflight(profile)
+        return APIResponse(
+            success=True,
+            message="Model resource preflight completed",
+            data=result,
+            error=None,
+        )
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Model resource preflight failed",
+            data={"stage": stage, "profile_id": profile_id},
+            error=ErrorModel(code="model_resource_preflight_failed", details=str(exc)),
+        )
 
 
 @router.post("/models/start", response_model=APIResponse)

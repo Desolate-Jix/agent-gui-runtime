@@ -45,6 +45,30 @@ def test_dataflow_requires_latest_detail_snapshot_for_downstream_steps() -> None
     with pytest.raises(ValueError, match="stale detail snapshot"):
         require_latest_detail_snapshot(state, first)
     assert any(section["text"] == "Required skill: C# integration" for section in latest["description_sections"])
+    assert latest["detail_bottom_reached"] is False
+    assert latest["detail_read_state"] == "no_new_content"
+
+
+def test_dataflow_records_explicit_reached_bottom_as_complete() -> None:
+    detail = with_detail_snapshot(
+        {"title": "Article", "description_sections": []},
+        source="observe_detail",
+    )
+    latest = merge_read_batch_into_detail_snapshot(
+        detail,
+        {
+            "contract_version": "read_region_batch_v1",
+            "status": "ok",
+            "stop_reason": "reached_bottom",
+            "completion_status": "complete",
+            "reached_bottom": True,
+            "merged_text_lines": ["Last paragraph"],
+            "captures": [{"trace_path": "logs/traces/article-last.json"}],
+        },
+    )
+
+    assert latest["detail_bottom_reached"] is True
+    assert latest["detail_read_state"] == "reached_bottom"
 
 
 def test_candidate_freshness_rejects_stale_capture_coordinates() -> None:

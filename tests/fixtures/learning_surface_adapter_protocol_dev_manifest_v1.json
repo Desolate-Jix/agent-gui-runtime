@@ -1,0 +1,78 @@
+{
+  "contract_version": "learning_surface_adapter_protocol_manifest_v1",
+  "split": "dev",
+  "used_for_rule_tuning": true,
+  "interpretation": "Deterministic protocol fixtures for routing-rule development only; not model ability, recognition accuracy, bbox quality, or live reliability.",
+  "cases": [
+    {
+      "case_id": "dev_browser_host_chat_content",
+      "source_type": "fixture_only",
+      "trace_path": "tests/fixtures/surface_adapter_protocol/dev_browser_chat.json",
+      "trace_sha256": "322613ab07e95f11a68cc59ea6359d53ea6ea0a07605e282390125b9ecac8bf6",
+      "screenshot_path": "tests/fixtures/surface_adapter_protocol/screen.ppm",
+      "screenshot_sha256": "37da76abaaa9a3a325748b94bb63fad8aa924d6ce860ed5581b5125842a4f266",
+      "expected_adapter_id": "browser",
+      "expected_host_adapter_id": "browser",
+      "expected_host_adapter_status": "selected_from_visible_evidence",
+      "expected_content_adapter_id": "chat",
+      "expected_content_adapter_status": "selected_from_correlated_model_and_inventory",
+      "expected_decision_status": "selected_from_visible_evidence"
+    },
+    {
+      "case_id": "dev_browser_host_mail_content",
+      "source_type": "fixture_only",
+      "trace_path": "tests/fixtures/surface_adapter_protocol/dev_browser_mail.json",
+      "trace_sha256": "027930b64ab7764e73d91a2a21411d24ef9c0ca999b4b886d3469bbe46e01e74",
+      "screenshot_path": "tests/fixtures/surface_adapter_protocol/screen.ppm",
+      "screenshot_sha256": "37da76abaaa9a3a325748b94bb63fad8aa924d6ce860ed5581b5125842a4f266",
+      "expected_adapter_id": "browser",
+      "expected_host_adapter_id": "browser",
+      "expected_host_adapter_status": "selected_from_visible_evidence",
+      "expected_content_adapter_id": "mail_workspace",
+      "expected_content_adapter_status": "selected_from_correlated_model_and_inventory",
+      "expected_decision_status": "selected_from_visible_evidence"
+    },
+    {
+      "case_id": "dev_native_media_content",
+      "source_type": "fixture_only",
+      "trace_path": "tests/fixtures/surface_adapter_protocol/dev_native_media.json",
+      "trace_sha256": "31df8e9809678c024eb710c1f1f9fd15a1ef84d847e5b1a1a271b5950ccafc97",
+      "screenshot_path": "tests/fixtures/surface_adapter_protocol/screen.ppm",
+      "screenshot_sha256": "37da76abaaa9a3a325748b94bb63fad8aa924d6ce860ed5581b5125842a4f266",
+      "expected_adapter_id": "media_player",
+      "expected_host_adapter_id": "generic",
+      "expected_host_adapter_status": "not_applicable",
+      "expected_content_adapter_id": "media_player",
+      "expected_content_adapter_status": "selected_from_correlated_model_and_inventory",
+      "expected_decision_status": "selected_from_visible_evidence"
+    },
+    {
+      "case_id": "dev_media_feed_selects_read_only_policy",
+      "source_type": "fixture_only",
+      "trace_path": "tests/fixtures/surface_adapter_protocol/dev_media_feed_conflict.json",
+      "trace_sha256": "b69084f6677c15554c02ad991be5f6872c99fc58691978b765099a1db38cdb58",
+      "screenshot_path": "tests/fixtures/surface_adapter_protocol/screen.ppm",
+      "screenshot_sha256": "37da76abaaa9a3a325748b94bb63fad8aa924d6ce860ed5581b5125842a4f266",
+      "expected_adapter_id": "media_feed",
+      "expected_host_adapter_id": "generic",
+      "expected_host_adapter_status": "not_applicable",
+      "expected_content_adapter_id": "media_feed",
+      "expected_content_adapter_status": "selected_from_correlated_model_and_inventory",
+      "expected_decision_status": "selected_from_visible_evidence"
+    },
+    {
+      "case_id": "dev_dense_table_remains_generic",
+      "source_type": "fixture_only",
+      "trace_path": "tests/fixtures/surface_adapter_protocol/dev_dense_table_generic.json",
+      "trace_sha256": "cb53d2c4756b81656f88aed287ce900308d173451faba5aeaf692facb4b0d81c",
+      "screenshot_path": "tests/fixtures/surface_adapter_protocol/screen.ppm",
+      "screenshot_sha256": "37da76abaaa9a3a325748b94bb63fad8aa924d6ce860ed5581b5125842a4f266",
+      "expected_adapter_id": "generic",
+      "expected_host_adapter_id": "generic",
+      "expected_host_adapter_status": "not_applicable",
+      "expected_content_adapter_id": "generic",
+      "expected_content_adapter_status": "not_applicable",
+      "expected_decision_status": "insufficient_surface_evidence"
+    }
+  ]
+}

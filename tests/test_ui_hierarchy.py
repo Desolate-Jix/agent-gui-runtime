@@ -81,6 +81,119 @@ def test_ui_hierarchy_builds_unique_nested_parents() -> None:
     assert all(node["parent_id"] for node in graph["nodes"] if node["level"] != "screen")
 
 
+def test_ui_hierarchy_attaches_stage1_5_numbered_regions_to_structure_parent() -> None:
+    graph = build_ui_hierarchy_graph(
+        structure_regions=[_structure("main", {"x": 0, "y": 0, "w": 900, "h": 600})],
+        numbered_regions=[
+            {
+                "region_id": "main__stage1_5__conversation_list",
+                "bbox": {"x": 0, "y": 0, "w": 340, "h": 600},
+                "input_stage1_5_subregion": {
+                    "subregion_id": "main__stage1_5__conversation_list",
+                    "parent_region_id": "main",
+                    "role": "conversation_list",
+                },
+                "subregion_groups": [
+                    {
+                        "group_id": "conversation_row_1",
+                        "role": "conversation_row",
+                        "bbox": {"x": 20, "y": 120, "w": 300, "h": 64},
+                        "member_item_ids": ["conversation_title_1"],
+                        "source": "fixture_stage1_5_row",
+                    }
+                ],
+                "numbered_items": [
+                    {
+                        "item_id": "conversation_title_1",
+                        "number": "1.1",
+                        "label": "Example chat",
+                        "role": "text",
+                        "bbox": {"x": 90, "y": 130, "w": 140, "h": 22},
+                        "source": "ocr",
+                    }
+                ],
+            },
+            {
+                "region_id": "main__stage1_5__message_thread",
+                "bbox": {"x": 340, "y": 0, "w": 560, "h": 600},
+                "input_stage1_5_subregion": {
+                    "subregion_id": "main__stage1_5__message_thread",
+                    "parent_region_id": "main",
+                    "role": "message_thread",
+                },
+                "subregion_groups": [],
+                "numbered_items": [],
+            },
+        ],
+        screen_size={"width": 900, "height": 600},
+    )
+
+    by_source = {node.get("source_ref"): node for node in graph["nodes"] if node.get("source_ref")}
+    assert by_source["conversation_row_1"]["component_type"] == "conversation_row"
+    assert by_source["conversation_title_1"]["parent_id"] == by_source["conversation_row_1"]["node_id"]
+    assert by_source["conversation_row_1"]["parent_id"] == by_source["main"]["node_id"]
+    assert graph["validation"]["passed"] is True
+
+
+def test_ui_hierarchy_prefers_atomic_control_parent_over_semantic_group_for_factual_children() -> None:
+    graph = build_ui_hierarchy_graph(
+        structure_regions=[_structure("main", {"x": 0, "y": 0, "w": 640, "h": 420})],
+        numbered_regions=[
+            {
+                "region_id": "main",
+                "bbox": {"x": 0, "y": 0, "w": 640, "h": 420},
+                "subregion_groups": [
+                    {
+                        "group_id": "conversation_list",
+                        "role": "conversation_group",
+                        "bbox": {"x": 30, "y": 40, "w": 280, "h": 330},
+                        "member_item_ids": ["avatar_1", "title_1"],
+                        "source": "semantic_interpretation",
+                    }
+                ],
+                "control_parents": [
+                    {
+                        "object_id": "control_parent_row_1",
+                        "label": "Conversation row",
+                        "role": "atomic_control_parent",
+                        "bbox": {"x": 48, "y": 82, "w": 220, "h": 46},
+                        "member_object_ids": ["avatar_1", "title_1"],
+                        "source": "repeated_visual_anchor_with_row_evidence",
+                    }
+                ],
+                "numbered_items": [
+                    {
+                        "item_id": "avatar_1",
+                        "label": "Avatar",
+                        "role": "icon",
+                        "bbox": {"x": 48, "y": 82, "w": 42, "h": 42},
+                        "source": "visual",
+                    },
+                    {
+                        "item_id": "title_1",
+                        "label": "Chat title",
+                        "role": "text",
+                        "bbox": {"x": 100, "y": 90, "w": 120, "h": 20},
+                        "source": "ocr",
+                    },
+                ],
+            }
+        ],
+        screen_size={"width": 640, "height": 420},
+    )
+
+    by_source = {node.get("source_ref"): node for node in graph["nodes"] if node.get("source_ref")}
+    control_parent = by_source["control_parent_row_1"]
+    assert control_parent["level"] == "component"
+    assert control_parent["component_type"] == "atomic_control_parent"
+    assert control_parent["parent_id"] == "uih:structure:main"
+    assert by_source["avatar_1"]["parent_id"] == control_parent["node_id"]
+    assert by_source["title_1"]["parent_id"] == control_parent["node_id"]
+    assert by_source["conversation_list"]["node_id"] != control_parent["node_id"]
+    assert graph["summary"]["control_parent_count"] == 1
+    assert graph["validation"]["duplicate_primary_owner_count"] == 0
+
+
 def test_ui_hierarchy_keeps_empty_structure_region_and_clips_children() -> None:
     structure_regions = [
         _structure("top_bar", {"x": 0, "y": 0, "w": 500, "h": 80}),
@@ -282,6 +395,46 @@ def test_ui_hierarchy_is_deterministic_and_display_only() -> None:
     assert first["execute_binding_enabled"] is False
     assert first["artifact_is_authorization"] is False
     assert first["runtime_pathgraph_promotion"] is False
+
+
+def test_ui_hierarchy_does_not_restore_suppressed_fusion_group() -> None:
+    graph = build_ui_hierarchy_graph(
+        structure_regions=[_structure("main", {"x": 0, "y": 0, "w": 300, "h": 200})],
+        numbered_regions=[
+            {
+                "region_id": "main",
+                "bbox": {"x": 0, "y": 0, "w": 300, "h": 200},
+                "subregion_groups": [
+                    {
+                        "group_id": "suppressed_group",
+                        "role": "media_card_group",
+                        "bbox": {"x": 20, "y": 20, "w": 120, "h": 80},
+                        "member_item_ids": ["shared_item"],
+                        "render_in_main_overlay": False,
+                        "candidate_only": True,
+                    },
+                    {
+                        "group_id": "active_group",
+                        "role": "section_parent",
+                        "bbox": {"x": 100, "y": 20, "w": 160, "h": 100},
+                        "member_item_ids": ["shared_item"],
+                    },
+                ],
+                "numbered_items": [
+                    {
+                        "item_id": "shared_item",
+                        "role": "text",
+                        "bbox": {"x": 110, "y": 40, "w": 60, "h": 20},
+                    }
+                ],
+            }
+        ],
+        screen_size={"width": 300, "height": 200},
+    )
+
+    by_source = {node.get("source_ref"): node for node in graph["nodes"]}
+    assert "suppressed_group" not in by_source
+    assert by_source["shared_item"]["parent_id"] == by_source["active_group"]["node_id"]
 
 
 def test_two_stage_output_attaches_ui_hierarchy() -> None:

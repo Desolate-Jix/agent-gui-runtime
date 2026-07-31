@@ -50,6 +50,33 @@ def test_model_status_checks_only_requested_profile(monkeypatch) -> None:
     assert response.data["requested_profile_id"] == "vista_4b_transformers"
 
 
+def test_model_resource_preflight_returns_adaptive_batch_without_starting_model(monkeypatch) -> None:
+    monkeypatch.setattr(
+        runtime_api,
+        "profile_for_stage",
+        lambda stage, profile_id=None: {"profile_id": profile_id or stage, "gpu_memory_gib": 10},
+    )
+    monkeypatch.setattr(
+        runtime_api,
+        "build_model_resource_preflight",
+        lambda profile: {
+            "contract_version": "model_resource_preflight_v1",
+            "profile_id": profile["profile_id"],
+            "resource_mode": "constrained",
+            "recommended_batch_size": 2,
+        },
+    )
+
+    response = runtime_api.model_resource_preflight(
+        stage="locate",
+        profile_id="vista_4b_transformers",
+    )
+
+    assert response.success is True
+    assert response.data["resource_mode"] == "constrained"
+    assert response.data["recommended_batch_size"] == 2
+
+
 def test_observe_stage_defaults_to_learning_quality_understanding_profile() -> None:
     observe = profile_for_stage("observe")
     locate = profile_for_stage("locate")

@@ -1,0 +1,62 @@
+{
+  "contract_version": "single_interface_asset_v1",
+  "interface_id": "branch_updates",
+  "application_identity_key": "web:navigation-branching-lab",
+  "display_name": "Live Updates",
+  "surface_type": "content_collection",
+  "state_signature": "branch_updates:reviewed",
+  "artifact_is_authorization": false,
+  "fixed_anchors": [
+    {
+      "content_id": "updates_identity",
+      "label": "Live Updates Interface",
+      "source_kind": "state",
+      "source_id": "branch_updates",
+      "content_behavior": "fixed_label",
+      "agent_usage": "identity_anchor",
+      "read_policy": "on_interface_match",
+      "agent_description": "Confirm the reviewed live updates collection."
+    }
+  ],
+  "dynamic_slots": [
+    {
+      "content_id": "updates_feed",
+      "label": "Current live updates",
+      "source_kind": "region",
+      "source_id": "updates_feed",
+      "content_behavior": "dynamic_collection",
+      "agent_usage": "decision_signal",
+      "read_policy": "on_demand",
+      "read_strategy": "infinite_collection",
+      "completion_policy": "budget_or_no_new_content",
+      "max_scrolls": 2,
+      "max_items": 12,
+      "agent_description": "Read the visible updates, scroll twice at most, then stop collection reading and continue."
+    }
+  ],
+  "controls": [
+    {
+      "control_id": "open_summary",
+      "label": "Open workflow summary",
+      "role": "button",
+      "agent_description": "Continue to the summary after bounded collection reading has stopped.",
+      "review_status": "human_reviewed"
+    }
+  ],
+  "action_candidates": [],
+  "verification_rules": [
+    {
+      "rule_id": "summary_visible",
+      "description": "Workflow Summary Interface is visible."
+    }
+  ],
+  "blockers": [],
+  "review": {
+    "status": "human_reviewed",
+    "manual_revision": {
+      "semantic_description": "Read a bounded sample rather than treating the collection as finite."
+    }
+  },
+  "evidence": {},
+  "execute_binding_enabled": false
+}

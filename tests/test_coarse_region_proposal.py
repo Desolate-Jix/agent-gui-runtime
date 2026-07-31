@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from app.learn.recognition.coarse_region_proposal import build_coarse_region_proposals
+from app.learn.recognition.coarse_region_proposal import (
+    _axis_cuts,
+    _normalize_elements,
+    build_coarse_region_proposals,
+)
 
 
 def _item(item_id: str, x: int, y: int, w: int, h: int, source: str = "uia") -> dict:
@@ -56,6 +60,23 @@ def test_three_column_layout_produces_distinct_coarse_columns() -> None:
     assert narrow_left
     assert middle
     assert wide_right
+
+
+def test_full_window_container_does_not_inflate_whitespace_cut_support() -> None:
+    items = [
+        _item("window", 0, 0, 1000, 600),
+        _item("left-rail", 0, 40, 90, 520),
+        _item("middle-top", 400, 90, 170, 70),
+        _item("middle-bottom", 400, 360, 170, 70),
+        _item("right-top", 750, 90, 170, 70),
+        _item("right-bottom", 750, 360, 170, 70),
+    ]
+    screen = {"x": 0, "y": 0, "w": 1000, "h": 600}
+
+    cuts = _axis_cuts(_normalize_elements(items, screen), screen, axis="x")
+
+    assert len(cuts) >= 2
+    assert all(float(cut["support"]) < 0.72 for cut in cuts[:2])
 
 
 def test_projection_finds_narrow_column_boundary_and_sparse_remainder() -> None:
@@ -134,4 +155,3 @@ def test_proposal_evidence_exposes_generation_sources_and_density() -> None:
         assert 0.0 <= proposal["evidence"]["separator_strength"] <= 1.0
         assert 0.0 <= proposal["evidence"]["whitespace_boundary_strength"] <= 1.0
         assert 0.0 <= proposal["evidence"]["element_density"] <= 1.0
-

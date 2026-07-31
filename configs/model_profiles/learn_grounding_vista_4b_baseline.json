@@ -21,6 +21,8 @@
   "grounding_role": "roi_point_grounding_baseline",
   "recommended_use": "Bounded actual-call baseline for Learn Recognition ROI grounding using the existing local VISTA endpoint.",
   "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+  "request_cancel_supported": true,
+  "request_cancel_endpoint": "http://127.0.0.1:1244/v1/cancel",
   "runtime": "transformers",
   "model_path": "models/vista-4b-safetensors-sharded",
   "start_script": "scripts/model_servers/start_transformers_vision_server.ps1",

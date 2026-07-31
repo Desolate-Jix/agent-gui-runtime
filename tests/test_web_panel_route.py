@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -9,6 +10,7 @@ from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
 from app.api import panel as panel_api
+from app.learn.workflow_contracts import LearningTaskResult
 from app.main import app
 
 
@@ -43,22 +45,18 @@ def test_web_panel_serves_browser_control_surface() -> None:
     assert 'data-i18n="nav_group_learn_flow"' in response.text
     assert 'data-i18n="nav_group_execute_flow"' in response.text
     assert 'data-stage="learn_interface"' in response.text
-    assert 'data-stage="template_display"' in response.text
-    assert 'data-stage="learn_validation"' in response.text
+    assert 'data-stage="template_display"' not in response.text
+    assert 'data-stage="learn_validation"' not in response.text
     assert 'data-stage="execute_actions"' in response.text
-    assert 'data-stage="execute_task_run"' in response.text
+    assert 'data-stage="execute_task_run"' not in response.text
     assert 'data-stage="execute_locate"' in response.text
     assert 'data-i18n="nav_group_replay"' not in response.text
     assert 'data-i18n="nav_group_replay_flow"' not in response.text
     assert 'data-stage="open_bind"' in response.text
     assert 'data-stage="capture"' in response.text
     assert 'data-stage="learn_interface" data-step="1"' in response.text
-    assert 'data-stage="template_display" data-step="2"' in response.text
-    assert 'data-stage="trace" data-step="3"' in response.text
-    assert 'data-stage="learn_validation" data-step="4"' in response.text
-    assert 'data-stage="execute_task_run" data-step="2"' in response.text
     assert 'data-stage="execute_actions" data-step="1"' in response.text
-    assert 'data-stage="execute_locate" data-step="3"' in response.text
+    assert 'data-stage="execute_locate" data-step="2"' in response.text
     assert 'id="pageMetaStrip"' in response.text
     assert 'id="pageApiBadge"' in response.text
     assert 'id="pageSideEffectBadge"' in response.text
@@ -113,8 +111,8 @@ def test_web_panel_serves_browser_control_surface() -> None:
     assert 'id="replayInterfaceCalibrationPath"' in response.text
     assert 'data-i18n="template_replay_section"' in response.text
     assert 'data-i18n="learning_studio_section"' in response.text
-    assert 'data-learn-replay-view="template"' in response.text
-    assert 'data-learn-replay-view="draft"' in response.text
+    assert 'data-learn-replay-view="template"' not in response.text
+    assert 'data-learn-replay-view="draft"' not in response.text
     assert 'data-learn-replay-panel="template"' in response.text
     assert 'data-learn-replay-panel="draft"' in response.text
     assert 'id="replayModelArtifactPath"' in response.text
@@ -145,6 +143,9 @@ def test_web_panel_serves_browser_control_surface() -> None:
     assert 'id="learningDraftReviewLoadBtn"' in response.text
     assert 'id="learningDraftRecommendedLoadBtn"' in response.text
     assert 'id="learningDraftReviewSaveBtn"' in response.text
+    assert 'id="learningCorrectionMemoryRefreshBtn"' in response.text
+    assert 'id="learningCorrectionMemorySummary"' in response.text
+    assert 'id="learningCorrectionMemoryList"' in response.text
     assert 'id="learningAssistedTemplateAcceptanceSimulationBtn"' in response.text
     assert 'id="learningAssistedTemplateAcceptanceSimulationSummary"' in response.text
     assert 'data-i18n="learning_assisted_template_acceptance_simulation_create"' in response.text
@@ -230,6 +231,358 @@ def test_web_panel_serves_browser_control_surface() -> None:
     assert 'id="saveAsOverlay"' in response.text
     assert 'id="saveAsFileName"' in response.text
     assert 'id="saveAsConfirmBtn"' in response.text
+
+
+def test_learning_workflow_transition_endpoint_rejects_stage_skip() -> None:
+    client = TestClient(app)
+    first = client.post(
+        "/panel/transition_learning_workflow_state",
+        json={
+            "run_id": "run-panel",
+            "expected_revision": 0,
+            "stage": "bind_capture",
+            "outcome": "running",
+            "reason": "started",
+            "evidence_refs": {},
+        },
+    )
+
+    assert first.status_code == 200
+    assert first.json()["success"] is True
+    state = first.json()["data"]["workflow_state"]
+
+    skipped = client.post(
+        "/panel/transition_learning_workflow_state",
+        json={
+            "run_id": "run-panel",
+            "expected_revision": state["revision"],
+            "stage": "numbered_map",
+            "outcome": "running",
+            "reason": "invalid skip",
+            "evidence_refs": {},
+        },
+    )
+
+    assert skipped.status_code == 200
+    assert skipped.json()["success"] is False
+    assert skipped.json()["error"]["code"] == "learning_workflow_transition_invalid"
+
+
+def test_learning_workflow_state_endpoint_recovers_by_run_id() -> None:
+    client = TestClient(app)
+    run_id = "run-panel-recovery"
+    started = client.post(
+        "/panel/transition_learning_workflow_state",
+        json={
+            "run_id": run_id,
+            "expected_revision": 0,
+            "stage": "bind_capture",
+            "outcome": "running",
+        },
+    )
+    assert started.json()["success"] is True
+
+    recovered = client.get(f"/panel/learning_workflow_state/{run_id}")
+
+    assert recovered.status_code == 200
+    assert recovered.json()["success"] is True
+    assert recovered.json()["data"]["workflow_state"]["revision"] == 1
+    assert recovered.json()["data"]["workflow_state"]["current_stage"] == "bind_capture"
+
+
+def test_panel_saves_structured_learning_calibration_result(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    source_image = tmp_path / "artifacts" / "screenshots" / "capture.png"
+    numbering_report = tmp_path / "artifacts" / "learning-runs" / "run-panel" / "stage2.json"
+    overlay = tmp_path / "artifacts" / "review-overlays" / "calibrated.png"
+    trace_path = tmp_path / "logs" / "traces" / "vision" / "calibration.json"
+    for path, content in (
+        (source_image, b"capture"),
+        (numbering_report, b"numbering"),
+        (overlay, b"overlay"),
+    ):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    trace_path.parent.mkdir(parents=True, exist_ok=True)
+    trace_path.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "request": {
+                    "image_path": str(source_image),
+                    "metadata": {
+                        "two_stage_report_path": str(numbering_report),
+                        "learning_interface_flow": True,
+                        "no_live_click_authorization": True,
+                    },
+                },
+                "result": {
+                    "image_path": str(source_image),
+                    "learn_all_targets": {
+                        "overlay_path": str(overlay),
+                        "vista_coordinate_validation": {
+                            "validated_count": 2,
+                            "failed_count": 0,
+                            "batch": {
+                                "resumable": False,
+                                "completed_count": 2,
+                                "remaining_count": 0,
+                            },
+                        },
+                    },
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    response = TestClient(app).post(
+        "/panel/save_learning_calibration_result",
+        json={
+            "run_id": "run-panel",
+            "trace_path": str(trace_path),
+            "source_image_path": str(source_image),
+            "numbering_report_path": str(numbering_report),
+            "overlay_path": str(overlay),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result_path = tmp_path / payload["data"]["result_path"]
+    assert result_path.exists()
+    saved = json.loads(result_path.read_text(encoding="utf-8"))
+    assert saved["contract_version"] == "learning_calibration_result_v1"
+    assert saved["calibration_summary"]["remaining_count"] == 0
+
+
+def test_learning_workflow_transition_endpoint_rejects_completion_without_evidence() -> None:
+    client = TestClient(app)
+    run_id = "run-panel-missing-evidence"
+    started = client.post(
+        "/panel/transition_learning_workflow_state",
+        json={
+            "run_id": run_id,
+            "expected_revision": 0,
+            "stage": "bind_capture",
+            "outcome": "running",
+        },
+    ).json()["data"]["workflow_state"]
+
+    rejected = client.post(
+        "/panel/transition_learning_workflow_state",
+        json={
+            "run_id": run_id,
+            "expected_revision": started["revision"],
+            "stage": "bind_capture",
+            "outcome": "completed",
+            "reason": "captured",
+            "evidence_refs": {},
+        },
+    )
+
+    assert rejected.status_code == 200
+    assert rejected.json()["success"] is False
+    assert "bind_capture completed requires evidence: image_path" in rejected.json()["error"]["details"]
+    recovered = client.get(f"/panel/learning_workflow_state/{run_id}").json()
+    assert recovered["data"]["workflow_state"]["revision"] == started["revision"]
+    assert recovered["data"]["workflow_state"]["stages"]["bind_capture"]["status"] == "running"
+
+
+def test_learning_workflow_transition_endpoint_verifies_completed_artifact(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    image_path = tmp_path / "artifacts" / "screenshots" / "capture.png"
+    image_path.parent.mkdir(parents=True)
+    image_path.write_bytes(b"verified capture")
+    expected_sha256 = hashlib.sha256(image_path.read_bytes()).hexdigest()
+    client = TestClient(app)
+    run_id = "run-panel-verified-evidence"
+    started = client.post(
+        "/panel/transition_learning_workflow_state",
+        json={
+            "run_id": run_id,
+            "expected_revision": 0,
+            "stage": "bind_capture",
+            "outcome": "running",
+        },
+    ).json()["data"]["workflow_state"]
+
+    completed = client.post(
+        "/panel/transition_learning_workflow_state",
+        json={
+            "run_id": run_id,
+            "expected_revision": started["revision"],
+            "stage": "bind_capture",
+            "outcome": "completed",
+            "reason": "captured",
+            "evidence_refs": {
+                "image_path": "artifacts/screenshots/capture.png",
+                "screenshot_sha256": expected_sha256,
+            },
+        },
+    ).json()
+
+    assert completed["success"] is True
+    evidence = completed["data"]["workflow_state"]["current_evidence_refs"]
+    assert evidence["evidence_integrity"]["verified"] is True
+    assert evidence["evidence_integrity"]["artifacts"]["image_path"]["sha256"] == expected_sha256
+
+
+def test_learning_workflow_transition_endpoint_rejects_stale_evidence_without_revision_change(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    image_path = tmp_path / "artifacts" / "screenshots" / "capture.png"
+    image_path.parent.mkdir(parents=True)
+    image_path.write_bytes(b"current capture")
+    client = TestClient(app)
+    run_id = "run-panel-stale-evidence"
+    started = client.post(
+        "/panel/transition_learning_workflow_state",
+        json={
+            "run_id": run_id,
+            "expected_revision": 0,
+            "stage": "bind_capture",
+            "outcome": "running",
+        },
+    ).json()["data"]["workflow_state"]
+
+    rejected = client.post(
+        "/panel/transition_learning_workflow_state",
+        json={
+            "run_id": run_id,
+            "expected_revision": started["revision"],
+            "stage": "bind_capture",
+            "outcome": "completed",
+            "reason": "captured",
+            "evidence_refs": {
+                "image_path": "artifacts/screenshots/capture.png",
+                "screenshot_sha256": "0" * 64,
+            },
+        },
+    ).json()
+
+    assert rejected["success"] is False
+    assert rejected["error"]["code"] == "learning_workflow_evidence_invalid"
+    recovered = client.get(f"/panel/learning_workflow_state/{run_id}").json()
+    state = recovered["data"]["workflow_state"]
+    assert state["revision"] == started["revision"]
+    assert state["stages"]["bind_capture"]["status"] == "running"
+
+
+def test_learning_workflow_transition_endpoint_rejects_cross_capture_artifact_without_revision_change(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    bound_image = tmp_path / "artifacts" / "screenshots" / "bound.png"
+    stale_image = tmp_path / "artifacts" / "screenshots" / "stale.png"
+    bound_image.parent.mkdir(parents=True)
+    bound_image.write_bytes(b"bound capture")
+    stale_image.write_bytes(b"stale capture")
+    stale_sha256 = hashlib.sha256(stale_image.read_bytes()).hexdigest()
+    trial_path = tmp_path / "artifacts" / "learning-runs" / "stale-trial.json"
+    trial_path.parent.mkdir(parents=True)
+    trial_path.write_text(
+        json.dumps(
+            {
+                "observe_bundle": {"source_image_path": str(stale_image)},
+                "capture_sha256": stale_sha256,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    client = TestClient(app)
+    run_id = "run-panel-cross-capture"
+
+    state = client.post(
+        "/panel/transition_learning_workflow_state",
+        json={
+            "run_id": run_id,
+            "expected_revision": 0,
+            "stage": "bind_capture",
+            "outcome": "running",
+        },
+    ).json()["data"]["workflow_state"]
+    state = client.post(
+        "/panel/transition_learning_workflow_state",
+        json={
+            "run_id": run_id,
+            "expected_revision": state["revision"],
+            "stage": "bind_capture",
+            "outcome": "completed",
+            "evidence_refs": {"image_path": str(bound_image)},
+        },
+    ).json()["data"]["workflow_state"]
+    started = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": run_id,
+            "expected_revision": state["revision"],
+            "stage": "screen_understanding",
+            "reason": "cross-capture lineage test",
+            "lease_seconds": 600,
+        },
+    ).json()["data"]
+    state = started["workflow_state"]
+
+    rejected = client.post(
+        "/panel/finish_learning_workflow_stage_operation",
+        json={
+            "run_id": run_id,
+            "expected_revision": state["revision"],
+            "stage": "screen_understanding",
+            "operation_id": started["operation_id"],
+            "outcome": "completed",
+            "evidence_refs": {"trial_path": str(trial_path)},
+        },
+    ).json()
+
+    assert rejected["success"] is False
+    assert rejected["error"]["code"] == "learning_workflow_evidence_invalid"
+    assert "capture lineage mismatch" in rejected["error"]["details"]
+    recovered = client.get(f"/panel/learning_workflow_state/{run_id}").json()
+    persisted = recovered["data"]["workflow_state"]
+    assert persisted["revision"] == state["revision"]
+    assert persisted["stages"]["screen_understanding"]["status"] == "running"
+
+
+def test_panel_learning_progress_uses_structured_workflow_state() -> None:
+    panel_js = (panel_api.PANEL_DIR / "panel.js").read_text(encoding="utf-8")
+
+    assert "/panel/transition_learning_workflow_state" in panel_js
+    assert "/panel/learning_workflow_state/" in panel_js
+    assert "renderLearningWorkflowState" in panel_js
+    assert "expected_revision" in panel_js
+    assert "sessionStorage" in panel_js
+    assert "previous_state: currentLearningWorkflowState" not in panel_js
+    assert 'const failed = ["failed", "blocked", "no usable"' not in panel_js
+
+
+def test_panel_learning_progress_exposes_detached_runtime_recovery_state() -> None:
+    panel_js = (panel_api.PANEL_DIR / "panel.js").read_text(encoding="utf-8")
+
+    render_start = panel_js.index("function renderLearningWorkflowState")
+    render_end = panel_js.index("function newLearningWorkflowRunId", render_start)
+    render_body = panel_js[render_start:render_end]
+    recover_start = panel_js.index("async function recoverLearningWorkflowState")
+    recover_end = panel_js.index("async function restoreLearningWorkflowState", recover_start)
+    recover_body = panel_js[recover_start:recover_end]
+
+    assert '["data", "runtime_attachment"]' in recover_body
+    assert '"running_detached"' in render_body
+    assert '"recovery_required"' in render_body
+    assert '"worker_finished"' in render_body
+    assert '"result_available"' in render_body
+    assert '"result_adopted"' in render_body
+    assert "continuation_required" in render_body
 
 
 def test_panel_image_frame_clears_transient_missing_state_after_image_loads() -> None:
@@ -474,6 +827,8 @@ def test_web_panel_serves_static_assets() -> None:
     assert "target_entity" in response.text
     assert "/panel/load_learning_draft_review" in response.text
     assert "/panel/save_learning_draft_review" in response.text
+    assert "/panel/surface_rule_registry" in response.text
+    assert "loadLearningCorrectionMemoryRegistry" in response.text
     assert 'on("replayModelArtifactLoadBtn", "click", loadReplayModelArtifact)' in response.text
     assert 'task_template === "model_artifact_single_step"' in response.text
     assert 'isModelArtifactTaskRun' in response.text
@@ -710,6 +1065,153 @@ def test_web_panel_serves_static_assets() -> None:
     assert ".run-badge.warn" in css_response.text
 
 
+def test_panel_surface_rule_registry_endpoint_is_read_only_and_safe(monkeypatch) -> None:
+    client = TestClient(app)
+    expected = {
+        "contract_version": "panel_surface_rule_registry_v1",
+        "status_counts": {"candidate": 1},
+        "rules": [{"rule_id": "surface_correction_demo", "status": "candidate"}],
+        "candidate_rules_affect_production": False,
+        "production_rule_policy": "active_only",
+        "model_activation_allowed": False,
+        "no_click_authorization": True,
+    }
+    monkeypatch.setattr(panel_api, "build_surface_rule_registry_panel_view", lambda **kwargs: expected)
+
+    response = client.get("/panel/surface_rule_registry")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["data"] == expected
+    assert body["error"] is None
+
+
+def test_learning_correction_memory_refreshes_after_human_review_save() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    save_start = panel_js.index("async function saveLearningDraftReview")
+    save_end = panel_js.index("async function generatePathGraphCandidate", save_start)
+    save_body = panel_js[save_start:save_end]
+
+    assert 'api("GET", "/panel/surface_rule_registry"' in panel_js
+    assert 'void loadLearningCorrectionMemoryRegistry({ skipResponse: true })' in save_body
+    assert "Reviewed template candidate loaded, but CorrectionMemory refresh failed" in save_body
+    assert 'on("learningCorrectionMemoryRefreshBtn", "click", loadLearningCorrectionMemoryRegistry)' in panel_js
+
+
+def test_learning_draft_box_save_refreshes_parent_before_closing_editor() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    save_start = panel_js.index("async function saveLearningDraftReview")
+    save_end = panel_js.index("async function generatePathGraphCandidate", save_start)
+    save_body = panel_js[save_start:save_end]
+    refresh_start = panel_js.index("async function refreshSavedLearningDraftReview")
+    refresh_end = panel_js.index("async function refreshCurrentInterfaceWorkflowEvidence", refresh_start)
+    refresh_body = panel_js[refresh_start:refresh_end]
+
+    saving_index = save_body.index('apply.textContent = "Saving review..."')
+    refresh_index = save_body.index("await refreshSavedLearningDraftReview({")
+    workflow_refresh_index = save_body.index("reviewedPath,")
+    close_index = save_body.index("closeImageInspector()")
+    correction_index = save_body.index("void loadLearningCorrectionMemoryRegistry({ skipResponse: true })")
+
+    assert saving_index < refresh_index < workflow_refresh_index < close_index < correction_index
+    assert "setLearningDraftReviewSourcePath(sourcePath)" in refresh_body
+    assert 'const reviewedPath = String(data.reviewed_template_candidate_path || "").trim()' in save_body
+    assert "Reviewed template candidate save response is missing reviewed_template_candidate_path" in save_body
+    assert "try {" in save_body
+    assert "} finally {" in save_body
+    assert 'apply.textContent = saveSucceeded ? "Saved" : "Save review";' in save_body
+    assert "apply.disabled = false" in save_body
+    assert "previousSourcePath: sourcePath" in save_body
+    assert "discoverRelatedSidecars: false" in panel_js
+    assert "supersedePendingLoad: true" in panel_js
+    assert "skipReviewRender: true" in panel_js
+    assert "workflow evidence refresh failed" in save_body
+
+
+def test_interface_workflow_exposes_manual_current_evidence_refresh() -> None:
+    index_html = Path("app/web_panel/index.html").read_text(encoding="utf-8")
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    assert 'id="interfaceWorkflowRefreshEvidenceBtn"' in index_html
+    assert "刷新当前证据" in index_html
+    assert "async function refreshCurrentInterfaceWorkflowEvidence" in panel_js
+    assert (
+        'on("interfaceWorkflowRefreshEvidenceBtn", "click", '
+        "refreshCurrentInterfaceWorkflowEvidence)"
+    ) in panel_js
+    refresh_start = panel_js.index("async function refreshCurrentInterfaceWorkflowEvidence")
+    refresh_end = panel_js.index("\n}\n", refresh_start) + len("\n}")
+    refresh_body = panel_js[refresh_start:refresh_end]
+    shared_refresh_start = panel_js.index("async function refreshSavedLearningDraftReview")
+    shared_refresh_end = panel_js.index("\n}\n", shared_refresh_start) + len("\n}")
+    shared_refresh_body = panel_js[shared_refresh_start:shared_refresh_end]
+    assert "refreshSavedLearningDraftReview({" in refresh_body
+    assert "interfaceWorkflowSourcePathsAfterReview" in shared_refresh_body
+    assert "selectSourcePath: sourcePath" in shared_refresh_body
+    assert "discoverRelatedSidecars: false" in shared_refresh_body
+    assert "supersedePendingLoad: true" in shared_refresh_body
+    assert "skipReviewRender: true" in shared_refresh_body
+
+
+def test_learning_draft_box_editor_exposes_agent_semantics_and_destination_controls() -> None:
+    index_html = Path("app/web_panel/index.html").read_text(encoding="utf-8")
+
+    for control_id in (
+        "imageInspectorLabel",
+        "imageInspectorDescription",
+        "imageInspectorActionTypeSelect",
+        "imageInspectorInputSemantics",
+        "imageInspectorDestinationKind",
+        "imageInspectorDestinationValue",
+        "imageInspectorVerificationRule",
+        "imageInspectorRiskLevel",
+    ):
+        assert f'id="{control_id}"' in index_html
+
+
+def test_learning_draft_panel_exposes_reviewed_memory_execute_acceptance_controls() -> None:
+    index_html = Path("app/web_panel/index.html").read_text(encoding="utf-8")
+
+    assert 'id="learningOperationalMemoryPanel"' in index_html
+    assert 'id="learningMemoryInterfaceId"' in index_html
+    assert 'id="learningMemoryActionSelect"' in index_html
+    assert 'id="learningMemoryPublishBtn"' in index_html
+    assert 'id="learningMemoryLoadBtn"' in index_html
+    assert 'id="learningMemoryDryRunBtn"' in index_html
+    assert 'id="learningMemoryExecuteBtn"' in index_html
+    assert 'id="learningMemoryReturnToEditBtn"' in index_html
+
+
+def test_generic_learning_panel_hides_seek_continuous_task_handoff_controls() -> None:
+    index_html = Path("app/web_panel/index.html").read_text(encoding="utf-8")
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8")
+
+    assert 'id="continuousTaskHandoffPanel"' not in index_html
+    assert 'id="continuousTaskRunDir"' not in index_html
+    assert 'id="continuousTaskUseForLearningBtn"' not in index_html
+    assert 'id="continuousTaskResumeBtn"' not in index_html
+    assert "/panel/continuous_task_handoff" in panel_js
+    assert "/panel/resume_continuous_task" in panel_js
+    boot_start = panel_js.index("async function boot()")
+    boot_body = panel_js[boot_start:panel_js.index("boot();", boot_start)]
+    assert "loadContinuousTaskHandoff" not in boot_body
+
+
+def test_learning_draft_reviewed_memory_execution_requires_fresh_runtime_resolution() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    start = panel_js.index("async function executeLearningOperationalMemory")
+    end = panel_js.index("function returnLearningOperationalMemoryToReview", start)
+    body = panel_js[start:end]
+
+    assert "interface_memory_id" in body
+    assert "interface_memory_action_id" in body
+    assert "capture_live: true" in body
+    assert "max_execution_attempts: 1" in body
+    assert "approved_plan_id" not in body
+    assert '"/action/execute_recognition_plan"' in body
+
+
 def test_learning_interface_flow_has_unified_progress_and_simple_review_surface() -> None:
     html = Path("app/web_panel/index.html").read_text(encoding="utf-8")
     panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8")
@@ -733,11 +1235,30 @@ def test_learning_interface_flow_has_unified_progress_and_simple_review_surface(
         "numbered_map",
         "page_details",
         "precise_calibration",
+        "review_repair",
         "fusion",
         "pathgraph_draft",
         "complete",
     ]:
         assert f'data-learning-flow-step="{step}"' in html
+
+    flow_steps_match = re.search(
+        r"const LEARNING_INTERFACE_FLOW_STEPS = \[(.*?)\];",
+        panel_js,
+        flags=re.DOTALL,
+    )
+    assert flow_steps_match is not None
+    assert re.findall(r'"([a-z_]+)"', flow_steps_match.group(1)) == [
+        "bind_capture",
+        "screen_understanding",
+        "numbered_map",
+        "precise_calibration",
+        "review_repair",
+        "fusion",
+        "page_details",
+        "pathgraph_draft",
+        "complete",
+    ]
 
     assert 'id="learningDraftHistoryList"' in html
     assert 'id="learningDraftScreenshotPanel"' in html
@@ -746,6 +1267,20 @@ def test_learning_interface_flow_has_unified_progress_and_simple_review_surface(
     assert 'id="learningDraftPathLayoutResetBtn"' in html
     assert 'id="learningDraftInterfaceDetailPanel"' in html
     assert 'id="learningDraftManualEditPanel"' in html
+    assert (
+        '<details class="learning-review-section learning-screen-preview-section" '
+        'id="learningDraftScreenUnderstandingDiagnostics">'
+    ) in html
+    assert re.search(
+        r"\.learning-draft-pathgraph-panel\s*\{[^}]*order:\s*3;",
+        panel_css,
+        flags=re.DOTALL,
+    )
+    assert re.search(
+        r"\.learning-review-panel\s*\{[^}]*order:\s*4;",
+        panel_css,
+        flags=re.DOTALL,
+    )
     for field_id in [
         "learningDraftManualRegionLabel",
         "learningDraftManualRegionRole",
@@ -760,7 +1295,8 @@ def test_learning_interface_flow_has_unified_progress_and_simple_review_surface(
 
     assert '<details class="replay-action-disclosure" id="learningDraftAdvancedDiagnostics">' in html
     assert "const LEARNING_INTERFACE_FLOW_STEPS" in panel_js
-    assert "function setLearningInterfaceFlowStep" in panel_js
+    assert "function renderLearningWorkflowState" in panel_js
+    assert "async function transitionLearningWorkflowState" in panel_js
     assert "function learningInterfaceTrialEvidenceSummary" in panel_js
     assert "function learningInterfaceTrialEvidenceStatusText" in panel_js
     assert "function learningDeepCalibrationEvidenceSummary" in panel_js
@@ -772,7 +1308,8 @@ def test_learning_interface_flow_has_unified_progress_and_simple_review_surface(
     assert "async function runLearningInterfaceFlow" in panel_js
     assert "hasNumberedOverlayEvidence" in panel_js
     assert "hasCalibratedEvidence" in panel_js
-    assert "Stage1 region gate + two-stage numbering" in panel_js
+    assert "function nextLearningStageOperation" in panel_js
+    assert '"panel_learning_two_stage_understanding"' in panel_js
     assert "async function runLearningTwoStageUnderstanding" in panel_js
     assert "/panel/run_learning_two_stage_understanding" in panel_js
     assert "function learningTwoStageAllowsDraftTrial" in panel_js
@@ -784,9 +1321,8 @@ def test_learning_interface_flow_has_unified_progress_and_simple_review_surface(
         "result.coordinate_overlay_path"
     )
     assert "nestedGet(result, [\"fusion\", \"compiled_overlay_path\"])" in two_stage_overlay_body
-    assert "Stage1 gate blocked Stage2" in panel_js
-    assert "two-stage boxes accepted for draft review" in panel_js
-    assert 'renderLearningDraftScreenshotPath(twoStageOverlayPath, "learning two-stage fused overlay")' in panel_js
+    assert "/panel/continue_learning_stage_worker_result" in panel_js
+    assert 'renderLearningDraftScreenshotPath(overlayPath, "learning two-stage fused overlay")' in panel_js
     numbered_map_start = panel_js.index("function learningDraftNumberedMapImagePath")
     numbered_map_body = panel_js[numbered_map_start:panel_js.index("function renderLearningDraftScreenshotPath", numbered_map_start)]
     assert numbered_map_body.index("preview.compiled_overlay_path") < numbered_map_body.index("learningDraftSourceImagePath(draft)")
@@ -795,7 +1331,7 @@ def test_learning_interface_flow_has_unified_progress_and_simple_review_surface(
         "learningDraftSourceImagePath(draft)"
     )
     assert "filtered_non_actionable" in panel_js
-    assert "two-stage fused draft · Stage1 gate passed" in panel_js
+    assert "backend-managed stage chain completed · draft only" in panel_js
     assert "function syncLearningInterfacePrepFromSharedControls" in panel_js
     assert "function learningDraftRegionId" in panel_js
     assert "learningDraftRegionId(region, index)" in panel_js
@@ -807,10 +1343,16 @@ def test_learning_interface_flow_has_unified_progress_and_simple_review_surface(
     assert "renderLearningDraftHistoryList" in panel_js
     assert "renderLearningDraftScreenshotPanel" in panel_js
     assert "renderLearningDraftManualEditPanel" in panel_js
+    assert "target_region_id: manualCandidate.targetRegionId" in panel_js
+    assert "target_action_template_id: manualCandidate.targetActionTemplateId" in panel_js
+    assert "async function refreshSavedLearningDraftReview" in panel_js
+    assert "discoverRelatedSidecars: false" in panel_js
+    assert "Reviewed template candidate saved, but panel refresh failed" in panel_js
     assert ".learning-interface-prep-card" in panel_css
     assert ".learning-interface-flow-card" in panel_css
     assert ".learning-draft-review-workspace" in panel_css
     assert ".learning-draft-screenshot-frame" in panel_css
+    assert re.search(r"\.learning-review-panel\s*\{[^}]*grid-column:\s*1\s*/\s*-1;", panel_css)
     assert "max-height: none" in panel_css
     assert "max-height: 360px" not in panel_css
 
@@ -838,43 +1380,68 @@ def test_learning_interface_flow_has_unified_progress_and_simple_review_surface(
     assert "overflow: hidden" in panel_css
 
 
-def test_learning_mode_sidebar_uses_demo_stage_names_without_draft_replay_label() -> None:
+def test_learning_mode_sidebar_exposes_one_learning_workspace_and_keeps_internal_tools_hidden() -> None:
     html = Path("app/web_panel/index.html").read_text(encoding="utf-8")
     panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8")
     panel_css = Path("app/web_panel/panel.css").read_text(encoding="utf-8")
 
-    expected_order = [
-        'data-stage="learn_interface"',
-        'data-stage="template_display"',
-        'data-stage="trace"',
-        'data-stage="learn_validation"',
-    ]
-    positions = [html.index(item) for item in expected_order]
-    assert positions == sorted(positions)
+    assert html.count('data-stage="learn_interface"') == 1
     assert 'data-i18n="nav_learn_interface"' in html
-    assert 'data-i18n="nav_template_display"' in html
     assert 'data-stage="learn_interface" data-step="1"' in html
-    assert 'data-stage="template_display" data-step="2"' in html
-    assert 'data-stage="trace" data-step="3"' in html
-    assert 'data-stage="learn_validation" data-step="4"' in html
+    assert 'data-stage="template_display"' not in html
+    assert 'data-stage="trace"' not in html
+    assert 'data-stage="learn_validation"' not in html
+    assert 'data-stage="execute_task_run"' not in html
+    assert 'data-stage="execute_locate" data-step="2"' in html
+    assert 'data-learn-replay-view=' not in html
+    assert '<section class="learn-replay-subview active" data-learn-replay-panel="draft">' in html
+    assert '<details class="replay-advanced-tools">' in html
     assert 'data-i18n="nav_learn_replay"' not in html
     assert 'data-i18n="nav_learn_observe"' not in html
     assert 'data-i18n="nav_learn_locate"' not in html
     assert "学习产物回放" not in html
     assert "body.agent-mode-learn .nav-group-system" in panel_css
+    assert "body.agent-mode-learn .policy-strip" in panel_css
+    assert "body.agent-mode-learn .page-meta-strip" in panel_css
+    assert "body.agent-mode-learn .response-surface" in panel_css
+    assert "body.agent-mode-learn .content-grid" in panel_css
+    assert 'body.learn-replay-draft-subview .stage-page[data-page="learn_replay"] > h3' in panel_css
+    assert "body.learn-replay-draft-subview .learning-draft-history-panel" in panel_css
+    assert "body.learn-replay-draft-subview .learning-draft-screenshot-panel" in panel_css
+    assert "body.learn-replay-draft-subview #learningDraftReviewPanel" in panel_css
+    assert "body.learn-replay-draft-subview #learningDraftPathGraphPanel" in panel_css
 
     assert 'learn_interface: {' in panel_js
     assert 'template_display: {' in panel_js
     assert 'learnReplaySubview: "draft"' in panel_js
     assert 'learnReplaySubview: "template"' in panel_js
+    assert 'let currentLearnReplaySubview = "draft";' in panel_js
     assert 'on("agentModeLearnBtn", "click", () => showStage("learn_interface"))' in panel_js
     assert 'if (page === "learn_replay" && meta.learnReplaySubview)' in panel_js
+
+
+def test_learning_workspace_stacks_graph_evidence_and_on_demand_inspector() -> None:
+    panel_css = Path("app/web_panel/panel.css").read_text(encoding="utf-8")
+
+    assert "grid-template-columns: minmax(0, 1fr);" in panel_css
+    assert ".interface-workflow-inspector-panel[hidden]" in panel_css
+    assert "display: none;" in panel_css
+    assert "@media (max-width: 1500px)" in panel_css
+    responsive_start = panel_css.index("@media (max-width: 1500px)")
+    responsive_end = panel_css.index("@media (max-width: 980px)", responsive_start)
+    responsive_body = panel_css[responsive_start:responsive_end]
+    assert ".interface-workflow-node-workspace" in responsive_body
+    assert "grid-template-columns: minmax(0, 1fr);" in responsive_body
+    assert ".interface-workflow-inspector-panel" in responsive_body
+    assert "grid-column: auto;" in responsive_body
 
 
 def test_panel_api_response_result_helper_preserves_two_stage_gate_data() -> None:
     panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
     result_of_start = panel_js.index("function resultOf(response)")
     result_of_body = panel_js[result_of_start:panel_js.index("function statusTextForResponse", result_of_start)]
+    assert 'response.data !== null' in result_of_body
+    assert 'response.result !== null' in result_of_body
     assert "if (Object.keys(result).length) return result;" in result_of_body
     assert "if (Object.keys(data).length) return data;" in result_of_body
 
@@ -885,54 +1452,36 @@ def test_panel_api_response_result_helper_preserves_two_stage_gate_data() -> Non
     assert 'nestedGet(result, ["stage2_numbering_skipped"]) !== true' in allows_body
 
 
-def test_panel_two_stage_endpoint_records_explicit_source_image_override(monkeypatch, tmp_path) -> None:
+def test_panel_two_stage_endpoint_forwards_explicit_source_image_override(monkeypatch, tmp_path) -> None:
     client = TestClient(app)
     override_image = tmp_path / "override.png"
     Image.new("RGB", (111, 77), "white").save(override_image)
+    captured_input = {}
 
-    monkeypatch.setattr(panel_api, "_resolve_panel_learning_image_path", lambda path: Path(path))
-    monkeypatch.setattr(
-        panel_api,
-        "_observe_bundle_from_trace_result",
-        lambda result, trace_path: {
-            "image_path": "artifacts/screenshots/stale.png",
-            "source_image_path": "artifacts/screenshots/stale.png",
-            "screen_size": {"width": 320, "height": 240},
-            "screen_reading": {"screen_summary": "demo screen"},
-        },
-    )
-    monkeypatch.setattr(
-        panel_api,
-        "_stage1_inventory_from_trace_result",
-        lambda result: [{"item_id": "item_1", "label": "Main", "bbox": {"x": 0, "y": 0, "w": 111, "h": 77}}],
-    )
-    monkeypatch.setattr(
-        panel_api,
-        "build_inventory_layout_graph",
-        lambda inventory, screen_size=None: {"node_count": len(inventory), "zone_count": 1, "zones": {}},
-    )
-    captured_bundle = {}
-
-    def fake_two_stage(**kwargs):
-        captured_bundle.update(kwargs["bundle"])
-        return {
-            "stage1_gate": {"status": "passed", "failure_categories": [], "allow_stage2_numbering": True},
-            "stage2_numbering_skipped": False,
-            "stage2_numbering": {
-                "numbered_item_count": 7,
-                "calibration_candidate_count": 3,
-                "regions": [{"region_id": "R1"}],
+    def fake_run(task_input, *, project_root):
+        captured_input.update(task_input.model_dump())
+        return LearningTaskResult(
+            outcome="completed",
+            payload={
+                "contract_version": "panel_learning_two_stage_understanding_run_v1",
+                "source_image_override": {
+                    "status": "applied",
+                    "original_path": "artifacts/screenshots/stale.png",
+                    "path": str(override_image),
+                },
+                "image_path": str(override_image),
+                "summary": {"stage2_calibration_candidate_count": 3},
+                "learn_all_targets": {
+                    "stage2_calibration_candidate_count": 3,
+                },
             },
-            "fusion": {
-                "compiled_overlay_path": "artifacts/review-overlays/demo_two_stage.png",
-                "fused_review_boxes": [
-                    {"id": "R1", "label": "Main", "role": "review_only", "bbox": {"x": 1, "y": 2, "w": 3, "h": 4}}
-                ],
-            },
-        }
+        )
 
-    monkeypatch.setattr(panel_api, "build_two_stage_screen_understanding", fake_two_stage)
-    monkeypatch.setattr(panel_api, "fusion_status_from_two_stage", lambda report: {"status": "available"})
+    monkeypatch.setattr(
+        panel_api,
+        "run_two_stage_understanding_task",
+        fake_run,
+    )
 
     response = client.post(
         "/panel/run_learning_two_stage_understanding",
@@ -947,18 +1496,12 @@ def test_panel_two_stage_endpoint_records_explicit_source_image_override(monkeyp
 
     assert response.status_code == 200
     data = response.json()["data"]
+    assert captured_input["source_image_path"] == str(override_image)
     assert data["source_image_override"]["status"] == "applied"
     assert data["source_image_override"]["original_path"] == "artifacts/screenshots/stale.png"
     assert data["image_path"] == str(override_image)
-    assert captured_bundle["image_path"] == str(override_image)
-    assert captured_bundle["screen_size"] == {"width": 111, "height": 77}
-    assert captured_bundle["app_name"] == "demo_app"
-    assert captured_bundle["state_hint"] == "home"
     assert data["summary"]["stage2_calibration_candidate_count"] == 3
     assert data["learn_all_targets"]["stage2_calibration_candidate_count"] == 3
-    saved_report = json.loads(Path(data["report_path"]).read_text(encoding="utf-8-sig"))
-    assert saved_report["source_image_override"]["status"] == "applied"
-    assert saved_report["observe_bundle"]["image_path"] == str(override_image)
 
 
 def test_panel_status_text_does_not_label_two_stage_review_boxes_as_no_targets() -> None:
@@ -1039,12 +1582,13 @@ def test_learning_interface_keeps_display_overlay_out_of_source_image_path() -> 
     assert "payload.agent_mode = \"learn\"" in calibration_body
     assert "payload.learn_depth = \"deep\"" in calibration_body
     assert "payload.metadata.learn_all_targets = true" in calibration_body
-    assert "payload.metadata.two_stage_report_path = lastLearningTwoStageReportPath" in calibration_body
-    assert "payload.metadata.learn_vista_coordinate_validation" in calibration_body
-    assert 'max_targets: "all"' in calibration_body
-    assert "max_targets: 5" not in calibration_body
-    assert "stop_on_failure: false" in calibration_body
-    assert "use_numbered_overlay: true" in calibration_body
+    assert "payload.metadata.two_stage_report_path = calibrationSourceReportPath" in calibration_body
+    assert "payload.metadata.final_numbering_revision" not in calibration_body
+    assert "payload.metadata.review_repair_integrity_gate_passed" not in calibration_body
+    assert "payload.metadata.learn_vista_coordinate_validation" not in calibration_body
+    assert '"learning_calibration_sequence_request_v1"' in calibration_body
+    assert '"panel_learning_calibration_sequence"' in calibration_body
+    assert "locate_payload: payload" in calibration_body
 
     two_stage_payload_start = panel_js.index("function learningTwoStageUnderstandingPayload")
     two_stage_payload_body = panel_js[two_stage_payload_start:panel_js.index("function learningTwoStageOverlayPath", two_stage_payload_start)]
@@ -1068,28 +1612,57 @@ def test_learning_interface_flow_runs_deep_calibration_before_fusion_trial() -> 
     flow_start = panel_js.index("async function runLearningInterfaceFlow")
     flow_body = panel_js[flow_start:panel_js.index("async function completeLearningInterfaceReadonlyFlow", flow_start)]
 
-    assert "const calibration = await runLearningDeepCalibration()" in flow_body
-    assert "const calibrationEvidence = learningDeepCalibrationEvidenceSummary(calibration)" in flow_body
-    assert "const calibrationOverlayPath = learningDeepCalibrationOverlayPath(calibration)" in flow_body
-    assert "renderLearningDraftScreenshotPath(calibrationOverlayPath, \"learning deep calibration overlay\")" in flow_body
-    assert flow_body.index("const calibration = await runLearningDeepCalibration()") < flow_body.index(
-        "const fusedTrial = await runLearningDraftTrial"
-    )
+    assert "followContinuationChain: true" in flow_body
+    assert "runLearningDeepCalibration(" not in flow_body
+    assert "runLearningDraftTrial(" not in flow_body
+    assert "function backendContinuationStageWorker" in panel_js
+    assert 'taskKind === "panel_learning_calibration_sequence"' in panel_js
+    assert 'taskKind === "panel_learning_recognition_trial"' in panel_js
 
 
-def test_learning_interface_flow_requires_understanding_model_before_screen_observe() -> None:
+def test_learning_interface_bind_capture_is_model_free() -> None:
     panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
 
+    capture_start = panel_js.index("async function captureLearningDraftWindow")
+    capture_end = panel_js.index("async function runLearningScreenObserve", capture_start)
+    capture_body = panel_js[capture_start:capture_end]
     flow_start = panel_js.index("async function runLearningInterfaceFlow")
     flow_body = panel_js[flow_start:panel_js.index("async function completeLearningInterfaceReadonlyFlow", flow_start)]
-
-    assert 'const understandingProfile = syncStageProvider("observe")' in flow_body
-    assert 'ensureStageModelReady("observe", understandingProfileId)' in flow_body
-    assert "if (!understandingReady)" in flow_body
-    assert "understanding model unavailable" in flow_body
-    assert flow_body.index('ensureStageModelReady("observe", understandingProfileId)') < flow_body.index(
-        "captureLearningDraftWindow()"
+    screen_operation_start = flow_body.index(
+        'const screenUnderstandingOperation = await startLearningWorkflowStageOperation'
     )
+    bind_capture_body = flow_body[:screen_operation_start]
+
+    assert '"/state/capture_window"' in capture_body
+    assert 'ensureStageModelReady("observe"' not in capture_body
+    assert '"/vision/observe_screen"' not in capture_body
+    assert 'ensureStageModelReady("observe"' not in bind_capture_body
+    assert '"vision_observe_screen"' not in bind_capture_body
+
+
+def test_learning_interface_screen_understanding_operation_owns_observe_and_draft() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    observe_start = panel_js.index("async function runLearningScreenObserve")
+    observe_end = panel_js.index("function renderLearningWorkflowState", observe_start)
+    observe_body = panel_js[observe_start:observe_end]
+    flow_start = panel_js.index("async function runLearningInterfaceFlow")
+    flow_body = panel_js[flow_start:panel_js.index("async function completeLearningInterfaceReadonlyFlow", flow_start)]
+    operation_start = flow_body.index(
+        'const screenUnderstandingOperation = await startLearningWorkflowStageOperation'
+    )
+    operation_body = flow_body[operation_start:]
+
+    assert 'ensureStageModelReady("observe", profileId, { signal: options.signal })' in observe_body
+    assert '"vision_observe_screen"' in observe_body
+    assert "capture_live: false" in observe_body
+    assert "image_path: sourceImagePath" in observe_body
+    assert "operation: options.operation" in observe_body
+    assert "return runLearningScreenObserve({" in operation_body
+    assert "followContinuationChain: true" in operation_body
+    assert "runLearningDraftTrial(" not in operation_body
+    assert "learningStageContinuationFinished(trialResponse)" in operation_body
+    assert 'learningStageContinuation(trialResponse).outcome === "completed"' in operation_body
 
 
 def test_learning_interface_records_coordinate_overlay_fusion_provenance() -> None:
@@ -1139,12 +1712,10 @@ def test_learning_interface_flow_stops_before_calibration_when_stage1_gate_block
 
     flow_start = panel_js.index("async function runLearningInterfaceFlow")
     flow_body = panel_js[flow_start:panel_js.index("async function completeLearningInterfaceReadonlyFlow", flow_start)]
-    blocked_start = flow_body.index("if (!twoStageAllowed)")
-    blocked_end = flow_body.index('setLearningInterfaceFlowStep("precise_calibration"', blocked_start)
-    blocked_body = flow_body[blocked_start:blocked_end]
-
-    assert "return twoStage" in blocked_body
-    assert "runLearningDeepCalibration" not in blocked_body
+    assert "runLearningDeepCalibration(" not in flow_body
+    assert "backendContinuationStageWorker(continuationData)" in panel_js
+    assert "if (!operation && !worker) return null" in panel_js
+    assert "if (!managedChainCompleted) return trialResponse" in flow_body
 
 
 def test_learning_interface_flow_keeps_latest_fused_review_overlay() -> None:
@@ -1152,13 +1723,13 @@ def test_learning_interface_flow_keeps_latest_fused_review_overlay() -> None:
 
     flow_start = panel_js.index("async function runLearningInterfaceFlow")
     flow_body = panel_js[flow_start:panel_js.index("async function completeLearningInterfaceReadonlyFlow", flow_start)]
-    overlay_render = 'renderLearningDraftScreenshotPath(twoStageOverlayPath, "learning two-stage fused overlay")'
+    overlay_render = 'renderLearningDraftScreenshotPath(overlayPath, "learning two-stage fused overlay")'
+    handler_start = panel_js.index("async function applyManagedLearningStageWorkerResponse")
+    handler_end = panel_js.index("async function runLearningInterfaceFlow", handler_start)
+    handler_body = panel_js[handler_start:handler_end]
 
-    assert flow_body.count(overlay_render) == 1
-    fused_trial_start = flow_body.index(
-        "const fusedTrial = await runLearningDraftTrial({ preserveTwoStageReportPath: true })"
-    )
-    assert overlay_render not in flow_body[fused_trial_start:]
+    assert handler_body.count(overlay_render) == 1
+    assert "lastLearningFinalReviewedOverlayPath" in flow_body
 
 
 def test_learning_interface_precise_calibration_reports_live_progress_and_stops_on_failure() -> None:
@@ -1171,14 +1742,15 @@ def test_learning_interface_precise_calibration_reports_live_progress_and_stops_
     assert '"learning_flow_calibration_loading_model"' in calibration_body
     assert '"learning_flow_calibration_running_chain"' in calibration_body
     assert "learningCalibrationTimeoutSeconds" in calibration_body
-    assert "learningCalibrationTimeoutSeconds(learningTwoStageCalibrationTargetCount())" in calibration_body
+    assert "learningCalibrationTimeoutSeconds(candidateCount)" in calibration_body
     assert 'learning_flow_calibration_loading_model: "正在检查 / 加载定位模型"' in panel_js
     assert 'learning_flow_calibration_loading_model: "Checking / loading locator model"' in panel_js
     assert 'learning_flow_calibration_running_chain: "正在执行 OCR + VISTA + rerank + gate dry-run"' in panel_js
     assert 'learning_flow_calibration_running_chain: "Running OCR + VISTA + rerank + gate dry-run"' in panel_js
     assert "batchAborted" in panel_js
     assert "learn_calibration_blocked" in panel_js
-    assert "calibrationEvidence.isBlocked" in panel_js
+    assert 'taskKind === "panel_learning_calibration_sequence"' in panel_js
+    assert "lastLearningDeepCalibrationResponse = response" in panel_js
 
     progress_start = panel_js.index("async function runLearningCalibrationProgress")
     progress_end = panel_js.index("async function runLearningDeepCalibration", progress_start)
@@ -1189,7 +1761,8 @@ def test_learning_interface_precise_calibration_reports_live_progress_and_stops_
     assert 'learning_flow_calibration_candidate_count: "numbered candidates"' in panel_js
 
     assert "learningTwoStageCalibrationTargetCount" in calibration_body
-    assert "candidateCount: learningTwoStageCalibrationTargetCount()" in calibration_body
+    assert "const candidateCount = learningTwoStageCalibrationTargetCount()" in calibration_body
+    assert "{ candidateCount }" in calibration_body
 
     timeout_start = panel_js.index("function learningCalibrationTimeoutSeconds")
     timeout_end = panel_js.index("function learningTwoStageCalibrationTargetCount", timeout_start)
@@ -1200,11 +1773,13 @@ def test_learning_interface_precise_calibration_reports_live_progress_and_stops_
     flow_start = panel_js.index("async function runLearningInterfaceFlow")
     flow_end = panel_js.index("async function completeLearningInterfaceReadonlyFlow", flow_start)
     flow_body = panel_js[flow_start:flow_end]
-    failure_start = flow_body.index("if (!calibration?.success)")
-    failure_end = flow_body.index("const calibrationEvidence", failure_start)
+    failure_start = flow_body.index("if (!trialResponse?.success)")
+    failure_end = flow_body.index("if (!learningStageContinuationFinished", failure_start)
     failure_body = flow_body[failure_start:failure_end]
     assert "completeLearningInterfaceReadonlyFlow" not in failure_body
-    assert "return calibration || trial" in failure_body
+    assert "recoverLearningWorkflowState" in failure_body
+    assert "return trialResponse" in failure_body
+    assert "runLearningDeepCalibration(" not in flow_body
 
 
 def test_learning_interface_uses_actual_calibration_candidate_count_for_progress() -> None:
@@ -1219,6 +1794,155 @@ def test_learning_interface_uses_actual_calibration_candidate_count_for_progress
     assert "const explicitCandidateCount" in count_body
     assert "explicitCandidateCount ?? numberedItemCount" in count_body
     assert "calibration_candidate_count\"]\n      ||" not in count_body
+
+
+def test_learning_interface_precise_calibration_is_revision_bound_and_resumable() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    calibration_start = panel_js.index("async function runLearningDeepCalibration")
+    calibration_end = panel_js.index("function learningTwoStageUnderstandingPayload", calibration_start)
+    calibration_body = panel_js[calibration_start:calibration_end]
+    assert "LEARNING_CALIBRATION_BATCH_SIZE" in panel_js
+    assert '"learning_calibration_sequence_request_v1"' in calibration_body
+    assert "candidate_count: candidateCount" in calibration_body
+    assert "calibration_source_revision: calibrationSourceRevision" in calibration_body
+    assert "maximum_batch_size: LEARNING_CALIBRATION_BATCH_SIZE" in calibration_body
+    assert "locate_payload: payload" in calibration_body
+    assert "resumeResults" not in calibration_body
+    assert "for (let batchIndex" not in calibration_body
+    assert '"vision_locate_target"' not in calibration_body
+
+
+def test_learning_interface_uses_backend_calibration_artifact_continuation() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    flow_start = panel_js.index("async function runLearningInterfaceFlow")
+    flow_end = panel_js.index("async function completeLearningInterfaceReadonlyFlow", flow_start)
+    flow_body = panel_js[flow_start:flow_end]
+    assert "saveLearningCalibrationResult(" not in panel_js
+    assert '"/panel/save_learning_calibration_result"' not in panel_js
+    assert "followContinuationChain: true" in flow_body
+    assert "backendContinuationStageWorker(continuationData)" in panel_js
+    assert 'taskKind === "panel_learning_calibration_sequence"' in panel_js
+
+
+def test_learning_interface_checks_resources_before_starting_real_locator_model() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    calibration_start = panel_js.index("async function runLearningDeepCalibration")
+    calibration_end = panel_js.index("function learningTwoStageUnderstandingPayload", calibration_start)
+    calibration_body = panel_js[calibration_start:calibration_end]
+
+    assert "async function learningModelResourcePreflight" in panel_js
+    assert "/runtime/models/resource_preflight?" in panel_js
+    assert "recommended_batch_size" in panel_js
+    assert calibration_body.index("learningModelResourcePreflight") < calibration_body.index("ensureStageModelReady")
+    assert "const calibrationBatchSize =" not in calibration_body
+    assert "maximum_batch_size: LEARNING_CALIBRATION_BATCH_SIZE" in calibration_body
+    assert "batchResourcePreflight" not in calibration_body
+    assert "learningCalibrationTimeoutSeconds(candidateCount)" in calibration_body
+    assert 'learning_flow_calibration_checking_resources: "正在检查 GPU / 内存占用"' in panel_js
+    assert 'learning_flow_calibration_checking_resources: "Checking GPU / memory use"' in panel_js
+
+
+def test_learning_calibration_batch_recovery_is_backend_owned() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    calibration_start = panel_js.index("async function runLearningDeepCalibration")
+    calibration_end = panel_js.index("function learningTwoStageUnderstandingPayload", calibration_start)
+    calibration_body = panel_js[calibration_start:calibration_end]
+
+    assert '"panel_learning_calibration_sequence"' in calibration_body
+    assert "fallbackPath:" not in calibration_body
+    assert "for (let batchIndex" not in calibration_body
+    assert "learningVistaRetryableAbortReason" not in panel_js
+    assert "learningVistaCompletedResumeResults" not in panel_js
+    assert "waitForStageModelIdle" not in panel_js
+    assert '"vision_locate_target"' not in calibration_body
+
+
+def test_learning_calibration_resume_compaction_is_not_frontend_owned() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    assert "function learningVistaResumeResultForTransport" not in panel_js
+    assert "function learningVistaCompletedResumeResults" not in panel_js
+
+
+def test_every_learning_model_inference_checks_resources_before_real_model_call() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    preflight_start = panel_js.index("async function learningModelResourcePreflight")
+    preflight_end = panel_js.index("async function runLearningCalibrationProgress", preflight_start)
+    preflight_body = panel_js[preflight_start:preflight_end]
+    assert "new URLSearchParams({ stage })" in preflight_body
+
+    ensure_start = panel_js.index("async function ensureStageModelReady")
+    ensure_end = panel_js.index("async function applyModelProfile", ensure_start)
+    ensure_body = panel_js[ensure_start:ensure_end]
+    assert "options.resourcePreflight" in ensure_body
+    assert "learningModelResourcePreflight(stage, profileId, { signal: options.signal })" in ensure_body
+    assert ensure_body.index("learningModelResourcePreflight") < ensure_body.index("/runtime/models?")
+    assert 'resourcePreflight.resourceMode === "critical"' in ensure_body
+    assert "resourcePreflight.modelLaunchAllowed === false" in ensure_body
+    assert ensure_body.index('resourcePreflight.resourceMode === "critical"') < ensure_body.index("/runtime/models?")
+    assert "model_start_blocked_by_resource_preflight" in ensure_body
+
+    assert "model_launch_allowed" in preflight_body
+    assert "reason_codes" in preflight_body
+
+    draft_start = panel_js.index("async function runLearningDraftTrial")
+    draft_end = panel_js.index("function learningReviewLabel", draft_start)
+    draft_body = panel_js[draft_start:draft_end]
+    assert draft_body.index('ensureStageModelReady("observe"') < draft_body.index(
+        'runManagedLearningStageWorker('
+    )
+    assert '"panel_learning_recognition_trial"' in draft_body
+    assert 'fallbackPath: "/panel/run_learning_recognition_trial"' in draft_body
+
+    stage2_start = panel_js.index("async function runLearningTwoStageUnderstanding")
+    stage2_end = panel_js.index("async function runLearningModelReviewRepair", stage2_start)
+    stage2_body = panel_js[stage2_start:stage2_end]
+    assert stage2_body.index('ensureStageModelReady("observe"') < stage2_body.index(
+        'runManagedLearningStageWorker('
+    )
+    assert '"panel_learning_two_stage_understanding"' in stage2_body
+    assert 'fallbackPath: "/panel/run_learning_two_stage_understanding"' in stage2_body
+
+    review_start = panel_js.index("async function runLearningModelReviewRepair")
+    review_end = panel_js.index("async function runLearningInterfaceFlow", review_start)
+    review_body = panel_js[review_start:review_end]
+    assert review_body.index('ensureStageModelReady("observe"') < review_body.index(
+        'runManagedLearningStageWorker('
+    )
+    assert '"panel_learning_model_review_repair"' in review_body
+    assert 'fallbackPath: "/panel/run_learning_model_review_repair"' in review_body
+
+
+def test_managed_learning_worker_explicitly_adopts_completed_result() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    helper_start = panel_js.index("async function runManagedLearningStageWorker")
+    helper_end = panel_js.index(
+        "async function finishLearningWorkflowStageOperation",
+        helper_start,
+    )
+    helper_body = panel_js[helper_start:helper_end]
+
+    assert "/panel/adopt_learning_stage_worker_result" in helper_body
+    assert "workerStatus.response" not in helper_body
+    assert "result_available" in helper_body
+
+
+def test_locator_reuses_resource_preflight_for_model_readiness() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    calibration_start = panel_js.index("async function runLearningDeepCalibration")
+    calibration_end = panel_js.index("function learningTwoStageUnderstandingPayload", calibration_start)
+    calibration_body = panel_js[calibration_start:calibration_end]
+
+    assert "learningModelResourcePreflight(" in calibration_body
+    assert '"locate", profileId, { signal: options.signal }' in calibration_body
+    assert 'ensureStageModelReady("locate", profileId, { resourcePreflight, signal: options.signal })' in calibration_body
 
 
 def test_learning_draft_compacts_vista_evidence_before_fusion_payload() -> None:
@@ -1248,18 +1972,41 @@ def test_learning_interface_flow_marks_unhandled_exception_as_terminal_failure()
     flow_body = panel_js[flow_start:flow_end]
 
     assert "catch (error)" in flow_body
-    assert 'setLearningInterfaceFlowStep(currentLearningInterfaceFlowStep' in flow_body
+    assert "transitionLearningWorkflowState(" in flow_body
+    assert "activeLearningStageOperation" in flow_body
+    assert "finishLearningWorkflowStageOperation(" in flow_body
+    assert 'currentLearningInterfaceFlowStep,\n            "failed"' in flow_body
     assert "learning flow failed" in flow_body
     assert "return { success: false" in flow_body
+
+
+def test_learning_interface_flow_uses_returned_artifact_shapes_for_evidence() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    flow_start = panel_js.index("async function runLearningInterfaceFlow")
+    flow_end = panel_js.index("async function runLearningDraftTrial", flow_start)
+    flow_body = panel_js[flow_start:flow_end]
+
+    assert "fallbackResult: resultOf(trialResponse)" in flow_body
+    assert "learningTrialArtifactPath(trial)" not in flow_body
+    assert "learningTrialArtifactPath(fusedTrial)" not in flow_body
+    assert "learningStageContinuationFinished(trialResponse)" in flow_body
+    assert "learningPageDetailArtifactPath(pageDetail || {})" in flow_body
+    assert "learningScaffoldArtifactPath(scaffold || {})" in flow_body
+    assert 'nestedGet(trial, ["data", "trial_path"])' not in flow_body
+    assert "fusedTrial" not in flow_body
+    assert 'nestedGet(pageDetail, ["data", "source_path"])' not in flow_body
+    assert 'nestedGet(scaffold, ["data", "scaffold_path"])' not in flow_body
 
 
 def test_learning_interface_step_status_keeps_global_status_in_sync() -> None:
     panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
 
-    helper_start = panel_js.index("function setLearningInterfaceFlowStep")
-    helper_end = panel_js.index("function learningInterfaceTrialEvidenceSummary", helper_start)
+    helper_start = panel_js.index("function renderLearningWorkflowState")
+    helper_end = panel_js.index("function newLearningWorkflowRunId", helper_start)
     helper_body = panel_js[helper_start:helper_end]
-    assert 'stepId === "complete"' in helper_body
+    assert 'workflowStatus === "completed"' in helper_body
+    assert 'workflowStatus === "failed" || workflowStatus === "safe_stopped"' in helper_body
     assert 'setStatus("running", "running")' in helper_body
     assert 'setStatus("ok", "ok")' in helper_body
     assert 'setStatus("failed", "error")' in helper_body
@@ -2551,7 +3298,7 @@ def test_panel_translation_keys_stay_bilingual() -> None:
     assert "learning_diff" not in zh_keys
 
 
-def test_panel_removes_wrong_learning_draft_workbench() -> None:
+def test_panel_keeps_internal_learning_assets_without_exposing_subview_switch() -> None:
     index_html = Path("app/web_panel/index.html").read_text(encoding="utf-8")
     panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8")
     panel_css = Path("app/web_panel/panel.css").read_text(encoding="utf-8")
@@ -2560,9 +3307,9 @@ def test_panel_removes_wrong_learning_draft_workbench() -> None:
     assert 'class="replay-action-disclosure"' in index_html
     assert 'class="button-row replay-template-advanced-actions"' in index_html
     assert 'class="button-row replay-learning-actions"' in index_html
-    assert 'class="learn-replay-subnav"' in index_html
+    assert 'class="learn-replay-subnav"' not in index_html
     assert 'data-learn-replay-panel="template"' in index_html
-    assert 'data-learn-replay-panel="draft"' in index_html
+    assert '<section class="learn-replay-subview active" data-learn-replay-panel="draft">' in index_html
     assert 'class="form-section-label wide-control"' in index_html
     assert 'class="form-section-label wide-control learning-studio-section-label"' in index_html
     assert 'data-i18n="template_replay_section"' in index_html
@@ -2608,7 +3355,7 @@ def test_panel_removes_wrong_learning_draft_workbench() -> None:
     assert 'id="imageInspectorApplyBoxBtn"' in index_html
     assert "function renderLearningTemplateSummary" not in panel_js
     assert "function setLearningWorkbenchView" not in panel_js
-    assert 'let currentLearnReplaySubview = "template";' in panel_js
+    assert 'let currentLearnReplaySubview = "draft";' in panel_js
     assert 'document.body.classList.toggle("learn-replay-draft-subview", draftActive);' in panel_js
 
 
@@ -2643,8 +3390,8 @@ def test_learning_draft_panel_renders_open_detail_transition_hints() -> None:
     assert "createPreciseUnderstandingCandidate" in panel_js
     assert "createPageDetailCandidate" in panel_js
     assert "createLearningDemoScaffold" in panel_js
-    assert "const candidateSourcePath = String(data.report_path || data.page_detail_candidate_path || sourcePath || \"\").trim();" in panel_js
-    assert "const scaffoldSourcePath = String(data.report_path || data.learn_mode_demo_scaffold_path || sourcePath || \"\").trim();" in panel_js
+    assert "const candidateSourcePath = learningPageDetailArtifactPath(data) || sourcePath;" in panel_js
+    assert "const scaffoldSourcePath = learningScaffoldArtifactPath(data) || sourcePath;" in panel_js
     assert "/panel/create_model_start_approval_packet" in panel_js
     assert "/panel/create_calibration_pre_run_check" in panel_js
     assert "/panel/create_pathgraph_integration_readiness" in panel_js
@@ -2874,6 +3621,9 @@ def test_learning_draft_panel_renders_open_detail_transition_hints() -> None:
     assert "setRecommendedLearningDraftReviewSource" in panel_js
     assert "loadRecommendedLearningDraftReview" in panel_js
     assert 'on("learningDraftRecommendedLoadBtn", "click", loadRecommendedLearningDraftReview);' in panel_js
+    assert "orderedLearningDraftSources" in panel_js
+    assert 'item.recommended_for_panel_review === true ? "[Recommended current] "' in panel_js
+    assert 'item.pinned === true ? "[Pinned reference] "' in panel_js
     assert "recommended_current_precise_understanding" in panel_js
     assert "item.pinned" in panel_js
     assert "learningDraftReviewSourcePath" in panel_js
@@ -2935,6 +3685,14 @@ def test_learning_draft_panel_renders_open_detail_transition_hints() -> None:
     assert "function showLearningDraftInterfaceDetails" not in panel_js
     assert "function loadLearningDraftSharedViews" not in panel_js
     assert "function clearLearningDraftReviewDisplay" in panel_js
+    load_review_start = panel_js.index("async function loadLearningDraftReview")
+    load_review_end = panel_js.index("async function saveLearningDraftReview", load_review_start)
+    load_review_body = panel_js[load_review_start:load_review_end]
+    assert 'clearLearningDraftReviewDisplay(`loading · ${sourcePath}`, {' in load_review_body
+    assert "preserveWorkflowReview: options.skipWorkflowReview === true" in load_review_body
+    assert load_review_body.index("clearLearningDraftReviewDisplay") < load_review_body.index(
+        'api("POST", "/panel/load_learning_draft_review"'
+    )
     assert "function clearLearningDraftWorkspaceForNewRun" in panel_js
     assert "function renderLearningDraftPathPreview" in panel_js
     assert "function renderLearningDraftHierarchy" in panel_js
@@ -2981,7 +3739,7 @@ def test_learning_draft_panel_renders_open_detail_transition_hints() -> None:
     run_flow_body = panel_js[run_flow_start:run_flow_end]
     assert "const binding = await bindSelectedWindow()" in run_flow_body
     assert run_flow_body.index("const binding = await bindSelectedWindow()") < run_flow_body.index("captureLearningDraftWindow")
-    assert 'setLearningInterfaceFlowStep("bind_capture", `bind failed' in run_flow_body
+    assert '"bind_capture",\n        "failed",\n        `bind failed' in run_flow_body
     assert 'clearLearningDraftWorkspaceForNewRun("not_loaded · new learning run started")' in run_flow_body
     assert run_flow_body.index("clearLearningDraftWorkspaceForNewRun") < run_flow_body.index("captureLearningDraftWindow")
     assert 'clearScreenUnderstandingResidualDisplays("not_loaded · screen understanding started")' in capture_trial_body
@@ -2991,21 +3749,30 @@ def test_learning_draft_panel_renders_open_detail_transition_hints() -> None:
     request_payload_start = panel_js.index("function learningRecognitionTrialRequestPayload")
     capture_trial_start_for_payload = panel_js.index("async function captureLearningDraftWindow", request_payload_start)
     request_payload_body = panel_js[request_payload_start:capture_trial_start_for_payload]
-    assert "two_stage_report_path: String(lastLearningTwoStageReportPath || \"\").trim() || null" in request_payload_body
+    assert (
+        "two_stage_report_path: String(lastLearningFinalStage2ReportPath || "
+        "lastLearningTwoStageReportPath || \"\").trim() || null"
+    ) in request_payload_body
     assert run_trial_body.index("const payload = learningRecognitionTrialRequestPayload()") < run_trial_body.index(
         'clearScreenUnderstandingResidualDisplays("not_loaded · generating learning draft", {'
     )
-    assert "const trialEvidence = learningInterfaceTrialEvidenceSummary(trial)" in run_flow_body
-    assert "const twoStage = await runLearningTwoStageUnderstanding()" in run_flow_body
-    assert "const twoStageAllowed = learningTwoStageAllowsDraftTrial(twoStage)" in run_flow_body
-    assert "if (!twoStageAllowed)" in run_flow_body
-    blocked_stage_body = run_flow_body[
-        run_flow_body.index("if (!twoStageAllowed)"):
-        run_flow_body.index("setLearningInterfaceFlowStep(\n      \"fusion\"", run_flow_body.index("if (!twoStageAllowed)"))
+    assert "followContinuationChain: true" in run_flow_body
+    assert "learningStageContinuationFinished(trialResponse)" in run_flow_body
+    assert 'learningStageContinuation(trialResponse).outcome === "completed"' in run_flow_body
+    screen_operation_body = run_flow_body[
+        run_flow_body.index(
+            'startLearningWorkflowStageOperation(\n      "screen_understanding"'
+        )
+        :
     ]
-    assert "return trial" not in blocked_stage_body
-    assert "loading review overlay" in blocked_stage_body
-    assert "const fusedTrial = await runLearningDraftTrial({ preserveTwoStageReportPath: true })" in run_flow_body
+    assert "runLearningDraftTrial(" not in screen_operation_body
+    assert "runLearningTwoStageUnderstanding(" not in run_flow_body
+    assert "runLearningDeepCalibration(" not in run_flow_body
+    assert "runLearningModelReviewRepair(" not in run_flow_body
+    assert "nextLearningStageOperation(" not in run_flow_body
+    assert "backendContinuationStageWorker(continuationData)" in panel_js
+    assert "runLearningScreenObserve({" in run_flow_body
+    assert "followContinuationChain: true" in run_flow_body
     assert "let lastLearningTwoStageReportPath" in panel_js
     assert "let lastLearningFusedTrialPath" in panel_js
     assert 'lastLearningTwoStageReportPath = ""' in panel_js
@@ -3021,8 +3788,6 @@ def test_learning_draft_panel_renders_open_detail_transition_hints() -> None:
     assert create_page_detail_body.index("lastLearningTwoStageReportPath") < create_page_detail_body.index("learningDraftReviewSourcePath()")
     assert 'stage2_region_strategy: "partitioned"' in panel_js
     assert 'stage2_region_strategy: "global_no_partition"' not in run_flow_body
-    assert run_flow_body.index("const twoStage = await runLearningTwoStageUnderstanding()") < run_flow_body.index("const fusedTrial = await runLearningDraftTrial")
-    assert run_flow_body.index("if (!twoStageAllowed)") < run_flow_body.index("const fusedTrial = await runLearningDraftTrial")
     assert "replayModelArtifactPath" not in run_trial_body
     assert "loadReplayModelArtifact" not in run_trial_body
     assert "/execute/" not in run_trial_body
@@ -3148,7 +3913,11 @@ def test_learning_draft_panel_renders_open_detail_transition_hints() -> None:
     set_subview_start = panel_js.index("function setLearnReplaySubview")
     set_subview_end = panel_js.index("function learningRecognitionTrialRequestPayload")
     set_subview_body = panel_js[set_subview_start:set_subview_end]
-    assert 'if (selected === "draft") hideSharedPathSurface()' in set_subview_body
+    assert 'if (selected === "draft") {' in set_subview_body
+    assert "hideSharedPathSurface();" in set_subview_body
+    assert set_subview_body.index('if (selected === "draft") {') < set_subview_body.index(
+        "hideSharedPathSurface();"
+    )
     observe_handler_start = panel_js.index('on("observeBtn", "click"')
     observe_handler_end = panel_js.index('on("analyzeBtn", "click"', observe_handler_start)
     observe_handler_body = panel_js[observe_handler_start:observe_handler_end]
@@ -3165,51 +3934,83 @@ def test_learning_draft_panel_renders_open_detail_transition_hints() -> None:
     assert ".learning-interface-detail-grid" not in panel_css
 
 
-def test_panel_two_stage_endpoint_returns_review_boxes_for_real_learning_flow(monkeypatch) -> None:
+def test_learning_draft_panel_exposes_full_image_bbox_editor_controls() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    index_html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
+
+    assert '<script src="/panel/assets/learning_draft_editor.js' in index_html
+    for control_id in (
+        "learningDraftOpenBoxEditorBtn",
+        "imageInspectorAddRegionBtn",
+        "imageInspectorDeleteBoxBtn",
+        "imageInspectorUndoBtn",
+        "imageInspectorRedoBtn",
+        "imageInspectorRoleSelect",
+        "imageInspectorParentSelect",
+        "imageInspectorReason",
+    ):
+        assert f'id="{control_id}"' in index_html
+    assert "LearningDraftEditorState.createLearningDraftEditorState" in panel_js
+    assert 'contract_version: "human_review_patch_v1"' in panel_js
+    assert "renderLearningDraftEditorBoxes" in panel_js
+    assert "resetLearningDraftEditorState" in panel_js
+
+
+def test_panel_two_stage_endpoint_returns_review_boxes_for_real_learning_flow(
+    monkeypatch,
+    tmp_path,
+) -> None:
     client = TestClient(app)
+    report_path = tmp_path / "two-stage.json"
+    saved_report = {
+        "model_grounding_evidence": {
+            "status": "not_valid_for_model_grounding_evidence"
+        },
+        "learn_all_targets": {
+            "review_box_count": 1,
+            "review_boxes": [
+                {
+                    "id": "R1",
+                    "label": "Main Card",
+                    "role": "review_only",
+                    "bbox": {"x": 10, "y": 20, "w": 100, "h": 80},
+                }
+            ],
+            "overlay_path": "artifacts/review-overlays/demo_two_stage.png",
+            "stage1_gate_status": "passed",
+        },
+    }
+    report_path.write_text(
+        json.dumps(saved_report, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
     monkeypatch.setattr(
         panel_api,
-        "_observe_bundle_from_trace_result",
-        lambda result, trace_path: {
-            "image_path": result.get("image_path", ""),
-            "source_image_path": result.get("image_path", ""),
-            "screen_size": {"width": 320, "height": 240},
-            "screen_reading": {"screen_summary": "demo screen"},
-        },
-    )
-    monkeypatch.setattr(
-        panel_api,
-        "_stage1_inventory_from_trace_result",
-        lambda result: [{"item_id": "item_1", "label": "Main", "bbox": {"x": 0, "y": 0, "w": 320, "h": 240}}],
-    )
-    monkeypatch.setattr(
-        panel_api,
-        "build_inventory_layout_graph",
-        lambda inventory, screen_size=None: {"node_count": len(inventory), "zone_count": 1, "zones": {}},
-    )
-    monkeypatch.setattr(
-        panel_api,
-        "build_two_stage_screen_understanding",
-        lambda **kwargs: {
-            "stage1_gate": {"status": "passed", "failure_categories": [], "allow_stage2_numbering": True},
-            "stage2_numbering_skipped": False,
-            "stage2_numbering": {"numbered_item_count": 7, "regions": [{"region_id": "R1"}]},
-            "fusion": {
-                "compiled_overlay_path": "artifacts/review-overlays/demo_two_stage.png",
-                "full_screen_understanding_overlay_path": "artifacts/review-overlays/demo_two_stage.png",
-                "fused_review_boxes": [
-                    {
-                        "id": "R1",
-                        "label": "Main Card",
-                        "role": "review_only",
-                        "bbox": {"x": 10, "y": 20, "w": 100, "h": 80},
-                    }
+        "run_two_stage_understanding_task",
+        lambda task_input, *, project_root: LearningTaskResult(
+            outcome="completed",
+            payload={
+                "contract_version": "panel_learning_two_stage_understanding_run_v1",
+                "stage1_gate": {"status": "passed"},
+                "stage2_numbering_skipped": False,
+                "learn_all_targets": saved_report["learn_all_targets"],
+                "coordinate_overlay_path": "artifacts/review-overlays/demo_two_stage.png",
+                "model_grounding_evidence": saved_report[
+                    "model_grounding_evidence"
                 ],
+                "summary": {
+                    "model_grounding_evidence_status": (
+                        "not_valid_for_model_grounding_evidence"
+                    ),
+                    "stage2_numbered_item_count": 7,
+                },
+                "real_clicks": 0,
+                "promotion_allowed": False,
+                "report_path": str(report_path),
             },
-        },
+        ),
     )
-    monkeypatch.setattr(panel_api, "fusion_status_from_two_stage", lambda report: {"status": "available"})
 
     response = client.post(
         "/panel/run_learning_two_stage_understanding",
@@ -3242,6 +4043,204 @@ def test_panel_two_stage_endpoint_returns_review_boxes_for_real_learning_flow(mo
     assert saved_report["learn_all_targets"]["review_boxes"][0]["label"] == "Main Card"
     assert saved_report["learn_all_targets"]["overlay_path"] == "artifacts/review-overlays/demo_two_stage.png"
     assert saved_report["learn_all_targets"]["stage1_gate_status"] == "passed"
+
+def test_panel_learning_model_review_repair_returns_final_numbering_for_calibration(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    client = TestClient(app)
+    source_report = tmp_path / "two_stage.json"
+    screenshot = tmp_path / "screen.png"
+    overlay = tmp_path / "before.png"
+    source_report.write_text("{}", encoding="utf-8")
+    screenshot.write_bytes(b"screen")
+    overlay.write_bytes(b"overlay")
+    final_report = tmp_path / "final_stage2.json"
+    final_overlay = tmp_path / "final.png"
+    final_report.write_text("{}", encoding="utf-8")
+    final_overlay.write_bytes(b"final")
+
+    def fake_run(**kwargs):
+        assert kwargs["two_stage_report_path"] == source_report.resolve()
+        assert kwargs["screenshot_path"] == screenshot.resolve()
+        assert kwargs["composite_overlay_path"] == overlay.resolve()
+        assert kwargs["model_profile_id"] == "learn_mode_qwen3_vl_8b"
+        return {
+            "contract_version": "panel_learning_model_review_repair_result_v1",
+            "status": "ready_for_calibration",
+            "calibration_permission": True,
+            "final_stage2_report_path": str(final_report.resolve()),
+            "final_repaired_overlay_path": str(final_overlay.resolve()),
+            "final_numbering_revision": "final-revision-1",
+            "integrity_gate": {"passed": True, "failure_categories": []},
+            "three_image_evidence": {
+                "original": str(screenshot.resolve()),
+                "before_review_fusion": str(overlay.resolve()),
+                "final_repaired_fusion": str(final_overlay.resolve()),
+            },
+            "safety": {"display_only": True, "real_clicks": 0, "live_fills": 0, "live_submits": 0},
+        }
+
+    monkeypatch.setattr(panel_api, "_resolve_under_root_path", lambda value: Path(value).resolve())
+    monkeypatch.setattr(panel_api, "run_panel_learning_model_review_repair", fake_run)
+
+    response = client.post(
+        "/panel/run_learning_model_review_repair",
+        json={
+            "two_stage_report_path": str(source_report),
+            "screenshot_path": str(screenshot),
+            "composite_overlay_path": str(overlay),
+            "model_profile_id": "learn_mode_qwen3_vl_8b",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["calibration_permission"] is True
+    assert payload["data"]["final_stage2_report_path"] == str(final_report.resolve())
+    assert payload["data"]["final_numbering_revision"] == "final-revision-1"
+    assert payload["data"]["real_clicks"] == 0
+
+
+def test_panel_learning_model_review_repair_safe_stop_is_not_api_failure(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    client = TestClient(app)
+    source_report = tmp_path / "two_stage.json"
+    screenshot = tmp_path / "screen.png"
+    overlay = tmp_path / "before.png"
+    source_report.write_text("{}", encoding="utf-8")
+    screenshot.write_bytes(b"screen")
+    overlay.write_bytes(b"overlay")
+
+    monkeypatch.setattr(panel_api, "_resolve_under_root_path", lambda value: Path(value).resolve())
+    monkeypatch.setattr(
+        panel_api,
+        "run_panel_learning_model_review_repair",
+        lambda **kwargs: {
+            "contract_version": "panel_learning_model_review_repair_result_v1",
+            "status": "safe_stop",
+            "calibration_permission": False,
+            "final_stage2_report_path": "",
+            "final_repaired_overlay_path": str(overlay.resolve()),
+            "final_numbering_revision": "",
+            "integrity_gate": {
+                "passed": False,
+                "failure_categories": ["needs_human_review"],
+            },
+            "safety": {"display_only": True, "real_clicks": 0, "live_fills": 0, "live_submits": 0},
+        },
+    )
+
+    response = client.post(
+        "/panel/run_learning_model_review_repair",
+        json={
+            "two_stage_report_path": str(source_report),
+            "screenshot_path": str(screenshot),
+            "composite_overlay_path": str(overlay),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["status"] == "safe_stop"
+    assert payload["data"]["calibration_permission"] is False
+    assert payload["data"]["integrity_gate"]["failure_categories"] == ["needs_human_review"]
+    assert payload["data"]["real_clicks"] == 0
+
+
+def test_learning_interface_flow_calibrates_before_model_review_and_repair() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
+    flow_start = panel_js.index("async function runLearningInterfaceFlow")
+    flow_body = panel_js[flow_start:panel_js.index("async function completeLearningInterfaceReadonlyFlow", flow_start)]
+
+    assert 'data-learning-flow-step="review_repair"' in html
+    assert 'data-i18n="learning_flow_review_repair"' in html
+    assert "followContinuationChain: true" in flow_body
+    assert "runLearningDeepCalibration(" not in flow_body
+    assert "runLearningModelReviewRepair(" not in flow_body
+    assert 'taskKind === "panel_learning_calibration_sequence"' in panel_js
+    assert 'taskKind === "panel_learning_model_review_repair"' in panel_js
+
+    assert panel_js.index('"precise_calibration",') < panel_js.index('"review_repair",')
+    assert html.index('data-learning-flow-step="precise_calibration"') < html.index(
+        'data-learning-flow-step="review_repair"'
+    )
+
+
+def test_learning_interface_flow_progress_matches_real_artifact_dependencies() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
+    flow_start = panel_js.index("async function runLearningInterfaceFlow")
+    flow_end = panel_js.index("async function completeLearningInterfaceReadonlyFlow", flow_start)
+    flow_body = panel_js[flow_start:flow_end]
+    complete_body = panel_js[flow_end:panel_js.index("async function runLearningDraftTrial", flow_end)]
+
+    assert 'markLearningInterfaceFlowStepDone("page_details")' not in flow_body
+    assert 'setLearningInterfaceFlowStep("page_details"' not in flow_body
+    assert "/panel/run_learning_workflow_readonly_tail" in complete_body
+    assert "createPageDetailCandidate()" not in complete_body
+    assert "createLearningDemoScaffold()" not in complete_body
+    assert 'transitionLearningWorkflowState("page_details"' not in complete_body
+    assert 'transitionLearningWorkflowState("pathgraph_draft"' not in complete_body
+    assert 'transitionLearningWorkflowState("complete"' not in complete_body
+    assert 'nestedGet(response, ["data", "workflow_state"])' in complete_body
+    assert "runLearningDeepCalibration(" not in flow_body
+    assert "runLearningModelReviewRepair(" not in flow_body
+    assert "runLearningDraftTrial(" not in flow_body
+    assert "backendContinuationStageWorker(continuationData)" in panel_js
+    assert html.index('data-learning-flow-step="precise_calibration"') < html.index(
+        'data-learning-flow-step="review_repair"'
+    )
+    assert html.index('data-learning-flow-step="review_repair"') < html.index(
+        'data-learning-flow-step="fusion"'
+    )
+    assert html.index('data-learning-flow-step="fusion"') < html.index(
+        'data-learning-flow-step="page_details"'
+    )
+
+
+def test_learning_interface_flow_has_explicit_completed_step_marker() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    helper_start = panel_js.index("function renderLearningWorkflowState")
+    helper_end = panel_js.index("function newLearningWorkflowRunId", helper_start)
+    helper_body = panel_js[helper_start:helper_end]
+    assert 'data-learning-flow-step' in helper_body
+    assert 'item.classList.toggle("is-done", stageStatus === "completed")' in helper_body
+    assert 'item.classList.toggle("is-active", itemStep === currentStage && stageStatus === "running")' in helper_body
+
+
+def test_learning_model_review_repair_renders_final_overlay_and_binds_final_graph() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    assert "let lastLearningReviewRepairResponse = null;" in panel_js
+    assert "let lastLearningFinalStage2ReportPath = \"\";" in panel_js
+    assert "let lastLearningFinalNumberingRevision = \"\";" in panel_js
+    review_start = panel_js.index("async function runLearningModelReviewRepair")
+    review_end = panel_js.index("async function runLearningInterfaceFlow", review_start)
+    review_body = panel_js[review_start:review_end]
+    payload_start = panel_js.index("function learningModelReviewRepairPayload")
+    payload_end = panel_js.index("async function runLearningModelReviewRepair", payload_start)
+    payload_body = panel_js[payload_start:payload_end]
+    assert '"panel_learning_model_review_repair"' in review_body
+    assert 'fallbackPath: "/panel/run_learning_model_review_repair"' in review_body
+    assert 'renderLearningDraftScreenshotPath(finalOverlayPath, "learning final reviewed fusion overlay")' in review_body
+    assert "lastLearningFinalStage2ReportPath" in review_body
+    assert "lastLearningFinalNumberingRevision" in review_body
+
+    calibration_start = panel_js.index("async function runLearningDeepCalibration")
+    calibration_end = panel_js.index("function learningTwoStageUnderstandingPayload", calibration_start)
+    calibration_body = panel_js[calibration_start:calibration_end]
+    assert "payload.metadata.two_stage_report_path = calibrationSourceReportPath" in calibration_body
+    assert "payload.metadata.final_numbering_revision" not in calibration_body
+    assert "payload.metadata.review_repair_integrity_gate_passed" not in calibration_body
+    assert "learningDeepCalibrationOverlayPath(calibrationResponse)" in payload_body
+
 
 def test_seek_search_button_visual_asset_declares_missing_source_as_stale() -> None:
     map_path = Path("artifacts/visual-match-smoke/live_seek_20260624/learned_interface_map_calibrated_real_crops.json")
@@ -3522,3 +4521,561 @@ def test_learning_draft_page_detail_renders_same_source_once() -> None:
     assert "const canonicalPageDetail = candidateReview.page_detail_candidate" in scaffold_body
     assert "renderLearningPageDetailPreviewIfDistinct(modelPageDetail, canonicalPageDetail" in scaffold_body
     assert "renderLearningPageDetailPreviewIfDistinct(readonlyPageDetail, canonicalPageDetail" in scaffold_body
+
+
+def test_learning_draft_history_sources_load_during_panel_boot() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    boot_start = panel_js.index("async function boot()")
+    boot_end = panel_js.index("\nboot();", boot_start)
+    boot_body = panel_js[boot_start:boot_end]
+
+    assert "loadLearningDetailObserveSources();" in boot_body
+    assert boot_body.index("loadLearningDetailObserveSources();") < boot_body.index("refreshModels();")
+
+
+def test_panel_learning_review_assets_use_current_cache_key() -> None:
+    panel_html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
+
+    assert "/panel/assets/panel.css?v=20260729-workflow-control-picker-1" in panel_html
+    assert "/panel/assets/learning_draft_editor.js?v=20260729-box-editor-status-1" in panel_html
+    assert "/panel/assets/learning_workflow_review.js?v=20260729-unconnected-interface-1" in panel_html
+    assert "/panel/assets/interface_workflow_graph.js?v=20260729-compact-workflow-graph-1" in panel_html
+    assert "/panel/assets/panel.js?v=20260729-workflow-control-picker-1" in panel_html
+
+
+def test_learning_draft_history_visibly_separates_current_and_pinned_sources() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    render_start = panel_js.index("function renderLearningDraftHistoryList")
+    render_end = panel_js.index("function orderedLearningDraftSources", render_start)
+    render_body = panel_js[render_start:render_end]
+
+    assert 'item.recommended_for_panel_review === true ? "[Recommended current] "' in render_body
+    assert 'item.pinned === true ? "[Pinned reference] "' in render_body
+
+
+def test_learning_draft_review_load_coalesces_duplicate_source_before_clearing_view() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    load_start = panel_js.index("async function loadLearningDraftReview")
+    load_end = panel_js.index("\nasync function ", load_start + 1)
+    load_body = panel_js[load_start:load_end]
+
+    assert "learningDraftReviewLoadPromise" in load_body
+    assert "learningDraftReviewLoadSourcePath === sourcePath" in load_body
+    assert "return learningDraftReviewLoadPromise" in load_body
+    assert load_body.index("learningDraftReviewLoadPromise") < load_body.index(
+        "clearLearningDraftReviewDisplay"
+    )
+
+
+def test_interface_workflow_evidence_layer_switch_preserves_unsaved_editor_values() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    handler_start = panel_js.index('on("interfaceWorkflowLayerTabs", "click"')
+    handler_end = panel_js.index("\n  });", handler_start) + len("\n  });")
+    handler_body = panel_js[handler_start:handler_end]
+
+    assert "state.selectLayer(layer)" in handler_body
+    assert "renderActiveInterfaceWorkflowEvidence()" in handler_body
+    assert "renderInterfaceWorkflowReviewSelection()" not in handler_body
+
+
+def test_panel_contains_generic_interface_workflow_review_workspace() -> None:
+    client = TestClient(app)
+    response = client.get("/panel")
+
+    assert response.status_code == 200
+    html = response.text
+    assert 'id="interfaceWorkflowReviewPanel"' in html
+    assert 'id="interfaceWorkflowThreeColumnWorkbench"' in html
+    assert 'id="interfaceWorkflowIdentityInput"' in html
+    assert 'id="interfaceWorkflowPathColumn"' in html
+    assert 'id="interfaceWorkflowEvidenceColumn"' in html
+    assert 'id="interfaceWorkflowReviewToolsColumn"' in html
+    assert 'href="#interfaceWorkflowThreeColumnWorkbench"' in html
+    assert "路径图与界面证据" in html
+    assert "先在下方带框图选择具体控件" in html
+    assert "先在左侧路径图选择具体控件" not in html
+    assert "修正当前界面" in html
+    assert 'id="interfaceWorkflowGraph"' in html
+    assert 'id="interfaceWorkflowGraphCanvas"' in html
+    assert 'id="interfaceWorkflowGraphTooltip"' in html
+    assert 'id="interfaceWorkflowGraphContextMenu"' in html
+    assert 'id="interfaceWorkflowGraphLinkStatus"' in html
+    assert 'id="interfaceWorkflowGraphEmpty"' in html
+    assert 'id="interfaceWorkflowGraphZoomOut"' in html
+    assert 'id="interfaceWorkflowGraphBack"' in html
+    assert 'id="interfaceWorkflowGraphZoomIn"' in html
+    assert 'id="interfaceWorkflowGraphReset"' in html
+    assert 'id="interfaceWorkflowGraphLegend"' in html
+    assert "圆点代表界面，连线代表操作与跳转" in html
+    assert "选择已保存的单界面" in html
+    assert "加入流程" in html
+    assert "加入并连接" not in html
+    assert "用当前框连接下一个界面" in html
+    assert 'id="interfaceWorkflowEvidence"' in html
+    assert 'id="interfaceWorkflowEvidenceModeWorkflow"' in html
+    assert 'id="interfaceWorkflowEvidenceModePreview"' in html
+    assert 'id="interfaceWorkflowInspector"' in html
+    assert 'id="interfaceWorkflowLayerTabs"' in html
+    assert 'id="interfaceWorkflowNodeName"' in html
+    assert 'id="interfaceWorkflowSurfaceType"' in html
+    assert 'id="interfaceWorkflowNodeReviewStatus"' in html
+    assert 'id="interfaceWorkflowTransitionAction"' in html
+    assert 'id="interfaceWorkflowTransitionTarget"' in html
+    assert 'id="interfaceWorkflowSourceSelect"' in html
+    assert 'id="interfaceWorkflowSourcePreviewBtn"' in html
+    assert 'id="interfaceWorkflowSourceNameInput"' in html
+    assert 'id="interfaceWorkflowAttachWorkflowSelect"' in html
+    assert 'id="interfaceWorkflowAttachFromNodeSelect"' not in html
+    assert 'id="interfaceWorkflowAttachActionType"' not in html
+    assert 'id="interfaceWorkflowAttachActionLabel"' not in html
+    assert 'id="interfaceWorkflowAttachTargetControl"' not in html
+    assert 'id="interfaceWorkflowAttachPickControlBtn"' not in html
+    assert "job_card" not in html
+    assert 'id="interfaceWorkflowSourcePreview"' in html
+    assert 'id="interfaceWorkflowAddSourceBtn"' in html
+    assert 'id="interfaceWorkflowRemoveSourceBtn"' in html
+    assert 'id="interfaceWorkflowSourceStatus"' in html
+    assert 'id="interfaceWorkflowEditBoxesBtn"' in html
+    assert 'id="interfaceWorkflowReviewToolsToggle"' in html
+    assert 'id="interfaceWorkflowSaveBtn"' in html
+    assert 'id="interfaceWorkflowMemoryBtn"' in html
+    assert 'id="interfaceWorkflowSaveStatus"' in html
+    assert "/panel/assets/learning_workflow_review.js" in html
+    assert "/panel/assets/interface_workflow_graph.js" in html
+    assert "SEEK workflow review" not in html
+
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    assert '"/panel/save_interface_workflow_review"' in panel_js
+    assert "function openInterfaceWorkflowMemoryVerification" in panel_js
+    assert 'scrollIntoView({ behavior: "smooth", block: "start" })' in panel_js
+
+
+def test_interface_workflow_graph_uses_branching_canvas_instead_of_linear_steps() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    render_start = panel_js.index("function renderInterfaceWorkflowReviewSelection")
+    render_end = panel_js.index("function commitInterfaceWorkflowEditorToState", render_start)
+    render_body = panel_js[render_start:render_end]
+
+    assert "renderInterfaceWorkflowGraph(graph)" in render_body
+    assert "interface-workflow-path-step" not in render_body
+    assert "下一界面尚未加入" not in render_body
+    assert 'if (layoutNode.kind !== "interface") return;' in panel_js
+    assert "interfaceWorkflowSelectedOperationId = \"\"" in panel_js
+    assert "interfaceWorkflowReviewState.focusInterface(layoutNode.ref_id)" in panel_js
+    assert "createInterfaceWorkflowSimulation" in panel_js
+    assert "window.requestAnimationFrame(tick)" in panel_js
+    assert "interfaceWorkflowGraphSimulation.isSettled()" in panel_js
+    assert "Math.max(0.35" in panel_js
+
+
+def test_interface_workflow_correction_opens_existing_full_image_box_editor() -> None:
+    html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    handler_start = panel_js.index('on("interfaceWorkflowReviewToolsToggle"')
+    handler_end = panel_js.index("\n  });", handler_start) + len("\n  });")
+    handler_body = panel_js[handler_start:handler_end]
+    function_start = panel_js.index("async function openCurrentInterfaceWorkflowBoxEditor")
+    function_end = panel_js.index("\n}\n", function_start) + len("\n}")
+    function_body = panel_js[function_start:function_end]
+
+    assert "openCurrentInterfaceWorkflowBoxEditor" in handler_body
+    assert "setInterfaceWorkflowCorrectionOpen" not in handler_body
+    assert "function openCurrentInterfaceWorkflowBoxEditor" in panel_js
+    assert "await loadLearningDraftReview({" in panel_js
+    assert "skipWorkflowReview: true" in panel_js
+    assert "discoverRelatedSidecars: false" in function_body
+    assert "supersedePendingLoad: true" in function_body
+    assert "skipReviewRender: true" in function_body
+    load_review_start = panel_js.index("async function loadLearningDraftReview")
+    load_review_end = panel_js.index("async function saveLearningDraftReview", load_review_start)
+    load_review_body = panel_js[load_review_start:load_review_end]
+    assert "discover_related_sidecars: options.discoverRelatedSidecars !== false" in load_review_body
+    assert "options.supersedePendingLoad !== true" in load_review_body
+    assert "loadRequestToken !== learningDraftReviewLoadRequestToken" in load_review_body
+    assert "learningDraftReview = data;" in load_review_body
+    assert "if (!options.skipReviewRender)" in load_review_body
+    assert "function interfaceWorkflowEditableImagePath" in panel_js
+    assert 'entry?.layer === "source"' in panel_js
+    editable_image_start = panel_js.index("function interfaceWorkflowEditableImagePath")
+    editable_image_end = panel_js.index("\n}\n", editable_image_start) + len("\n}")
+    editable_image_body = panel_js[editable_image_start:editable_image_end]
+    assert "view?.active_image_path" not in editable_image_body
+    assert "const editorImagePath = interfaceWorkflowEditableImagePath(view);" in function_body
+    assert "const currentEditorImagePath = learningDraftSourceImagePath(learningDraftReview?.draft || {})" in function_body
+    assert "const loadedEditorImagePath = learningDraftSourceImagePath(review.draft);" in function_body
+    assert 'if (!loadedEditorImagePath)' in function_body
+    assert "当前界面缺少可编辑原图" in function_body
+    assert "openLearningDraftBoxEditor(currentEditorImagePath)" in function_body
+    assert "openLearningDraftBoxEditor(loadedEditorImagePath)" in function_body
+    assert function_body.index("const loadedEditorImagePath") > function_body.index(
+        "await loadLearningDraftReview({"
+    )
+    assert "openLearningDraftBoxEditor(view.active_image_path)" not in function_body
+    assert "function currentLearningDraftReviewMatchesSource" in panel_js
+    assert "currentLearningDraftReviewMatchesSource(sourcePath)" in function_body
+    assert function_body.index("currentLearningDraftReviewMatchesSource(sourcePath)") < function_body.index(
+        "await loadLearningDraftReview({"
+    )
+    assert 'title: "正在加载框编辑器..."' in function_body
+    assert function_body.index('title: "正在加载框编辑器..."') < function_body.index(
+        "await loadLearningDraftReview({"
+    )
+    assert "closeImageInspector();" in function_body
+    assert function_body.index("setInterfaceWorkflowCorrectionOpen(false);") < function_body.index(
+        'toggle.textContent = "正在打开框编辑器...";'
+    )
+    assert function_body.index('toggle.textContent = "正在打开框编辑器...";') < function_body.index(
+        "await loadLearningDraftReview({"
+    )
+    assert 'id="interfaceWorkflowBoxEditorStatus"' in html
+    assert 'role="status"' in html[html.index('id="interfaceWorkflowBoxEditorStatus"') - 120 :]
+    assert "setInterfaceWorkflowBoxEditorStatus" in function_body
+    assert '"正在加载可编辑证据…"' in function_body
+    assert '"当前界面没有可编辑的学习证据"' in function_body
+    assert '"当前界面学习证据加载失败"' in function_body
+    assert "catch (error)" in function_body
+    assert '"无法打开修正工具"' in function_body
+
+
+def test_interface_workflow_refresh_skips_related_sidecar_discovery() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    load_start = panel_js.index("async function loadInterfaceWorkflowReview")
+    load_end = panel_js.index("async function addInterfaceWorkflowSource", load_start)
+    load_body = panel_js[load_start:load_end]
+    refresh_start = panel_js.index("async function refreshSavedLearningDraftReview")
+    refresh_end = panel_js.index("async function refreshCurrentInterfaceWorkflowEvidence", refresh_start)
+    refresh_body = panel_js[refresh_start:refresh_end]
+
+    assert "discover_related_sidecars: options.discoverRelatedSidecars !== false" in load_body
+    assert "discoverRelatedSidecars: false" in refresh_body
+
+
+def test_interface_workflow_graph_draws_plain_small_text_on_links() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    start = panel_js.index("function drawInterfaceWorkflowGraphLink")
+    end = panel_js.index("\nfunction drawInterfaceWorkflowGraphNode", start)
+    body = panel_js[start:end]
+    label_body = body[body.index("const label =") :]
+
+    assert "interfaceWorkflowEdgeLabelLayout" in label_body
+    assert "labelLayout.visible" in label_body
+    assert "labelLayout.max_width" in label_body
+    assert "labelLayout.font_size" in label_body
+    assert "interfaceWorkflowGraphText(ctx, label" in label_body
+    assert "interfaceWorkflowGraphRoundedRect" not in label_body
+    assert 'rgba(255, 255, 255' not in label_body
+
+
+def test_interface_workflow_graph_keeps_evidence_visible_below_compact_canvas() -> None:
+    panel_css = Path("app/web_panel/panel.css").read_text(encoding="utf-8-sig")
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    assert "height: clamp(280px, 34vh, 360px);" in panel_css
+    assert ".interface-workflow-graph-stage" in panel_css
+    assert "#interfaceWorkflowGraphCanvas" in panel_css
+    assert "height: 100%;" in panel_css
+    assert "Math.max(280, Number(stage?.clientHeight" in panel_js
+    assert "Math.max(520, Number(stage?.clientHeight" not in panel_js
+
+
+def test_interface_workflow_graph_measures_labels_with_the_selected_font() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    start = panel_js.index("function interfaceWorkflowGraphText")
+    end = panel_js.index("\nfunction interfaceWorkflowGraphCurve", start)
+    body = panel_js[start:end]
+
+    assert body.index("ctx.font =") < body.index("ctx.measureText")
+
+
+def test_interface_workflow_operation_selection_highlights_only_verified_target_evidence() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    assert "resolveInterfaceWorkflowTargetEvidence" in panel_js
+    assert "interfaceWorkflowEvidenceTargetHighlight" in panel_js
+    assert "目标证据不可用" in panel_js
+    assert "|| operations[0]" not in panel_js
+    assert "renderInterfaceWorkflowEvidence(view)" in panel_js
+    assert "renderInterfaceWorkflowGraph(interfaceWorkflowReviewState?.graph()" in panel_js
+
+
+def test_interface_workflow_panel_composes_multiple_history_sources_without_losing_edits() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    assert "let interfaceWorkflowDraftSourcePaths = []" in panel_js
+    assert "function setInterfaceWorkflowSourceOptions" in panel_js
+    assert "async function addInterfaceWorkflowSource" in panel_js
+    assert "async function removeCurrentInterfaceWorkflowSource" in panel_js
+    assert "mergeEditableWorkflowReview" in panel_js
+    assert "commitInterfaceWorkflowEditorToState" in panel_js
+    assert 'on("interfaceWorkflowAddSourceBtn", "click", addInterfaceWorkflowSource)' in panel_js
+    assert 'on("interfaceWorkflowSourcePreviewBtn", "click", previewInterfaceWorkflowSource)' in panel_js
+    assert 'on("interfaceWorkflowRemoveSourceBtn", "click", removeCurrentInterfaceWorkflowSource)' in panel_js
+
+
+def test_interface_workflow_add_copy_does_not_imply_automatic_linking() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    assert 'interface_workflow_add: "加入流程"' in panel_js
+    assert 'interface_workflow_add: "加入并连接"' not in panel_js
+
+
+def test_learning_draft_add_mode_immediately_updates_overlay_pointer_state() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    start = panel_js.index("function updateLearningDraftEditorControls")
+    end = panel_js.index("\nfunction applyLearningDraftEditorMetadataFromControls", start)
+    body = panel_js[start:end]
+
+    assert '$("imageInspectorDraftBoxes")' in body
+    assert 'classList.toggle("is-add-mode", learningDraftEditorAddMode)' in body
+
+
+def test_interface_workflow_panel_loads_saved_workflows_by_application() -> None:
+    html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    assert 'id="interfaceWorkflowLibrarySelect"' in html
+    assert 'id="interfaceWorkflowLoadSavedBtn"' in html
+    assert 'id="interfaceWorkflowCreateBtn"' in html
+    assert 'id="interfaceWorkflowOpenFolderBtn"' in html
+    assert 'id="interfaceWorkflowNewNameInput"' in html
+    assert 'id="interfaceWorkflowLibraryStatus"' in html
+    assert '"/memory/interface_workflows/registry"' in panel_js
+    assert "/memory/interface_workflows/agent_context?application_identity_key=" in panel_js
+    assert "async function loadSavedInterfaceWorkflowReview" in panel_js
+    assert "async function createInterfaceWorkflow" in panel_js
+    assert 'on("interfaceWorkflowLoadSavedBtn", "click", loadSavedInterfaceWorkflowReview)' in panel_js
+    assert 'on("interfaceWorkflowCreateBtn", "click", createInterfaceWorkflow)' in panel_js
+    assert 'on("interfaceWorkflowOpenFolderBtn", "click"' in panel_js
+
+
+def test_adding_a_single_interface_does_not_create_a_transition() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    start = panel_js.index("async function addInterfaceWorkflowSource")
+    end = panel_js.index("\nasync function removeCurrentInterfaceWorkflowSource", start)
+    body = panel_js[start:end]
+
+    assert "addInterfaceNode" in body
+    assert "addOperation" not in body
+    assert "interfaceWorkflowAttachFromNodeSelect" not in body
+    assert "interfaceWorkflowAttachActionType" not in body
+    assert "interfaceWorkflowAttachTargetControl" not in body
+    assert "界面已加入流程，尚未连接" in body
+
+
+def test_adding_a_single_interface_preserves_name_entered_before_preview_reload() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    start = panel_js.index("async function addInterfaceWorkflowSource")
+    end = panel_js.index("\nasync function removeCurrentInterfaceWorkflowSource", start)
+    body = panel_js[start:end]
+
+    captured_at = body.index("const requestedDisplayName")
+    previewed_at = body.index("await previewInterfaceWorkflowSource()")
+
+    assert captured_at < previewed_at
+    assert "newNode.display_name = requestedDisplayName" in body
+
+
+def test_workflow_graph_context_menu_supports_link_creation_and_link_removal() -> None:
+    html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    assert 'data-interface-workflow-context-action="start-link"' in html
+    assert 'id="interfaceWorkflowGraphContextEdges"' in html
+    assert 'data-interface-workflow-context-action="delete-edge"' in panel_js
+    assert "deleteInterfaceWorkflowGraphEdge" in panel_js
+
+
+def test_panel_exposes_only_the_fixed_learned_workflow_folder() -> None:
+    panel_api = Path("app/api/panel.py").read_text(encoding="utf-8-sig")
+
+    assert 'INTERFACE_WORKFLOW_DIR = ROOT_DIR / "artifacts" / "interface-workflow-reviews"' in panel_api
+    assert '@router.post("/panel/open_interface_workflow_folder"' in panel_api
+
+
+def test_interface_workflow_panel_reopens_saved_workflows_after_boot_and_save() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    registry_start = panel_js.index("async function loadInterfaceWorkflowLibraryRegistry")
+    registry_end = panel_js.index("\nasync function loadSavedInterfaceWorkflowReview", registry_start)
+    registry_body = panel_js[registry_start:registry_end]
+    save_start = panel_js.index("async function saveInterfaceWorkflowReview")
+    save_end = panel_js.index("\nasync function loadInterfaceWorkflowReview", save_start)
+    save_body = panel_js[save_start:save_end]
+    boot_start = panel_js.index("async function boot")
+    boot_body = panel_js[boot_start:]
+
+    assert "preferredWorkflowId" in registry_body
+    assert "openSelected" in registry_body
+    assert "await loadSavedInterfaceWorkflowReview()" in registry_body
+    assert "response.data?.workflow_id" in save_body
+    assert "openSelected: true" in save_body
+    assert "await loadInterfaceWorkflowLibraryRegistry({" in boot_body
+    assert "openSelected: true" in boot_body
+    assert boot_body.index("await loadInterfaceWorkflowLibraryRegistry({") < boot_body.index(
+        "await loadLearningDetailObserveSources()"
+    )
+
+
+def test_recent_single_interface_load_does_not_replace_open_saved_workflow() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    start = panel_js.index("async function maybeLoadCurrentLearningDraftReview")
+    end = panel_js.index("\nfunction setLearnReplaySubview", start)
+    body = panel_js[start:end]
+    load_start = panel_js.index("async function loadLearningDraftReview")
+    load_end = panel_js.index("\nasync function saveLearningDraftReview", load_start)
+    load_body = panel_js[load_start:load_end]
+    clear_start = panel_js.index("function clearLearningDraftReviewDisplay")
+    clear_end = panel_js.index("\nfunction renderLearningCorrectionMemoryRegistry", clear_start)
+    clear_body = panel_js[clear_start:clear_end]
+
+    assert 'const options = { skipResponse: true };' in body
+    assert 'typeof interfaceWorkflowReviewState !== "undefined"' in body
+    assert "options.skipWorkflowReview = true" in body
+    assert "preserveWorkflowReview: options.skipWorkflowReview === true" in load_body
+    assert "if (!options.preserveWorkflowReview) clearInterfaceWorkflowReview(reason)" in clear_body
+
+
+def test_interface_workflow_library_prefers_newest_saved_workflow() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    start = panel_js.index("function setInterfaceWorkflowLibraryOptions")
+    end = panel_js.index("\nasync function loadInterfaceWorkflowLibraryRegistry", start)
+    body = panel_js[start:end]
+
+    assert "preferredWorkflowId" in body
+    assert "workflowOrder" in body
+    assert ".sort(" in body
+    assert "options[0]?.workflowId" in body
+
+
+def test_learning_draft_load_failure_replaces_loading_state() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    start = panel_js.index("async function loadLearningDraftReview")
+    end = panel_js.index("\nasync function saveLearningDraftReview", start)
+    body = panel_js[start:end]
+
+    assert "clearLearningDraftReviewDisplay(`加载失败 · ${sourcePath}`)" in body
+    assert "catch (error)" in body
+
+
+def test_panel_contains_reviewed_operation_toolbar() -> None:
+    html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    for element_id in (
+        "interfaceWorkflowOperationList",
+        "interfaceWorkflowOperationType",
+        "interfaceWorkflowOperationLabel",
+        "interfaceWorkflowOperationTargetControl",
+        "interfaceWorkflowOperationTargetNode",
+        "interfaceWorkflowOperationPlaceholderName",
+        "interfaceWorkflowOperationConfirmation",
+        "interfaceWorkflowOperationAddBtn",
+        "interfaceWorkflowOperationUpdateBtn",
+        "interfaceWorkflowOperationDeleteBtn",
+        "interfaceWorkflowOperationDryRunBtn",
+        "interfaceWorkflowOperationStatus",
+    ):
+        assert f'id="{element_id}"' in html
+
+    assert "function addInterfaceWorkflowOperation" in panel_js
+    assert "function updateInterfaceWorkflowOperation" in panel_js
+    assert "function removeInterfaceWorkflowOperation" in panel_js
+    assert "function createInterfaceWorkflowPlaceholderNode" in panel_js
+
+
+def test_workflow_graph_link_creation_uses_hidden_modal_without_scrolling() -> None:
+    html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    assert 'id="interfaceWorkflowLinkDialog"' in html
+    assert 'id="interfaceWorkflowLinkDialogSource"' in html
+    assert 'id="interfaceWorkflowLinkDialogTarget"' in html
+    assert 'id="interfaceWorkflowLinkDialogBody"' in html
+    assert 'id="interfaceWorkflowLinkDialogCancelBtn"' in html
+    assert 'id="interfaceWorkflowLinkDialogSaveBtn"' in html
+    assert 'id="interfaceWorkflowOperationToolbar"' in html
+    assert '<dialog class="interface-workflow-link-dialog" id="interfaceWorkflowLinkDialog">' in html
+
+    start = panel_js.index("function completeInterfaceWorkflowGraphLink")
+    end = panel_js.index("\nfunction ", start + 20)
+    body = panel_js[start:end]
+
+    assert "openInterfaceWorkflowLinkDialog(link)" in body
+    assert "setInterfaceWorkflowCorrectionOpen(true)" not in body
+    assert "scrollIntoView" not in body
+    assert "function openInterfaceWorkflowLinkDialog" in panel_js
+    assert "function closeInterfaceWorkflowLinkDialog" in panel_js
+    assert 'on("interfaceWorkflowLinkDialogSaveBtn", "click"' in panel_js
+    assert 'on("interfaceWorkflowLinkDialogCancelBtn", "click"' in panel_js
+
+
+def test_workflow_link_control_pick_uses_dedicated_modal_and_resumes_link_editor() -> None:
+    html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    for element_id in (
+        "interfaceWorkflowEvidenceAnchor",
+        "interfaceWorkflowControlPickerDialog",
+        "interfaceWorkflowControlPickerDialogBody",
+        "interfaceWorkflowControlPickerDialogCancelBtn",
+    ):
+        assert f'id="{element_id}"' in html
+
+    start = panel_js.index("function startInterfaceWorkflowOperationControlPick")
+    end = panel_js.index("\nfunction ", start + 20)
+    start_body = panel_js[start:end]
+    select = panel_js.index("function selectInterfaceWorkflowEvidenceControl")
+    select_end = panel_js.index("\nfunction ", select + 20)
+    select_body = panel_js[select:select_end]
+
+    assert "openInterfaceWorkflowControlPickerDialog()" in start_body
+    assert "scrollIntoView" not in start_body
+    assert "closeInterfaceWorkflowControlPickerDialog({ resumeLinkDialog: true })" in select_body
+    assert "function openInterfaceWorkflowControlPickerDialog" in panel_js
+    assert "function closeInterfaceWorkflowControlPickerDialog" in panel_js
+    assert 'on("interfaceWorkflowControlPickerDialogCancelBtn", "click"' in panel_js
+
+
+def test_reviewed_operation_dry_run_never_requests_execution() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    start = panel_js.index("async function dryRunInterfaceWorkflowOperation")
+    end = panel_js.index("\nasync function ", start + 20)
+    body = panel_js[start:end]
+
+    assert '"/action/execute_recognition_plan"' in body
+    assert "capture_live: true" in body
+    assert "dry_run: true" in body
+    assert "action_executed=false" in body
+    assert "dry_run: false" not in body
+
+
+def test_interface_workflow_editor_keeps_unsaved_status_after_rerender() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    start = panel_js.index("function renderInterfaceWorkflowEditor")
+    end = panel_js.index("\nfunction renderInterfaceWorkflowReview", start)
+    body = panel_js[start:end]
+
+    assert "interfaceWorkflowHasUnsavedChanges" in body
+    assert "有未保存修改 · 保存后才能安全验证" in body
+
+
+def test_interface_workflow_content_semantics_editor_is_available() -> None:
+    html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    for element_id in (
+        "interfaceWorkflowContentEditor",
+        "interfaceWorkflowContentTarget",
+        "interfaceWorkflowContentBehavior",
+        "interfaceWorkflowContentAgentUsage",
+        "interfaceWorkflowContentReadPolicy",
+        "interfaceWorkflowContentDescription",
+        "interfaceWorkflowContentSaveBtn",
+        "interfaceWorkflowContentStatus",
+    ):
+        assert f'id="{element_id}"' in html
+
+    assert "function renderInterfaceWorkflowContentEditor" in panel_js
+    assert "function saveInterfaceWorkflowContentDescriptor" in panel_js
+    assert "content_descriptors" in panel_js
+    assert "Agent 只在当前观察中读取动态值" in html

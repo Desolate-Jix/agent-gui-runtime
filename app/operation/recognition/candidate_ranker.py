@@ -159,6 +159,9 @@ def _score_element(
     elif explicit_label_match:
         text_similarity = max(text_similarity, 0.9)
         reasons.append("goal_explicitly_mentions_candidate_label")
+        if _goal_explicitly_requests_element_role(goal, element):
+            role_score = max(role_score, 1.0)
+            reasons.append("explicit_goal_role_match")
 
     if goal_action_terms:
         if element_action_terms & goal_action_terms:
@@ -237,19 +240,40 @@ def _goal_requests_visual_icon(goal: str) -> bool:
 
 def _goal_requests_text_entry(goal: str) -> bool:
     normalized = _normalize_text(goal)
+    explicit_text_entry_roles = (
+        "text box",
+        "textbox",
+        "text area",
+        "textarea",
+        "input field",
+        "search box",
+        "\u8f93\u5165\u6846",
+        "\u6587\u672c\u6846",
+        "\u5b57\u6bb5",
+    )
+    if any(hint in normalized for hint in explicit_text_entry_roles):
+        return True
+    explicit_non_text_roles = (
+        "radio button",
+        "radio",
+        "checkbox",
+        "check box",
+        "button",
+        "link",
+        "hyperlink",
+        "\u5355\u9009\u6846",
+        "\u590d\u9009\u6846",
+        "\u6309\u94ae",
+        "\u94fe\u63a5",
+    )
+    if any(hint in normalized for hint in explicit_non_text_roles):
+        return False
     return any(
         hint in normalized
         for hint in (
-            "text box",
-            "textbox",
-            "text area",
-            "textarea",
             "input",
             "field",
             "cover letter",
-            "\u8f93\u5165\u6846",
-            "\u6587\u672c\u6846",
-            "\u5b57\u6bb5",
         )
     )
 
@@ -394,6 +418,31 @@ def _best_text_similarity(goal: str, candidates: Iterable[str]) -> float:
 
 def _goal_explicitly_requests_element_label(goal: str, element: PageElement) -> bool:
     return _goal_label_match(goal, _element_text_values(element), negated=False)
+
+
+def _goal_explicitly_requests_element_role(goal: str, element: PageElement) -> bool:
+    normalized_goal = _normalize_text(goal)
+    role = _normalize_text(element.role)
+    role_terms = {
+        "radio": {"radio", "radio button", "single choice"},
+        "checkbox": {"checkbox", "check box"},
+        "check box": {"checkbox", "check box"},
+        "button": {"button"},
+        "input": {"input", "field", "text box", "textbox"},
+        "text_input": {"input", "field", "text box", "textbox"},
+        "textarea": {"textarea", "text area", "text box"},
+        "edit": {"input", "field", "text box", "textbox"},
+        "combobox": {"combobox", "combo box", "dropdown", "select"},
+        "combo box": {"combobox", "combo box", "dropdown", "select"},
+        "dropdown": {"combobox", "combo box", "dropdown", "select"},
+        "select": {"combobox", "combo box", "dropdown", "select"},
+        "link": {"link", "hyperlink"},
+        "hyperlink": {"link", "hyperlink"},
+    }
+    return any(
+        re.search(rf"(?<!\w){re.escape(_normalize_text(term))}(?!\w)", normalized_goal)
+        for term in role_terms.get(role, set())
+    )
 
 
 def _goal_negates_element_label(goal: str, element: PageElement) -> bool:

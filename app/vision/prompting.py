@@ -90,7 +90,7 @@ Required JSON shape:
 - contract_version must be "vision_regions_v1"
 - image_size must be {{"width": {image_size.width}, "height": {image_size.height}}}
 - interface_classification must be an object with category, confidence, reason, and structure_signals
-- interface_classification.category must be one of: media_catalog, documentation_portal, settings_dashboard, conversation_workspace, file_browser, form_workflow, generic
+- interface_classification.category must be one of: media_catalog, documentation_portal, settings_dashboard, conversation_workspace, mail_workspace, feed_workspace, aggregate_portal, search_workspace, file_browser, form_workflow, employment_workflow, generic
 - classify by the visible interface structure and task surface, never by a product-specific category name
 - each region must include: region_id, label, role, diagonal, description, ocr_text, text_lines, possible_destinations, anchor_relations, grounding_constraints, confidence
 - role must be one of: nav, button, input, tab, card, list, dialog, content, panel, icon, other
@@ -455,7 +455,7 @@ Return JSON only with this compact shape:
   "image_size": {{"width": {image_size.width}, "height": {image_size.height}}},
   "screen_summary": "short purpose",
   "state_guess": "short localization state hint",
-  "interface_classification": {{"category": "media_catalog|documentation_portal|settings_dashboard|conversation_workspace|file_browser|form_workflow|generic", "confidence": 0.0, "reason": "short visible evidence", "structure_signals": {{"media_cards": false, "article_or_document_sections": false, "settings_controls": false, "people_or_conversation_rows": false, "file_or_folder_rows": false, "form_fields": false}}}},
+  "interface_classification": {{"category": "media_catalog|documentation_portal|settings_dashboard|conversation_workspace|mail_workspace|feed_workspace|aggregate_portal|search_workspace|file_browser|form_workflow|employment_workflow|generic", "confidence": 0.0, "reason": "short visible evidence", "structure_signals": {{"media_cards": false, "playback_controls": false, "media_library_navigation": false, "feed_items": false, "mixed_content_modules": false, "news_items": false, "video_items": false, "search_controls": false, "search_results": false, "article_or_document_sections": false, "settings_controls": false, "people_or_conversation_rows": false, "message_thread": false, "message_composer": false, "mail_or_email_rows": false, "mailbox_navigation": false, "mail_toolbar": false, "file_or_folder_rows": false, "form_fields": false, "employment_workflow": false, "job_result_cards": false, "job_detail_content": false, "application_fields": false, "application_review": false}}}},
   "regions": [
     {{"region_id": "c1", "label": "visible label or icon name", "role": "button|icon|input|tab|nav|menu_item|link|toggle|card|other", "diagonal": {{"x1": 0, "y1": 0, "x2": 1, "y2": 1}}, "description": "visible content plus likely action", "ocr_text": "short exact visible anchor", "text_lines": ["exact visible anchor text"], "boundary_definition": "tight visible boundary", "clickable_area_hint": "where a later locator should point", "confidence": 0.0}}
   ],
@@ -470,9 +470,25 @@ Rules:
 - prioritize navigation, icon-only buttons, primary buttons, tabs, inputs, toggles, menus, and title-bar controls
 - keep screen_summary and state_guess under 12 words each
 - classify by visible interface structure, not the application or product name
-- use media_catalog for media libraries/catalogs, documentation_portal for text-heavy documentation/news portals, settings_dashboard for settings/control surfaces, conversation_workspace for chat or conversation workspaces, file_browser for file managers with navigation trees and dense row/column listings, form_workflow for field-driven forms, and generic when evidence is insufficient
+- use media_catalog for media libraries with playback controls or library navigation, documentation_portal for text-heavy documentation portals, settings_dashboard for settings/control surfaces, conversation_workspace for chat workspaces with a thread and composer, mail_workspace for mailboxes, feed_workspace for one dominant social/news feed, aggregate_portal for multiple peer content modules, search_workspace for search result pages, file_browser for file managers with navigation trees and dense row/column listings, form_workflow for general field-driven forms, employment_workflow for employment task surfaces, and generic when evidence is insufficient
 - set every structure_signals field from visible evidence before choosing category; the selected specialized category must have its corresponding signal set to true
 - friend, contact, participant, presence, or online-status rows are conversation_workspace; they are not file_browser merely because they form a dense list
+- email rows are mail_workspace, not conversation_workspace; require repeated mail rows plus mailbox navigation or a mail toolbar
+- feed posts are feed_workspace, not media_catalog; repeated image cards alone do not prove a media player
+- aggregate_portal requires multiple peer content modules with distinct purposes, such as weather, markets, sports, news, games, advertising, or media
+- classify by container organization before counting repeated articles
+- independently framed widgets remain peer modules even when several contain news; use their separate headings, frames, sources, controls, and column placement as mixed_content_modules evidence
+- feed_workspace requires one dominant ordered stream under shared controls; repeated articles inside several independent widgets do not by themselves make one feed
+- a page with news inside one module is not automatically feed_workspace; choose aggregate_portal when no single feed dominates the visible content structure
+- search_workspace requires a visible search control and repeated result items; a browser address bar alone is not a page search control
+- news_items and video_items describe visible content structure, not a site name; set them only when repeated matching items are visible
+- search_workspace can still contain news_items or video_items; keep those orthogonal content signals true when visible so later rules can preserve both content type and interaction state
+- conversation_workspace requires both a visible message thread and a message composer, not only people or conversation rows
+- media_catalog requires playback controls or media-library navigation in addition to media cards
+- employment_workflow covers job results, job details, application forms, and application review; set the matching page-state signals from visible structure
+- ordinary surveys, registration forms, and checkout reviews are not employment_workflow
+- employment_workflow requires employment-specific structure plus job cards, job details, application fields, or application review evidence; a job-site name or URL alone is insufficient
+- use generic when the visible topology does not disambiguate the class
 - file_browser requires visible file/folder semantics such as filenames, folder icons, path/address navigation, a directory tree, or file metadata columns
 - interface_classification.reason must cite one concise visible structural clue; use generic with lower confidence instead of inventing a specialized category
 - state_guess must be the best concise hint to pass into a later POST /vision/locate_target state_hint field

@@ -19,6 +19,24 @@ from seek_debug_export_application_fill_record import build_record_from_debug_ru
 from seek_debug_step_runner import build_parser as build_step_parser  # noqa: E402
 from seek_debug_step_runner import run_step  # noqa: E402
 from seek_mvp_traversal_runner import _post_json  # noqa: E402
+from app.agent.continuous_task_session import (  # noqa: E402
+    confirm_apply_entry,
+    create_continuous_task_session,
+    observe_interface,
+    record_action_result,
+    resume_after_learning,
+    request_apply_entry_confirmation,
+)
+from app.agent.reviewed_interface_memory import ReviewedInterfaceMemoryStore  # noqa: E402
+from app.agent.seek_continuous_demo import (  # noqa: E402
+    build_step_evidence,
+    load_seek_checkpoint,
+    load_seek_session,
+    quick_apply_interface_id,
+    resolve_active_memory_sha256,
+    save_seek_checkpoint,
+    save_seek_session,
+)
 from app.seek.application_artifacts import build_seek_application_flow_artifact  # noqa: E402
 from seek_demo_readiness_report import build_demo_readiness_report, load_step_reports  # noqa: E402
 
@@ -26,6 +44,10 @@ from seek_demo_readiness_report import build_demo_readiness_report, load_step_re
 DEFAULT_SEARCH_URL = "https://nz.seek.com/software-engineer-jobs/in-All-Auckland"
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 SCROLL_WHEEL_CLICKS_MAX = 20
+
+
+def _build_reviewed_memory_store() -> ReviewedInterfaceMemoryStore:
+    return ReviewedInterfaceMemoryStore(project_root=REPO_ROOT)
 
 
 def _clamp_scroll_wheel_clicks(value: int) -> int:
@@ -69,22 +91,8 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _card_prefilter_decision(card: dict[str, Any] | None, *, learned_fast_mode: bool = True) -> dict[str, Any]:
-    payload = card if isinstance(card, dict) else {}
-    title = str(payload.get("title") or "")
-    company = str(payload.get("company") or "")
-    classification = str(payload.get("classification") or "")
-    text = " ".join([title, company, classification]).casefold()
-    if "summer" in text:
-        return {"decision": "skip", "reason": "summer_role_card_prefilter"}
-    if "internship" in text:
-        return {"decision": "skip", "reason": "internship_card_prefilter"}
-    if "trading manager" in text:
-        return {"decision": "skip", "reason": "non_software_trading_manager_card_prefilter"}
-    if learned_fast_mode:
-        blocked_terms = ("senior", "specialist", "lead", "principal", "architect", "manager")
-        if any(term in text for term in blocked_terms):
-            return {"decision": "skip", "reason": "learned_fast_mode_skip_senior_or_specialist_card"}
-    return {"decision": "keep", "reason": "needs_detail_read"}
+    # 卡片标题不能替代完整岗位详情；是否适合必须交给 Agent 判断。
+    return {"decision": "keep", "reason": "agent_requires_full_detail"}
 
 
 def _final_review_ready(flow_state: dict[str, Any] | None) -> bool:
@@ -190,6 +198,35 @@ def _apply_entry_state(execute_apply: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
+def _transition_audit(payload: dict[str, Any], *, agent_decision: Any = None) -> dict[str, Any]:
+    action = payload.get("action") if isinstance(payload.get("action"), dict) else {}
+    execute_response = (
+        action.get("execute_response") if isinstance(action.get("execute_response"), dict) else {}
+    )
+    apply_entry = payload.get("apply_entry") if isinstance(payload.get("apply_entry"), dict) else {}
+    ui_diff = payload.get("ui_diff_verification") if isinstance(payload.get("ui_diff_verification"), dict) else {}
+    gate_allowed = execute_response.get("pre_click_allowed")
+    gate_source = "recognition_plan_pre_click"
+    if gate_allowed is None and apply_entry:
+        gate_allowed = bool(apply_entry.get("executed") and apply_entry.get("application_flow_started"))
+        gate_source = "seek_apply_entry_verification"
+    if gate_allowed is None:
+        gate_allowed = payload.get("status") not in {"failed", "blocked_need_user_or_gpt_decision"}
+        gate_source = "runner_transition_status"
+    verification = str(ui_diff.get("verification_status") or "").strip()
+    if not verification and apply_entry.get("application_flow_started") is True:
+        verification = "application_flow_started"
+    if not verification and isinstance(payload.get("application_flow_state"), dict):
+        verification = "application_flow_state_observed"
+    return {
+        "agent_decision": str(agent_decision or "").strip() or None,
+        "gate_result": "allowed" if gate_allowed else "blocked",
+        "gate_source": gate_source,
+        "post_action_verification": verification or "step_status_only",
+        "runner_status": payload.get("status"),
+    }
+
+
 def _station_internal_application_started(execute_apply: dict[str, Any]) -> bool:
     state = _apply_entry_state(execute_apply)
     if state.get("application_flow_started") is not True:
@@ -256,6 +293,8 @@ def _write_speed_demo_result(
         "time_budget_ms": args.time_budget_ms,
         "within_budget": total_ms <= args.time_budget_ms,
         "learned_fast_mode": not getattr(args, "disable_learned_fast_mode", False),
+        "local_keyword_prefilter_enabled": False,
+        "full_detail_agent_decision_required": True,
         "steps": steps,
         "job_attempts": job_attempts,
         "result_scrolls": result_scrolls,
@@ -291,11 +330,248 @@ def _recover_seek_results_after_external_apply(
     }
 
 
+def _finish_application_flow(
+    *,
+    run_dir: Path,
+    started: float,
+    args: argparse.Namespace,
+    run,
+    budget_exhausted,
+    steps: list[dict[str, Any]],
+    job_attempts: list[dict[str, Any]],
+    result_scrolls: list[dict[str, Any]],
+    initial_flow_state: dict[str, Any] | None = None,
+    continuous_session: dict[str, Any] | None = None,
+    memory_store=None,
+) -> dict[str, Any]:
+    last_flow_state = dict(initial_flow_state or {})
+    application_stop_status: str | None = None
+    application_stop_reason: str | None = None
+    continuous_session_path: Path | None = None
+    continuous_checkpoint_path: Path | None = None
+
+    for _ in range(args.max_application_steps):
+        if budget_exhausted(reserve_ms=12000):
+            return _write_speed_demo_result(
+                run_dir,
+                started=started,
+                args=args,
+                steps=steps,
+                job_attempts=job_attempts,
+                result_scrolls=result_scrolls,
+                status="needs_work",
+                stop_reason="time_budget_exhausted_before_application_step",
+                extra={
+                    "application_started": True,
+                    "last_flow_state": last_flow_state,
+                    **(
+                        {"continuous_session_path": str(continuous_session_path)}
+                        if continuous_session_path
+                        else {}
+                    ),
+                },
+            )
+        payload = run(
+            "continue_application_flow",
+            [
+                "--fill-safe-fields",
+                "--allow-cover-letter-fill",
+                "--max-safe-fields-to-fill",
+                str(args.max_safe_fields_to_fill),
+            ],
+        )
+        if isinstance(payload.get("application_flow_state"), dict):
+            last_flow_state = payload["application_flow_state"]
+        elif isinstance(payload.get("post_apply_wait"), dict) and isinstance(
+            payload["post_apply_wait"].get("application_flow_state"), dict
+        ):
+            last_flow_state = payload["post_apply_wait"]["application_flow_state"]
+
+        if continuous_session is not None and memory_store is not None:
+            evidence = build_step_evidence(payload, run_dir=run_dir)
+            if payload.get("status") != "blocked_need_user_or_gpt_decision":
+                continuous_session = record_action_result(
+                    continuous_session,
+                    action_type="continue_next_step",
+                    action_executed=True,
+                    post_action_verified=True,
+                    evidence=evidence,
+                    transition_audit=_transition_audit(payload),
+                )
+            final_submit_visible = _final_review_ready(last_flow_state)
+            interface_id = quick_apply_interface_id(last_flow_state)
+            memory_sha256 = None if final_submit_visible else resolve_active_memory_sha256(memory_store, interface_id)
+            continuous_session = observe_interface(
+                continuous_session,
+                interface_id=interface_id,
+                surface_type="final_submit_visible" if final_submit_visible else "seek_quick_apply",
+                memory_object_sha256=memory_sha256,
+                evidence=evidence,
+                learning_required=not final_submit_visible,
+                knowledge_source="reviewed_interface_memory",
+            )
+            continuous_session_path = save_seek_session(run_dir, continuous_session)
+            continuous_checkpoint_path = save_seek_checkpoint(
+                run_dir,
+                {
+                    "phase": "final_submit_safe_stop" if final_submit_visible else "quick_apply",
+                    "application_started": True,
+                    "last_flow_state": last_flow_state,
+                },
+            )
+            if continuous_session.get("status") == "paused_for_learning":
+                return _write_speed_demo_result(
+                    run_dir,
+                    started=started,
+                    args=args,
+                    steps=steps,
+                    job_attempts=job_attempts,
+                    result_scrolls=result_scrolls,
+                    status="paused_for_learning",
+                    stop_reason="reviewed_quick_apply_memory_required",
+                    extra={
+                        "continuous_session_path": str(continuous_session_path),
+                        "continuous_checkpoint_path": str(continuous_checkpoint_path),
+                        "pending_learning": continuous_session.get("pending_learning"),
+                        "application_flow_state": last_flow_state,
+                    },
+                )
+            if continuous_session.get("status") == "safe_stop":
+                application_stop_status = "safe_stop"
+                application_stop_reason = str(continuous_session.get("stop_reason") or "")
+                break
+
+        if payload.get("status") == "blocked_need_user_or_gpt_decision":
+            application_stop_status = str(payload.get("status") or "")
+            application_stop_reason = str(last_flow_state.get("stop_reason") or payload.get("stop_reason") or "")
+            break
+        if "continue_application_flow" not in (payload.get("next_allowed_steps") or []):
+            break
+
+    record_path = run_dir / "application_fill_record.json"
+    record = build_record_from_debug_run(run_dir)
+    _write_json(record_path, record)
+    final_review: dict[str, Any] = {
+        "status": "not_attempted",
+        "reason": "not_at_review_and_submit",
+        "application_flow_state": last_flow_state,
+    }
+    extraction_path = run_dir / "final_review_extraction.json"
+    extraction: dict[str, Any] = {
+        "contract_version": "seek_final_review_extraction_v1",
+        "status": "not_attempted",
+        "reason": "not_at_review_and_submit",
+        "current_step": last_flow_state.get("current_step"),
+        "state_type": last_flow_state.get("state_type"),
+    }
+    if _final_review_ready(last_flow_state):
+        final_review = run("extract_final_review", ["--application-fill-record", str(record_path)])
+        extraction_path = Path(str(final_review.get("final_review_extraction_path") or extraction_path))
+        extraction = _read_json(extraction_path) if extraction_path.exists() else {}
+    else:
+        _write_json(extraction_path, extraction)
+    artifact = build_seek_application_flow_artifact(
+        record,
+        final_review_extraction=extraction,
+        record_path=record_path,
+        final_review_extraction_path=extraction_path,
+    )
+    artifact_path = run_dir / "seek_application_flow_artifact.json"
+    _write_json(artifact_path, artifact)
+    readiness = build_demo_readiness_report(
+        run_dir=run_dir,
+        step_reports=load_step_reports(run_dir),
+        application_fill_record=record,
+        final_review_audit=extraction,
+        long_read_benchmark=None,
+        time_budget_ms=args.time_budget_ms,
+    )
+    readiness_path = run_dir / "demo_readiness_report.json"
+    _write_json(readiness_path, readiness)
+    total_ms = round((time.perf_counter() - started) * 1000, 3)
+    safe_stop = bool(continuous_session and continuous_session.get("status") == "safe_stop")
+    result = {
+        "contract_version": "seek_speed_demo_run_v1",
+        "status": (
+            "safe_stop"
+            if safe_stop
+            else "pass"
+            if readiness.get("status") == "pass" and extraction.get("status") == "pass"
+            else "needs_work"
+        ),
+        "stop_reason": continuous_session.get("stop_reason") if safe_stop and continuous_session else None,
+        "run_dir": str(run_dir),
+        "total_ms": total_ms,
+        "time_budget_ms": args.time_budget_ms,
+        "within_budget": total_ms <= args.time_budget_ms,
+        "steps": steps,
+        "job_attempts": job_attempts,
+        "result_scrolls": result_scrolls,
+        "application_fill_record_path": str(record_path),
+        "final_review_extraction_path": str(extraction_path),
+        "artifact_path": str(artifact_path),
+        "readiness_report_path": str(readiness_path),
+        "readiness_status": readiness.get("status"),
+        "final_review_status": extraction.get("status"),
+        "application_stop_status": application_stop_status,
+        "application_stop_reason": application_stop_reason,
+        "final_submissions": extraction.get("final_submissions", record.get("final_submissions", 0)),
+        "submit_clicks": extraction.get("submit_clicks", record.get("submit_clicks", 0)),
+    }
+    if continuous_session_path:
+        result["continuous_session_path"] = str(continuous_session_path)
+    if continuous_checkpoint_path:
+        result["continuous_checkpoint_path"] = str(continuous_checkpoint_path)
+    _write_json(run_dir / "speed_demo_report.json", result)
+    return result
+
+
 def run_speed_demo(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(args.run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
     steps: list[dict[str, Any]] = []
+    job_attempts: list[dict[str, Any]] = []
+    result_scrolls: list[dict[str, Any]] = []
+    continuous_enabled = bool(getattr(args, "continuous_session", False))
+    resume_continuous = continuous_enabled and bool(getattr(args, "resume_continuous_session", False))
+    continuous_session: dict[str, Any] | None = None
+    continuous_session_path: Path | None = None
+    continuous_checkpoint_path: Path | None = None
+    resume_checkpoint: dict[str, Any] | None = None
+    memory_store = _build_reviewed_memory_store() if continuous_enabled else None
+    if resume_continuous:
+        continuous_session = load_seek_session(run_dir)
+        resume_checkpoint = load_seek_checkpoint(run_dir)
+        stored_attempt = resume_checkpoint.get("job_attempt")
+        if isinstance(stored_attempt, dict):
+            job_attempts.append(stored_attempt)
+        if continuous_session.get("status") == "paused_for_learning":
+            pending = (
+                continuous_session.get("pending_learning")
+                if isinstance(continuous_session.get("pending_learning"), dict)
+                else {}
+            )
+            pending_interface_id = str(pending.get("interface_id") or "")
+            memory_sha256 = (
+                resolve_active_memory_sha256(memory_store, pending_interface_id)
+                if memory_store is not None and pending_interface_id
+                else None
+            )
+            if memory_sha256:
+                continuous_session = resume_after_learning(
+                    continuous_session,
+                    interface_id=pending_interface_id,
+                    memory_object_sha256=memory_sha256,
+                )
+        continuous_session_path = save_seek_session(run_dir, continuous_session)
+        continuous_checkpoint_path = run_dir / "seek_continuous_checkpoint.json"
+    elif continuous_enabled:
+        continuous_session = create_continuous_task_session(
+            session_id=run_dir.name,
+            workflow_id="seek-quick-apply-demo",
+        )
+        continuous_session_path = save_seek_session(run_dir, continuous_session)
     deadline = started + (float(args.time_budget_ms) / 1000.0) if args.time_budget_ms else None
 
     def budget_exhausted(*, reserve_ms: float = 0.0) -> bool:
@@ -315,7 +591,14 @@ def run_speed_demo(args: argparse.Namespace) -> dict[str, Any]:
         )
 
     def run(step: str, extra: list[str] | None = None) -> dict[str, Any]:
-        payload = _run_step(run_dir, step, extra)
+        step_args = [
+            "--base-url",
+            str(args.base_url),
+            "--timeout",
+            str(args.timeout),
+            *(extra or []),
+        ]
+        payload = _run_step(run_dir, step, step_args)
         steps.append(_step_summary(payload))
         if (
             step == "execute_apply_entry"
@@ -334,6 +617,173 @@ def run_speed_demo(args: argparse.Namespace) -> dict[str, Any]:
             raise RuntimeError(f"{step} stopped with status {payload.get('status')}")
         return payload
 
+    if resume_continuous and continuous_session is not None and resume_checkpoint is not None:
+        if continuous_session.get("status") == "paused_for_learning":
+            return _write_speed_demo_result(
+                run_dir,
+                started=started,
+                args=args,
+                steps=steps,
+                job_attempts=job_attempts,
+                result_scrolls=result_scrolls,
+                status="paused_for_learning",
+                stop_reason="reviewed_quick_apply_memory_required",
+                extra={
+                    "continuous_session_path": str(continuous_session_path),
+                    "continuous_checkpoint_path": str(continuous_checkpoint_path),
+                    "pending_learning": continuous_session.get("pending_learning"),
+                },
+            )
+        if resume_checkpoint.get("phase") == "awaiting_apply_confirmation":
+            if not bool(getattr(args, "approve_quick_apply_entry", False)):
+                return _write_speed_demo_result(
+                    run_dir,
+                    started=started,
+                    args=args,
+                    steps=steps,
+                    job_attempts=job_attempts,
+                    result_scrolls=result_scrolls,
+                    status="awaiting_confirmation",
+                    stop_reason="quick_apply_entry_confirmation_required",
+                    extra={
+                        "continuous_session_path": str(continuous_session_path),
+                        "continuous_checkpoint_path": str(continuous_checkpoint_path),
+                        "pending_apply_confirmation": continuous_session.get("pending_apply_confirmation"),
+                    },
+                )
+            continuous_session = confirm_apply_entry(continuous_session, approved=True)
+            continuous_session_path = save_seek_session(run_dir, continuous_session)
+            apply_args = ["--allow-maybe-apply"] if args.allow_maybe_apply else []
+            execute_apply = run(
+                "execute_apply_entry",
+                [
+                    "--post-apply-capture-wait-seconds",
+                    str(args.post_apply_capture_wait_seconds),
+                    *apply_args,
+                ],
+            )
+            apply_state = _apply_entry_state(execute_apply)
+            apply_evidence = build_step_evidence(execute_apply, run_dir=run_dir)
+            if _external_apply_flow_started(execute_apply):
+                continuous_session = observe_interface(
+                    continuous_session,
+                    interface_id=quick_apply_interface_id(apply_state),
+                    surface_type="external_ats",
+                    memory_object_sha256=None,
+                    evidence=apply_evidence,
+                    learning_required=False,
+                    knowledge_source="seek_runtime_profile",
+                )
+                continuous_session_path = save_seek_session(run_dir, continuous_session)
+                return _write_speed_demo_result(
+                    run_dir,
+                    started=started,
+                    args=args,
+                    steps=steps,
+                    job_attempts=job_attempts,
+                    result_scrolls=result_scrolls,
+                    status="safe_stop",
+                    stop_reason="external_ats_not_supported",
+                    extra={
+                        "continuous_session_path": str(continuous_session_path),
+                        "continuous_checkpoint_path": str(continuous_checkpoint_path),
+                        "external_apply_state": apply_state,
+                    },
+                )
+            if not _station_internal_application_started(execute_apply):
+                return _write_speed_demo_result(
+                    run_dir,
+                    started=started,
+                    args=args,
+                    steps=steps,
+                    job_attempts=job_attempts,
+                    result_scrolls=result_scrolls,
+                    status="needs_work",
+                    stop_reason=str(apply_state.get("stop_reason") or "quick_apply_entry_not_verified"),
+                    extra={
+                        "continuous_session_path": str(continuous_session_path),
+                        "continuous_checkpoint_path": str(continuous_checkpoint_path),
+                        "application_flow_state": apply_state,
+                    },
+                )
+            continuous_session = record_action_result(
+                continuous_session,
+                action_type="open_apply_flow",
+                action_executed=True,
+                post_action_verified=True,
+                evidence=apply_evidence,
+                transition_audit=_transition_audit(
+                    execute_apply,
+                    agent_decision=(resume_checkpoint.get("job_attempt") or {}).get("match_decision"),
+                ),
+            )
+            quick_apply_id = quick_apply_interface_id(apply_state)
+            quick_apply_memory_sha256 = resolve_active_memory_sha256(memory_store, quick_apply_id)
+            continuous_session = observe_interface(
+                continuous_session,
+                interface_id=quick_apply_id,
+                surface_type="seek_quick_apply",
+                memory_object_sha256=quick_apply_memory_sha256,
+                evidence=apply_evidence,
+                learning_required=True,
+                knowledge_source="reviewed_interface_memory",
+            )
+            continuous_session_path = save_seek_session(run_dir, continuous_session)
+            continuous_checkpoint_path = save_seek_checkpoint(
+                run_dir,
+                {
+                    "phase": "quick_apply",
+                    "application_started": True,
+                    "job_attempt": resume_checkpoint.get("job_attempt"),
+                    "last_flow_state": apply_state,
+                },
+            )
+            if continuous_session.get("status") == "paused_for_learning":
+                return _write_speed_demo_result(
+                    run_dir,
+                    started=started,
+                    args=args,
+                    steps=steps,
+                    job_attempts=job_attempts,
+                    result_scrolls=result_scrolls,
+                    status="paused_for_learning",
+                    stop_reason="reviewed_quick_apply_memory_required",
+                    extra={
+                        "continuous_session_path": str(continuous_session_path),
+                        "continuous_checkpoint_path": str(continuous_checkpoint_path),
+                        "pending_learning": continuous_session.get("pending_learning"),
+                        "application_flow_state": apply_state,
+                    },
+                )
+            return _finish_application_flow(
+                run_dir=run_dir,
+                started=started,
+                args=args,
+                run=run,
+                budget_exhausted=budget_exhausted,
+                steps=steps,
+                job_attempts=job_attempts,
+                result_scrolls=result_scrolls,
+                initial_flow_state=apply_state,
+                continuous_session=continuous_session,
+                memory_store=memory_store,
+            )
+        if resume_checkpoint.get("phase") == "quick_apply":
+            return _finish_application_flow(
+                run_dir=run_dir,
+                started=started,
+                args=args,
+                run=run,
+                budget_exhausted=budget_exhausted,
+                steps=steps,
+                job_attempts=job_attempts,
+                result_scrolls=result_scrolls,
+                initial_flow_state=resume_checkpoint.get("last_flow_state"),
+                continuous_session=continuous_session,
+                memory_store=memory_store,
+            )
+        raise RuntimeError(f"unsupported continuous SEEK resume phase: {resume_checkpoint.get('phase')}")
+
     if args.close_old_windows:
         run("close_old_seek_windows", ["--allow-close-windows"])
     run("open", ["--url", args.url])
@@ -342,15 +792,25 @@ def run_speed_demo(args: argparse.Namespace) -> dict[str, Any]:
         ["--window-width", str(args.window_width), "--window-height", str(args.window_height)],
     )
     run("capture")
-    cards_payload = run("extract_cards").get("cards_payload") or {}
+    extract_cards = run("extract_cards")
+    cards_payload = extract_cards.get("cards_payload") or {}
     visible_cards = cards_payload.get("jobs") if isinstance(cards_payload.get("jobs"), list) else []
+    if continuous_enabled and continuous_session is not None and memory_store is not None:
+        results_interface_id = "seek_results_reviewed_current"
+        results_memory_sha256 = resolve_active_memory_sha256(memory_store, results_interface_id)
+        continuous_session = observe_interface(
+            continuous_session,
+            interface_id=results_interface_id,
+            surface_type="seek_results",
+            memory_object_sha256=results_memory_sha256,
+            evidence=build_step_evidence(extract_cards, run_dir=run_dir),
+            learning_required=False,
+            knowledge_source="reviewed_interface_memory" if results_memory_sha256 else "seek_runtime_profile",
+        )
+        continuous_session_path = save_seek_session(run_dir, continuous_session)
     application_started = False
-    application_stop_status: str | None = None
-    application_stop_reason: str | None = None
-    job_attempts: list[dict[str, Any]] = []
     attempted_jobs = 0
     scroll_round = 0
-    result_scrolls: list[dict[str, Any]] = []
     while attempted_jobs < args.max_jobs and not application_started:
         if budget_exhausted(reserve_ms=25000):
             return budget_stop("time_budget_exhausted_before_next_job")
@@ -418,6 +878,26 @@ def run_speed_demo(args: argparse.Namespace) -> dict[str, Any]:
                 cards_payload = run("extract_cards").get("cards_payload") or {}
                 visible_cards = cards_payload.get("jobs") if isinstance(cards_payload.get("jobs"), list) else []
                 continue
+            if continuous_enabled and continuous_session is not None:
+                detail_evidence = build_step_evidence(execute_card, run_dir=run_dir)
+                continuous_session = record_action_result(
+                    continuous_session,
+                    action_type="open_detail",
+                    action_executed=True,
+                    post_action_verified=True,
+                    evidence=detail_evidence,
+                    transition_audit=_transition_audit(execute_card),
+                )
+                continuous_session = observe_interface(
+                    continuous_session,
+                    interface_id="seek_job_detail_runtime_profile",
+                    surface_type="seek_job_detail",
+                    memory_object_sha256=None,
+                    evidence=detail_evidence,
+                    learning_required=False,
+                    knowledge_source="seek_runtime_profile",
+                )
+                continuous_session_path = save_seek_session(run_dir, continuous_session)
             run(
                 "read_detail_batch",
                 [
@@ -429,7 +909,11 @@ def run_speed_demo(args: argparse.Namespace) -> dict[str, Any]:
                     str(args.wheel_clicks),
                 ],
             )
-            match = run("match")
+            match_args: list[str] = []
+            agent_suitability_review = str(getattr(args, "agent_suitability_review", "") or "").strip()
+            if agent_suitability_review:
+                match_args.extend(["--agent-suitability-review", agent_suitability_review])
+            match = run("match", match_args)
             decision = (match.get("match_decision") or {}).get("decision")
             attempt: dict[str, Any] = {
                 "job_index": job_index,
@@ -444,6 +928,41 @@ def run_speed_demo(args: argparse.Namespace) -> dict[str, Any]:
                     attempt["reason"] = "maybe_apply_requires_explicit_allow_maybe_apply"
                 job_attempts.append(attempt)
                 continue
+            if continuous_enabled and continuous_session is not None:
+                continuous_session = request_apply_entry_confirmation(
+                    continuous_session,
+                    job_id=str(card.get("job_id") or card.get("id") or f"visible-{job_index}"),
+                    job_title=str(attempt.get("job_title") or card.get("title") or f"Job {job_index}"),
+                )
+                continuous_session_path = save_seek_session(run_dir, continuous_session)
+                continuous_checkpoint_path = save_seek_checkpoint(
+                    run_dir,
+                    {
+                        "phase": "awaiting_apply_confirmation",
+                        "application_started": False,
+                        "job_index": job_index,
+                        "job_attempt": attempt,
+                        "last_flow_state": {},
+                    },
+                )
+                if not bool(getattr(args, "approve_quick_apply_entry", False)):
+                    return _write_speed_demo_result(
+                        run_dir,
+                        started=started,
+                        args=args,
+                        steps=steps,
+                        job_attempts=job_attempts,
+                        result_scrolls=result_scrolls,
+                        status="awaiting_confirmation",
+                        stop_reason="quick_apply_entry_confirmation_required",
+                        extra={
+                            "continuous_session_path": str(continuous_session_path),
+                            "continuous_checkpoint_path": str(continuous_checkpoint_path),
+                            "pending_apply_confirmation": continuous_session.get("pending_apply_confirmation"),
+                        },
+                    )
+                continuous_session = confirm_apply_entry(continuous_session, approved=True)
+                continuous_session_path = save_seek_session(run_dir, continuous_session)
             apply_args = ["--allow-maybe-apply"] if args.allow_maybe_apply else []
             execute_apply = run(
                 "execute_apply_entry",
@@ -545,6 +1064,55 @@ def run_speed_demo(args: argparse.Namespace) -> dict[str, Any]:
                 continue
             attempt["status"] = "application_started"
             job_attempts.append(attempt)
+            if continuous_enabled and continuous_session is not None and memory_store is not None:
+                apply_evidence = build_step_evidence(execute_apply, run_dir=run_dir)
+                continuous_session = record_action_result(
+                    continuous_session,
+                    action_type="open_apply_flow",
+                    action_executed=True,
+                    post_action_verified=True,
+                    evidence=apply_evidence,
+                    transition_audit=_transition_audit(execute_apply, agent_decision=decision),
+                )
+                quick_apply_id = quick_apply_interface_id(apply_state)
+                quick_apply_memory_sha256 = resolve_active_memory_sha256(memory_store, quick_apply_id)
+                continuous_session = observe_interface(
+                    continuous_session,
+                    interface_id=quick_apply_id,
+                    surface_type="seek_quick_apply",
+                    memory_object_sha256=quick_apply_memory_sha256,
+                    evidence=apply_evidence,
+                    learning_required=True,
+                    knowledge_source="reviewed_interface_memory",
+                )
+                continuous_session_path = save_seek_session(run_dir, continuous_session)
+                continuous_checkpoint_path = save_seek_checkpoint(
+                    run_dir,
+                    {
+                        "phase": "quick_apply",
+                        "application_started": True,
+                        "job_index": job_index,
+                        "job_attempt": attempt,
+                        "last_flow_state": apply_state,
+                    },
+                )
+                if continuous_session.get("status") == "paused_for_learning":
+                    return _write_speed_demo_result(
+                        run_dir,
+                        started=started,
+                        args=args,
+                        steps=steps,
+                        job_attempts=job_attempts,
+                        result_scrolls=result_scrolls,
+                        status="paused_for_learning",
+                        stop_reason="reviewed_quick_apply_memory_required",
+                        extra={
+                            "continuous_session_path": str(continuous_session_path),
+                            "continuous_checkpoint_path": str(continuous_checkpoint_path),
+                            "pending_learning": continuous_session.get("pending_learning"),
+                            "application_flow_state": apply_state,
+                        },
+                    )
             application_started = True
             break
         if application_started or attempted_jobs >= args.max_jobs:
@@ -598,99 +1166,19 @@ def run_speed_demo(args: argparse.Namespace) -> dict[str, Any]:
             status="needs_work",
             stop_reason="no_eligible_station_internal_apply_entry",
         )
-    last_flow_state: dict[str, Any] = {}
-    for _ in range(args.max_application_steps):
-        if budget_exhausted(reserve_ms=12000):
-            return budget_stop(
-                "time_budget_exhausted_before_application_step",
-                extra={"application_started": application_started, "last_flow_state": last_flow_state},
-            )
-        payload = run(
-            "continue_application_flow",
-            [
-                "--fill-safe-fields",
-                "--allow-cover-letter-fill",
-                "--max-safe-fields-to-fill",
-                str(args.max_safe_fields_to_fill),
-            ],
-        )
-        if isinstance(payload.get("application_flow_state"), dict):
-            last_flow_state = payload["application_flow_state"]
-        elif isinstance(payload.get("post_apply_wait"), dict) and isinstance(
-            payload["post_apply_wait"].get("application_flow_state"), dict
-        ):
-            last_flow_state = payload["post_apply_wait"]["application_flow_state"]
-        if payload.get("status") == "blocked_need_user_or_gpt_decision":
-            application_stop_status = str(payload.get("status") or "")
-            application_stop_reason = str(last_flow_state.get("stop_reason") or payload.get("stop_reason") or "")
-            break
-        if "continue_application_flow" not in (payload.get("next_allowed_steps") or []):
-            break
-
-    record_path = run_dir / "application_fill_record.json"
-    record = build_record_from_debug_run(run_dir)
-    _write_json(record_path, record)
-    final_review: dict[str, Any] = {
-        "status": "not_attempted",
-        "reason": "not_at_review_and_submit",
-        "application_flow_state": last_flow_state,
-    }
-    extraction_path = run_dir / "final_review_extraction.json"
-    extraction: dict[str, Any] = {
-        "contract_version": "seek_final_review_extraction_v1",
-        "status": "not_attempted",
-        "reason": "not_at_review_and_submit",
-        "current_step": last_flow_state.get("current_step"),
-        "state_type": last_flow_state.get("state_type"),
-    }
-    if _final_review_ready(last_flow_state):
-        final_review = run("extract_final_review", ["--application-fill-record", str(record_path)])
-        extraction_path = Path(str(final_review.get("final_review_extraction_path") or extraction_path))
-        extraction = _read_json(extraction_path) if extraction_path.exists() else {}
-    else:
-        _write_json(extraction_path, extraction)
-    artifact = build_seek_application_flow_artifact(
-        record,
-        final_review_extraction=extraction,
-        record_path=record_path,
-        final_review_extraction_path=extraction_path,
-    )
-    artifact_path = run_dir / "seek_application_flow_artifact.json"
-    _write_json(artifact_path, artifact)
-    readiness = build_demo_readiness_report(
+    return _finish_application_flow(
         run_dir=run_dir,
-        step_reports=load_step_reports(run_dir),
-        application_fill_record=record,
-        final_review_audit=extraction,
-        long_read_benchmark=None,
-        time_budget_ms=args.time_budget_ms,
+        started=started,
+        args=args,
+        run=run,
+        budget_exhausted=budget_exhausted,
+        steps=steps,
+        job_attempts=job_attempts,
+        result_scrolls=result_scrolls,
+        initial_flow_state=apply_state,
+        continuous_session=continuous_session,
+        memory_store=memory_store,
     )
-    readiness_path = run_dir / "demo_readiness_report.json"
-    _write_json(readiness_path, readiness)
-    total_ms = round((time.perf_counter() - started) * 1000, 3)
-    result = {
-        "contract_version": "seek_speed_demo_run_v1",
-        "status": "pass" if readiness.get("status") == "pass" and extraction.get("status") == "pass" else "needs_work",
-        "run_dir": str(run_dir),
-        "total_ms": total_ms,
-        "time_budget_ms": args.time_budget_ms,
-        "within_budget": total_ms <= args.time_budget_ms,
-        "steps": steps,
-        "job_attempts": job_attempts,
-        "result_scrolls": result_scrolls,
-        "application_fill_record_path": str(record_path),
-        "final_review_extraction_path": str(extraction_path),
-        "artifact_path": str(artifact_path),
-        "readiness_report_path": str(readiness_path),
-        "readiness_status": readiness.get("status"),
-        "final_review_status": extraction.get("status"),
-        "application_stop_status": application_stop_status,
-        "application_stop_reason": application_stop_reason,
-        "final_submissions": extraction.get("final_submissions", record.get("final_submissions", 0)),
-        "submit_clicks": extraction.get("submit_clicks", record.get("submit_clicks", 0)),
-    }
-    _write_json(run_dir / "speed_demo_report.json", result)
-    return result
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -702,6 +1190,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--job-index", type=int, default=0)
     parser.add_argument("--max-jobs", type=int, default=5)
     parser.add_argument("--allow-maybe-apply", action="store_true")
+    parser.add_argument(
+        "--agent-suitability-review",
+        default=None,
+        help="Optional full-JD Agent review JSON passed to the match step.",
+    )
     parser.add_argument("--visible-jobs-per-page", type=int, default=4)
     parser.add_argument("--max-result-scrolls", type=int, default=3)
     parser.add_argument("--results-scroll-wheel-clicks", type=int, default=9)
@@ -716,9 +1209,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--time-budget-ms", type=float, default=300000.0)
     parser.add_argument("--close-old-windows", action="store_true")
     parser.add_argument(
+        "--continuous-session",
+        action="store_true",
+        help="Persist SEEK interface transitions and pause before using an unreviewed Quick Apply surface.",
+    )
+    parser.add_argument(
+        "--resume-continuous-session",
+        action="store_true",
+        help="Resume the same run directory after the pending interface memory has been reviewed and published.",
+    )
+    parser.add_argument(
+        "--approve-quick-apply-entry",
+        action="store_true",
+        help="Record explicit approval to enter a matching SEEK-hosted Quick Apply flow.",
+    )
+    parser.add_argument(
         "--disable-learned-fast-mode",
         action="store_true",
-        help="Disable learned SEEK card pruning. Useful for broad exploratory runs, slower for the 3-minute demo path.",
+        help="Compatibility flag. Local keyword pruning is disabled; Agent always reads full job detail.",
     )
     return parser
 

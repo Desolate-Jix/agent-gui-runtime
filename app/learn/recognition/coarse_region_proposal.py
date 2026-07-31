@@ -99,12 +99,13 @@ def _axis_cuts(
     total = screen[size_key]
     cross_total = screen[cross_key]
     start_key = axis
-    eligible = []
+    eligible_elements = []
     for element in elements:
         box = element["bbox"]
         if box[size_key] / total >= 0.7 or box["w"] * box["h"] / (screen["w"] * screen["h"]) >= 0.18:
             continue
-        eligible.append(box)
+        eligible_elements.append(element)
+    eligible = [element["bbox"] for element in eligible_elements]
     bin_count = min(512, max(128, total // 2))
     occupancy = []
     for index in range(bin_count):
@@ -137,8 +138,8 @@ def _axis_cuts(
         if gap_start <= total * 0.01 or gap_end >= total * 0.99:
             continue
         point = (gap_start + gap_end) // 2
-        before = [item["bbox"] for item in elements if item["bbox"][start_key] + item["bbox"][size_key] / 2 < point]
-        after = [item["bbox"] for item in elements if item["bbox"][start_key] + item["bbox"][size_key] / 2 >= point]
+        before = [box for box in eligible if box[start_key] + box[size_key] / 2 < point]
+        after = [box for box in eligible if box[start_key] + box[size_key] / 2 >= point]
         if not before or not after:
             continue
         before_span = _cross_span_ratio(before, axis=axis, cross_total=cross_total)
@@ -162,7 +163,7 @@ def _axis_cuts(
                 "score": round(min(1.0, gap_ratio * 2.0 + effective_support), 4),
             }
         )
-    for aligned in _aligned_boundary_cuts(elements, screen, axis=axis):
+    for aligned in _aligned_boundary_cuts(eligible_elements, screen, axis=axis):
         existing = next((item for item in cuts if abs(item["point"] - aligned["point"]) <= total * 0.015), None)
         if existing is None:
             cuts.append(aligned)

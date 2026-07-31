@@ -1,0 +1,244 @@
+{
+  "contract_version": "navigation_reading_live_suite_v1",
+  "suite_id": "navigation_reading_live_v2",
+  "goal": "From the workspace, open the incident report and read it to the end, return to the workspace, open and close the policy dialog, return to the workspace, open live updates, read the visible collection and perform exactly two effect-verified scrolls before explicitly stopping collection reading, continue to the workflow summary, and stop safely. Use task progress to avoid repeating completed branches.",
+  "app_name": "Navigation Branching Lab",
+  "initial_interface_id": "branch_hub",
+  "interface_specs": [
+    {
+      "interface_id": "branch_hub",
+      "surface_type": "navigation_hub",
+      "identity_markers": [
+        "Navigation Branching Lab",
+        "Operations Workspace Interface",
+        "Open incident report"
+      ],
+      "identity_marker_sets": [
+        [
+          "Operations Workspace Interface",
+          "Open incident report"
+        ],
+        [
+          "stage=hub"
+        ]
+      ]
+    },
+    {
+      "interface_id": "branch_incident",
+      "surface_type": "finite_detail",
+      "identity_markers": [
+        "Navigation Branching Lab",
+        "Incident Report Interface",
+        "Incident evidence section 1"
+      ],
+      "identity_marker_sets": [
+        [
+          "Incident Report Interface",
+          "Incident evidence section 1"
+        ],
+        [
+          "stage=incident"
+        ]
+      ],
+      "read_target": {
+        "content_id": "incident_body",
+        "scroll_scope": "page",
+        "target_pane": "page",
+        "wheel_clicks": 5,
+        "bottom_markers": [
+          "INCIDENT REPORT END"
+        ]
+      }
+    },
+    {
+      "interface_id": "branch_policy_modal",
+      "surface_type": "modal_dialog",
+      "identity_markers": [
+        "Navigation Branching Lab",
+        "Policy Dialog Interface",
+        "Close policy dialog"
+      ],
+      "identity_marker_sets": [
+        [
+          "Policy Dialog Interface",
+          "Close policy dialog"
+        ],
+        [
+          "stage=policy"
+        ]
+      ]
+    },
+    {
+      "interface_id": "branch_updates",
+      "surface_type": "content_collection",
+      "identity_markers": [
+        "Navigation Branching Lab",
+        "Live Updates Interface",
+        "Live update 1"
+      ],
+      "identity_marker_sets": [
+        [
+          "Live Updates Interface",
+          "Live update 1"
+        ],
+        [
+          "stage=updates"
+        ]
+      ],
+      "read_target": {
+        "content_id": "updates_feed",
+        "scroll_scope": "page",
+        "target_pane": "page",
+        "wheel_clicks": 4,
+        "bottom_markers": []
+      }
+    },
+    {
+      "interface_id": "branch_summary",
+      "surface_type": "read_only_summary",
+      "identity_markers": [
+        "Navigation Branching Lab",
+        "Workflow Summary Interface",
+        "BRANCHING WORKFLOW SAFE STOP"
+      ],
+      "identity_marker_sets": [
+        [
+          "Workflow Summary Interface",
+          "BRANCHING WORKFLOW SAFE STOP"
+        ],
+        [
+          "stage=summary"
+        ]
+      ],
+      "read_target": {
+        "content_id": "summary_body",
+        "scroll_scope": "page",
+        "target_pane": "page",
+        "wheel_clicks": 3,
+        "bottom_markers": [
+          "BRANCHING WORKFLOW SAFE STOP"
+        ]
+      }
+    }
+  ],
+  "interface_assets": [
+    {
+      "interface_id": "branch_hub",
+      "path": "assets/branch-hub.json",
+      "sha256": "25fe438c6739aefcba2e8cd518e1bf9e5d8281d34c90a9b5c67c5ec80a90c717"
+    },
+    {
+      "interface_id": "branch_incident",
+      "path": "assets/branch-incident.json",
+      "sha256": "4f01452c57dd967403aa0d0acc0ca90a9741c481fb1ac95a03e739956311f5ce"
+    },
+    {
+      "interface_id": "branch_policy_modal",
+      "path": "assets/branch-policy-modal.json",
+      "sha256": "af0e5b1d1f380a9bd04f83c594208ccd9b58e42ac7b5e15d3cf1c45dc6054b2b"
+    },
+    {
+      "interface_id": "branch_updates",
+      "path": "assets/branch-updates.json",
+      "sha256": "f14f3c027b5ebf9067c9b0ae3f4ce43e8fb1e639766d670d7fd4b7b6df8981e2"
+    },
+    {
+      "interface_id": "branch_summary",
+      "path": "assets/branch-summary.json",
+      "sha256": "5f89232078699c9bf1d940586299849537317ed4c24535dc9f7ce3307d3ef723"
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "hub_to_incident",
+      "source_interface_id": "branch_hub",
+      "target_interface_id": "branch_incident",
+      "source_control_id": "open_incident",
+      "action_type": "open_detail",
+      "display_name": "Open incident report",
+      "agent_description": "Open the incident report if this branch has not been completed.",
+      "operation_goal": "Click the button labeled Open incident report",
+      "risk_level": "low",
+      "review_status": "human_reviewed",
+      "success_conditions": [
+        "Incident Report Interface is visible"
+      ]
+    },
+    {
+      "transition_id": "incident_to_hub",
+      "source_interface_id": "branch_incident",
+      "target_interface_id": "branch_hub",
+      "source_control_id": "return_hub",
+      "action_type": "back",
+      "display_name": "Return to workspace",
+      "agent_description": "Return to the workspace after reading the incident report completely.",
+      "operation_goal": "Click the button labeled Return to workspace",
+      "requires_completed_read": "incident_body",
+      "risk_level": "low",
+      "review_status": "human_reviewed",
+      "success_conditions": [
+        "Operations Workspace Interface is visible"
+      ]
+    },
+    {
+      "transition_id": "hub_to_policy",
+      "source_interface_id": "branch_hub",
+      "target_interface_id": "branch_policy_modal",
+      "source_control_id": "open_policy",
+      "action_type": "open_modal",
+      "display_name": "Open policy dialog",
+      "agent_description": "Open the policy dialog after the incident branch is complete.",
+      "operation_goal": "Click the button labeled Open policy dialog",
+      "risk_level": "low",
+      "review_status": "human_reviewed",
+      "success_conditions": [
+        "Policy Dialog Interface is visible"
+      ]
+    },
+    {
+      "transition_id": "policy_to_hub",
+      "source_interface_id": "branch_policy_modal",
+      "target_interface_id": "branch_hub",
+      "source_control_id": "close_policy",
+      "action_type": "close_modal",
+      "display_name": "Close policy dialog",
+      "agent_description": "Close the policy dialog and return to the workspace.",
+      "operation_goal": "Click the button labeled Close policy dialog",
+      "risk_level": "low",
+      "review_status": "human_reviewed",
+      "success_conditions": [
+        "Operations Workspace Interface is visible"
+      ]
+    },
+    {
+      "transition_id": "hub_to_updates",
+      "source_interface_id": "branch_hub",
+      "target_interface_id": "branch_updates",
+      "source_control_id": "open_updates",
+      "action_type": "open_detail",
+      "display_name": "Open live updates",
+      "agent_description": "Open live updates after the incident and policy branches are complete.",
+      "operation_goal": "Click the button labeled Open live updates",
+      "risk_level": "low",
+      "review_status": "human_reviewed",
+      "success_conditions": [
+        "Live Updates Interface is visible"
+      ]
+    },
+    {
+      "transition_id": "updates_to_summary",
+      "source_interface_id": "branch_updates",
+      "target_interface_id": "branch_summary",
+      "source_control_id": "open_summary",
+      "action_type": "continue_next_step",
+      "display_name": "Open workflow summary",
+      "agent_description": "Continue only after bounded collection reading has explicitly stopped.",
+      "operation_goal": "Click the button labeled Open workflow summary",
+      "risk_level": "low",
+      "review_status": "human_reviewed",
+      "success_conditions": [
+        "Workflow Summary Interface is visible"
+      ]
+    }
+  ]
+}

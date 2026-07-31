@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Protocol
 
 from loguru import logger
 
@@ -22,7 +22,15 @@ except Exception as exc:  # pragma: no cover - depends on runtime platform/envir
 
 from app.core.window_manager import window_manager
 from app.core.runtime_artifacts import SCREENSHOTS_DIR, build_screenshot_path
-from app.api.models.request import ROIModel
+
+
+class ROIValue(Protocol):
+    x: int
+    y: int
+    width: int
+    height: int
+
+    def model_dump(self) -> dict[str, Any]: ...
 
 
 class ScreenshotService:
@@ -36,7 +44,7 @@ class ScreenshotService:
 
     def capture_window(
         self,
-        roi: Optional[ROIModel] = None,
+        roi: Optional[ROIValue] = None,
         save_image: bool = True,
         *,
         purpose: str = "capture",
@@ -103,7 +111,7 @@ class ScreenshotService:
         top: int,
         right: int,
         bottom: int,
-        roi: Optional[ROIModel],
+        roi: Optional[ROIValue],
     ) -> dict[str, Any]:
         """Resolve full-window or ROI-relative capture coordinates."""
         window_width = max(1, right - left)

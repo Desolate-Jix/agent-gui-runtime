@@ -1,0 +1,64 @@
+{
+  "contract_version": "learning_surface_adapter_protocol_manifest_v1",
+  "split": "holdout",
+  "used_for_rule_tuning": false,
+  "interpretation": "Deterministic protocol holdout fixtures; results cannot be used to tune routing rules and do not measure model ability or general GUI reliability.",
+  "cases": [
+    {
+      "case_id": "holdout_native_chat_content",
+      "source_type": "fixture_only",
+      "trace_path": "tests/fixtures/surface_adapter_protocol/holdout_native_chat.json",
+      "trace_sha256": "38c3747f1faf555fba8a7f6692bc8fc4f8850e23505c65d89c603efc195b83ad",
+      "screenshot_path": "tests/fixtures/surface_adapter_protocol/screen.ppm",
+      "screenshot_sha256": "37da76abaaa9a3a325748b94bb63fad8aa924d6ce860ed5581b5125842a4f266",
+      "expected_adapter_id": "chat",
+      "expected_host_adapter_id": "generic",
+      "expected_host_adapter_status": "not_applicable",
+      "expected_content_adapter_id": "chat",
+      "expected_content_adapter_status": "selected_from_correlated_model_and_inventory",
+      "expected_decision_status": "selected_from_visible_evidence"
+    },
+    {
+      "case_id": "holdout_browser_host_media_content",
+      "source_type": "fixture_only",
+      "trace_path": "tests/fixtures/surface_adapter_protocol/holdout_browser_media.json",
+      "trace_sha256": "870818136eae631294a1c20069765697cb483f02878316866793e10657e4326c",
+      "screenshot_path": "tests/fixtures/surface_adapter_protocol/screen.ppm",
+      "screenshot_sha256": "37da76abaaa9a3a325748b94bb63fad8aa924d6ce860ed5581b5125842a4f266",
+      "expected_adapter_id": "browser",
+      "expected_host_adapter_id": "browser",
+      "expected_host_adapter_status": "selected_from_visible_evidence",
+      "expected_content_adapter_id": "media_player",
+      "expected_content_adapter_status": "selected_from_correlated_model_and_inventory",
+      "expected_decision_status": "selected_from_visible_evidence"
+    },
+    {
+      "case_id": "holdout_mail_insufficient_abstains",
+      "source_type": "fixture_only",
+      "trace_path": "tests/fixtures/surface_adapter_protocol/holdout_mail_insufficient.json",
+      "trace_sha256": "5f934480bb416bf0621b116b5114883023c6a4fc9d31a37676bad881e1fd370f",
+      "screenshot_path": "tests/fixtures/surface_adapter_protocol/screen.ppm",
+      "screenshot_sha256": "37da76abaaa9a3a325748b94bb63fad8aa924d6ce860ed5581b5125842a4f266",
+      "expected_adapter_id": "generic",
+      "expected_host_adapter_id": "generic",
+      "expected_host_adapter_status": "not_applicable",
+      "expected_content_adapter_id": "generic",
+      "expected_content_adapter_status": "evidence_insufficient",
+      "expected_decision_status": "content_adapter_evidence_insufficient"
+    },
+    {
+      "case_id": "holdout_browser_native_conflict_abstains",
+      "source_type": "fixture_only",
+      "trace_path": "tests/fixtures/surface_adapter_protocol/holdout_browser_native_conflict.json",
+      "trace_sha256": "a7cc5d5f94222e548bffce4abed38a376446a33ac1fe6d80f7e9ccec1bd6aceb",
+      "screenshot_path": "tests/fixtures/surface_adapter_protocol/screen.ppm",
+      "screenshot_sha256": "37da76abaaa9a3a325748b94bb63fad8aa924d6ce860ed5581b5125842a4f266",
+      "expected_adapter_id": "generic",
+      "expected_host_adapter_id": "generic",
+      "expected_host_adapter_status": "evidence_conflict",
+      "expected_content_adapter_id": "generic",
+      "expected_content_adapter_status": "not_applicable",
+      "expected_decision_status": "browser_evidence_conflicts_with_validated_native_surface"
+    }
+  ]
+}

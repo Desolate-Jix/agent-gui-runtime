@@ -1,0 +1,21 @@
+{
+  "result": {
+    "app_name": "protocol holdout",
+    "image_path": "tests/fixtures/surface_adapter_protocol/screen.ppm",
+    "image_size": {"width": 1000, "height": 700},
+    "interface_classification": {
+      "category": "conversation_workspace",
+      "confidence": 0.92,
+      "structure_signals": {
+        "people_or_conversation_rows": true,
+        "message_thread": true,
+        "message_composer": true
+      }
+    },
+    "screen_inventory": [
+      {"item_id": "contact_1", "role": "contact_row", "bbox": {"x": 0, "y": 0, "w": 240, "h": 52}},
+      {"item_id": "conversation_thread", "role": "conversation_thread", "bbox": {"x": 240, "y": 0, "w": 760, "h": 610}},
+      {"item_id": "message_composer", "role": "message_composer", "bbox": {"x": 240, "y": 610, "w": 760, "h": 90}}
+    ]
+  }
+}

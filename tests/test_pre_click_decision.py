@@ -143,6 +143,23 @@ def test_pre_click_decision_rejects_candidate_that_matches_local_ocr_but_not_goa
     assert "candidate_goal_text_mismatch" in result.candidate_decisions[0].reasons
 
 
+def test_pre_click_decision_rejects_input_when_goal_explicitly_requests_radio() -> None:
+    candidate = _candidate(
+        label="Cover letter text box containing Dear Hiring Manager",
+        role="input",
+        text_similarity=0.9,
+    )
+
+    result = decide_pre_click(
+        goal="Select the Don't include a cover letter radio button",
+        candidates=_rank_result(candidate),
+        grounding=_grounding(matched_text="Cover letter"),
+    )
+
+    assert result.allowed is False
+    assert "candidate_goal_role_mismatch" in result.candidate_decisions[0].reasons
+
+
 def test_pre_click_decision_allows_short_label_when_goal_mentions_it_in_long_instruction() -> None:
     candidate = _candidate(label="Continue", text_similarity=0.35)
 

@@ -12,6 +12,7 @@ from scripts.run_general_ui_recognition_benchmark import (
     _runner_safety_audit,
     _summarize_ownership_golden,
     _write_case_review_sheet,
+    build_regression_diagnosis,
     evaluate_case_report,
     run_benchmark,
     summarize_metrics,
@@ -27,6 +28,7 @@ def _report(
     structure_types: list[str] | None = None,
     interface_category: str = "generic",
     class_strategy: str = "evidence_balanced",
+    control_parent_roles: list[str] | None = None,
 ) -> dict:
     roles = list(group_roles or ["list_group"])
     validation = {
@@ -75,6 +77,14 @@ def _report(
                         {"item_id": f"item_{index}", "role": role}
                         for index, role in enumerate(item_roles or [], start=1)
                     ],
+                    "control_parents": [
+                        {
+                            "object_id": f"control_parent_{index}",
+                            "role": role,
+                            "bbox": {"x": index * 40, "y": 100, "w": 32, "h": 32},
+                        }
+                        for index, role in enumerate(control_parent_roles or [], start=1)
+                    ],
                 }
             ]
             if gate_status == "passed"
@@ -116,6 +126,37 @@ def test_supported_case_checks_hierarchy_and_semantic_expectations() -> None:
     assert result["capability_pass"] is True
     assert result["safety_pass"] is True
     assert all(assertion["passed"] for assertion in result["assertions"])
+
+
+def test_supported_case_checks_atomic_control_parent_expectations_separately_from_semantic_groups() -> None:
+    case = {
+        "case_id": "calculator",
+        "expected_outcome": "supported",
+        "expectations": {
+            "required_control_parent_roles": {"atomic_control_parent": 2},
+            "forbidden_group_roles": ["tile_card_parent"],
+        },
+    }
+
+    result = evaluate_case_report(
+        case,
+        _report(control_parent_roles=["atomic_control_parent", "atomic_control_parent"]),
+    )
+
+    assert result["case_outcome"] == "supported_pass"
+    assert result["control_parent_role_counts"] == {"atomic_control_parent": 2}
+    assertion = next(
+        item
+        for item in result["assertions"]
+        if item["assertion_id"] == "required_control_parent_role:atomic_control_parent"
+    )
+    assert assertion == {
+        "assertion_id": "required_control_parent_role:atomic_control_parent",
+        "passed": True,
+        "expected": {"min": 2},
+        "actual": 2,
+        "category": "visual_object_structure",
+    }
 
 
 def test_supported_case_checks_model_category_and_selected_class_strategy() -> None:
@@ -251,6 +292,156 @@ def test_summary_separates_cases_families_invalid_and_known_failures() -> None:
     assert media["reliability_status"] == "insufficient_sample_size_and_application_diversity"
     assert summary["class_profile_coverage"]["interpretation"].startswith("Model-selected class profiles")
     assert "overall_success_rate" not in summary
+
+
+def test_summary_does_not_claim_supported_passes_when_required_ownership_golden_is_stale() -> None:
+    cases = [
+        {
+            "case_id": "python",
+            "app_family": "python",
+            "case_outcome": "supported_pass",
+            "capability_pass": True,
+        }
+    ]
+
+    summary = summarize_metrics(
+        cases,
+        [],
+        ownership_golden_fixture_status="invalid",
+    )
+
+    assert summary["benchmark_validity_status"] == "invalid_required_fixture"
+    assert summary["supported_capability"] == {
+        "passed": 0,
+        "attempted": 0,
+        "rate": "not_covered",
+        "reason": "ownership_golden_fixture_invalid",
+        "interpretation": (
+            "required ownership golden fixture is invalid; supported case checks are diagnostic only and cannot "
+            "be reported as benchmark capability passes"
+        ),
+    }
+
+
+def test_regression_diagnosis_separates_repaired_code_changed_golden_and_remaining_failure() -> None:
+    previous = {
+        "ownership_golden_fixture": {"status": "valid"},
+        "cases": [
+            {
+                "case_id": "stage1_case",
+                "screenshot_path": "stage1.png",
+                "failed_assertions": [
+                    {
+                        "assertion_id": "required_structure_type:top_bar",
+                        "category": "stage1",
+                        "expected": {"min": 1},
+                        "actual": 0,
+                    }
+                ],
+                "ownership_golden": {"checks": []},
+            },
+            {
+                "case_id": "ownership_case",
+                "screenshot_path": "ownership.png",
+                "failed_assertions": [
+                    {
+                        "assertion_id": "ownership_golden_holdout",
+                        "category": "ownership_holdout",
+                        "expected": {"passed": 2, "attempted": 2},
+                        "actual": {"passed": 0, "attempted": 2},
+                    }
+                ],
+                "ownership_golden": {
+                    "checks": [
+                        {
+                            "annotation_id": "stable_owner",
+                            "item_id": "stable_item",
+                            "expected_owner_role": "list_row",
+                            "actual_owner_role": None,
+                            "passed": False,
+                            "failure_category": "ownership_item_missing",
+                        },
+                        {
+                            "annotation_id": "changed_id_owner",
+                            "item_id": "temporary_item",
+                            "expected_owner_role": "list_row",
+                            "actual_owner_role": None,
+                            "passed": False,
+                            "failure_category": "ownership_item_missing",
+                        },
+                    ]
+                },
+            },
+        ],
+    }
+    current = {
+        "ownership_golden_fixture": {"status": "valid"},
+        "cases": [
+            {
+                "case_id": "stage1_case",
+                "screenshot_path": "stage1.png",
+                "failed_assertions": [],
+                "assertions": [
+                    {
+                        "assertion_id": "required_structure_type:top_bar",
+                        "category": "stage1",
+                        "expected": {"min": 1},
+                        "actual": 1,
+                        "passed": True,
+                    }
+                ],
+                "ownership_golden": {"checks": []},
+            },
+            {
+                "case_id": "ownership_case",
+                "screenshot_path": "ownership.png",
+                "failed_assertions": [
+                    {
+                        "assertion_id": "ownership_golden_holdout",
+                        "category": "ownership_holdout",
+                        "expected": {"passed": 2, "attempted": 2},
+                        "actual": {"passed": 1, "attempted": 2},
+                    }
+                ],
+                "assertions": [],
+                "ownership_golden": {
+                    "checks": [
+                        {
+                            "annotation_id": "stable_owner",
+                            "item_id": "stable_item",
+                            "expected_owner_role": "list_row",
+                            "actual_owner_role": None,
+                            "passed": False,
+                            "failure_category": "ownership_item_missing",
+                        },
+                        {
+                            "annotation_id": "changed_id_owner",
+                            "item_id": "stable_item_2",
+                            "expected_owner_role": "list_row",
+                            "actual_owner_role": "list_row",
+                            "passed": True,
+                            "failure_category": None,
+                        },
+                    ]
+                },
+            },
+        ],
+    }
+
+    diagnosis = build_regression_diagnosis(previous, current)
+
+    by_case = {case["case_id"]: case for case in diagnosis["cases"]}
+    assert by_case["stage1_case"]["diagnoses"][0]["root_cause_category"] == "code_path_repaired"
+    ownership_categories = {
+        item["annotation_id"]: item["root_cause_category"]
+        for item in by_case["ownership_case"]["ownership_diagnoses"]
+    }
+    assert ownership_categories == {
+        "stable_owner": "ownership_failure_remains",
+        "changed_id_owner": "ownership_golden_item_id_updated",
+    }
+    assert diagnosis["summary"]["remaining_failure_case_count"] == 1
+    assert diagnosis["summary"]["stale_fixture_involved"] is False
 
 
 def test_fixture_validation_pins_trace_and_screenshot_checksums(tmp_path) -> None:
@@ -453,6 +644,33 @@ def test_ownership_golden_scores_expected_owner_role_from_resolved_map() -> None
     assert result["rate"] == 1.0
     assert result["used_for_rule_tuning"] is False
     assert result["mismatches"] == []
+
+
+def test_ownership_golden_resolves_unique_canonical_region_alias_without_lowering_owner_role() -> None:
+    report = _report(group_roles=["tile_card_parent"])
+    region = report["stage2_numbering"]["regions"][0]
+    region["region_id"] = "structure_region_main_content"
+    region["subregion_groups"] = [
+        {"group_id": "tile_1", "role": "tile_card_parent", "member_item_ids": ["ocr_1"]},
+    ]
+    region["ownership_resolution"] = {"source_item_owner_map": {"ocr_1": "tile_1"}}
+
+    result = _evaluate_ownership_golden(
+        report,
+        [
+            {
+                "annotation_id": "legacy_primary_area_owner",
+                "region_id": "structure_region_primary_area",
+                "item_id": "ocr_1",
+                "expected_owner_role": "tile_card_parent",
+            }
+        ],
+    )
+
+    assert result["passed"] == 1
+    assert result["checks"][0]["resolved_region_id"] == "structure_region_main_content"
+    assert result["checks"][0]["region_resolution"] == "canonical_role_alias"
+    assert result["checks"][0]["actual_owner_role"] == "tile_card_parent"
 
 
 def test_ownership_golden_exposes_wrong_role_and_missing_item() -> None:

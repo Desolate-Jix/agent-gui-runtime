@@ -57,7 +57,15 @@ def merge_read_batch_into_detail_snapshot(
     )
     merged["detail_batch_status"] = batch.get("status")
     merged["detail_batch_stop_reason"] = batch.get("stop_reason")
-    merged["detail_bottom_reached"] = batch.get("stop_reason") == "no_new_content"
+    merged["detail_read_state"] = str(batch.get("stop_reason") or "unknown")
+    merged["detail_bottom_reached"] = (
+        batch.get("reached_bottom") is True
+        or batch.get("stop_reason") == "reached_bottom"
+    )
+    merged["detail_read_completion"] = (
+        "complete" if merged["detail_bottom_reached"]
+        else str(batch.get("completion_status") or "incomplete")
+    )
     merged["detail_batch_unique_line_count"] = batch.get("unique_line_count")
     merged["runtime_detail_dataflow"] = {
         "contract_version": "runtime_detail_dataflow_v1",

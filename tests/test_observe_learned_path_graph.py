@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from app.api.vision import _apply_learned_path_graph_to_screen_map
-from app.api.models.request import VisionObserveScreenRequestModel
+from app.learn.observe_enrichment.path_graph import (
+    apply_learned_path_graph_to_screen_map,
+)
+from app.operation.observe.contracts import ObserveScreenTaskInput
 
 
 def test_seek_observe_screen_map_uses_learned_path_graph_for_search_results() -> None:
@@ -32,10 +34,10 @@ def test_seek_observe_screen_map_uses_learned_path_graph_for_search_results() ->
         },
     }
 
-    assisted = _apply_learned_path_graph_to_screen_map(
+    assisted = apply_learned_path_graph_to_screen_map(
         screen_map,
         result=result,
-        request=VisionObserveScreenRequestModel(app_name="seek", state_hint="SEEK search results"),
+        task=ObserveScreenTaskInput(app_name="seek", state_hint="SEEK search results"),
         image_path="missing-test-image.png",
     )
 
@@ -71,10 +73,10 @@ def test_seek_application_form_does_not_use_search_results_path_graph() -> None:
         },
     }
 
-    assisted = _apply_learned_path_graph_to_screen_map(
+    assisted = apply_learned_path_graph_to_screen_map(
         screen_map,
         result=result,
-        request=VisionObserveScreenRequestModel(app_name="seek", state_hint="Choose documents"),
+        task=ObserveScreenTaskInput(app_name="seek", state_hint="Choose documents"),
         image_path="missing-test-image.png",
     )
 

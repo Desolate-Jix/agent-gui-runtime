@@ -70,6 +70,9 @@ def build_pathgraph_candidate_from_review(
         "pending_detail_observe_requests",
         _pending_detail_observe_requests(graph),
     )
+    correction_memory = (
+        save_result.get("correction_memory") if isinstance(save_result.get("correction_memory"), dict) else None
+    )
 
     out_dir = reviewed_path.parent / "pathgraph_candidate"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -111,8 +114,10 @@ def build_pathgraph_candidate_from_review(
         "pending_detail_observe_requests": pending_detail_observe_requests,
         "created_at": datetime.now().isoformat(),
     }
+    if correction_memory:
+        wrapper["correction_memory"] = dict(correction_memory)
     wrapper_path.write_text(json.dumps(wrapper, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return {
+    result = {
         "contract_version": "pathgraph_candidate_build_v1",
         "pathgraph_candidate_path": _relative_path(wrapper_path, root),
         "reviewed_template_candidate_path": _relative_path(reviewed_path, root),
@@ -134,7 +139,14 @@ def build_pathgraph_candidate_from_review(
         "evidence_integrity": evidence_integrity,
         "model_start_runbook": model_start_runbook,
         "pending_detail_observe_requests": pending_detail_observe_requests,
+        "human_review_patch_path": save_result.get("human_review_patch_path") or "",
+        "human_review_patch_revision": save_result.get("human_review_patch_revision"),
+        "reviewed_overlay_path": save_result.get("reviewed_overlay_path") or "",
+        "changes_summary": save_result.get("changes_summary") or [],
     }
+    if correction_memory:
+        result["correction_memory"] = dict(correction_memory)
+    return result
 
 
 def build_model_generated_pathgraph_preview(

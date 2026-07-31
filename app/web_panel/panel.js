@@ -7,6 +7,10 @@ let lastLearningDraftObserveResponse = null;
 let lastLearningDraftObserveTracePath = "";
 let lastLearningTwoStageReportPath = "";
 let lastLearningTwoStageResponse = null;
+let lastLearningReviewRepairResponse = null;
+let lastLearningFinalStage2ReportPath = "";
+let lastLearningFinalNumberingRevision = "";
+let lastLearningFinalReviewedOverlayPath = "";
 let lastLearningFusedTrialPath = "";
 let lastLearningDeepCalibrationResponse = null;
 let currentImagePath = "";
@@ -34,7 +38,9 @@ let taskRunState = null;
 const BROWSER_APP_IDS = new Set(["browser", "edge", "msedge", "chrome", "firefox"]);
 const CARD_ORDER_STORAGE_KEY = "openclaw.panel.cardOrder.v1";
 const LEARNING_DRAFT_PATH_SPLIT_STORAGE_KEY = "openclaw.panel.learningDraftPathSplit.v1";
+const LEARNING_WORKFLOW_RUN_STORAGE_KEY = "openclaw.panel.learningWorkflowRunId.v1";
 const CARD_DRAG_START_THRESHOLD_PX = 6;
+const LEARNING_CALIBRATION_BATCH_SIZE = 8;
 const DEFAULT_SEEK_GRAPH_PATH = "artifacts/seek/runtime_path_graph_seek_mvp_20260617.json";
 const DEFAULT_WIKIPEDIA_GRAPH_PATH = "artifacts/wikipedia/runtime_path_graph_wikipedia_search_v1.json";
 const DEFAULT_GITHUB_ISSUES_GRAPH_PATH = "artifacts/github/runtime_path_graph_github_issues_v1.json";
@@ -67,10 +73,50 @@ let seekApplicationEvidence = null;
 let replayAppProfile = null;
 let replayAgentPrompt = null;
 let learningDraftReview = null;
+let learningDraftReviewLoadPromise = null;
+let learningDraftReviewLoadSourcePath = "";
+let learningDraftReviewLoadRequestToken = 0;
+let interfaceWorkflowReview = null;
+let interfaceWorkflowReviewState = null;
+let interfaceWorkflowDraftSourcePaths = [];
+let interfaceWorkflowAvailableSources = [];
+let interfaceWorkflowLibraryRegistry = null;
+let interfaceWorkflowSourcePreview = null;
+let interfaceWorkflowSourceReviewState = null;
+let interfaceWorkflowSelectedOperationId = "";
+let interfaceWorkflowSavedReviewPath = "";
+let interfaceWorkflowHasUnsavedChanges = false;
+let interfaceWorkflowControlPickMode = false;
+let interfaceWorkflowControlPickDestination = "attach";
+const interfaceWorkflowWorkbenchState = globalThis.InterfaceWorkflowReview
+  .createInterfaceWorkflowWorkbenchState();
+let interfaceWorkflowGraphLayout = null;
+let interfaceWorkflowGraphZoom = 1;
+let interfaceWorkflowGraphPan = { x: 0, y: 0 };
+let interfaceWorkflowGraphDrag = null;
+let interfaceWorkflowGraphSignature = "";
+let interfaceWorkflowGraphAnimationId = 0;
+let interfaceWorkflowGraphAnimationTime = 0;
+let interfaceWorkflowGraphSimulation = null;
+let interfaceWorkflowGraphHoveredNodeId = "";
+let interfaceWorkflowGraphHoverProjection = null;
+let interfaceWorkflowGraphResizeObserver = null;
+const interfaceWorkflowLoadGuard = globalThis.InterfaceWorkflowReview
+  .createLatestInterfaceWorkflowLoadGuard();
 let selectedLearningDraftNodeId = "";
 let learningDraftReviewBboxEdits = { regions: {}, actions: {} };
 let imageInspectorEditContext = null;
 let imageInspectorSelection = null;
+let learningDraftEditorState = null;
+let learningDraftEditorSelected = null;
+let learningDraftEditorActive = false;
+let learningDraftEditorAddMode = false;
+let learningDraftEditorDrag = null;
+let learningDraftEditorCompactMode = true;
+let learningDraftEditorExpandedGroupKey = "";
+let panelImageRevision = 0;
+let learningCorrectionMemoryRegistry = null;
+let continuousTaskHandoff = null;
 let assistedTemplateAcceptanceSuggestions = [];
 let assistedTemplateAcceptanceSimulation = null;
 
@@ -78,13 +124,18 @@ const LEARNING_INTERFACE_FLOW_STEPS = [
   "bind_capture",
   "screen_understanding",
   "numbered_map",
-  "page_details",
   "precise_calibration",
+  "review_repair",
   "fusion",
+  "page_details",
   "pathgraph_draft",
   "complete",
 ];
 let currentLearningInterfaceFlowStep = "bind_capture";
+let currentLearningWorkflowState = null;
+let currentLearningWorkflowRunId = "";
+let activeLearningStageOperation = null;
+let activeLearningStageTaskContext = null;
 
 /* Navigation path graph state */
 // Each page node:
@@ -99,7 +150,7 @@ let navPathAppName = "";
 let navPathDirty = false;    // true when unsaved changes exist
 let liveSessionSnapshot = null;  // saved live session when viewing history
 let runtimePathGraphView = null; // learned artifact rendered into the shared PathGraph card
-let currentLearnReplaySubview = "template";
+let currentLearnReplaySubview = "draft";
 
 const stageMeta = {
   open_bind: ["stage_open_bind_title", "stage_open_bind_subtitle"],
@@ -285,16 +336,16 @@ const translations = {
     nav_group_execute: "执行模式",
     nav_group_tools: "系统工具",
     workspace_switch: "工作区切换",
-    workspace_hint_learn: "绑定、截图、学习界面、模板展示、Trace、安全验证",
+    workspace_hint_learn: "识别单界面、人工修订、连接多界面流程",
     workspace_hint_execute: "可用动作、定位、Gate、动作证据",
     workspace_hint_system: "绑定窗口、截图、Trace、模型",
-    nav_group_learn_flow: "学习界面内绑定和截图 -> 模板展示 -> Trace -> 安全验证",
+    nav_group_learn_flow: "识别单界面 -> 人工修订 -> 加入软件流程",
     nav_group_execute_flow: "Observe -> Agent 决策 -> Gate -> Operation -> Trace",
     nav_trace_audit: "Trace 审计",
     nav_learn_observe: "整屏理解 / Learn Fast",
     nav_learn_locate: "坐标校准 / Learn Deep",
     nav_learn_replay: "学习产物回放",
-    nav_learn_interface: "学习界面",
+    nav_learn_interface: "学习工作台",
     nav_template_display: "模板展示",
     nav_learn_validation: "路径图安全验证",
     nav_execute_actions: "当前状态 / 可用动作",
@@ -422,8 +473,8 @@ const translations = {
     stage_learn_deep_subtitle: "学习模式：校准 PathGraph 子节点坐标、补充遗漏节点，不真实点击",
     stage_learn_replay_title: "学习产物回放 / 路径图验证",
     stage_learn_replay_subtitle: "学习模式：查看 SEEK/Wikipedia 路径图产物、验证报告和连续 Execute 回放",
-    stage_learn_interface_title: "学习界面",
-    stage_learn_interface_subtitle: "绑定并截图当前界面，整屏理解、区域编号、校准并输出融合草稿和只读 PathGraph。",
+    stage_learn_interface_title: "学习工作台",
+    stage_learn_interface_subtitle: "识别并修订单个界面，再把已审核界面连接成可复用的软件流程。",
     stage_template_display_title: "模板展示",
     stage_template_display_subtitle: "加载已审阅模板，查看 PathGraph、界面结构、动作模板、skill 和安全规则。",
     stage_learn_validation_title: "路径图安全验证",
@@ -490,8 +541,8 @@ const translations = {
     refresh_available_actions: "刷新可用动作",
     learn_validation_title: "路径图安全验证",
     learn_validation_hint: "验证候选路径图是否能安全行走。只允许 read-only/no-write 动作；input、Apply、Submit、Delete、Save changes 会被过滤。",
-    learn_replay_title: "学习产物回放 / 路径图验证",
-    learn_replay_hint: "加载学习产物，查看路径图结构、动作模板、skill 和安全规则；多步回放只在面板 harness 串联，后端 Execute 仍一次只执行一步。",
+    learn_replay_title: "学习工作台",
+    learn_replay_hint: "识别并审核单个界面，再把已审核界面连接成可复用的软件流程。学习产物不授权执行。",
     template_subinterface: "模板界面",
     learning_draft_subinterface: "学习草稿界面",
     template_replay_section: "模板回放 / Template Replay",
@@ -504,40 +555,89 @@ const translations = {
     learning_interface_window: "目标窗口",
     learning_interface_image_path: "最新截图",
     learning_interface_prep_idle: "就绪 · 不会真实点击",
+    continuous_task_handoff_title: "暂停任务交接",
+    continuous_task_handoff_hint: "使用暂停时的原始截图进行审阅，发布获批记忆后继续同一个不提交任务。",
+    continuous_task_handoff_idle: "等待暂停任务",
+    continuous_task_run_dir: "任务运行目录",
+    continuous_task_refresh: "加载暂停任务",
+    continuous_task_use_for_learning: "使用暂停截图",
+    continuous_task_resume: "继续原任务",
     learning_interface_flow_title: "学习当前界面",
-    learning_interface_flow_hint: "绑定并截图，整屏理解，区域编号，执行模式定位链校准，再输出融合草稿和只读 PathGraph。",
+    learning_interface_flow_hint: "绑定并截图，整屏理解，区域编号，执行模式定位链校准，再保存融合学习结果和只读 PathGraph。",
     learning_interface_run: "学习当前界面",
+    learning_interface_cancel: "取消当前阶段",
+    learning_interface_cancelled: "当前阶段已安全停止；后端计算终止未覆盖",
     learning_interface_flow_idle: "空闲 · 不会真实点击",
     learning_flow_bind_capture: "绑定 / 截图",
     learning_flow_screen_understanding: "整屏理解",
     learning_flow_understanding_loading_model: "正在检查 / 加载整屏理解模型",
     learning_flow_understanding_model_unavailable: "整屏理解模型不可用",
     learning_flow_numbered_map: "编号选择图",
+    learning_flow_review_repair: "模型复核 / 修复",
     learning_flow_page_details: "界面详情",
     learning_flow_precise_calibration: "精准校准",
     learning_flow_calibration_loading_model: "正在检查 / 加载定位模型",
+    learning_flow_calibration_checking_resources: "正在检查 GPU / 内存占用",
     learning_flow_calibration_running_chain: "正在执行 OCR + VISTA + rerank + gate dry-run",
     learning_flow_calibration_candidate_count: "编号候选",
+    learning_flow_calibration_attempted: "已校准",
+    learning_flow_calibration_remaining: "剩余",
+    learning_flow_calibration_batch: "批次",
     learning_flow_calibration_elapsed: "已等待",
     learning_flow_fusion: "融合结果",
-    learning_flow_pathgraph_draft: "PathGraph 草稿",
+    learning_flow_pathgraph_draft: "界面路径关系",
     learning_flow_complete: "完成",
     learning_draft_advanced_diagnostics: "高级诊断",
     learning_draft_advanced_diagnostics_hint: "旧的分步工具和产物路径；Demo 时保持折叠。",
-    learning_draft_history_title: "历史学习草稿",
-    learning_draft_history_empty: "加载最近草稿或运行学习后显示历史。",
+    learning_draft_history_title: "历史学习结果",
+    learning_draft_history_empty: "加载最近结果或运行学习后显示历史。",
+    interface_workflow_review_title: "软件界面学习",
+    interface_workflow_review_hint: "一个软件对应一张完整界面图；选择节点后在中间查看证据，在右侧修改名称、结构和跳转。",
+    interface_workflow_goal: "目标",
+    interface_workflow_application: "软件",
+    interface_workflow_safety: "执行边界",
+    interface_workflow_draft_only: "正式保存，执行仍需实时验证",
+    interface_workflow_empty: "选择已保存的单界面，或打开一个已学习的软件流程。",
+    interface_workflow_evidence: "当前界面证据",
+    interface_workflow_evidence_empty: "尚未选择界面。",
+    interface_workflow_inspector: "界面结构与路径",
+    interface_workflow_inspector_empty: "选择节点后显示区域、控件、候选操作、阻碍条件和前后界面。",
+    interface_workflow_node_name: "界面名称",
+    interface_workflow_surface_type: "界面类型",
+    interface_workflow_review_status: "审核状态",
+    interface_workflow_transition_action: "到下一界面的动作",
+    interface_workflow_transition_target: "下一界面",
+    interface_workflow_add_interface: "1. 选择已保存的单界面",
+    interface_workflow_add: "加入流程",
+    interface_workflow_remove: "移除当前界面",
+    interface_workflow_source_empty: "当前流程尚未加入界面。",
+    interface_workflow_edit_boxes: "修改当前界面框",
+    interface_workflow_save_draft: "保存学习结果",
+    interface_workflow_memory_handoff: "发布与执行验证",
+    interface_workflow_save_hint: "学习结果会正式保存；真实操作仍需实时识别、Gate 与 Trace。",
     learning_draft_screenshot_title: "截图 / 编号图",
     learning_draft_screenshot_empty: "还没有加载学习截图。",
-    learning_draft_manual_edit_title: "人工修改草稿",
+    learning_draft_manual_edit_title: "人工修改学习结果",
     learning_draft_manual_region_label: "区域名称",
     learning_draft_manual_region_role: "角色",
     learning_draft_manual_region_section: "页面区块",
     learning_draft_manual_operation: "可能操作",
-    learning_draft_manual_enter_pathgraph: "可进入 PathGraph 草稿",
+    learning_draft_manual_enter_pathgraph: "可进入界面路径关系",
     learning_draft_manual_needs_recalibration: "需要重新校准",
     learning_draft_manual_notes: "修改说明",
     learning_draft_manual_save: "保存人工修改",
-    learning_draft_raw_details: "原始草稿字段",
+    learning_correction_memory_title: "人工修正记忆",
+    learning_correction_memory_refresh: "刷新",
+    learning_correction_memory_hint: "人工修改先保存为非生产候选；只有完成回归、人工批准并单独启用的规则才会影响后续学习。",
+    learning_correction_memory_empty: "还没有人工修正候选。",
+    learning_correction_memory_total: "候选总数",
+    learning_correction_memory_active: "已启用",
+    learning_correction_memory_candidate: "待回归",
+    learning_correction_memory_policy: "生产策略",
+    learning_correction_memory_corrections: "修改数",
+    learning_correction_memory_evidence: "证据",
+    learning_correction_memory_edits: "修改类型",
+    learning_draft_raw_details: "原始学习字段",
     learning_trial_app: "学习应用",
     learning_trial_state: "学习状态",
     learning_trial_max_attempts: "试跑次数",
@@ -590,24 +690,24 @@ const translations = {
     load_artifact: "加载产物",
     model_artifact_trial_path: "模型产物 trial 路径",
     load_model_artifact: "加载模型产物",
-    learning_draft_review_source_path: "学习草稿审阅来源",
-    learning_draft_review: "加载学习草稿",
-    learning_draft_recommended_load: "加载当前推荐草稿",
-    learning_draft_review_save: "保存审阅候选",
-    learning_draft_review_title: "学习草稿审阅",
-    learning_draft_review_hint: "以接近模板的结构展示和修改学习草稿；只保存审阅候选，不授权点击或 Execute 绑定。",
+    learning_draft_review_source_path: "学习结果来源",
+    learning_draft_review: "加载学习结果",
+    learning_draft_recommended_load: "加载当前推荐结果",
+    learning_draft_review_save: "保存学习结果",
+    learning_draft_review_title: "学习结果审阅",
+    learning_draft_review_hint: "展示和修改已保存的学习结果；真实操作仍需实时定位、Gate 和 Trace。",
     learning_draft_review_status: "审阅状态",
-    learning_draft_summary: "草稿摘要",
+    learning_draft_summary: "学习结果摘要",
     learning_draft_states: "状态",
     learning_draft_regions: "区域",
     learning_draft_actions: "动作模板",
     learning_draft_blockers: "阻断条件",
     learning_draft_verification_rules: "验证规则",
     learning_draft_safety_status: "安全 / 状态",
-    learning_draft_path_preview_title: "草稿路径图预览",
-    learning_ui_hierarchy_title: "UI 层级结构",
-    learning_ui_hierarchy_hint: "按已裁决的父子归属展示屏幕、栏、分区、组件组、组件和内容。",
-    learning_draft_path_preview_hint: "从学习草稿生成的只读预览；不加载模板回放，不绑定 Execute，也不授权点击。",
+    learning_draft_path_preview_title: "界面路径关系",
+    learning_ui_hierarchy_title: "页面 → 状态 → 区域 → 操作",
+    learning_ui_hierarchy_hint: "先看页面结构，再沿状态、区域和操作查看归属关系；这里只读展示，不授权执行。",
+    learning_draft_path_preview_hint: "从学习结果生成的只读路径预览；不绑定 Execute，也不授权点击。",
     learning_draft_not_executable: "候选 / 不可执行",
     learning_draft_node_detail: "页面详情",
     learning_draft_related_regions: "关联区域",
@@ -640,6 +740,16 @@ const translations = {
     learning_draft_image_inspector: "原图检查",
     learning_draft_edit_bbox: "修改框",
     learning_draft_drag_bbox_hint: "在原图上拖拽选择新框；使用选框只更新学习草稿审阅候选，不授权点击。",
+    learning_memory_title: "Agent 操作记忆",
+    learning_memory_hint: "只发布人工批准的审阅候选。默认由 Agent 根据自然语言选择唯一低风险动作；预演和执行都会重新截图、重新定位、经过 Gate 并验证结果，失败会记录并返回人工修订。",
+    learning_memory_interface_id: "界面记忆 ID",
+    learning_memory_action: "操作（可选人工指定）",
+    learning_memory_goal: "执行目标",
+    learning_memory_publish: "发布审阅记忆",
+    learning_memory_load: "载入生效记忆",
+    learning_memory_preview: "在执行模式预演",
+    learning_memory_execute: "执行低风险操作",
+    learning_memory_return_to_edit: "返回修改框",
     learning_draft_apply_selected_bbox: "使用选框",
     learning_draft_bbox_edit_saved: "已记录人工框选",
     learning_draft_bbox_edited: "人工改框",
@@ -647,7 +757,7 @@ const translations = {
     learning_draft_source_freshness_summary: "截图来源校验",
     learning_draft_freshness_demo_case: "截图来源演示",
     learning_draft_load_freshness_demo: "加载来源演示",
-    learning_draft_no_path_nodes: "暂无可预览的草稿状态",
+    learning_draft_no_path_nodes: "暂无可预览的界面状态",
     learning_draft_evidence_sources: "证据来源",
     screen_understanding_preview_title: "整屏理解预览",
     screen_understanding_preview_not_available: "暂无整屏理解证据",
@@ -835,16 +945,16 @@ const translations = {
     nav_group_execute: "Execute Mode",
     nav_group_tools: "System Tools",
     workspace_switch: "Workspace Switch",
-    workspace_hint_learn: "Bind, screenshot, learn interface, show template, trace, validate safety",
+    workspace_hint_learn: "Recognize one interface, review it, and connect the software workflow",
     workspace_hint_execute: "Available actions, locate, gate, evidence",
     workspace_hint_system: "Bind windows, capture, traces, models",
-    nav_group_learn_flow: "Bind and screenshot inside Learn interface -> template display -> Trace -> safety validation",
+    nav_group_learn_flow: "Recognize one interface -> human review -> add to software workflow",
     nav_group_execute_flow: "Observe -> Agent decision -> Gate -> Operation -> Trace",
     nav_trace_audit: "Trace Audit",
     nav_learn_observe: "Observe / Learn Fast",
     nav_learn_locate: "Coordinate Calibration / Learn Deep",
     nav_learn_replay: "Artifact Replay",
-    nav_learn_interface: "Learn interface",
+    nav_learn_interface: "Learning workspace",
     nav_template_display: "Template display",
     nav_learn_validation: "PathGraph Validation",
     nav_execute_actions: "Current State / Actions",
@@ -972,8 +1082,8 @@ const translations = {
     stage_learn_deep_subtitle: "Learn Mode: calibrate PathGraph child-node coordinates and add missing nodes; no real click",
     stage_learn_replay_title: "Artifact Replay / PathGraph Validation",
     stage_learn_replay_subtitle: "Learn Mode: inspect SEEK/Wikipedia PathGraph artifacts, validation reports, and continuous Execute replay",
-    stage_learn_interface_title: "Learn interface",
-    stage_learn_interface_subtitle: "Bind and screenshot the current interface, understand the full screen, number regions, calibrate, and output a fused draft plus read-only PathGraph.",
+    stage_learn_interface_title: "Learning workspace",
+    stage_learn_interface_subtitle: "Recognize and review one interface, then connect approved interfaces into a reusable software workflow.",
     stage_template_display_title: "Template display",
     stage_template_display_subtitle: "Load reviewed templates and inspect PathGraph, interface structure, action templates, skills, and safety rules.",
     stage_learn_validation_title: "PathGraph Safe Validation",
@@ -1040,8 +1150,8 @@ const translations = {
     refresh_available_actions: "Refresh available actions",
     learn_validation_title: "PathGraph Safe Validation",
     learn_validation_hint: "Validate whether a candidate PathGraph can be walked safely. Only read-only/no-write actions are allowed; input, Apply, Submit, Delete, and Save changes are filtered.",
-    learn_replay_title: "Artifact Replay / PathGraph Validation",
-    learn_replay_hint: "Load a learned artifact, inspect PathGraph structure, action templates, skills, and safety rules. Multi-step replay is chained by the panel harness; backend Execute still performs one step at a time.",
+    learn_replay_title: "Learning workspace",
+    learn_replay_hint: "Recognize and review one interface, then connect approved interfaces into a reusable software workflow. Learning assets never authorize execution.",
     template_subinterface: "Template",
     learning_draft_subinterface: "Learning draft",
     template_replay_section: "Template Replay",
@@ -1054,40 +1164,89 @@ const translations = {
     learning_interface_window: "Target window",
     learning_interface_image_path: "Latest screenshot",
     learning_interface_prep_idle: "ready · no live click",
+    continuous_task_handoff_title: "Paused task handoff",
+    continuous_task_handoff_hint: "Reuse the exact paused screenshot for review, publish the approved memory, then continue the same no-submit task.",
+    continuous_task_handoff_idle: "waiting for a paused task",
+    continuous_task_run_dir: "Run directory",
+    continuous_task_refresh: "Load paused task",
+    continuous_task_use_for_learning: "Use paused screenshot",
+    continuous_task_resume: "Continue original task",
     learning_interface_flow_title: "Learn current interface",
-    learning_interface_flow_hint: "Bind and screenshot, understand the full screen, number regions, calibrate with the Execute locator chain, then output a fused draft and read-only PathGraph.",
+    learning_interface_flow_hint: "Bind and screenshot, understand the full screen, number regions, calibrate with the Execute locator chain, then save the fused learning result and a read-only PathGraph.",
     learning_interface_run: "Learn current interface",
+    learning_interface_cancel: "Cancel current stage",
+    learning_interface_cancelled: "Current stage safe-stopped; backend compute termination is not covered",
     learning_interface_flow_idle: "idle · no live click",
     learning_flow_bind_capture: "Bind / screenshot",
     learning_flow_screen_understanding: "Full-screen understanding",
     learning_flow_understanding_loading_model: "Checking / loading full-screen understanding model",
     learning_flow_understanding_model_unavailable: "Full-screen understanding model unavailable",
     learning_flow_numbered_map: "Numbered selection map",
+    learning_flow_review_repair: "Model review / repair",
     learning_flow_page_details: "Interface details",
     learning_flow_precise_calibration: "Precise calibration",
     learning_flow_calibration_loading_model: "Checking / loading locator model",
+    learning_flow_calibration_checking_resources: "Checking GPU / memory use",
     learning_flow_calibration_running_chain: "Running OCR + VISTA + rerank + gate dry-run",
     learning_flow_calibration_candidate_count: "numbered candidates",
+    learning_flow_calibration_attempted: "calibrated",
+    learning_flow_calibration_remaining: "remaining",
+    learning_flow_calibration_batch: "batch",
     learning_flow_calibration_elapsed: "elapsed",
     learning_flow_fusion: "Fusion",
-    learning_flow_pathgraph_draft: "PathGraph draft",
+    learning_flow_pathgraph_draft: "Interface paths",
     learning_flow_complete: "Complete",
     learning_draft_advanced_diagnostics: "Advanced diagnostics",
     learning_draft_advanced_diagnostics_hint: "Old split-step tools and artifact paths; keep closed for demo.",
-    learning_draft_history_title: "History learning drafts",
-    learning_draft_history_empty: "Load recent drafts or run learning to show history.",
+    learning_draft_history_title: "Saved learning history",
+    learning_draft_history_empty: "Load recent results or run learning to show history.",
+    interface_workflow_review_title: "Software interface learning",
+    interface_workflow_review_hint: "Each application keeps one complete interface graph. Select a node to inspect evidence and edit its name, structure, and transitions.",
+    interface_workflow_goal: "Goal",
+    interface_workflow_application: "Application",
+    interface_workflow_safety: "Execution boundary",
+    interface_workflow_draft_only: "Saved learning; execution still requires live validation",
+    interface_workflow_empty: "Select a saved interface or open a learned software workflow.",
+    interface_workflow_evidence: "Current interface evidence",
+    interface_workflow_evidence_empty: "No interface selected.",
+    interface_workflow_inspector: "Interface structure and path",
+    interface_workflow_inspector_empty: "Select a node to inspect regions, controls, candidate actions, blockers, and transitions.",
+    interface_workflow_node_name: "Interface name",
+    interface_workflow_surface_type: "Surface type",
+    interface_workflow_review_status: "Review status",
+    interface_workflow_transition_action: "Action to next interface",
+    interface_workflow_transition_target: "Next interface",
+    interface_workflow_add_interface: "1. Select a saved interface",
+    interface_workflow_add: "Add and connect",
+    interface_workflow_remove: "Remove current interface",
+    interface_workflow_source_empty: "No interface has been added to this workflow.",
+    interface_workflow_edit_boxes: "Edit current interface boxes",
+    interface_workflow_save_draft: "Save learning result",
+    interface_workflow_memory_handoff: "Publish and verify in Execute",
+    interface_workflow_save_hint: "Learning is saved formally; real actions still require live recognition, Gate, and Trace.",
     learning_draft_screenshot_title: "Screenshot / numbered map",
     learning_draft_screenshot_empty: "No learning screenshot loaded.",
-    learning_draft_manual_edit_title: "Manual draft edit",
+    learning_draft_manual_edit_title: "Edit learning result",
     learning_draft_manual_region_label: "Region label",
     learning_draft_manual_region_role: "Role",
     learning_draft_manual_region_section: "Section",
     learning_draft_manual_operation: "Possible operation",
-    learning_draft_manual_enter_pathgraph: "May enter PathGraph draft",
+    learning_draft_manual_enter_pathgraph: "May enter interface paths",
     learning_draft_manual_needs_recalibration: "Needs recalibration",
     learning_draft_manual_notes: "Notes",
     learning_draft_manual_save: "Save manual edit",
-    learning_draft_raw_details: "Raw draft fields",
+    learning_correction_memory_title: "Human correction memory",
+    learning_correction_memory_refresh: "Refresh",
+    learning_correction_memory_hint: "Human edits are stored as non-production candidates. Only separately regression-verified, human-approved active rules may affect later learning runs.",
+    learning_correction_memory_empty: "No correction candidates recorded.",
+    learning_correction_memory_total: "total candidates",
+    learning_correction_memory_active: "active",
+    learning_correction_memory_candidate: "awaiting regression",
+    learning_correction_memory_policy: "production policy",
+    learning_correction_memory_corrections: "corrections",
+    learning_correction_memory_evidence: "evidence",
+    learning_correction_memory_edits: "edit types",
+    learning_draft_raw_details: "Raw learning fields",
     learning_trial_app: "Learning app",
     learning_trial_state: "Learning state",
     learning_trial_max_attempts: "Trial attempts",
@@ -1140,24 +1299,24 @@ const translations = {
     load_artifact: "Load artifact",
     model_artifact_trial_path: "Model artifact trial path",
     load_model_artifact: "Load model artifact",
-    learning_draft_review_source_path: "Learning draft review source",
-    learning_draft_review: "Load learning draft",
-    learning_draft_recommended_load: "Load recommended current draft",
-    learning_draft_review_save: "Save reviewed candidate",
-    learning_draft_review_title: "Learning Draft Review",
-    learning_draft_review_hint: "Display and edit the learning draft in a template-like shape. This only saves a reviewed candidate and never authorizes clicks or Execute binding.",
+    learning_draft_review_source_path: "Learning result source",
+    learning_draft_review: "Load learning result",
+    learning_draft_recommended_load: "Load recommended result",
+    learning_draft_review_save: "Save learning result",
+    learning_draft_review_title: "Learning result review",
+    learning_draft_review_hint: "Display and edit a saved learning result. Real actions still require live localization, Gate, and Trace.",
     learning_draft_review_status: "Review status",
-    learning_draft_summary: "Draft summary",
+    learning_draft_summary: "Learning result summary",
     learning_draft_states: "States",
     learning_draft_regions: "Regions",
     learning_draft_actions: "Action templates",
     learning_draft_blockers: "Blockers",
     learning_draft_verification_rules: "Verification rules",
     learning_draft_safety_status: "Safety / status",
-    learning_draft_path_preview_title: "Draft PathGraph preview",
-    learning_ui_hierarchy_title: "UI hierarchy",
-    learning_ui_hierarchy_hint: "Screen, regions, sections, groups, components, and content are shown with their resolved parent-child ownership.",
-    learning_draft_path_preview_hint: "Read-only preview generated from the learning draft. It does not load Template Replay, Execute, or click authorization.",
+    learning_draft_path_preview_title: "Interface path relationships",
+    learning_ui_hierarchy_title: "Page → state → region → action",
+    learning_ui_hierarchy_hint: "Review the page structure first, then follow state, region, and action ownership. This view is read-only and does not authorize execution.",
+    learning_draft_path_preview_hint: "Read-only path preview generated from the learning result. It does not bind Execute or authorize clicks.",
     learning_draft_not_executable: "candidate / not executable",
     learning_draft_node_detail: "Page detail",
     learning_draft_related_regions: "Related regions",
@@ -1190,6 +1349,16 @@ const translations = {
     learning_draft_image_inspector: "Image inspector",
     learning_draft_edit_bbox: "Edit box",
     learning_draft_drag_bbox_hint: "Drag on the original image to select a new box. Applying it only updates the reviewed draft candidate and never authorizes clicks.",
+    learning_memory_title: "Agent operational memory",
+    learning_memory_hint: "Publish only a human-approved reviewed candidate. By default the Agent resolves one low-risk action from the natural-language goal; preview and execution always recapture, re-ground, pass Gate, verify, and persist failures for human review.",
+    learning_memory_interface_id: "Interface memory ID",
+    learning_memory_action: "Action (optional override)",
+    learning_memory_goal: "Execution goal",
+    learning_memory_publish: "Publish reviewed memory",
+    learning_memory_load: "Load active memory",
+    learning_memory_preview: "Preview in Execute",
+    learning_memory_execute: "Execute low-risk action",
+    learning_memory_return_to_edit: "Return to edit boxes",
     learning_draft_apply_selected_bbox: "Use selected box",
     learning_draft_bbox_edit_saved: "Manual box edit recorded",
     learning_draft_bbox_edited: "edited bbox",
@@ -1197,7 +1366,7 @@ const translations = {
     learning_draft_source_freshness_summary: "Source freshness",
     learning_draft_freshness_demo_case: "Freshness demo case",
     learning_draft_load_freshness_demo: "Load freshness demo",
-    learning_draft_no_path_nodes: "No draft states to preview yet",
+    learning_draft_no_path_nodes: "No interface states to preview yet",
     learning_draft_evidence_sources: "Evidence sources",
     screen_understanding_preview_title: "Screen Understanding Preview",
     screen_understanding_preview_not_available: "no screen understanding evidence",
@@ -1980,8 +2149,21 @@ async function api(method, path, payload = null, options = {}) {
     return { success: false, message: t("request_already_running") };
   }
   pendingRequests.add(requestKey);
-  setStatus("running");
+  if (!options.skipStatus) setStatus("running");
   const controller = new AbortController();
+  const callerSignal = options.signal instanceof AbortSignal ? options.signal : null;
+  let abortedByCaller = false;
+  const abortFromCaller = () => {
+    abortedByCaller = true;
+    controller.abort();
+  };
+  if (callerSignal) {
+    if (callerSignal.aborted) {
+      abortFromCaller();
+    } else {
+      callerSignal.addEventListener("abort", abortFromCaller, { once: true });
+    }
+  }
   const timeoutMs = Number(options.timeoutSeconds || requestTimeoutSeconds()) * 1000;
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
   const request = {
@@ -2003,15 +2185,28 @@ async function api(method, path, payload = null, options = {}) {
     }
     if (!options.skipRender) renderResponse(data, options.summary || `${method} ${path}`);
     const ok = response.ok && data.success !== false;
-    setStatus(ok ? statusTextForResponse(data) : "failed", ok ? "ok" : "error");
+    if (!options.skipStatus) {
+      setStatus(ok ? statusTextForResponse(data) : "failed", ok ? "ok" : "error");
+    }
     return data;
   } catch (error) {
+    if (abortedByCaller) {
+      return {
+        success: false,
+        message: "Request cancelled",
+        cancelled: true,
+        error: String(error),
+      };
+    }
     const data = { success: false, message: "Request failed", error: String(error) };
     if (!options.skipRender) renderResponse(data, options.summary || `${method} ${path}`);
-    setStatus("failed", "error");
+    if (!options.skipStatus) setStatus("failed", "error");
     return data;
   } finally {
     window.clearTimeout(timeoutId);
+    if (callerSignal) {
+      callerSignal.removeEventListener("abort", abortFromCaller);
+    }
     pendingRequests.delete(requestKey);
   }
 }
@@ -2022,11 +2217,15 @@ function requestTimeoutSeconds() {
 }
 
 function resultOf(response) {
-  const data = response && typeof response.data === "object" ? response.data : {};
+  const data = response && response.data !== null && typeof response.data === "object"
+    ? response.data
+    : {};
   const result = data && typeof data.result === "object" ? data.result : {};
   if (Object.keys(result).length) return result;
   if (Object.keys(data).length) return data;
-  const directResult = response && typeof response.result === "object" ? response.result : {};
+  const directResult = response && response.result !== null && typeof response.result === "object"
+    ? response.result
+    : {};
   return Object.keys(directResult).length ? directResult : (response || {});
 }
 
@@ -2660,11 +2859,48 @@ function selectedModelStatus(models, stage, profileId) {
     || (models || []).find((item) => (item.profile?.role || []).includes(stage));
 }
 
-async function ensureStageModelReady(stage, profileId) {
+async function waitForAbortableDelay(delayMs, signal) {
+  if (signal?.aborted) return false;
+  return new Promise((resolve) => {
+    const finish = (completed) => {
+      window.clearTimeout(timerId);
+      signal?.removeEventListener("abort", handleAbort);
+      resolve(completed);
+    };
+    const handleAbort = () => finish(false);
+    const timerId = window.setTimeout(() => finish(true), delayMs);
+    signal?.addEventListener("abort", handleAbort, { once: true });
+  });
+}
+
+async function ensureStageModelReady(stage, profileId, options = {}) {
   const profile = profileById(profileId);
   const providerMode = String(profile?.provider_mode || "").toLowerCase();
   if (!providerMode.startsWith("local")) return true;
+  if (options.signal?.aborted) return false;
 
+  const resourcePreflight = options.resourcePreflight
+    || await learningModelResourcePreflight(stage, profileId, { signal: options.signal });
+  if (resourcePreflight.cancelled || options.signal?.aborted) return false;
+  if (resourcePreflight.resourceMode === "critical" || resourcePreflight.modelLaunchAllowed === false) {
+    const reasons = resourcePreflight.reasonCodes.length
+      ? resourcePreflight.reasonCodes.join(", ")
+      : "critical_resource_load";
+    setStatus(`model blocked: ${reasons}`, "warning");
+    renderResponse({
+      success: false,
+      message: `${stage} model start blocked by resource preflight`,
+      data: {
+        contract_version: "panel_model_preflight_v1",
+        stage,
+        profile_id: profileId,
+        blocker: "model_start_blocked_by_resource_preflight",
+        resource_preflight: resourcePreflight.data,
+        next_step: "Free GPU memory or stop competing GPU workloads, then retry this stage.",
+      },
+    }, `${stage} model resource blocked`);
+    return false;
+  }
   setStatus(`checking ${stage} model`);
   const modelStatusPath = profileId
     ? `/runtime/models?profile_id=${encodeURIComponent(profileId)}`
@@ -2672,7 +2908,9 @@ async function ensureStageModelReady(stage, profileId) {
   const statusResponse = await api("GET", modelStatusPath, null, {
     summary: profileId ? `GET /runtime/models?profile_id=${profileId}` : "GET /runtime/models",
     skipRender: true,
+    signal: options.signal,
   });
+  if (statusResponse?.cancelled || options.signal?.aborted) return false;
   const models = nestedGet(statusResponse, ["data", "models"]) || [];
   const selected = selectedModelStatus(models, stage, profileId);
   if (selected?.status?.status === "running") return true;
@@ -2699,7 +2937,13 @@ async function ensureStageModelReady(stage, profileId) {
     profile_id: profileId || null,
     wait_until_ready: true,
     wait_seconds: waitSeconds,
-  }, { summary: `POST /runtime/models/start ${stage}`, skipRender: true, timeoutSeconds: waitSeconds + 10 });
+  }, {
+    summary: `POST /runtime/models/start ${stage}`,
+    skipRender: true,
+    timeoutSeconds: waitSeconds + 10,
+    signal: options.signal,
+  });
+  if (startResponse?.cancelled || options.signal?.aborted) return false;
 
   const afterStatus = nestedGet(startResponse, ["data", "after", "status"])
     || nestedGet(startResponse, ["data", "before", "status"])
@@ -3188,6 +3432,521 @@ function imageInspectorBoxFromPoints(start, end) {
   return { x, y, width, height };
 }
 
+function learningDraftEditorSelectedItem() {
+  if (!learningDraftEditorState || !learningDraftEditorSelected) return null;
+  return learningDraftEditorState.getItem(
+    learningDraftEditorSelected.target_kind,
+    learningDraftEditorSelected.target_id,
+  );
+}
+
+function updateLearningDraftEditorControls() {
+  const selected = learningDraftEditorSelectedItem();
+  const undo = $("imageInspectorUndoBtn");
+  const redo = $("imageInspectorRedoBtn");
+  const remove = $("imageInspectorDeleteBoxBtn");
+  const label = $("imageInspectorLabel");
+  const description = $("imageInspectorDescription");
+  const role = $("imageInspectorRoleSelect");
+  const actionType = $("imageInspectorActionTypeSelect");
+  const inputSemantics = $("imageInspectorInputSemantics");
+  const parent = $("imageInspectorParentSelect");
+  const destinationKind = $("imageInspectorDestinationKind");
+  const destinationValue = $("imageInspectorDestinationValue");
+  const verificationRule = $("imageInspectorVerificationRule");
+  const riskLevel = $("imageInspectorRiskLevel");
+  if (undo) undo.disabled = !learningDraftEditorState?.canUndo();
+  if (redo) redo.disabled = !learningDraftEditorState?.canRedo();
+  if (remove) remove.disabled = !selected;
+  if (label) {
+    label.disabled = !selected;
+    label.value = String(selected?.label || "");
+  }
+  if (description) {
+    description.disabled = !selected;
+    description.value = String(selected?.description || "");
+  }
+  if (role) {
+    role.disabled = !selected || selected.target_kind !== "region";
+    setSelectValueIfPresent(role, selected?.role || "review_only");
+  }
+  if (actionType) {
+    actionType.disabled = !selected;
+    setSelectValueIfPresent(actionType, selected?.semantic_action || selected?.action_type || "read_only");
+  }
+  if (inputSemantics) {
+    inputSemantics.disabled = !selected;
+    inputSemantics.value = String(selected?.input_semantics || "");
+  }
+  if (parent) {
+    const regions = learningDraftEditorState?.listItems().filter((item) => (
+      item.target_kind === "region" && item.target_id !== selected?.target_id
+    )) || [];
+    parent.innerHTML = `<option value="">none</option>${regions.map((item) => (
+      `<option value="${escapeAttr(item.target_id)}">${escapeHtml(item.label || item.target_id)}</option>`
+    )).join("")}`;
+    parent.disabled = !selected || selected.target_kind !== "region";
+    parent.value = String(selected?.parent_region_id || "");
+  }
+  const destination = selected?.destination && typeof selected.destination === "object"
+    ? selected.destination
+    : {};
+  const destinationType = String(destination.kind || "none");
+  if (destinationKind) {
+    destinationKind.disabled = !selected;
+    setSelectValueIfPresent(destinationKind, destinationType);
+  }
+  if (destinationValue) {
+    destinationValue.disabled = !selected || destinationType === "none";
+    destinationValue.value = destinationType === "url"
+      ? String(destination.url || "")
+      : String(destination.target_interface_id || "");
+  }
+  if (verificationRule) {
+    verificationRule.disabled = !selected;
+    verificationRule.value = String(selected?.verification_rule || "");
+  }
+  if (riskLevel) {
+    riskLevel.disabled = !selected;
+    setSelectValueIfPresent(riskLevel, selected?.risk_level || "normal");
+  }
+  const add = $("imageInspectorAddRegionBtn");
+  if (add) add.classList.toggle("active", learningDraftEditorAddMode);
+  const compact = $("imageInspectorCompactBoxesBtn");
+  if (compact) {
+    compact.textContent = learningDraftEditorCompactMode ? "显示全部框" : "精简框";
+    compact.setAttribute("aria-pressed", learningDraftEditorCompactMode ? "true" : "false");
+  }
+  const boxes = $("imageInspectorDraftBoxes");
+  if (boxes) boxes.classList.toggle("is-add-mode", learningDraftEditorAddMode);
+}
+
+function applyLearningDraftEditorMetadataFromControls() {
+  if (!learningDraftEditorSelected || !learningDraftEditorState) return;
+  const destinationKind = String($("imageInspectorDestinationKind")?.value || "none");
+  const destinationValue = String($("imageInspectorDestinationValue")?.value || "").trim();
+  const actionType = String($("imageInspectorActionTypeSelect")?.value || "read_only");
+  const riskLevel = actionType === "final_submit"
+    ? "dangerous"
+    : String($("imageInspectorRiskLevel")?.value || "normal");
+  const destination = { kind: destinationKind };
+  if (destinationKind === "interface") destination.target_interface_id = destinationValue;
+  if (destinationKind === "url") destination.url = destinationValue;
+  learningDraftEditorState.apply({
+    op: "update_metadata",
+    ...learningDraftEditorSelected,
+    after_metadata: {
+      label: String($("imageInspectorLabel")?.value || "").trim(),
+      description: String($("imageInspectorDescription")?.value || "").trim(),
+      semantic_action: actionType,
+      action_type: actionType,
+      input_semantics: String($("imageInspectorInputSemantics")?.value || "").trim(),
+      destination,
+      verification_rule: String($("imageInspectorVerificationRule")?.value || "").trim(),
+      risk_level: riskLevel,
+      requires_confirmation: riskLevel !== "normal",
+    },
+    reason: String($("imageInspectorReason")?.value || "").trim(),
+  });
+  syncLearningDraftReviewFromEditor();
+  renderLearningDraftEditorBoxes();
+}
+
+function renderLearningDraftEditorBoxes() {
+  const host = $("imageInspectorDraftBoxes");
+  const image = $("imageInspectorImage");
+  if (!host || !image) return;
+  if (!learningDraftEditorActive || !learningDraftEditorState || !image.naturalWidth) {
+    host.innerHTML = "";
+    host.style.display = "none";
+    return;
+  }
+  const scaleX = image.clientWidth / image.naturalWidth;
+  const scaleY = image.clientHeight / image.naturalHeight;
+  host.style.display = "block";
+  host.style.width = `${image.clientWidth}px`;
+  host.style.height = `${image.clientHeight}px`;
+  host.classList.toggle("is-add-mode", learningDraftEditorAddMode);
+  const allItems = learningDraftEditorState.listItems();
+  const projection = window.LearningDraftEditorState.buildLearningDraftDisplayProjection(allItems, {
+    compact: learningDraftEditorCompactMode,
+    selected: learningDraftEditorSelected,
+    protectedKeys: learningDraftEditorState.editedKeys(),
+  });
+  const itemByKey = new Map(allItems.map((item) => [
+    `${item.target_kind}:${item.target_id}`,
+    item,
+  ]));
+  const groupByOwner = new Map(projection.groups.map((group) => [group.ownerKey, group]));
+  host.innerHTML = projection.visibleItems.map((item) => {
+    const bbox = normalizeBbox(item.bbox);
+    if (!bbox) return "";
+    const selected = item.target_kind === learningDraftEditorSelected?.target_kind
+      && item.target_id === learningDraftEditorSelected?.target_id;
+    const itemKey = `${item.target_kind}:${item.target_id}`;
+    const overlapGroup = groupByOwner.get(itemKey);
+    const overlapMenu = overlapGroup && learningDraftEditorExpandedGroupKey === itemKey
+      ? `<div class="image-inspector-overlap-menu" role="menu">${overlapGroup.memberKeys.map((memberKey) => {
+        const member = itemByKey.get(memberKey);
+        if (!member) return "";
+        return `<button type="button" role="menuitem"
+          data-editor-overlap-member="${escapeAttr(memberKey)}"
+          data-editor-kind="${escapeAttr(member.target_kind)}"
+          data-editor-id="${escapeAttr(member.target_id)}">${escapeHtml(member.label || member.target_id)}</button>`;
+      }).join("")}</div>`
+      : "";
+    return `<div class="image-inspector-draft-box ${escapeAttr(item.target_kind)}${selected ? " selected" : ""}"
+      data-editor-kind="${escapeAttr(item.target_kind)}"
+      data-editor-id="${escapeAttr(item.target_id)}"
+      style="left:${bbox.x * scaleX}px;top:${bbox.y * scaleY}px;width:${bbox.width * scaleX}px;height:${bbox.height * scaleY}px">
+      <span>${escapeHtml(item.label || item.target_id)}</span>
+      ${overlapGroup ? `<button type="button" class="image-inspector-overlap-count"
+        data-editor-overlap-owner="${escapeAttr(itemKey)}"
+        aria-label="显示 ${overlapGroup.memberKeys.length} 个重叠框">+${overlapGroup.memberKeys.length}</button>` : ""}
+      ${overlapMenu}
+      ${selected ? ["n", "ne", "e", "se", "s", "sw", "w", "nw"].map(
+        (handle) => `<i class="image-inspector-resize-handle handle-${handle}" data-editor-resize-handle="${handle}"></i>`,
+      ).join("") : ""}
+    </div>`;
+  }).join("");
+  host.querySelectorAll("[data-editor-id]").forEach((box) => {
+    box.addEventListener("mousedown", (event) => {
+      if (event.target.closest("[data-editor-overlap-owner], [data-editor-overlap-member]")) return;
+      const pointerMode = window.LearningDraftEditorState.learningDraftEditorPointerMode(
+        learningDraftEditorAddMode,
+        event.target?.dataset?.editorResizeHandle,
+      );
+      if (pointerMode === "add") return;
+      event.stopPropagation();
+      const targetKind = box.dataset.editorKind === "action" ? "action" : "region";
+      const targetId = String(box.dataset.editorId || "");
+      selectLearningDraftEditorItem(targetKind, targetId);
+      startLearningDraftEditorDrag(event, pointerMode);
+    });
+  });
+  host.querySelectorAll("[data-editor-overlap-owner]").forEach((button) => {
+    button.addEventListener("mousedown", (event) => event.stopPropagation());
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const ownerKey = String(button.dataset.editorOverlapOwner || "");
+      learningDraftEditorExpandedGroupKey = learningDraftEditorExpandedGroupKey === ownerKey ? "" : ownerKey;
+      renderLearningDraftEditorBoxes();
+    });
+  });
+  host.querySelectorAll("[data-editor-overlap-member]").forEach((button) => {
+    button.addEventListener("mousedown", (event) => event.stopPropagation());
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      learningDraftEditorExpandedGroupKey = "";
+      selectLearningDraftEditorItem(
+        button.dataset.editorKind === "action" ? "action" : "region",
+        String(button.dataset.editorId || ""),
+      );
+    });
+  });
+  updateLearningDraftEditorControls();
+}
+
+function selectLearningDraftEditorItem(targetKind, targetId) {
+  const item = learningDraftEditorState?.getItem(targetKind, targetId);
+  if (!item) return;
+  learningDraftEditorSelected = { target_kind: targetKind, target_id: targetId };
+  const bbox = normalizeBbox(item.bbox);
+  imageInspectorSelection = bbox ? {
+    bbox,
+    point: { x: bbox.x + bbox.width / 2, y: bbox.y + bbox.height / 2 },
+  } : null;
+  drawImageInspectorSelection(imageInspectorSelection?.bbox, imageInspectorSelection?.point);
+  renderLearningDraftEditorBoxes();
+}
+
+function startLearningDraftEditorDrag(event, mode) {
+  const item = learningDraftEditorSelectedItem();
+  const start = imageInspectorEventPoint(event);
+  const bbox = normalizeBbox(item?.bbox);
+  if (!item || !start || !bbox) return;
+  learningDraftEditorDrag = { mode, start, bbox };
+  const move = (moveEvent) => {
+    if (!learningDraftEditorDrag) return;
+    const point = imageInspectorEventPoint(moveEvent);
+    if (!point) return;
+    const deltaX = Math.round(point.x - start.x);
+    const deltaY = Math.round(point.y - start.y);
+    const image = $("imageInspectorImage");
+    let next;
+    if (mode.startsWith("resize:")) {
+      const handle = mode.slice("resize:".length);
+      next = normalizeBbox(window.LearningDraftEditorState.resizeBboxFromHandle(
+        { x: bbox.x, y: bbox.y, w: bbox.width, h: bbox.height },
+        handle,
+        deltaX,
+        deltaY,
+        image?.naturalWidth,
+        image?.naturalHeight,
+      ));
+    } else {
+      next = normalizeBbox(window.LearningDraftEditorState.clampBboxToImage(
+        { x: bbox.x + deltaX, y: bbox.y + deltaY, w: bbox.width, h: bbox.height },
+        image?.naturalWidth,
+        image?.naturalHeight,
+      ));
+    }
+    imageInspectorSelection = {
+      bbox: next,
+      point: { x: next.x + next.width / 2, y: next.y + next.height / 2 },
+    };
+    drawImageInspectorSelection(next, imageInspectorSelection.point);
+  };
+  const up = () => {
+    window.removeEventListener("mousemove", move);
+    window.removeEventListener("mouseup", up);
+    learningDraftEditorDrag = null;
+    if (!imageInspectorSelection?.bbox || !learningDraftEditorSelected) return;
+    learningDraftEditorState.apply({
+      op: "update_bbox",
+      target_kind: learningDraftEditorSelected.target_kind,
+      target_id: learningDraftEditorSelected.target_id,
+      after_bbox: imageInspectorSelection.bbox,
+      reason: String($("imageInspectorReason")?.value || "").trim(),
+    });
+    syncLearningDraftReviewFromEditor();
+    renderLearningDraftEditorBoxes();
+  };
+  window.addEventListener("mousemove", move);
+  window.addEventListener("mouseup", up);
+}
+
+function openLearningDraftBoxEditor(imagePathOverride = "") {
+  if (!learningDraftReview?.draft || !learningDraftEditorState) return false;
+  const imagePath = String(imagePathOverride || "").trim()
+    || learningDraftSourceImagePath(learningDraftReview.draft);
+  if (!imagePath) return false;
+  learningDraftEditorActive = true;
+  learningDraftEditorAddMode = false;
+  learningDraftEditorCompactMode = true;
+  learningDraftEditorExpandedGroupKey = "";
+  openImageInspector({
+    imagePath,
+    title: "Learning draft box editor",
+    editContext: { kind: "editor", id: "learning_draft_editor" },
+  });
+  const controls = $("imageInspectorEditorControls");
+  if (controls) controls.style.display = "flex";
+  const apply = $("imageInspectorApplyBoxBtn");
+  if (apply) {
+    apply.disabled = false;
+    apply.textContent = "Save review";
+  }
+  updateLearningDraftEditorControls();
+  return true;
+}
+
+function currentLearningDraftReviewMatchesSource(sourcePath) {
+  const requestedPath = String(sourcePath || "").trim().replaceAll("\\", "/").toLowerCase();
+  const loadedPath = String(learningDraftReview?.source?.source_path || "")
+    .trim()
+    .replaceAll("\\", "/")
+    .toLowerCase();
+  return Boolean(
+    requestedPath
+    && loadedPath === requestedPath
+    && learningDraftReview?.draft
+    && learningDraftEditorState
+  );
+}
+
+function setInterfaceWorkflowBoxEditorStatus(message = "", tone = "") {
+  const status = $("interfaceWorkflowBoxEditorStatus");
+  if (!status) return;
+  const text = String(message || "").trim();
+  status.textContent = text;
+  status.dataset.tone = String(tone || "").trim();
+  status.hidden = !text;
+}
+
+function interfaceWorkflowEditableImagePath(view) {
+  const sourceLayer = (Array.isArray(view?.available_layers) ? view.available_layers : [])
+    .find((entry) => entry?.layer === "source");
+  return String(
+    sourceLayer?.path
+    || view?.node?.evidence?.source_screenshot_path
+    || "",
+  ).trim();
+}
+
+async function openCurrentInterfaceWorkflowBoxEditor() {
+  const view = interfaceWorkflowReviewState?.current?.();
+  const editorImagePath = interfaceWorkflowEditableImagePath(view);
+  const sourcePath = (Array.isArray(view?.node?.source_paths) ? view.node.source_paths : [])
+    .map((value) => String(value || "").trim())
+    .find(Boolean);
+  if (!sourcePath) {
+    setInterfaceWorkflowBoxEditorStatus("当前界面没有可编辑的学习证据", "error");
+    renderResponse({
+      success: false,
+      message: "当前界面没有可编辑的学习证据",
+    }, "Interface workflow review");
+    return null;
+  }
+
+  setInterfaceWorkflowBoxEditorStatus("正在加载可编辑证据…");
+  if (currentLearningDraftReviewMatchesSource(sourcePath)) {
+    setLearningDraftReviewSourcePath(sourcePath);
+    const currentEditorImagePath = learningDraftSourceImagePath(learningDraftReview?.draft || {})
+      || editorImagePath;
+    if (!currentEditorImagePath) {
+      setInterfaceWorkflowBoxEditorStatus("当前界面缺少可编辑原图", "error");
+      return null;
+    }
+    if (!openLearningDraftBoxEditor(currentEditorImagePath)) {
+      setInterfaceWorkflowBoxEditorStatus("当前界面缺少可编辑截图", "error");
+      return null;
+    }
+    setInterfaceWorkflowBoxEditorStatus("");
+    return learningDraftReview;
+  }
+
+  const toggle = $("interfaceWorkflowReviewToolsToggle");
+  setInterfaceWorkflowCorrectionOpen(false);
+  if (toggle) {
+    toggle.disabled = true;
+    toggle.textContent = "正在打开框编辑器...";
+  }
+  const loadingImagePath = editorImagePath;
+  if (loadingImagePath) {
+    openImageInspector({
+      imagePath: loadingImagePath,
+      title: "正在加载框编辑器...",
+    });
+    const controls = $("imageInspectorEditorControls");
+    if (controls) controls.style.display = "none";
+  }
+  setLearningDraftReviewSourcePath(sourcePath);
+  try {
+    const review = await loadLearningDraftReview({
+      skipResponse: true,
+      skipWorkflowReview: true,
+      discoverRelatedSidecars: false,
+      supersedePendingLoad: true,
+      skipReviewRender: true,
+    });
+    if (!review) {
+      renderResponse({
+        success: false,
+        message: "当前界面学习证据加载失败",
+        data: { source_path: sourcePath },
+      }, "Interface workflow review");
+      closeImageInspector();
+      setInterfaceWorkflowBoxEditorStatus("当前界面学习证据加载失败", "error");
+      return null;
+    }
+    const loadedEditorImagePath = learningDraftSourceImagePath(review.draft);
+    if (!loadedEditorImagePath) {
+      closeImageInspector();
+      setInterfaceWorkflowBoxEditorStatus("当前界面缺少可编辑原图", "error");
+      return null;
+    }
+    if (!openLearningDraftBoxEditor(loadedEditorImagePath)) {
+      closeImageInspector();
+      setInterfaceWorkflowBoxEditorStatus("当前界面缺少可编辑截图", "error");
+      return null;
+    }
+    setInterfaceWorkflowBoxEditorStatus("");
+    return review;
+  } catch (error) {
+    closeImageInspector();
+    const detail = String(error?.message || "").trim();
+    const message = detail ? `无法打开修正工具：${detail}` : "无法打开修正工具";
+    setInterfaceWorkflowBoxEditorStatus(message, "error");
+    renderResponse({
+      success: false,
+      message,
+      data: { source_path: sourcePath },
+    }, "Interface workflow review");
+    return null;
+  } finally {
+    if (toggle) {
+      toggle.disabled = false;
+      toggle.textContent = "修正当前界面";
+    }
+  }
+}
+
+function interfaceWorkflowSourcePathsAfterReview(previousSourcePath, reviewedPath) {
+  const previous = String(previousSourcePath || "").trim();
+  const reviewed = String(reviewedPath || "").trim();
+  const paths = interfaceWorkflowDraftSourcePaths
+    .map((path) => String(path || "").trim())
+    .filter(Boolean)
+    .map((path) => (previous && path === previous ? reviewed : path))
+    .filter(Boolean);
+  if (reviewed && !paths.includes(reviewed)) paths.push(reviewed);
+  return Array.from(new Set(paths));
+}
+
+async function refreshSavedLearningDraftReview({ previousSourcePath, reviewedPath }) {
+  const sourcePath = String(reviewedPath || "").trim();
+  if (!sourcePath) return null;
+  setLearningDraftReviewSourcePath(sourcePath);
+  bumpPanelImageRevision();
+  const refreshedReview = await loadLearningDraftReview({
+    skipResponse: true,
+    skipWorkflowReview: true,
+    discoverRelatedSidecars: false,
+    supersedePendingLoad: true,
+    skipReviewRender: true,
+  });
+  if (!refreshedReview) return null;
+  const refreshedWorkflow = await loadInterfaceWorkflowReview(
+    interfaceWorkflowSourcePathsAfterReview(previousSourcePath, sourcePath),
+    {
+      skipResponse: true,
+      selectSourcePath: sourcePath,
+      discoverRelatedSidecars: false,
+    },
+  );
+  if (!refreshedWorkflow) return null;
+  return { review: refreshedReview, workflow: refreshedWorkflow };
+}
+
+async function refreshCurrentInterfaceWorkflowEvidence() {
+  const button = $("interfaceWorkflowRefreshEvidenceBtn");
+  const view = interfaceWorkflowReviewState?.current?.();
+  const sourcePath = (Array.isArray(view?.node?.source_paths) ? view.node.source_paths : [])
+    .map((value) => String(value || "").trim())
+    .find(Boolean);
+  if (!sourcePath) {
+    renderResponse(
+      { success: false, message: "请先在路径图选择一个有证据的界面。" },
+      "Interface workflow evidence refresh",
+    );
+    return null;
+  }
+  if (button) {
+    button.disabled = true;
+    button.textContent = "正在刷新...";
+  }
+  try {
+    const refreshed = await refreshSavedLearningDraftReview({
+      previousSourcePath: sourcePath,
+      reviewedPath: sourcePath,
+    });
+    if (!refreshed) {
+      renderResponse(
+        { success: false, message: "当前界面证据刷新失败。" },
+        "Interface workflow evidence refresh",
+      );
+      return null;
+    }
+    return refreshed;
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = "刷新当前证据";
+    }
+  }
+}
+
 function closeImageInspector() {
   const overlay = $("imageInspectorOverlay");
   const image = $("imageInspectorImage");
@@ -3199,6 +3958,12 @@ function closeImageInspector() {
   if (box) box.style.display = "none";
   if (pointEl) pointEl.style.display = "none";
   if (footer) footer.style.display = "none";
+  const controls = $("imageInspectorEditorControls");
+  if (controls) controls.style.display = "none";
+  learningDraftEditorActive = false;
+  learningDraftEditorAddMode = false;
+  learningDraftEditorDrag = null;
+  learningDraftEditorExpandedGroupKey = "";
   imageInspectorEditContext = null;
   imageInspectorSelection = null;
 }
@@ -3231,6 +3996,9 @@ function openImageInspector({ imagePath = "", bbox = null, point = null, title =
   if (footer) footer.style.display = imageInspectorEditContext ? "flex" : "none";
   if (hint) hint.textContent = imageInspectorEditContext ? t("learning_draft_drag_bbox_hint") : "";
   if (applyButton) applyButton.disabled = !imageInspectorSelection;
+  const editorControls = $("imageInspectorEditorControls");
+  if (editorControls && !learningDraftEditorActive) editorControls.style.display = "none";
+  if (applyButton && !learningDraftEditorActive) applyButton.textContent = t("learning_draft_apply_selected_bbox");
   if (titleEl) titleEl.textContent = title || t("learning_draft_image_inspector");
   if (meta) {
     const pointText = point ? ` · point=${Math.round(Number(point.x || 0))},${Math.round(Number(point.y || 0))}` : "";
@@ -3238,6 +4006,7 @@ function openImageInspector({ imagePath = "", bbox = null, point = null, title =
   }
   image.onload = () => {
     drawImageInspectorSelection(imageInspectorSelection?.bbox || normalized, imageInspectorSelection?.point || point);
+    renderLearningDraftEditorBoxes();
   };
   image.src = panelFileUrl(resolvedImagePath);
 }
@@ -3913,7 +4682,12 @@ function isTraceImagePath(key, value) {
 function traceImageUrl(path) {
   const text = String(path || "");
   if (/^https?:\/\//i.test(text) || text.startsWith("data:")) return text;
-  return `${baseUrl()}/panel/file?path=${encodeURIComponent(text)}`;
+  return `${baseUrl()}/panel/file?path=${encodeURIComponent(text)}&revision=${panelImageRevision}`;
+}
+
+function bumpPanelImageRevision() {
+  panelImageRevision += 1;
+  return panelImageRevision;
 }
 
 function panelImageHtml(path, alt, className = "") {
@@ -8957,7 +9731,7 @@ async function loadLearningDraftFreshnessDemo() {
 }
 
 async function loadRecommendedLearningDraftReview() {
-  const response = await api("GET", "/panel/learning_draft_sources", null, {
+  const response = await api("GET", "/panel/learning_draft_sources?limit=12&include_recent=true", null, {
     summary: "GET /panel/learning_draft_sources",
     workflowStep: "learning_draft_recommended_source",
     skipRender: true,
@@ -9074,6 +9848,12 @@ function buildLearningDraftObservationEvidence() {
     : observeResult.screen_map && typeof observeResult.screen_map === "object"
       ? observeResult.screen_map
       : null;
+  const interfaceClassification = observeResult.interface_classification
+    && typeof observeResult.interface_classification === "object"
+    ? observeResult.interface_classification
+    : result.interface_classification && typeof result.interface_classification === "object"
+      ? result.interface_classification
+      : {};
   const hasScreenMapEvidence = screenMapEvidenceCount(screenMap) > 0;
   const hasCalibrationCandidates = calibrationEvidenceTargets.length > 0;
   const hasModelCalibrationEvidence = vistaValidatedCount > 0;
@@ -9120,7 +9900,8 @@ function buildLearningDraftObservationEvidence() {
     rejected_display_overlay_input_path: isLearningDisplayOverlayPath($("learningTrialImagePath")?.value || currentImagePath),
     screen_size: result.screen_size || result.viewport_size || result.image_size || nestedGet(result, ["capture", "image_size"]) || observeResult.screen_size || observeResult.viewport_size || observeResult.image_size || nestedGet(observeResult, ["capture", "image_size"]) || {},
     screen_summary: result.screen_summary || nestedGet(result, ["screen_map", "summary", "screen_summary"]) || nestedGet(result, ["screen_reading", "screen_summary"]) || observeResult.screen_summary || nestedGet(observeResult, ["screen_map", "summary", "screen_summary"]) || nestedGet(observeResult, ["screen_reading", "screen_summary"]) || "",
-      screen_map: screenMap,
+    interface_classification: interfaceClassification,
+    screen_map: screenMap,
     coordinate_overlay_path: result.coordinate_overlay_path || nestedGet(result, ["learn_all_targets", "overlay_path"]) || "",
     coordinate_overlay: {
       contract_version: String(coordinateOverlay.contract_version || ""),
@@ -9199,8 +9980,9 @@ function setLearningDetailObserveRequests(requests = []) {
 
 function setLearningDetailObserveSourceOptions(sources = []) {
   const select = $("learningDetailObserveSourceSelect");
-  const items = Array.isArray(sources) ? sources.filter((item) => item && typeof item === "object") : [];
+  const items = orderedLearningDraftSources(sources);
   renderLearningDraftHistoryList(items);
+  setInterfaceWorkflowSourceOptions(items);
   if (!select) return;
   const currentSourcePath = String($("learningDetailObserveSourcePath")?.value || "").trim();
   select.innerHTML = `<option value="">--</option>`;
@@ -9210,9 +9992,9 @@ function setLearningDetailObserveSourceOptions(sources = []) {
     if (!sourcePath || !loadPath) return;
     const summary = String(item.screen_summary || item.state_guess || sourcePath);
     const sourceCategory = String(item.source_category || "");
-    const sourceBadge = item.pinned === true || sourceCategory === "recommended_current_precise_understanding"
-      ? "[Recommended current] "
-      : "";
+    const sourceBadge = item.recommended_for_panel_review === true ? "[Recommended current] "
+      : item.pinned === true ? "[Pinned reference] "
+        : "";
     const pageDetailBadge = sourceCategory === "recent_learning_page_detail" ? "[Page detail] " : "";
     const demoScaffoldSourceBadge = sourceCategory === "recent_learning_demo_scaffold" ? "[Demo scaffold] " : "";
     const preflightBadge = String(item.preflight_status || "") === "ready_for_explicit_model_start"
@@ -9242,10 +10024,412 @@ function setLearningDetailObserveSourceOptions(sources = []) {
   setRecommendedLearningDraftReviewSource(items);
 }
 
+function setInterfaceWorkflowSourceOptions(sources = []) {
+  const select = $("interfaceWorkflowSourceSelect");
+  interfaceWorkflowAvailableSources = orderedLearningDraftSources(sources);
+  if (!select) return;
+  const previousValue = String(select.value || "").trim();
+  select.innerHTML = `<option value="">--</option>`;
+  interfaceWorkflowAvailableSources.forEach((item, index) => {
+    const loadPath = learningDraftSourceLoadPath(item);
+    if (!loadPath) return;
+    const summary = InterfaceWorkflowReview.userFacingLearningLabel(
+      item.screen_summary || item.state_guess || item.source_path || loadPath,
+    );
+    const option = document.createElement("option");
+    option.value = loadPath;
+    option.textContent = `${index + 1}. ${summary.slice(0, 100)}`;
+    select.appendChild(option);
+  });
+  if (Array.from(select.options).some((option) => option.value === previousValue)) {
+    select.value = previousValue;
+  }
+  renderInterfaceWorkflowSourcePreview(null);
+}
+
+function setInterfaceWorkflowLibraryOptions(registry = {}, preferredWorkflowId = "") {
+  interfaceWorkflowLibraryRegistry = registry && typeof registry === "object" ? registry : {};
+  const select = $("interfaceWorkflowLibrarySelect");
+  const status = $("interfaceWorkflowLibraryStatus");
+  if (!select) return;
+  const previousValue = String(select.value || "").trim();
+  const applications = interfaceWorkflowLibraryRegistry.applications || {};
+  const workflows = interfaceWorkflowLibraryRegistry.workflows || {};
+  const workflowOrder = new Map(
+    Object.keys(workflows).map((workflowId, index) => [workflowId, index]),
+  );
+  const options = [];
+  Object.entries(applications).forEach(([identityKey, application]) => {
+    const identity = application?.application_identity || {};
+    const applicationLabel = interfaceWorkflowApplicationLabel(identity) || identityKey;
+    (Array.isArray(application?.workflow_ids) ? application.workflow_ids : []).forEach((workflowId) => {
+      const record = workflows[workflowId];
+      if (!record || typeof record !== "object") return;
+      options.push({
+        workflowId,
+        identityKey,
+        label: `${applicationLabel} · ${record.goal || workflowId} · ${Number(record.node_count || 0)} 个界面`,
+      });
+    });
+  });
+  options.sort((left, right) => (
+    Number(workflowOrder.get(right.workflowId) ?? -1)
+    - Number(workflowOrder.get(left.workflowId) ?? -1)
+  ));
+  select.innerHTML = `<option value="">-- 选择软件 / 流程 --</option>`;
+  options.forEach((item) => {
+    const option = document.createElement("option");
+    option.value = item.workflowId;
+    option.dataset.applicationIdentityKey = item.identityKey;
+    option.textContent = item.label;
+    select.appendChild(option);
+  });
+  const attachSelect = $("interfaceWorkflowAttachWorkflowSelect");
+  if (attachSelect) {
+    const previousAttachValue = String(attachSelect.value || "").trim();
+    attachSelect.innerHTML = `<option value="">当前打开流程</option>`;
+    options.forEach((item) => {
+      const option = document.createElement("option");
+      option.value = item.workflowId;
+      option.dataset.applicationIdentityKey = item.identityKey;
+      option.textContent = item.label;
+      attachSelect.appendChild(option);
+    });
+    if (options.some((item) => item.workflowId === previousAttachValue)) {
+      attachSelect.value = previousAttachValue;
+    }
+  }
+  const normalizedPreferredWorkflowId = String(preferredWorkflowId || "").trim();
+  if (options.some((item) => item.workflowId === normalizedPreferredWorkflowId)) {
+    select.value = normalizedPreferredWorkflowId;
+  } else if (options.some((item) => item.workflowId === previousValue)) {
+    select.value = previousValue;
+  } else {
+    select.value = String(options[0]?.workflowId || "");
+  }
+  if (status) {
+    status.textContent = options.length
+      ? `已找到 ${options.length} 个已学习流程`
+      : "尚无已保存的多界面流程";
+  }
+}
+
+function syncInterfaceWorkflowAttachFromNodeOptions() {
+  const select = $("interfaceWorkflowAttachFromNodeSelect");
+  if (!select) return;
+  const currentValue = String(select.value || "").trim();
+  const snapshot = interfaceWorkflowReviewState?.snapshot?.() || {};
+  const nodes = Array.isArray(snapshot.nodes) ? snapshot.nodes : [];
+  select.innerHTML = `<option value="">${nodes.length ? "-- 选择来源界面 --" : "作为流程入口"}</option>`;
+  nodes.forEach((node) => {
+    const option = document.createElement("option");
+    option.value = String(node.node_id || "");
+    option.textContent = InterfaceWorkflowReview.userFacingLearningLabel(
+      node.display_name || node.node_id || "未命名界面",
+    );
+    select.appendChild(option);
+  });
+  const selectedNodeId = String(interfaceWorkflowReviewState?.current?.()?.node?.node_id || "");
+  if (nodes.some((node) => String(node.node_id) === currentValue)) {
+    select.value = currentValue;
+  } else if (nodes.some((node) => String(node.node_id) === selectedNodeId)) {
+    select.value = selectedNodeId;
+  }
+  syncInterfaceWorkflowAttachControlOptions(select.value);
+}
+
+function interfaceWorkflowNodeById(nodeId) {
+  const snapshot = interfaceWorkflowReviewState?.snapshot?.() || {};
+  return (Array.isArray(snapshot.nodes) ? snapshot.nodes : []).find(
+    (node) => String(node?.node_id || "") === String(nodeId || ""),
+  ) || null;
+}
+
+function fillInterfaceWorkflowControlSelect(select, node, selectedControlId = "") {
+  if (!select) return;
+  const choices = globalThis.InterfaceWorkflowReview?.interfaceWorkflowControlChoices?.(node) || [];
+  select.innerHTML = `<option value="">不指定控件</option>`;
+  choices.forEach((choice) => {
+    const option = document.createElement("option");
+    option.value = choice.control_id;
+    option.textContent = `${choice.label} · ${choice.role}`;
+    select.appendChild(option);
+  });
+  if (choices.some((choice) => choice.control_id === selectedControlId)) {
+    select.value = selectedControlId;
+  }
+  select.disabled = !node;
+}
+
+function syncInterfaceWorkflowAttachControlOptions(sourceNodeId = "") {
+  const node = interfaceWorkflowNodeById(sourceNodeId);
+  const select = $("interfaceWorkflowAttachTargetControl");
+  const selected = String(select?.value || "");
+  fillInterfaceWorkflowControlSelect(select, node, selected);
+  if ($("interfaceWorkflowAttachPickControlBtn")) {
+    $("interfaceWorkflowAttachPickControlBtn").disabled = !node;
+  }
+}
+
+function currentInterfaceWorkflowEvidenceState() {
+  const workbench = interfaceWorkflowWorkbenchState.current();
+  if (workbench.evidence_mode === "source_preview" && interfaceWorkflowSourceReviewState) {
+    return interfaceWorkflowSourceReviewState;
+  }
+  return interfaceWorkflowReviewState;
+}
+
+function renderInterfaceWorkflowEvidenceMode() {
+  const workbench = interfaceWorkflowWorkbenchState.current();
+  const workflowButton = $("interfaceWorkflowEvidenceModeWorkflow");
+  const previewButton = $("interfaceWorkflowEvidenceModePreview");
+  workflowButton?.classList.toggle("is-active", workbench.evidence_mode === "workflow");
+  previewButton?.classList.toggle("is-active", workbench.evidence_mode === "source_preview");
+  if (previewButton) previewButton.disabled = !interfaceWorkflowSourceReviewState;
+  if ($("interfaceWorkflowEvidenceTitle")) {
+    $("interfaceWorkflowEvidenceTitle").textContent = workbench.evidence_mode === "source_preview"
+      ? "单界面预览证据"
+      : "当前流程界面证据";
+  }
+}
+
+function renderActiveInterfaceWorkflowEvidence() {
+  renderInterfaceWorkflowEvidenceMode();
+  const state = currentInterfaceWorkflowEvidenceState();
+  renderInterfaceWorkflowEvidence(state?.current?.() || null);
+}
+
+function showInterfaceWorkflowEvidenceMode(mode) {
+  if (mode === "source_preview" && !interfaceWorkflowSourceReviewState) return;
+  const view = mode === "source_preview"
+    ? interfaceWorkflowSourceReviewState?.current?.()
+    : interfaceWorkflowReviewState?.current?.();
+  if (mode === "source_preview") {
+    interfaceWorkflowWorkbenchState.showSourcePreview(view?.node?.node_id || "");
+  } else {
+    interfaceWorkflowWorkbenchState.showWorkflowNode(view?.node?.node_id || "");
+  }
+  interfaceWorkflowControlPickMode = false;
+  renderActiveInterfaceWorkflowEvidence();
+}
+
+function interfaceWorkflowSourcePreviewImage(node = {}) {
+  const evidence = node?.evidence && typeof node.evidence === "object" ? node.evidence : {};
+  return String(
+    evidence.human_review_overlay_path
+    || evidence.fused_overlay_path
+    || evidence.numbered_overlay_path
+    || evidence.source_screenshot_path
+    || "",
+  ).trim();
+}
+
+function renderInterfaceWorkflowSourcePreview(preview) {
+  interfaceWorkflowSourcePreview = preview && typeof preview === "object" ? preview : null;
+  const panel = $("interfaceWorkflowSourcePreview");
+  const media = $("interfaceWorkflowSourcePreviewMedia");
+  const nameInput = $("interfaceWorkflowSourceNameInput");
+  if (!panel || !media || !nameInput) return;
+  const node = interfaceWorkflowSourcePreview?.node;
+  if (!node) {
+    interfaceWorkflowSourceReviewState = null;
+    panel.hidden = true;
+    media.innerHTML = "";
+    nameInput.value = "";
+    return;
+  }
+  const imagePath = interfaceWorkflowSourcePreviewImage(node);
+  const displayName = InterfaceWorkflowReview.userFacingLearningLabel(
+    node.display_name || node.node_id || "单界面预览",
+  );
+  panel.hidden = false;
+  media.innerHTML = imagePath
+    ? panelImageHtml(imagePath, displayName, "interface-workflow-source-preview-image")
+    : `<p class="trace-idle">这个学习结果没有可用截图</p>`;
+  nameInput.value = displayName;
+}
+
+async function previewInterfaceWorkflowSource() {
+  const sourcePath = String($("interfaceWorkflowSourceSelect")?.value || "").trim();
+  if (!sourcePath) {
+    if ($("interfaceWorkflowSourceStatus")) {
+      $("interfaceWorkflowSourceStatus").textContent = "请先选择一个已保存的单界面。";
+    }
+    renderInterfaceWorkflowSourcePreview(null);
+    return null;
+  }
+  if ($("interfaceWorkflowSourceStatus")) {
+    $("interfaceWorkflowSourceStatus").textContent = "正在读取单界面预览…";
+  }
+  const response = await api("POST", "/panel/load_interface_workflow_review", {
+    goal: String($("learningTrialGoal")?.value || "").trim(),
+    application_identity: currentInterfaceWorkflowApplicationIdentity(),
+    draft_source_paths: [sourcePath],
+  }, {
+    summary: "POST /panel/load_interface_workflow_review",
+    workflowStep: "preview_saved_interface",
+    skipRender: true,
+  });
+  if (!response?.success) {
+    renderInterfaceWorkflowSourcePreview(null);
+    if ($("interfaceWorkflowSourceStatus")) {
+      $("interfaceWorkflowSourceStatus").textContent = response?.message || "单界面预览读取失败";
+    }
+    return null;
+  }
+  const node = Array.isArray(response.data?.nodes) ? response.data.nodes[0] : null;
+  const factory = globalThis.InterfaceWorkflowReview?.createInterfaceWorkflowReviewState;
+  interfaceWorkflowSourceReviewState = node && typeof factory === "function"
+    ? factory(response.data || {})
+    : null;
+  renderInterfaceWorkflowSourcePreview({ sourcePath, node, review: response.data || {} });
+  if (interfaceWorkflowSourceReviewState) {
+    interfaceWorkflowWorkbenchState.showSourcePreview(node.node_id);
+    renderActiveInterfaceWorkflowEvidence();
+  }
+  if ($("interfaceWorkflowSourceStatus")) {
+    $("interfaceWorkflowSourceStatus").textContent = node
+      ? "预览已加载；可以改名并加入选定流程，连接稍后在路径图中创建。"
+      : "这个学习结果没有可用界面。";
+  }
+  return node;
+}
+
+async function selectInterfaceWorkflowAttachTarget() {
+  const workflowId = String($("interfaceWorkflowAttachWorkflowSelect")?.value || "").trim();
+  if (!workflowId) return interfaceWorkflowReview;
+  const librarySelect = $("interfaceWorkflowLibrarySelect");
+  if (!librarySelect || !Array.from(librarySelect.options).some((option) => option.value === workflowId)) {
+    if ($("interfaceWorkflowSourceStatus")) {
+      $("interfaceWorkflowSourceStatus").textContent = "选择的软件流程已经不在流程库中。";
+    }
+    return null;
+  }
+  if (String(interfaceWorkflowReviewState?.graph?.()?.workflow?.workflow_id || "") === workflowId) {
+    syncInterfaceWorkflowAttachFromNodeOptions();
+    return interfaceWorkflowReview;
+  }
+  librarySelect.value = workflowId;
+  const loaded = await loadSavedInterfaceWorkflowReview();
+  syncInterfaceWorkflowAttachFromNodeOptions();
+  return loaded;
+}
+
+async function loadInterfaceWorkflowLibraryRegistry({
+  preferredWorkflowId = "",
+  openSelected = false,
+} = {}) {
+  const status = $("interfaceWorkflowLibraryStatus");
+  if (status) status.textContent = "正在读取流程库…";
+  const response = await api("GET", "/memory/interface_workflows/registry", null, {
+    summary: "GET /memory/interface_workflows/registry",
+    workflowStep: "interface_workflow_library_registry",
+    skipRender: true,
+  });
+  if (!response?.success) {
+    setInterfaceWorkflowLibraryOptions({});
+    if (status) status.textContent = response?.message || "流程库读取失败";
+    return null;
+  }
+  setInterfaceWorkflowLibraryOptions(response.data || {}, preferredWorkflowId);
+  const selectedWorkflowId = String($("interfaceWorkflowLibrarySelect")?.value || "").trim();
+  const normalizedPreferredWorkflowId = String(preferredWorkflowId || "").trim();
+  const selectedMatchesPreferred = (
+    !normalizedPreferredWorkflowId
+    || selectedWorkflowId === normalizedPreferredWorkflowId
+  );
+  if (openSelected && selectedWorkflowId && selectedMatchesPreferred) {
+    await loadSavedInterfaceWorkflowReview();
+  }
+  return response.data || {};
+}
+
+async function loadSavedInterfaceWorkflowReview() {
+  const loadToken = interfaceWorkflowLoadGuard.begin();
+  const select = $("interfaceWorkflowLibrarySelect");
+  const status = $("interfaceWorkflowLibraryStatus");
+  const workflowId = String(select?.value || "").trim();
+  const identityKey = String(
+    select?.selectedOptions?.[0]?.dataset?.applicationIdentityKey || "",
+  ).trim();
+  if (!workflowId || !identityKey) {
+    if (status) status.textContent = "请选择一个已学习流程";
+    return null;
+  }
+  if (status) status.textContent = "正在打开已学习流程…";
+  const response = await api(
+    "GET",
+    `/memory/interface_workflows/agent_context?application_identity_key=${encodeURIComponent(identityKey)}`,
+    null,
+    {
+      summary: "GET /memory/interface_workflows/agent_context",
+      workflowStep: "load_saved_interface_workflow_review",
+      skipRender: true,
+    },
+  );
+  const workflows = Array.isArray(response?.data?.workflows) ? response.data.workflows : [];
+  const review = workflows.find((item) => String(item?.workflow?.workflow_id || "") === workflowId);
+  if (!interfaceWorkflowLoadGuard.isCurrent(loadToken)) return null;
+  if (!response?.success || !review) {
+    if (status) status.textContent = response?.message || "已学习流程读取失败";
+    return null;
+  }
+  interfaceWorkflowDraftSourcePaths = Array.from(new Set(
+    (Array.isArray(review.nodes) ? review.nodes : [])
+      .flatMap((node) => Array.isArray(node?.source_paths) ? node.source_paths : [])
+      .map((path) => String(path || "").trim())
+      .filter(Boolean),
+  ));
+  renderInterfaceWorkflowReview(review);
+  interfaceWorkflowSavedReviewPath = String(
+    interfaceWorkflowLibraryRegistry?.workflows?.[workflowId]?.path || "",
+  ).trim();
+  interfaceWorkflowHasUnsavedChanges = false;
+  if (status) {
+    status.textContent = `已打开 · ${interfaceWorkflowApplicationLabel(review.workflow?.application_identity)} · ${review.nodes?.length || 0} 个界面`;
+  }
+  return review;
+}
+
+async function createInterfaceWorkflow() {
+  const workflowName = String($("interfaceWorkflowNewNameInput")?.value || "").trim();
+  const applicationIdentity = currentInterfaceWorkflowApplicationIdentity();
+  const applicationLabel = interfaceWorkflowApplicationLabel(applicationIdentity);
+  const status = $("interfaceWorkflowLibraryStatus");
+  if (!applicationLabel) {
+    if (status) status.textContent = "请先填写软件名称、网站域名或绑定目标窗口。";
+    return null;
+  }
+  if (!workflowName) {
+    if (status) status.textContent = "请填写新流程名称。";
+    return null;
+  }
+  const normalizedName = workflowName
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fff._-]+/g, "_")
+    .replace(/^[_\-.]+|[_\-.]+$/g, "")
+    .slice(0, 48) || "workflow";
+  const review = globalThis.InterfaceWorkflowReview?.createEmptyInterfaceWorkflowReview?.({
+    workflowId: `workflow_${normalizedName}_${Date.now().toString(36)}`,
+    goal: workflowName,
+    applicationIdentity,
+  });
+  if (!review) {
+    if (status) status.textContent = "流程模块未加载，无法新建流程。";
+    return null;
+  }
+  interfaceWorkflowDraftSourcePaths = [];
+  renderInterfaceWorkflowReview(review);
+  markInterfaceWorkflowUnsaved("新流程已创建，正在保存…");
+  const saved = await saveInterfaceWorkflowReview();
+  if ($("interfaceWorkflowNewNameInput")) $("interfaceWorkflowNewNameInput").value = "";
+  return saved;
+}
+
 function renderLearningDraftHistoryList(sources = []) {
   const target = $("learningDraftHistoryList");
   if (!target) return;
-  const items = Array.isArray(sources) ? sources.filter((item) => item && typeof item === "object") : [];
+  const items = orderedLearningDraftSources(sources);
   if (!items.length) {
     target.innerHTML = `<p class="trace-idle">${escapeHtml(t("learning_draft_history_empty"))}</p>`;
     return;
@@ -9254,9 +10438,12 @@ function renderLearningDraftHistoryList(sources = []) {
     const loadPath = learningDraftSourceLoadPath(item);
     const summary = String(item.screen_summary || item.state_guess || item.source_path || loadPath || "").trim();
     const meta = learningDraftSourceMetaText(item);
+    const sourceBadge = item.recommended_for_panel_review === true ? "[Recommended current] "
+      : item.pinned === true ? "[Pinned reference] "
+        : "";
     return `
       <button type="button" class="learning-draft-history-item" data-learning-draft-history-path="${escapeAttr(loadPath)}">
-        <strong>${escapeHtml(`${index + 1}. ${summary || "learning draft"}`)}</strong>
+        <strong>${escapeHtml(`${index + 1}. ${sourceBadge}${summary || "learning draft"}`)}</strong>
         <span>${escapeHtml(meta || loadPath || "no source path")}</span>
       </button>`;
   }).join("");
@@ -9271,13 +10458,25 @@ function renderLearningDraftHistoryList(sources = []) {
   });
 }
 
+function orderedLearningDraftSources(sources = []) {
+  const items = Array.isArray(sources) ? sources.filter((item) => item && typeof item === "object") : [];
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => (
+      Number(right.item.recommended_for_panel_review === true)
+      - Number(left.item.recommended_for_panel_review === true)
+    ) || left.index - right.index)
+    .map(({ item }) => item);
+}
+
 function learningDraftSourceLoadPath(item = {}) {
   return String(item.pathgraph_candidate_path || item.source_path || "").trim();
 }
 
 function preferredLearningDraftReviewSource(items = []) {
   const sources = Array.isArray(items) ? items.filter((item) => item && typeof item === "object") : [];
-  return sources.find((item) => (
+  return sources.find((item) => item.recommended_for_panel_review === true)
+    || sources.find((item) => (
     item.fresh_model_chain_accepted === true
     && item.fresh_model_counts_as_final_goal_completion === true
     && item.presentation_accepted === true
@@ -10177,6 +11376,10 @@ function clearLearningDraftTrialArtifacts(reason = "", options = {}) {
 
 function clearLearningDraftWorkspaceForNewRun(reason = "") {
   lastLearningDeepCalibrationResponse = null;
+  lastLearningReviewRepairResponse = null;
+  lastLearningFinalStage2ReportPath = "";
+  lastLearningFinalNumberingRevision = "";
+  lastLearningFinalReviewedOverlayPath = "";
   clearLearningDraftTrialArtifacts(reason);
 }
 
@@ -10188,6 +11391,17 @@ function applyLearnReplaySubviewChrome(page = activeStagePage()) {
   const draftActive = page === "learn_replay" && currentLearnReplaySubview === "draft";
   document.body.classList.toggle("learn-replay-draft-subview", draftActive);
   document.body.classList.toggle("learn-replay-template-subview", page === "learn_replay" && currentLearnReplaySubview === "template");
+}
+
+async function maybeLoadCurrentLearningDraftReview() {
+  if (currentLearnReplaySubview !== "draft" || learningDraftReview) return null;
+  const sourcePath = String($("learningDraftReviewSourcePath")?.value || "").trim();
+  if (!sourcePath) return null;
+  const options = { skipResponse: true };
+  if (typeof interfaceWorkflowReviewState !== "undefined" && interfaceWorkflowReviewState) {
+    options.skipWorkflowReview = true;
+  }
+  return loadLearningDraftReview(options);
 }
 
 function setLearnReplaySubview(view = "template") {
@@ -10202,7 +11416,10 @@ function setLearnReplaySubview(view = "template") {
     panel.classList.toggle("active", panel.dataset.learnReplayPanel === selected);
   });
   applyLearnReplaySubviewChrome();
-  if (selected === "draft") hideSharedPathSurface();
+  if (selected === "draft") {
+    hideSharedPathSurface();
+    void maybeLoadCurrentLearningDraftReview();
+  }
   else if (activeStagePage() === "learn_replay" && setSharedPathSurfaceVisibility("learn_replay")) renderNavPath();
 }
 
@@ -10213,15 +11430,54 @@ function learningRecognitionTrialRequestPayload() {
     state_hint: String($("learningTrialState")?.value || $("observeState")?.value || "").trim(),
     summary: String($("learningTrialGoal")?.value || evidence.screen_summary || "learn a reusable UI workflow template from this screen").trim(),
     observation_evidence: evidence,
-    two_stage_report_path: String(lastLearningTwoStageReportPath || "").trim() || null,
+    two_stage_report_path: String(lastLearningFinalStage2ReportPath || lastLearningTwoStageReportPath || "").trim() || null,
   };
 }
 
 async function captureLearningDraftWindow() {
+  clearScreenUnderstandingResidualDisplays("not_loaded · immutable screenshot capture started");
+  const response = await api(
+    "POST",
+    "/state/capture_window",
+    { save_image: true },
+    {
+      summary: "POST /state/capture_window learning source capture",
+      workflowStep: "learning_bind_capture",
+      timeoutSeconds: 30,
+    }
+  );
+  if (!response?.success) return null;
+  const result = resultOf(response);
+  const imagePath = String(result.image_path || "").trim();
+  if (!imagePath) {
+    return {
+      success: false,
+      message: "Learning source capture returned no image_path",
+      data: result,
+    };
+  }
+  setCurrentImage(imagePath);
+  setLearningSourceImagePath(imagePath);
+  lastLearningDraftObserveResponse = null;
+  lastLearningDraftObserveTracePath = "";
+  return response;
+}
+
+async function runLearningScreenObserve(options = {}) {
   clearScreenUnderstandingResidualDisplays("not_loaded · screen understanding started");
   const profile = syncStageProvider("observe");
   const profileId = profile?.profile_id || $("observeModelProfile")?.value || "";
-  if (!(await ensureStageModelReady("observe", profileId))) return null;
+  if (!(await ensureStageModelReady("observe", profileId, { signal: options.signal }))) return null;
+  const sourceImagePath = firstLearningSourceImagePath(
+    learningSourceImagePath,
+    currentImagePath
+  );
+  if (!sourceImagePath) {
+    return {
+      success: false,
+      message: "Learning screen observe requires the immutable capture image",
+    };
+  }
   const payload = {
     task: "observe_screen",
     app_name: String($("learningTrialApp")?.value || $("observeApp")?.value || "").trim() || null,
@@ -10234,52 +11490,847 @@ async function captureLearningDraftWindow() {
       ...metadataWithPrompt("observe"),
       learning_studio_draft_capture: true,
       purpose: "learning_draft_trial_image",
+      learning_workflow_stage: "screen_understanding",
+      learning_workflow_operation_id: String(options.operation?.operation_id || ""),
     },
-    capture_live: true,
+    capture_live: false,
+    image_path: sourceImagePath,
   };
-  const response = await api("POST", "/vision/observe_screen", payload, {
-    summary: "POST /vision/observe_screen learning draft capture",
-    workflowStep: "learning_draft_capture",
-    timeoutSeconds: requestTimeoutSeconds(),
-  });
-  if (!response?.success) return null;
-  const result = resultOf(response);
-  const imagePath = result.image_path
-    || nestedGet(response, ["data", "image_path"])
-    || nestedGet(result, ["live_capture", "image_path"])
-    || currentImagePath;
-  if (imagePath) {
-    setCurrentImage(imagePath);
-    setLearningSourceImagePath(imagePath);
-  }
-  lastLearningDraftObserveResponse = response;
-  lastLearningDraftObserveTracePath = result.trace_path || nestedGet(response, ["data", "trace_path"]) || "";
+  const response = await runManagedLearningStageWorker(
+    "vision_observe_screen",
+    payload,
+    {
+      operation: options.operation,
+      signal: options.signal,
+      fallbackPath: "/vision/observe_screen",
+      summary: "POST /vision/observe_screen managed learning observe",
+      workflowStep: "learning_screen_understanding_observe",
+      timeoutSeconds: requestTimeoutSeconds(),
+      followContinuationChain: Boolean(options.followContinuationChain),
+      onWorkerResponse: applyManagedLearningStageWorkerResponse,
+    }
+  );
+  if (!response?.success) return response;
   return response;
 }
 
-function setLearningInterfaceFlowStep(stepId, statusText = "") {
-  const stepIndex = LEARNING_INTERFACE_FLOW_STEPS.indexOf(stepId);
-  if (stepIndex >= 0) currentLearningInterfaceFlowStep = stepId;
+function renderLearningWorkflowState(workflowState = {}, runtimeAttachment = null) {
+  const stages = workflowState?.stages && typeof workflowState.stages === "object"
+    ? workflowState.stages
+    : {};
+  const currentStage = String(workflowState?.current_stage || "");
+  const runtimeAttachmentStatus = String(runtimeAttachment?.status || "");
+  if (LEARNING_INTERFACE_FLOW_STEPS.includes(currentStage)) {
+    currentLearningInterfaceFlowStep = currentStage;
+  }
   document.querySelectorAll("[data-learning-flow-step]").forEach((item) => {
     const itemStep = String(item.getAttribute("data-learning-flow-step") || "");
-    const itemIndex = LEARNING_INTERFACE_FLOW_STEPS.indexOf(itemStep);
-    item.classList.toggle("is-active", itemStep === stepId);
-    item.classList.toggle("is-done", stepIndex >= 0 && itemIndex >= 0 && itemIndex < stepIndex);
+    const stageStatus = String(stages?.[itemStep]?.status || "pending");
+    item.classList.toggle("is-active", itemStep === currentStage && stageStatus === "running");
+    item.classList.toggle("is-done", stageStatus === "completed");
   });
   const status = $("learningInterfaceFlowStatus");
   if (status) {
-    status.textContent = statusText || t(`learning_flow_${stepId}`) || stepId || t("learning_interface_flow_idle");
+    const workflowReason = String(
+      workflowState?.current_reason
+      || t(`learning_flow_${currentStage}`)
+      || currentStage
+      || t("learning_interface_flow_idle")
+    );
+    if (runtimeAttachmentStatus === "running_detached") {
+      status.textContent = `${workflowReason} · running_detached · recovery_required`;
+    } else if (
+      runtimeAttachmentStatus === "worker_finished"
+      && String(runtimeAttachment?.recovery_status || "") === "result_available"
+    ) {
+      status.textContent = `${workflowReason} · worker_finished · result_available · resume_required`;
+    } else if (
+      runtimeAttachmentStatus === "worker_finished"
+      && String(runtimeAttachment?.recovery_status || "") === "result_adopted"
+    ) {
+      status.textContent = `${workflowReason} · worker_finished · result_adopted · continuation_required`;
+    } else {
+      status.textContent = workflowReason;
+    }
   }
-  const normalizedStatus = String(statusText || "").toLowerCase();
-  const failed = ["failed", "blocked", "no usable", "失败", "阻止", "不可用"]
-    .some((token) => normalizedStatus.includes(token));
-  if (stepId === "complete") {
+  const workflowStatus = String(workflowState?.workflow_status || "idle");
+  if (workflowStatus === "completed") {
     setStatus("ok", "ok");
-  } else if (failed) {
+  } else if (workflowStatus === "failed" || workflowStatus === "safe_stopped") {
     setStatus("failed", "error");
-  } else {
+  } else if (runtimeAttachmentStatus === "running_detached") {
+    setStatus("recovery_required", "running");
+  } else if (
+    runtimeAttachmentStatus === "worker_finished"
+    && ["result_available", "result_adopted"].includes(
+      String(runtimeAttachment?.recovery_status || "")
+    )
+  ) {
+    setStatus("resume_required", "running");
+  } else if (workflowStatus === "running") {
     setStatus("running", "running");
   }
+}
+
+function newLearningWorkflowRunId() {
+  const randomPart = globalThis.crypto?.randomUUID
+    ? globalThis.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `learn-${randomPart}`;
+}
+
+function storedLearningWorkflowRunId() {
+  try {
+    return String(sessionStorage.getItem(LEARNING_WORKFLOW_RUN_STORAGE_KEY) || "").trim();
+  } catch (_error) {
+    return "";
+  }
+}
+
+function persistLearningWorkflowRunId(runId) {
+  const normalized = String(runId || "").trim();
+  try {
+    if (normalized) {
+      sessionStorage.setItem(LEARNING_WORKFLOW_RUN_STORAGE_KEY, normalized);
+    } else {
+      sessionStorage.removeItem(LEARNING_WORKFLOW_RUN_STORAGE_KEY);
+    }
+  } catch (_error) {
+    // 浏览器禁用 sessionStorage 时仍保留当前页内状态，服务端继续负责迁移校验。
+  }
+}
+
+async function recoverLearningWorkflowState(runId, options = {}) {
+  const normalized = String(runId || "").trim();
+  if (!normalized) return null;
+  const response = await api(
+    "GET",
+    `/panel/learning_workflow_state/${encodeURIComponent(normalized)}`,
+    null,
+    {
+      summary: "GET /panel/learning_workflow_state/{run_id}",
+      workflowStep: `recover_learning_workflow_state:${normalized}`,
+      skipRender: true,
+      skipStatus: true,
+    }
+  );
+  let workflowState = nestedGet(response, ["data", "workflow_state"]);
+  let runtimeAttachment = nestedGet(response, ["data", "runtime_attachment"]);
+  if (!response?.success || !workflowState || typeof workflowState !== "object") {
+    const errorCode = String(nestedGet(response, ["error", "code"]) || "").trim();
+    if (
+      options.clearMissing !== false
+      && errorCode === "learning_workflow_run_not_found"
+      && storedLearningWorkflowRunId() === normalized
+    ) {
+      persistLearningWorkflowRunId("");
+    }
+    return null;
+  }
+  const runningStage = String(workflowState.current_stage || "").trim();
+  const runningRecord = workflowState.stages?.[runningStage];
+  const stageExecution = runningRecord?.evidence_refs?.stage_execution;
+  if (
+    runningRecord?.status === "running"
+    && stageExecution?.contract_version === "learning_workflow_stage_operation_v1"
+    && stageExecution?.owner === "backend_lease"
+  ) {
+    const recovery = await api(
+      "POST",
+      "/panel/recover_learning_workflow_stage_operation",
+      {
+        run_id: normalized,
+        expected_revision: Number(workflowState.revision || 0),
+      },
+      {
+        summary: "POST /panel/recover_learning_workflow_stage_operation",
+        workflowStep: `recover_learning_workflow_stage_operation:${normalized}`,
+        skipRender: true,
+        skipStatus: true,
+      }
+    );
+    const recoveredState = nestedGet(recovery, ["data", "workflow_state"]);
+    if (recovery?.success && recoveredState && typeof recoveredState === "object") {
+      workflowState = recoveredState;
+      if (String(workflowState.workflow_status || "") !== "running") {
+        runtimeAttachment = null;
+      }
+    }
+  }
+  currentLearningWorkflowRunId = normalized;
+  currentLearningWorkflowState = workflowState;
+  persistLearningWorkflowRunId(normalized);
+  renderLearningWorkflowState(workflowState, runtimeAttachment);
+  return workflowState;
+}
+
+async function restoreLearningWorkflowState() {
+  return recoverLearningWorkflowState(storedLearningWorkflowRunId());
+}
+
+async function transitionLearningWorkflowState(stepId, outcome, reason = "", evidenceRefs = {}) {
+  const response = await api("POST", "/panel/transition_learning_workflow_state", {
+    run_id: currentLearningWorkflowRunId,
+    expected_revision: Number(currentLearningWorkflowState?.revision || 0),
+    stage: stepId,
+    outcome,
+    reason: String(reason || ""),
+    evidence_refs: evidenceRefs && typeof evidenceRefs === "object" ? evidenceRefs : {},
+  }, {
+    summary: "POST /panel/transition_learning_workflow_state",
+    workflowStep: "transition_learning_workflow_state",
+    skipRender: true,
+  });
+  if (!response?.success) {
+    await recoverLearningWorkflowState(currentLearningWorkflowRunId, { clearMissing: false });
+    throw new Error(
+      nestedGet(response, ["error", "details"])
+      || response?.message
+      || "learning workflow transition rejected"
+    );
+  }
+  const workflowState = nestedGet(response, ["data", "workflow_state"]);
+  if (!workflowState || typeof workflowState !== "object") {
+    throw new Error("learning workflow transition returned no workflow_state");
+  }
+  currentLearningWorkflowState = workflowState;
+  persistLearningWorkflowRunId(currentLearningWorkflowRunId);
+  renderLearningWorkflowState(workflowState);
+  return workflowState;
+}
+
+async function startLearningWorkflowStageOperation(stepId, reason = "", leaseSeconds = 600) {
+  const response = await api(
+    "POST",
+    "/panel/start_learning_workflow_stage_operation",
+    {
+      run_id: currentLearningWorkflowRunId,
+      expected_revision: Number(currentLearningWorkflowState?.revision || 0),
+      stage: stepId,
+      reason: String(reason || ""),
+      lease_seconds: Math.min(1800, Math.max(30, Number(leaseSeconds) || 600)),
+    },
+    {
+      summary: "POST /panel/start_learning_workflow_stage_operation",
+      workflowStep: `start_learning_workflow_stage_operation:${stepId}`,
+      skipRender: true,
+    }
+  );
+  if (!response?.success) {
+    await recoverLearningWorkflowState(currentLearningWorkflowRunId, { clearMissing: false });
+    throw new Error(
+      nestedGet(response, ["error", "details"])
+      || response?.message
+      || "learning workflow stage operation start rejected"
+    );
+  }
+  const operation = response?.data;
+  const workflowState = operation?.workflow_state;
+  if (!operation?.operation_id || !workflowState || typeof workflowState !== "object") {
+    throw new Error("learning workflow stage operation returned no operation_id or workflow_state");
+  }
+  currentLearningWorkflowState = workflowState;
+  persistLearningWorkflowRunId(currentLearningWorkflowRunId);
+  renderLearningWorkflowState(workflowState);
+  return operation;
+}
+
+async function heartbeatLearningWorkflowStageOperation(operation, leaseSeconds = 600) {
+  const stepId = String(operation?.stage || "").trim();
+  const operationId = String(operation?.operation_id || "").trim();
+  if (!stepId || !operationId) {
+    throw new Error("learning workflow stage heartbeat identity is missing");
+  }
+  const response = await api(
+    "POST",
+    "/panel/heartbeat_learning_workflow_stage_operation",
+    {
+      run_id: currentLearningWorkflowRunId,
+      expected_revision: Number(currentLearningWorkflowState?.revision || 0),
+      stage: stepId,
+      operation_id: operationId,
+      lease_seconds: Math.min(1800, Math.max(30, Number(leaseSeconds) || 600)),
+    },
+    {
+      summary: "POST /panel/heartbeat_learning_workflow_stage_operation",
+      workflowStep: `heartbeat_learning_workflow_stage_operation:${stepId}`,
+      skipRender: true,
+    }
+  );
+  if (!response?.success) {
+    await recoverLearningWorkflowState(currentLearningWorkflowRunId, { clearMissing: false });
+    throw new Error(
+      nestedGet(response, ["error", "details"])
+      || response?.message
+      || "learning workflow stage operation heartbeat rejected"
+    );
+  }
+  const renewedOperation = response?.data;
+  const workflowState = renewedOperation?.workflow_state;
+  if (!workflowState || typeof workflowState !== "object") {
+    throw new Error("learning workflow stage heartbeat returned no workflow_state");
+  }
+  Object.assign(operation, renewedOperation);
+  currentLearningWorkflowState = workflowState;
+  activeLearningStageOperation = operation;
+  persistLearningWorkflowRunId(currentLearningWorkflowRunId);
+  renderLearningWorkflowState(workflowState);
+  return operation;
+}
+
+function setLearningInterfaceCancelEnabled(enabled) {
+  const button = $("learningInterfaceCancelBtn");
+  if (button) button.disabled = !enabled;
+}
+
+function learningWorkflowStageCancelledError() {
+  const error = new Error(t("learning_interface_cancelled"));
+  error.name = "LearningWorkflowStageCancelledError";
+  return error;
+}
+
+async function cancelActiveLearningInterfaceFlow() {
+  const context = activeLearningStageTaskContext;
+  const operation = context?.operation || activeLearningStageOperation;
+  const stepId = String(operation?.stage || "").trim();
+  const operationId = String(operation?.operation_id || "").trim();
+  if (
+    !context
+    || !stepId
+    || !operationId
+    || currentLearningWorkflowState?.terminal === true
+  ) {
+    return {
+      success: false,
+      message: "No cancellable learning workflow stage operation",
+    };
+  }
+
+  context.cancellationRequested = true;
+  setLearningInterfaceCancelEnabled(false);
+  if (context.heartbeatPromise) {
+    await context.heartbeatPromise;
+  }
+  const response = await api(
+    "POST",
+    "/panel/cancel_learning_workflow_stage_operation",
+    {
+      run_id: currentLearningWorkflowRunId,
+      expected_revision: Number(currentLearningWorkflowState?.revision || 0),
+      stage: stepId,
+      operation_id: operationId,
+      reason: "user requested learning stage cancellation",
+    },
+    {
+      summary: "POST /panel/cancel_learning_workflow_stage_operation",
+      workflowStep: `cancel_learning_workflow_stage_operation:${stepId}`,
+      skipRender: true,
+      skipStatus: true,
+    }
+  );
+  if (!response?.success) {
+    context.cancellationRequested = false;
+    setLearningInterfaceCancelEnabled(true);
+    await recoverLearningWorkflowState(currentLearningWorkflowRunId, { clearMissing: false });
+    renderResponse(
+      response || { success: false, message: "Learning stage cancellation rejected" },
+      "Learning stage cancellation"
+    );
+    return response;
+  }
+
+  const cancellation = response?.data || {};
+  const workflowState = cancellation.workflow_state;
+  context.cancelled = true;
+  context.backendComputeTermination = String(
+    cancellation.backend_compute_termination || "not_covered"
+  );
+  if (workflowState && typeof workflowState === "object") {
+    currentLearningWorkflowState = workflowState;
+    persistLearningWorkflowRunId(currentLearningWorkflowRunId);
+    renderLearningWorkflowState(workflowState);
+  }
+  context.taskController.abort();
+  renderResponse({
+    success: true,
+    message: t("learning_interface_cancelled"),
+    data: {
+      ...cancellation,
+      backend_compute_termination: context.backendComputeTermination,
+      no_click_authorization: true,
+    },
+  }, "Learning stage cancellation");
+  return response;
+}
+
+async function runLearningStageTaskWithHeartbeat(
+  operation,
+  task,
+  {
+    heartbeatIntervalMs = 30000,
+    leaseSeconds = 600,
+  } = {}
+) {
+  if (typeof task !== "function") {
+    throw new Error("learning workflow stage task is required");
+  }
+  const taskController = new AbortController();
+  const taskContext = {
+    operation,
+    taskController,
+    heartbeatPromise: null,
+    heartbeatSuspended: false,
+    cancellationRequested: false,
+    cancelled: false,
+    backendComputeTermination: "not_covered",
+  };
+  activeLearningStageTaskContext = taskContext;
+  setLearningInterfaceCancelEnabled(true);
+  let stopped = false;
+  let heartbeatError = null;
+  const renew = () => {
+    if (
+      stopped
+      || taskContext.cancellationRequested
+      || taskContext.heartbeatSuspended
+      || taskContext.heartbeatPromise
+    ) return;
+    taskContext.heartbeatPromise = heartbeatLearningWorkflowStageOperation(
+      taskContext.operation,
+      leaseSeconds
+    )
+      .catch((error) => {
+        heartbeatError = error;
+      })
+      .finally(() => {
+        taskContext.heartbeatPromise = null;
+      });
+  };
+  const timer = window.setInterval(
+    () => { void renew(); },
+    Math.max(5000, Number(heartbeatIntervalMs) || 30000)
+  );
+  let result;
+  let taskError = null;
+  try {
+    result = await task({
+      signal: taskController.signal,
+      operation,
+    });
+  } catch (error) {
+    taskError = error;
+  } finally {
+    stopped = true;
+    window.clearInterval(timer);
+    if (taskContext.heartbeatPromise) {
+      await taskContext.heartbeatPromise;
+    }
+    setLearningInterfaceCancelEnabled(false);
+  }
+  if (activeLearningStageTaskContext?.cancelled === true) {
+    throw learningWorkflowStageCancelledError();
+  }
+  if (activeLearningStageTaskContext === taskContext) {
+    activeLearningStageTaskContext = null;
+  }
+  if (taskError) throw taskError;
+  if (heartbeatError) throw heartbeatError;
+  return result;
+}
+
+async function runManagedLearningStageWorker(
+  taskKind,
+  payload,
+  {
+    operation = null,
+    signal = null,
+    fallbackPath = "",
+    summary = "",
+    workflowStep = "",
+    timeoutSeconds = null,
+    followContinuationChain = false,
+    onWorkerResponse = null,
+  } = {}
+) {
+  const operationId = String(operation?.operation_id || "").trim();
+  const stage = String(operation?.stage || "").trim();
+  if (!operationId || !stage) {
+    if (!fallbackPath) {
+      return {
+        success: false,
+        message: "managed learning stage operation is required",
+      };
+    }
+    return api("POST", fallbackPath, payload, {
+      summary,
+      workflowStep,
+      timeoutSeconds,
+      signal,
+    });
+  }
+
+  const started = await api("POST", "/panel/start_learning_stage_worker", {
+    run_id: currentLearningWorkflowRunId,
+    expected_revision: Number(currentLearningWorkflowState?.revision || 0),
+    stage,
+    operation_id: operationId,
+    task_kind: taskKind,
+    payload,
+  }, {
+    summary: `POST /panel/start_learning_stage_worker · ${taskKind}`,
+    workflowStep: `start_learning_stage_worker:${stage}`,
+    skipRender: true,
+    timeoutSeconds: 30,
+    signal,
+  });
+  if (!started?.success) return started;
+  const worker = started.data || {};
+  const workerId = String(worker.worker_id || "").trim();
+  if (!workerId || worker.backend_compute_owner !== "backend_process_worker") {
+    return {
+      success: false,
+      message: "backend learning stage worker identity is missing",
+      data: worker,
+    };
+  }
+  return pollManagedLearningStageWorker(worker, {
+    operation,
+    signal,
+    taskKind,
+    summary,
+    workflowStep,
+    timeoutSeconds,
+    followContinuationChain,
+    onWorkerResponse,
+    chainDepth: 0,
+  });
+}
+
+async function pollManagedLearningStageWorker(
+  worker,
+  {
+    operation = null,
+    signal = null,
+    taskKind = "",
+    summary = "",
+    workflowStep = "",
+    timeoutSeconds = null,
+    followContinuationChain = false,
+    onWorkerResponse = null,
+    chainDepth = 0,
+  } = {}
+) {
+  const operationId = String(operation?.operation_id || "").trim();
+  const stage = String(operation?.stage || "").trim();
+  const workerId = String(worker?.worker_id || "").trim();
+  const normalizedTaskKind = String(taskKind || worker?.task_kind || "").trim();
+  if (
+    !operationId
+    || !stage
+    || !workerId
+    || worker?.backend_compute_owner !== "backend_process_worker"
+  ) {
+    return {
+      success: false,
+      message: "backend learning stage worker identity is missing",
+      data: worker || {},
+    };
+  }
+  while (!signal?.aborted) {
+    const status = await api(
+      "GET",
+      `/panel/learning_stage_worker/${encodeURIComponent(workerId)}`
+        + `?run_id=${encodeURIComponent(currentLearningWorkflowRunId)}`
+        + `&operation_id=${encodeURIComponent(operationId)}`,
+      null,
+      {
+        summary: `GET /panel/learning_stage_worker/${workerId}`,
+        workflowStep: `poll_learning_stage_worker:${stage}`,
+        skipRender: true,
+        timeoutSeconds: 15,
+        signal,
+      }
+    );
+    if (!status?.success) return status;
+    const workerStatus = status.data || {};
+    if (workerStatus.status === "completed") {
+      if (workerStatus.result_available !== true) {
+        return {
+          success: false,
+          message: "backend learning stage worker completed without an available result",
+          data: workerStatus,
+        };
+      }
+      const adopted = await api(
+        "POST",
+        "/panel/adopt_learning_stage_worker_result",
+        {
+          run_id: currentLearningWorkflowRunId,
+          expected_revision: Number(currentLearningWorkflowState?.revision || 0),
+          stage,
+          operation_id: operationId,
+          worker_id: workerId,
+        },
+        {
+          summary: `POST /panel/adopt_learning_stage_worker_result · ${taskKind}`,
+          workflowStep: `adopt_learning_stage_worker_result:${stage}`,
+          skipRender: true,
+          timeoutSeconds: 30,
+          signal,
+        }
+      );
+      if (!adopted?.success) return adopted;
+      const heartbeatContext = activeLearningStageTaskContext;
+      if (heartbeatContext) {
+        heartbeatContext.heartbeatSuspended = true;
+        if (heartbeatContext.heartbeatPromise) {
+          await heartbeatContext.heartbeatPromise;
+        }
+      }
+      const continued = await api(
+        "POST",
+        "/panel/continue_learning_stage_worker_result",
+        {
+          run_id: currentLearningWorkflowRunId,
+          expected_revision: Number(currentLearningWorkflowState?.revision || 0),
+          stage,
+          operation_id: operationId,
+          worker_id: workerId,
+        },
+        {
+          summary: `POST /panel/continue_learning_stage_worker_result · ${taskKind}`,
+          workflowStep: `continue_learning_stage_worker_result:${stage}`,
+          skipRender: true,
+          timeoutSeconds: 30,
+          signal,
+        }
+      );
+      if (!continued?.success) {
+        if (heartbeatContext) heartbeatContext.heartbeatSuspended = false;
+        return continued;
+      }
+      const continuationData = continued.data || {};
+      const workflowState = continuationData.workflow_state;
+      if (workflowState && typeof workflowState === "object") {
+        currentLearningWorkflowState = workflowState;
+        persistLearningWorkflowRunId(currentLearningWorkflowRunId);
+        renderLearningWorkflowState(workflowState);
+      }
+      const workerResponse = continuationData.response;
+      if (!workerResponse || typeof workerResponse !== "object") {
+        return {
+          success: false,
+          message: "continued learning stage worker result returned no response",
+        };
+      }
+      const {
+        response: _continuedResponse,
+        workflow_state: _continuedWorkflowState,
+        ...continuationMetadata
+      } = continuationData;
+      if (typeof onWorkerResponse === "function") {
+        await onWorkerResponse({
+          taskKind: normalizedTaskKind,
+          response: workerResponse,
+          continuation: continuationMetadata,
+        });
+      }
+      const normalizedResponse = {
+        ...workerResponse,
+        learning_stage_continuation: continuationMetadata,
+      };
+      const nextWorker = continuationData.next_worker;
+      if (
+        followContinuationChain
+        && nextWorker
+        && typeof nextWorker === "object"
+        && continuationMetadata.stage_finished !== true
+      ) {
+        if (chainDepth >= 7) {
+          return {
+            success: false,
+            message: "managed learning stage continuation chain exceeded its limit",
+            data: { stage, worker_id: workerId },
+          };
+        }
+        if (heartbeatContext) heartbeatContext.heartbeatSuspended = false;
+        return pollManagedLearningStageWorker(nextWorker, {
+          operation,
+          signal,
+          taskKind: String(nextWorker.task_kind || ""),
+          summary,
+          workflowStep,
+          timeoutSeconds,
+          followContinuationChain,
+          onWorkerResponse,
+          chainDepth: chainDepth + 1,
+        });
+      }
+      const nextStage = backendContinuationStageWorker(continuationData);
+      if (followContinuationChain && nextStage) {
+        if (chainDepth >= 7) {
+          return {
+            success: false,
+            message: "managed learning stage continuation chain exceeded its limit",
+            data: { stage, worker_id: workerId },
+          };
+        }
+        if (activeLearningStageTaskContext?.heartbeatPromise) {
+          await activeLearningStageTaskContext.heartbeatPromise;
+        }
+        activeLearningStageOperation = nextStage.operation;
+        if (activeLearningStageTaskContext) {
+          activeLearningStageTaskContext.operation = nextStage.operation;
+          activeLearningStageTaskContext.heartbeatSuspended = false;
+        }
+        return pollManagedLearningStageWorker(nextStage.worker, {
+          operation: nextStage.operation,
+          signal,
+          taskKind: String(nextStage.worker.task_kind || ""),
+          summary,
+          workflowStep,
+          timeoutSeconds,
+          followContinuationChain,
+          onWorkerResponse,
+          chainDepth: chainDepth + 1,
+        });
+      }
+      if (heartbeatContext) heartbeatContext.heartbeatSuspended = false;
+      return normalizedResponse;
+    }
+    if (workerStatus.status === "failed") {
+      return {
+        success: false,
+        message: "backend learning stage worker failed",
+        data: workerStatus,
+        error: workerStatus.error || null,
+      };
+    }
+    if (workerStatus.status === "cancelled") {
+      return {
+        success: false,
+        cancelled: true,
+        message: "backend learning stage worker cancelled",
+        data: workerStatus,
+      };
+    }
+    const completedDelay = await waitForAbortableDelay(350, signal);
+    if (!completedDelay) break;
+  }
+  return {
+    success: false,
+    cancelled: true,
+    message: "backend learning stage worker polling cancelled",
+  };
+}
+
+function learningStageContinuation(response = {}) {
+  const continuation = response?.learning_stage_continuation;
+  return continuation && typeof continuation === "object" ? continuation : {};
+}
+
+function learningStageContinuationFinished(response = {}) {
+  return learningStageContinuation(response).stage_finished === true;
+}
+
+function nextLearningStageOperation(
+  response = {},
+  expectedStage = "",
+  expectedTaskKind = ""
+) {
+  const continuation = learningStageContinuation(response);
+  const operation = continuation.next_stage_operation;
+  const stage = String(operation?.stage || "").trim();
+  const taskKind = String(operation?.task_kind || "").trim();
+  const operationId = String(operation?.operation_id || "").trim();
+  if (
+    !operation
+    || typeof operation !== "object"
+    || operation.owner !== "backend_continuation"
+    || operation.status !== "running"
+    || !operationId
+    || stage !== String(expectedStage || "").trim()
+    || taskKind !== String(expectedTaskKind || "").trim()
+  ) {
+    throw new Error(
+      `backend continuation returned no valid ${expectedStage} operation`
+    );
+  }
+  return operation;
+}
+
+function backendContinuationStageWorker(continuationData = {}) {
+  const operation = continuationData?.next_stage_operation;
+  const worker = continuationData?.next_stage_worker;
+  if (!operation && !worker) return null;
+  const operationId = String(operation?.operation_id || "").trim();
+  const stage = String(operation?.stage || "").trim();
+  const taskKind = String(operation?.task_kind || "").trim();
+  const workerRunId = String(worker?.run_id || "").trim();
+  if (
+    !operation
+    || !worker
+    || operation.owner !== "backend_continuation"
+    || operation.status !== "running"
+    || !operationId
+    || !stage
+    || !taskKind
+    || worker.backend_compute_owner !== "backend_process_worker"
+    || String(worker.operation_id || "").trim() !== operationId
+    || String(worker.stage || "").trim() !== stage
+    || String(worker.task_kind || "").trim() !== taskKind
+    || (workerRunId && workerRunId !== currentLearningWorkflowRunId)
+  ) {
+    throw new Error("backend continuation returned an invalid next-stage worker");
+  }
+  return { operation, worker };
+}
+
+async function finishLearningWorkflowStageOperation(
+  operation,
+  outcome,
+  reason = "",
+  evidenceRefs = {}
+) {
+  const stepId = String(operation?.stage || "").trim();
+  const operationId = String(operation?.operation_id || "").trim();
+  if (!stepId || !operationId) {
+    throw new Error("learning workflow stage operation identity is missing");
+  }
+  const response = await api(
+    "POST",
+    "/panel/finish_learning_workflow_stage_operation",
+    {
+      run_id: currentLearningWorkflowRunId,
+      expected_revision: Number(currentLearningWorkflowState?.revision || 0),
+      stage: stepId,
+      operation_id: operationId,
+      outcome,
+      reason: String(reason || ""),
+      evidence_refs: evidenceRefs && typeof evidenceRefs === "object" ? evidenceRefs : {},
+    },
+    {
+      summary: "POST /panel/finish_learning_workflow_stage_operation",
+      workflowStep: `finish_learning_workflow_stage_operation:${stepId}`,
+      skipRender: true,
+    }
+  );
+  if (!response?.success) {
+    await recoverLearningWorkflowState(currentLearningWorkflowRunId, { clearMissing: false });
+    throw new Error(
+      nestedGet(response, ["error", "details"])
+      || response?.message
+      || "learning workflow stage operation finish rejected"
+    );
+  }
+  const workflowState = nestedGet(response, ["data", "workflow_state"]);
+  if (!workflowState || typeof workflowState !== "object") {
+    throw new Error("learning workflow stage operation finish returned no workflow_state");
+  }
+  currentLearningWorkflowState = workflowState;
+  persistLearningWorkflowRunId(currentLearningWorkflowRunId);
+  renderLearningWorkflowState(workflowState);
+  return response.data;
 }
 
 function learningInterfaceTrialEvidenceSummary(trial = {}) {
@@ -10314,6 +12365,31 @@ function learningInterfaceTrialEvidenceStatusText(evidence = {}) {
     `grounding=${Number(evidence.groundingValidationCount || 0)}`,
     `actions=${Number(evidence.actionTemplateCount || 0)}`,
   ].join(" · ");
+}
+
+function learningTrialArtifactPath(response = {}) {
+  const result = resultOf(response);
+  return String(result.trial_path || "").trim();
+}
+
+function learningPageDetailArtifactPath(response = {}) {
+  const result = resultOf(response);
+  return String(
+    result.report_path
+    || result.page_detail_candidate_path
+    || result.source_path
+    || ""
+  ).trim();
+}
+
+function learningScaffoldArtifactPath(response = {}) {
+  const result = resultOf(response);
+  return String(
+    result.report_path
+    || result.learn_mode_demo_scaffold_path
+    || result.scaffold_path
+    || ""
+  ).trim();
 }
 
 function learningDeepCalibrationEvidenceSummary(response = {}) {
@@ -10407,6 +12483,9 @@ function learningCalibrationTimeoutSeconds(candidateCount = 0) {
 }
 
 function learningTwoStageCalibrationTargetCount() {
+  const finalResult = resultOf(lastLearningReviewRepairResponse || {});
+  const finalCandidateCount = Number(finalResult.final_calibration_candidate_count || 0);
+  if (lastLearningFinalStage2ReportPath && finalCandidateCount > 0) return finalCandidateCount;
   const result = resultOf(lastLearningTwoStageResponse || {});
   const explicitCandidateCount =
     nestedGet(result, ["stage2_numbering", "calibration_candidate_count"])
@@ -10418,17 +12497,72 @@ function learningTwoStageCalibrationTargetCount() {
   return Math.max(0, Number(explicitCandidateCount ?? numberedItemCount));
 }
 
+function learningVistaCalibrationSummary(response) {
+  const result = resultOf(response || {});
+  const learnAllTargets = result?.learn_all_targets && typeof result.learn_all_targets === "object"
+    ? result.learn_all_targets
+    : {};
+  if (learnAllTargets.vista_coordinate_validation && typeof learnAllTargets.vista_coordinate_validation === "object") {
+    return learnAllTargets.vista_coordinate_validation;
+  }
+  return result?.vista_coordinate_validation && typeof result.vista_coordinate_validation === "object"
+    ? result.vista_coordinate_validation
+    : {};
+}
+
+async function learningModelResourcePreflight(stage, profileId, options = {}) {
+  if (options.signal?.aborted) {
+    return {
+      response: { success: false, cancelled: true },
+      data: {},
+      resourceMode: "unknown",
+      modelLaunchAllowed: false,
+      reasonCodes: ["cancelled"],
+      batchSize: 1,
+      cancelled: true,
+    };
+  }
+  const query = new URLSearchParams({ stage });
+  if (profileId) query.set("profile_id", profileId);
+  const response = await api("GET", `/runtime/models/resource_preflight?${query.toString()}`, null, {
+    summary: "GET /runtime/models/resource_preflight",
+    skipRender: true,
+    timeoutSeconds: 15,
+    signal: options.signal,
+  });
+  const data = response?.data && typeof response.data === "object" ? response.data : {};
+  const recommended = Number(data.recommended_batch_size || 0);
+  return {
+    response,
+    data,
+    resourceMode: String(data.resource_mode || "unknown"),
+    modelLaunchAllowed: data.model_launch_allowed !== false,
+    reasonCodes: Array.isArray(data.reason_codes) ? data.reason_codes.map((item) => String(item)) : [],
+    batchSize: [1, 2, LEARNING_CALIBRATION_BATCH_SIZE].includes(recommended) ? recommended : 2,
+    cancelled: response?.cancelled === true || options.signal?.aborted === true,
+  };
+}
+
 async function runLearningCalibrationProgress(task, labelKey, options = {}) {
   const startedAt = Date.now();
   const candidateCount = Math.max(0, Number(options.candidateCount || 0));
+  const progress = options.progress && typeof options.progress === "object" ? options.progress : {};
   const renderProgress = () => {
     const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
     const candidateText = candidateCount > 0
       ? ` · ${t("learning_flow_calibration_candidate_count")} ${candidateCount}`
       : "";
+    const attemptedCount = Math.max(0, Number(progress.attemptedCount || 0));
+    const remainingCount = Math.max(0, Number(progress.remainingCount ?? candidateCount));
+    const batchIndex = Math.max(0, Number(progress.batchIndex || 0));
+    const batchText = batchIndex > 0
+      ? ` · ${t("learning_flow_calibration_attempted")} ${attemptedCount}`
+        + ` · ${t("learning_flow_calibration_remaining")} ${remainingCount}`
+        + ` · ${t("learning_flow_calibration_batch")} ${batchIndex}`
+      : "";
     setLearningInterfaceFlowStep(
       "precise_calibration",
-      `${t("learning_flow_precise_calibration")} · ${t(labelKey)}${candidateText} · ${t("learning_flow_calibration_elapsed")} ${elapsedSeconds}s`
+      `${t("learning_flow_precise_calibration")} · ${t(labelKey)}${candidateText}${batchText} · ${t("learning_flow_calibration_elapsed")} ${elapsedSeconds}s`
     );
   };
   renderProgress();
@@ -10440,13 +12574,26 @@ async function runLearningCalibrationProgress(task, labelKey, options = {}) {
   }
 }
 
-async function runLearningDeepCalibration() {
+async function runLearningDeepCalibration(
+  twoStageResponse = lastLearningTwoStageResponse,
+  options = {}
+) {
   const profile = syncStageProvider("locate");
   const profileId = profile?.profile_id || $("locateModelProfile")?.value || "";
+  const resourcePreflight = await runLearningCalibrationProgress(
+    () => learningModelResourcePreflight("locate", profileId, { signal: options.signal }),
+    "learning_flow_calibration_checking_resources"
+  );
+  if (resourcePreflight.cancelled || options.signal?.aborted) {
+    return { success: false, cancelled: true, message: "learning calibration cancelled" };
+  }
   const modelReady = await runLearningCalibrationProgress(
-    () => ensureStageModelReady("locate", profileId),
+    () => ensureStageModelReady("locate", profileId, { resourcePreflight, signal: options.signal }),
     "learning_flow_calibration_loading_model"
   );
+  if (options.signal?.aborted) {
+    return { success: false, cancelled: true, message: "learning calibration cancelled" };
+  }
   if (!modelReady) return null;
   const payload = payloadFromShared("locate");
   const imagePath = firstLearningSourceImagePath(learningSourceImagePath, $("learningTrialImagePath")?.value, currentImagePath);
@@ -10469,23 +12616,58 @@ async function runLearningDeepCalibration() {
   payload.metadata.learn_all_targets = true;
   payload.metadata.learn_all_targets_reason = "Learning interface flow must calibrate all numbered/review regions before draft fusion.";
   payload.metadata.learn_grounding_profile_id = profileId;
-  if (lastLearningTwoStageReportPath) {
-    payload.metadata.two_stage_report_path = lastLearningTwoStageReportPath;
+  const twoStageResult = resultOf(twoStageResponse || {});
+  const calibrationSourceReportPath = String(
+    twoStageResult.report_path || lastLearningTwoStageReportPath || ""
+  ).trim();
+  const calibrationSourceRevision = String(
+    twoStageResult.source_graph_revision
+      || nestedGet(twoStageResult, ["stage2_numbering", "source_graph_revision"])
+      || nestedGet(twoStageResult, ["stage2_numbering", "graph_revision"])
+      || nestedGet(twoStageResult, ["stage2_numbering", "final_numbering", "revision"])
+      || ""
+  ).trim();
+  if (!calibrationSourceReportPath) {
+    return {
+      success: false,
+      message: "two-stage numbering is unavailable",
+      data: { calibration_permission: false, failure_category: "two_stage_numbering_unavailable" },
+    };
   }
-  payload.metadata.learn_vista_coordinate_validation = {
-    enabled: true,
-    max_targets: "all",
-    stop_on_failure: false,
-    use_numbered_overlay: true,
+  payload.metadata.two_stage_report_path = calibrationSourceReportPath;
+  const candidateCount = learningTwoStageCalibrationTargetCount();
+  if (candidateCount <= 0) {
+    return {
+      success: false,
+      message: "two-stage calibration targets are unavailable",
+      data: {
+        failure_category: "two_stage_calibration_targets_unavailable",
+        final_numbering_revision: calibrationSourceRevision,
+      },
+    };
+  }
+  const sequencePayload = {
+    contract_version: "learning_calibration_sequence_request_v1",
+    profile_id: profileId || null,
+    candidate_count: candidateCount,
+    calibration_source_revision: calibrationSourceRevision,
+    maximum_batch_size: LEARNING_CALIBRATION_BATCH_SIZE,
+    locate_payload: payload,
   };
   const response = await runLearningCalibrationProgress(
-    () => api("POST", "/vision/locate_target", payload, {
-      summary: "POST /vision/locate_target · Learn Deep calibration",
-      workflowStep: "locate",
-      timeoutSeconds: learningCalibrationTimeoutSeconds(learningTwoStageCalibrationTargetCount()),
-    }),
+    () => runManagedLearningStageWorker(
+      "panel_learning_calibration_sequence",
+      sequencePayload,
+      {
+        operation: options.operation,
+        signal: options.signal,
+        summary: "POST managed learning calibration sequence",
+        workflowStep: "locate",
+        timeoutSeconds: learningCalibrationTimeoutSeconds(candidateCount),
+      }
+    ),
     "learning_flow_calibration_running_chain",
-    { candidateCount: learningTwoStageCalibrationTargetCount() }
+    { candidateCount }
   );
   if (response?.success) {
     lastLearningDeepCalibrationResponse = response;
@@ -10532,13 +12714,23 @@ function learningTwoStageAllowsDraftTrial(response) {
   return gateStatus === "passed" && nestedGet(result, ["stage2_numbering_skipped"]) !== true;
 }
 
-async function runLearningTwoStageUnderstanding() {
+async function runLearningTwoStageUnderstanding(options = {}) {
+  const profile = syncStageProvider("observe");
+  const profileId = profile?.profile_id || $("observeModelProfile")?.value || "";
+  if (!(await ensureStageModelReady("observe", profileId, { signal: options.signal }))) return null;
   const payload = learningTwoStageUnderstandingPayload();
-  const response = await api("POST", "/panel/run_learning_two_stage_understanding", payload, {
-    summary: "POST /panel/run_learning_two_stage_understanding",
-    workflowStep: "learning_two_stage_understanding",
-    timeoutSeconds: requestTimeoutSeconds(),
-  });
+  const response = await runManagedLearningStageWorker(
+    "panel_learning_two_stage_understanding",
+    payload,
+    {
+      operation: options.operation,
+      signal: options.signal,
+      fallbackPath: "/panel/run_learning_two_stage_understanding",
+      summary: "POST /panel/run_learning_two_stage_understanding",
+      workflowStep: "learning_two_stage_understanding",
+      timeoutSeconds: requestTimeoutSeconds(),
+    }
+  );
   if (response?.success) {
     lastLearningTwoStageResponse = response;
     lastLearningTwoStageReportPath = String(resultOf(response).report_path || "").trim();
@@ -10550,150 +12742,389 @@ async function runLearningTwoStageUnderstanding() {
   return response;
 }
 
+function learningModelReviewRepairPayload(twoStageResponse = {}, calibrationResponse = {}) {
+  const result = resultOf(twoStageResponse);
+  const profile = syncStageProvider("observe");
+  return {
+    two_stage_report_path: String(result.report_path || lastLearningTwoStageReportPath || "").trim(),
+    screenshot_path: firstLearningSourceImagePath(
+      learningSourceImagePath,
+      $("learningTrialImagePath")?.value,
+      result.image_path,
+      currentImagePath,
+    ),
+    composite_overlay_path: String(
+      learningDeepCalibrationOverlayPath(calibrationResponse)
+      || learningTwoStageOverlayPath(twoStageResponse)
+      || ""
+    ).trim(),
+    model_profile_id: String(profile?.profile_id || $("observeModelProfile")?.value || "learn_mode_qwen3_vl_8b").trim(),
+    timeout_seconds: Math.max(30, Math.min(900, requestTimeoutSeconds())),
+  };
+}
+
+function learningReviewRepairFinalOverlayPath(response = {}) {
+  const result = resultOf(response);
+  return String(
+    result.final_repaired_overlay_path
+    || nestedGet(result, ["three_image_evidence", "final_repaired_fusion"])
+    || ""
+  ).trim();
+}
+
+function learningReviewRepairAllowsCalibration(response = {}) {
+  const result = resultOf(response);
+  return response?.success === true
+    && result.calibration_permission === true
+    && nestedGet(result, ["integrity_gate", "passed"]) === true
+    && Boolean(String(result.final_stage2_report_path || "").trim())
+    && Boolean(String(result.final_numbering_revision || "").trim());
+}
+
+async function runLearningModelReviewRepair(
+  twoStageResponse = {},
+  calibrationResponse = {},
+  options = {}
+) {
+  const profile = syncStageProvider("observe");
+  const profileId = profile?.profile_id || $("observeModelProfile")?.value || "";
+  if (!(await ensureStageModelReady("observe", profileId, { signal: options.signal }))) return null;
+  const payload = learningModelReviewRepairPayload(twoStageResponse, calibrationResponse);
+  const response = await runManagedLearningStageWorker(
+    "panel_learning_model_review_repair",
+    payload,
+    {
+      operation: options.operation,
+      signal: options.signal,
+      fallbackPath: "/panel/run_learning_model_review_repair",
+      summary: "POST /panel/run_learning_model_review_repair",
+      workflowStep: "learning_model_review_repair",
+      timeoutSeconds: Math.max(requestTimeoutSeconds(), Number(payload.timeout_seconds || 0)),
+    }
+  );
+  if (response?.success) {
+    const result = resultOf(response);
+    lastLearningReviewRepairResponse = response;
+    lastLearningFinalStage2ReportPath = String(result.final_stage2_report_path || "").trim();
+    lastLearningFinalNumberingRevision = String(result.final_numbering_revision || "").trim();
+    const finalOverlayPath = learningReviewRepairFinalOverlayPath(response);
+    lastLearningFinalReviewedOverlayPath = finalOverlayPath;
+    if (finalOverlayPath) {
+      renderLearningDraftScreenshotPath(finalOverlayPath, "learning final reviewed fusion overlay");
+    }
+  }
+  return response;
+}
+
+async function applyManagedLearningStageWorkerResponse({
+  taskKind = "",
+  response = null,
+} = {}) {
+  if (!response?.success) return;
+  if (taskKind === "vision_observe_screen") {
+    const observeResult = resultOf(response);
+    const observeImagePath = observeResult.image_path
+      || nestedGet(response, ["data", "image_path"])
+      || nestedGet(observeResult, ["live_capture", "image_path"])
+      || currentImagePath;
+    if (observeImagePath) {
+      setCurrentImage(observeImagePath);
+      setLearningSourceImagePath(observeImagePath);
+    }
+    lastLearningDraftObserveResponse = response;
+    lastLearningDraftObserveTracePath = observeResult.trace_path
+      || nestedGet(response, ["data", "trace_path"])
+      || "";
+    renderResponse(response, "Learning screen understanding observe");
+    return;
+  }
+  if (taskKind === "panel_learning_recognition_trial") {
+    await applyLearningDraftTrialResponse(response);
+    return;
+  }
+  if (taskKind === "panel_learning_two_stage_understanding") {
+    lastLearningTwoStageResponse = response;
+    lastLearningTwoStageReportPath = String(resultOf(response).report_path || "").trim();
+    const overlayPath = learningTwoStageOverlayPath(response);
+    if (overlayPath) {
+      renderLearningDraftScreenshotPath(overlayPath, "learning two-stage fused overlay");
+    }
+    return;
+  }
+  if (taskKind === "panel_learning_calibration_sequence") {
+    lastLearningDeepCalibrationResponse = response;
+    const overlayPath = learningDeepCalibrationOverlayPath(response);
+    if (overlayPath) {
+      renderLearningDraftScreenshotPath(overlayPath, "learning deep calibration overlay");
+    }
+    return;
+  }
+  if (taskKind === "panel_learning_model_review_repair") {
+    const result = resultOf(response);
+    lastLearningReviewRepairResponse = response;
+    lastLearningFinalStage2ReportPath = String(result.final_stage2_report_path || "").trim();
+    lastLearningFinalNumberingRevision = String(result.final_numbering_revision || "").trim();
+    lastLearningFinalReviewedOverlayPath = learningReviewRepairFinalOverlayPath(response);
+    if (lastLearningFinalReviewedOverlayPath) {
+      renderLearningDraftScreenshotPath(
+        lastLearningFinalReviewedOverlayPath,
+        "learning final reviewed fusion overlay"
+      );
+    }
+  }
+}
+
 async function runLearningInterfaceFlow() {
   const button = $("learningInterfaceRunBtn");
   const previousDisabled = Boolean(button?.disabled);
   if (button) button.disabled = true;
   try {
     clearLearningDraftWorkspaceForNewRun("not_loaded · new learning run started");
-    setLearningInterfaceFlowStep("bind_capture", `${t("learning_flow_bind_capture")} · no live click`);
+    currentLearningWorkflowRunId = newLearningWorkflowRunId();
+    currentLearningWorkflowState = null;
+    persistLearningWorkflowRunId(currentLearningWorkflowRunId);
+    await transitionLearningWorkflowState(
+      "bind_capture",
+      "running",
+      `${t("learning_flow_bind_capture")} · no live click`
+    );
     const binding = await bindSelectedWindow();
     if (!binding?.success) {
-      setLearningInterfaceFlowStep("bind_capture", `bind failed · ${statusTextForResponse(binding || {})}`);
-      return null;
-    }
-    const understandingProfile = syncStageProvider("observe");
-    const understandingProfileId = understandingProfile?.profile_id || $("observeModelProfile")?.value || "";
-    setLearningInterfaceFlowStep(
-      "screen_understanding",
-      `${t("learning_flow_screen_understanding")} · ${t("learning_flow_understanding_loading_model")}`
-    );
-    const understandingReady = await ensureStageModelReady("observe", understandingProfileId);
-    if (!understandingReady) {
-      setLearningInterfaceFlowStep(
-        "screen_understanding",
-        `understanding model unavailable · ${t("learning_flow_understanding_model_unavailable")}`
+      await transitionLearningWorkflowState(
+        "bind_capture",
+        "failed",
+        `bind failed · ${statusTextForResponse(binding || {})}`
       );
       return null;
     }
     const capture = await captureLearningDraftWindow();
     if (!capture?.success) {
-      setLearningInterfaceFlowStep("bind_capture", "capture failed");
+      await transitionLearningWorkflowState("bind_capture", "failed", "capture failed");
       return null;
     }
-
-    setLearningInterfaceFlowStep("screen_understanding", t("learning_flow_screen_understanding"));
-    const trial = await runLearningDraftTrial();
-    if (!trial) {
-      setLearningInterfaceFlowStep("screen_understanding", "learning draft generation failed");
-      return null;
-    }
-
-    const trialEvidence = learningInterfaceTrialEvidenceSummary(trial);
-    const evidenceStatus = learningInterfaceTrialEvidenceStatusText(trialEvidence);
-    if (!trialEvidence.hasScreenUnderstandingEvidence) {
-      setLearningInterfaceFlowStep("screen_understanding", `no usable screen inventory · ${evidenceStatus}`);
-      return trial;
-    }
-
-    setLearningInterfaceFlowStep("numbered_map", "Stage1 region gate + two-stage numbering");
-    const twoStage = await runLearningTwoStageUnderstanding();
-    if (!twoStage?.success) {
-      setLearningInterfaceFlowStep("numbered_map", `two-stage understanding failed · ${statusTextForResponse(twoStage || {})}`);
-      return trial;
-    }
-    const twoStageOverlayPath = learningTwoStageOverlayPath(twoStage);
-    if (twoStageOverlayPath) {
-      renderLearningDraftScreenshotPath(twoStageOverlayPath, "learning two-stage fused overlay");
-    }
-    const twoStageAllowed = learningTwoStageAllowsDraftTrial(twoStage);
-    if (!twoStageAllowed) {
-      const status = nestedGet(resultOf(twoStage), ["stage1_gate", "status"]) || statusTextForResponse(twoStage);
-      setLearningInterfaceFlowStep("numbered_map", `Stage1 gate blocked Stage2 · ${status} · loading review overlay`);
-      return twoStage;
-    }
-
-    setLearningInterfaceFlowStep("precise_calibration", `${t("learning_flow_precise_calibration")} · dry-run`);
-    const calibration = await runLearningDeepCalibration();
-    if (!calibration?.success) {
-      setLearningInterfaceFlowStep("precise_calibration", `calibration failed · ${statusTextForResponse(calibration || {})}`);
-      return calibration || trial;
-    }
-    const calibrationEvidence = learningDeepCalibrationEvidenceSummary(calibration);
-    const calibrationOverlayPath = learningDeepCalibrationOverlayPath(calibration);
-    if (calibrationOverlayPath) {
-      renderLearningDraftScreenshotPath(calibrationOverlayPath, "learning deep calibration overlay");
-    }
-    setLearningInterfaceFlowStep(
-      "precise_calibration",
-      `${t("learning_flow_precise_calibration")} · ${learningDeepCalibrationEvidenceStatusText(calibrationEvidence)}`
+    const captureResult = resultOf(capture);
+    await transitionLearningWorkflowState(
+      "bind_capture",
+      "completed",
+      `${t("learning_flow_bind_capture")} · captured`,
+      {
+        image_path: firstLearningSourceImagePath(
+          captureResult.image_path,
+          nestedGet(captureResult, ["live_capture", "image_path"]),
+          learningSourceImagePath
+        ),
+        trace_path: String(captureResult.trace_path || lastLearningDraftObserveTracePath || ""),
+      }
     );
-    if (calibrationEvidence.isBlocked) {
-      setLearningInterfaceFlowStep(
-        "precise_calibration",
-        `calibration blocked · ${learningDeepCalibrationEvidenceStatusText(calibrationEvidence)}`
+
+    const screenUnderstandingOperation = await startLearningWorkflowStageOperation(
+      "screen_understanding",
+      t("learning_flow_screen_understanding"),
+      Math.min(1800, requestTimeoutSeconds() + 120)
+    );
+    if (!screenUnderstandingOperation.operation_id) {
+      throw new Error("screen understanding stage operation_id is missing");
+    }
+    activeLearningStageOperation = screenUnderstandingOperation;
+    const trialResponse = await runLearningStageTaskWithHeartbeat(
+      screenUnderstandingOperation,
+      async ({ signal, operation }) => {
+        return runLearningScreenObserve({
+          signal,
+          operation,
+          followContinuationChain: true,
+        });
+      }
+    );
+    if (!trialResponse?.success) {
+      await recoverLearningWorkflowState(
+        currentLearningWorkflowRunId,
+        { clearMissing: false }
       );
-      return calibration;
+      if (
+        currentLearningWorkflowState?.terminal !== true
+        && activeLearningStageOperation?.operation_id
+        && currentLearningWorkflowState?.current_stage === activeLearningStageOperation.stage
+      ) {
+        await finishLearningWorkflowStageOperation(
+          activeLearningStageOperation,
+          "failed",
+          `backend learning-stage worker chain failed · ${statusTextForResponse(trialResponse || {})}`
+        );
+      }
+      activeLearningStageOperation = null;
+      return trialResponse;
     }
-
-    setLearningInterfaceFlowStep(
-      "fusion",
-      twoStageAllowed ? "two-stage boxes accepted for draft review" : "two-stage review overlay attached · no Execute"
+    if (!learningStageContinuationFinished(trialResponse)) {
+      await finishLearningWorkflowStageOperation(
+        activeLearningStageOperation || screenUnderstandingOperation,
+        "failed",
+        "backend continuation did not finish the managed worker chain"
+      );
+      activeLearningStageOperation = null;
+      return trialResponse;
+    }
+    const managedChainCompleted = (
+      learningStageContinuation(trialResponse).outcome === "completed"
     );
-    const fusedTrial = await runLearningDraftTrial({ preserveTwoStageReportPath: true });
-    if (!fusedTrial) {
-      setLearningInterfaceFlowStep("fusion", "two-stage draft generation failed");
-      return await completeLearningInterfaceReadonlyFlow({
-        fallbackResult: trial,
-        statusNote: "two-stage draft generation failed; using initial draft",
-      });
+    activeLearningStageOperation = null;
+    if (!managedChainCompleted) return trialResponse;
+    if (lastLearningFinalReviewedOverlayPath) {
+      renderLearningDraftScreenshotPath(
+        lastLearningFinalReviewedOverlayPath,
+        "learning final reviewed fusion overlay"
+      );
     }
     return await completeLearningInterfaceReadonlyFlow({
-      fallbackResult: fusedTrial,
-      statusNote: twoStageAllowed
-        ? "two-stage fused draft · Stage1 gate passed"
-        : "two-stage review overlay attached · Stage1 gate blocked Execute",
+      fallbackResult: resultOf(trialResponse),
+      statusNote: "backend-managed stage chain completed · draft only",
     });
   } catch (error) {
+    if (
+      error?.name === "LearningWorkflowStageCancelledError"
+      || activeLearningStageTaskContext?.cancelled === true
+    ) {
+      const cancellationResult = {
+        success: false,
+        safe_stopped: true,
+        cancelled: true,
+        message: t("learning_interface_cancelled"),
+        data: {
+          backend_compute_termination: String(
+            activeLearningStageTaskContext?.backendComputeTermination || "not_covered"
+          ),
+          no_click_authorization: true,
+          execute_binding_enabled: false,
+        },
+      };
+      renderResponse(cancellationResult, "Learning interface flow");
+      return cancellationResult;
+    }
     const message = `learning flow failed · ${String(error)}`;
-    setLearningInterfaceFlowStep(currentLearningInterfaceFlowStep, message);
+    if (
+      currentLearningWorkflowState
+      && currentLearningWorkflowState.terminal !== true
+      && currentLearningWorkflowState.stages?.[currentLearningInterfaceFlowStep]?.status === "running"
+    ) {
+      try {
+        if (
+          activeLearningStageOperation
+          && activeLearningStageOperation.stage === currentLearningInterfaceFlowStep
+        ) {
+          await finishLearningWorkflowStageOperation(
+            activeLearningStageOperation,
+            "failed",
+            message
+          );
+          activeLearningStageOperation = null;
+        } else {
+          await transitionLearningWorkflowState(
+            currentLearningInterfaceFlowStep,
+            "failed",
+            message
+          );
+        }
+      } catch (_transitionError) {
+        setStatus("failed", "error");
+      }
+    } else {
+      setStatus("failed", "error");
+    }
     renderResponse({ success: false, message, error: String(error) }, "Learning interface flow");
     return { success: false, message, error: String(error) };
   } finally {
+    activeLearningStageTaskContext = null;
+    activeLearningStageOperation = null;
+    setLearningInterfaceCancelEnabled(false);
     if (button) button.disabled = previousDisabled;
   }
 }
 
 async function completeLearningInterfaceReadonlyFlow({ fallbackResult = null, statusNote = "" } = {}) {
   const note = String(statusNote || "").trim();
-  setLearningInterfaceFlowStep("page_details", `${t("learning_flow_page_details")}${note ? ` · ${note}` : ""}`);
-  const pageDetail = await createPageDetailCandidate();
-  if (!pageDetail) {
-    setLearningInterfaceFlowStep("page_details", "page detail candidate generation failed");
+  const sourcePath = String(
+    lastLearningFusedTrialPath
+    || learningDraftReviewSourcePath()
+    || ""
+  ).trim();
+  if (!sourcePath) {
+    throw new Error("backend read-only tail requires a fused learning source");
+  }
+  const response = await api(
+    "POST",
+    "/panel/run_learning_workflow_readonly_tail",
+    {
+      run_id: currentLearningWorkflowRunId,
+      expected_revision: Number(currentLearningWorkflowState?.revision || 0),
+      source_path: sourcePath,
+    },
+    {
+      summary: "POST /panel/run_learning_workflow_readonly_tail",
+      workflowStep: "run_learning_workflow_readonly_tail",
+      skipRender: true,
+    }
+  );
+  const workflowState = nestedGet(response, ["data", "workflow_state"]);
+  if (workflowState && typeof workflowState === "object") {
+    currentLearningWorkflowState = workflowState;
+    persistLearningWorkflowRunId(currentLearningWorkflowRunId);
+    renderLearningWorkflowState(workflowState);
+  } else if (!response?.success) {
+    await recoverLearningWorkflowState(currentLearningWorkflowRunId, { clearMissing: false });
+  }
+  if (!response?.success) {
+    renderResponse(
+      response || { success: false, message: "Learning workflow read-only tail failed" },
+      "Learning interface read-only tail"
+    );
     return fallbackResult;
   }
-  setLearningInterfaceFlowStep("fusion", `${t("learning_flow_fusion")} · review only`);
-  const scaffold = await createLearningDemoScaffold();
-  if (!scaffold) {
-    setLearningInterfaceFlowStep("pathgraph_draft", "readonly scaffold generation failed");
-    return pageDetail || fallbackResult;
-  }
-  setLearningInterfaceFlowStep("pathgraph_draft", `${t("learning_flow_pathgraph_draft")} · review only`);
-  setLearningInterfaceFlowStep("complete", `${t("learning_flow_complete")} · draft only`);
+
+  const pageDetail = nestedGet(response, ["data", "page_detail"]) || null;
+  const scaffold = nestedGet(response, ["data", "scaffold"]) || null;
+  const reviewSourcePath = learningScaffoldArtifactPath(scaffold || {})
+    || learningPageDetailArtifactPath(pageDetail || {})
+    || sourcePath;
+  setLearningDraftReviewSourcePath(reviewSourcePath);
+  await loadLearningDraftReview({ skipResponse: true });
+  renderResponse({
+    success: true,
+    message: `${t("learning_flow_complete")} · backend runner · draft only${note ? ` · ${note}` : ""}`,
+    data: {
+      ...resultOf(response),
+      no_click_authorization: true,
+      execute_binding_enabled: false,
+      runtime_pathgraph_promotion: false,
+    },
+  }, "Learning interface read-only tail");
   return scaffold || pageDetail || fallbackResult;
 }
 
 async function runLearningDraftTrial(options = {}) {
+  const profile = syncStageProvider("observe");
+  const profileId = profile?.profile_id || $("observeModelProfile")?.value || "";
+  if (!(await ensureStageModelReady("observe", profileId, { signal: options.signal }))) return null;
   const payload = learningRecognitionTrialRequestPayload();
   clearScreenUnderstandingResidualDisplays("not_loaded · generating learning draft", {
     preserveTwoStageReportPath: Boolean(options.preserveTwoStageReportPath),
   });
-  const response = await api("POST", "/panel/run_learning_recognition_trial", payload, {
-    summary: "POST /panel/run_learning_recognition_trial",
-    workflowStep: "run_learning_recognition_trial",
-    skipRender: true,
-    timeoutSeconds: requestTimeoutSeconds(),
-  });
+  const response = await runManagedLearningStageWorker(
+    "panel_learning_recognition_trial",
+    payload,
+    {
+      operation: options.operation,
+      signal: options.signal,
+      fallbackPath: "/panel/run_learning_recognition_trial",
+      summary: "POST /panel/run_learning_recognition_trial",
+      workflowStep: "run_learning_recognition_trial",
+      timeoutSeconds: requestTimeoutSeconds(),
+    }
+  );
+  const data = await applyLearningDraftTrialResponse(response, options);
+  return options.operation ? response : data;
+}
+
+async function applyLearningDraftTrialResponse(response, options = {}) {
   if (!response?.success) {
     renderResponse(response || { success: false, message: "Learning draft trial failed" }, "Learning Studio draft trial");
     return null;
@@ -10810,6 +13241,11 @@ function previewLearningDraftBbox(button) {
 }
 
 function applyImageInspectorSelectionToDraft() {
+  if (learningDraftEditorActive) {
+    syncLearningDraftReviewFromEditor();
+    void saveLearningDraftReview();
+    return;
+  }
   if (!imageInspectorEditContext || !imageInspectorSelection?.bbox || !learningDraftReview?.draft) return;
   const kind = imageInspectorEditContext.kind === "action" ? "action" : "region";
   const id = String(imageInspectorEditContext.id || "").trim();
@@ -10826,7 +13262,19 @@ function applyImageInspectorSelectionToDraft() {
     source: "human_review_full_image_inspector_v1",
   };
   const patchBucket = kind === "action" ? "actions" : "regions";
-  learningDraftReviewBboxEdits[patchBucket][id] = patchValue;
+  const editorItem = learningDraftEditorState?.getItem(kind, id);
+  if (editorItem) {
+    learningDraftEditorState.apply({
+      op: "update_bbox",
+      target_kind: kind,
+      target_id: id,
+      after_bbox: patchValue.bbox,
+      reason: String($("learningDraftManualNotes")?.value || "").trim(),
+    });
+    syncLearningDraftReviewFromEditor();
+  } else {
+    learningDraftReviewBboxEdits[patchBucket][id] = patchValue;
+  }
   const items = kind === "action"
     ? learningDraftArray(learningDraftReview.draft.action_templates)
     : learningDraftArray(learningDraftReview.draft.regions);
@@ -10870,6 +13318,7 @@ function bindImageInspectorEditDrag() {
   let dragStart = null;
   stage.addEventListener("mousedown", (event) => {
     if (!imageInspectorEditContext) return;
+    if (learningDraftEditorActive && !learningDraftEditorAddMode) return;
     const start = imageInspectorEventPoint(event);
     if (!start) return;
     dragStart = start;
@@ -10886,9 +13335,106 @@ function bindImageInspectorEditDrag() {
     if (applyButton) applyButton.disabled = false;
   });
   window.addEventListener("mouseup", () => {
+    if (dragStart && learningDraftEditorActive && learningDraftEditorAddMode && imageInspectorSelection?.bbox) {
+      const existing = learningDraftEditorState?.listItems().filter((item) => item.target_kind === "region") || [];
+      let nextIndex = existing.length + 1;
+      while (learningDraftEditorState?.getItem("region", `manual_region_${nextIndex}`)) nextIndex += 1;
+      const targetId = `manual_region_${nextIndex}`;
+      learningDraftEditorState?.apply({
+        op: "add",
+        target_kind: "region",
+        target_id: targetId,
+        item: {
+          label: `Manual region ${nextIndex}`,
+          role: "review_only",
+          parent_region_id: "",
+          bbox: imageInspectorSelection.bbox,
+        },
+        reason: String($("imageInspectorReason")?.value || "").trim(),
+      });
+      learningDraftEditorAddMode = false;
+      syncLearningDraftReviewFromEditor();
+      selectLearningDraftEditorItem("region", targetId);
+    }
     dragStart = null;
   });
   applyButton?.addEventListener("click", applyImageInspectorSelectionToDraft);
+
+  $("imageInspectorAddRegionBtn")?.addEventListener("click", () => {
+    learningDraftEditorAddMode = !learningDraftEditorAddMode;
+    learningDraftEditorSelected = null;
+    imageInspectorSelection = null;
+    drawImageInspectorSelection(null, null);
+    updateLearningDraftEditorControls();
+  });
+  $("imageInspectorCompactBoxesBtn")?.addEventListener("click", () => {
+    learningDraftEditorCompactMode = !learningDraftEditorCompactMode;
+    learningDraftEditorExpandedGroupKey = "";
+    renderLearningDraftEditorBoxes();
+  });
+  $("imageInspectorDeleteBoxBtn")?.addEventListener("click", () => {
+    if (!learningDraftEditorSelected || !learningDraftEditorState) return;
+    learningDraftEditorState.apply({
+      op: "delete",
+      ...learningDraftEditorSelected,
+      reason: String($("imageInspectorReason")?.value || "").trim(),
+    });
+    learningDraftEditorSelected = null;
+    imageInspectorSelection = null;
+    syncLearningDraftReviewFromEditor();
+    drawImageInspectorSelection(null, null);
+    renderLearningDraftEditorBoxes();
+  });
+  $("imageInspectorUndoBtn")?.addEventListener("click", () => {
+    learningDraftEditorState?.undo();
+    learningDraftEditorSelected = null;
+    imageInspectorSelection = null;
+    syncLearningDraftReviewFromEditor();
+    drawImageInspectorSelection(null, null);
+    renderLearningDraftEditorBoxes();
+  });
+  $("imageInspectorRedoBtn")?.addEventListener("click", () => {
+    learningDraftEditorState?.redo();
+    learningDraftEditorSelected = null;
+    imageInspectorSelection = null;
+    syncLearningDraftReviewFromEditor();
+    drawImageInspectorSelection(null, null);
+    renderLearningDraftEditorBoxes();
+  });
+  $("imageInspectorRoleSelect")?.addEventListener("change", (event) => {
+    if (!learningDraftEditorSelected || learningDraftEditorSelected.target_kind !== "region") return;
+    learningDraftEditorState?.apply({
+      op: "update_role",
+      ...learningDraftEditorSelected,
+      after_value: String(event.target.value || "review_only"),
+      reason: String($("imageInspectorReason")?.value || "").trim(),
+    });
+    syncLearningDraftReviewFromEditor();
+    renderLearningDraftEditorBoxes();
+  });
+  $("imageInspectorParentSelect")?.addEventListener("change", (event) => {
+    if (!learningDraftEditorSelected || learningDraftEditorSelected.target_kind !== "region") return;
+    learningDraftEditorState?.apply({
+      op: "update_parent",
+      ...learningDraftEditorSelected,
+      after_value: String(event.target.value || ""),
+      reason: String($("imageInspectorReason")?.value || "").trim(),
+    });
+    syncLearningDraftReviewFromEditor();
+    renderLearningDraftEditorBoxes();
+  });
+  [
+    "imageInspectorLabel",
+    "imageInspectorDescription",
+    "imageInspectorActionTypeSelect",
+    "imageInspectorInputSemantics",
+    "imageInspectorDestinationKind",
+    "imageInspectorDestinationValue",
+    "imageInspectorVerificationRule",
+    "imageInspectorRiskLevel",
+  ].forEach((controlId) => {
+    $(controlId)?.addEventListener("change", applyLearningDraftEditorMetadataFromControls);
+  });
 }
 
 function bindLearningDraftPreviewButtons(container) {
@@ -11383,13 +13929,67 @@ function learningReviewTextareaItems(text, idKey, idPrefix) {
     }));
 }
 
+function resetLearningDraftEditorState(review = null) {
+  const factory = globalThis.LearningDraftEditorState
+    ? globalThis.LearningDraftEditorState.createLearningDraftEditorState
+    : null;
+  const draft = review?.draft && typeof review.draft === "object" ? review.draft : {};
+  const items = [
+    ...learningDraftArray(draft.regions).map((item) => ({
+      ...item,
+      target_kind: "region",
+      target_id: String(item.region_id || "").trim(),
+    })),
+    ...learningDraftArray(draft.action_templates).map((item) => ({
+      ...item,
+      target_kind: "action",
+      target_id: String(item.action_template_id || item.action_id || "").trim(),
+    })),
+  ].filter((item) => item.target_id && normalizeBbox(item.bbox));
+  learningDraftEditorState = typeof factory === "function" ? factory(items) : null;
+  learningDraftEditorSelected = null;
+  learningDraftEditorActive = false;
+  learningDraftEditorAddMode = false;
+  learningDraftEditorCompactMode = true;
+  learningDraftEditorExpandedGroupKey = "";
+  updateLearningDraftEditorControls();
+}
+
+function syncLearningDraftReviewFromEditor() {
+  if (!learningDraftReview?.draft || !learningDraftEditorState) return;
+  const items = learningDraftEditorState.listItems();
+  learningDraftReview.draft.regions = items
+    .filter((item) => item.target_kind === "region")
+    .map((item) => {
+      const region = { ...item, region_id: item.target_id };
+      delete region.target_kind;
+      delete region.target_id;
+      return region;
+    });
+  learningDraftReview.draft.action_templates = items
+    .filter((item) => item.target_kind === "action")
+    .map((item) => {
+      const action = { ...item, action_template_id: item.target_id };
+      delete action.target_kind;
+      delete action.target_id;
+      return action;
+    });
+}
+
+function learningDraftEditorOperations() {
+  return learningDraftEditorState ? learningDraftEditorState.exportOperations() : [];
+}
+
 function learningDraftReviewPatch() {
-  return {
+  const manualCandidate = learningDraftManualCandidate(learningDraftReview?.draft || {});
+  const patch = {
     review_status: String($("learningDraftReviewStatusSelect")?.value || "needs_human_review"),
     source_after_review: "mixed",
     blockers: learningReviewTextareaItems($("learningDraftReviewBlockers")?.value || "", "blocker_id", "review_blocker"),
     verification_rules: learningReviewTextareaItems($("learningDraftReviewVerificationRules")?.value || "", "rule_id", "review_rule"),
     manual_edit: {
+      target_region_id: manualCandidate.targetRegionId,
+      target_action_template_id: manualCandidate.targetActionTemplateId,
       region_label: String($("learningDraftManualRegionLabel")?.value || "").trim(),
       region_role: String($("learningDraftManualRegionRole")?.value || "").trim(),
       region_section: String($("learningDraftManualRegionSection")?.value || "").trim(),
@@ -11400,6 +14000,17 @@ function learningDraftReviewPatch() {
     },
     region_bbox_updates: learningDraftReviewBboxEdits.regions,
     action_bbox_updates: learningDraftReviewBboxEdits.actions,
+  };
+  const operations = learningDraftEditorOperations();
+  if (!operations.length) return patch;
+  return {
+    ...patch,
+    contract_version: "human_review_patch_v1",
+    screenshot_path: learningDraftSourceImagePath(learningDraftReview?.draft || {}),
+    screenshot_sha256: learningDraftSourceImageSha256(learningDraftReview?.draft || {}),
+    reason: String($("imageInspectorReason")?.value || $("learningDraftManualNotes")?.value || "").trim(),
+    source: "human_panel_editor_v1",
+    operations,
   };
 }
 
@@ -11751,10 +14362,153 @@ function clearLearningDraftPathPreview(reason = "") {
   }
 }
 
+function buildLearningDraftDisplayHierarchy(draft = {}) {
+  const states = learningDraftArray(draft.states);
+  const regions = learningDraftArray(draft.regions);
+  const actions = learningDraftArray(draft.action_templates);
+  if (!states.length && !regions.length) return {};
+
+  const rootId = "draft:screen";
+  const stateNodeIds = new Map();
+  const regionNodeIds = new Map();
+  states.forEach((state, index) => {
+    const stateId = String(state.state_id || `state_${index + 1}`).trim();
+    stateNodeIds.set(stateId, `draft:state:${stateId}`);
+  });
+  regions.forEach((region, index) => {
+    const regionId = String(region.region_id || `region_${index + 1}`).trim();
+    regionNodeIds.set(regionId, `draft:region:${regionId}`);
+  });
+
+  const stateForRegion = new Map();
+  states.forEach((state) => {
+    const stateId = String(state.state_id || "").trim();
+    learningDraftArray(state.region_refs || state.region_ids).forEach((regionId) => {
+      stateForRegion.set(String(regionId), stateId);
+    });
+  });
+  regions.forEach((region) => {
+    const regionId = String(region.region_id || "").trim();
+    const stateId = String(region.state_id || region.source_section_id || "").trim();
+    if (regionId && stateId && !stateForRegion.has(regionId)) stateForRegion.set(regionId, stateId);
+  });
+
+  const childrenByParent = new Map();
+  const addChild = (parentId, childId) => {
+    if (!parentId || !childId) return;
+    if (!childrenByParent.has(parentId)) childrenByParent.set(parentId, []);
+    const children = childrenByParent.get(parentId);
+    if (!children.includes(childId)) children.push(childId);
+  };
+  states.forEach((state, index) => {
+    const stateId = String(state.state_id || `state_${index + 1}`).trim();
+    addChild(rootId, stateNodeIds.get(stateId));
+  });
+
+  const regionNodes = regions.map((region, index) => {
+    const regionId = String(region.region_id || `region_${index + 1}`).trim();
+    const nodeId = regionNodeIds.get(regionId);
+    const parentRegionId = String(region.parent_region_id || "").trim();
+    const stateId = stateForRegion.get(regionId) || "";
+    const parentId = regionNodeIds.get(parentRegionId) || stateNodeIds.get(stateId) || rootId;
+    addChild(parentId, nodeId);
+    return {
+      node_id: nodeId,
+      source_ref: regionId,
+      parent_id: parentId,
+      children: [],
+      label: String(region.label || regionId),
+      level: String(region.hierarchy_level || "region"),
+      component_type: String(region.role || region.region_type || ""),
+      bbox: region.bbox && typeof region.bbox === "object" ? region.bbox : {},
+      review_status: String(region.review_status || "review_only"),
+    };
+  });
+
+  const actionNodes = actions.map((action, index) => {
+    const actionId = String(action.action_template_id || action.action_id || `action_${index + 1}`).trim();
+    const targetRegionId = String(action.target_region_id || action.region_id || action.target_entity || "").trim();
+    const stateId = String(action.state_id || stateForRegion.get(targetRegionId) || "").trim();
+    const parentId = regionNodeIds.get(targetRegionId) || stateNodeIds.get(stateId) || rootId;
+    const nodeId = `draft:action:${actionId}`;
+    addChild(parentId, nodeId);
+    return {
+      node_id: nodeId,
+      source_ref: actionId,
+      parent_id: parentId,
+      children: [],
+      label: String(action.label || action.semantic_action || action.action_type || actionId),
+      level: "action",
+      component_type: String(action.action_type || action.semantic_action || ""),
+      bbox: action.bbox && typeof action.bbox === "object" ? action.bbox : {},
+      review_status: "candidate_only",
+    };
+  });
+
+  const stateNodes = states.map((state, index) => {
+    const stateId = String(state.state_id || `state_${index + 1}`).trim();
+    const nodeId = stateNodeIds.get(stateId);
+    return {
+      node_id: nodeId,
+      source_ref: stateId,
+      parent_id: rootId,
+      children: childrenByParent.get(nodeId) || [],
+      label: String(state.label || stateId),
+      level: "structure_region",
+      component_type: String(state.page_type || "state"),
+      bbox: state.bbox && typeof state.bbox === "object" ? state.bbox : {},
+      review_status: "review_only",
+    };
+  });
+  const nodes = [
+    {
+      node_id: rootId,
+      source_ref: "learning_draft",
+      parent_id: "",
+      children: childrenByParent.get(rootId) || [],
+      label: String(draft.screen_summary || "Observed interface"),
+      level: "screen",
+      component_type: "learning_draft",
+      bbox: draft?.page_details?.screen?.bbox || {},
+      review_status: "display_only",
+    },
+    ...stateNodes,
+    ...regionNodes,
+    ...actionNodes,
+  ];
+  nodes.forEach((node) => {
+    node.children = childrenByParent.get(node.node_id) || node.children || [];
+  });
+  return {
+    contract_version: "ui_hierarchy_display_projection_v1",
+    root_node_id: rootId,
+    nodes,
+    summary: {
+      projection_source: "state_region_action_links",
+      structure_region_count: stateNodes.length,
+      region_count: regionNodes.length,
+      action_count: actionNodes.length,
+    },
+    validation: {},
+    display_only: true,
+    execute_binding_enabled: false,
+    artifact_is_authorization: false,
+  };
+}
+
 function learningDraftUiHierarchy(draft = {}) {
-  if (draft?.ui_hierarchy && typeof draft.ui_hierarchy === "object") return draft.ui_hierarchy;
+  if (
+    draft?.ui_hierarchy
+    && typeof draft.ui_hierarchy === "object"
+    && learningDraftArray(draft.ui_hierarchy.nodes).length
+  ) return draft.ui_hierarchy;
   const pageDetails = draft?.page_details && typeof draft.page_details === "object" ? draft.page_details : {};
-  return pageDetails?.ui_hierarchy && typeof pageDetails.ui_hierarchy === "object" ? pageDetails.ui_hierarchy : {};
+  if (
+    pageDetails?.ui_hierarchy
+    && typeof pageDetails.ui_hierarchy === "object"
+    && learningDraftArray(pageDetails.ui_hierarchy.nodes).length
+  ) return pageDetails.ui_hierarchy;
+  return buildLearningDraftDisplayHierarchy(draft);
 }
 
 function renderLearningDraftHierarchy(draft = {}) {
@@ -11766,6 +14520,7 @@ function renderLearningDraftHierarchy(draft = {}) {
     $("learningDraftHierarchySummary").textContent = nodes.length
       ? [
           `nodes=${nodes.length}`,
+          `source=${String(summary.projection_source || "native_ui_hierarchy")}`,
           `resolved_conflicts=${Number(summary.resolved_ownership_conflict_count || 0)}`,
           `ambiguous=${Number(summary.ambiguous_ownership_tie_count || 0)}`,
           `orphans=${Number(validation.orphan_node_count || 0)}`,
@@ -11775,7 +14530,11 @@ function renderLearningDraftHierarchy(draft = {}) {
       : "not_available";
   }
   if (!$("learningDraftHierarchyTree")) return;
-  if (!nodes.length || hierarchy.contract_version !== "ui_hierarchy_graph_v1") {
+  const supportedContracts = new Set([
+    "ui_hierarchy_graph_v1",
+    "ui_hierarchy_display_projection_v1",
+  ]);
+  if (!nodes.length || !supportedContracts.has(String(hierarchy.contract_version || ""))) {
     $("learningDraftHierarchyTree").innerHTML = `<p class="trace-idle">UI hierarchy not available</p>`;
     return;
   }
@@ -11812,6 +14571,7 @@ function renderLearningDraftHierarchy(draft = {}) {
   const roots = root ? [root] : nodes.filter((node) => !String(node.parent_id || ""));
   $("learningDraftHierarchyTree").innerHTML = roots.map((node) => renderNode(node, 0)).join("") || `<p class="trace-idle">UI hierarchy not available</p>`;
   $("learningDraftHierarchySummary").dataset.structureRegionCount = String(summary.structure_region_count || 0);
+  $("learningDraftHierarchySummary").dataset.projectionSource = String(summary.projection_source || "native_ui_hierarchy");
 }
 
 function renderLearningDraftPipelineAudit(audit = {}) {
@@ -13443,11 +16203,14 @@ function learningDraftManualCandidate(draft = {}) {
   const pageDetails = draft.page_details && typeof draft.page_details === "object" ? draft.page_details : {};
   const reviewOnlyRegions = Array.isArray(pageDetails.review_only_regions) ? pageDetails.review_only_regions : [];
   const action = actions[0] || null;
-  const region = regions.find((item) => String(item.region_id || "") === String(action?.region_id || "")) || regions[0] || reviewOnlyRegions[0] || {};
+  const actionRegionId = String(action?.target_region_id || action?.region_id || action?.target_entity || "").trim();
+  const region = regions.find((item) => String(item.region_id || "") === actionRegionId) || regions[0] || reviewOnlyRegions[0] || {};
   return {
-    label: action?.label || action?.action_template_id || region.label || region.region_id || "",
+    targetRegionId: String(region.region_id || "").trim(),
+    targetActionTemplateId: String(action?.action_template_id || action?.action_id || "").trim(),
+    label: region.label || region.region_id || action?.label || action?.action_template_id || "",
     role: region.role || region.region_type || action?.action_type || "review_only",
-    section: region.section_id || region.parent_region_id || region.section || "",
+    section: region.parent_region_id || region.section_id || region.section || "",
     operation: action?.action_type || region.semantic_action || "read_only",
     notes: region.description || action?.description || "",
   };
@@ -13484,6 +16247,1819 @@ function clearLearningDraftSimpleReviewPanels(reason = "") {
   if ($("learningDraftManualOperation")) $("learningDraftManualOperation").value = "read_only";
   if ($("learningDraftManualEnterPathGraph")) $("learningDraftManualEnterPathGraph").checked = false;
   if ($("learningDraftManualNeedsRecalibration")) $("learningDraftManualNeedsRecalibration").checked = true;
+}
+
+function clampInterfaceWorkflowGraphZoom(value) {
+  return Math.min(2.2, Math.max(0.35, Number(value) || 1));
+}
+
+function interfaceWorkflowGraphViewport() {
+  const canvas = $("interfaceWorkflowGraphCanvas");
+  const stage = canvas?.closest(".interface-workflow-graph-stage");
+  return {
+    canvas,
+    width: Math.max(320, Number(stage?.clientWidth || canvas?.clientWidth || 0)),
+    height: Math.max(280, Number(stage?.clientHeight || canvas?.clientHeight || 0)),
+  };
+}
+
+function interfaceWorkflowGraphRoundedRect(ctx, x, y, width, height, radius) {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function interfaceWorkflowGraphText(ctx, text, x, y, maxWidth, options = {}) {
+  const value = String(text || "");
+  let output = value;
+  ctx.font = options.font || "600 12px system-ui, sans-serif";
+  while (output.length > 1 && ctx.measureText(output).width > maxWidth) {
+    output = output.slice(0, -1);
+  }
+  if (output !== value) output = `${output.slice(0, -1)}…`;
+  ctx.fillStyle = options.color || "#1f2937";
+  ctx.textAlign = options.align || "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(output, x, y);
+}
+
+function interfaceWorkflowGraphCurve(link, index = 0) {
+  const source = link.source;
+  const target = link.target;
+  const geometry = globalThis.InterfaceWorkflowGraph?.interfaceWorkflowEdgeGeometry;
+  if (typeof geometry === "function") {
+    return geometry(source, target, index);
+  }
+  const dx = target.x - source.x;
+  const dy = target.y - source.y;
+  const distance = Math.max(1, Math.hypot(dx, dy));
+  const normalX = -dy / distance;
+  const normalY = dx / distance;
+  const offset = ((index % 3) - 1) * 10;
+  return {
+    start: { x: source.x + source.width / 2, y: source.y },
+    control: {
+      x: (source.x + target.x) / 2 + normalX * offset,
+      y: (source.y + target.y) / 2 + normalY * offset,
+    },
+    end: { x: target.x - target.width / 2, y: target.y },
+  };
+}
+
+function interfaceWorkflowGraphCurvePoint(curve, progress) {
+  const inverse = 1 - progress;
+  return {
+    x: inverse * inverse * curve.start.x
+      + 2 * inverse * progress * curve.control.x
+      + progress * progress * curve.end.x,
+    y: inverse * inverse * curve.start.y
+      + 2 * inverse * progress * curve.control.y
+      + progress * progress * curve.end.y,
+  };
+}
+
+function drawInterfaceWorkflowGraphLink(ctx, link, index, visualState = {}) {
+  const curve = interfaceWorkflowGraphCurve(link, index);
+  ctx.save();
+  ctx.globalAlpha = visualState.dimmed ? 0.13 : 1;
+  ctx.beginPath();
+  ctx.moveTo(curve.start.x, curve.start.y);
+  ctx.quadraticCurveTo(curve.control.x, curve.control.y, curve.end.x, curve.end.y);
+  ctx.strokeStyle = visualState.highlighted
+    ? "rgba(69, 102, 98, 0.92)"
+    : "rgba(105, 130, 127, 0.34)";
+  ctx.lineWidth = visualState.highlighted ? 2.5 : 1.25;
+  ctx.stroke();
+
+  const arrow = interfaceWorkflowGraphCurvePoint(curve, 0.88);
+  const arrowBefore = interfaceWorkflowGraphCurvePoint(curve, 0.84);
+  const arrowAngle = Math.atan2(arrow.y - arrowBefore.y, arrow.x - arrowBefore.x);
+  ctx.beginPath();
+  ctx.moveTo(arrow.x, arrow.y);
+  ctx.lineTo(
+    arrow.x - Math.cos(arrowAngle - Math.PI / 6) * 8,
+    arrow.y - Math.sin(arrowAngle - Math.PI / 6) * 8,
+  );
+  ctx.lineTo(
+    arrow.x - Math.cos(arrowAngle + Math.PI / 6) * 8,
+    arrow.y - Math.sin(arrowAngle + Math.PI / 6) * 8,
+  );
+  ctx.closePath();
+  ctx.fillStyle = visualState.highlighted ? "#456662" : "#78918e";
+  ctx.fill();
+
+  const label = String(link.label || link.action_type || "").trim();
+  const labelLayout = globalThis.InterfaceWorkflowGraph?.interfaceWorkflowEdgeLabelLayout?.(
+    link.source,
+    link.target,
+    index,
+  ) || {
+    ...interfaceWorkflowGraphCurvePoint(curve, 0.5),
+    angle: 0,
+    visible: true,
+    max_width: 72,
+    font_size: 8,
+  };
+  if (label && labelLayout.visible) {
+    ctx.translate(labelLayout.x, labelLayout.y);
+    ctx.rotate(labelLayout.angle);
+    interfaceWorkflowGraphText(ctx, label, 0, 0, labelLayout.max_width, {
+      color: "#536b68",
+      font: `500 ${labelLayout.font_size}px system-ui, sans-serif`,
+    });
+  }
+  ctx.restore();
+}
+
+function drawInterfaceWorkflowGraphNode(ctx, node, visualState = {}) {
+  const radius = Math.min(node.width, node.height) / 2 + (visualState.hovered ? 4 : 0);
+  const needsLearning = node.evidence_status === "needs_learning";
+  const selected = node.selected === true;
+  const presentation = globalThis.InterfaceWorkflowGraph?.interfaceWorkflowNodePresentation
+    ? globalThis.InterfaceWorkflowGraph.interfaceWorkflowNodePresentation(node)
+    : {
+      title: node.label,
+      subtitle: node.surface_type,
+      meta: "",
+      status: "",
+      status_tone: "neutral",
+    };
+  const reviewed = presentation.status_tone === "reviewed";
+  ctx.save();
+  ctx.globalAlpha = visualState.dimmed ? 0.2 : 1;
+  ctx.save();
+  if (selected || visualState.hovered) {
+    ctx.shadowColor = visualState.hovered
+      ? "rgba(64, 105, 101, 0.32)"
+      : "rgba(152, 64, 123, 0.32)";
+    ctx.shadowBlur = visualState.hovered ? 22 : 18;
+  }
+  ctx.beginPath();
+  ctx.arc(node.x, node.y, radius - 5, 0, Math.PI * 2);
+  ctx.fillStyle = selected
+    ? "#5f7f7c"
+    : needsLearning
+      ? "#d8dfdd"
+      : reviewed
+        ? "#789a97"
+        : "#adc0be";
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = visualState.hovered
+    ? "#456662"
+    : selected
+    ? "#a24781"
+    : needsLearning
+      ? "#8c7c69"
+      : reviewed
+        ? "#506f6c"
+        : "#6d8986";
+  ctx.lineWidth = visualState.hovered ? 3.2 : selected ? 4 : visualState.highlighted ? 2.2 : 1.4;
+  if (needsLearning) ctx.setLineDash([5, 4]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  interfaceWorkflowGraphText(
+    ctx,
+    presentation.title,
+    node.x,
+    node.y - 6,
+    node.width - 24,
+    {
+      color: selected ? "#ffffff" : "#173c39",
+      font: "650 12px system-ui, sans-serif",
+    },
+  );
+  interfaceWorkflowGraphText(
+    ctx,
+    presentation.subtitle,
+    node.x,
+    node.y + 14,
+    node.width - 28,
+    {
+      color: selected ? "#e7f0ef" : "#486461",
+      font: "9px system-ui, sans-serif",
+    },
+  );
+  interfaceWorkflowGraphText(
+    ctx,
+    presentation.status,
+    node.x,
+    node.y + radius + 12,
+    node.width + 24,
+    {
+      color: reviewed ? "#456662" : needsLearning ? "#80694f" : "#6d7775",
+      font: "600 9px system-ui, sans-serif",
+    },
+  );
+  ctx.restore();
+}
+
+function renderInterfaceWorkflowGraphFrame(timestamp = 0) {
+  interfaceWorkflowGraphAnimationTime = timestamp;
+  const { canvas, width, height } = interfaceWorkflowGraphViewport();
+  if (!canvas) return;
+  const dpr = Math.max(1, Number(window.devicePixelRatio || 1));
+  const pixelWidth = Math.round(width * dpr);
+  const pixelHeight = Math.round(height * dpr);
+  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
+    canvas.style.height = `${height}px`;
+  }
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#fbfcfc";
+  ctx.fillRect(0, 0, width, height);
+  if (!interfaceWorkflowGraphLayout?.nodes?.length) return;
+
+  ctx.save();
+  ctx.translate(interfaceWorkflowGraphPan.x, interfaceWorkflowGraphPan.y);
+  ctx.scale(interfaceWorkflowGraphZoom, interfaceWorkflowGraphZoom);
+  const highlightedNodeIds = new Set(
+    interfaceWorkflowGraphHoverProjection?.highlighted_node_ids || [],
+  );
+  const highlightedLinkIds = new Set(
+    interfaceWorkflowGraphHoverProjection?.highlighted_link_ids || [],
+  );
+  const dimmedNodeIds = new Set(
+    interfaceWorkflowGraphHoverProjection?.dimmed_node_ids || [],
+  );
+  const dimmedLinkIds = new Set(
+    interfaceWorkflowGraphHoverProjection?.dimmed_link_ids || [],
+  );
+  interfaceWorkflowGraphLayout.links.forEach((link, index) => {
+    drawInterfaceWorkflowGraphLink(ctx, link, index, {
+      highlighted: highlightedLinkIds.has(link.id),
+      dimmed: dimmedLinkIds.has(link.id),
+    });
+  });
+  interfaceWorkflowGraphLayout.nodes.forEach((node) => {
+    drawInterfaceWorkflowGraphNode(ctx, node, {
+      hovered: node.id === interfaceWorkflowGraphHoveredNodeId,
+      highlighted: highlightedNodeIds.has(node.id),
+      dimmed: dimmedNodeIds.has(node.id),
+    });
+  });
+  ctx.restore();
+}
+
+function ensureInterfaceWorkflowGraphAnimation() {
+  if (!interfaceWorkflowGraphSimulation) {
+    renderInterfaceWorkflowGraphFrame();
+    return;
+  }
+  const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
+  if (reducedMotion) {
+    interfaceWorkflowGraphSimulation.runToCompletion();
+    interfaceWorkflowGraphLayout = interfaceWorkflowGraphSimulation.layout;
+    renderInterfaceWorkflowGraphFrame();
+    return;
+  }
+  if (interfaceWorkflowGraphAnimationId) return;
+  const tick = (timestamp) => {
+    interfaceWorkflowGraphAnimationId = 0;
+    if (!interfaceWorkflowGraphSimulation) return;
+    interfaceWorkflowGraphSimulation.step(4);
+    interfaceWorkflowGraphLayout = interfaceWorkflowGraphSimulation.layout;
+    renderInterfaceWorkflowGraphFrame(timestamp);
+    if (!interfaceWorkflowGraphSimulation.isSettled()) {
+      interfaceWorkflowGraphAnimationId = window.requestAnimationFrame(tick);
+    }
+  };
+  interfaceWorkflowGraphAnimationId = window.requestAnimationFrame(tick);
+}
+
+function fitInterfaceWorkflowGraph() {
+  const { width, height } = interfaceWorkflowGraphViewport();
+  const bounds = interfaceWorkflowGraphLayout?.bounds;
+  if (!bounds) return;
+  const transform = globalThis.InterfaceWorkflowGraph?.fitInterfaceWorkflowLayout
+    ? globalThis.InterfaceWorkflowGraph.fitInterfaceWorkflowLayout(bounds, { width, height }, 24)
+    : { zoom: 1, pan: { x: 0, y: 0 } };
+  interfaceWorkflowGraphZoom = clampInterfaceWorkflowGraphZoom(transform.zoom);
+  interfaceWorkflowGraphPan = transform.pan;
+}
+
+function clearInterfaceWorkflowGraph(reason = "") {
+  if (interfaceWorkflowGraphAnimationId) {
+    window.cancelAnimationFrame(interfaceWorkflowGraphAnimationId);
+    interfaceWorkflowGraphAnimationId = 0;
+  }
+  interfaceWorkflowGraphSimulation = null;
+  interfaceWorkflowGraphLayout = null;
+  interfaceWorkflowGraphSignature = "";
+  interfaceWorkflowGraphHoveredNodeId = "";
+  interfaceWorkflowGraphHoverProjection = null;
+  $("interfaceWorkflowGraphCanvas")?.classList.remove("is-node-hovered");
+  const tooltip = $("interfaceWorkflowGraphTooltip");
+  if (tooltip) tooltip.hidden = true;
+  const empty = $("interfaceWorkflowGraphEmpty");
+  if (empty) {
+    empty.textContent = reason || t("interface_workflow_empty");
+    empty.hidden = false;
+  }
+  renderInterfaceWorkflowGraphFrame();
+}
+
+function renderInterfaceWorkflowGraph(graph = {}) {
+  const graphApi = globalThis.InterfaceWorkflowGraph;
+  if (
+    !graphApi?.buildInterfaceWorkflowTopology
+    || !graphApi?.createInterfaceWorkflowSimulation
+  ) {
+    clearInterfaceWorkflowGraph("workflow graph module unavailable");
+    return;
+  }
+  const topology = graphApi.buildInterfaceWorkflowTopology(graph);
+  topology.nodes.forEach((node) => {
+    if (node.kind === "operation") {
+      node.selected = node.ref_id === interfaceWorkflowSelectedOperationId;
+    }
+  });
+  const { width, height } = interfaceWorkflowGraphViewport();
+  const signature = JSON.stringify({
+    nodes: topology.nodes.map((node) => node.id),
+    links: topology.links.map((link) => `${link.source_id}->${link.target_id}`),
+  });
+  if (signature !== interfaceWorkflowGraphSignature) {
+    if (interfaceWorkflowGraphAnimationId) {
+      window.cancelAnimationFrame(interfaceWorkflowGraphAnimationId);
+      interfaceWorkflowGraphAnimationId = 0;
+    }
+    interfaceWorkflowGraphSimulation = graphApi.createInterfaceWorkflowSimulation(
+      topology,
+      { width, height },
+      { previousLayout: interfaceWorkflowGraphLayout },
+    );
+    interfaceWorkflowGraphLayout = interfaceWorkflowGraphSimulation.layout;
+    interfaceWorkflowGraphSignature = signature;
+    interfaceWorkflowGraphHoveredNodeId = "";
+    interfaceWorkflowGraphHoverProjection = null;
+    $("interfaceWorkflowGraphCanvas")?.classList.remove("is-node-hovered");
+    const tooltip = $("interfaceWorkflowGraphTooltip");
+    if (tooltip) tooltip.hidden = true;
+    fitInterfaceWorkflowGraph();
+    ensureInterfaceWorkflowGraphAnimation();
+  } else if (interfaceWorkflowGraphLayout) {
+    const topologyNodeById = new Map(topology.nodes.map((node) => [node.id, node]));
+    interfaceWorkflowGraphLayout.nodes.forEach((node) => {
+      const source = topologyNodeById.get(node.id);
+      if (!source) return;
+      const position = {
+        x: node.x,
+        y: node.y,
+        vx: node.vx,
+        vy: node.vy,
+        width: node.width,
+        height: node.height,
+      };
+      Object.assign(node, source, position);
+    });
+    const topologyLinkById = new Map(topology.links.map((link) => [link.id, link]));
+    interfaceWorkflowGraphLayout.links.forEach((link) => {
+      const source = topologyLinkById.get(link.id);
+      if (!source) return;
+      const endpoints = {
+        source: link.source,
+        target: link.target,
+      };
+      Object.assign(link, source, endpoints);
+    });
+  }
+  const empty = $("interfaceWorkflowGraphEmpty");
+  if (empty) empty.hidden = Boolean(interfaceWorkflowGraphLayout.nodes.length);
+  renderInterfaceWorkflowGraphFrame();
+}
+
+function selectInterfaceWorkflowGraphNode(layoutNode) {
+  if (!layoutNode || !interfaceWorkflowReviewState) return;
+  commitInterfaceWorkflowEditorToState();
+  if (layoutNode.kind !== "interface") return;
+  interfaceWorkflowSelectedOperationId = "";
+  interfaceWorkflowReviewState.focusInterface(layoutNode.ref_id);
+  interfaceWorkflowWorkbenchState.showWorkflowNode(layoutNode.ref_id);
+  interfaceWorkflowControlPickMode = false;
+  renderInterfaceWorkflowReviewSelection();
+  centerInterfaceWorkflowGraphNode(layoutNode.ref_id);
+}
+
+function interfaceWorkflowGraphPointFromEvent(event) {
+  const canvas = $("interfaceWorkflowGraphCanvas");
+  if (!canvas) return null;
+  const rect = canvas.getBoundingClientRect();
+  return {
+    screen: {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    },
+    world: {
+      x: (event.clientX - rect.left - interfaceWorkflowGraphPan.x) / interfaceWorkflowGraphZoom,
+      y: (event.clientY - rect.top - interfaceWorkflowGraphPan.y) / interfaceWorkflowGraphZoom,
+    },
+  };
+}
+
+function updateInterfaceWorkflowGraphHover(layoutNode, screenPoint = null) {
+  const canvas = $("interfaceWorkflowGraphCanvas");
+  const tooltip = $("interfaceWorkflowGraphTooltip");
+  const nodeId = String(layoutNode?.id || "");
+  interfaceWorkflowGraphHoveredNodeId = nodeId;
+  interfaceWorkflowGraphHoverProjection = nodeId
+    ? globalThis.InterfaceWorkflowGraph?.interfaceWorkflowHoverProjection?.(
+      interfaceWorkflowGraphLayout,
+      nodeId,
+    ) || null
+    : null;
+  canvas?.classList.toggle("is-node-hovered", Boolean(nodeId));
+  if (!tooltip) return;
+  if (!layoutNode || !screenPoint) {
+    tooltip.hidden = true;
+    return;
+  }
+  const presentation = globalThis.InterfaceWorkflowGraph?.interfaceWorkflowNodePresentation
+    ? globalThis.InterfaceWorkflowGraph.interfaceWorkflowNodePresentation(layoutNode)
+    : {
+      title: layoutNode.label,
+      subtitle: layoutNode.surface_type,
+      meta: "",
+      status: "",
+    };
+  tooltip.innerHTML = `
+    <strong>${escapeHtml(presentation.title || layoutNode.label || layoutNode.id)}</strong>
+    <span>${escapeHtml(presentation.subtitle || layoutNode.surface_type || "unknown_surface")}</span>
+    ${presentation.meta ? `<span>${escapeHtml(presentation.meta)}</span>` : ""}
+    ${presentation.status ? `<span>${escapeHtml(presentation.status)}</span>` : ""}
+  `;
+  const tooltipWidth = 240;
+  const tooltipHeight = 104;
+  const canvasWidth = Math.max(320, canvas?.clientWidth || 720);
+  const canvasHeight = Math.max(320, canvas?.clientHeight || 520);
+  tooltip.style.left = `${Math.max(8, Math.min(screenPoint.x + 14, canvasWidth - tooltipWidth - 8))}px`;
+  tooltip.style.top = `${Math.max(8, Math.min(screenPoint.y + 14, canvasHeight - tooltipHeight - 8))}px`;
+  tooltip.hidden = false;
+}
+
+function onInterfaceWorkflowGraphPointerDown(event) {
+  if (event.button !== 0) return;
+  hideInterfaceWorkflowGraphContextMenu();
+  const point = interfaceWorkflowGraphPointFromEvent(event);
+  if (!point) return;
+  updateInterfaceWorkflowGraphHover(null);
+  interfaceWorkflowGraphDrag = {
+    pointerId: event.pointerId,
+    start: point.screen,
+    pan: { ...interfaceWorkflowGraphPan },
+  };
+  event.currentTarget?.setPointerCapture?.(event.pointerId);
+  event.currentTarget?.classList.add("is-dragging");
+}
+
+function startInterfaceWorkflowAttachControlPick() {
+  const sourceNodeId = String($("interfaceWorkflowAttachFromNodeSelect")?.value || "").trim();
+  if (!sourceNodeId || !interfaceWorkflowReviewState) {
+    if ($("interfaceWorkflowSourceStatus")) {
+      $("interfaceWorkflowSourceStatus").textContent = "请先选择来源界面。";
+    }
+    return;
+  }
+  interfaceWorkflowReviewState.focusInterface(sourceNodeId);
+  interfaceWorkflowWorkbenchState.showWorkflowNode(sourceNodeId);
+  interfaceWorkflowSelectedOperationId = "";
+  interfaceWorkflowControlPickDestination = "attach";
+  interfaceWorkflowControlPickMode = true;
+  renderInterfaceWorkflowReviewSelection();
+  if ($("interfaceWorkflowSourceStatus")) {
+    $("interfaceWorkflowSourceStatus").textContent = "请在下方带框证据图中点击一个控件。";
+  }
+  $("interfaceWorkflowEvidenceColumn")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+}
+
+function startInterfaceWorkflowOperationControlPick() {
+  const nodeId = String(interfaceWorkflowReviewState?.current?.()?.node?.node_id || "");
+  if (!nodeId) return;
+  interfaceWorkflowWorkbenchState.showWorkflowNode(nodeId);
+  interfaceWorkflowControlPickDestination = "operation";
+  interfaceWorkflowControlPickMode = true;
+  renderActiveInterfaceWorkflowEvidence();
+  if ($("interfaceWorkflowOperationStatus")) {
+    $("interfaceWorkflowOperationStatus").textContent = "请在证据选择弹窗中点击目标控件。";
+  }
+  openInterfaceWorkflowControlPickerDialog();
+}
+
+function selectInterfaceWorkflowEvidenceControl(controlId) {
+  const normalizedControlId = String(controlId || "").trim();
+  if (!normalizedControlId) return;
+  const state = currentInterfaceWorkflowEvidenceState();
+  try {
+    state?.focusControl?.(normalizedControlId);
+  } catch (error) {
+    renderResponse({ success: false, message: error?.message || "控件选择失败" }, "Interface workflow review");
+    return;
+  }
+  if (interfaceWorkflowControlPickDestination === "attach") {
+    const select = $("interfaceWorkflowAttachTargetControl");
+    if (select && Array.from(select.options).some((option) => option.value === normalizedControlId)) {
+      select.value = normalizedControlId;
+    }
+    if ($("interfaceWorkflowSourceStatus")) {
+      $("interfaceWorkflowSourceStatus").textContent = "来源控件已选择；内部 ID 已自动填写。";
+    }
+  } else if ($("interfaceWorkflowOperationTargetControl")) {
+    $("interfaceWorkflowOperationTargetControl").value = normalizedControlId;
+  }
+  interfaceWorkflowControlPickMode = false;
+  renderActiveInterfaceWorkflowEvidence();
+  renderInterfaceWorkflowGraph(interfaceWorkflowReviewState?.graph?.() || { nodes: [], edges: [] });
+  if (interfaceWorkflowControlPickDestination === "operation") {
+    closeInterfaceWorkflowControlPickerDialog({ resumeLinkDialog: true });
+  }
+}
+
+function onInterfaceWorkflowGraphPointerMove(event) {
+  const point = interfaceWorkflowGraphPointFromEvent(event);
+  if (!point) return;
+  if (!interfaceWorkflowGraphDrag || interfaceWorkflowGraphDrag.pointerId !== event.pointerId) {
+    const hitTest = globalThis.InterfaceWorkflowGraph?.hitTestInterfaceWorkflowNode;
+    const layoutNode = typeof hitTest === "function"
+      ? hitTest(interfaceWorkflowGraphLayout, point.world)
+      : null;
+    const nextNodeId = String(layoutNode?.id || "");
+    if (nextNodeId !== interfaceWorkflowGraphHoveredNodeId) {
+      updateInterfaceWorkflowGraphHover(layoutNode, point.screen);
+      renderInterfaceWorkflowGraphFrame();
+    } else if (layoutNode) {
+      updateInterfaceWorkflowGraphHover(layoutNode, point.screen);
+    }
+    return;
+  }
+  interfaceWorkflowGraphPan = {
+    x: interfaceWorkflowGraphDrag.pan.x + point.screen.x - interfaceWorkflowGraphDrag.start.x,
+    y: interfaceWorkflowGraphDrag.pan.y + point.screen.y - interfaceWorkflowGraphDrag.start.y,
+  };
+  renderInterfaceWorkflowGraphFrame();
+}
+
+function onInterfaceWorkflowGraphPointerUp(event) {
+  const drag = interfaceWorkflowGraphDrag;
+  interfaceWorkflowGraphDrag = null;
+  event.currentTarget?.releasePointerCapture?.(event.pointerId);
+  event.currentTarget?.classList.remove("is-dragging");
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  const point = interfaceWorkflowGraphPointFromEvent(event);
+  if (!point) return;
+  const moved = Math.hypot(
+    point.screen.x - drag.start.x,
+    point.screen.y - drag.start.y,
+  );
+  if (moved > 4) return;
+  const hitTest = globalThis.InterfaceWorkflowGraph?.hitTestInterfaceWorkflowNode;
+  const layoutNode = typeof hitTest === "function"
+    ? hitTest(interfaceWorkflowGraphLayout, point.world)
+    : null;
+  if (layoutNode) {
+    updateInterfaceWorkflowGraphHover(layoutNode, point.screen);
+    const workbench = interfaceWorkflowWorkbenchState.current();
+    if (
+      layoutNode.kind === "interface"
+      && workbench.link_source_node_id
+      && layoutNode.ref_id !== workbench.link_source_node_id
+    ) {
+      completeInterfaceWorkflowGraphLink(layoutNode.ref_id);
+      return;
+    }
+    selectInterfaceWorkflowGraphNode(layoutNode);
+  }
+}
+
+function hideInterfaceWorkflowGraphContextMenu() {
+  const menu = $("interfaceWorkflowGraphContextMenu");
+  if (menu) menu.hidden = true;
+}
+
+function setInterfaceWorkflowGraphLinkStatus(message = "右键界面可快速创建连接。") {
+  if ($("interfaceWorkflowGraphLinkStatus")) {
+    $("interfaceWorkflowGraphLinkStatus").textContent = message;
+  }
+}
+
+function onInterfaceWorkflowGraphContextMenu(event) {
+  event.preventDefault();
+  const point = interfaceWorkflowGraphPointFromEvent(event);
+  const hitTest = globalThis.InterfaceWorkflowGraph?.hitTestInterfaceWorkflowNode;
+  const layoutNode = point && typeof hitTest === "function"
+    ? hitTest(interfaceWorkflowGraphLayout, point.world)
+    : null;
+  const menu = $("interfaceWorkflowGraphContextMenu");
+  if (!menu || layoutNode?.kind !== "interface") {
+    hideInterfaceWorkflowGraphContextMenu();
+    return;
+  }
+  menu.dataset.nodeId = layoutNode.ref_id;
+  const contextEdges = $("interfaceWorkflowGraphContextEdges");
+  if (contextEdges) {
+    const snapshot = interfaceWorkflowReviewState?.snapshot?.() || {};
+    const outgoing = (Array.isArray(snapshot.edges) ? snapshot.edges : []).filter(
+      (edge) => String(edge?.source_node_id || "") === String(layoutNode.ref_id || ""),
+    );
+    contextEdges.innerHTML = outgoing.length
+      ? outgoing.map((edge) => {
+        const target = interfaceWorkflowNodeById(edge.target_node_id);
+        const label = InterfaceWorkflowReview.userFacingLearningLabel(
+          edge.display_name || edge.action_type || "未命名连接",
+        );
+        const targetLabel = InterfaceWorkflowReview.userFacingLearningLabel(
+          target?.display_name || target?.node_id || "目标界面",
+        );
+        return `<button type="button"
+          data-interface-workflow-context-action="delete-edge"
+          data-interface-workflow-edge-id="${escapeAttr(edge.edge_id)}">删除连接：${escapeHtml(label)} → ${escapeHtml(targetLabel)}</button>`;
+      }).join("")
+      : '<span class="interface-workflow-context-empty">当前界面没有已保存连接</span>';
+  }
+  menu.style.left = `${point.screen.x}px`;
+  menu.style.top = `${point.screen.y}px`;
+  menu.hidden = false;
+}
+
+function startInterfaceWorkflowGraphLink(nodeId) {
+  const node = interfaceWorkflowNodeById(nodeId);
+  if (!node) return;
+  interfaceWorkflowWorkbenchState.startLink(nodeId);
+  hideInterfaceWorkflowGraphContextMenu();
+  setInterfaceWorkflowGraphLinkStatus(
+    `正在从“${InterfaceWorkflowReview.userFacingLearningLabel(node.display_name || node.node_id)}”创建连接，请点击目标界面。`,
+  );
+}
+
+function setInterfaceWorkflowCorrectionOpen(open) {
+  const next = Boolean(open);
+  interfaceWorkflowWorkbenchState.setCorrectionOpen(next);
+  const tools = $("interfaceWorkflowReviewToolsColumn");
+  if (tools) tools.hidden = !next;
+  const toggle = $("interfaceWorkflowReviewToolsToggle");
+  if (toggle) toggle.textContent = next ? "收起修正工具" : "修正当前界面";
+  if (next) renderInterfaceWorkflowEditor(interfaceWorkflowReviewState?.current?.());
+}
+
+function restoreInterfaceWorkflowOperationToolbar() {
+  const toolbar = $("interfaceWorkflowOperationToolbar");
+  const anchor = $("interfaceWorkflowOperationToolbarAnchor");
+  if (!toolbar || !anchor) return;
+  anchor.insertAdjacentElement("afterend", toolbar);
+  toolbar.hidden = true;
+}
+
+function closeInterfaceWorkflowLinkDialog(options = {}) {
+  const dialog = $("interfaceWorkflowLinkDialog");
+  if (dialog?.open) dialog.close();
+  if (options.preserveToolbar !== true) restoreInterfaceWorkflowOperationToolbar();
+  if (options.cancelled === true) {
+    interfaceWorkflowWorkbenchState.clearLink();
+    setInterfaceWorkflowGraphLinkStatus("已取消创建连接。");
+  }
+}
+
+function restoreInterfaceWorkflowEvidence() {
+  const evidence = $("interfaceWorkflowEvidence");
+  const anchor = $("interfaceWorkflowEvidenceAnchor");
+  if (!evidence || !anchor) return;
+  anchor.insertAdjacentElement("afterend", evidence);
+}
+
+function resumeInterfaceWorkflowLinkDialog() {
+  const dialog = $("interfaceWorkflowLinkDialog");
+  if (!dialog || dialog.open) return;
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+  } else {
+    dialog.setAttribute("open", "");
+  }
+}
+
+function closeInterfaceWorkflowControlPickerDialog(options = {}) {
+  const dialog = $("interfaceWorkflowControlPickerDialog");
+  if (dialog?.open) dialog.close();
+  restoreInterfaceWorkflowEvidence();
+  if (options.cancelled === true) {
+    interfaceWorkflowControlPickMode = false;
+    renderActiveInterfaceWorkflowEvidence();
+  }
+  if (options.resumeLinkDialog === true) resumeInterfaceWorkflowLinkDialog();
+}
+
+function openInterfaceWorkflowControlPickerDialog() {
+  const dialog = $("interfaceWorkflowControlPickerDialog");
+  const body = $("interfaceWorkflowControlPickerDialogBody");
+  const evidence = $("interfaceWorkflowEvidence");
+  if (!dialog || !body || !evidence) {
+    interfaceWorkflowControlPickMode = false;
+    if ($("interfaceWorkflowOperationStatus")) {
+      $("interfaceWorkflowOperationStatus").textContent = "证据选择器不可用，请刷新面板后重试。";
+    }
+    return;
+  }
+  closeInterfaceWorkflowLinkDialog({ preserveToolbar: true });
+  body.appendChild(evidence);
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+  } else {
+    dialog.setAttribute("open", "");
+  }
+}
+
+function openInterfaceWorkflowLinkDialog(link) {
+  const dialog = $("interfaceWorkflowLinkDialog");
+  const body = $("interfaceWorkflowLinkDialogBody");
+  const toolbar = $("interfaceWorkflowOperationToolbar");
+  if (!dialog || !body || !toolbar) {
+    setInterfaceWorkflowGraphLinkStatus("连接编辑器不可用，请刷新面板后重试。");
+    return;
+  }
+  const sourceNode = interfaceWorkflowNodeById(link?.source_node_id);
+  const targetNode = interfaceWorkflowNodeById(link?.target_node_id);
+  if ($("interfaceWorkflowLinkDialogSource")) {
+    $("interfaceWorkflowLinkDialogSource").textContent = InterfaceWorkflowReview.userFacingLearningLabel(
+      sourceNode?.display_name || sourceNode?.node_id || "来源界面",
+    );
+  }
+  if ($("interfaceWorkflowLinkDialogTarget")) {
+    $("interfaceWorkflowLinkDialogTarget").textContent = InterfaceWorkflowReview.userFacingLearningLabel(
+      targetNode?.display_name || targetNode?.node_id || "目标界面",
+    );
+  }
+  if ($("interfaceWorkflowLinkDialogStatus")) {
+    $("interfaceWorkflowLinkDialogStatus").textContent = "选择目标控件并确认操作信息。";
+  }
+  body.appendChild(toolbar);
+  toolbar.hidden = false;
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+  } else {
+    dialog.setAttribute("open", "");
+  }
+}
+
+function completeInterfaceWorkflowGraphLink(targetNodeId) {
+  let link;
+  try {
+    link = interfaceWorkflowWorkbenchState.chooseLinkTarget(targetNodeId);
+  } catch (error) {
+    setInterfaceWorkflowGraphLinkStatus(error?.message || "无法创建连接");
+    return;
+  }
+  interfaceWorkflowReviewState?.focusInterface(link.source_node_id);
+  interfaceWorkflowWorkbenchState.showWorkflowNode(link.source_node_id);
+  interfaceWorkflowSelectedOperationId = "";
+  renderInterfaceWorkflowReviewSelection();
+  if ($("interfaceWorkflowOperationType")) $("interfaceWorkflowOperationType").value = "continue_next_step";
+  if ($("interfaceWorkflowOperationTargetNode")) $("interfaceWorkflowOperationTargetNode").value = link.target_node_id;
+  const targetNode = interfaceWorkflowNodeById(link.target_node_id);
+  if ($("interfaceWorkflowOperationLabel")) {
+    $("interfaceWorkflowOperationLabel").value = `前往 ${InterfaceWorkflowReview.userFacingLearningLabel(
+      targetNode?.display_name || targetNode?.node_id || "目标界面",
+    )}`;
+  }
+  openInterfaceWorkflowLinkDialog(link);
+  setInterfaceWorkflowGraphLinkStatus("来源和目标已选择；请在弹窗中确认控件与操作。");
+}
+
+async function deleteInterfaceWorkflowGraphEdge(edgeId) {
+  if (!interfaceWorkflowReviewState || !edgeId) return null;
+  try {
+    const removed = interfaceWorkflowReviewState.removeOperation(edgeId);
+    interfaceWorkflowSelectedOperationId = "";
+    interfaceWorkflowReview = interfaceWorkflowReviewState.snapshot();
+    hideInterfaceWorkflowGraphContextMenu();
+    markInterfaceWorkflowUnsaved(`已删除连接 ${removed.display_name || removed.edge_id}，正在保存…`);
+    renderInterfaceWorkflowReviewSelection();
+    await saveInterfaceWorkflowReview();
+    return removed;
+  } catch (error) {
+    setInterfaceWorkflowGraphLinkStatus(error?.message || "删除连接失败");
+    return null;
+  }
+}
+
+function zoomInterfaceWorkflowGraph(multiplier, anchor = null) {
+  const previous = interfaceWorkflowGraphZoom;
+  const next = clampInterfaceWorkflowGraphZoom(previous * multiplier);
+  if (next === previous) return;
+  const { width, height } = interfaceWorkflowGraphViewport();
+  const focus = anchor || { x: width / 2, y: height / 2 };
+  const worldX = (focus.x - interfaceWorkflowGraphPan.x) / previous;
+  const worldY = (focus.y - interfaceWorkflowGraphPan.y) / previous;
+  interfaceWorkflowGraphZoom = next;
+  interfaceWorkflowGraphPan = {
+    x: focus.x - worldX * next,
+    y: focus.y - worldY * next,
+  };
+  renderInterfaceWorkflowGraphFrame();
+}
+
+function resetInterfaceWorkflowGraphView() {
+  fitInterfaceWorkflowGraph();
+  renderInterfaceWorkflowGraphFrame();
+}
+
+function centerInterfaceWorkflowGraphNode(nodeId) {
+  const targetId = `interface::${String(nodeId || "").trim()}`;
+  const node = interfaceWorkflowGraphLayout?.nodes?.find((item) => item.id === targetId);
+  if (!node) return;
+  const { width, height } = interfaceWorkflowGraphViewport();
+  interfaceWorkflowGraphPan = {
+    x: width / 2 - node.x * interfaceWorkflowGraphZoom,
+    y: height / 2 - node.y * interfaceWorkflowGraphZoom,
+  };
+  renderInterfaceWorkflowGraphFrame();
+}
+
+function clearInterfaceWorkflowReview(reason = "") {
+  interfaceWorkflowReview = null;
+  interfaceWorkflowReviewState = null;
+  interfaceWorkflowSourceReviewState = null;
+  interfaceWorkflowDraftSourcePaths = [];
+  interfaceWorkflowSelectedOperationId = "";
+  interfaceWorkflowSavedReviewPath = "";
+  interfaceWorkflowHasUnsavedChanges = false;
+  interfaceWorkflowControlPickMode = false;
+  interfaceWorkflowWorkbenchState.clearLink();
+  interfaceWorkflowWorkbenchState.setCorrectionOpen(false);
+  setInterfaceWorkflowCorrectionOpen(false);
+  setInterfaceWorkflowGraphLinkStatus();
+  if ($("interfaceWorkflowStatus")) $("interfaceWorkflowStatus").textContent = reason || t("pending");
+  if ($("interfaceWorkflowGoal")) $("interfaceWorkflowGoal").textContent = "--";
+  if ($("interfaceWorkflowApplication")) $("interfaceWorkflowApplication").textContent = "--";
+  clearInterfaceWorkflowGraph(reason);
+  if ($("interfaceWorkflowLayerTabs")) $("interfaceWorkflowLayerTabs").innerHTML = "";
+  if ($("interfaceWorkflowEvidence")) {
+    $("interfaceWorkflowEvidence").innerHTML = `<p class="trace-idle">${escapeHtml(reason || t("interface_workflow_evidence_empty"))}</p>`;
+  }
+  if ($("interfaceWorkflowInspector")) {
+    $("interfaceWorkflowInspector").innerHTML = `<p class="trace-idle">${escapeHtml(reason || t("interface_workflow_inspector_empty"))}</p>`;
+  }
+  if ($("interfaceWorkflowNodeName")) $("interfaceWorkflowNodeName").value = "";
+  if ($("interfaceWorkflowSurfaceType")) $("interfaceWorkflowSurfaceType").value = "";
+  if ($("interfaceWorkflowNodeReviewStatus")) $("interfaceWorkflowNodeReviewStatus").value = "needs_human_review";
+  if ($("interfaceWorkflowTransitionAction")) {
+    $("interfaceWorkflowTransitionAction").value = "";
+    $("interfaceWorkflowTransitionAction").dataset.edgeId = "";
+  }
+  if ($("interfaceWorkflowTransitionTarget")) {
+    $("interfaceWorkflowTransitionTarget").innerHTML = `<option value="">--</option>`;
+  }
+  if ($("interfaceWorkflowSourceStatus")) {
+    $("interfaceWorkflowSourceStatus").textContent = reason || t("interface_workflow_source_empty");
+  }
+  for (const id of [
+    "interfaceWorkflowNodeName",
+    "interfaceWorkflowSurfaceType",
+    "interfaceWorkflowNodeReviewStatus",
+    "interfaceWorkflowTransitionAction",
+    "interfaceWorkflowTransitionTarget",
+    "interfaceWorkflowRemoveSourceBtn",
+    "interfaceWorkflowEditBoxesBtn",
+    "interfaceWorkflowContentBehavior",
+    "interfaceWorkflowContentAgentUsage",
+    "interfaceWorkflowContentReadPolicy",
+    "interfaceWorkflowContentDescription",
+    "interfaceWorkflowContentSaveBtn",
+    "interfaceWorkflowSaveBtn",
+    "interfaceWorkflowMemoryBtn",
+  ]) {
+    if ($(id)) $(id).disabled = true;
+  }
+  if ($("interfaceWorkflowSaveStatus")) {
+    $("interfaceWorkflowSaveStatus").textContent = reason || t("interface_workflow_save_hint");
+  }
+  renderInterfaceWorkflowOperationEditor(null);
+}
+
+function interfaceWorkflowApplicationLabel(applicationIdentity = {}) {
+  if (typeof applicationIdentity === "string") return applicationIdentity;
+  if (!applicationIdentity || typeof applicationIdentity !== "object") return "";
+  return String(
+    applicationIdentity.display_name
+    || applicationIdentity.name
+    || applicationIdentity.window_title
+    || applicationIdentity.process_name
+    || applicationIdentity.window_value
+    || "",
+  ).trim();
+}
+
+function currentInterfaceWorkflowApplicationIdentity() {
+  const windowSelect = $("learningInterfaceWindowSelect") || $("windowSelect");
+  const selectedOption = windowSelect?.selectedOptions?.[0];
+  const explicitIdentity = String($("interfaceWorkflowIdentityInput")?.value || "").trim();
+  const launchTarget = String(
+    $("learningInterfaceLaunchTargetSelect")?.value || $("appId")?.value || "",
+  ).trim();
+  const windowValue = String(windowSelect?.value || "").trim();
+  const displayName = String(selectedOption?.textContent || "").trim();
+  const processMatch = `${launchTarget} ${windowValue} ${displayName}`.match(
+    /([A-Za-z0-9._-]+\.exe)\b/i,
+  );
+  const looksLikeWebIdentity = /^(?:https?:\/\/)?(?:www\.)?[^/\s]+\.[^/\s]+/i.test(explicitIdentity);
+  return {
+    kind: looksLikeWebIdentity ? "web" : "",
+    display_name: explicitIdentity || displayName,
+    name: explicitIdentity || displayName,
+    url: looksLikeWebIdentity ? explicitIdentity : "",
+    product: looksLikeWebIdentity ? "" : explicitIdentity,
+    process: processMatch ? processMatch[1] : "",
+    window_value: windowValue,
+    launch_target: launchTarget,
+  };
+}
+
+function interfaceWorkflowItemLabel(item = {}, fallback = "") {
+  if (!item || typeof item !== "object") return String(fallback || "");
+  return String(
+    item.label
+    || item.display_name
+    || item.name
+    || item.region_id
+    || item.control_id
+    || item.component_id
+    || item.action_template_id
+    || item.action_id
+    || item.state_id
+    || item.blocker_id
+    || fallback
+    || "",
+  ).trim();
+}
+
+function interfaceWorkflowChipList(items = [], fallback = "none") {
+  const normalized = Array.isArray(items) ? items : [];
+  if (!normalized.length) return `<span class="interface-workflow-chip">${escapeHtml(fallback)}</span>`;
+  return normalized.slice(0, 80).map((item, index) => {
+    const label = typeof item === "string" ? item : interfaceWorkflowItemLabel(item, `item ${index + 1}`);
+    const type = item && typeof item === "object"
+      ? String(item.action_type || item.role || item.region_type || item.control_type || "").trim()
+      : "";
+    return `<span class="interface-workflow-chip">${escapeHtml([label, type].filter(Boolean).join(" · "))}</span>`;
+  }).join("");
+}
+
+function interfaceWorkflowInspectorBlock(title, items, fallback = "none") {
+  return `
+    <section class="interface-workflow-inspector-block">
+      <h5>${escapeHtml(title)}</h5>
+      <div class="interface-workflow-chip-list">${interfaceWorkflowChipList(items, fallback)}</div>
+    </section>`;
+}
+
+function renderInterfaceWorkflowInspector(view) {
+  const target = $("interfaceWorkflowInspector");
+  if (!target) return;
+  const node = view?.node;
+  if (!node) {
+    target.innerHTML = `<p class="trace-idle">${escapeHtml(t("interface_workflow_inspector_empty"))}</p>`;
+    return;
+  }
+  const incoming = (view.incoming_edges || []).map((edge) => ({
+    label: `← ${edge.source_node_id || "unknown"}`,
+    action_type: edge.action_type || "unknown_action",
+  }));
+  const outgoing = (view.outgoing_edges || []).map((edge) => ({
+    label: `→ ${edge.target_node_id || "unknown"}`,
+    action_type: edge.action_type || "unknown_action",
+  }));
+  target.innerHTML = `
+    <section class="interface-workflow-inspector-block">
+      <h5>${escapeHtml(node.display_name || node.node_id || "Interface")}</h5>
+      <div class="interface-workflow-chip-list">
+        <span class="interface-workflow-chip">${escapeHtml(node.surface_type || "unknown_surface")}</span>
+        <span class="interface-workflow-chip">${escapeHtml(node.review_status || "needs_human_review")}</span>
+        <span class="interface-workflow-chip">observations=${escapeHtml(String(node.observation_count || 1))}</span>
+      </div>
+    </section>
+    ${interfaceWorkflowInspectorBlock(t("learning_draft_regions"), node.regions, "no regions")}
+    ${interfaceWorkflowInspectorBlock("controls", node.controls, "no controls")}
+    ${interfaceWorkflowInspectorBlock(t("learning_draft_actions"), node.action_candidates, "no candidate actions")}
+    ${interfaceWorkflowInspectorBlock(t("learning_draft_blockers"), node.blockers, "no blockers")}
+    ${interfaceWorkflowInspectorBlock(t("learning_draft_verification_rules"), node.verification_rules, "no verification rules")}
+    ${interfaceWorkflowInspectorBlock("incoming transitions", incoming, "entry interface")}
+    ${interfaceWorkflowInspectorBlock("outgoing transitions", outgoing, "no observed next interface")}`;
+}
+
+function renderInterfaceWorkflowEvidenceTarget(view, operation, viewportOverride = null) {
+  const evidence = $("interfaceWorkflowEvidence");
+  const stage = evidence?.querySelector(".interface-workflow-evidence-stage");
+  const status = evidence?.querySelector(".interface-workflow-evidence-target-status");
+  if (!stage || !status) return;
+  stage.querySelector("#interfaceWorkflowEvidenceTargetHighlight")?.remove();
+  if (!operation) {
+    status.textContent = "选择一个操作节点后显示对应控件证据";
+    return;
+  }
+  const targetEvidence = globalThis.InterfaceWorkflowGraph?.resolveInterfaceWorkflowTargetEvidence?.(
+    view?.node,
+    operation,
+    viewportOverride,
+  );
+  if (!targetEvidence) {
+    status.textContent = `目标证据不可用 · ${operation.target_control_id || operation.target_region_id || "未绑定控件"}`;
+    return;
+  }
+  const highlight = document.createElement("span");
+  highlight.id = "interfaceWorkflowEvidenceTargetHighlight";
+  highlight.className = "interface-workflow-evidence-target-highlight";
+  highlight.style.left = `${targetEvidence.normalized.left * 100}%`;
+  highlight.style.top = `${targetEvidence.normalized.top * 100}%`;
+  highlight.style.width = `${targetEvidence.normalized.width * 100}%`;
+  highlight.style.height = `${targetEvidence.normalized.height * 100}%`;
+  highlight.title = operation.display_name || operation.action_type || operation.edge_id || "目标控件";
+  stage.appendChild(highlight);
+  status.textContent = `目标证据 · ${targetEvidence.target_id}`;
+}
+
+function renderInterfaceWorkflowControlPickTargets(view, viewportOverride = null) {
+  const evidence = $("interfaceWorkflowEvidence");
+  const stage = evidence?.querySelector(".interface-workflow-evidence-stage");
+  if (!stage) return;
+  stage.querySelectorAll("[data-interface-workflow-control-id]").forEach((entry) => entry.remove());
+  if (!interfaceWorkflowControlPickMode || !view?.node) return;
+  const choices = globalThis.InterfaceWorkflowReview?.interfaceWorkflowControlChoices?.(view.node) || [];
+  choices.forEach((choice) => {
+    const targetEvidence = globalThis.InterfaceWorkflowGraph?.resolveInterfaceWorkflowTargetEvidence?.(
+      view.node,
+      { target_control_id: choice.control_id },
+      viewportOverride,
+    );
+    if (!targetEvidence) return;
+    const target = document.createElement("button");
+    target.type = "button";
+    target.className = "interface-workflow-evidence-control-target";
+    target.dataset.interfaceWorkflowControlId = choice.control_id;
+    target.style.left = `${targetEvidence.normalized.left * 100}%`;
+    target.style.top = `${targetEvidence.normalized.top * 100}%`;
+    target.style.width = `${targetEvidence.normalized.width * 100}%`;
+    target.style.height = `${targetEvidence.normalized.height * 100}%`;
+    target.title = `${choice.label} · ${choice.role}`;
+    target.setAttribute("aria-label", `选择 ${choice.label}`);
+    stage.appendChild(target);
+  });
+}
+
+function renderInterfaceWorkflowEvidence(view) {
+  const tabs = $("interfaceWorkflowLayerTabs");
+  const evidence = $("interfaceWorkflowEvidence");
+  if (!tabs || !evidence) return;
+  const layers = Array.isArray(view?.available_layers) ? view.available_layers : [];
+  tabs.innerHTML = layers.map((entry) => `
+    <button
+      type="button"
+      class="interface-workflow-layer-tab${entry.layer === view.active_layer ? " is-active" : ""}"
+      data-interface-workflow-layer="${escapeHtml(entry.layer)}"
+    >${escapeHtml(entry.layer.replaceAll("_", " "))}</button>`).join("");
+  if (!view?.active_image_path) {
+    evidence.innerHTML = `<p class="trace-idle">证据缺失 · ${escapeHtml(view?.evidence_status || "screenshot_missing")}</p>`;
+    return;
+  }
+  const operation = currentInterfaceWorkflowOperation(view);
+  evidence.innerHTML = `
+    <div class="interface-workflow-evidence-stage">
+      ${panelImageHtml(
+    view.active_image_path,
+    `${view.node?.display_name || "interface"} ${view.active_layer || "evidence"}`,
+    "interface-workflow-evidence-image",
+      )}
+    </div>
+    <p class="interface-workflow-evidence-target-status"></p>`;
+  renderInterfaceWorkflowEvidenceTarget(view, operation);
+  renderInterfaceWorkflowControlPickTargets(view);
+  const image = evidence.querySelector("img");
+  const applyNaturalViewport = () => {
+    if (!image?.naturalWidth || !image?.naturalHeight) return;
+    renderInterfaceWorkflowEvidenceTarget(view, operation, {
+      width: image.naturalWidth,
+      height: image.naturalHeight,
+    });
+    renderInterfaceWorkflowControlPickTargets(view, {
+      width: image.naturalWidth,
+      height: image.naturalHeight,
+    });
+  };
+  if (image?.complete) {
+    applyNaturalViewport();
+  } else {
+    image?.addEventListener("load", applyNaturalViewport, { once: true });
+  }
+}
+
+function currentInterfaceWorkflowOperation(view = null) {
+  const currentView = view || interfaceWorkflowReviewState?.current();
+  const operations = Array.isArray(currentView?.outgoing_edges) ? currentView.outgoing_edges : [];
+  return operations.find((edge) => edge.edge_id === interfaceWorkflowSelectedOperationId) || null;
+}
+
+function interfaceWorkflowOperationPatch() {
+  return {
+    display_name: String($("interfaceWorkflowOperationLabel")?.value || "").trim(),
+    agent_description: String($("interfaceWorkflowOperationDescription")?.value || "").trim(),
+    action_type: String($("interfaceWorkflowOperationType")?.value || "read").trim(),
+    target_control_id: String($("interfaceWorkflowOperationTargetControl")?.value || "").trim(),
+    target_node_id: String($("interfaceWorkflowOperationTargetNode")?.value || "").trim(),
+    risk_level: String($("interfaceWorkflowOperationRisk")?.value || "low").trim(),
+    requires_user_confirmation: $("interfaceWorkflowOperationConfirmation")?.checked === true,
+    review_status: "needs_human_review",
+  };
+}
+
+function markInterfaceWorkflowUnsaved(message = "有未保存的操作或路径修改") {
+  interfaceWorkflowHasUnsavedChanges = true;
+  if ($("interfaceWorkflowOperationStatus")) {
+    $("interfaceWorkflowOperationStatus").textContent = message;
+  }
+  if ($("interfaceWorkflowSaveStatus")) {
+    $("interfaceWorkflowSaveStatus").textContent = "有未保存修改 · 保存后才能安全验证";
+  }
+}
+
+function renderInterfaceWorkflowOperationEditor(view) {
+  const node = view?.node;
+  const operations = Array.isArray(view?.outgoing_edges) ? view.outgoing_edges : [];
+  const enabled = Boolean(node);
+  if (!operations.some((edge) => edge.edge_id === interfaceWorkflowSelectedOperationId)) {
+    interfaceWorkflowSelectedOperationId = "";
+  }
+  const operation = currentInterfaceWorkflowOperation(view);
+  const operationList = $("interfaceWorkflowOperationList");
+  if (operationList) {
+    operationList.innerHTML = `<option value="">新增操作</option>${operations.map((edge) => (
+      `<option value="${escapeHtml(edge.edge_id)}">${escapeHtml(edge.display_name || edge.action_type || edge.edge_id)}</option>`
+    )).join("")}`;
+    operationList.value = String(operation?.edge_id || "");
+    operationList.disabled = !enabled;
+  }
+
+  const typeSelect = $("interfaceWorkflowOperationType");
+  if (typeSelect) {
+    const actionType = String(operation?.action_type || "read");
+    typeSelect.value = Array.from(typeSelect.options).some((option) => option.value === actionType)
+      ? actionType
+      : "read";
+    typeSelect.disabled = !enabled;
+  }
+  if ($("interfaceWorkflowOperationLabel")) {
+    $("interfaceWorkflowOperationLabel").value = String(operation?.display_name || "");
+    $("interfaceWorkflowOperationLabel").disabled = !enabled;
+  }
+  if ($("interfaceWorkflowOperationDescription")) {
+    $("interfaceWorkflowOperationDescription").value = String(operation?.agent_description || "");
+    $("interfaceWorkflowOperationDescription").disabled = !enabled;
+  }
+  if ($("interfaceWorkflowOperationTargetControl")) {
+    fillInterfaceWorkflowControlSelect(
+      $("interfaceWorkflowOperationTargetControl"),
+      node,
+      String(operation?.target_control_id || operation?.target_region_id || ""),
+    );
+  }
+  if ($("interfaceWorkflowOperationPickControlBtn")) {
+    $("interfaceWorkflowOperationPickControlBtn").disabled = !enabled;
+  }
+  if ($("interfaceWorkflowOperationRisk")) {
+    const riskLevel = String(operation?.risk_level || "low");
+    $("interfaceWorkflowOperationRisk").value = ["low", "medium", "high"].includes(riskLevel)
+      ? riskLevel
+      : "low";
+    $("interfaceWorkflowOperationRisk").disabled = !enabled;
+  }
+  if ($("interfaceWorkflowOperationConfirmation")) {
+    $("interfaceWorkflowOperationConfirmation").checked = operation?.requires_user_confirmation === true;
+    $("interfaceWorkflowOperationConfirmation").disabled = !enabled;
+  }
+  if ($("interfaceWorkflowOperationPlaceholderName")) {
+    $("interfaceWorkflowOperationPlaceholderName").value = "";
+    $("interfaceWorkflowOperationPlaceholderName").disabled = !enabled;
+  }
+
+  const graph = interfaceWorkflowReviewState?.graph() || { nodes: [] };
+  const targetSelect = $("interfaceWorkflowOperationTargetNode");
+  if (targetSelect) {
+    targetSelect.innerHTML = `<option value="">请选择目标界面</option>`;
+    (graph.nodes || []).forEach((candidate) => {
+      const option = document.createElement("option");
+      option.value = candidate.node_id;
+      option.textContent = candidate.node_id === node?.node_id
+        ? `${candidate.label || candidate.node_id}（当前界面）`
+        : (candidate.label || candidate.node_id);
+      targetSelect.appendChild(option);
+    });
+    targetSelect.value = String(operation?.target_node_id || "");
+    targetSelect.disabled = !enabled;
+  }
+
+  if ($("interfaceWorkflowTransitionAction")) {
+    $("interfaceWorkflowTransitionAction").value = String(operation?.action_type || "");
+    $("interfaceWorkflowTransitionAction").dataset.edgeId = String(operation?.edge_id || "");
+  }
+  if ($("interfaceWorkflowTransitionTarget")) {
+    $("interfaceWorkflowTransitionTarget").value = String(operation?.target_node_id || "");
+    $("interfaceWorkflowTransitionTarget").dataset.edgeId = String(operation?.edge_id || "");
+  }
+
+  if ($("interfaceWorkflowOperationAddBtn")) $("interfaceWorkflowOperationAddBtn").disabled = !enabled;
+  if ($("interfaceWorkflowOperationUpdateBtn")) $("interfaceWorkflowOperationUpdateBtn").disabled = !operation;
+  if ($("interfaceWorkflowOperationDeleteBtn")) $("interfaceWorkflowOperationDeleteBtn").disabled = !operation;
+  if ($("interfaceWorkflowOperationDryRunBtn")) {
+    $("interfaceWorkflowOperationDryRunBtn").disabled = !operation || interfaceWorkflowHasUnsavedChanges;
+  }
+  if ($("interfaceWorkflowOperationStatus")) {
+    $("interfaceWorkflowOperationStatus").textContent = operation
+      ? `${operation.action_type || "unknown_action"} · ${node?.node_id || ""} -> ${operation.target_node_id || ""}`
+      : (enabled ? "可以添加当前界面的第一个操作" : "尚未选择界面");
+  }
+}
+
+function createInterfaceWorkflowPlaceholderNode() {
+  if (!interfaceWorkflowReviewState) return null;
+  const name = String($("interfaceWorkflowOperationPlaceholderName")?.value || "").trim();
+  if (!name) return null;
+  const node = interfaceWorkflowReviewState.addPlaceholderNode(name, "unknown_surface");
+  if ($("interfaceWorkflowOperationPlaceholderName")) {
+    $("interfaceWorkflowOperationPlaceholderName").value = "";
+  }
+  return node;
+}
+
+function addInterfaceWorkflowOperation() {
+  if (!interfaceWorkflowReviewState) return null;
+  const view = interfaceWorkflowReviewState.current();
+  const sourceNodeId = String(view?.node?.node_id || "").trim();
+  if (!sourceNodeId) return null;
+  try {
+    const placeholder = createInterfaceWorkflowPlaceholderNode();
+    const patch = interfaceWorkflowOperationPatch();
+    if (placeholder) patch.target_node_id = placeholder.node_id;
+    if (!patch.target_node_id) {
+      throw new Error("请选择目标界面，或填写待学习界面名称");
+    }
+    const edge = interfaceWorkflowReviewState.addOperation(sourceNodeId, {
+      operation_id: patch.display_name || patch.action_type,
+      ...patch,
+      display_name: patch.display_name || patch.action_type,
+    });
+    interfaceWorkflowSelectedOperationId = edge.edge_id;
+    interfaceWorkflowReview = interfaceWorkflowReviewState.snapshot();
+    markInterfaceWorkflowUnsaved(`已添加 ${edge.display_name} · 尚未保存`);
+    renderInterfaceWorkflowReviewSelection();
+    return edge;
+  } catch (error) {
+    if ($("interfaceWorkflowOperationStatus")) {
+      $("interfaceWorkflowOperationStatus").textContent = error?.message || "添加操作失败";
+    }
+    return null;
+  }
+}
+
+function updateInterfaceWorkflowOperation() {
+  if (!interfaceWorkflowReviewState || !interfaceWorkflowSelectedOperationId) return null;
+  try {
+    const patch = interfaceWorkflowOperationPatch();
+    if (!patch.target_node_id) throw new Error("操作必须指定目标界面");
+    interfaceWorkflowReviewState.updateEdge(interfaceWorkflowSelectedOperationId, {
+      ...patch,
+      display_name: patch.display_name || patch.action_type,
+    });
+    interfaceWorkflowReview = interfaceWorkflowReviewState.snapshot();
+    markInterfaceWorkflowUnsaved("操作与跳转路径已更新 · 尚未保存");
+    renderInterfaceWorkflowReviewSelection();
+    return currentInterfaceWorkflowOperation();
+  } catch (error) {
+    if ($("interfaceWorkflowOperationStatus")) {
+      $("interfaceWorkflowOperationStatus").textContent = error?.message || "更新操作失败";
+    }
+    return null;
+  }
+}
+
+function removeInterfaceWorkflowOperation() {
+  if (!interfaceWorkflowReviewState || !interfaceWorkflowSelectedOperationId) return null;
+  try {
+    const removed = interfaceWorkflowReviewState.removeOperation(interfaceWorkflowSelectedOperationId);
+    interfaceWorkflowSelectedOperationId = "";
+    interfaceWorkflowReview = interfaceWorkflowReviewState.snapshot();
+    markInterfaceWorkflowUnsaved(`已删除 ${removed.display_name || removed.edge_id} · 目标界面保留`);
+    renderInterfaceWorkflowReviewSelection();
+    return removed;
+  } catch (error) {
+    if ($("interfaceWorkflowOperationStatus")) {
+      $("interfaceWorkflowOperationStatus").textContent = error?.message || "删除操作失败";
+    }
+    return null;
+  }
+}
+
+function commitInterfaceWorkflowOperationEditor(options = {}) {
+  if (!interfaceWorkflowReviewState || !interfaceWorkflowSelectedOperationId) return null;
+  const patch = interfaceWorkflowOperationPatch();
+  if (!patch.target_node_id) return null;
+  interfaceWorkflowReviewState.updateEdge(interfaceWorkflowSelectedOperationId, {
+    ...patch,
+    display_name: patch.display_name || patch.action_type,
+  });
+  interfaceWorkflowReview = interfaceWorkflowReviewState.snapshot();
+  if (options.silent !== true) markInterfaceWorkflowUnsaved();
+  return currentInterfaceWorkflowOperation();
+}
+
+async function dryRunInterfaceWorkflowOperation() {
+  if (!interfaceWorkflowReviewState) return null;
+  if (interfaceWorkflowHasUnsavedChanges || !interfaceWorkflowSavedReviewPath) {
+    if ($("interfaceWorkflowOperationStatus")) {
+      $("interfaceWorkflowOperationStatus").textContent = "请先保存学习结果，再运行安全验证";
+    }
+    return null;
+  }
+  const view = interfaceWorkflowReviewState.current();
+  const operation = currentInterfaceWorkflowOperation(view);
+  if (!operation) return null;
+  const forbidden = new Set(["final_submit", "submit", "send", "confirm", "payment", "delete"]);
+  const actionType = String(operation.action_type || "").trim().toLowerCase();
+  if (forbidden.has(actionType)) {
+    if ($("interfaceWorkflowOperationStatus")) {
+      $("interfaceWorkflowOperationStatus").textContent = `安全停止 · 禁止动作 ${actionType}`;
+    }
+    return null;
+  }
+  const graph = interfaceWorkflowReviewState.graph();
+  const applicationIdentity = graph.workflow?.application_identity || {};
+  const appName = String(
+    selectedWindowCandidate()?.process_name
+    || applicationIdentity.process_name
+    || applicationIdentity.process
+    || applicationIdentity.name
+    || "",
+  ).trim();
+  if (!appName) {
+    if ($("interfaceWorkflowOperationStatus")) {
+      $("interfaceWorkflowOperationStatus").textContent = "安全停止 · 需要绑定当前目标窗口";
+    }
+    return null;
+  }
+  if ($("interfaceWorkflowOperationStatus")) {
+    $("interfaceWorkflowOperationStatus").textContent = "正在获取当前截图并执行定位与 Gate dry-run…";
+  }
+  const response = await api(
+    "POST",
+    "/action/execute_recognition_plan",
+    {
+      goal: String(operation.display_name || operation.action_type || "").trim(),
+      app_name: appName,
+      state_hint: String(view?.node?.surface_type || "").trim(),
+      capture_live: true,
+      dry_run: true,
+      provider_mode: "local_grounding",
+      top_k: 3,
+      enable_post_click_verification: false,
+      max_execution_attempts: 1,
+      metadata: {
+        reviewed_workflow_operation: {
+          edge_id: operation.edge_id,
+          operation_id: operation.operation_id,
+          action_type: operation.action_type,
+          target_region_id: operation.target_region_id || "",
+          target_control_id: operation.target_control_id || "",
+        },
+      },
+    },
+    {
+      summary: "Reviewed operation dry-run",
+      workflowStep: "reviewed_operation_dry_run",
+      timeoutSeconds: requestTimeoutSeconds(),
+      skipRender: true,
+    },
+  );
+  const result = response?.data?.result || response?.data || {};
+  const actionExecuted = nestedGet(result, ["execution_path", "action_executed"])
+    ?? nestedGet(result, ["recognition_plan", "execution_path", "action_executed"])
+    ?? false;
+  const tracePath = String(
+    result.trace_path
+    || nestedGet(result, ["recognition_plan", "trace_path"])
+    || "",
+  ).trim();
+  if (response?.success && actionExecuted !== true) {
+    if ($("interfaceWorkflowOperationStatus")) {
+      $("interfaceWorkflowOperationStatus").textContent = `ready_for_operator_review · action_executed=false${tracePath ? ` · ${tracePath}` : ""}`;
+    }
+  } else {
+    if ($("interfaceWorkflowOperationStatus")) {
+      $("interfaceWorkflowOperationStatus").textContent = actionExecuted === true
+        ? "invalid · dry-run returned action_executed=true"
+        : `safe_stop · action_executed=false · ${response?.message || "Gate rejected"}`;
+    }
+  }
+  renderResponse(response || { success: false, message: "Reviewed operation dry-run failed" }, "Reviewed operation dry-run");
+  return response?.success && actionExecuted !== true ? result : null;
+}
+
+function selectedInterfaceWorkflowContentDescriptor(view) {
+  const node = view?.node;
+  const control = view?.selected_control;
+  const sourceId = String(control?.control_id || control?.region_id || "").trim();
+  const descriptors = Array.isArray(node?.content_descriptors) ? node.content_descriptors : [];
+  return descriptors.find((item) => String(item?.source_id || "").trim() === sourceId) || null;
+}
+
+function renderInterfaceWorkflowContentEditor(view) {
+  const node = view?.node;
+  const control = view?.selected_control;
+  const sourceId = String(control?.control_id || control?.region_id || "").trim();
+  const descriptor = selectedInterfaceWorkflowContentDescriptor(view);
+  const enabled = Boolean(node && sourceId);
+  const setValue = (id, value) => {
+    const element = $(id);
+    if (!element) return;
+    element.value = String(value || "");
+    element.disabled = !enabled;
+  };
+  setValue(
+    "interfaceWorkflowContentTarget",
+    enabled
+      ? `${interfaceWorkflowItemLabel(control, sourceId)} · ${sourceId}`
+      : "",
+  );
+  setValue(
+    "interfaceWorkflowContentBehavior",
+    descriptor?.content_behavior || "fixed_structure",
+  );
+  setValue(
+    "interfaceWorkflowContentAgentUsage",
+    descriptor?.agent_usage || "display_only",
+  );
+  setValue(
+    "interfaceWorkflowContentReadPolicy",
+    descriptor?.read_policy || "on_demand",
+  );
+  setValue(
+    "interfaceWorkflowContentDescription",
+    descriptor?.agent_description || "",
+  );
+  if ($("interfaceWorkflowContentSaveBtn")) {
+    $("interfaceWorkflowContentSaveBtn").disabled = !enabled;
+  }
+  if ($("interfaceWorkflowContentStatus")) {
+    $("interfaceWorkflowContentStatus").textContent = enabled
+      ? (descriptor ? "已保存内容说明" : "等待补充内容说明")
+      : "请在中间带框图选择具体控件";
+  }
+}
+
+function saveInterfaceWorkflowContentDescriptor() {
+  if (!interfaceWorkflowReviewState) return null;
+  const view = interfaceWorkflowReviewState.current();
+  const node = view?.node;
+  const control = view?.selected_control;
+  const nodeId = String(node?.node_id || "").trim();
+  const sourceId = String(control?.control_id || control?.region_id || "").trim();
+  if (!nodeId || !sourceId) {
+    if ($("interfaceWorkflowContentStatus")) {
+      $("interfaceWorkflowContentStatus").textContent = "请先在中间带框图选择具体控件";
+    }
+    return null;
+  }
+  const existing = Array.isArray(node.content_descriptors)
+    ? node.content_descriptors.map((item) => ({ ...item }))
+    : [];
+  const index = existing.findIndex((item) => String(item?.source_id || "").trim() === sourceId);
+  const contentId = String(existing[index]?.content_id || `${nodeId}_${sourceId}`)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "_")
+    .replace(/^[_\-.]+|[_\-.]+$/g, "")
+    .slice(0, 96);
+  const descriptor = {
+    content_id: contentId || `content_${existing.length + 1}`,
+    label: interfaceWorkflowItemLabel(control, sourceId),
+    source_kind: control?.control_id ? "control" : "region",
+    source_id: sourceId,
+    content_behavior: String($("interfaceWorkflowContentBehavior")?.value || "fixed_structure"),
+    agent_usage: String($("interfaceWorkflowContentAgentUsage")?.value || "display_only"),
+    read_policy: String($("interfaceWorkflowContentReadPolicy")?.value || "on_demand"),
+    agent_description: String($("interfaceWorkflowContentDescription")?.value || "").trim(),
+  };
+  if (index >= 0) existing[index] = descriptor;
+  else existing.push(descriptor);
+  interfaceWorkflowReviewState.updateNode(nodeId, {
+    content_descriptors: existing,
+  });
+  interfaceWorkflowReview = interfaceWorkflowReviewState.snapshot();
+  markInterfaceWorkflowUnsaved("内容说明已更新，等待保存学习结果");
+  renderInterfaceWorkflowReviewSelection();
+  if ($("interfaceWorkflowContentStatus")) {
+    $("interfaceWorkflowContentStatus").textContent = "内容说明已更新";
+  }
+  return descriptor;
+}
+
+function renderInterfaceWorkflowEditor(view) {
+  const node = view?.node;
+  const enabled = Boolean(node);
+  if ($("interfaceWorkflowNodeName")) {
+    $("interfaceWorkflowNodeName").value = String(node?.display_name || "");
+    $("interfaceWorkflowNodeName").disabled = !enabled;
+  }
+  if ($("interfaceWorkflowSurfaceType")) {
+    $("interfaceWorkflowSurfaceType").value = String(node?.surface_type || "");
+    $("interfaceWorkflowSurfaceType").disabled = !enabled;
+  }
+  if ($("interfaceWorkflowNodeReviewStatus")) {
+    const status = String(node?.review_status || "needs_human_review");
+    $("interfaceWorkflowNodeReviewStatus").value = ["needs_human_review", "reviewed_candidate", "rejected"].includes(status)
+      ? status
+      : "needs_human_review";
+    $("interfaceWorkflowNodeReviewStatus").disabled = !enabled;
+  }
+  if ($("interfaceWorkflowEditBoxesBtn")) $("interfaceWorkflowEditBoxesBtn").disabled = !enabled;
+  if ($("interfaceWorkflowRemoveSourceBtn")) $("interfaceWorkflowRemoveSourceBtn").disabled = !enabled;
+  if ($("interfaceWorkflowSaveBtn")) $("interfaceWorkflowSaveBtn").disabled = !enabled;
+  if ($("interfaceWorkflowMemoryBtn")) $("interfaceWorkflowMemoryBtn").disabled = !enabled;
+  if ($("interfaceWorkflowSaveStatus")) {
+    $("interfaceWorkflowSaveStatus").textContent = interfaceWorkflowHasUnsavedChanges
+      ? "有未保存修改 · 保存后才能安全验证"
+      : (enabled ? t("interface_workflow_save_hint") : t("interface_workflow_inspector_empty"));
+  }
+  renderInterfaceWorkflowContentEditor(view);
+  renderInterfaceWorkflowOperationEditor(view);
+}
+
+function renderInterfaceWorkflowReview(review) {
+  const factory = globalThis.InterfaceWorkflowReview?.createInterfaceWorkflowReviewState;
+  if (typeof factory !== "function") {
+    clearInterfaceWorkflowReview("workflow review module unavailable");
+    return;
+  }
+  interfaceWorkflowReview = review || null;
+  try {
+    interfaceWorkflowReviewState = factory(interfaceWorkflowReview);
+  } catch (error) {
+    clearInterfaceWorkflowReview(error?.message || "invalid workflow review");
+    return;
+  }
+  interfaceWorkflowSelectedOperationId = "";
+  interfaceWorkflowSavedReviewPath = "";
+  interfaceWorkflowHasUnsavedChanges = false;
+  interfaceWorkflowWorkbenchState.showWorkflowNode(
+    interfaceWorkflowReviewState.current()?.node?.node_id || "",
+  );
+  setInterfaceWorkflowCorrectionOpen(false);
+  renderInterfaceWorkflowReviewSelection();
+}
+
+function renderInterfaceWorkflowReviewSelection() {
+  if (!interfaceWorkflowReviewState) {
+    clearInterfaceWorkflowReview();
+    return;
+  }
+  const graph = interfaceWorkflowReviewState.graph();
+  const view = interfaceWorkflowReviewState.current();
+  const workflow = graph.workflow || {};
+  const applicationLabel = interfaceWorkflowApplicationLabel(workflow.application_identity);
+  if ($("interfaceWorkflowStatus")) {
+    $("interfaceWorkflowStatus").textContent = `${workflow.review_status || "needs_human_review"} · nodes=${graph.nodes.length}`;
+  }
+  if ($("interfaceWorkflowGoal")) $("interfaceWorkflowGoal").textContent = workflow.goal || "--";
+  if ($("interfaceWorkflowApplication")) $("interfaceWorkflowApplication").textContent = applicationLabel || "--";
+  if ($("interfaceWorkflowSourceStatus")) {
+    $("interfaceWorkflowSourceStatus").textContent = interfaceWorkflowDraftSourcePaths.length
+      ? `已加入 ${interfaceWorkflowDraftSourcePaths.length} 个历史界面；选择节点可审核各自证据。`
+      : t("interface_workflow_source_empty");
+  }
+  renderInterfaceWorkflowGraph(graph);
+  renderActiveInterfaceWorkflowEvidence();
+  renderInterfaceWorkflowInspector(view);
+  renderInterfaceWorkflowEditor(view);
+  syncInterfaceWorkflowAttachFromNodeOptions();
+}
+
+function commitInterfaceWorkflowEditorToState() {
+  if (!interfaceWorkflowReviewState) return null;
+  const view = interfaceWorkflowReviewState.current();
+  const nodeId = String(view?.node?.node_id || "").trim();
+  if (!nodeId) return interfaceWorkflowReviewState.snapshot();
+  interfaceWorkflowReviewState.updateNode(nodeId, {
+    display_name: String($("interfaceWorkflowNodeName")?.value || "").trim() || nodeId,
+    surface_type: String($("interfaceWorkflowSurfaceType")?.value || "").trim() || "unknown_surface",
+    review_status: String($("interfaceWorkflowNodeReviewStatus")?.value || "needs_human_review"),
+  });
+  commitInterfaceWorkflowOperationEditor({ silent: true });
+  interfaceWorkflowReview = interfaceWorkflowReviewState.snapshot();
+  return interfaceWorkflowReview;
+}
+
+async function saveInterfaceWorkflowReview() {
+  if (!interfaceWorkflowReviewState) {
+    if ($("interfaceWorkflowSaveStatus")) {
+      $("interfaceWorkflowSaveStatus").textContent = "没有可保存的界面学习结果";
+    }
+    return null;
+  }
+  interfaceWorkflowReview = commitInterfaceWorkflowEditorToState();
+  if (!interfaceWorkflowReview) return null;
+  renderInterfaceWorkflowReviewSelection();
+  if ($("interfaceWorkflowSaveBtn")) $("interfaceWorkflowSaveBtn").disabled = true;
+  if ($("interfaceWorkflowSaveStatus")) $("interfaceWorkflowSaveStatus").textContent = "正在保存学习结果…";
+
+  const response = await api("POST", "/panel/save_interface_workflow_review", {
+    review: interfaceWorkflowReview,
+  }, {
+    summary: "POST /panel/save_interface_workflow_review",
+    workflowStep: "save_interface_workflow_review",
+    skipRender: true,
+  });
+  if ($("interfaceWorkflowSaveBtn")) $("interfaceWorkflowSaveBtn").disabled = false;
+  if (!response?.success) {
+    if ($("interfaceWorkflowSaveStatus")) {
+      $("interfaceWorkflowSaveStatus").textContent = response?.message || "学习结果保存失败";
+    }
+    return null;
+  }
+  if ($("interfaceWorkflowSaveStatus")) {
+    $("interfaceWorkflowSaveStatus").textContent = `已保存 · ${response.data?.path || ""} · 未发布`;
+  }
+  interfaceWorkflowSavedReviewPath = String(response.data?.path || "").trim();
+  interfaceWorkflowHasUnsavedChanges = false;
+  await loadInterfaceWorkflowLibraryRegistry({
+    preferredWorkflowId: String(response.data?.workflow_id || "").trim(),
+    openSelected: true,
+  });
+  renderInterfaceWorkflowOperationEditor(interfaceWorkflowReviewState.current());
+  return response.data || {};
+}
+
+function openInterfaceWorkflowMemoryVerification() {
+  if (!interfaceWorkflowReviewState) return;
+  const graph = interfaceWorkflowReviewState.graph();
+  const view = interfaceWorkflowReviewState.current();
+  const applicationIdentity = graph.workflow?.application_identity || {};
+  const interfaceIdSeed = [
+    applicationIdentity.process_name,
+    applicationIdentity.name,
+    applicationIdentity.display_name,
+    view?.node?.surface_type,
+  ].filter(Boolean).join("_").toLowerCase();
+  const interfaceId = interfaceIdSeed
+    .replace(/[^a-z0-9._-]+/g, "_")
+    .replace(/^[_\-.]+|[_\-.]+$/g, "")
+    .slice(0, 80);
+  if ($("learningMemoryInterfaceId") && !$("learningMemoryInterfaceId").value) {
+    $("learningMemoryInterfaceId").value = interfaceId.length >= 2
+      ? interfaceId
+      : "reviewed_interface";
+  }
+  if ($("learningMemoryGoal") && !$("learningMemoryGoal").value) {
+    $("learningMemoryGoal").value = String(graph.workflow?.goal || "").trim();
+  }
+  if ($("learningMemoryStatus")) {
+    $("learningMemoryStatus").textContent = "先保存并人工批准当前界面候选，再发布；Execute 仍需实时定位与 Gate";
+  }
+  $("learningOperationalMemoryPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function loadInterfaceWorkflowReview(sourcePaths = [], options = {}) {
+  const loadToken = options.loadToken || interfaceWorkflowLoadGuard.begin();
+  if (!interfaceWorkflowLoadGuard.isCurrent(loadToken)) return null;
+  const paths = Array.from(new Set(
+    (Array.isArray(sourcePaths) ? sourcePaths : [])
+      .map((path) => String(path || "").trim())
+      .filter(Boolean),
+  ));
+  if (!paths.length) {
+    clearInterfaceWorkflowReview("no learning draft selected");
+    return null;
+  }
+  const previousReview = options.preserveEdits === true
+    ? commitInterfaceWorkflowEditorToState()
+    : null;
+  const response = await api("POST", "/panel/load_interface_workflow_review", {
+    goal: String($("learningTrialGoal")?.value || "").trim(),
+    application_identity: currentInterfaceWorkflowApplicationIdentity(),
+    draft_source_paths: paths,
+    discover_related_sidecars: options.discoverRelatedSidecars !== false,
+  }, {
+    summary: "POST /panel/load_interface_workflow_review",
+    workflowStep: "load_interface_workflow_review",
+    skipRender: true,
+  });
+  if (!interfaceWorkflowLoadGuard.isCurrent(loadToken)) return null;
+  if (!response?.success) {
+    if (!interfaceWorkflowReviewState) {
+      clearInterfaceWorkflowReview(response?.message || "workflow review load failed");
+    } else if ($("interfaceWorkflowSourceStatus")) {
+      $("interfaceWorkflowSourceStatus").textContent = response?.message || "workflow review load failed";
+    }
+    if (!options.skipResponse) renderResponse(response || { success: false }, "Interface workflow review");
+    return null;
+  }
+  const merge = globalThis.InterfaceWorkflowReview?.mergeEditableWorkflowReview;
+  const nextReview = previousReview && typeof merge === "function"
+    ? merge(response.data || {}, previousReview)
+    : (response.data || {});
+  interfaceWorkflowDraftSourcePaths = paths;
+  renderInterfaceWorkflowReview(nextReview);
+  const selectedSourcePath = String(options.selectSourcePath || "").trim();
+  if (selectedSourcePath && interfaceWorkflowReviewState) {
+    const selectedNode = (interfaceWorkflowReviewState.snapshot().nodes || []).find(
+      (node) => Array.isArray(node.source_paths) && node.source_paths.includes(selectedSourcePath),
+    );
+    if (selectedNode) {
+      interfaceWorkflowReviewState.select(selectedNode.node_id);
+      renderInterfaceWorkflowReviewSelection();
+    }
+  }
+  if (!options.skipResponse) renderResponse(response, "Interface workflow review");
+  return response.data || {};
+}
+
+async function addInterfaceWorkflowSource() {
+  const sourcePath = String($("interfaceWorkflowSourceSelect")?.value || "").trim();
+  if (!sourcePath) {
+    if ($("interfaceWorkflowSourceStatus")) $("interfaceWorkflowSourceStatus").textContent = "请选择一个已保存的单界面。";
+    return null;
+  }
+  const requestedWorkflowId = String($("interfaceWorkflowAttachWorkflowSelect")?.value || "").trim();
+  if (requestedWorkflowId) {
+    const loadedTarget = await selectInterfaceWorkflowAttachTarget();
+    if (!loadedTarget) return null;
+  }
+  if (!interfaceWorkflowReviewState) {
+    if ($("interfaceWorkflowSourceStatus")) {
+      $("interfaceWorkflowSourceStatus").textContent = "请先新建或打开一个软件流程。";
+    }
+    return null;
+  }
+  if (interfaceWorkflowDraftSourcePaths.includes(sourcePath)) {
+    if ($("interfaceWorkflowSourceStatus")) $("interfaceWorkflowSourceStatus").textContent = "这个界面已经在当前流程中。";
+    return null;
+  }
+  const requestedDisplayName = String(
+    $("interfaceWorkflowSourceNameInput")?.value || "",
+  ).trim();
+  const previewNode = await previewInterfaceWorkflowSource();
+  const sourceSnapshot = interfaceWorkflowSourceReviewState?.snapshot?.() || {};
+  const newNode = (Array.isArray(sourceSnapshot.nodes) ? sourceSnapshot.nodes : []).find(
+    (node) => String(node?.node_id || "") === String(previewNode?.node_id || ""),
+  );
+  if (!newNode) {
+    if ($("interfaceWorkflowSourceStatus")) {
+      $("interfaceWorkflowSourceStatus").textContent = "新界面已读取，但无法建立可保存的界面节点。";
+    }
+    return null;
+  }
+  if (requestedDisplayName) newNode.display_name = requestedDisplayName;
+  newNode.review_status = "reviewed_candidate";
+  try {
+    interfaceWorkflowReviewState.addInterfaceNode(newNode);
+  } catch (error) {
+    if ($("interfaceWorkflowSourceStatus")) {
+      $("interfaceWorkflowSourceStatus").textContent = error?.message || "界面加入失败";
+    }
+    return null;
+  }
+  interfaceWorkflowDraftSourcePaths.push(sourcePath);
+  interfaceWorkflowReviewState.focusInterface(newNode.node_id);
+  interfaceWorkflowWorkbenchState.showWorkflowNode(newNode.node_id);
+  interfaceWorkflowReview = interfaceWorkflowReviewState.snapshot();
+  markInterfaceWorkflowUnsaved("界面已加入流程，尚未连接；正在保存…");
+  renderInterfaceWorkflowReviewSelection();
+  await saveInterfaceWorkflowReview();
+  renderInterfaceWorkflowSourcePreview(null);
+  return interfaceWorkflowReview;
+}
+
+async function removeCurrentInterfaceWorkflowSource() {
+  if (!interfaceWorkflowReviewState) return null;
+  const currentNode = interfaceWorkflowReviewState.current()?.node;
+  const removePaths = new Set(Array.isArray(currentNode?.source_paths) ? currentNode.source_paths : []);
+  const remainingPaths = interfaceWorkflowDraftSourcePaths.filter((path) => !removePaths.has(path));
+  if (remainingPaths.length === interfaceWorkflowDraftSourcePaths.length) {
+    if ($("interfaceWorkflowSourceStatus")) $("interfaceWorkflowSourceStatus").textContent = "当前界面没有可移除的历史来源。";
+    return null;
+  }
+  if (!remainingPaths.length) {
+    clearInterfaceWorkflowReview("当前流程尚未加入界面。");
+    return {};
+  }
+  return loadInterfaceWorkflowReview(remainingPaths, { preserveEdits: true, skipResponse: true });
 }
 
 function renderLearningDraftReview(review) {
@@ -13552,9 +18128,11 @@ function renderLearningDraftReview(review) {
   renderLearningDraftPathPreview(review);
 }
 
-function clearLearningDraftReviewDisplay(reason = "") {
+function clearLearningDraftReviewDisplay(reason = "", options = {}) {
   learningDraftReview = null;
+  if (!options.preserveWorkflowReview) clearInterfaceWorkflowReview(reason);
   learningDraftReviewBboxEdits = { regions: {}, actions: {} };
+  resetLearningDraftEditorState(null);
   if ($("learningDraftReviewStates")) $("learningDraftReviewStates").innerHTML = `<p class="trace-idle">${escapeHtml(t("pending"))}</p>`;
   if ($("learningDraftReviewRegions")) $("learningDraftReviewRegions").innerHTML = `<p class="trace-idle">${escapeHtml(t("pending"))}</p>`;
   if ($("learningDraftReviewActions")) $("learningDraftReviewActions").innerHTML = `<p class="trace-idle">${escapeHtml(t("pending"))}</p>`;
@@ -13571,6 +18149,220 @@ function clearLearningDraftReviewDisplay(reason = "") {
   clearLearningDraftPathPreview(reason);
 }
 
+function renderLearningCorrectionMemoryRegistry(registry) {
+  learningCorrectionMemoryRegistry = registry || null;
+  const rules = Array.isArray(registry?.rules) ? registry.rules : [];
+  const counts = registry?.status_counts && typeof registry.status_counts === "object"
+    ? registry.status_counts
+    : {};
+  if ($("learningCorrectionMemorySummary")) {
+    $("learningCorrectionMemorySummary").innerHTML = [
+      [t("learning_correction_memory_total"), rules.length],
+      [t("learning_correction_memory_candidate"), Number(counts.candidate || 0)],
+      [t("learning_correction_memory_active"), Number(counts.active || 0)],
+      [t("learning_correction_memory_policy"), String(registry?.production_rule_policy || "active_only")],
+    ].map(([label, value]) => `<span><strong>${escapeHtml(String(value))}</strong>${escapeHtml(label)}</span>`).join("");
+  }
+  if (!$("learningCorrectionMemoryList")) return;
+  if (!rules.length) {
+    $("learningCorrectionMemoryList").innerHTML = `<p class="trace-idle">${escapeHtml(t("learning_correction_memory_empty"))}</p>`;
+    return;
+  }
+  $("learningCorrectionMemoryList").innerHTML = rules.map((rule) => {
+    const surface = rule?.surface && typeof rule.surface === "object" ? rule.surface : {};
+    const editTypes = Array.isArray(rule?.edit_types) ? rule.edit_types.filter(Boolean) : [];
+    const status = String(rule?.status || "candidate");
+    return `<article class="learning-correction-memory-item" data-status="${escapeHtml(status)}">
+      <div class="learning-correction-memory-item-head">
+        <strong>${escapeHtml(String(rule?.rule_id || "unnamed rule"))}</strong>
+        <span>${escapeHtml(status)}</span>
+      </div>
+      <div class="learning-correction-memory-item-meta">
+        <span>surface=${escapeHtml(String(surface.adapter_id || "generic"))}</span>
+        <span>${escapeHtml(t("learning_correction_memory_corrections"))}=${escapeHtml(String(rule?.correction_count || 0))}</span>
+        <span>${escapeHtml(t("learning_correction_memory_evidence"))}=${escapeHtml(String(rule?.evidence_status || "unknown"))}</span>
+        <span>production_eligible=${escapeHtml(String(rule?.production_eligible === true))}</span>
+      </div>
+      <small>${escapeHtml(t("learning_correction_memory_edits"))}: ${escapeHtml(editTypes.join(", ") || "none")}</small>
+    </article>`;
+  }).join("");
+}
+
+function renderContinuousTaskHandoff(data) {
+  continuousTaskHandoff = data && typeof data === "object" ? data : null;
+  const status = $("continuousTaskHandoffStatus");
+  const summary = $("continuousTaskHandoffSummary");
+  const screenshot = $("continuousTaskHandoffScreenshot");
+  const useButton = $("continuousTaskUseForLearningBtn");
+  const resumeButton = $("continuousTaskResumeBtn");
+  if (!continuousTaskHandoff) {
+    if (status) status.textContent = t("continuous_task_handoff_idle");
+    if (summary) summary.innerHTML = `<span class="trace-idle">${escapeHtml(t("continuous_task_handoff_hint"))}</span>`;
+    if (screenshot) {
+      screenshot.hidden = true;
+      screenshot.removeAttribute("src");
+    }
+    if (useButton) useButton.disabled = true;
+    if (resumeButton) resumeButton.disabled = true;
+    return;
+  }
+
+  const dataRunDir = String(continuousTaskHandoff.run_dir || "").trim();
+  if ($("continuousTaskRunDir") && dataRunDir) $("continuousTaskRunDir").value = dataRunDir;
+  const interfaceId = String(continuousTaskHandoff.pending_interface_id || "").trim();
+  const surfaceType = String(continuousTaskHandoff.pending_surface_type || "").trim();
+  const checkpointPhase = String(continuousTaskHandoff.checkpoint_phase || "").trim();
+  const resumeAction = String(continuousTaskHandoff.resume_action || "").trim();
+  const blocker = String(continuousTaskHandoff.resume_blocker || "").trim();
+  if (status) {
+    status.textContent = continuousTaskHandoff.resume_ready
+      ? (resumeAction === "confirm_apply_entry"
+        ? "awaiting confirmation · Quick Apply entry only"
+        : "reviewed memory ready · no-submit resume available")
+      : `paused · ${blocker || "reviewed memory required"}`;
+  }
+  if (summary) {
+    const draftNotice = resumeAction === "confirm_apply_entry"
+      ? "Quick Apply 学习草稿尚未生成；确认进入后，遇到未知表单才会开始学习。"
+      : "";
+    summary.innerHTML = `
+      <strong>${escapeHtml(interfaceId || "unknown interface")}</strong>
+      <div>${escapeHtml(surfaceType || "unknown surface")} · ${escapeHtml(checkpointPhase || "unknown phase")}</div>
+      <div>${continuousTaskHandoff.screenshot_valid ? "screenshot verified" : "screenshot invalid"} · final submit forbidden · live fill disabled</div>
+      ${draftNotice ? `<div class="continuous-task-draft-notice">${escapeHtml(draftNotice)}</div>` : ""}
+      ${blocker ? `<div>${escapeHtml(blocker)}</div>` : ""}`;
+  }
+  const screenshotPath = String(continuousTaskHandoff.screenshot_path || "").trim();
+  if (screenshot) {
+    if (screenshotPath) {
+      screenshot.src = panelFileUrl(screenshotPath);
+      screenshot.hidden = false;
+    } else {
+      screenshot.hidden = true;
+      screenshot.removeAttribute("src");
+    }
+  }
+  if (useButton) useButton.disabled = !(screenshotPath && continuousTaskHandoff.screenshot_valid);
+  if (resumeButton) {
+    resumeButton.disabled = continuousTaskHandoff.resume_ready !== true;
+    resumeButton.textContent = resumeAction === "confirm_apply_entry"
+      ? "确认进入 Quick Apply"
+      : "继续原任务";
+  }
+}
+
+async function loadContinuousTaskHandoff(options = {}) {
+  const runDir = String($("continuousTaskRunDir")?.value || "").trim();
+  const query = runDir ? `?run_dir=${encodeURIComponent(runDir)}` : "";
+  const response = await api(
+    "GET",
+    `/panel/continuous_task_handoff${query}`,
+    null,
+    { summary: "Load paused continuous task", workflowStep: "continuous_task_handoff", skipRender: true },
+  );
+  if (!response?.success) {
+    renderContinuousTaskHandoff(null);
+    if (!options.skipResponse) {
+      renderResponse(response || { success: false, message: "Continuous task handoff load failed" }, "Paused task handoff");
+    }
+    return null;
+  }
+  renderContinuousTaskHandoff(response.data || {});
+  if (!options.skipResponse) renderResponse(response, "Paused task handoff");
+  return response.data || {};
+}
+
+function useContinuousTaskHandoffForLearning() {
+  if (!continuousTaskHandoff?.screenshot_valid) {
+    renderResponse({ success: false, message: "Paused task screenshot is not verified" }, "Paused task handoff");
+    return null;
+  }
+  const screenshotPath = String(continuousTaskHandoff.screenshot_path || "").trim();
+  const interfaceId = String(continuousTaskHandoff.pending_interface_id || "").trim();
+  const surfaceType = String(continuousTaskHandoff.pending_surface_type || "").trim();
+  setLearningSourceImagePath(screenshotPath);
+  setCurrentImage(screenshotPath);
+  renderLearningDraftScreenshotPath(
+    screenshotPath,
+    "paused continuous-task screenshot",
+    screenshotPath,
+    String(continuousTaskHandoff.screenshot_sha256 || ""),
+  );
+  if ($("learningTrialApp")) $("learningTrialApp").value = "seek";
+  if ($("learningTrialState")) $("learningTrialState").value = surfaceType || "quick_apply";
+  if ($("learningTrialGoal")) {
+    $("learningTrialGoal").value = "learn and review the paused SEEK Quick Apply interface";
+  }
+  if ($("learningMemoryInterfaceId") && interfaceId) $("learningMemoryInterfaceId").value = interfaceId;
+  if ($("learningInterfacePrepStatus")) {
+    $("learningInterfacePrepStatus").textContent = "paused evidence loaded · no live click";
+  }
+  renderResponse({
+    success: true,
+    message: "Paused screenshot loaded into Learning Studio without operating the target app",
+    data: {
+      run_dir: continuousTaskHandoff.run_dir,
+      pending_interface_id: interfaceId,
+      screenshot_path: screenshotPath,
+      no_click: true,
+    },
+  }, "Paused task handoff");
+  return continuousTaskHandoff;
+}
+
+async function resumeContinuousTaskHandoff() {
+  if (!continuousTaskHandoff?.resume_ready) {
+    renderResponse({
+      success: false,
+      message: continuousTaskHandoff?.resume_blocker || "Reviewed memory is not ready",
+    }, "Paused task handoff");
+    return null;
+  }
+  const runDir = String(continuousTaskHandoff.run_dir || $("continuousTaskRunDir")?.value || "").trim();
+  const resumeButton = $("continuousTaskResumeBtn");
+  if (resumeButton) resumeButton.disabled = true;
+  if ($("continuousTaskHandoffStatus")) {
+    $("continuousTaskHandoffStatus").textContent = "starting same no-submit task...";
+  }
+  const response = await api(
+    "POST",
+    "/panel/resume_continuous_task",
+    { run_dir: runDir, base_url: window.location.origin },
+    { summary: "Resume paused continuous task", workflowStep: "continuous_task_resume", skipRender: true },
+  );
+  if (!response?.success) {
+    if (resumeButton) resumeButton.disabled = false;
+    if ($("continuousTaskHandoffStatus")) $("continuousTaskHandoffStatus").textContent = "resume blocked";
+    renderResponse(response || { success: false, message: "Continuous task resume failed" }, "Paused task handoff");
+    return null;
+  }
+  if ($("continuousTaskHandoffStatus")) {
+    $("continuousTaskHandoffStatus").textContent = "same task resumed · no-submit";
+  }
+  renderResponse(response, "Paused task handoff");
+  return response.data || {};
+}
+
+async function loadLearningCorrectionMemoryRegistry(options = {}) {
+  const response = await api("GET", "/panel/surface_rule_registry", null, {
+    summary: "GET /panel/surface_rule_registry",
+    workflowStep: "load_surface_rule_registry",
+    skipRender: true,
+  });
+  if (!response?.success) {
+    learningCorrectionMemoryRegistry = null;
+    if ($("learningCorrectionMemorySummary")) $("learningCorrectionMemorySummary").innerHTML = "";
+    if ($("learningCorrectionMemoryList")) {
+      $("learningCorrectionMemoryList").innerHTML = `<p class="trace-idle">${escapeHtml(response?.message || t("learning_correction_memory_empty"))}</p>`;
+    }
+    if (!options.skipResponse) renderResponse(response || { success: false, message: "CorrectionMemory load failed" }, "CorrectionMemory");
+    return null;
+  }
+  renderLearningCorrectionMemoryRegistry(response.data || {});
+  if (!options.skipResponse) renderResponse(response, "CorrectionMemory");
+  return response.data || {};
+}
+
 async function loadLearningDraftReview(options = {}) {
   const sourcePath = learningDraftReviewSourcePath();
   if (!sourcePath) {
@@ -13578,47 +18370,349 @@ async function loadLearningDraftReview(options = {}) {
     if (!options.skipResponse) renderResponse(response, "Learning draft review");
     return null;
   }
-  const response = await api("POST", "/panel/load_learning_draft_review", {
-    source_path: sourcePath,
-  }, { summary: "POST /panel/load_learning_draft_review", workflowStep: "load_learning_draft_review", skipRender: true });
-  if (!response?.success) {
-    if (!options.skipResponse) renderResponse(response || { success: false, message: "Learning draft review load failed" }, "Learning draft review");
-    return null;
+
+  if (options.supersedePendingLoad !== true) {
+    while (learningDraftReviewLoadPromise) {
+      if (learningDraftReviewLoadSourcePath === sourcePath) {
+        return learningDraftReviewLoadPromise;
+      }
+      await learningDraftReviewLoadPromise;
+    }
   }
-  const data = response.data || {};
-  learningDraftReviewBboxEdits = { regions: {}, actions: {} };
-  renderLearningDraftReview(data);
-  if (!options.skipResponse) {
-    renderResponse({
-      success: true,
-      message: "Learning draft review loaded as display-only candidate",
-      data,
-    }, "Learning draft review");
+
+  const loadRequestToken = ++learningDraftReviewLoadRequestToken;
+  const workflowLoadToken = options.skipWorkflowReview
+    ? null
+    : interfaceWorkflowLoadGuard.begin();
+  const loadPromise = (async () => {
+    clearLearningDraftReviewDisplay(`loading · ${sourcePath}`, {
+      preserveWorkflowReview: options.skipWorkflowReview === true,
+    });
+    try {
+      const response = await api("POST", "/panel/load_learning_draft_review", {
+        source_path: sourcePath,
+        discover_related_sidecars: options.discoverRelatedSidecars !== false,
+      }, { summary: "POST /panel/load_learning_draft_review", workflowStep: "load_learning_draft_review", skipRender: true });
+      if (!response?.success) {
+        if (loadRequestToken !== learningDraftReviewLoadRequestToken) return null;
+        clearLearningDraftReviewDisplay(`加载失败 · ${sourcePath}`, {
+          preserveWorkflowReview: options.skipWorkflowReview === true,
+        });
+        if (!options.skipResponse) renderResponse(response || { success: false, message: "Learning draft review load failed" }, "Learning draft review");
+        return null;
+      }
+      const data = response.data || {};
+      if (loadRequestToken !== learningDraftReviewLoadRequestToken) return null;
+      learningDraftReviewBboxEdits = { regions: {}, actions: {} };
+      learningDraftReview = data;
+      resetLearningDraftEditorState(data);
+      if (!options.skipReviewRender) {
+        renderLearningDraftReview(data);
+      }
+      if (!options.skipWorkflowReview) {
+        await loadInterfaceWorkflowReview(
+          [sourcePath],
+          { skipResponse: true, loadToken: workflowLoadToken },
+        );
+      }
+      if (!options.skipResponse) {
+        renderResponse({
+          success: true,
+          message: "Learning draft review loaded as display-only candidate",
+          data,
+        }, "Learning draft review");
+      }
+      return data;
+    } catch (error) {
+      if (loadRequestToken !== learningDraftReviewLoadRequestToken) return null;
+      clearLearningDraftReviewDisplay(`加载失败 · ${sourcePath}`);
+      if (!options.skipResponse) {
+        renderResponse({
+          success: false,
+          message: "Learning draft review load failed",
+          error: String(error?.message || error),
+        }, "Learning draft review");
+      }
+      return null;
+    }
+  })();
+  learningDraftReviewLoadSourcePath = sourcePath;
+  learningDraftReviewLoadPromise = loadPromise;
+  try {
+    return await loadPromise;
+  } finally {
+    if (learningDraftReviewLoadPromise === loadPromise) {
+      learningDraftReviewLoadPromise = null;
+      learningDraftReviewLoadSourcePath = "";
+    }
   }
-  return data;
 }
 
 async function saveLearningDraftReview() {
+  const apply = $("imageInspectorApplyBoxBtn");
+  let saveSucceeded = false;
+  if (learningDraftEditorActive && apply) {
+    apply.disabled = true;
+    apply.textContent = "Saving review...";
+  }
+  try {
+    const sourcePath = learningDraftReviewSourcePath();
+    if (!sourcePath) {
+      renderResponse({ success: false, message: "learning_draft_review_source_path is required" }, "Learning draft review");
+      return null;
+    }
+    if (learningDraftEditorActive && learningDraftEditorSelected) {
+      applyLearningDraftEditorMetadataFromControls();
+    }
+    const reviewPatch = learningDraftReviewPatch();
+    const response = await api("POST", "/panel/save_learning_draft_review", {
+      source_path: sourcePath,
+      review_patch: reviewPatch,
+    }, { summary: "POST /panel/save_learning_draft_review", workflowStep: "save_learning_draft_review", skipRender: true });
+    if (!response?.success) {
+      renderResponse(response || { success: false, message: "Learning draft review save failed" }, "Learning draft review");
+      return null;
+    }
+    const data = response.data || {};
+    const reviewedPath = String(data.reviewed_template_candidate_path || "").trim();
+    if (!reviewedPath) {
+      renderResponse({
+        success: false,
+        message: "Reviewed template candidate save response is missing reviewed_template_candidate_path",
+        data,
+      }, "Learning draft review");
+      return null;
+    }
+    setLearningPathGraphCandidatePaths(data);
+    const refreshed = await refreshSavedLearningDraftReview({
+      previousSourcePath: sourcePath,
+      reviewedPath,
+    });
+    if (!refreshed?.review) {
+      renderResponse({
+        success: false,
+        message: "Reviewed template candidate saved, but panel refresh failed",
+        data,
+      }, "Learning draft review");
+      return null;
+    }
+    if (!refreshed.workflow) {
+      renderResponse({
+        success: false,
+        message: "Reviewed template candidate saved, but workflow evidence refresh failed",
+        data,
+      }, "Learning draft review");
+      return null;
+    }
+    saveSucceeded = true;
+    closeImageInspector();
+    void loadLearningCorrectionMemoryRegistry({ skipResponse: true }).catch((error) => {
+      renderResponse({
+        success: false,
+        message: "Reviewed template candidate loaded, but CorrectionMemory refresh failed",
+        data: { reviewed_template_candidate_path: reviewedPath },
+        error: String(error),
+      }, "Learning draft review");
+    });
+    renderResponse({
+      success: true,
+      message: "Reviewed template candidate saved without execute authorization",
+      data,
+    }, "Learning draft review");
+    return data;
+  } catch (error) {
+    renderResponse({
+      success: false,
+      message: "Learning draft review save failed",
+      error: String(error),
+    }, "Learning draft review");
+    return null;
+  } finally {
+    if (apply) {
+      apply.disabled = false;
+      apply.textContent = saveSucceeded ? "Saved" : "Save review";
+    }
+  }
+}
+
+async function publishLearningOperationalMemory() {
+  const interfaceId = String($("learningMemoryInterfaceId")?.value || "").trim();
   const sourcePath = learningDraftReviewSourcePath();
-  if (!sourcePath) {
-    renderResponse({ success: false, message: "learning_draft_review_source_path is required" }, "Learning draft review");
+  if (!interfaceId || !sourcePath) {
+    const response = {
+      success: false,
+      message: "interface memory ID and reviewed candidate path are required",
+    };
+    renderResponse(response, "Agent operational memory");
     return null;
   }
-  const reviewPatch = learningDraftReviewPatch();
-  const response = await api("POST", "/panel/save_learning_draft_review", {
-    source_path: sourcePath,
-    review_patch: reviewPatch,
-  }, { summary: "POST /panel/save_learning_draft_review", workflowStep: "save_learning_draft_review", skipRender: true });
+  if (String($("learningDraftReviewStatusSelect")?.value || "") !== "approved_as_assisted_template") {
+    const response = {
+      success: false,
+      message: "human approval is required before publishing operational memory",
+    };
+    renderResponse(response, "Agent operational memory");
+    return null;
+  }
+  const registryResponse = await api(
+    "GET",
+    "/memory/reviewed_interfaces/registry",
+    null,
+    { summary: "Load operational memory registry", skipRender: true },
+  );
+  if (!registryResponse?.success) {
+    renderResponse(registryResponse, "Agent operational memory");
+    return null;
+  }
+  const expectedRevision = Number(registryResponse?.data?.registry_revision || 0);
+  const response = await api(
+    "POST",
+    "/memory/reviewed_interfaces/publish",
+    {
+      source_path: sourcePath,
+      interface_id: interfaceId,
+      expected_registry_revision: expectedRevision,
+    },
+    { summary: "Publish reviewed operational memory", skipRender: true },
+  );
   if (!response?.success) {
-    renderResponse(response || { success: false, message: "Learning draft review save failed" }, "Learning draft review");
+    if ($("learningMemoryStatus")) $("learningMemoryStatus").textContent = "publish_failed · return_to_human_review";
+    renderResponse(response, "Agent operational memory");
     return null;
   }
-  renderResponse({
-    success: true,
-    message: "Reviewed template candidate saved without execute authorization",
-    data: response.data || {},
-  }, "Learning draft review");
-  return response.data || {};
+  if ($("learningMemoryStatus")) $("learningMemoryStatus").textContent = "published · execution_still_requires_gate";
+  await loadLearningOperationalMemory();
+  renderResponse(response, "Agent operational memory");
+  return response.data || null;
+}
+
+async function loadLearningOperationalMemory() {
+  const interfaceId = String($("learningMemoryInterfaceId")?.value || "").trim();
+  if (!interfaceId) {
+    renderResponse({ success: false, message: "interface memory ID is required" }, "Agent operational memory");
+    return null;
+  }
+  const response = await api(
+    "GET",
+    `/memory/reviewed_interfaces/${encodeURIComponent(interfaceId)}/agent_context`,
+    null,
+    { summary: "Load Agent operational memory", skipRender: true },
+  );
+  if (!response?.success) {
+    if ($("learningMemoryStatus")) $("learningMemoryStatus").textContent = "load_failed · return_to_human_review";
+    renderResponse(response, "Agent operational memory");
+    return null;
+  }
+  const actions = Array.isArray(response?.data?.available_actions) ? response.data.available_actions : [];
+  const select = $("learningMemoryActionSelect");
+  if (select) {
+    select.innerHTML = "";
+    const automaticOption = document.createElement("option");
+    automaticOption.value = "";
+    automaticOption.textContent = "-- Agent resolves from goal --";
+    select.appendChild(automaticOption);
+    for (const action of actions) {
+      const option = document.createElement("option");
+      option.value = String(action.action_id || "");
+      option.textContent = `${action.label || action.action_id} · ${action.danger_class || "unknown"}`;
+      option.dataset.goal = String(action.label || action.semantic_action || action.action_id || "");
+      select.appendChild(option);
+    }
+  }
+  const firstAction = actions[0] || {};
+  if ($("learningMemoryGoal") && !$("learningMemoryGoal").value) {
+    $("learningMemoryGoal").value = String(firstAction.label || firstAction.semantic_action || "");
+  }
+  if ($("learningMemoryStatus")) {
+    $("learningMemoryStatus").textContent = actions.length
+      ? `loaded · actions=${actions.length} · current_resolution_required`
+      : "loaded · no_actions";
+  }
+  renderResponse(response, "Agent operational memory");
+  return response.data || null;
+}
+
+async function executeLearningOperationalMemory(dryRun = true) {
+  const interfaceId = String($("learningMemoryInterfaceId")?.value || "").trim();
+  const actionId = String($("learningMemoryActionSelect")?.value || "").trim();
+  const goal = String($("learningMemoryGoal")?.value || "").trim();
+  const appName = String(
+    selectedWindowCandidate()?.process_name
+    || $("bindProcess")?.value
+    || $("executeApp")?.value
+    || "",
+  ).trim();
+  if (!interfaceId || !goal || !appName) {
+    const response = {
+      success: false,
+      message: "interface memory, goal, and bound target process are required",
+    };
+    renderResponse(response, "Agent operational memory Execute");
+    return null;
+  }
+  if ($("learningMemoryStatus")) {
+    $("learningMemoryStatus").textContent = dryRun
+      ? "execute_preview_running · current_capture"
+      : "execute_running · current_capture";
+  }
+  const payload = {
+    goal,
+    app_name: appName,
+    interface_memory_id: interfaceId,
+    capture_live: true,
+    dry_run: Boolean(dryRun),
+    provider_mode: "local_grounding",
+    top_k: 3,
+    enable_post_click_verification: true,
+    max_execution_attempts: 1,
+  };
+  if (actionId) payload.interface_memory_action_id = actionId;
+  const response = await api(
+    "POST",
+    "/action/execute_recognition_plan",
+    payload,
+    {
+      summary: dryRun ? "Operational memory Execute preview" : "Operational memory Execute",
+      workflowStep: dryRun ? "memory_execute_preview" : "memory_execute",
+      timeoutSeconds: requestTimeoutSeconds(),
+      skipRender: true,
+    },
+  );
+  if (!response?.success) {
+    const feedback = response?.data?.learning_review_feedback || null;
+    const reviewSource = String(feedback?.review_target?.reviewed_candidate_path || "").trim();
+    if (reviewSource) {
+      setLearningDraftReviewSourcePath(reviewSource);
+      await loadLearningDraftReview({ skipResponse: true });
+    }
+    if ($("learningDraftReviewStatusSelect")) {
+      $("learningDraftReviewStatusSelect").value = "needs_human_review";
+    }
+    if ($("learningMemoryStatus")) {
+      $("learningMemoryStatus").textContent = feedback?.feedback_path
+        ? "execution_failed · feedback_recorded · return_to_human_review"
+        : "execution_failed · return_to_human_review";
+    }
+    renderResponse(response, "Agent operational memory Execute");
+    return null;
+  }
+  if ($("learningMemoryStatus")) {
+    $("learningMemoryStatus").textContent = dryRun
+      ? "preview_ready · Gate_allowed · no_click"
+      : "executed_verified · post_action_verified";
+  }
+  renderResponse(response, "Agent operational memory Execute");
+  return response.data || null;
+}
+
+function returnLearningOperationalMemoryToReview() {
+  if ($("learningDraftReviewStatusSelect")) {
+    $("learningDraftReviewStatusSelect").value = "needs_human_review";
+  }
+  if ($("learningMemoryStatus")) {
+    $("learningMemoryStatus").textContent = "needs_human_review · editing";
+  }
+  openLearningDraftBoxEditor();
 }
 
 async function generatePathGraphCandidate() {
@@ -13861,7 +18955,7 @@ async function createPageDetailCandidate() {
     return null;
   }
   const data = response.data || {};
-  const candidateSourcePath = String(data.report_path || data.page_detail_candidate_path || sourcePath || "").trim();
+  const candidateSourcePath = learningPageDetailArtifactPath(data) || sourcePath;
   setLearningDraftReviewSourcePath(candidateSourcePath);
   await loadLearningDraftReview({ skipResponse: true });
   renderResponse({
@@ -13903,7 +18997,7 @@ async function createLearningDemoScaffold() {
     return null;
   }
   const data = response.data || {};
-  const scaffoldSourcePath = String(data.report_path || data.learn_mode_demo_scaffold_path || sourcePath || "").trim();
+  const scaffoldSourcePath = learningScaffoldArtifactPath(data) || sourcePath;
   setLearningDraftReviewSourcePath(scaffoldSourcePath);
   await loadLearningDraftReview({ skipResponse: true });
   renderResponse({
@@ -14410,7 +19504,7 @@ async function createAssistedTemplateAuditedPromotionRequest() {
 }
 
 async function loadLearningDetailObserveSources() {
-  const response = await api("GET", "/panel/learning_draft_sources", null, {
+  const response = await api("GET", "/panel/learning_draft_sources?limit=12&include_recent=true", null, {
     summary: "GET /panel/learning_draft_sources",
     workflowStep: "learning_draft_sources",
     skipRender: true,
@@ -14421,6 +19515,7 @@ async function loadLearningDetailObserveSources() {
   }
   const data = response.data || {};
   setLearningDetailObserveSourceOptions(data.sources || []);
+  await maybeLoadCurrentLearningDraftReview();
   renderResponse(response, "Learning draft sources");
   return data;
 }
@@ -15507,6 +20602,9 @@ function bindEvents() {
   on("learningInterfaceListWindowsBtn", "click", learningInterfaceListWindows);
   on("learningInterfaceBindWindowBtn", "click", learningInterfaceBindWindow);
   on("learningInterfaceCaptureBtn", "click", learningInterfaceCapture);
+  on("continuousTaskHandoffRefreshBtn", "click", loadContinuousTaskHandoff);
+  on("continuousTaskUseForLearningBtn", "click", useContinuousTaskHandoffForLearning);
+  on("continuousTaskResumeBtn", "click", resumeContinuousTaskHandoff);
   on("imageInspectorCloseBtn", "click", closeImageInspector);
   $("imageInspectorOverlay")?.addEventListener("click", (event) => {
     if (event.target === $("imageInspectorOverlay")) closeImageInspector();
@@ -15524,6 +20622,7 @@ function bindEvents() {
   on("replayPreset", "change", applyReplayPreset);
   on("replayModelArtifactLoadBtn", "click", loadReplayModelArtifact);
   on("learningInterfaceRunBtn", "click", runLearningInterfaceFlow);
+  on("learningInterfaceCancelBtn", "click", cancelActiveLearningInterfaceFlow);
   on("learningDraftPathLayoutResetBtn", "click", resetLearningDraftPathLayout);
   bindLearningDraftPathResize();
   on("learningTrialCaptureBtn", "click", captureLearningDraftWindow);
@@ -15531,8 +20630,15 @@ function bindEvents() {
   on("learningDraftReviewLoadBtn", "click", loadLearningDraftReview);
   on("learningDraftRecommendedLoadBtn", "click", loadRecommendedLearningDraftReview);
   on("learningDraftFreshnessDemoBtn", "click", loadLearningDraftFreshnessDemo);
+  on("learningDraftOpenBoxEditorBtn", "click", openLearningDraftBoxEditor);
   on("learningDraftReviewSaveBtn", "click", saveLearningDraftReview);
   on("learningDraftManualSaveBtn", "click", saveLearningDraftReview);
+  on("learningMemoryPublishBtn", "click", publishLearningOperationalMemory);
+  on("learningMemoryLoadBtn", "click", loadLearningOperationalMemory);
+  on("learningMemoryDryRunBtn", "click", () => executeLearningOperationalMemory(true));
+  on("learningMemoryExecuteBtn", "click", () => executeLearningOperationalMemory(false));
+  on("learningMemoryReturnToEditBtn", "click", returnLearningOperationalMemoryToReview);
+  on("learningCorrectionMemoryRefreshBtn", "click", loadLearningCorrectionMemoryRegistry);
   on("learningPathGraphCandidateBtn", "click", generatePathGraphCandidate);
   on("learningModelStartApprovalPacketBtn", "click", createModelStartApprovalPacket);
   on("learningCalibrationPreRunCheckBtn", "click", createCalibrationPreRunCheck);
@@ -15570,6 +20676,168 @@ function bindEvents() {
   });
   on("learningDetailObserveSourcesBtn", "click", loadLearningDetailObserveSources);
   on("learningDetailObserveAttachBtn", "click", attachLearningDetailObserveResult);
+  on("interfaceWorkflowGraphCanvas", "pointerdown", onInterfaceWorkflowGraphPointerDown);
+  on("interfaceWorkflowGraphCanvas", "pointermove", onInterfaceWorkflowGraphPointerMove);
+  on("interfaceWorkflowGraphCanvas", "pointerup", onInterfaceWorkflowGraphPointerUp);
+  on("interfaceWorkflowGraphCanvas", "contextmenu", onInterfaceWorkflowGraphContextMenu);
+  on("interfaceWorkflowGraphCanvas", "pointercancel", (event) => {
+    interfaceWorkflowGraphDrag = null;
+    event.currentTarget?.classList.remove("is-dragging");
+    updateInterfaceWorkflowGraphHover(null);
+    renderInterfaceWorkflowGraphFrame();
+  });
+  on("interfaceWorkflowGraphCanvas", "pointerleave", () => {
+    if (interfaceWorkflowGraphDrag) return;
+    updateInterfaceWorkflowGraphHover(null);
+    renderInterfaceWorkflowGraphFrame();
+  });
+  on("interfaceWorkflowGraphCanvas", "wheel", (event) => {
+    event.preventDefault();
+    const point = interfaceWorkflowGraphPointFromEvent(event);
+    zoomInterfaceWorkflowGraph(event.deltaY < 0 ? 1.12 : 0.89, point?.screen || null);
+  });
+  on("interfaceWorkflowGraphZoomOut", "click", () => zoomInterfaceWorkflowGraph(0.82));
+  on("interfaceWorkflowGraphZoomIn", "click", () => zoomInterfaceWorkflowGraph(1.22));
+  on("interfaceWorkflowGraphReset", "click", resetInterfaceWorkflowGraphView);
+  on("interfaceWorkflowGraphBack", "click", () => {
+    interfaceWorkflowReviewState?.clearFocus();
+    interfaceWorkflowWorkbenchState.clearLink();
+    setInterfaceWorkflowGraphLinkStatus();
+    interfaceWorkflowSelectedOperationId = "";
+    renderInterfaceWorkflowReviewSelection();
+    resetInterfaceWorkflowGraphView();
+  });
+  on("interfaceWorkflowGraphContextMenu", "click", (event) => {
+    const action = event.target.closest("[data-interface-workflow-context-action]")
+      ?.dataset?.interfaceWorkflowContextAction;
+    const menu = $("interfaceWorkflowGraphContextMenu");
+    if (action === "start-link") {
+      startInterfaceWorkflowGraphLink(String(menu?.dataset?.nodeId || ""));
+    } else if (action === "delete-edge") {
+      const edgeId = String(
+        event.target.closest("[data-interface-workflow-edge-id]")?.dataset?.interfaceWorkflowEdgeId || "",
+      );
+      void deleteInterfaceWorkflowGraphEdge(edgeId);
+    } else if (action === "cancel-link") {
+      interfaceWorkflowWorkbenchState.clearLink();
+      hideInterfaceWorkflowGraphContextMenu();
+      setInterfaceWorkflowGraphLinkStatus();
+    }
+  });
+  on("interfaceWorkflowLinkDialogSaveBtn", "click", () => {
+    const edge = addInterfaceWorkflowOperation();
+    if (!edge) {
+      if ($("interfaceWorkflowLinkDialogStatus")) {
+        $("interfaceWorkflowLinkDialogStatus").textContent = $("interfaceWorkflowOperationStatus")?.textContent
+          || "连接保存失败，请检查必填项。";
+      }
+      return;
+    }
+    closeInterfaceWorkflowLinkDialog();
+    setInterfaceWorkflowGraphLinkStatus(`已添加连接“${edge.display_name}”；请保存学习结果。`);
+  });
+  on("interfaceWorkflowLinkDialogCancelBtn", "click", () => {
+    closeInterfaceWorkflowLinkDialog({ cancelled: true });
+  });
+  on("interfaceWorkflowLinkDialogCloseBtn", "click", () => {
+    closeInterfaceWorkflowLinkDialog({ cancelled: true });
+  });
+  $("interfaceWorkflowLinkDialog")?.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeInterfaceWorkflowLinkDialog({ cancelled: true });
+  });
+  $("interfaceWorkflowLinkDialog")?.addEventListener("click", (event) => {
+    if (event.target === $("interfaceWorkflowLinkDialog")) {
+      closeInterfaceWorkflowLinkDialog({ cancelled: true });
+    }
+  });
+  on("interfaceWorkflowControlPickerDialogCancelBtn", "click", () => {
+    closeInterfaceWorkflowControlPickerDialog({ cancelled: true, resumeLinkDialog: true });
+  });
+  $("interfaceWorkflowControlPickerDialog")?.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeInterfaceWorkflowControlPickerDialog({ cancelled: true, resumeLinkDialog: true });
+  });
+  $("interfaceWorkflowControlPickerDialog")?.addEventListener("click", (event) => {
+    if (event.target === $("interfaceWorkflowControlPickerDialog")) {
+      closeInterfaceWorkflowControlPickerDialog({ cancelled: true, resumeLinkDialog: true });
+    }
+  });
+  const interfaceWorkflowGraphStage = $("interfaceWorkflowGraphCanvas")?.closest(".interface-workflow-graph-stage");
+  if (interfaceWorkflowGraphStage && typeof ResizeObserver === "function") {
+    interfaceWorkflowGraphResizeObserver?.disconnect();
+    interfaceWorkflowGraphResizeObserver = new ResizeObserver(() => {
+      if (interfaceWorkflowReviewState) {
+        renderInterfaceWorkflowGraph(interfaceWorkflowReviewState.graph());
+      } else {
+        renderInterfaceWorkflowGraphFrame();
+      }
+    });
+    interfaceWorkflowGraphResizeObserver.observe(interfaceWorkflowGraphStage);
+  }
+  on("interfaceWorkflowLayerTabs", "click", (event) => {
+    const button = event.target.closest("[data-interface-workflow-layer]");
+    const layer = String(button?.dataset?.interfaceWorkflowLayer || "").trim();
+    const state = currentInterfaceWorkflowEvidenceState();
+    if (!layer || !state) return;
+    try {
+      state.selectLayer(layer);
+      renderActiveInterfaceWorkflowEvidence();
+    } catch (error) {
+      renderResponse({ success: false, message: error?.message || "Evidence layer selection failed" }, "Interface workflow review");
+    }
+  });
+  on("interfaceWorkflowEvidenceModeWorkflow", "click", () => showInterfaceWorkflowEvidenceMode("workflow"));
+  on("interfaceWorkflowEvidenceModePreview", "click", () => showInterfaceWorkflowEvidenceMode("source_preview"));
+  on("interfaceWorkflowRefreshEvidenceBtn", "click", refreshCurrentInterfaceWorkflowEvidence);
+  on("interfaceWorkflowReviewToolsToggle", "click", openCurrentInterfaceWorkflowBoxEditor);
+  on("interfaceWorkflowEvidence", "click", (event) => {
+    const target = event.target.closest("[data-interface-workflow-control-id]");
+    if (target) selectInterfaceWorkflowEvidenceControl(target.dataset.interfaceWorkflowControlId);
+  });
+  on("interfaceWorkflowOperationList", "change", () => {
+    interfaceWorkflowSelectedOperationId = String($("interfaceWorkflowOperationList")?.value || "").trim();
+    const view = interfaceWorkflowReviewState?.current();
+    renderInterfaceWorkflowOperationEditor(view);
+    showInterfaceWorkflowEvidenceMode("workflow");
+    renderInterfaceWorkflowGraph(interfaceWorkflowReviewState?.graph() || { nodes: [], edges: [] });
+  });
+  on("interfaceWorkflowOperationTargetControl", "change", () => {
+    const controlId = String($("interfaceWorkflowOperationTargetControl")?.value || "").trim();
+    if (controlId) {
+      try {
+        interfaceWorkflowReviewState?.focusControl?.(controlId);
+      } catch (_error) {
+        // 控件选项来自当前界面，状态更新失败时由保存校验明确报告。
+      }
+    }
+    renderActiveInterfaceWorkflowEvidence();
+  });
+  on("interfaceWorkflowOperationPickControlBtn", "click", startInterfaceWorkflowOperationControlPick);
+  on("interfaceWorkflowOperationAddBtn", "click", addInterfaceWorkflowOperation);
+  on("interfaceWorkflowOperationUpdateBtn", "click", updateInterfaceWorkflowOperation);
+  on("interfaceWorkflowOperationDeleteBtn", "click", removeInterfaceWorkflowOperation);
+  on("interfaceWorkflowOperationDryRunBtn", "click", dryRunInterfaceWorkflowOperation);
+  on("interfaceWorkflowContentSaveBtn", "click", saveInterfaceWorkflowContentDescriptor);
+  on("interfaceWorkflowEditBoxesBtn", "click", openCurrentInterfaceWorkflowBoxEditor);
+  on("interfaceWorkflowLoadSavedBtn", "click", loadSavedInterfaceWorkflowReview);
+  on("interfaceWorkflowCreateBtn", "click", createInterfaceWorkflow);
+  on("interfaceWorkflowOpenFolderBtn", "click", () => api(
+    "POST",
+    "/panel/open_interface_workflow_folder",
+    {},
+    { summary: "open learned workflow folder", skipRender: true },
+  ));
+  on("interfaceWorkflowSourceSelect", "change", () => {
+    renderInterfaceWorkflowSourcePreview(null);
+    showInterfaceWorkflowEvidenceMode("workflow");
+  });
+  on("interfaceWorkflowSourcePreviewBtn", "click", previewInterfaceWorkflowSource);
+  on("interfaceWorkflowAttachWorkflowSelect", "change", selectInterfaceWorkflowAttachTarget);
+  on("interfaceWorkflowAddSourceBtn", "click", addInterfaceWorkflowSource);
+  on("interfaceWorkflowRemoveSourceBtn", "click", removeCurrentInterfaceWorkflowSource);
+  on("interfaceWorkflowSaveBtn", "click", saveInterfaceWorkflowReview);
+  on("interfaceWorkflowMemoryBtn", "click", openInterfaceWorkflowMemoryVerification);
   on("replayLoadBtn", "click", loadReplayArtifact);
   on("replayAppProfileLoadBtn", "click", loadReplayAppProfile);
   on("replayAgentPromptLoadBtn", "click", loadReplayAgentPrompt);
@@ -15828,16 +21096,16 @@ async function boot() {
   startPathResizeObserver();
   const response = await api("GET", "/health", null, { summary: "GET /health" });
   setRuntimeState(response.success ? "runtime_ready" : "runtime_unavailable", response.success);
+  await restoreLearningWorkflowState();
   await preloadLearningDraftFromQuery();
+  await loadInterfaceWorkflowLibraryRegistry({
+    openSelected: true,
+  });
+  await loadLearningCorrectionMemoryRegistry({ skipResponse: true });
+  await loadLearningDetailObserveSources();
   if (!panelQueryFlag("skip_boot_models")) {
     await refreshModels();
   }
 }
 
 boot();
-
-
-
-
-
-

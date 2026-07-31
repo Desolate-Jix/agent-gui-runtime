@@ -40,8 +40,33 @@ def test_read_region_batch_stops_after_no_new_content() -> None:
     )
 
     assert report["stop_reason"] == "no_new_content"
+    assert report["completion_status"] == "incomplete"
+    assert report["reached_bottom"] is False
     assert report["capture_count"] == 3
     assert report["merged_text_lines"] == ["A", "B"]
+
+
+def test_read_region_batch_only_marks_complete_for_explicit_reached_bottom() -> None:
+    report = build_read_region_batch_report(
+        target_container_id="article:body",
+        target_bbox={"x": 0, "y": 0, "width": 100, "height": 100},
+        max_captures=5,
+        captures=[
+            {"ocr_result": _ocr("A", "B")},
+            {
+                "ocr_result": _ocr("C"),
+                "reached_bottom": True,
+                "scroll_effect_status": "boundary",
+            },
+            {"ocr_result": _ocr("must not be consumed")},
+        ],
+    )
+
+    assert report["stop_reason"] == "reached_bottom"
+    assert report["completion_status"] == "complete"
+    assert report["reached_bottom"] is True
+    assert report["capture_count"] == 2
+    assert report["merged_text_lines"] == ["A", "B", "C"]
 
 
 def test_read_region_batch_wrong_scope_blocks() -> None:
@@ -55,6 +80,7 @@ def test_read_region_batch_wrong_scope_blocks() -> None:
 
     assert report["status"] == "blocked_wrong_scope"
     assert report["stop_reason"] == "wrong_scope_detected"
+    assert report["completion_status"] == "blocked"
 
 
 def test_extract_ocr_text_lines_accepts_texts_shape() -> None:

@@ -1243,6 +1243,21 @@ def _execute_failure_allows_detail_semantic_success(response: dict[str, Any]) ->
     )
 
 
+def _can_retry_pre_apply_detail_reset(
+    verification: dict[str, Any],
+    *,
+    reset_attempts: int,
+) -> bool:
+    if reset_attempts == 0:
+        return True
+    failure_reasons = {
+        str(reason).strip()
+        for reason in verification.get("failure_reasons", [])
+        if str(reason).strip()
+    }
+    return bool(failure_reasons) and failure_reasons <= {"apply_or_quick_apply_not_visible"}
+
+
 def _reset_seek_job_detail_to_top(
     base_url: str,
     *,
@@ -1443,8 +1458,17 @@ def _execute_apply_entry(
             timeout=timeout,
         )
     summary["pre_apply_detail_verification"] = pre_apply_verification
-    if pre_apply_verification.get("ok") is not True and not pre_apply_detail_reset_attempts:
+    max_pre_apply_detail_reset_attempts = 3
+    if pre_apply_verification.get("ok") is not True:
         summary["pre_apply_detail_verification_before_recovery"] = pre_apply_verification
+    while (
+        pre_apply_verification.get("ok") is not True
+        and len(pre_apply_detail_reset_attempts) < max_pre_apply_detail_reset_attempts
+        and _can_retry_pre_apply_detail_reset(
+            pre_apply_verification,
+            reset_attempts=len(pre_apply_detail_reset_attempts),
+        )
+    ):
         recovery_reset = _reset_seek_job_detail_to_top(
             base_url,
             timeout=timeout,
@@ -1474,6 +1498,7 @@ def _execute_apply_entry(
                 timeout=timeout,
             )
         summary["pre_apply_detail_verification_after_recovery"] = pre_apply_verification
+        summary["pre_apply_detail_verification"] = pre_apply_verification
     if pre_apply_verification.get("ok") is not True:
         summary["status"] = "blocked_need_user_or_gpt_decision"
         summary["stop_reason"] = "pre_apply_detail_verification_failed"

@@ -100,6 +100,12 @@ def test_learn_mode_model_profiles_separate_parser_and_grounding_roles() -> None
     assert len(priorities) == len(set(priorities))
 
 
+def test_qwen_8b_profiles_declare_gpu_memory_budget_for_resource_preflight() -> None:
+    for profile_name in ("learn_mode_qwen3_vl_8b.json", "qwen3_vl_8b_q4_k_m.json"):
+        profile = json.loads((PROFILE_DIR / profile_name).read_text(encoding="utf-8"))
+        assert profile["gpu_memory_gib"] == 7
+
+
 def test_learn_grounding_vista_baseline_profile_is_learn_only_wrapper() -> None:
     profile = json.loads((PROFILE_DIR / "learn_grounding_vista_4b_baseline.json").read_text(encoding="utf-8"))
     execute_defaults = set(STAGE_PROFILE_IDS.values())

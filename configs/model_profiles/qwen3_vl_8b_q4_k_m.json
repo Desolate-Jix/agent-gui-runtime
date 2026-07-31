@@ -16,6 +16,7 @@
   "port": 1240,
   "context_size": 8192,
   "gpu_layers": 99,
+  "gpu_memory_gib": 7,
   "image_min_tokens": 1024,
   "supports_ocr_anchors": true,
   "launchable": true,

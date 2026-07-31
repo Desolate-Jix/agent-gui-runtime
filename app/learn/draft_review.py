@@ -8,10 +8,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from PIL import Image, ImageDraw, UnidentifiedImageError
+
+from app.learn.correction_memory import record_human_review_correction
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 REVIEW_CONTRACT = "learning_draft_review_v1"
 REVIEWED_TEMPLATE_CONTRACT = "reviewed_template_candidate_v1"
+HUMAN_REVIEW_PATCH_CONTRACT = "human_review_patch_v1"
 MODEL_START_PREFLIGHT_REPORT_NAME = "learn_fusion_model_start_preflight_report.json"
 DEMO_READINESS_REPORT_NAME = "learn_fusion_demo_readiness_report.json"
 MODEL_START_APPROVAL_PACKET_NAME = "learn_fusion_model_start_approval_packet.json"
@@ -30,7 +35,12 @@ def clear_learning_draft_sidecar_cache() -> None:
     _SIDECAR_CANDIDATE_PATH_CACHE.clear()
 
 
-def load_learning_draft_review(source_path: str | Path, *, project_root: str | Path | None = None) -> dict[str, Any]:
+def load_learning_draft_review(
+    source_path: str | Path,
+    *,
+    project_root: str | Path | None = None,
+    discover_related_sidecars: bool = True,
+) -> dict[str, Any]:
     """加载模型学习草稿，生成只用于展示和人工审核的面板模型。"""
     root = Path(project_root).resolve() if project_root is not None else PROJECT_ROOT
     resolved = _resolve_source_path(source_path, root)
@@ -45,6 +55,7 @@ def load_learning_draft_review(source_path: str | Path, *, project_root: str | P
         root,
         source_bytes,
         source_hash,
+        discover_related_sidecars=discover_related_sidecars,
     )
 
     draft, attempt_index = _select_draft(payload)
@@ -56,6 +67,8 @@ def load_learning_draft_review(source_path: str | Path, *, project_root: str | P
         "attempt_index": attempt_index,
         "readonly": True,
     }
+    normalized_draft = _normalized_draft(draft)
+    _bind_review_source_image(normalized_draft, root)
     result = {
         "contract_version": REVIEW_CONTRACT,
         "source": source_ref,
@@ -69,7 +82,7 @@ def load_learning_draft_review(source_path: str | Path, *, project_root: str | P
         "real_action_requires_gate": True,
         "execute_binding_enabled": False,
         "authorization_scope": "display_and_review_only",
-        "draft": _normalized_draft(draft),
+        "draft": normalized_draft,
         "screen_understanding_preview": _screen_understanding_preview(payload, root=root),
         "audit": deepcopy(payload.get("audit")) if isinstance(payload.get("audit"), dict) else {},
         "safety": _review_safety(),
@@ -77,7 +90,12 @@ def load_learning_draft_review(source_path: str | Path, *, project_root: str | P
     if candidate_review:
         result["pathgraph_candidate_review"] = candidate_review
     else:
-        demo_artifact_review = _learning_demo_artifact_review(payload, resolved, root)
+        demo_artifact_review = _learning_demo_artifact_review(
+            payload,
+            resolved,
+            root,
+            discover_related_sidecars=discover_related_sidecars,
+        )
         if demo_artifact_review:
             result["pathgraph_candidate_review"] = demo_artifact_review
     return result
@@ -94,6 +112,17 @@ def save_reviewed_template_candidate(
     review_patch = review_patch if isinstance(review_patch, dict) else {}
     review = load_learning_draft_review(source_path, project_root=root)
     draft = deepcopy(review["draft"])
+    out_dir = root / "artifacts" / "learning-draft-review" / _slug_for_output(review["source"])
+    out_dir.mkdir(parents=True, exist_ok=True)
+    human_review_patch, human_review_patch_path = _prepare_human_review_patch(
+        review_patch,
+        review=review,
+        draft=draft,
+        root=root,
+        out_dir=out_dir,
+    )
+    if human_review_patch:
+        review_patch = _compile_human_review_patch(review_patch, human_review_patch)
     changes: list[str] = []
 
     _apply_label_updates(draft.get("regions") or [], review_patch.get("region_label_updates"), "region_id", changes)
@@ -113,6 +142,42 @@ def save_reviewed_template_candidate(
         changes,
     )
     _apply_review_additions(draft, review_patch, changes)
+    _apply_role_updates(draft.get("regions") or [], review_patch.get("region_role_updates"), changes)
+    _apply_parent_updates(draft.get("regions") or [], review_patch.get("region_parent_updates"), changes)
+    _apply_metadata_updates(
+        draft.get("regions") or [],
+        review_patch.get("region_metadata_updates"),
+        "region_id",
+        "region",
+        changes,
+    )
+    _apply_metadata_updates(
+        draft.get("action_templates") or [],
+        review_patch.get("action_metadata_updates"),
+        "action_template_id",
+        "action",
+        changes,
+    )
+    _apply_review_deletions(draft, review_patch, changes)
+    _apply_manual_edit(draft, review_patch.get("manual_edit"), changes)
+    for operation in _list_of_dicts(human_review_patch.get("operations")):
+        if operation.get("op") == "add":
+            changes.append(f"{operation.get('target_kind')}_add:{operation.get('target_id')}")
+
+    reviewed_overlay_path = _render_human_review_overlay(
+        draft,
+        root=root,
+        out_dir=out_dir,
+        revision=int(human_review_patch.get("revision") or 0),
+    )
+    reviewed_overlay_ref = _relative_path(reviewed_overlay_path, root) if reviewed_overlay_path else ""
+    if reviewed_overlay_ref:
+        draft["numbered_map_path"] = reviewed_overlay_ref
+        page_details = draft.get("page_details") if isinstance(draft.get("page_details"), dict) else {}
+        page_details["compiled_overlay_path"] = reviewed_overlay_ref
+        page_details["human_review_overlay_path"] = reviewed_overlay_ref
+        page_details["human_review_overlay_revision"] = int(human_review_patch.get("revision") or 0)
+        draft["page_details"] = page_details
 
     blockers = _list_of_dicts(review_patch.get("blockers"))
     verification_rules = _list_of_dicts(review_patch.get("verification_rules"))
@@ -170,15 +235,34 @@ def save_reviewed_template_candidate(
             "precise_understanding_summary": precise_understanding_summary,
             "precise_understanding_readiness_summary": precise_understanding_readiness_summary,
             "evidence_integrity": evidence_integrity,
+            "human_review_patch_path": _relative_path(human_review_patch_path, root) if human_review_patch_path else "",
+            "human_review_patch_revision": human_review_patch.get("revision") if human_review_patch else None,
+            "reviewed_overlay_path": reviewed_overlay_ref,
             "review_status": review_status,
             "authorization_scope": "display_and_review_only",
         },
     }
-    out_dir = root / "artifacts" / "learning-draft-review" / _slug_for_output(review["source"])
-    out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "reviewed_template_candidate.json"
+    if human_review_patch and human_review_patch_path:
+        human_review_patch_path.write_text(
+            json.dumps(human_review_patch, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    correction_memory = (
+        record_human_review_correction(
+            human_review_patch,
+            review=review,
+            reviewed_draft=draft,
+            project_root=root,
+            source_patch_path=_relative_path(human_review_patch_path, root),
+        )
+        if human_review_patch and human_review_patch_path
+        else None
+    )
+    if correction_memory:
+        candidate["audit"]["correction_memory"] = deepcopy(correction_memory)
     out_path.write_text(json.dumps(candidate, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return {
+    result = {
         "contract_version": "learning_draft_review_save_v1",
         "reviewed_template_candidate_path": _relative_path(out_path, root),
         "review_status": review_status,
@@ -193,7 +277,13 @@ def save_reviewed_template_candidate(
         "precise_understanding_summary": precise_understanding_summary,
         "precise_understanding_readiness_summary": precise_understanding_readiness_summary,
         "evidence_integrity": evidence_integrity,
+        "human_review_patch_path": _relative_path(human_review_patch_path, root) if human_review_patch_path else "",
+        "human_review_patch_revision": human_review_patch.get("revision") if human_review_patch else None,
+        "reviewed_overlay_path": reviewed_overlay_ref,
     }
+    if correction_memory:
+        result["correction_memory"] = correction_memory
+    return result
 
 
 def _select_draft(payload: dict[str, Any]) -> tuple[dict[str, Any], int | None]:
@@ -458,6 +548,8 @@ def _resolve_review_payload(
     root: Path,
     source_bytes: bytes,
     source_hash: str,
+    *,
+    discover_related_sidecars: bool = True,
 ) -> tuple[dict[str, Any], Path, bytes, str, dict[str, Any] | None]:
     contract = str(payload.get("contract_version") or "")
     reviewed_path: Path | None = None
@@ -482,7 +574,12 @@ def _resolve_review_payload(
     reviewed_payload = json.loads(reviewed_bytes.decode("utf-8-sig"))
     if not isinstance(reviewed_payload, dict):
         raise ValueError("reviewed template candidate must be a JSON object")
-    candidate_review = _pathgraph_candidate_review(wrapper_payload, wrapper_path, root)
+    candidate_review = _pathgraph_candidate_review(
+        wrapper_payload,
+        wrapper_path,
+        root,
+        discover_related_sidecars=discover_related_sidecars,
+    )
     return reviewed_payload, reviewed_path, reviewed_bytes, hashlib.sha256(reviewed_bytes).hexdigest(), candidate_review
 
 
@@ -490,6 +587,8 @@ def _pathgraph_candidate_review(
     wrapper_payload: dict[str, Any] | None,
     wrapper_path: Path | None,
     root: Path,
+    *,
+    discover_related_sidecars: bool = True,
 ) -> dict[str, Any] | None:
     if not isinstance(wrapper_payload, dict) or wrapper_payload.get("contract_version") != "pathgraph_candidate_v1":
         return None
@@ -519,9 +618,19 @@ def _pathgraph_candidate_review(
     calibration_pre_run_check = _load_calibration_pre_run_check(wrapper_payload, wrapper_path, root)
     pathgraph_integration_readiness = _load_pathgraph_integration_readiness(wrapper_payload, wrapper_path, root)
     current_evidence_packet = _load_current_evidence_packet(wrapper_payload, wrapper_path, root)
-    learn_mode_demo_scaffold = _load_learn_mode_demo_scaffold(wrapper_payload, wrapper_path, root)
+    learn_mode_demo_scaffold = _load_learn_mode_demo_scaffold(
+        wrapper_payload,
+        wrapper_path,
+        root,
+        discover_related_sidecars=discover_related_sidecars,
+    )
     precise_understanding_candidate = _load_precise_understanding_candidate(wrapper_payload, wrapper_path, root)
-    page_detail_candidate = _load_page_detail_candidate(wrapper_payload, wrapper_path, root)
+    page_detail_candidate = _load_page_detail_candidate(
+        wrapper_payload,
+        wrapper_path,
+        root,
+        discover_related_sidecars=discover_related_sidecars,
+    )
     if not page_detail_candidate:
         scaffold_page_detail = learn_mode_demo_scaffold.get("page_detail_candidate")
         if (
@@ -529,7 +638,12 @@ def _pathgraph_candidate_review(
             and scaffold_page_detail.get("contract_version") == "learn_page_detail_candidate_v1"
         ):
             page_detail_candidate = scaffold_page_detail
-    learning_mode_demo_goal_readiness = _load_learning_mode_demo_goal_readiness(wrapper_payload, wrapper_path, root)
+    learning_mode_demo_goal_readiness = _load_learning_mode_demo_goal_readiness(
+        wrapper_payload,
+        wrapper_path,
+        root,
+        discover_related_sidecars=discover_related_sidecars,
+    )
     model_start_runbook = (
         wrapper_payload.get("model_start_runbook")
         if isinstance(wrapper_payload.get("model_start_runbook"), dict)
@@ -595,6 +709,8 @@ def _learning_demo_artifact_review(
     wrapper_payload: dict[str, Any] | None,
     wrapper_path: Path | None,
     root: Path,
+    *,
+    discover_related_sidecars: bool = True,
 ) -> dict[str, Any] | None:
     if not isinstance(wrapper_payload, dict) or wrapper_path is None:
         return None
@@ -605,11 +721,19 @@ def _learning_demo_artifact_review(
         deepcopy(wrapper_payload)
         if contract == "learn_page_detail_candidate_v1"
         else _load_page_detail_candidate(wrapper_payload, wrapper_path, root)
+        if discover_related_sidecars
+        or bool(wrapper_payload.get("page_detail_candidate_path") or wrapper_payload.get("learn_page_detail_candidate_path"))
+        or (wrapper_path.parent / PAGE_DETAIL_CANDIDATE_NAME).is_file()
+        else {}
     )
     learn_mode_demo_scaffold = (
         deepcopy(wrapper_payload)
         if contract == "learn_mode_demo_scaffold_v1"
         else _load_learn_mode_demo_scaffold(wrapper_payload, wrapper_path, root)
+        if discover_related_sidecars
+        or bool(wrapper_payload.get("learn_mode_demo_scaffold_path"))
+        or (wrapper_path.parent / LEARN_MODE_DEMO_SCAFFOLD_NAME).is_file()
+        else {}
     )
     if contract == "learn_mode_demo_scaffold_v1" and not page_detail_candidate:
         scaffold_page_detail = wrapper_payload.get("page_detail_candidate")
@@ -618,7 +742,13 @@ def _learning_demo_artifact_review(
             and scaffold_page_detail.get("contract_version") == "learn_page_detail_candidate_v1"
         ):
             page_detail_candidate = deepcopy(scaffold_page_detail)
-    learning_mode_demo_goal_readiness = _load_learning_mode_demo_goal_readiness(wrapper_payload, wrapper_path, root)
+    learning_mode_demo_goal_readiness = (
+        _load_learning_mode_demo_goal_readiness(wrapper_payload, wrapper_path, root)
+        if discover_related_sidecars
+        or bool(wrapper_payload.get("learning_mode_demo_goal_readiness_path"))
+        or (wrapper_path.parent / LEARNING_MODE_DEMO_GOAL_READINESS_NAME).is_file()
+        else {}
+    )
     if not any(
         (
             current_evidence_packet,
@@ -871,8 +1001,31 @@ def _load_sidecar_by_source_path(
     file_name: str,
     contract_version: str,
     source_field: str = "source_path",
+    allow_global_search: bool = True,
 ) -> dict[str, Any]:
     if wrapper_path is None:
+        return {}
+    adjacent_candidates = [
+        wrapper_path if wrapper_path.name == file_name else wrapper_path.parent / file_name,
+        wrapper_path.parent / "pathgraph_candidate" / file_name,
+        wrapper_path.parent.parent / file_name,
+    ]
+    seen_adjacent: set[str] = set()
+    for path in adjacent_candidates:
+        resolved_text = str(path.resolve())
+        if resolved_text in seen_adjacent:
+            continue
+        seen_adjacent.add(resolved_text)
+        payload = _load_matching_sidecar_candidate(
+            path,
+            wrapper_path=wrapper_path,
+            root=root,
+            contract_version=contract_version,
+            source_field=source_field,
+        )
+        if payload:
+            return payload
+    if not allow_global_search:
         return {}
     search_roots = [root / "logs", root / "artifacts"]
     cache_key = (str(root.resolve()), file_name)
@@ -893,6 +1046,27 @@ def _load_sidecar_by_source_path(
             continue
         if _path_value_matches(payload.get(source_field), wrapper_path, root):
             return payload
+    return {}
+
+
+def _load_matching_sidecar_candidate(
+    path: Path,
+    *,
+    wrapper_path: Path,
+    root: Path,
+    contract_version: str,
+    source_field: str,
+) -> dict[str, Any]:
+    if not path.exists() or not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict) or payload.get("contract_version") != contract_version:
+        return {}
+    if path.resolve() == wrapper_path.resolve() or _path_value_matches(payload.get(source_field), wrapper_path, root):
+        return payload
     return {}
 
 
@@ -1092,7 +1266,13 @@ def _load_precise_understanding_candidate(
     return payload if payload.get("contract_version") == "learn_precise_understanding_candidate_v1" else {}
 
 
-def _load_page_detail_candidate(wrapper_payload: dict[str, Any], wrapper_path: Path | None, root: Path) -> dict[str, Any]:
+def _load_page_detail_candidate(
+    wrapper_payload: dict[str, Any],
+    wrapper_path: Path | None,
+    root: Path,
+    *,
+    discover_related_sidecars: bool = True,
+) -> dict[str, Any]:
     explicit = wrapper_payload.get("page_detail_candidate_path") or wrapper_payload.get("learn_page_detail_candidate_path")
     if explicit:
         payload = _load_candidate_json(explicit, root)
@@ -1106,6 +1286,7 @@ def _load_page_detail_candidate(wrapper_payload: dict[str, Any], wrapper_path: P
             root=root,
             file_name=PAGE_DETAIL_CANDIDATE_NAME,
             contract_version="learn_page_detail_candidate_v1",
+            allow_global_search=discover_related_sidecars,
         )
     payload = json.loads(sidecar.read_text(encoding="utf-8-sig"))
     if not isinstance(payload, dict):
@@ -1117,11 +1298,16 @@ def _load_page_detail_candidate(wrapper_payload: dict[str, Any], wrapper_path: P
         root=root,
         file_name=PAGE_DETAIL_CANDIDATE_NAME,
         contract_version="learn_page_detail_candidate_v1",
+        allow_global_search=discover_related_sidecars,
     )
 
 
 def _load_learn_mode_demo_scaffold(
-    wrapper_payload: dict[str, Any], wrapper_path: Path | None, root: Path
+    wrapper_payload: dict[str, Any],
+    wrapper_path: Path | None,
+    root: Path,
+    *,
+    discover_related_sidecars: bool = True,
 ) -> dict[str, Any]:
     explicit = wrapper_payload.get("learn_mode_demo_scaffold_path")
     if explicit:
@@ -1136,6 +1322,7 @@ def _load_learn_mode_demo_scaffold(
             root=root,
             file_name=LEARN_MODE_DEMO_SCAFFOLD_NAME,
             contract_version="learn_mode_demo_scaffold_v1",
+            allow_global_search=discover_related_sidecars,
         )
     payload = json.loads(sidecar.read_text(encoding="utf-8-sig"))
     if not isinstance(payload, dict):
@@ -1147,11 +1334,16 @@ def _load_learn_mode_demo_scaffold(
         root=root,
         file_name=LEARN_MODE_DEMO_SCAFFOLD_NAME,
         contract_version="learn_mode_demo_scaffold_v1",
+        allow_global_search=discover_related_sidecars,
     )
 
 
 def _load_learning_mode_demo_goal_readiness(
-    wrapper_payload: dict[str, Any], wrapper_path: Path | None, root: Path
+    wrapper_payload: dict[str, Any],
+    wrapper_path: Path | None,
+    root: Path,
+    *,
+    discover_related_sidecars: bool = True,
 ) -> dict[str, Any]:
     explicit = wrapper_payload.get("learning_mode_demo_goal_readiness_path")
     if explicit:
@@ -1161,7 +1353,12 @@ def _load_learning_mode_demo_goal_readiness(
         return {}
     sidecar = wrapper_path.parent / LEARNING_MODE_DEMO_GOAL_READINESS_NAME
     if not sidecar.exists():
-        scaffold = _load_learn_mode_demo_scaffold(wrapper_payload, wrapper_path, root)
+        scaffold = _load_learn_mode_demo_scaffold(
+            wrapper_payload,
+            wrapper_path,
+            root,
+            discover_related_sidecars=discover_related_sidecars,
+        )
         scaffold_report_path = scaffold.get("report_path") if isinstance(scaffold, dict) else None
         if not isinstance(scaffold_report_path, str) or not scaffold_report_path.strip():
             return {}
@@ -1178,7 +1375,12 @@ def _load_learning_mode_demo_goal_readiness(
         return {}
     if payload.get("contract_version") == "learning_mode_demo_goal_readiness_v1":
         return payload
-    scaffold = _load_learn_mode_demo_scaffold(wrapper_payload, wrapper_path, root)
+    scaffold = _load_learn_mode_demo_scaffold(
+        wrapper_payload,
+        wrapper_path,
+        root,
+        discover_related_sidecars=discover_related_sidecars,
+    )
     scaffold_report_path = scaffold.get("report_path") if isinstance(scaffold, dict) else None
     if not isinstance(scaffold_report_path, str) or not scaffold_report_path.strip():
         return {}
@@ -1304,6 +1506,20 @@ def _screen_understanding_preview(payload: dict[str, Any], *, root: Path) -> dic
 
 def _preview_fusion_status(draft: dict[str, Any], *, root: Path) -> dict[str, Any]:
     page_details = draft.get("page_details") if isinstance(draft.get("page_details"), dict) else {}
+    reviewed_overlay = str(page_details.get("human_review_overlay_path") or "").strip()
+    if reviewed_overlay:
+        reviewed_overlay_path = _preview_artifact_path(reviewed_overlay, root=root)
+        return {
+            "full_screen_understanding_overlay_path": reviewed_overlay_path,
+            "compiled_overlay_path": reviewed_overlay_path,
+            "fusion_summary": {
+                "source": "human_review_overlay",
+                "revision": _int_value(page_details.get("human_review_overlay_revision"), 0),
+            },
+            "fusion_not_accuracy": True,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
     statuses = _fusion_source_statuses(page_details)
     for _, status in statuses:
         full_overlay = str(status.get("full_screen_understanding_overlay_path") or "").strip()
@@ -1698,6 +1914,378 @@ def _extract_blockers(draft: dict[str, Any], safety: dict[str, Any]) -> list[dic
     return []
 
 
+def _prepare_human_review_patch(
+    review_patch: dict[str, Any],
+    *,
+    review: dict[str, Any],
+    draft: dict[str, Any],
+    root: Path,
+    out_dir: Path,
+) -> tuple[dict[str, Any], Path | None]:
+    if review_patch.get("contract_version") != HUMAN_REVIEW_PATCH_CONTRACT:
+        return {}, None
+
+    screenshot_path = str(review_patch.get("screenshot_path") or "").strip()
+    screenshot_sha256 = str(review_patch.get("screenshot_sha256") or "").strip().lower()
+    if not screenshot_path or not screenshot_sha256:
+        raise ValueError("human_review_patch requires screenshot_path and screenshot_sha256")
+    source_image = _draft_source_image_evidence(draft)
+    source_path = str(source_image.get("path") or "").strip()
+    if source_path and _relative_path(_resolve_optional_under_root(screenshot_path, root), root) != _relative_path(
+        _resolve_optional_under_root(source_path, root), root
+    ):
+        raise ValueError("human_review_patch screenshot_path does not match the learning draft source image")
+    screenshot = _resolve_optional_under_root(screenshot_path, root)
+    if not screenshot.exists() or not screenshot.is_file():
+        raise ValueError("human_review_patch screenshot file is missing")
+    actual_sha256 = hashlib.sha256(screenshot.read_bytes()).hexdigest()
+    if actual_sha256 != screenshot_sha256:
+        raise ValueError("human_review_patch screenshot checksum mismatch")
+    expected_sha256 = str(source_image.get("sha256") or "").strip().lower()
+    if expected_sha256 and expected_sha256 != screenshot_sha256:
+        raise ValueError("human_review_patch screenshot checksum is stale for the learning draft")
+    try:
+        with Image.open(screenshot) as source_image_file:
+            source_image_file.load()
+            screenshot_size = source_image_file.size
+    except (UnidentifiedImageError, OSError, SyntaxError) as exc:
+        raise ValueError("human_review_patch screenshot is not a decodable image") from exc
+
+    operations = _normalize_human_review_operations(
+        review_patch.get("operations"),
+        draft,
+        screenshot_size=screenshot_size,
+    )
+    revision, patch_path = _next_human_review_patch_path(out_dir)
+    normalized = {
+        "contract_version": HUMAN_REVIEW_PATCH_CONTRACT,
+        "revision": revision,
+        "created_at": datetime.now().isoformat(),
+        "source_draft_path": review.get("source", {}).get("source_path"),
+        "source_draft_sha256": review.get("source", {}).get("sha256"),
+        "screenshot_path": _relative_path(screenshot, root),
+        "screenshot_sha256": screenshot_sha256,
+        "reason": str(review_patch.get("reason") or "").strip(),
+        "source": str(review_patch.get("source") or "human_panel_editor_v1").strip(),
+        "operations": operations,
+        "operation_count": len(operations),
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+        "final_submit_forbidden": True,
+        "authorization_scope": "display_and_review_only",
+    }
+    return normalized, patch_path
+
+
+def _normalize_human_review_operations(
+    value: Any,
+    draft: dict[str, Any],
+    *,
+    screenshot_size: tuple[int, int],
+) -> list[dict[str, Any]]:
+    operations = _list_of_dicts(value)
+    regions = {str(item.get("region_id") or "").strip(): item for item in _list_of_dicts(draft.get("regions"))}
+    actions = {
+        str(item.get("action_template_id") or item.get("action_id") or "").strip(): item
+        for item in _list_of_dicts(draft.get("action_templates"))
+    }
+    normalized: list[dict[str, Any]] = []
+    for index, operation in enumerate(operations):
+        op = str(operation.get("op") or "").strip()
+        target_kind = str(operation.get("target_kind") or "").strip()
+        target_id = str(operation.get("target_id") or "").strip()
+        items = actions if target_kind == "action" else regions if target_kind == "region" else {}
+        if target_kind not in {"region", "action"} or not target_id:
+            raise ValueError(f"human_review_patch operation {index} has invalid target")
+        if op == "add":
+            if target_id in items:
+                raise ValueError(f"human_review_patch operation {index} target already exists: {target_kind}:{target_id}")
+            item = deepcopy(operation.get("item")) if isinstance(operation.get("item"), dict) else {}
+            id_key = "action_template_id" if target_kind == "action" else "region_id"
+            item[id_key] = target_id
+            if _normalized_bbox(item.get("bbox")) is None:
+                raise ValueError(f"human_review_patch operation {index} has invalid added bbox")
+            item["bbox"] = _normalized_bbox(item["bbox"])
+            if not _bbox_within_image(item["bbox"], screenshot_size):
+                raise ValueError(f"human_review_patch operation {index} bbox is outside screenshot bounds")
+            normalized.append(
+                {
+                    "op": op,
+                    "target_kind": target_kind,
+                    "target_id": target_id,
+                    "item": item,
+                    "reason": str(operation.get("reason") or "").strip(),
+                }
+            )
+            items[target_id] = item
+            continue
+        item = items.get(target_id)
+        if item is None:
+            raise ValueError(f"human_review_patch operation {index} target does not exist: {target_kind}:{target_id}")
+        if op == "delete":
+            normalized.append(
+                {
+                    "op": op,
+                    "target_kind": target_kind,
+                    "target_id": target_id,
+                    "before_item": deepcopy(item),
+                    "reason": str(operation.get("reason") or "").strip(),
+                }
+            )
+            items.pop(target_id, None)
+            continue
+        if op == "update_role":
+            if target_kind != "region":
+                raise ValueError(f"human_review_patch operation {index} role target must be a region")
+            before_value = str(operation.get("before_value") or "").strip()
+            current_value = str(item.get("role") or item.get("region_type") or "").strip()
+            if before_value and before_value != current_value:
+                raise ValueError(f"human_review_patch operation {index} before_value is stale")
+            after_value = str(operation.get("after_value") or "").strip()
+            if not after_value:
+                raise ValueError(f"human_review_patch operation {index} after_value is required")
+            normalized.append(
+                {
+                    "op": op,
+                    "target_kind": target_kind,
+                    "target_id": target_id,
+                    "before_value": current_value,
+                    "after_value": after_value,
+                    "reason": str(operation.get("reason") or "").strip(),
+                }
+            )
+            item["role"] = after_value
+            continue
+        if op == "update_parent":
+            if target_kind != "region":
+                raise ValueError(f"human_review_patch operation {index} parent target must be a region")
+            before_value = str(operation.get("before_value") or "").strip()
+            current_value = str(item.get("parent_region_id") or "").strip()
+            if before_value != current_value:
+                raise ValueError(f"human_review_patch operation {index} before_value is stale")
+            after_value = str(operation.get("after_value") or "").strip()
+            if after_value == target_id or (after_value and after_value not in regions):
+                raise ValueError(f"human_review_patch operation {index} parent target is invalid")
+            normalized.append(
+                {
+                    "op": op,
+                    "target_kind": target_kind,
+                    "target_id": target_id,
+                    "before_value": current_value,
+                    "after_value": after_value,
+                    "reason": str(operation.get("reason") or "").strip(),
+                }
+            )
+            item["parent_region_id"] = after_value
+            continue
+        if op == "update_metadata":
+            after_metadata = _normalize_human_review_metadata(operation.get("after_metadata"))
+            if not after_metadata:
+                raise ValueError(f"human_review_patch operation {index} after_metadata is required")
+            before_metadata = {key: deepcopy(item.get(key)) for key in after_metadata}
+            normalized.append(
+                {
+                    "op": op,
+                    "target_kind": target_kind,
+                    "target_id": target_id,
+                    "before_metadata": before_metadata,
+                    "after_metadata": after_metadata,
+                    "reason": str(operation.get("reason") or "").strip(),
+                }
+            )
+            item.update(deepcopy(after_metadata))
+            continue
+        if op != "update_bbox":
+            raise ValueError(f"human_review_patch operation {index} has unsupported op: {op}")
+        current_bbox = _normalized_bbox(item.get("bbox"))
+        before_bbox = _normalized_bbox(operation.get("before_bbox"))
+        after_bbox = _normalized_bbox(operation.get("after_bbox"))
+        if current_bbox is None or after_bbox is None:
+            raise ValueError(f"human_review_patch operation {index} has invalid bbox")
+        if not _bbox_within_image(after_bbox, screenshot_size):
+            raise ValueError(f"human_review_patch operation {index} bbox is outside screenshot bounds")
+        if before_bbox is not None and before_bbox != current_bbox:
+            raise ValueError(f"human_review_patch operation {index} before_bbox is stale")
+        normalized.append(
+            {
+                "op": op,
+                "target_kind": target_kind,
+                "target_id": target_id,
+                "before_bbox": before_bbox or current_bbox,
+                "after_bbox": after_bbox,
+                "reason": str(operation.get("reason") or "").strip(),
+            }
+        )
+    _validate_region_parent_graph(regions)
+    return normalized
+
+
+def _normalize_human_review_metadata(value: Any) -> dict[str, Any]:
+    source = value if isinstance(value, dict) else {}
+    normalized: dict[str, Any] = {}
+    for key in (
+        "label",
+        "description",
+        "semantic_action",
+        "action_type",
+        "input_semantics",
+        "verification_rule",
+        "risk_level",
+    ):
+        if key in source:
+            normalized[key] = str(source.get(key) or "").strip()
+    if "requires_confirmation" in source:
+        normalized["requires_confirmation"] = source.get("requires_confirmation") is True
+    if "destination" in source:
+        destination = source.get("destination") if isinstance(source.get("destination"), dict) else {}
+        kind = str(destination.get("kind") or "none").strip().lower()
+        if kind not in {"none", "interface", "url"}:
+            raise ValueError(f"human_review_patch destination kind is invalid: {kind}")
+        normalized_destination: dict[str, Any] = {"kind": kind}
+        if kind == "interface":
+            normalized_destination["target_interface_id"] = str(
+                destination.get("target_interface_id") or ""
+            ).strip()
+        elif kind == "url":
+            normalized_destination["url"] = str(destination.get("url") or "").strip()
+        normalized["destination"] = normalized_destination
+    semantic_action = str(normalized.get("semantic_action") or normalized.get("action_type") or "").lower()
+    if semantic_action in {"final_submit", "send", "confirm", "payment"}:
+        normalized["risk_level"] = "dangerous"
+        normalized["requires_confirmation"] = True
+    return normalized
+
+
+def _bbox_within_image(bbox: dict[str, int], screenshot_size: tuple[int, int]) -> bool:
+    image_width, image_height = screenshot_size
+    return (
+        bbox["x"] >= 0
+        and bbox["y"] >= 0
+        and bbox["x"] + bbox["w"] <= image_width
+        and bbox["y"] + bbox["h"] <= image_height
+    )
+
+
+def _validate_region_parent_graph(regions: dict[str, dict[str, Any]]) -> None:
+    for region_id in regions:
+        visited: set[str] = set()
+        current_id = region_id
+        while current_id:
+            if current_id in visited:
+                raise ValueError(f"human_review_patch parent cycle detected at region: {current_id}")
+            visited.add(current_id)
+            current = regions.get(current_id)
+            if current is None:
+                break
+            current_id = str(current.get("parent_region_id") or "").strip()
+
+
+def _next_human_review_patch_path(out_dir: Path) -> tuple[int, Path]:
+    revisions: list[int] = []
+    for path in out_dir.glob("human_review_patch_r*.json"):
+        match = re.fullmatch(r"human_review_patch_r(\d+)\.json", path.name)
+        if match:
+            revisions.append(int(match.group(1)))
+    revision = max(revisions, default=0) + 1
+    return revision, out_dir / f"human_review_patch_r{revision:04d}.json"
+
+
+def _compile_human_review_patch(
+    legacy_patch: dict[str, Any],
+    human_review_patch: dict[str, Any],
+) -> dict[str, Any]:
+    compiled = deepcopy(legacy_patch)
+    region_updates = deepcopy(compiled.get("region_bbox_updates")) if isinstance(compiled.get("region_bbox_updates"), dict) else {}
+    action_updates = deepcopy(compiled.get("action_bbox_updates")) if isinstance(compiled.get("action_bbox_updates"), dict) else {}
+    region_additions = _list_of_dicts(compiled.get("region_additions"))
+    action_additions = _list_of_dicts(compiled.get("action_template_additions"))
+    region_role_updates = deepcopy(compiled.get("region_role_updates")) if isinstance(compiled.get("region_role_updates"), dict) else {}
+    region_parent_updates = deepcopy(compiled.get("region_parent_updates")) if isinstance(compiled.get("region_parent_updates"), dict) else {}
+    region_metadata_updates = deepcopy(compiled.get("region_metadata_updates")) if isinstance(compiled.get("region_metadata_updates"), dict) else {}
+    action_metadata_updates = deepcopy(compiled.get("action_metadata_updates")) if isinstance(compiled.get("action_metadata_updates"), dict) else {}
+    region_deletions = [str(item) for item in compiled.get("region_deletions", [])] if isinstance(compiled.get("region_deletions"), list) else []
+    action_deletions = [str(item) for item in compiled.get("action_deletions", [])] if isinstance(compiled.get("action_deletions"), list) else []
+    for operation in _list_of_dicts(human_review_patch.get("operations")):
+        op = operation.get("op")
+        target_kind = operation.get("target_kind")
+        target_id = str(operation.get("target_id") or "")
+        if op == "add":
+            (action_additions if target_kind == "action" else region_additions).append(deepcopy(operation["item"]))
+            continue
+        if op == "delete":
+            (action_deletions if target_kind == "action" else region_deletions).append(target_id)
+            continue
+        if op == "update_role":
+            region_role_updates[target_id] = operation["after_value"]
+            continue
+        if op == "update_parent":
+            region_parent_updates[target_id] = operation["after_value"]
+            continue
+        if op == "update_metadata":
+            metadata_updates = action_metadata_updates if target_kind == "action" else region_metadata_updates
+            metadata_updates[target_id] = deepcopy(operation["after_metadata"])
+            continue
+        update = {
+            "bbox": deepcopy(operation["after_bbox"]),
+            "source": "human_review_patch_v1",
+        }
+        if target_kind == "action":
+            action_updates[target_id] = update
+        else:
+            region_updates[target_id] = update
+    compiled["region_bbox_updates"] = region_updates
+    compiled["action_bbox_updates"] = action_updates
+    compiled["region_additions"] = region_additions
+    compiled["action_template_additions"] = action_additions
+    compiled["region_role_updates"] = region_role_updates
+    compiled["region_parent_updates"] = region_parent_updates
+    compiled["region_metadata_updates"] = region_metadata_updates
+    compiled["action_metadata_updates"] = action_metadata_updates
+    compiled["region_deletions"] = region_deletions
+    compiled["action_deletions"] = action_deletions
+    return compiled
+
+
+def _render_human_review_overlay(
+    draft: dict[str, Any],
+    *,
+    root: Path,
+    out_dir: Path,
+    revision: int,
+) -> Path | None:
+    source = _draft_source_image_evidence(draft)
+    source_path = str(source.get("path") or "").strip()
+    if not source_path:
+        return None
+    resolved = _resolve_optional_under_root(source_path, root)
+    if not resolved.exists() or not resolved.is_file():
+        return None
+    try:
+        image = Image.open(resolved).convert("RGB")
+    except (UnidentifiedImageError, OSError, SyntaxError) as exc:
+        raise ValueError("learning draft source screenshot is not a decodable image") from exc
+    draw = ImageDraw.Draw(image)
+    for kind, items, color, id_key in (
+        ("R", _list_of_dicts(draft.get("regions")), (0, 110, 230), "region_id"),
+        ("A", _list_of_dicts(draft.get("action_templates")), (240, 120, 0), "action_template_id"),
+    ):
+        for index, item in enumerate(items, start=1):
+            bbox = _normalized_bbox(item.get("bbox"))
+            if bbox is None:
+                continue
+            x1 = max(0, min(image.width - 1, bbox["x"]))
+            y1 = max(0, min(image.height - 1, bbox["y"]))
+            x2 = max(x1, min(image.width - 1, bbox["x"] + bbox["w"]))
+            y2 = max(y1, min(image.height - 1, bbox["y"] + bbox["h"]))
+            draw.rectangle((x1, y1, x2, y2), outline=color, width=3)
+            item_id = str(item.get(id_key) or item.get("action_id") or index).strip()
+            draw.text((x1 + 3, y1 + 3), f"{kind}{index} {item_id}", fill=color)
+    suffix = f"r{revision:04d}" if revision > 0 else "legacy"
+    output = out_dir / f"human_review_overlay_{suffix}.png"
+    image.save(output)
+    return output
+
+
 def _apply_label_updates(items: list[dict[str, Any]], updates: Any, id_key: str, changes: list[str]) -> None:
     if not isinstance(updates, dict):
         return
@@ -1757,6 +2345,75 @@ def _apply_bbox_updates(
         changes.append(f"{change_prefix}_bbox:{item_id}")
 
 
+def _apply_role_updates(items: list[dict[str, Any]], updates: Any, changes: list[str]) -> None:
+    if not isinstance(updates, dict):
+        return
+    for item in items:
+        item_id = str(item.get("region_id") or "").strip()
+        if item_id not in updates:
+            continue
+        item["role"] = str(updates[item_id]).strip()
+        item["requires_human_review"] = True
+        changes.append(f"region_role:{item_id}")
+
+
+def _apply_parent_updates(items: list[dict[str, Any]], updates: Any, changes: list[str]) -> None:
+    if not isinstance(updates, dict):
+        return
+    for item in items:
+        item_id = str(item.get("region_id") or "").strip()
+        if item_id not in updates:
+            continue
+        item["parent_region_id"] = str(updates[item_id]).strip()
+        item["requires_human_review"] = True
+        changes.append(f"region_parent:{item_id}")
+
+
+def _apply_metadata_updates(
+    items: list[dict[str, Any]],
+    updates: Any,
+    id_key: str,
+    change_prefix: str,
+    changes: list[str],
+) -> None:
+    if not isinstance(updates, dict):
+        return
+    for item in items:
+        item_id = str(item.get(id_key) or item.get("action_id") or "").strip()
+        metadata = updates.get(item_id)
+        if not isinstance(metadata, dict):
+            continue
+        item.update(deepcopy(_normalize_human_review_metadata(metadata)))
+        item["candidate_only"] = True
+        item["requires_human_review"] = True
+        item["artifact_is_authorization"] = False
+        item["execute_binding_enabled"] = False
+        item["final_submit_forbidden"] = True
+        changes.append(f"{change_prefix}_metadata:{item_id}")
+
+
+def _apply_review_deletions(draft: dict[str, Any], review_patch: dict[str, Any], changes: list[str]) -> None:
+    for draft_key, patch_key, id_key, prefix in (
+        ("regions", "region_deletions", "region_id", "region"),
+        ("action_templates", "action_deletions", "action_template_id", "action"),
+    ):
+        requested = {
+            str(item).strip()
+            for item in review_patch.get(patch_key, [])
+            if str(item).strip()
+        } if isinstance(review_patch.get(patch_key), list) else set()
+        if not requested:
+            continue
+        retained: list[dict[str, Any]] = []
+        for item in _list_of_dicts(draft.get(draft_key)):
+            item_id = str(item.get(id_key) or item.get("action_id") or "").strip()
+            if item_id in requested:
+                changes.append(f"{prefix}_delete:{item_id}")
+            else:
+                retained.append(item)
+        draft[draft_key] = retained
+
+
 def _apply_review_additions(draft: dict[str, Any], review_patch: dict[str, Any], changes: list[str]) -> None:
     additions = (
         ("states", "state_additions", "state_id"),
@@ -1768,6 +2425,54 @@ def _apply_review_additions(draft: dict[str, Any], review_patch: dict[str, Any],
         added = _append_review_only_items(draft, draft_key, review_patch.get(patch_key), id_key)
         if added:
             changes.append(f"{patch_key}:{added}")
+
+
+def _apply_manual_edit(draft: dict[str, Any], manual_edit: Any, changes: list[str]) -> None:
+    if not isinstance(manual_edit, dict):
+        return
+    region_id = str(manual_edit.get("target_region_id") or "").strip()
+    action_id = str(manual_edit.get("target_action_template_id") or "").strip()
+    regions = _list_of_dicts(draft.get("regions"))
+    actions = _list_of_dicts(draft.get("action_templates"))
+    region = next((item for item in regions if str(item.get("region_id") or "").strip() == region_id), None)
+    action = next(
+        (
+            item
+            for item in actions
+            if str(item.get("action_template_id") or item.get("action_id") or "").strip() == action_id
+        ),
+        None,
+    )
+    if region is None and region_id:
+        raise ValueError(f"manual edit target region was not found: {region_id}")
+    if action is None and action_id:
+        raise ValueError(f"manual edit target action was not found: {action_id}")
+
+    if region is not None:
+        for source_key, target_key in (
+            ("region_label", "label"),
+            ("region_role", "role"),
+            ("region_section", "parent_region_id"),
+            ("notes", "description"),
+        ):
+            if source_key not in manual_edit:
+                continue
+            region[target_key] = str(manual_edit.get(source_key) or "").strip()
+            changes.append(f"manual_{target_key}:{region_id}")
+        for key in ("may_enter_pathgraph_draft", "needs_recalibration"):
+            if key not in manual_edit:
+                continue
+            region[key] = manual_edit.get(key) is True
+            changes.append(f"manual_{key}:{region_id}")
+        region["requires_human_review"] = True
+
+    if action is not None and "possible_operation" in manual_edit:
+        operation = str(manual_edit.get("possible_operation") or "").strip()
+        if operation:
+            action["semantic_action"] = operation
+            action["action_type"] = operation
+            action["requires_human_review"] = True
+            changes.append(f"manual_action_type:{action_id}")
 
 
 def _append_review_only_items(draft: dict[str, Any], draft_key: str, additions: Any, id_key: str) -> int:
@@ -1966,6 +2671,65 @@ def _draft_source_image_path(draft: dict[str, Any]) -> str:
     return _draft_source_image_evidence(draft)["path"]
 
 
+def _bind_review_source_image(draft: dict[str, Any], root: Path) -> None:
+    source = _draft_source_image_evidence(draft)
+    image_path = str(source.get("path") or "").strip()
+    if not image_path:
+        return
+    resolved = _resolve_optional_under_root(image_path, root)
+    if not resolved.exists() or not resolved.is_file():
+        return
+    source_bytes = resolved.read_bytes()
+    actual_sha256 = hashlib.sha256(source_bytes).hexdigest()
+    expected_sha256 = str(source.get("sha256") or "").strip().lower()
+    if expected_sha256 and expected_sha256 != actual_sha256:
+        return
+    panel_source = _materialize_panel_review_source_image(
+        resolved,
+        root=root,
+        source_bytes=source_bytes,
+        source_sha256=actual_sha256,
+    )
+    page_details = draft.get("page_details") if isinstance(draft.get("page_details"), dict) else {}
+    screen = page_details.get("screen") if isinstance(page_details.get("screen"), dict) else {}
+    screen["source_image_path"] = _relative_path(panel_source, root)
+    screen["source_image_sha256"] = actual_sha256
+    screen["source_image_binding_source"] = str(source.get("source") or "")
+    screen["source_image_binding_allows_computed_checksum"] = bool(source.get("allow_computed_checksum"))
+    screen["source_image_materialized_for_panel"] = panel_source != resolved
+    screen["artifact_is_authorization"] = False
+    screen["execute_binding_enabled"] = False
+    page_details["screen"] = screen
+    draft["page_details"] = page_details
+
+
+def _materialize_panel_review_source_image(
+    source_path: Path,
+    *,
+    root: Path,
+    source_bytes: bytes,
+    source_sha256: str,
+) -> Path:
+    try:
+        source_path.relative_to(root)
+        return source_path
+    except ValueError:
+        pass
+
+    suffix = source_path.suffix.lower() or ".png"
+    output_path = (
+        root
+        / "artifacts"
+        / "learning-draft-review"
+        / "source-images"
+        / f"{source_sha256}{suffix}"
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if not output_path.exists() or hashlib.sha256(output_path.read_bytes()).hexdigest() != source_sha256:
+        output_path.write_bytes(source_bytes)
+    return output_path
+
+
 def _draft_source_image_evidence(draft: dict[str, Any]) -> dict[str, Any]:
     page_details = draft.get("page_details") if isinstance(draft.get("page_details"), dict) else {}
     screen = page_details.get("screen") if isinstance(page_details.get("screen"), dict) else {}
@@ -1973,8 +2737,8 @@ def _draft_source_image_evidence(draft: dict[str, Any]) -> dict[str, Any]:
         (
             screen.get("source_image_path"),
             screen.get("source_image_sha256"),
-            "page_details.screen.source_image_path",
-            False,
+            str(screen.get("source_image_binding_source") or "page_details.screen.source_image_path"),
+            bool(screen.get("source_image_binding_allows_computed_checksum")),
         ),
         (screen.get("image_path"), screen.get("image_sha256"), "page_details.screen.image_path", False),
         (

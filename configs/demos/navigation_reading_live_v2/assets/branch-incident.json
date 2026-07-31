@@ -1,0 +1,62 @@
+{
+  "contract_version": "single_interface_asset_v1",
+  "interface_id": "branch_incident",
+  "application_identity_key": "web:navigation-branching-lab",
+  "display_name": "Incident Report",
+  "surface_type": "finite_detail",
+  "state_signature": "branch_incident:reviewed",
+  "artifact_is_authorization": false,
+  "fixed_anchors": [
+    {
+      "content_id": "incident_identity",
+      "label": "Incident Report Interface",
+      "source_kind": "state",
+      "source_id": "branch_incident",
+      "content_behavior": "fixed_label",
+      "agent_usage": "identity_anchor",
+      "read_policy": "on_interface_match",
+      "agent_description": "Confirm the reviewed incident report interface."
+    }
+  ],
+  "dynamic_slots": [
+    {
+      "content_id": "incident_body",
+      "label": "Current incident report",
+      "source_kind": "region",
+      "source_id": "incident_body",
+      "content_behavior": "dynamic_value",
+      "agent_usage": "decision_signal",
+      "read_policy": "on_demand",
+      "read_strategy": "finite_detail",
+      "completion_policy": "reached_bottom_required",
+      "max_scrolls": 4,
+      "max_items": 0,
+      "agent_description": "Read the report through the INCIDENT REPORT END marker."
+    }
+  ],
+  "controls": [
+    {
+      "control_id": "return_hub",
+      "label": "Return to workspace",
+      "role": "button",
+      "agent_description": "Return to the workspace after the incident report is complete.",
+      "review_status": "human_reviewed"
+    }
+  ],
+  "action_candidates": [],
+  "verification_rules": [
+    {
+      "rule_id": "workspace_visible_after_return",
+      "description": "Operations Workspace Interface is visible after returning."
+    }
+  ],
+  "blockers": [],
+  "review": {
+    "status": "human_reviewed",
+    "manual_revision": {
+      "semantic_description": "Read the finite report, then return to the hub."
+    }
+  },
+  "evidence": {},
+  "execute_binding_enabled": false
+}

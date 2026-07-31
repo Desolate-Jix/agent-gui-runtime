@@ -44,6 +44,74 @@ _CONTENT_ROLES = {
 }
 
 
+def _numbered_regions_by_structure(
+    numbered_regions: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    merged_by_structure: dict[str, dict[str, Any]] = {}
+    used_group_ids_by_structure: dict[str, set[str]] = {}
+    for region in numbered_regions:
+        if not isinstance(region, dict):
+            continue
+        region_id = str(region.get("region_id") or "").strip()
+        if not region_id:
+            continue
+        stage1_5 = (
+            region.get("input_stage1_5_subregion")
+            if isinstance(region.get("input_stage1_5_subregion"), dict)
+            else {}
+        )
+        structure_ref = str(stage1_5.get("parent_region_id") or region_id).strip()
+        target = merged_by_structure.setdefault(
+            structure_ref,
+            {
+                "region_id": structure_ref,
+                "subregion_groups": [],
+                "control_parents": [],
+                "numbered_items": [],
+                "source_region_ids": [],
+            },
+        )
+        target["source_region_ids"].append(region_id)
+        used_group_ids = used_group_ids_by_structure.setdefault(structure_ref, set())
+        raw_groups = [
+            deepcopy(group)
+            for group in region.get("subregion_groups", [])
+            if isinstance(group, dict)
+        ]
+        group_id_map: dict[str, str] = {}
+        for index, group in enumerate(raw_groups, start=1):
+            original_id = str(group.get("group_id") or f"group_{index}")
+            merged_id = original_id
+            if merged_id in used_group_ids:
+                merged_id = f"{region_id}::{original_id}"
+            group_id_map[original_id] = merged_id
+            used_group_ids.add(merged_id)
+        for group in raw_groups:
+            original_id = str(group.get("group_id") or "")
+            if original_id in group_id_map:
+                group["group_id"] = group_id_map[original_id]
+            parent_group_id = str(group.get("parent_group_id") or "")
+            if parent_group_id in group_id_map:
+                group["parent_group_id"] = group_id_map[parent_group_id]
+            if isinstance(group.get("child_group_ids"), list):
+                group["child_group_ids"] = [
+                    group_id_map.get(str(child_id), str(child_id))
+                    for child_id in group["child_group_ids"]
+                ]
+            target["subregion_groups"].append(group)
+        target["control_parents"].extend(
+            deepcopy(value)
+            for value in region.get("control_parents", [])
+            if isinstance(value, dict)
+        )
+        target["numbered_items"].extend(
+            deepcopy(value)
+            for value in region.get("numbered_items", [])
+            if isinstance(value, dict)
+        )
+    return merged_by_structure
+
+
 def build_ui_hierarchy_graph(
     *,
     structure_regions: list[dict[str, Any]],
@@ -71,11 +139,7 @@ def build_ui_hierarchy_graph(
     nodes: list[dict[str, Any]] = [root]
     clipped_node_ids: list[str] = []
     structure_by_source: dict[str, dict[str, Any]] = {}
-    numbered_by_region = {
-        str(region.get("region_id") or ""): region
-        for region in numbered_regions
-        if str(region.get("region_id") or "").strip()
-    }
+    numbered_by_region = _numbered_regions_by_structure(numbered_regions)
 
     ordered_structures = sorted(
         [region for region in structure_regions if _bbox(region.get("bbox")) or _bbox(region.get("precise_bbox"))],
@@ -108,6 +172,7 @@ def build_ui_hierarchy_graph(
     for structure_ref, structure_node in structure_by_source.items():
         numbered_region = numbered_by_region.get(structure_ref, {})
         groups = numbered_region.get("subregion_groups") if isinstance(numbered_region.get("subregion_groups"), list) else []
+        groups = [group for group in groups if group.get("render_in_main_overlay") is not False]
         payload_by_id = {
             str(group.get("group_id") or f"group_{index}"): group
             for index, group in enumerate(groups, start=1)
@@ -149,12 +214,65 @@ def build_ui_hierarchy_graph(
         group_nodes_by_region[structure_ref] = node_by_id
         group_payloads_by_region[structure_ref] = payload_by_id
 
+    control_nodes_by_region: dict[str, dict[str, dict[str, Any]]] = {}
+    control_member_owners_by_region: dict[str, dict[str, str]] = {}
+    for structure_ref, structure_node in structure_by_source.items():
+        numbered_region = numbered_by_region.get(structure_ref, {})
+        controls = (
+            numbered_region.get("control_parents")
+            if isinstance(numbered_region.get("control_parents"), list)
+            else []
+        )
+        node_by_control: dict[str, dict[str, Any]] = {}
+        member_owner: dict[str, str] = {}
+        for index, control in enumerate(
+            sorted(
+                [value for value in controls if isinstance(value, dict)],
+                key=lambda value: (
+                    *_bbox_sort_key(_bbox(value.get("bbox")) or {}),
+                    str(value.get("object_id") or ""),
+                ),
+            ),
+            start=1,
+        ):
+            control_id = str(control.get("object_id") or f"control_parent_{index}")
+            raw_bbox = _bbox(control.get("bbox")) or structure_node["bbox"]
+            bbox, clipped = _clip_with_flag(raw_bbox, structure_node["bbox"])
+            members = [
+                str(member_id)
+                for member_id in control.get("member_object_ids", [])
+                if str(member_id or "").strip()
+            ]
+            node = _node(
+                node_id=f"uih:control:{_slug(structure_ref)}:{_slug(control_id)}",
+                level="component",
+                component_type=str(control.get("role") or "atomic_control_parent"),
+                bbox=bbox,
+                parent_id=structure_node["node_id"],
+                source_ref=control_id,
+                label=str(control.get("label") or control_id),
+                member_item_ids=members,
+                evidence=_evidence(control),
+                confidence=_confidence(control),
+                review_status="needs_review" if clipped else "review_only",
+            )
+            if clipped:
+                clipped_node_ids.append(node["node_id"])
+            node_by_control[control_id] = node
+            nodes.append(node)
+            for member_id in members:
+                member_owner.setdefault(member_id, control_id)
+        control_nodes_by_region[structure_ref] = node_by_control
+        control_member_owners_by_region[structure_ref] = member_owner
+
     duplicate_owner_item_ids: list[str] = []
     for structure_ref, structure_node in structure_by_source.items():
         numbered_region = numbered_by_region.get(structure_ref, {})
         items = numbered_region.get("numbered_items") if isinstance(numbered_region.get("numbered_items"), list) else []
         node_by_group = group_nodes_by_region.get(structure_ref, {})
         payload_by_group = group_payloads_by_region.get(structure_ref, {})
+        node_by_control = control_nodes_by_region.get(structure_ref, {})
+        control_member_owners = control_member_owners_by_region.get(structure_ref, {})
         for index, item in enumerate(sorted(items, key=lambda entry: (*_bbox_sort_key(_bbox(entry.get("bbox")) or {}), str(entry.get("item_id") or ""))), start=1):
             item_id = str(item.get("item_id") or item.get("number") or f"item_{index}")
             level = _item_level(item)
@@ -172,7 +290,12 @@ def build_ui_hierarchy_graph(
                     and _contains_ratio(_bbox(item.get("bbox")) or {}, group_node["bbox"]) >= 0.999
                 )
             owner_group_id, competing_claims = _select_item_owner(claims, node_by_group)
-            parent = node_by_group.get(owner_group_id) if owner_group_id else structure_node
+            control_owner_id = str(control_member_owners.get(item_id) or "")
+            parent = node_by_control.get(control_owner_id)
+            if parent is None:
+                parent = node_by_group.get(owner_group_id) if owner_group_id else structure_node
+            else:
+                competing_claims = []
             raw_bbox = _bbox(item.get("bbox")) or parent["bbox"]
             bbox, clipped = _clip_with_flag(raw_bbox, parent["bbox"])
             review_status = "needs_review" if clipped or competing_claims else "review_only"
@@ -277,6 +400,7 @@ def build_ui_hierarchy_graph(
             "structure_region_count": levels.get("structure_region", 0),
             "component_count": levels.get("component", 0),
             "content_count": levels.get("content", 0),
+            "control_parent_count": sum(len(values) for values in control_nodes_by_region.values()),
             "resolved_ownership_conflict_count": resolved_ownership_conflict_count,
             "ambiguous_ownership_tie_count": ambiguous_ownership_tie_count,
             "ownership_review_required": any(bool(audit.get("needs_human_review")) for audit in ownership_audits),

@@ -90,6 +90,49 @@ def test_local_provider_calls_openai_compatible_vision_endpoint(tmp_path, monkey
     assert attempt_io["output"]["parsed_model_json"]["screen_summary"] == "demo screen"
 
 
+def test_local_provider_propagates_managed_model_request_id(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (200, 120), color=(255, 255, 255)).save(image_path)
+    monkeypatch.setenv("AGENT_GUI_MODEL_REQUEST_ID", "learn-worker-123")
+
+    def fake_urlopen(request, timeout):
+        assert timeout == 12.0
+        assert request.get_header("X-agent-gui-request-id") == "learn-worker-123"
+        body = json.loads(request.data.decode("utf-8"))
+        assert body["request_id"] == "learn-worker-123"
+        return _FakeHTTPResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "screen_summary": "managed request",
+                                    "state_guess": "managed",
+                                    "regions": [],
+                                    "targets": [],
+                                    "observers": [],
+                                }
+                            )
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("app.vision.local_provider.urlopen", fake_urlopen)
+
+    result = LocalVisionProvider(
+        endpoint="http://127.0.0.1:1234/v1/chat/completions",
+        timeout_seconds=12,
+    ).analyze(VisionAnalyzeRequest(image_path=str(image_path), task="observe_screen"))
+
+    assert result.screen_summary == "managed request"
+
+
 def test_local_provider_repairs_reversible_utf8_mojibake_before_parsing(tmp_path, monkeypatch) -> None:
     image_path = tmp_path / "screen.png"
     Image.new("RGB", (200, 120), color=(255, 255, 255)).save(image_path)

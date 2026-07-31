@@ -1,0 +1,47 @@
+{
+  "contract_version": "single_interface_asset_v1",
+  "interface_id": "branch_policy_modal",
+  "application_identity_key": "web:navigation-branching-lab",
+  "display_name": "Policy Dialog",
+  "surface_type": "modal_dialog",
+  "state_signature": "branch_policy_modal:reviewed",
+  "artifact_is_authorization": false,
+  "fixed_anchors": [
+    {
+      "content_id": "policy_identity",
+      "label": "Policy Dialog Interface",
+      "source_kind": "state",
+      "source_id": "branch_policy_modal",
+      "content_behavior": "fixed_label",
+      "agent_usage": "identity_anchor",
+      "read_policy": "on_interface_match",
+      "agent_description": "Confirm the reviewed policy modal."
+    }
+  ],
+  "dynamic_slots": [],
+  "controls": [
+    {
+      "control_id": "close_policy",
+      "label": "Close policy dialog",
+      "role": "button",
+      "agent_description": "Close the reviewed policy dialog and return to the workspace.",
+      "review_status": "human_reviewed"
+    }
+  ],
+  "action_candidates": [],
+  "verification_rules": [
+    {
+      "rule_id": "workspace_visible_after_close",
+      "description": "Operations Workspace Interface is visible after closing the dialog."
+    }
+  ],
+  "blockers": [],
+  "review": {
+    "status": "human_reviewed",
+    "manual_revision": {
+      "semantic_description": "Review the modal state and close it without another side effect."
+    }
+  },
+  "evidence": {},
+  "execute_binding_enabled": false
+}

@@ -1,23 +1,314 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
+import pytest
+
 from scripts.run_learning_interface_chain_smoke import (
+    ChainSmokeCase,
     _observation_evidence,
+    build_acceptance_batch_plan,
+    build_resource_blocked_report,
     _two_stage_stage1_overlay_path,
     _two_stage_review_box_count,
     build_learn_calibration_metadata,
     build_manifest_cases,
+    build_manifest_suite_cases,
     build_post_calibration_three_image_audit,
     build_three_image_audit,
     build_protected_cases,
+    ensure_acceptance_model_stage,
+    load_resume_completed_case_ids,
     audit_stage1_geometry,
     classify_chain_completion,
     classify_case_quality,
     evaluate_class_expectations,
     evaluate_saved_class_expectations,
+    main,
     summarize_class_expectation_audits,
 )
+
+
+def test_ensure_acceptance_model_stage_waits_for_locate_model(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_ensure_model_server(**kwargs):
+        calls.append(dict(kwargs))
+        return {
+            "stage": "locate",
+            "profile": {"profile_id": "vista_4b_transformers"},
+            "before": {"status": "unreachable"},
+            "started": True,
+            "after": {"status": "running", "model_id": "VISTA-4B"},
+        }
+
+    monkeypatch.setattr(
+        "scripts.run_learning_interface_chain_smoke.ensure_model_server",
+        fake_ensure_model_server,
+    )
+
+    result = ensure_acceptance_model_stage("locate", wait_seconds=120)
+
+    assert calls == [
+        {
+            "stage": "locate",
+            "wait_until_ready": True,
+            "wait_seconds": 120,
+        }
+    ]
+    assert result["status"] == "running"
+    assert result["profile_id"] == "vista_4b_transformers"
+    assert result["started"] is True
+
+
+def test_ensure_acceptance_model_stage_rejects_non_running_model(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "scripts.run_learning_interface_chain_smoke.ensure_model_server",
+        lambda **_kwargs: {
+            "stage": "locate",
+            "profile": {"profile_id": "vista_4b_transformers"},
+            "before": {"status": "unreachable"},
+            "started": True,
+            "after": {"status": "startup_failed", "reason": "started_process_exited"},
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="acceptance model stage locate is not ready: startup_failed"):
+        ensure_acceptance_model_stage("locate", wait_seconds=5)
+
+
+def _write_acceptance_manifest(tmp_path: Path, *, name: str, case_id: str) -> Path:
+    trace_path = tmp_path / f"{name}_trace.json"
+    image_path = tmp_path / f"{name}_screen.png"
+    trace_path.write_text('{"result": {}}\n', encoding="utf-8")
+    image_path.write_bytes(f"image:{name}".encode("utf-8"))
+    manifest_path = tmp_path / f"{name}_manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "cases": [
+                    {
+                        "case_id": case_id,
+                        "trace_path": str(trace_path),
+                        "screenshot_path": str(image_path),
+                        "trace_sha256": hashlib.sha256(trace_path.read_bytes()).hexdigest(),
+                        "screenshot_sha256": hashlib.sha256(image_path.read_bytes()).hexdigest(),
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return manifest_path
+
+
+def test_build_manifest_suite_cases_combines_protected_and_holdout_manifests(tmp_path: Path) -> None:
+    protected = _write_acceptance_manifest(tmp_path, name="protected", case_id="protected_case")
+    holdout = _write_acceptance_manifest(tmp_path, name="holdout", case_id="holdout_case")
+
+    cases = build_manifest_suite_cases([protected, holdout])
+
+    assert [case.case_id for case in cases] == ["protected_case", "holdout_case"]
+
+
+def test_build_manifest_suite_cases_rejects_duplicate_case_ids(tmp_path: Path) -> None:
+    first = _write_acceptance_manifest(tmp_path, name="first", case_id="duplicate_case")
+    second = _write_acceptance_manifest(tmp_path, name="second", case_id="duplicate_case")
+
+    with pytest.raises(ValueError, match="duplicate acceptance case ids: duplicate_case"):
+        build_manifest_suite_cases([first, second])
+
+
+def test_acceptance_batch_plan_uses_resource_recommendation_and_can_resume() -> None:
+    cases = [
+        ChainSmokeCase(case_id=f"case_{index}", trace_path="trace.json", source_image_path="screen.png")
+        for index in range(5)
+    ]
+    preflight = {
+        "resource_mode": "constrained",
+        "model_launch_allowed": True,
+        "recommended_batch_size": 2,
+    }
+
+    first = build_acceptance_batch_plan(cases, resource_preflight=preflight, batch_index=0)
+    second = build_acceptance_batch_plan(cases, resource_preflight=preflight, batch_index=1)
+
+    assert first["selected_case_ids"] == ["case_0", "case_1"]
+    assert first["pending_case_ids"] == ["case_2", "case_3", "case_4"]
+    assert first["batch_size"] == 2
+    assert second["selected_case_ids"] == ["case_2", "case_3"]
+    assert second["pending_case_ids"] == ["case_0", "case_1", "case_4"]
+
+
+def test_acceptance_batch_plan_resumes_by_completed_ids_when_resource_batch_size_changes() -> None:
+    cases = [
+        ChainSmokeCase(case_id=f"case_{index}", trace_path="trace.json", source_image_path="screen.png")
+        for index in range(5)
+    ]
+
+    first = build_acceptance_batch_plan(
+        cases,
+        resource_preflight={"recommended_batch_size": 2, "model_launch_allowed": True},
+    )
+    resumed = build_acceptance_batch_plan(
+        cases,
+        resource_preflight={"recommended_batch_size": 1, "model_launch_allowed": True},
+        completed_case_ids=first["selected_case_ids"],
+    )
+
+    assert resumed["completed_case_ids"] == ["case_0", "case_1"]
+    assert resumed["remaining_case_ids"] == ["case_2", "case_3", "case_4"]
+    assert resumed["selected_case_ids"] == ["case_2"]
+    assert resumed["pending_case_ids"] == ["case_3", "case_4"]
+
+
+def test_acceptance_batch_plan_rejects_resume_ids_with_nonzero_batch_index() -> None:
+    cases = [
+        ChainSmokeCase(case_id=f"case_{index}", trace_path="trace.json", source_image_path="screen.png")
+        for index in range(3)
+    ]
+
+    with pytest.raises(ValueError, match="batch_index must remain zero when completed_case_ids are supplied"):
+        build_acceptance_batch_plan(
+            cases,
+            resource_preflight={"recommended_batch_size": 1, "model_launch_allowed": True},
+            completed_case_ids=["case_0"],
+            batch_index=1,
+        )
+
+
+def test_load_resume_completed_case_ids_reads_same_manifest_batch_reports(tmp_path: Path) -> None:
+    manifest = (tmp_path / "manifest.json").resolve()
+    manifest.write_text('{"cases": []}\n', encoding="utf-8")
+    first_report = tmp_path / "batch_0.json"
+    second_report = tmp_path / "batch_1.json"
+    for path, completed in (
+        (first_report, ["case_0", "case_1"]),
+        (second_report, ["case_2"]),
+    ):
+        path.write_text(
+            json.dumps(
+                {
+                    "contract_version": "learning_interface_chain_smoke_report_v2",
+                    "status": "completed_batch",
+                    "manifest_paths": [str(manifest)],
+                    "completed_case_ids": completed,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    completed = load_resume_completed_case_ids(
+        [first_report, second_report],
+        expected_manifest_paths=[str(manifest)],
+        known_case_ids={"case_0", "case_1", "case_2", "case_3"},
+    )
+
+    assert completed == ["case_0", "case_1", "case_2"]
+
+
+def test_cli_resume_report_keeps_only_unfinished_cases_pending(tmp_path: Path, monkeypatch) -> None:
+    first_manifest = _write_acceptance_manifest(tmp_path, name="first", case_id="case_0")
+    second_manifest = _write_acceptance_manifest(tmp_path, name="second", case_id="case_1")
+    resume_report = tmp_path / "completed_batch.json"
+    resume_report.write_text(
+        json.dumps(
+            {
+                "contract_version": "learning_interface_chain_smoke_report_v2",
+                "status": "completed_batch",
+                "manifest_paths": [str(first_manifest.resolve()), str(second_manifest.resolve())],
+                "completed_case_ids": ["case_0"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    out_dir = tmp_path / "out"
+    monkeypatch.setattr(
+        "scripts.run_learning_interface_chain_smoke.build_chain_model_resource_preflight",
+        lambda: {
+            "resource_mode": "critical",
+            "model_launch_allowed": False,
+            "recommended_batch_size": 1,
+            "reason_codes": ["insufficient_gpu_memory_for_profile"],
+        },
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "run_learning_interface_chain_smoke.py",
+            "--manifest",
+            str(first_manifest),
+            "--manifest",
+            str(second_manifest),
+            "--resume-report",
+            str(resume_report),
+            "--out",
+            str(out_dir),
+            "--json",
+        ],
+    )
+
+    exit_code = main()
+    report = json.loads((out_dir / "learning_interface_chain_smoke_report.json").read_text(encoding="utf-8"))
+
+    assert exit_code == 2
+    assert report["completed_case_ids"] == []
+    assert report["pending_case_ids"] == ["case_1"]
+    assert report["batch_plan"]["completed_case_ids"] == ["case_0"]
+    assert report["batch_plan"]["selected_case_ids"] == ["case_1"]
+    assert report["resume_report_paths"] == [str(resume_report.resolve())]
+
+
+def test_acceptance_batch_plan_filters_explicit_case_ids_before_batching() -> None:
+    cases = [
+        ChainSmokeCase(case_id=f"case_{index}", trace_path="trace.json", source_image_path="screen.png")
+        for index in range(4)
+    ]
+
+    plan = build_acceptance_batch_plan(
+        cases,
+        resource_preflight={"recommended_batch_size": 8, "model_launch_allowed": True},
+        requested_case_ids=["case_3", "case_1"],
+        requested_batch_size=1,
+        batch_index=1,
+    )
+
+    assert plan["eligible_case_ids"] == ["case_1", "case_3"]
+    assert plan["selected_case_ids"] == ["case_3"]
+    assert plan["pending_case_ids"] == ["case_1"]
+
+
+def test_resource_blocked_report_does_not_attempt_model_or_score_cases(tmp_path: Path) -> None:
+    plan = {
+        "selected_case_ids": ["case_0"],
+        "pending_case_ids": ["case_1"],
+        "eligible_case_ids": ["case_0", "case_1"],
+        "batch_size": 1,
+        "batch_index": 0,
+    }
+    preflight = {
+        "resource_mode": "critical",
+        "model_launch_allowed": False,
+        "recommended_batch_size": 1,
+        "reason_codes": ["insufficient_gpu_memory_for_profile"],
+    }
+
+    report = build_resource_blocked_report(
+        batch_plan=plan,
+        resource_preflight=preflight,
+        out_dir=tmp_path,
+    )
+
+    assert report["status"] == "resource_blocked"
+    assert report["model_calls_attempted"] == 0
+    assert report["case_count"] == 0
+    assert report["invalid_case_count"] == 0
+    assert report["pending_case_ids"] == ["case_0", "case_1"]
+    assert report["safety"]["live_clicks"] == 0
+    assert Path(report["report_path"]).exists()
 
 
 def test_build_manifest_cases_uses_current_valid_recursive_surfaces() -> None:
@@ -32,6 +323,44 @@ def test_build_manifest_cases_uses_current_valid_recursive_surfaces() -> None:
     assert not any("qq" in case.case_id.lower() for case in cases)
     assert not any("calculator" in case.case_id.lower() for case in cases)
     assert any(case.case_id == "conversation_workspace_whatsapp_20260715" for case in cases)
+
+
+def test_targeted_fresh_rerun_manifest_freezes_independent_expectations() -> None:
+    manifest_path = Path("tests/fixtures/learning_practical_targeted_rerun_manifest_v1.json")
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert payload["used_for_rule_tuning"] is False
+    assert payload["holdout_used_for_tuning"] is False
+
+    cases = payload["cases"]
+    assert [case["case_id"] for case in cases] == [
+        "conversation_workspace_whatsapp_20260715",
+        "holdout_qq_group_chat_20260720",
+        "holdout_github_desktop_changes_20260718",
+    ]
+    assert all(case["expectations"] for case in cases)
+    assert all(case["screenshot_sha256"] for case in cases)
+    assert all(case["trace_sha256"] for case in cases)
+
+    raw_cases = {case["case_id"]: case for case in payload["cases"]}
+    assert raw_cases["conversation_workspace_whatsapp_20260715"]["expected_root_zones"] == [
+        "left_nav",
+        "top_bar",
+        "main_content",
+    ]
+    assert raw_cases["holdout_qq_group_chat_20260720"]["expected_root_zones"] == [
+        "left_nav",
+        "top_bar",
+        "main_content",
+    ]
+    assert raw_cases["holdout_github_desktop_changes_20260718"]["expected_root_zones"] == [
+        "top_bar",
+        "main_content",
+    ]
+
+    github_case = next(case for case in cases if case["app_family"] == "github_desktop")
+    assert "conversation_row" in github_case["expectations"]["forbidden_group_roles"]
+    assert "message_item" in github_case["expectations"]["forbidden_group_roles"]
 
 
 def test_class_expectation_audit_scores_strategy_structure_roles_and_contamination() -> None:
@@ -80,6 +409,113 @@ def test_class_expectation_audit_scores_strategy_structure_roles_and_contaminati
     assert "interface_category_mismatch" in failed["issues"]
     assert "forbidden_group_role_present:media_card_group" in failed["issues"]
     assert "forbidden_label_token_present:apple music" in failed["issues"]
+
+
+def test_class_expectation_audit_scores_bar_presence_absence_and_sub_bar_roles() -> None:
+    expectations = {
+        "expected_bar_types": ["top_bar", "left_sidebar"],
+        "expected_absent_bar_types": ["right_sidebar", "bottom_bar"],
+        "expected_sub_bar_roles": ["conversation_navigation_rail", "conversation_list"],
+    }
+    report = {
+        "ui_hierarchy": {
+            "nodes": [
+                {"level": "screen", "component_type": "screen", "label": "Chat"},
+                {"level": "structure_region", "component_type": "top_bar", "label": "Title"},
+                {"level": "structure_region", "component_type": "left_sidebar", "label": "Navigation"},
+                {"level": "structure_region", "component_type": "main_content", "label": "Conversation"},
+                {
+                    "level": "component_group",
+                    "component_type": "conversation_navigation_rail",
+                    "label": "Navigation rail",
+                },
+                {"level": "component_group", "component_type": "conversation_list", "label": "Chats"},
+            ]
+        }
+    }
+
+    passed = evaluate_class_expectations(report, expectations)
+    assert passed["status"] == "passed"
+    assert passed["actual"]["bar_types"] == ["left_sidebar", "top_bar"]
+    assert passed["actual"]["sub_bar_roles"] == [
+        "conversation_list",
+        "conversation_navigation_rail",
+    ]
+
+    failed_report = {
+        "ui_hierarchy": {
+            "nodes": [
+                {"level": "screen", "component_type": "screen", "label": "Chat"},
+                {"level": "structure_region", "component_type": "left_sidebar", "label": "Navigation"},
+                {"level": "structure_region", "component_type": "right_sidebar", "label": "Unexpected"},
+                {
+                    "level": "component_group",
+                    "component_type": "conversation_navigation_rail",
+                    "label": "Navigation rail",
+                },
+            ]
+        }
+    }
+    failed = evaluate_class_expectations(failed_report, expectations)
+
+    assert failed["status"] == "needs_review"
+    assert "missing_expected_bar_type:top_bar" in failed["issues"]
+    assert "unexpected_bar_type:right_sidebar" in failed["issues"]
+    assert "missing_expected_sub_bar_role:conversation_list" in failed["issues"]
+
+
+def test_steam_acceptance_cases_expect_the_visible_group_chat_bottom_bar() -> None:
+    manifest_path = Path("tests/fixtures/learning_practical_steam_bar_adjudication_v1.json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    steam_cases = {
+        case["case_id"]: case
+        for case in manifest["cases"]
+        if str(case.get("case_id") or "").startswith("conversation_workspace_steam_")
+    }
+
+    assert set(steam_cases) == {
+        "conversation_workspace_steam_20260713",
+        "conversation_workspace_steam_20260714",
+    }
+    for case in steam_cases.values():
+        assert case["adjudication"] == "visible_docked_group_chat_bottom_area"
+        assert "bottom_bar" in case["expected_bar_types"]
+        assert "bottom_bar" not in case["expected_absent_bar_types"]
+
+
+def test_class_expectation_audit_reads_stage1_5_chat_subregions_and_navigation_root() -> None:
+    expectations = {
+        "expected_bar_types": ["left_sidebar"],
+        "expected_sub_bar_roles": ["conversation_navigation_rail", "conversation_list"],
+    }
+    report = {
+        "interface_classification": {"category": "conversation_workspace"},
+        "ui_hierarchy": {
+            "nodes": [
+                {"level": "screen", "component_type": "screen", "label": "Chat"},
+                {"level": "structure_region", "component_type": "left_sidebar", "label": "Navigation"},
+                {"level": "structure_region", "component_type": "main_content", "label": "Conversation"},
+            ]
+        },
+        "stage1_5_partition": {
+            "subregions": [
+                {"role": "conversation_list", "bbox": {"x": 60, "y": 80, "w": 260, "h": 620}},
+                {"role": "message_thread", "bbox": {"x": 320, "y": 80, "w": 680, "h": 620}},
+            ]
+        },
+    }
+
+    result = evaluate_class_expectations(report, expectations)
+
+    assert result["status"] == "passed"
+    assert result["actual"]["sub_bar_roles"] == [
+        "conversation_list",
+        "conversation_navigation_rail",
+    ]
+    assert result["actual"]["sub_bar_evidence_sources"] == {
+        "conversation_list": "stage1_5_partition",
+        "conversation_navigation_rail": "conversation_workspace_left_sidebar_root",
+    }
 
 
 def test_class_expectation_needs_review_blocks_quality_and_chain_completion() -> None:

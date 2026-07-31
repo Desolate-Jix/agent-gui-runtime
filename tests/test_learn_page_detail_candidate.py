@@ -17,6 +17,76 @@ def _write_json(path: Path, payload: dict) -> Path:
     return path
 
 
+def test_page_detail_candidate_records_reviewed_dual_stream_source_identity(tmp_path: Path) -> None:
+    source = _write_json(
+        tmp_path / "artifacts" / "learning-runs" / "reviewed" / "final_stage2_for_calibration.json",
+        {
+            "contract_version": "panel_learning_final_stage2_for_calibration_v1",
+            "artifact_type": "learn_reviewed_final_stage2",
+            "source_image_path": "artifacts/screenshots/qq.png",
+            "model_review_repair": {
+                "source_graph_revision": "source-revision",
+                "reviewed_graph_revision": "reviewed-revision",
+                "final_numbering_revision": "final-revision",
+                "integrity_gate": {
+                    "passed": True,
+                    "expected_capture_sha256": "capture-sha",
+                    "actual_capture_sha256": "capture-sha",
+                },
+            },
+            "stage2_numbering": {
+                "graph_revision": "final-revision",
+                "final_numbering": {"revision": "final-revision"},
+                "regions": [
+                    {
+                        "region_id": "main",
+                        "label": "Main",
+                        "bbox": {"x": 0, "y": 0, "w": 400, "h": 300},
+                        "stage2_streams": {
+                            "contract_version": "learn_stage2_dual_streams_v1",
+                            "visual_objects": [{"object_id": "button"}],
+                            "semantic_groups": [{"group_id": "toolbar"}],
+                            "associations": [{"object_id": "button", "group_id": "toolbar"}],
+                        },
+                        "numbered_items": [],
+                    }
+                ],
+            },
+            "fusion": {
+                "contract_version": "learn_two_stage_fused_review_boxes_v1",
+                "compiled_overlay_path": "artifacts/review-overlays/qq_reviewed.png",
+                "fused_review_boxes": [
+                    {
+                        "box_type": "structure_region",
+                        "number": "1",
+                        "label": "Main",
+                        "bbox": {"x": 0, "y": 0, "w": 400, "h": 300},
+                    }
+                ],
+            },
+            "execute_binding_enabled": False,
+            "artifact_is_authorization": False,
+        },
+    )
+
+    result = build_learn_page_detail_candidate(source_path=source, out_dir=source.parent, project_root=tmp_path)
+
+    identity = result["source_identity"]
+    assert identity["contract_version"] == "learning_repaired_source_identity_v1"
+    assert identity["source_artifact_type"] == "learn_reviewed_final_stage2"
+    assert identity["source_graph_revision"] == "source-revision"
+    assert identity["reviewed_graph_revision"] == "reviewed-revision"
+    assert identity["final_numbering_revision"] == "final-revision"
+    assert identity["capture_sha256"] == "capture-sha"
+    assert identity["screenshot_path"] == "artifacts/screenshots/qq.png"
+    assert identity["compiled_overlay_path"] == "artifacts/review-overlays/qq_reviewed.png"
+    assert identity["dual_stream_contract"] == "learn_stage2_dual_streams_v1"
+    assert identity["dual_stream_region_count"] == 1
+    assert identity["visual_object_count"] == 1
+    assert identity["semantic_group_count"] == 1
+    assert identity["association_count"] == 1
+
+
 def test_page_detail_candidate_preserves_panel_trial_overlay_and_screenshot(tmp_path: Path) -> None:
     source = _write_json(
         tmp_path / "artifacts" / "learning-runs" / "panel_trial" / "trial_result.json",
@@ -101,14 +171,35 @@ def test_page_detail_candidate_uses_nested_two_stage_structure_from_fused_trial(
                 },
             },
             "two_stage_understanding": {
-                "contract_version": "learn_two_stage_screen_understanding_v1",
+                "contract_version": "panel_learning_final_stage2_for_calibration_v1",
+                "artifact_type": "learn_reviewed_final_stage2",
+                "model_review_repair": {
+                    "source_graph_revision": "nested-source-revision",
+                    "reviewed_graph_revision": "nested-reviewed-revision",
+                    "final_numbering_revision": "nested-final-revision",
+                    "integrity_gate": {
+                        "passed": True,
+                        "actual_capture_sha256": "nested-capture-sha",
+                    },
+                },
                 "stage2_numbering": {
                     "contract_version": "learn_stage2_region_numbering_v1",
+                    "graph_revision": "nested-final-revision",
+                    "final_numbering": {
+                        "revision": "nested-final-revision",
+                        "capture_sha256": "nested-capture-sha",
+                    },
                     "regions": [
                         {
                             "region_id": "main",
                             "label": "Main",
                             "bbox": {"x": 0, "y": 100, "w": 800, "h": 500},
+                            "stage2_streams": {
+                                "contract_version": "learn_stage2_dual_streams_v1",
+                                "visual_objects": [{"object_id": "search"}],
+                                "semantic_groups": [{"group_id": "main_group"}],
+                                "associations": [{"object_id": "search", "group_id": "main_group"}],
+                            },
                             "subregion_groups": [],
                             "numbered_items": [],
                         }
@@ -155,13 +246,30 @@ def test_page_detail_candidate_uses_nested_two_stage_structure_from_fused_trial(
 
     result = build_learn_page_detail_candidate(source_path=source, out_dir=source.parent, project_root=tmp_path)
 
-    assert result["source_detail_shape"] == "learn_two_stage_screen_understanding_v1"
+    assert result["source_detail_shape"] == "panel_learning_final_stage2_for_calibration_v1"
     assert result["summary"]["region_count"] == 2
     assert {item["label"] for item in result["layout"]["regions"]} == {"Search", "Result card"}
     assert result["ui_hierarchy"]["contract_version"] == "ui_hierarchy_graph_v1"
     assert len(result["ui_hierarchy"]["nodes"]) == 3
     assert result["compiled_overlay_path"] == "artifacts/review-overlays/fused.png"
     assert result["screenshot_path"] == "artifacts/screenshots/python.png"
+    assert result["source_identity"] == {
+        "contract_version": "learning_repaired_source_identity_v1",
+        "source_path": "artifacts/learning-runs/fused_trial/trial_result.json",
+        "source_contract_version": "panel_learning_final_stage2_for_calibration_v1",
+        "source_artifact_type": "learn_reviewed_final_stage2",
+        "source_graph_revision": "nested-source-revision",
+        "reviewed_graph_revision": "nested-reviewed-revision",
+        "final_numbering_revision": "nested-final-revision",
+        "capture_sha256": "nested-capture-sha",
+        "screenshot_path": "artifacts/screenshots/python.png",
+        "compiled_overlay_path": "artifacts/review-overlays/fused.png",
+        "dual_stream_contract": "learn_stage2_dual_streams_v1",
+        "dual_stream_region_count": 1,
+        "visual_object_count": 1,
+        "semantic_group_count": 1,
+        "association_count": 1,
+    }
 
 
 def test_page_detail_candidate_overlays_matched_precise_locator_geometry_on_two_stage_regions(tmp_path: Path) -> None:

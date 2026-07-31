@@ -84,6 +84,33 @@ def test_stage1_inventory_preserves_action_grounding_evidence_from_observe_trace
     assert items[0]["metadata"]["interaction_type"] == "click"
 
 
+def test_stage1_inventory_preserves_explicit_source_id_from_observe_trace() -> None:
+    result = {
+        "image_size": {"width": 800, "height": 600},
+        "screen_inventory": {
+            "available_actions": [
+                {
+                    "id": "action_screen_3_help",
+                    "source_id": "element_h_170cdf28",
+                    "label": "Help",
+                    "role": "menu_item",
+                    "bbox": {"x": 290, "y": 32, "w": 48, "h": 32},
+                    "source": "screen_reading.ui_elements",
+                    "metadata": {
+                        "evidence_level": "semantic_region_only",
+                        "uia_match": None,
+                    },
+                }
+            ]
+        },
+    }
+
+    items = _stage1_inventory_from_trace_result(result)
+
+    assert items[0]["item_id"] == "action_screen_3_help"
+    assert items[0]["metadata"]["source_id"] == "element_h_170cdf28"
+
+
 def test_stage1_inventory_reads_parser_screen_inventory_list() -> None:
     result = {
         "observe_bundle": {
@@ -120,6 +147,35 @@ def test_stage1_inventory_reads_parser_screen_inventory_list() -> None:
     assert items[0]["metadata"]["source"] == "screen_inventory.list"
     assert items[0]["review_only"] is True
     assert items[0]["grounding_eligible"] is False
+
+
+def test_trace_input_preserves_nested_model_interface_classification() -> None:
+    classification = {
+        "category": "feed_workspace",
+        "confidence": 1.0,
+        "reason": "visible news feed",
+        "structure_signals": {
+            "feed_items": True,
+            "news_items": True,
+        },
+    }
+    result = {
+        "observe_bundle": {
+            "screen_size": {"width": 1280, "height": 720},
+            "sources": {
+                "vision": {
+                    "interface_classification": classification,
+                }
+            },
+        }
+    }
+
+    bundle = _observe_bundle_from_trace_result(
+        result,
+        trace_path=Path("recognition_trial.json"),
+    )
+
+    assert bundle["sources"]["vision"]["interface_classification"] == classification
 
 
 def test_stage1_inventory_does_not_promote_single_edge_ocr_text_to_sidebar() -> None:

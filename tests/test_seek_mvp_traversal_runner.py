@@ -1611,6 +1611,86 @@ def test_execute_apply_entry_goal_prefers_merged_card_title_over_observed_ocr(mo
     assert "SeniorAndroid" not in apply_call["goal"]
 
 
+def test_execute_apply_entry_repeats_detail_reset_until_fresh_apply_is_visible(monkeypatch) -> None:
+    calls: list[tuple[str, dict]] = []
+    visual_verifications = iter(
+        [
+            {"ok": False, "failure_reasons": ["apply_or_quick_apply_not_visible"]},
+            {"ok": False, "failure_reasons": ["apply_or_quick_apply_not_visible"]},
+            {
+                "ok": True,
+                "apply_button_state": {
+                    "visible": True,
+                    "label": "Quick apply",
+                    "bbox": {"x": 1200, "y": 830, "w": 90, "h": 42},
+                    "click_point": {"x": 1245, "y": 851},
+                    "candidate_freshness": {
+                        "contract_version": "action_candidate_freshness_v1",
+                        "capture_id": "second-reset-capture",
+                        "viewport_size": {"width": 1440, "height": 900},
+                        "source": "learned_visual_match",
+                        "freshness": "current_capture",
+                    },
+                },
+            },
+        ]
+    )
+    monkeypatch.setattr(
+        runner,
+        "_learned_quick_apply_verification_from_detail",
+        lambda *_args, **_kwargs: next(visual_verifications),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_verify_pre_apply_job_detail",
+        lambda *_args, **_kwargs: {
+            "contract_version": "pre_apply_detail_verification_v1",
+            "ok": False,
+            "failure_reasons": ["apply_or_quick_apply_not_visible"],
+        },
+    )
+
+    def fake_post(base_url, endpoint, payload, timeout):
+        calls.append((endpoint, payload))
+        if endpoint == "/action/scroll":
+            return _scroll_response()
+        assert endpoint == "/action/execute_confirmed_point"
+        return _response(
+            {
+                "contract_version": "execute_confirmed_point_v1",
+                "trace_path": "logs/traces/actions/confirmed.json",
+                "confirmed_point": {"x": payload["x"], "y": payload["y"]},
+                "candidate_bbox": payload["bbox"],
+                "execution_path": {"action_executed": payload.get("dry_run") is False},
+            }
+        )
+
+    monkeypatch.setattr(runner, "_post_json", fake_post)
+
+    attempt = runner._execute_apply_entry(
+        "http://runtime",
+        app_name="edge",
+        job={"job_id": "job1", "title": "Software Engineer", "company": "Example"},
+        detail={
+            "job_id": "job1",
+            "title": "Software Engineer",
+            "company": "Example",
+            "apply_button_state": {"visible": False, "label": "Quick apply"},
+        },
+        match_decision={"decision": "strong_apply", "job_id": "job1"},
+        candidate_profile=None,
+        execute_clicks=False,
+        timeout=5,
+    )
+
+    scroll_calls = [payload for endpoint, payload in calls if endpoint == "/action/scroll"]
+    assert len(scroll_calls) == 2
+    assert attempt["status"] == "dry_run_ready"
+    assert len(attempt["pre_apply_detail_reset_attempts"]) == 2
+    assert attempt["pre_apply_detail_verification"]["ok"] is True
+    assert attempt["apply_click"]["candidate_freshness"]["capture_id"] == "second-reset-capture"
+
+
 def test_execute_apply_entry_sends_verified_apply_seeded_candidate(monkeypatch) -> None:
     calls: list[tuple[str, dict]] = []
 

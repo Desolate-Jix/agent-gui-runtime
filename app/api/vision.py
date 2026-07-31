@@ -16,13 +16,88 @@ from app.core.model_server import load_model_profiles
 from app.core.runtime_artifacts import ARTIFACTS_DIR, RuntimeTimer, build_review_overlay_path, write_trace
 from app.core.screenshot import screenshot_service
 from app.gate.candidates import validate_action_candidate_freshness
-from app.operation.path_graph import build_available_actions
+from app.operation.observe.contracts import (
+    ObserveScreenReadRequest,
+    ObserveScreenReadResult,
+    ObserveScreenTaskInput,
+)
+from app.operation.locate.contracts import (
+    LocateRecognitionPlanResult,
+    LocateSingleTargetTaskInput,
+)
+from app.operation.locate.service import run_single_target_locate
 from app.operation.runtime_context import build_operation_runtime_context, operation_trace_link
 from app.operation.visual_asset_matching import match_visual_asset
-from app.learn.interface_map import build_learned_interface_map
-from app.learn.path_graph_resolver import resolve_runtime_path_graph
+from app.learn.workflow_task_result_adapter import (
+    observe_result_to_legacy_response,
+)
+from app.learn.workflow_tasks.observe import run_observe_task
+from app.learn.observe_enrichment.deep_review import (
+    _compact_map_items,
+    _compact_uia_for_learn_deep,
+    _deep_duplicate_candidate,
+    _extract_provider_model_json,
+    _learn_deep_model_options,
+    _normalize_learn_deep_model_candidate,
+    _normalize_learn_deep_model_update,
+    _path_bbox_similarity,
+    _path_label_key,
+    _path_label_similarity,
+)
+from app.learn.observe_enrichment.screen_map_builder import (
+    _application_bottom_bar_top,
+    _application_screen_map_sections,
+    _application_top_bar_bottom,
+    _as_list,
+    _bbox_overlap_area,
+    _bbox_union,
+    _bounded_float,
+    _card_bbox_for_seed,
+    _card_children_from_texts,
+    _card_column_bounds,
+    _card_role_for_bbox,
+    _compact_state_hint,
+    _expected_effect_for_ocr_text,
+    _expected_effect_from_item,
+    _first_compact_text,
+    _floating_overlay_section,
+    _goal_hint_for_candidate,
+    _header_ocr_text_is_noise,
+    _interaction_policy_from_item,
+    _is_card_seed_label,
+    _is_generic_article_seed_label,
+    _looks_like_high_risk_action_text,
+    _looks_like_low_risk_navigation_candidate,
+    _looks_like_metadata_text,
+    _looks_like_more_button_text,
+    _max_text_edge,
+    _normalize_map_bbox,
+    _normalize_map_point,
+    _normalize_ocr_candidate_label,
+    _number,
+    _ocr_text_candidate_role,
+    _pad_bbox,
+    _point_inside_bbox,
+    _risk_class_for_candidate,
+    _screen_map_candidate,
+    _screen_map_candidates,
+    _screen_map_card_candidates,
+    _screen_map_has_right_sidebar_evidence,
+    _screen_map_looks_like_browser_page,
+    _screen_map_section,
+    _screen_map_sections,
+    _screen_map_text_candidates,
+    _screen_map_text_is_noise,
+    _screen_map_texts,
+    _screen_state_signature,
+    _section_id_for_bbox,
+    _texts_in_bbox,
+)
+from app.learn.observe_enrichment.visual_assets import (
+    safe_visual_asset_run_name,
+)
+from app.learn.recognition.surface_adapters import surface_adapter_excludes_inventory_item
 from app.learn.recognition.two_stage import partition_stage2_calibration_items
-from app.learn.visual_asset_crops import build_visual_assets_from_screen_map
 from app.api.models.request import (
     VisionAnalyzeRequestModel,
     VisionLocateTargetRequestModel,
@@ -46,6 +121,11 @@ from app.vision.artifacts import save_region_artifacts
 from app.vision.anchor_grounding import apply_anchor_grounding_evaluation
 from app.vision.factory import VisionProviderFactory
 from app.vision.local_provider import LocalVisionProvider
+from app.vision.model_io import (
+    attach_model_io as _attach_model_io,
+    model_io_failure_payload as _model_io_failure_payload,
+    model_io_trace as _model_io_trace,
+)
 from app.vision.layer_trace import (
     failure_layer,
     make_layer,
@@ -74,9 +154,6 @@ router = APIRouter(prefix="/vision", tags=["vision"])
 
 VISTA_DIRECT_IMAGES_DIR = ARTIFACTS_DIR / "vista-direct"
 VISUAL_ASSET_RECALL_CONTRACT = "visual_asset_recall_v1"
-DEFAULT_LEARNED_RUNTIME_PATH_GRAPHS = {
-    "seek": ARTIFACTS_DIR / "seek" / "runtime_path_graph_seek_mvp_20260617.json",
-}
 
 
 def _vision_execution_path(
@@ -97,44 +174,6 @@ def _vision_execution_path(
         "ocr_region_refine_used": bool(ocr_region_refine_used),
         "coordinate_source": "page_structure_v1.click_point" if page_structure_generated else "vision_regions_v1",
     }
-
-
-def _model_io_trace(provider_response: Any | None = None, *, error: Exception | None = None) -> dict[str, Any] | None:
-    if provider_response is not None:
-        raw_response = getattr(provider_response, "raw_response", None)
-        raw = raw_response if isinstance(raw_response, dict) else {}
-        attempts = raw.get("attempts") if isinstance(raw.get("attempts"), list) else []
-        model_json = raw.get("model_json") if isinstance(raw.get("model_json"), dict) else {}
-        model_name = raw.get("model_name") or model_json.get("model_name") or model_json.get("provider")
-        return {
-            "contract_version": "model_io_trace_v1",
-            "status": "success",
-            "provider": getattr(provider_response, "provider", None),
-            "model_name": model_name,
-            "raw_text": getattr(provider_response, "raw_text", None) or raw.get("raw_text"),
-            "raw_response": raw,
-            "attempt_count": len(attempts),
-            "attempts": attempts,
-        }
-    if error is not None:
-        diagnostics = getattr(error, "diagnostics", None)
-        if isinstance(diagnostics, dict):
-            return {
-                "contract_version": "model_io_trace_v1",
-                "status": "failed",
-                **diagnostics,
-            }
-    return None
-
-
-def _attach_model_io(result_payload: dict[str, Any], provider_response: Any | None) -> None:
-    model_io = _model_io_trace(provider_response)
-    if model_io is not None:
-        result_payload["model_io"] = model_io
-
-
-def _model_io_failure_payload(exc: Exception) -> dict[str, Any] | None:
-    return _model_io_trace(error=exc)
 
 
 def _maybe_refine_with_ocr(provider_response, *, request: VisionAnalyzeRequestModel, image_path: Path):
@@ -1808,6 +1847,31 @@ def _recognition_candidate_from_vista_direct(
     )
 
 
+def _vista_direct_uia_conflicts(
+    *,
+    goal: str,
+    point: dict[str, int],
+    candidates: list[RecognitionCandidate],
+) -> list[str]:
+    normalized_goal = re.sub(r"\s+", " ", str(goal or "").strip().casefold())
+    exact_uia_candidates: list[RecognitionCandidate] = []
+    for candidate in candidates:
+        if not isinstance(candidate.element.evidence.get("screen_inventory_action"), dict):
+            continue
+        normalized_label = re.sub(r"\s+", " ", str(candidate.label or "").strip().casefold())
+        if len(normalized_label) < 3 or normalized_label not in normalized_goal:
+            continue
+        exact_uia_candidates.append(candidate)
+    if not exact_uia_candidates:
+        return []
+    if any(
+        _point_inside_map_bbox(point, candidate.refined_bbox or candidate.element.bbox.to_dict())
+        for candidate in exact_uia_candidates
+    ):
+        return []
+    return [candidate.candidate_id for candidate in exact_uia_candidates]
+
+
 def _execute_fast_inventory_from_uia(
     *,
     image_path: Path,
@@ -1937,6 +2001,10 @@ def _recognition_plan_from_vista_point(
     path_graph_recall: dict[str, Any],
 ) -> APIResponse:
     seeded_candidate = _seeded_candidate_payload(request.metadata)
+    seeded_candidate_requires_current_grounding = bool(
+        isinstance(seeded_candidate, dict)
+        and seeded_candidate.get("require_current_grounding") is True
+    )
     visual_asset_recall = request.metadata.get("visual_asset_recall") if isinstance(request.metadata, dict) else None
     if not isinstance(visual_asset_recall, dict):
         visual_asset_recall = {
@@ -1950,6 +2018,7 @@ def _recognition_plan_from_vista_point(
     reviewed_execution = request.metadata.get("reviewed_test_execution") if isinstance(request.metadata, dict) else None
     allow_reviewed_seed_without_model = bool(
         seed_candidate is not None
+        and not seeded_candidate_requires_current_grounding
         and isinstance(reviewed_execution, dict)
         and reviewed_execution.get("allow_seeded_candidate_without_model") is True
     )
@@ -2038,7 +2107,12 @@ def _recognition_plan_from_vista_point(
                     selected_candidate = candidate
                     vista_point_inside_selected_bbox = True
                     break
-            if selected_candidate is None and seed_candidate is not None and seed_candidate.element.click_point is not None:
+            if (
+                selected_candidate is None
+                and seed_candidate is not None
+                and seed_candidate.element.click_point is not None
+                and not seeded_candidate_requires_current_grounding
+            ):
                 selected_candidate = seed_candidate
                 seeded_primary_point_used = True
             if selected_candidate is not None:
@@ -2259,6 +2333,23 @@ def _recognition_plan_from_vista_point(
         )
         candidates = candidates[: max(1, int(request.top_k or 5))]
 
+    vista_direct_uia_conflict_ids: list[str] = []
+    if vista_direct_used and selected_candidate is not None and isinstance(vista_payload, dict):
+        vista_direct_uia_conflict_ids = _vista_direct_uia_conflicts(
+            goal=goal,
+            point=vista_payload["point"],
+            candidates=candidates,
+        )
+        if vista_direct_uia_conflict_ids:
+            selected_candidate.eligible = False
+            selected_candidate.element.interaction_policy.allowed = False
+            selected_candidate.reasons = _unique_list(
+                [
+                    *selected_candidate.reasons,
+                    "vista_direct_conflicts_with_exact_uia_candidate_bbox",
+                ]
+            )
+
     for index, candidate in enumerate(candidates, start=1):
         candidate.rank = index
     margin = round(float(candidates[0].score) - float(candidates[1].score), 4) if len(candidates) > 1 else round(float(candidates[0].score), 4) if candidates else None
@@ -2287,6 +2378,7 @@ def _recognition_plan_from_vista_point(
             "vista_direct_point_grounding_attempted": vista_direct_attempted,
             "screen_inventory_candidate_rank_used": screen_inventory_rank_result is not None,
             "screen_inventory_candidate_count": len(screen_inventory_rank_result.candidates) if screen_inventory_rank_result else 0,
+            "vista_direct_uia_conflict_candidate_ids": vista_direct_uia_conflict_ids,
             "vista_roi_policy": vista_image_preprocess.get("roi_policy"),
             "vista_roi_source": vista_image_preprocess.get("roi_source"),
             "vista_roi_fallback_tier": vista_image_preprocess.get("fallback_tier"),
@@ -2620,57 +2712,10 @@ def _mode_payload(request: Any, *, fallback_contract: str) -> dict[str, Any]:
     }
 
 
-def _should_learn_visual_assets(request: Any) -> bool:
-    if getattr(request, "agent_mode", None) != "learn":
-        return False
-    metadata = getattr(request, "metadata", None)
-    if isinstance(metadata, dict):
-        visual_assets = metadata.get("visual_assets")
-        if isinstance(visual_assets, dict) and visual_assets.get("enabled") is False:
-            return False
-    return True
 
 
-def _safe_visual_asset_run_name(value: Any) -> str:
-    text = str(value or "screen").strip()
-    safe = "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in text)
-    return safe.strip("_")[:80] or "screen"
 
 
-def _skipped_visual_asset_learning(
-    *,
-    image_path: str,
-    reason: str,
-    app_id: Any,
-    page_type: Any,
-    learn_depth: Any,
-    error_detail: str | None = None,
-) -> dict[str, Any]:
-    payload = {
-        "contract_version": "visual_asset_learning_v1",
-        "status": "skipped",
-        "reason": reason,
-        "source_image_path": str(image_path),
-        "app_id": app_id,
-        "page_type": page_type,
-        "learn_depth": learn_depth,
-        "visual_assets": {
-            "contract_version": "visual_asset_store_v1",
-            "asset_status_default": "skipped",
-            "asset_match_is_evidence_only": True,
-            "asset_can_authorize_click": False,
-            "assets": [],
-        },
-        "summary": {
-            "candidate_count": 0,
-            "asset_count": 0,
-            "skipped_count": 0,
-            "artifact_is_authorization": False,
-        },
-    }
-    if error_detail:
-        payload["error_detail"] = error_detail
-    return payload
 
 
 def _build_visual_asset_recall(
@@ -2720,7 +2765,7 @@ def _build_visual_asset_recall(
             scales=tuple(_visual_asset_scales(asset)),
             min_score=min_score,
             min_score_gap=_visual_asset_min_score_gap(asset),
-            artifact_dir=ARTIFACTS_DIR / "visual-matches" / _safe_visual_asset_run_name(Path(image_path).stem),
+            artifact_dir=ARTIFACTS_DIR / "visual-matches" / safe_visual_asset_run_name(Path(image_path).stem),
             capture_id=str(image_path),
             viewport_size=image_size.to_dict(),
         )
@@ -3348,150 +3393,100 @@ def _observe_screen_provider_mode(provider_mode: str | None) -> str:
 def observe_screen(request: VisionObserveScreenRequestModel) -> APIResponse:
     """Capture or read a screen and return broad UI understanding for agent planning."""
     timer = RuntimeTimer()
-    try:
-        with timer.step("resolve_image_source", capture_live=request.capture_live):
-            image_path, live_capture = _learning_observe_image_source(request)
-        operation_context = build_operation_runtime_context(
+    task = ObserveScreenTaskInput.model_validate(request.model_dump())
+    screen_response: dict[str, APIResponse] = {}
+
+    def read_screen_adapter(
+        read_request: ObserveScreenReadRequest,
+    ) -> ObserveScreenReadResult:
+        response = screen_reading(
+            VisionAnalyzeRequestModel(
+                image_path=read_request.image_path,
+                task=read_request.task,
+                app_name=read_request.app_name,
+                goal=read_request.goal,
+                state_hint=read_request.state_hint,
+                provider_mode=read_request.provider_mode,
+                agent_mode=read_request.agent_mode,
+                learn_depth=read_request.learn_depth,
+                write_policy=read_request.write_policy.model_dump(),
+                metadata=read_request.metadata,
+                operation_context=(
+                    read_request.operation_context.model_dump()
+                ),
+            )
+        )
+        screen_response["value"] = response
+        data = response.data if isinstance(response.data, dict) else {}
+        error = (
+            response.error.model_dump()
+            if hasattr(response.error, "model_dump")
+            else response.error
+        )
+        return ObserveScreenReadResult(
+            success=response.success,
+            message=response.message,
+            payload=(
+                data.get("result")
+                if isinstance(data.get("result"), dict)
+                else None
+            ),
+            error=error,
+            model_io=(
+                data.get("model_io")
+                if isinstance(data.get("model_io"), dict)
+                else None
+            ),
+        )
+
+    def build_degraded_adapter(**kwargs: Any) -> dict[str, Any]:
+        response = screen_response.get("value")
+        if response is None:
+            raise RuntimeError(
+                "Screen reading failed without a response payload"
+            )
+        return _build_degraded_observation_result(
             request=request,
-            skill_id="observe_screen",
-            semantic_action="observe_screen",
-            side_effect_class="read_only",
-            requires_gate=False,
-            capture_id=image_path,
-            viewport_size=_image_size_payload(image_path=image_path, live_capture=live_capture),
-            evidence_refs=[image_path],
+            image_path=kwargs["image_path"],
+            live_capture=kwargs["live_capture"],
+            screen_response=response,
         )
-        screen_request = VisionAnalyzeRequestModel(
-            image_path=image_path,
-            task=request.task,
-            app_name=request.app_name,
-            goal="understand the current interface, visible controls, and likely actions",
-            state_hint=request.state_hint,
-            provider_mode=_observe_screen_provider_mode(request.provider_mode),
-            agent_mode=request.agent_mode,
-            learn_depth=request.learn_depth,
-            write_policy=request.write_policy,
-            metadata={
-                **dict(request.metadata or {}),
-                "ocr_anchors": {"enabled": True, "max_anchors": "all", **dict((request.metadata or {}).get("ocr_anchors") or {})}
-                if isinstance((request.metadata or {}).get("ocr_anchors"), dict)
-                else (request.metadata or {}).get("ocr_anchors", {"enabled": True, "max_anchors": "all"}),
-            },
-            operation_context=operation_context,
-        )
-        with timer.step("screen_reading"):
-            response = screen_reading(screen_request)
-        if not response.success or not response.data:
-            with timer.step("observe_degraded_fallback"):
-                result = _build_degraded_observation_result(
-                    request=request,
-                    image_path=image_path,
-                    live_capture=live_capture,
-                    screen_response=response,
-                )
-        else:
-            result = response.data["result"]
-        result["contract_version"] = "screen_observation_v1"
-        result.update(_mode_payload(request, fallback_contract="screen_observation_v1"))
-        result["live_capture"] = live_capture
-        result["operation_context"] = operation_context
-        result["operation_trace_link"] = operation_trace_link(operation_context, result_status="success", evidence_refs=[image_path])
-        result["suggested_state_hint"] = _suggested_state_hint_from_observation(result)
-        result["screen_map"] = _build_screen_map_from_observation(result, request=request, image_path=image_path)
-        result["screen_map"] = _apply_learned_path_graph_to_screen_map(
-            result["screen_map"],
-            result=result,
-            request=request,
-            image_path=image_path,
-        )
-        if request.learn_depth == "deep":
-            with timer.step("learn_deep_review"):
-                deep_result = _build_learn_deep_review(
-                    result=result,
-                    screen_map=result["screen_map"],
-                    request=request,
-                )
-            result["screen_map"] = deep_result["screen_map"]
-            result["path_graph_deep_review"] = deep_result["path_graph_deep_review"]
-            result["path_graph_delta"] = deep_result["path_graph_delta"]
-            result["element_memory_init_plan"] = deep_result["element_memory_init_plan"]
-        if _should_learn_visual_assets(request):
-            page_type = result["screen_map"].get("page_type") or result.get("state_guess") or request.state_hint
-            if not Path(image_path).exists():
-                visual_asset_learning = _skipped_visual_asset_learning(
-                    image_path=image_path,
-                    reason="missing_source_image",
-                    app_id=request.app_name or result.get("app_name"),
-                    page_type=page_type,
-                    learn_depth=request.learn_depth,
-                )
-            else:
-                try:
-                    with timer.step("learn_visual_assets"):
-                        visual_asset_learning = build_visual_assets_from_screen_map(
-                            result["screen_map"],
-                            source_image_path=image_path,
-                            output_dir=ARTIFACTS_DIR
-                            / "visual-assets"
-                            / _safe_visual_asset_run_name(request.app_name or result.get("app_name") or Path(image_path).stem),
-                            app_id=request.app_name or result.get("app_name"),
-                            page_type=page_type,
-                            capture_id=str(image_path),
-                            learn_depth=request.learn_depth,
-                        )
-                except Exception as exc:
-                    visual_asset_learning = _skipped_visual_asset_learning(
-                        image_path=image_path,
-                        reason="visual_asset_learning_failed",
-                        app_id=request.app_name or result.get("app_name"),
-                        page_type=page_type,
-                        learn_depth=request.learn_depth,
-                        error_detail=str(exc),
-                    )
-            result["visual_asset_learning"] = visual_asset_learning
-            result["screen_map"]["visual_assets"] = visual_asset_learning.get("visual_assets")
-            with timer.step("build_learned_interface_map"):
-                learned_interface_map = build_learned_interface_map(
-                    _runtime_graph_from_screen_map_for_interface_map(result["screen_map"], result=result),
-                    visual_asset_learning.get("visual_assets"),
-                )
-            result["learned_interface_map"] = learned_interface_map
-            result["screen_map"]["learned_interface_map_summary"] = learned_interface_map.get("summary")
-        result["agent_next_steps"] = [
-            "Read screen_map.candidates to decide what the user likely wants; it is a semantic map, not executable coordinates.",
-            "Use screen_map.state_id and suggested_state_hint as the default context for POST /vision/locate_target unless the user overrides it.",
-            "When a concrete target is chosen, call POST /vision/locate_target with that candidate label/goal.",
-            "Execute only through POST /action/execute_recognition_plan after pre_click_decision allows it.",
-        ]
-        result["timings"] = timer.to_dict()
-        result["trace_path"] = _write_trace_if_enabled(
+
+    task_result = run_observe_task(
+        task,
+        project_root=Path(__file__).resolve().parents[2],
+        image_source_resolver=lambda _task: (
+            _learning_observe_image_source(request)
+        ),
+        screen_reader=read_screen_adapter,
+        degraded_builder=build_degraded_adapter,
+        image_size_builder=_image_size_payload,
+        provider_factory=VisionProviderFactory,
+        trace_writer=lambda **kwargs: _write_trace_if_enabled(
             request,
-            category="vision",
-            operation="observe_screen",
-            payload={"success": True, "request": request.model_dump(), "result": result},
-            name_hint=request.app_name or Path(image_path).stem,
-        )
-        data = VisionResultData(result=result)
-        return APIResponse(success=True, message="Screen observation completed", data=data.model_dump(), error=None)
-    except Exception as exc:
-        timings = timer.to_dict()
-        model_io = _model_io_failure_payload(exc)
-        failure_payload = {"success": False, "request": request.model_dump(), "error": str(exc), "timings": timings}
-        if model_io is not None:
-            failure_payload["model_io"] = model_io
-        trace_path = _write_trace_if_enabled(
-            request,
-            category="vision",
-            operation="observe_screen",
-            payload=failure_payload,
-            name_hint=request.app_name or "observe_screen",
-        )
+            **kwargs,
+        ),
+        artifacts_dir=ARTIFACTS_DIR,
+        timer=timer,
+    )
+    legacy = observe_result_to_legacy_response(task_result)
+    if legacy["success"] is True:
         return APIResponse(
-            success=False,
-            message="Screen observation failed",
-            data={"trace_path": trace_path, "timings": timings, "model_io": model_io} if model_io is not None else {"trace_path": trace_path, "timings": timings},
-            error=ErrorModel(code="observe_screen_failed", details=str(exc)),
+            success=True,
+            message=legacy["message"],
+            data=legacy["data"],
+            error=None,
         )
+    failure = legacy.get("error") if isinstance(legacy.get("error"), dict) else {}
+    return APIResponse(
+        success=False,
+        message=legacy["message"],
+        data=legacy["data"],
+        error=ErrorModel(
+            code=str(failure.get("code") or "observe_screen_failed"),
+            details=str(failure.get("details") or "Screen observation failed"),
+        ),
+    )
 
 
 def _build_degraded_observation_result(
@@ -3638,1007 +3633,70 @@ def _texts_from_ocr_payload(ocr_payload: dict[str, Any]) -> list[dict[str, Any]]
     return texts
 
 
-def _suggested_state_hint_from_observation(result: dict[str, Any]) -> str:
-    for value in (result.get("state_guess"), result.get("screen_summary")):
-        hint = _compact_state_hint(value)
-        if hint:
-            return hint
-    screen_reading = result.get("screen_reading") if isinstance(result.get("screen_reading"), dict) else {}
-    for value in (screen_reading.get("state_guess"), screen_reading.get("screen_summary")):
-        hint = _compact_state_hint(value)
-        if hint:
-            return hint
-    return ""
-
-
-def _compact_state_hint(value: Any) -> str:
-    text = " ".join(str(value or "").strip().split())
-    if not text or text.casefold() in {"unknown", "none", "null"}:
-        return ""
-    return text[:80]
-
-
-def _build_screen_map_from_observation(result: dict[str, Any], *, request: VisionObserveScreenRequestModel, image_path: str) -> dict[str, Any]:
-    screen_reading = result.get("screen_reading") if isinstance(result.get("screen_reading"), dict) else {}
-    screen_summary = (
-        result.get("screen_summary")
-        or screen_reading.get("screen_summary")
-        or result.get("message")
-        or ""
-    )
-    state_hint = result.get("suggested_state_hint") or _suggested_state_hint_from_observation(result)
-    sections = _screen_map_sections(result)
-    candidates = _screen_map_candidates(result, sections=sections)
-    app_name = request.app_name or result.get("app_name") or screen_reading.get("app_name") or ""
-    signature = _screen_state_signature(
-        app_name=app_name,
-        state_hint=state_hint,
-        screen_summary=screen_summary,
-        image_path=image_path,
-        candidates=candidates,
-    )
-    return {
-        "contract_version": "screen_map_v1",
-        "state_id": signature["state_id"],
-        "app_name": app_name,
-        "image_path": image_path,
-        "state_hint": state_hint,
-        "summary": {
-            "screen_summary": screen_summary,
-            "candidate_count": len(candidates),
-            "safe_candidate_count": len([item for item in candidates if item.get("risk_class") == "safe_click_allowed"]),
-            "blocked_candidate_count": len([item for item in candidates if item.get("risk_class") == "blocked"]),
-            "section_count": len(sections),
-        },
-        "state_signature": signature,
-        "sections": sections,
-        "candidates": candidates,
-        "agent_usage": {
-            "observe_role": "Build the semantic page/action map.",
-            "locate_role": "Locate one selected screen_map candidate precisely before any click.",
-            "execute_role": "Verify the selected point and post-click transition through the gated action API.",
-        },
-    }
-
-
-def _runtime_graph_from_screen_map_for_interface_map(screen_map: dict[str, Any], *, result: dict[str, Any]) -> dict[str, Any]:
-    """把 observe 的 screen_map 转成 Interface Map 所需的最小路径图。"""
-
-    graph = screen_map if isinstance(screen_map, dict) else {}
-    state_id = str(graph.get("state_id") or "observed_state")
-    page_type = str(graph.get("page_type") or graph.get("state_hint") or result.get("state_guess") or "observed_page")
-    regions: list[dict[str, Any]] = []
-    for section in graph.get("sections") or []:
-        if not isinstance(section, dict):
-            continue
-        section_id = str(section.get("section_id") or section.get("region_id") or "").strip()
-        if not section_id:
-            continue
-        regions.append(
-            {
-                "region_id": section_id,
-                "label": section.get("label") or section_id,
-                "role": section.get("role") or section.get("section_type") or "content",
-                "bbox": section.get("bbox") if isinstance(section.get("bbox"), dict) else None,
-                "container_id": section.get("container_id") or section_id,
-                "repeatable": bool(section.get("repeatable")),
-            }
-        )
-    return {
-        "contract_version": "runtime_path_graph_v1",
-        "graph_id": f"{graph.get('app_name') or result.get('app_name') or 'app'}:{page_type}:observe_interface_seed",
-        "app_id": graph.get("app_name") or result.get("app_name"),
-        "page_type": page_type,
-        "states": [
-            {
-                "state_id": state_id,
-                "label": graph.get("state_hint") or result.get("state_guess") or state_id,
-                "state_fingerprint": graph.get("state_signature") if isinstance(graph.get("state_signature"), dict) else {},
-            }
-        ],
-        "regions": regions,
-        "source": {
-            "contract_version": graph.get("contract_version"),
-            "artifact_is_authorization": False,
-            "source": "screen_map_v1",
-        },
-    }
-
-
-def _apply_learned_path_graph_to_screen_map(
-    screen_map: dict[str, Any],
-    *,
-    result: dict[str, Any],
-    request: VisionObserveScreenRequestModel,
-    image_path: str,
-) -> dict[str, Any]:
-    graph_info = _default_learned_runtime_path_graph(result, request=request)
-    graph = graph_info.get("graph") if isinstance(graph_info, dict) else None
-    if not isinstance(graph, dict):
-        return screen_map
-    screen_inventory = _observation_screen_inventory(result)
-    if _observation_looks_like_seek_application_form(result, screen_inventory=screen_inventory):
-        assisted = dict(screen_map)
-        assisted["learned_path_graph_resolution"] = {
-            "contract_version": "learned_path_graph_observe_resolution_v1",
-            "matched": False,
-            "reason": "seek_application_form_not_search_results",
-            "graph_path": graph_info.get("path"),
-        }
-        return assisted
-    resolution = resolve_runtime_path_graph(
-        graph,
-        screen_inventory=screen_inventory,
-        requested_state_id=None,
-        safety={
-            "forbid_final_submit": False,
-            "allow_apply_entry": False,
-            "allow_safe_fill": False,
-        },
-    )
-    if not resolution.get("matched"):
-        assisted = dict(screen_map)
-        assisted["learned_path_graph_resolution"] = {
-            **resolution,
-            "contract_version": "learned_path_graph_observe_resolution_v1",
-            "graph_path": graph_info.get("path"),
-        }
-        return assisted
-    sections = _screen_map_sections_from_runtime_path_graph(
-        graph,
-        result=result,
-        image_path=image_path,
-        fallback_sections=screen_map.get("sections") if isinstance(screen_map.get("sections"), list) else [],
-    )
-    actions = build_available_actions(
-        graph,
-        current_state_id=resolution.get("state_id"),
-        include_guarded_apply=False,
-        path_graph_resolution=resolution,
-    )
-    path_candidates = _screen_map_candidates_from_path_graph_actions(actions, sections=sections)
-    observed_candidates = _resection_observed_candidates_for_path_graph(
-        screen_map.get("candidates") if isinstance(screen_map.get("candidates"), list) else [],
-        sections=sections,
-        graph_app_id=str(graph.get("app_id") or ""),
-    )
-    candidates = _dedupe_screen_map_candidates([*path_candidates, *observed_candidates])
-    assisted = {
-        **screen_map,
-        "state_id": resolution.get("state_id") or screen_map.get("state_id"),
-        "state_hint": graph.get("page_type") or screen_map.get("state_hint"),
-        "sections": sections,
-        "candidates": candidates[:80],
-        "learned_path_graph_resolution": {
-            **resolution,
-            "contract_version": "learned_path_graph_observe_resolution_v1",
-            "graph_path": graph_info.get("path"),
-            "source": "runtime_path_graph_v1",
-            "screen_map_policy": "learned_path_graph_primary_model_supplemental",
-        },
-        "learned_path_graph_available_actions": actions,
-    }
-    summary = dict(assisted.get("summary") if isinstance(assisted.get("summary"), dict) else {})
-    summary.update(
-        {
-            "candidate_count": len(assisted["candidates"]),
-            "safe_candidate_count": len([item for item in assisted["candidates"] if item.get("risk_class") == "safe_click_allowed"]),
-            "blocked_candidate_count": len([item for item in assisted["candidates"] if item.get("risk_class") == "blocked"]),
-            "section_count": len(sections),
-            "learned_path_graph_used": True,
-            "learned_path_graph_id": graph.get("graph_id"),
-        }
-    )
-    assisted["summary"] = summary
-    agent_usage = dict(assisted.get("agent_usage") if isinstance(assisted.get("agent_usage"), dict) else {})
-    agent_usage["observe_role"] = "Use the learned runtime PathGraph as the primary page structure; use model output only as current text/evidence."
-    agent_usage["execute_role"] = "Choose from learned_path_graph_available_actions, then validate coordinates through the gated action API."
-    assisted["agent_usage"] = agent_usage
-    return assisted
-
-
-def _default_learned_runtime_path_graph(result: dict[str, Any], *, request: VisionObserveScreenRequestModel) -> dict[str, Any]:
-    key = _learned_path_graph_key(result, request=request)
-    path = DEFAULT_LEARNED_RUNTIME_PATH_GRAPHS.get(key)
-    if not path or not path.exists():
-        return {}
-    try:
-        graph = json.loads(path.read_text(encoding="utf-8-sig"))
-    except Exception:
-        return {}
-    if not isinstance(graph, dict) or graph.get("contract_version") != "runtime_path_graph_v1":
-        return {}
-    return {"key": key, "path": str(path), "graph": graph}
-
-
-def _learned_path_graph_key(result: dict[str, Any], *, request: VisionObserveScreenRequestModel) -> str | None:
-    haystack = " ".join(
-        str(item or "")
-        for item in [
-            request.app_name,
-            request.state_hint,
-            result.get("app_name"),
-            result.get("state_guess"),
-            result.get("screen_summary"),
-            (result.get("screen_reading") or {}).get("screen_summary") if isinstance(result.get("screen_reading"), dict) else "",
-            (result.get("screen_reading") or {}).get("state_guess") if isinstance(result.get("screen_reading"), dict) else "",
-        ]
-    ).casefold()
-    if "seek" in haystack or "nz.seek" in haystack or "job search" in haystack:
-        return "seek"
-    return None
-
-
-def _observation_screen_inventory(result: dict[str, Any]) -> dict[str, Any] | None:
-    if isinstance(result.get("screen_inventory"), dict):
-        return result["screen_inventory"]
-    screen_reading = result.get("screen_reading") if isinstance(result.get("screen_reading"), dict) else {}
-    if isinstance(screen_reading.get("screen_inventory"), dict):
-        return screen_reading["screen_inventory"]
-    parse_result = result.get("parse_result") if isinstance(result.get("parse_result"), dict) else {}
-    nested = parse_result.get("screen_reading") if isinstance(parse_result.get("screen_reading"), dict) else {}
-    if isinstance(nested.get("screen_inventory"), dict):
-        return nested["screen_inventory"]
-    return None
-
-
-def _observation_looks_like_seek_application_form(result: dict[str, Any], *, screen_inventory: dict[str, Any] | None) -> bool:
-    labels = " ".join(_inventory_texts(screen_inventory)).casefold()
-    fields = [
-        result.get("screen_summary"),
-        result.get("state_guess"),
-        (result.get("screen_reading") or {}).get("screen_summary") if isinstance(result.get("screen_reading"), dict) else "",
-        (result.get("screen_reading") or {}).get("state_guess") if isinstance(result.get("screen_reading"), dict) else "",
-        labels,
-    ]
-    text = " ".join(str(item or "") for item in fields).casefold()
-    form_terms = [
-        "choose documents",
-        "answer employer questions",
-        "update seek profile",
-        "review and submit",
-        "application form",
-        "cover letter",
-    ]
-    return any(term in text for term in form_terms)
-
-
-def _screen_map_sections_from_runtime_path_graph(
-    graph: dict[str, Any],
-    *,
-    result: dict[str, Any],
-    image_path: str,
-    fallback_sections: list[Any],
-) -> list[dict[str, Any]]:
-    width, height = _screen_map_image_size(result, image_path=image_path)
-    learned_bboxes = _learned_graph_region_bboxes(graph, width=width, height=height)
-    sections: list[dict[str, Any]] = []
-    fallback_by_id = {str(item.get("section_id") or ""): item for item in fallback_sections if isinstance(item, dict)}
-    for region in graph.get("regions") or []:
-        if not isinstance(region, dict):
-            continue
-        region_id = str(region.get("region_id") or "").strip()
-        if not region_id:
-            continue
-        bbox = learned_bboxes.get(region_id) or _normalize_map_bbox(region.get("bbox")) or _normalize_map_bbox(fallback_by_id.get(region_id, {}).get("bbox"))
-        section = {
-            "contract_version": "screen_map_section_v1",
-            "section_id": region_id,
-            "label": region.get("label") or region_id.replace("_", " ").title(),
-            "role": region.get("role") or "content",
-            "description": "Learned from runtime_path_graph_v1.",
-            "bbox": bbox,
-            "container_id": region.get("container_id"),
-            "parent_section_id": region.get("parent_region_id"),
-            "repeatable": bool(region.get("repeatable")),
-            "contains": region.get("contains") or [],
-            "source": "runtime_path_graph_v1",
-            "text_count": 0,
-            "text_sample": [],
-        }
-        texts = _texts_in_bbox(_screen_map_texts(result), bbox) if bbox else []
-        section["text_count"] = len(texts)
-        section["text_sample"] = [_first_compact_text(item.get("text")) for item in texts[:10] if _first_compact_text(item.get("text"))]
-        sections.append(section)
-    return sections or [item for item in fallback_sections if isinstance(item, dict)]
-
-
-def _screen_map_candidates_from_path_graph_actions(actions: dict[str, Any], *, sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    payload = actions.get("actions") if isinstance(actions, dict) else []
-    candidates: list[dict[str, Any]] = []
-    for index, action in enumerate(payload if isinstance(payload, list) else []):
-        if not isinstance(action, dict):
-            continue
-        action_id = str(action.get("action_template_id") or action.get("action_id") or f"path_action_{index}")
-        section_id = _section_for_path_graph_action(action_id, action)
-        bbox = _section_bbox(sections, section_id)
-        candidates.append(
-            {
-                "contract_version": "screen_map_candidate_v1",
-                "candidate_id": f"path_graph_action_{action_id}",
-                "label": action.get("label") or action.get("goal_template") or action_id.replace("_", " "),
-                "role": action.get("action_kind") or action.get("low_level_action_type") or "action",
-                "goal_hint": action.get("goal_template") or action_id,
-                "expected_effect": action.get("to_state_id") or action.get("transition_id") or "",
-                "risk_class": "safe_click_allowed" if action.get("low_level_action_type") in {"click", "scroll", "input"} else "safe_review_only",
-                "section_id": section_id,
-                "bbox": bbox,
-                "click_point": _bbox_center(bbox),
-                "confidence": 0.92,
-                "source": "runtime_path_graph_v1",
-                "action_template_id": action_id,
-                "low_level_action_type": action.get("low_level_action_type"),
-                "artifact_is_authorization": False,
-            }
-        )
-    return candidates
-
-
-def _resection_observed_candidates_for_path_graph(
-    candidates: list[Any],
-    *,
-    sections: list[dict[str, Any]],
-    graph_app_id: str,
-) -> list[dict[str, Any]]:
-    learned_sections = [item for item in sections if isinstance(item, dict) and item.get("bbox")]
-    results: list[dict[str, Any]] = []
-    for item in candidates:
-        if not isinstance(item, dict):
-            continue
-        candidate = dict(item)
-        bbox = _normalize_map_bbox(candidate.get("bbox"))
-        section_id = _best_section_id_for_bbox(bbox, learned_sections) if bbox else candidate.get("section_id")
-        if section_id:
-            candidate["section_id"] = section_id
-        if graph_app_id == "seek":
-            _apply_seek_path_graph_candidate_policy(candidate)
-        candidate["source_before_path_graph"] = candidate.get("source")
-        candidate["source"] = "model_observation_resectioned_by_runtime_path_graph"
-        results.append(candidate)
-    return results
-
-
-def _apply_seek_path_graph_candidate_policy(candidate: dict[str, Any]) -> None:
-    section_id = str(candidate.get("section_id") or "")
-    role = str(candidate.get("role") or "").casefold()
-    label = str(candidate.get("label") or "")
-    if section_id == "results_list" and role in {"news_card", "card", "menu_item", "menu item", ""}:
-        candidate["role"] = "job_card"
-        candidate["risk_class"] = "safe_click_allowed"
-        candidate["expected_effect"] = "open selected SEEK job in job_detail"
-    elif section_id in {"job_detail", "detail_header", "detail_body"}:
-        if any(term in label.casefold() for term in ("apply", "quick apply")):
-            candidate["role"] = "button"
-            candidate["risk_class"] = "safe_click_allowed"
-            candidate["expected_effect"] = "enter guarded apply flow; final submit remains forbidden"
-        else:
-            candidate["risk_class"] = candidate.get("risk_class") or "safe_review_only"
-
-
-def _screen_map_image_size(result: dict[str, Any], *, image_path: str) -> tuple[int, int]:
-    image_size = result.get("image_size") if isinstance(result.get("image_size"), dict) else {}
-    live_capture = result.get("live_capture") if isinstance(result.get("live_capture"), dict) else {}
-    width = int(_number(image_size.get("width") or live_capture.get("image_width")) or 0)
-    height = int(_number(image_size.get("height") or live_capture.get("image_height")) or 0)
-    if width > 0 and height > 0:
-        return width, height
-    try:
-        with Image.open(image_path) as image:
-            return int(image.width), int(image.height)
-    except Exception:
-        return 1000, 1000
-
-
-def _learned_graph_region_bboxes(graph: dict[str, Any], *, width: int, height: int) -> dict[str, dict[str, int]]:
-    if graph.get("app_id") != "seek":
-        return {}
-    chrome_h = min(height, max(72, round(height * 0.06)))
-    top_h = min(height - chrome_h, max(120, round(height * 0.12)))
-    content_y = chrome_h + top_h
-    content_h = max(1, height - content_y)
-    results_x = round(width * 0.235)
-    results_w = round(width * 0.20)
-    detail_x = round(width * 0.45)
-    detail_w = max(1, width - detail_x - round(width * 0.04))
-    return {
-        "top_search_area": {"x": 0, "y": chrome_h, "w": width, "h": top_h},
-        "results_list": {"x": results_x, "y": content_y, "w": results_w, "h": content_h},
-        "job_detail": {"x": detail_x, "y": content_y, "w": detail_w, "h": content_h},
-        "job_card": {"x": results_x, "y": content_y, "w": results_w, "h": content_h},
-        "detail_header": {"x": detail_x, "y": content_y, "w": detail_w, "h": max(1, round(content_h * 0.30))},
-        "detail_body": {"x": detail_x, "y": content_y + round(content_h * 0.30), "w": detail_w, "h": max(1, round(content_h * 0.70))},
-    }
-
-
-def _section_for_path_graph_action(action_id: str, action: dict[str, Any]) -> str:
-    if action.get("scroll_container_id") == "seek:job_detail" or action_id in {"read_detail", "apply_entry"}:
-        return "job_detail"
-    if action.get("scroll_container_id") == "seek:results_list" or action_id in {"open_job_card", "load_more_results"}:
-        return "results_list"
-    return str(action.get("source_section_id") or action.get("target_section_id") or "main_content")
-
-
-def _section_bbox(sections: list[dict[str, Any]], section_id: str) -> dict[str, int] | None:
-    for section in sections:
-        if section.get("section_id") == section_id and isinstance(section.get("bbox"), dict):
-            return _normalize_map_bbox(section["bbox"])
-    return None
-
-
-def _bbox_center(bbox: dict[str, Any] | None) -> dict[str, int] | None:
-    normalized = _normalize_map_bbox(bbox)
-    if not normalized:
-        return None
-    return {
-        "x": int(round(normalized["x"] + normalized["w"] / 2)),
-        "y": int(round(normalized["y"] + normalized["h"] / 2)),
-    }
-
-
-def _best_section_id_for_bbox(bbox: dict[str, Any] | None, sections: list[dict[str, Any]]) -> str | None:
-    normalized = _normalize_map_bbox(bbox)
-    if not normalized:
-        return None
-    best: tuple[float, str] | None = None
-    for section in sections:
-        section_bbox = _normalize_map_bbox(section.get("bbox"))
-        if not section_bbox:
-            continue
-        overlap = _bbox_intersection_area(normalized, section_bbox)
-        if overlap <= 0:
-            continue
-        score = overlap / max(1.0, float(normalized["w"] * normalized["h"]))
-        section_id = str(section.get("section_id") or "")
-        if best is None or score > best[0]:
-            best = (score, section_id)
-    return best[1] if best and best[0] >= 0.2 else None
-
-
-def _bbox_intersection_area(a: dict[str, Any], b: dict[str, Any]) -> float:
-    ax1, ay1 = float(a["x"]), float(a["y"])
-    ax2, ay2 = ax1 + float(a["w"]), ay1 + float(a["h"])
-    bx1, by1 = float(b["x"]), float(b["y"])
-    bx2, by2 = bx1 + float(b["w"]), by1 + float(b["h"])
-    return max(0.0, min(ax2, bx2) - max(ax1, bx1)) * max(0.0, min(ay2, by2) - max(ay1, by1))
-
-
-def _dedupe_screen_map_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    seen: set[str] = set()
-    deduped: list[dict[str, Any]] = []
-    for candidate in candidates:
-        label = str(candidate.get("label") or "")
-        section_id = str(candidate.get("section_id") or "")
-        action_id = str(candidate.get("action_template_id") or "")
-        bbox = _normalize_map_bbox(candidate.get("bbox"))
-        bbox_key = ""
-        if bbox:
-            bbox_key = f"{bbox['x']}:{bbox['y']}:{bbox['w']}:{bbox['h']}"
-        key = f"{action_id}|{label.casefold()}|{section_id}|{bbox_key}"
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(candidate)
-    return deduped
-
-
-def _inventory_texts(screen_inventory: dict[str, Any] | None) -> list[str]:
-    inventory = screen_inventory if isinstance(screen_inventory, dict) else {}
-    labels: list[str] = []
-    for key in ("available_actions", "page_elements", "cards"):
-        for item in inventory.get(key) or []:
-            if not isinstance(item, dict):
-                continue
-            for field in ("label", "text", "title", "name"):
-                value = item.get(field)
-                if value:
-                    labels.append(str(value))
-    return labels
-
-
-def _build_learn_deep_review(
-    *,
-    result: dict[str, Any],
-    screen_map: dict[str, Any],
-    request: VisionObserveScreenRequestModel,
-) -> dict[str, Any]:
-    candidates = [dict(item) for item in _as_list(screen_map.get("candidates")) if isinstance(item, dict)]
-    sections = [item for item in _as_list(screen_map.get("sections")) if isinstance(item, dict)]
-    kept: list[dict[str, Any]] = []
-    removals: list[dict[str, Any]] = []
-    candidate_decisions: list[dict[str, Any]] = []
-
-    for candidate in candidates:
-        duplicate_of = _deep_duplicate_candidate(candidate, kept)
-        if duplicate_of is not None:
-            removals.append(
-                {
-                    "candidate_id": candidate.get("candidate_id"),
-                    "label": candidate.get("label"),
-                    "reason": "duplicate_candidate_same_label_and_bbox",
-                    "duplicate_of": duplicate_of.get("candidate_id"),
-                }
-            )
-            candidate_decisions.append(
-                {
-                    "candidate_id": candidate.get("candidate_id"),
-                    "label": candidate.get("label"),
-                    "action": "remove",
-                    "reasons": ["duplicate_candidate_same_label_and_bbox"],
-                }
-            )
-            continue
-        kept.append(candidate)
-        candidate_decisions.append(
-            {
-                "candidate_id": candidate.get("candidate_id"),
-                "label": candidate.get("label"),
-                "action": "keep",
-                "risk_class": candidate.get("risk_class"),
-                "section_id": candidate.get("section_id"),
-                "reasons": _deep_candidate_reasons(candidate),
-            }
-        )
-
-    additions = _deep_missing_text_additions(result=result, candidates=kept, sections=sections)
-    for addition in additions:
-        candidate_decisions.append(
-            {
-                "candidate_id": addition.get("candidate_id"),
-                "label": addition.get("label"),
-                "action": "add",
-                "reasons": ["important_ocr_text_missing_from_path_graph"],
-            }
-        )
-
-    refined_candidates = [*kept, *additions]
-    refined_map = dict(screen_map)
-    refined_map["candidates"] = refined_candidates
-    refined_map["learn_depth"] = "deep"
-    refined_map["summary"] = {
-        **dict(screen_map.get("summary") if isinstance(screen_map.get("summary"), dict) else {}),
-        "candidate_count": len(refined_candidates),
-        "safe_candidate_count": len([item for item in refined_candidates if item.get("risk_class") == "safe_click_allowed"]),
-        "blocked_candidate_count": len([item for item in refined_candidates if item.get("risk_class") == "blocked"]),
-        "deep_addition_count": len(additions),
-        "deep_removal_count": len(removals),
-    }
-
-    delta = {
-        "contract_version": "path_graph_delta_v1",
-        "source": "learn_deep_review",
-        "state_id": screen_map.get("state_id"),
-        "status": "ready",
-        "additions": additions,
-        "removals": removals,
-        "updates": [
-            {
-                "field": "screen_map.summary",
-                "reason": "learn_deep_summary_recomputed",
-                "candidate_count": len(refined_candidates),
-            }
-        ],
-        "summary": {
-            "addition_count": len(additions),
-            "removal_count": len(removals),
-            "update_count": 1,
-        },
-    }
-    review = {
-        "contract_version": "path_graph_deep_review_v1",
-        "status": "ready",
-        "state_id": screen_map.get("state_id"),
-        "learn_depth": "deep",
-        "candidate_decisions": candidate_decisions,
-        "summary": {
-            "input_candidate_count": len(candidates),
-            "output_candidate_count": len(refined_candidates),
-            "duplicate_count": len(removals),
-            "missing_text_addition_count": len(additions),
-            "section_count": len(sections),
-        },
-    }
-    write_policy = request.write_policy.model_dump() if hasattr(request.write_policy, "model_dump") else {}
-    deep_result = {
-        "screen_map": refined_map,
-        "path_graph_deep_review": review,
-        "path_graph_delta": delta,
-        "element_memory_init_plan": _build_element_memory_init_plan(
-            screen_map=refined_map,
-            enabled=bool(write_policy.get("element_memory", False)),
-        ),
-    }
-    model_review = _run_learn_deep_model_review(
-        result=result,
-        screen_map=refined_map,
-        deterministic_review=review,
-        deterministic_delta=delta,
-        request=request,
-    )
-    deep_result = _apply_learn_deep_model_review(
-        deep_result=deep_result,
-        model_review=model_review,
-        element_memory_enabled=bool(write_policy.get("element_memory", False)),
-    )
-    return deep_result
-
-
-def _run_learn_deep_model_review(
-    *,
-    result: dict[str, Any],
-    screen_map: dict[str, Any],
-    deterministic_review: dict[str, Any],
-    deterministic_delta: dict[str, Any],
-    request: VisionObserveScreenRequestModel,
-) -> dict[str, Any]:
-    options = _learn_deep_model_options(request)
-    if options.get("enabled") is False:
-        return {
-            "contract_version": "learn_deep_model_review_v1",
-            "status": "disabled",
-            "reason": "disabled_by_metadata",
-        }
-    image_path = str(screen_map.get("image_path") or result.get("image_path") or "").strip()
-    if not image_path:
-        return {
-            "contract_version": "learn_deep_model_review_v1",
-            "status": "skipped",
-            "reason": "missing_image_path",
-        }
-    try:
-        config = VisionProviderFactory.load_config()
-        provider_mode = str(options.get("provider_mode") or request.provider_mode or "local_grounding")
-        provider = VisionProviderFactory.create(mode=provider_mode, config=config)
-        provider_response = provider.analyze(
-            VisionAnalyzeRequest(
-                image_path=image_path,
-                task="learn_deep_review",
-                app_name=request.app_name,
-                goal="Review and refine the whole-screen PathGraph draft without executing actions.",
-                state_hint=screen_map.get("state_hint") or result.get("suggested_state_hint") or request.state_hint,
-                provider_mode=provider_mode,
-                metadata={
-                    "max_output_tokens": int(options.get("max_output_tokens") or 2048),
-                    "learn_deep_review_context": _learn_deep_model_context(
-                        result=result,
-                        screen_map=screen_map,
-                        deterministic_review=deterministic_review,
-                        deterministic_delta=deterministic_delta,
-                        max_candidates=int(options.get("max_candidates") or 80),
-                        max_texts=int(options.get("max_texts") or 120),
-                    ),
-                },
-            )
-        )
-        model_json = _extract_provider_model_json(provider_response.raw_response)
-        model_json = model_json if isinstance(model_json, dict) else {}
-        return {
-            "contract_version": "learn_deep_model_review_v1",
-            "status": str(model_json.get("status") or "ready"),
-            "provider": provider_response.provider,
-            "provider_mode": provider_mode,
-            "model_name": model_json.get("model_name") or model_json.get("provider") or provider_response.provider,
-            "model_io": _model_io_trace(provider_response),
-            "screen_summary": model_json.get("screen_summary") or provider_response.screen_summary,
-            "state_guess": model_json.get("state_guess") or provider_response.state_guess,
-            "candidate_decisions": _as_list(model_json.get("candidate_decisions")),
-            "additions": _as_list(model_json.get("additions")),
-            "removals": _as_list(model_json.get("removals")),
-            "updates": _as_list(model_json.get("updates")),
-            "notes": _as_list(model_json.get("notes")) or list(provider_response.notes),
-        }
-    except Exception as exc:
-        model_io = _model_io_failure_payload(exc)
-        return {
-            "contract_version": "learn_deep_model_review_v1",
-            "status": "failed",
-            "error": str(exc),
-            "provider_mode": str(options.get("provider_mode") or request.provider_mode or "local_grounding"),
-            "model_io": model_io,
-            "fallback": "deterministic_learn_deep_review",
-        }
-
-
-def _learn_deep_model_options(request: VisionObserveScreenRequestModel) -> dict[str, Any]:
-    metadata = request.metadata if isinstance(request.metadata, dict) else {}
-    raw = metadata.get("learn_deep_model_review")
-    if raw is False:
-        return {"enabled": False}
-    if isinstance(raw, dict):
-        return {**raw, "enabled": raw.get("enabled", True) is not False}
-    return {"enabled": True}
-
-
-def _learn_deep_model_context(
-    *,
-    result: dict[str, Any],
-    screen_map: dict[str, Any],
-    deterministic_review: dict[str, Any],
-    deterministic_delta: dict[str, Any],
-    max_candidates: int,
-    max_texts: int,
-) -> dict[str, Any]:
-    return {
-        "contract_version": "learn_deep_review_context_v1",
-        "state_id": screen_map.get("state_id"),
-        "app_name": screen_map.get("app_name"),
-        "state_hint": screen_map.get("state_hint"),
-        "summary": screen_map.get("summary"),
-        "sections": _compact_map_items(screen_map.get("sections"), limit=40),
-        "candidates": _compact_map_items(screen_map.get("candidates"), limit=max_candidates),
-        "ocr_texts": _compact_map_items(_screen_map_texts(result), limit=max_texts),
-        "uia": _compact_uia_for_learn_deep(result),
-        "deterministic_review_summary": deterministic_review.get("summary"),
-        "deterministic_delta_summary": deterministic_delta.get("summary"),
-        "safety": {
-            "path_graph_coordinates_are_observation_only": True,
-            "execution_requires_pre_click_decision_v1": True,
-        },
-    }
-
-
-def _compact_map_items(value: Any, *, limit: int) -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = []
-    for item in _as_list(value)[: max(0, int(limit))]:
-        if isinstance(item, dict):
-            items.append(
-                {
-                    key: item.get(key)
-                    for key in (
-                        "id",
-                        "candidate_id",
-                        "section_id",
-                        "label",
-                        "text",
-                        "role",
-                        "type",
-                        "risk_class",
-                        "expected_effect",
-                        "bbox",
-                        "click_point",
-                        "confidence",
-                        "source",
-                    )
-                    if key in item
-                }
-            )
-    return items
-
-
-def _compact_uia_for_learn_deep(result: dict[str, Any]) -> dict[str, Any]:
-    screen_reading = result.get("screen_reading") if isinstance(result.get("screen_reading"), dict) else {}
-    source_layers = screen_reading.get("source_layers") if isinstance(screen_reading.get("source_layers"), dict) else {}
-    uia = source_layers.get("windows_uia") if isinstance(source_layers.get("windows_uia"), dict) else {}
-    return {
-        "status": uia.get("status"),
-        "control_count": uia.get("control_count"),
-        "available": uia.get("available"),
-    }
-
-
-def _extract_provider_model_json(raw_response: Any) -> dict[str, Any]:
-    if not isinstance(raw_response, dict):
-        return {}
-    model_json = raw_response.get("model_json")
-    if isinstance(model_json, dict):
-        return model_json
-    if raw_response.get("contract_version") == "learn_deep_model_review_v1":
-        return raw_response
-    nested = raw_response.get("raw_response")
-    if isinstance(nested, dict):
-        return _extract_provider_model_json(nested)
-    return {}
-
-
-def _apply_learn_deep_model_review(
-    *,
-    deep_result: dict[str, Any],
-    model_review: dict[str, Any],
-    element_memory_enabled: bool,
-) -> dict[str, Any]:
-    review = dict(deep_result.get("path_graph_deep_review") or {})
-    delta = dict(deep_result.get("path_graph_delta") or {})
-    screen_map = dict(deep_result.get("screen_map") or {})
-    candidates = [dict(item) for item in _as_list(screen_map.get("candidates")) if isinstance(item, dict)]
-    model_status = str(model_review.get("status") or "")
-    review["model_review"] = model_review
-    if model_status != "ready":
-        deep_result["path_graph_deep_review"] = review
-        return deep_result
-
-    existing_by_id = {str(item.get("candidate_id")): item for item in candidates if item.get("candidate_id")}
-    remove_ids: set[str] = set()
-    model_decisions: list[dict[str, Any]] = []
-    additions: list[dict[str, Any]] = []
-    updates: list[dict[str, Any]] = []
-
-    review_items = [item for item in _as_list(model_review.get("candidate_decisions")) if isinstance(item, dict)]
-    review_items.extend({"action": "remove", **item} for item in _as_list(model_review.get("removals")) if isinstance(item, dict))
-    review_items.extend({"action": "add", "candidate": item} for item in _as_list(model_review.get("additions")) if isinstance(item, dict))
-    review_items.extend({"action": "update", **item} for item in _as_list(model_review.get("updates")) if isinstance(item, dict))
-
-    for index, item in enumerate(review_items):
-        action = str(item.get("action") or "").strip().lower()
-        candidate_id = str(item.get("candidate_id") or "").strip()
-        reasons = [str(reason) for reason in _as_list(item.get("reasons")) if str(reason).strip()]
-        if action == "remove" and candidate_id in existing_by_id and reasons:
-            remove_ids.add(candidate_id)
-            model_decisions.append(
-                {
-                    "candidate_id": candidate_id,
-                    "label": item.get("label") or existing_by_id[candidate_id].get("label"),
-                    "action": "remove",
-                    "source": "learn_deep_model_review",
-                    "reasons": reasons,
-                }
-            )
-        elif action == "add":
-            candidate = _normalize_learn_deep_model_candidate(
-                item.get("candidate") if isinstance(item.get("candidate"), dict) else item,
-                index=index,
-                screen_map=screen_map,
-            )
-            if candidate and not _deep_duplicate_candidate(candidate, candidates + additions):
-                additions.append(candidate)
-                model_decisions.append(
-                    {
-                        "candidate_id": candidate.get("candidate_id"),
-                        "label": candidate.get("label"),
-                        "action": "add",
-                        "source": "learn_deep_model_review",
-                        "reasons": reasons or ["model_identified_missing_candidate"],
-                    }
-                )
-        elif action == "update" and candidate_id in existing_by_id:
-            update = _normalize_learn_deep_model_update(item, existing_by_id[candidate_id])
-            if update:
-                updates.append(update)
-                existing_by_id[candidate_id].update(update["fields"])
-                model_decisions.append(
-                    {
-                        "candidate_id": candidate_id,
-                        "label": existing_by_id[candidate_id].get("label"),
-                        "action": "update",
-                        "source": "learn_deep_model_review",
-                        "reasons": reasons or ["model_refined_candidate_semantics"],
-                        "fields": sorted(update["fields"].keys()),
-                    }
-                )
-        elif action == "keep" and candidate_id in existing_by_id:
-            model_decisions.append(
-                {
-                    "candidate_id": candidate_id,
-                    "label": item.get("label") or existing_by_id[candidate_id].get("label"),
-                    "action": "keep",
-                    "source": "learn_deep_model_review",
-                    "reasons": reasons or ["model_kept_candidate"],
-                }
-            )
-
-    refined_candidates = [item for item in candidates if str(item.get("candidate_id") or "") not in remove_ids]
-    refined_candidates.extend(additions)
-    screen_map["candidates"] = refined_candidates
-    screen_map["summary"] = {
-        **dict(screen_map.get("summary") if isinstance(screen_map.get("summary"), dict) else {}),
-        "candidate_count": len(refined_candidates),
-        "safe_candidate_count": len([item for item in refined_candidates if item.get("risk_class") == "safe_click_allowed"]),
-        "blocked_candidate_count": len([item for item in refined_candidates if item.get("risk_class") == "blocked"]),
-        "model_addition_count": len(additions),
-        "model_removal_count": len(remove_ids),
-        "model_update_count": len(updates),
-    }
-
-    delta_removals = [item for item in _as_list(delta.get("removals")) if isinstance(item, dict)]
-    for candidate_id in sorted(remove_ids):
-        delta_removals.append(
-            {
-                "candidate_id": candidate_id,
-                "label": existing_by_id.get(candidate_id, {}).get("label"),
-                "reason": "model_review_remove",
-                "source": "learn_deep_model_review",
-            }
-        )
-    delta["additions"] = [*([item for item in _as_list(delta.get("additions")) if isinstance(item, dict)]), *additions]
-    delta["removals"] = delta_removals
-    delta["updates"] = [*([item for item in _as_list(delta.get("updates")) if isinstance(item, dict)]), *updates]
-    delta["summary"] = {
-        "addition_count": len(delta["additions"]),
-        "removal_count": len(delta["removals"]),
-        "update_count": len(delta["updates"]),
-    }
-
-    review["candidate_decisions"] = [*([item for item in _as_list(review.get("candidate_decisions")) if isinstance(item, dict)]), *model_decisions]
-    review["summary"] = {
-        **dict(review.get("summary") if isinstance(review.get("summary"), dict) else {}),
-        "output_candidate_count": len(refined_candidates),
-        "model_decision_count": len(model_decisions),
-        "model_addition_count": len(additions),
-        "model_removal_count": len(remove_ids),
-        "model_update_count": len(updates),
-    }
-
-    deep_result["screen_map"] = screen_map
-    deep_result["path_graph_deep_review"] = review
-    deep_result["path_graph_delta"] = delta
-    deep_result["element_memory_init_plan"] = _build_element_memory_init_plan(
-        screen_map=screen_map,
-        enabled=element_memory_enabled,
-    )
-    return deep_result
-
-
-def _normalize_learn_deep_model_candidate(raw: Any, *, index: int, screen_map: dict[str, Any]) -> dict[str, Any] | None:
-    if not isinstance(raw, dict):
-        return None
-    label = _first_compact_text(raw.get("label"), raw.get("text"), raw.get("name"))
-    bbox = _normalize_map_bbox(raw.get("bbox") or raw.get("diagonal"))
-    if not label or not bbox:
-        return None
-    candidate_id = str(raw.get("candidate_id") or raw.get("id") or f"learn_deep_model_{index}").strip()
-    role = _first_compact_text(raw.get("role"), raw.get("type")) or "model_candidate"
-    risk_class = str(raw.get("risk_class") or "safe_dry_run_only").strip()
-    if risk_class not in {"safe_click_allowed", "safe_dry_run_only", "requires_user_confirmation", "blocked"}:
-        risk_class = "safe_dry_run_only"
-    return {
-        "contract_version": "screen_map_candidate_v1",
-        "candidate_id": candidate_id,
-        "label": label,
-        "role": role,
-        "goal_hint": _first_compact_text(raw.get("goal_hint")) or _goal_hint_for_candidate(label=label, role=role),
-        "expected_effect": _first_compact_text(raw.get("expected_effect"), raw.get("description")) or "click may change the current interface",
-        "risk_class": risk_class,
-        "risk_reasons": [str(item) for item in _as_list(raw.get("risk_reasons") or raw.get("reasons")) if str(item).strip()],
-        "section_id": raw.get("section_id") or _section_id_for_bbox(bbox, _as_list(screen_map.get("sections"))),
-        "bbox": bbox,
-        "click_point": _normalize_map_point(raw.get("click_point"), bbox),
-        "confidence": _bounded_float(raw.get("confidence")) or 0.55,
-        "source": "learn_deep_model_review",
-        "screen_map_rule": "learn_deep_model_added",
-        "evidence": {
-            "model_review": {
-                "reason": _first_compact_text(raw.get("reason"), raw.get("description")),
-                "coordinates_are_observation_only": True,
-            }
-        },
-    }
-
-
-def _normalize_learn_deep_model_update(raw: dict[str, Any], existing: dict[str, Any]) -> dict[str, Any] | None:
-    fields: dict[str, Any] = {}
-    for key in ("label", "role", "section_id", "expected_effect", "risk_class", "description"):
-        value = raw.get(key)
-        if value is not None and str(value).strip() and value != existing.get(key):
-            fields[key] = str(value).strip()
-    bbox = _normalize_map_bbox(raw.get("bbox") or raw.get("bounding_box") or raw.get("bounds"))
-    if bbox and bbox != _normalize_map_bbox(existing.get("bbox")):
-        fields["bbox"] = bbox
-    point = _normalize_map_point(raw.get("click_point") or raw.get("clickPoint"), bbox or _normalize_map_bbox(existing.get("bbox")))
-    if point and point != _normalize_map_point(existing.get("click_point") or existing.get("clickPoint"), _normalize_map_bbox(existing.get("bbox"))):
-        fields["click_point"] = point
-    confidence = _bounded_float(raw.get("confidence"))
-    if confidence is not None and confidence != existing.get("confidence"):
-        fields["confidence"] = confidence
-    if not fields:
-        return None
-    return {
-        "candidate_id": existing.get("candidate_id"),
-        "source": "learn_deep_model_review",
-        "fields": fields,
-    }
-
-
-def _deep_duplicate_candidate(candidate: dict[str, Any], kept: list[dict[str, Any]]) -> dict[str, Any] | None:
-    candidate_label = _path_label_key(candidate.get("label"))
-    candidate_bbox = _normalize_map_bbox(candidate.get("bbox"))
-    if not candidate_label or not candidate_bbox:
-        return None
-    for existing in kept:
-        existing_label = _path_label_key(existing.get("label"))
-        existing_bbox = _normalize_map_bbox(existing.get("bbox"))
-        if not existing_label or not existing_bbox:
-            continue
-        if _path_label_similarity(candidate_label, existing_label) >= 0.92 and _path_bbox_similarity(candidate_bbox, existing_bbox) >= 0.82:
-            return existing
-    return None
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def _path_candidate_contains(parent: dict[str, Any], child: dict[str, Any], *, tolerance: int = 3) -> bool:
@@ -4818,1009 +3876,12 @@ def _prune_learn_target_visual_overlaps(targets: list[dict[str, Any]]) -> tuple[
     return kept, removals
 
 
-def _deep_candidate_reasons(candidate: dict[str, Any]) -> list[str]:
-    reasons = ["candidate_retained"]
-    if candidate.get("source") in {"ocr_card_groups", "ocr_text_actions", "nav_text_action"}:
-        reasons.append("ocr_backed_candidate")
-    if candidate.get("section_id"):
-        reasons.append("section_assigned")
-    if candidate.get("risk_class") == "safe_click_allowed":
-        reasons.append("safe_click_candidate")
-    return reasons
 
 
-def _deep_missing_text_additions(
-    *,
-    result: dict[str, Any],
-    candidates: list[dict[str, Any]],
-    sections: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    additions: list[dict[str, Any]] = []
-    existing_labels = {_path_label_key(item.get("label")) for item in candidates}
-    existing_boxes = [_normalize_map_bbox(item.get("bbox")) for item in candidates]
-    for index, text_item in enumerate(_screen_map_texts(result)):
-        text = _normalize_ocr_candidate_label(_first_compact_text(text_item.get("text")))
-        if not text or _screen_map_text_is_noise(text, allow_short=False):
-            continue
-        text_key = _path_label_key(text)
-        bbox = _normalize_map_bbox(text_item.get("bbox"))
-        if not text_key or not bbox:
-            continue
-        if any(_path_label_similarity(text_key, existing) >= 0.92 for existing in existing_labels if existing):
-            continue
-        if any(box and _bbox_contains_center(box, bbox) for box in existing_boxes):
-            continue
-        section_id = _section_id_for_bbox(bbox, sections)
-        addition = {
-            "contract_version": "screen_map_candidate_v1",
-            "candidate_id": f"learn_deep_text_{index}",
-            "label": text,
-            "role": "ocr_text_action",
-            "goal_hint": _goal_hint_for_candidate(label=text, role="ocr_text_action"),
-            "expected_effect": "click may change the current interface",
-            "risk_class": "safe_dry_run_only",
-            "risk_reasons": ["learn_deep_missing_text_requires_locate"],
-            "section_id": section_id,
-            "bbox": bbox,
-            "click_point": _normalize_map_point(None, bbox),
-            "confidence": _bounded_float(text_item.get("confidence") or text_item.get("score")) or 0.5,
-            "source": "learn_deep_missing_ocr_text",
-            "source_id": text_item.get("id") or text_item.get("text_id"),
-            "screen_map_rule": "learn_deep_missing_text_added",
-            "evidence": {
-                "source_text": text_item,
-                "screen_map_rule": "learn_deep_missing_text_added",
-            },
-        }
-        additions.append(addition)
-        existing_labels.add(text_key)
-        existing_boxes.append(bbox)
-    return additions[:20]
 
 
-def _bbox_contains_center(container: dict[str, int], inner: dict[str, int]) -> bool:
-    cx = inner["x"] + inner["w"] / 2
-    cy = inner["y"] + inner["h"] / 2
-    return container["x"] <= cx <= container["x"] + container["w"] and container["y"] <= cy <= container["y"] + container["h"]
 
 
-def _build_element_memory_init_plan(*, screen_map: dict[str, Any], enabled: bool) -> dict[str, Any]:
-    candidates = [item for item in _as_list(screen_map.get("candidates")) if isinstance(item, dict)]
-    entries = [
-        {
-            "candidate_id": item.get("candidate_id"),
-            "memory_key": f"{screen_map.get('state_id')}::{item.get('candidate_id')}",
-            "label": item.get("label"),
-            "role": item.get("role"),
-            "section_id": item.get("section_id"),
-            "risk_class": item.get("risk_class"),
-            "write_status": "planned_not_written",
-        }
-        for item in candidates
-        if item.get("candidate_id") and item.get("label")
-    ]
-    return {
-        "contract_version": "element_memory_init_plan_v1",
-        "status": "planned" if enabled else "disabled_by_write_policy",
-        "write_policy_element_memory": bool(enabled),
-        "state_id": screen_map.get("state_id"),
-        "entry_count": len(entries) if enabled else 0,
-        "entries": entries if enabled else [],
-    }
-
-
-def _screen_map_sections(result: dict[str, Any]) -> list[dict[str, Any]]:
-    image_size = result.get("image_size") if isinstance(result.get("image_size"), dict) else {}
-    live_capture = result.get("live_capture") if isinstance(result.get("live_capture"), dict) else {}
-    width = int(_number(image_size.get("width") or live_capture.get("image_width")) or 0)
-    height = int(_number(image_size.get("height") or live_capture.get("image_height")) or 0)
-    if width <= 0:
-        width = _max_text_edge(result, axis="x") or 1000
-    if height <= 0:
-        height = _max_text_edge(result, axis="y") or 1000
-
-    if not _screen_map_looks_like_browser_page(result):
-        return _application_screen_map_sections(result, width=width, height=height)
-
-    browser_chrome_bottom = min(height, max(80, round(height * 0.085)))
-    page_header_bottom = min(height, max(browser_chrome_bottom + 70, round(height * 0.17)))
-    promo_bottom = min(height, max(page_header_bottom + 90, round(height * 0.30)))
-    main_bottom = min(height, max(promo_bottom + 260, round(height * 0.86)))
-
-    has_right_sidebar = _screen_map_has_right_sidebar_evidence(result, width=width, height=height, top_y=promo_bottom, bottom_y=main_bottom)
-    right_sidebar_x = round(width * 0.58) if has_right_sidebar else width
-
-    sections = [
-        _screen_map_section(
-            "browser_chrome",
-            "Browser chrome",
-            "browser",
-            "Browser tabs, address bar, and extension controls.",
-            {"x": 0, "y": 0, "w": width, "h": browser_chrome_bottom},
-            result,
-        ),
-        _screen_map_section(
-            "page_header",
-            "Top navigation",
-            "navigation",
-            "Website header, logo, language controls, and top navigation tabs.",
-            {"x": 0, "y": browser_chrome_bottom, "w": width, "h": max(1, page_header_bottom - browser_chrome_bottom)},
-            result,
-        ),
-        _screen_map_section(
-            "promo_strip",
-            "Promotion strip",
-            "content",
-            "Horizontal promotional or feature cards above the main tool area.",
-            {"x": 0, "y": page_header_bottom, "w": width, "h": max(1, promo_bottom - page_header_bottom)},
-            result,
-        ),
-        _screen_map_section(
-            "main_content",
-            "Main content",
-            "content",
-            "Primary page body with tool cards, panels, forms, and test areas.",
-            {"x": 0, "y": promo_bottom, "w": right_sidebar_x, "h": max(1, main_bottom - promo_bottom)},
-            result,
-        ),
-    ]
-    if has_right_sidebar:
-        sections.append(
-            _screen_map_section(
-                "right_sidebar",
-                "Right sidebar",
-                "content",
-                "Secondary column with recommendations, related items, widgets, or quick actions.",
-                {"x": right_sidebar_x, "y": promo_bottom, "w": max(1, width - right_sidebar_x), "h": max(1, main_bottom - promo_bottom)},
-                result,
-            )
-        )
-    if main_bottom < height:
-        sections.append(
-            _screen_map_section(
-                "lower_content",
-                "Lower content",
-                "content",
-                "Content below the first viewport's main card area.",
-                {"x": 0, "y": main_bottom, "w": width, "h": max(1, height - main_bottom)},
-                result,
-            )
-        )
-    floating = _floating_overlay_section(result, width=width, height=height)
-    if floating:
-        sections.append(floating)
-    return sections
-
-
-def _screen_map_looks_like_browser_page(result: dict[str, Any]) -> bool:
-    screen_reading = result.get("screen_reading") if isinstance(result.get("screen_reading"), dict) else {}
-    live_capture = result.get("live_capture") if isinstance(result.get("live_capture"), dict) else {}
-    haystack = " ".join(
-        str(item or "")
-        for item in (
-            result.get("app_name"),
-            screen_reading.get("app_name"),
-            result.get("suggested_state_hint"),
-            result.get("state_guess"),
-            result.get("screen_summary"),
-            live_capture.get("process_name"),
-            live_capture.get("window_title"),
-            live_capture.get("title"),
-        )
-    ).casefold()
-    browser_tokens = (
-        "browser",
-        "chrome",
-        "edge",
-        "msedge",
-        "firefox",
-        "brave",
-        "google news",
-        "news homepage",
-        "web page",
-        "website",
-        "http://",
-        "https://",
-        "www.",
-    )
-    if any(token in haystack for token in browser_tokens):
-        return True
-    text_blob = " ".join(str(item.get("text") or "") for item in _screen_map_texts(result) if isinstance(item, dict)).casefold()
-    web_text_hits = sum(1 for token in ("home", "for you", "following", "search", "sign in", "settings") if token in text_blob)
-    return web_text_hits >= 4
-
-
-def _screen_map_has_right_sidebar_evidence(result: dict[str, Any], *, width: int, height: int, top_y: int, bottom_y: int) -> bool:
-    if width < 900:
-        return False
-    right_x = round(width * 0.58)
-    right_texts: list[str] = []
-    left_texts = 0
-    for item in _screen_map_texts(result):
-        if not isinstance(item, dict):
-            continue
-        bbox = _normalize_map_bbox(item.get("bbox"))
-        if not bbox:
-            continue
-        center_x = bbox["x"] + bbox["w"] / 2
-        center_y = bbox["y"] + bbox["h"] / 2
-        if center_y < top_y or center_y > bottom_y:
-            continue
-        text = str(item.get("text") or "").strip()
-        if center_x >= right_x:
-            if text:
-                right_texts.append(text)
-        else:
-            left_texts += 1
-    if len(right_texts) < 3 or left_texts < 2:
-        return False
-    right_blob = " ".join(right_texts).casefold()
-    sidebar_tokens = (
-        "recommended",
-        "recommendation",
-        "related",
-        "for you",
-        "headlines",
-        "perspectives",
-        "weather",
-        "business",
-        "technology",
-        "entertainment",
-        "sports",
-        "world",
-        "local",
-    )
-    if any(token in right_blob for token in sidebar_tokens):
-        return True
-    return len(right_texts) >= 5
-
-
-def _application_screen_map_sections(result: dict[str, Any], *, width: int, height: int) -> list[dict[str, Any]]:
-    top_bar_bottom = _application_top_bar_bottom(result, width=width, height=height)
-    bottom_bar_top = _application_bottom_bar_top(result, height=height)
-    content_bottom = bottom_bar_top if bottom_bar_top is not None else height
-    sections = [
-        _screen_map_section(
-            "top_bar",
-            "Top bar",
-            "navigation",
-            "Application top bar with primary tabs, search, account, and window-level actions.",
-            {"x": 0, "y": 0, "w": width, "h": top_bar_bottom},
-            result,
-        ),
-        _screen_map_section(
-            "primary_area",
-            "Primary area",
-            "content",
-            "Primary application workspace with panels, controls, cards, and action areas.",
-            {"x": 0, "y": top_bar_bottom, "w": width, "h": max(1, content_bottom - top_bar_bottom)},
-            result,
-        ),
-    ]
-    if bottom_bar_top is not None:
-        sections.append(
-            _screen_map_section(
-                "bottom_bar",
-                "Bottom bar",
-                "status",
-                "Lower application area with secondary actions, status, or footer controls.",
-                {"x": 0, "y": content_bottom, "w": width, "h": max(1, height - content_bottom)},
-                result,
-            )
-        )
-    floating = _floating_overlay_section(result, width=width, height=height)
-    if floating:
-        sections.append(floating)
-    return sections
-
-
-def _application_top_bar_bottom(result: dict[str, Any], *, width: int, height: int) -> int:
-    top_limit = max(80, round(height * 0.24))
-    evidence_boxes: list[dict[str, int]] = []
-    element_sources = [_as_list(result.get("ui_elements"))]
-    screen_reading = result.get("screen_reading") if isinstance(result.get("screen_reading"), dict) else {}
-    element_sources.append(_as_list(screen_reading.get("ui_elements")))
-    screen_reading_ui = screen_reading.get("ui") if isinstance(screen_reading.get("ui"), dict) else {}
-    element_sources.append(_as_list(screen_reading_ui.get("elements")))
-    for source in element_sources:
-        for item in source:
-            if not isinstance(item, dict):
-                continue
-            bbox = _normalize_map_bbox(item.get("bbox"))
-            if not bbox or bbox["y"] >= top_limit:
-                continue
-            role = " ".join(str(item.get(key) or "") for key in ("type", "role", "role_guess")).casefold()
-            if not any(token in role for token in ("menu", "tab", "nav", "button", "input", "search", "control")):
-                continue
-            # 左侧窄轨道上的纵向图标属于侧栏，不能把上栏向下拉长。
-            narrow_left_icon = (
-                "menu" not in role
-                and bbox["x"] + bbox["w"] <= max(72, round(width * 0.12))
-                and bbox["y"] >= max(56, round(height * 0.06))
-            )
-            if not narrow_left_icon:
-                evidence_boxes.append(bbox)
-    text_limit = min(top_limit, max(128, round(height * 0.12)))
-    for item in _screen_map_texts(result):
-        if not isinstance(item, dict):
-            continue
-        bbox = _normalize_map_bbox(item.get("bbox"))
-        if bbox and bbox["y"] < text_limit:
-            evidence_boxes.append(bbox)
-    if evidence_boxes:
-        evidence_bottom = max(box["y"] + box["h"] for box in evidence_boxes)
-        return min(height, max(56, evidence_bottom + 8))
-    return min(height, max(72, round(height * 0.10)))
-
-
-def _application_bottom_bar_top(result: dict[str, Any], *, height: int) -> int | None:
-    model_io = result.get("model_io") if isinstance(result.get("model_io"), dict) else {}
-    raw_response = model_io.get("raw_response") if isinstance(model_io.get("raw_response"), dict) else {}
-    model_json = raw_response.get("model_json") if isinstance(raw_response.get("model_json"), dict) else {}
-    candidates: list[int] = []
-    for item in _as_list(model_json.get("regions")):
-        if not isinstance(item, dict):
-            continue
-        role = " ".join(str(item.get(key) or "") for key in ("role", "label", "region_id")).casefold()
-        if not any(token in role for token in ("status_bar", "status bar", "bottom_bar", "bottom bar", "footer")):
-            continue
-        diagonal = item.get("diagonal") if isinstance(item.get("diagonal"), dict) else {}
-        top = int(_number(diagonal.get("y1")) or 0)
-        if top >= round(height * 0.70):
-            candidates.append(top)
-    return min(candidates) if candidates else None
-
-
-def _screen_map_section(section_id: str, label: str, role: str, description: str, bbox: dict[str, int], result: dict[str, Any]) -> dict[str, Any]:
-    texts = _texts_in_bbox(_screen_map_texts(result), bbox)
-    return {
-        "contract_version": "screen_map_section_v1",
-        "section_id": section_id,
-        "label": label,
-        "role": role,
-        "description": description,
-        "bbox": bbox,
-        "text_count": len(texts),
-        "text_sample": [_first_compact_text(item.get("text")) for item in texts[:10] if _first_compact_text(item.get("text"))],
-    }
-
-
-def _floating_overlay_section(result: dict[str, Any], *, width: int, height: int) -> dict[str, Any] | None:
-    texts = _screen_map_texts(result)
-    bottom_right = []
-    for text in texts:
-        bbox = _normalize_map_bbox(text.get("bbox"))
-        if not bbox:
-            continue
-        cx = bbox["x"] + bbox["w"] / 2
-        cy = bbox["y"] + bbox["h"] / 2
-        if cx > width * 0.72 and cy > height * 0.65:
-            label = str(text.get("text") or "")
-            if label and any(token in label.casefold() for token in ["video", "help", "帮助", "房间", "密码", "join", "加入"]):
-                bottom_right.append(text)
-    if not bottom_right:
-        return None
-    bbox = _bbox_union([_normalize_map_bbox(item.get("bbox")) for item in bottom_right])
-    if not bbox:
-        return None
-    padded = _pad_bbox(bbox, pad=28, max_width=width, max_height=height)
-    return _screen_map_section(
-        "floating_overlay",
-        "Floating overlay",
-        "overlay",
-        "Floating widget or overlay above the page content.",
-        padded,
-        result,
-    )
-
-
-def _screen_map_text_candidates(result: dict[str, Any], *, sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    candidates: list[dict[str, Any]] = []
-    for index, text_item in enumerate(_screen_map_texts(result)):
-        if not isinstance(text_item, dict):
-            continue
-        label = _normalize_ocr_candidate_label(_first_compact_text(text_item.get("text")))
-        bbox = _normalize_map_bbox(text_item.get("bbox"))
-        confidence = _bounded_float(text_item.get("confidence"))
-        if not label or not bbox:
-            continue
-        section_id = _section_id_for_bbox(bbox, sections)
-        role = _ocr_text_candidate_role(label, bbox, section_id=section_id)
-        if not role:
-            continue
-        min_confidence = 0.5 if section_id in {"page_header", "top_bar"} else (0.6 if len(label) <= 4 else 0.72)
-        if confidence is not None and confidence < min_confidence:
-            continue
-        candidates.append(
-            {
-                "id": f"ocr_{text_item.get('id') or index}",
-                "text_id": text_item.get("id"),
-                "label": label,
-                "type": role,
-                "bbox": bbox,
-                "click_point": _normalize_map_point(None, bbox),
-                "confidence": confidence,
-                "interaction_policy": {
-                    "allowed": True if role in {"button", "text_action", "nav_text_action"} else None,
-                    "reasons": ["ocr_text_candidate"],
-                },
-                "verification_hints": {"expected_changes": [_expected_effect_for_ocr_text(label, role)]},
-                "evidence_level": "ocr_text_only",
-                "screen_map_rule": (
-                    "more_text_is_button"
-                    if _looks_like_more_button_text(label)
-                    else ("header_text_is_button" if section_id in {"page_header", "top_bar"} else "ocr_action_text")
-                ),
-            }
-        )
-    return candidates
-
-
-def _screen_map_texts(result: dict[str, Any]) -> list[dict[str, Any]]:
-    texts: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    screen_reading = result.get("screen_reading") if isinstance(result.get("screen_reading"), dict) else {}
-    for source in (result.get("texts"), screen_reading.get("texts")):
-        for item in _as_list(source):
-            if not isinstance(item, dict):
-                continue
-            key = str(item.get("id") or item.get("text") or "") + "|" + str(item.get("bbox") or "")
-            if key in seen:
-                continue
-            seen.add(key)
-            texts.append(item)
-    return texts
-
-
-def _normalize_ocr_candidate_label(label: str) -> str:
-    return str(label or "").strip().strip("·•・-—→ ").strip()
-
-
-def _ocr_text_candidate_role(label: str, bbox: dict[str, int], *, section_id: str | None = None) -> str | None:
-    text = label.strip()
-    lowered = text.casefold()
-    if section_id == "top_bar":
-        if _screen_map_text_is_noise(text, allow_short=True):
-            return None
-        if len(text) <= 1:
-            return None
-        if sum(1 for char in text if char.isalnum()) <= 1 and len(text) <= 3:
-            return None
-        digit_count = sum(1 for char in text if char.isdigit())
-        alpha_count = sum(1 for char in text if char.isalpha())
-        if digit_count and digit_count >= max(1, alpha_count):
-            return None
-        return "nav_text_action"
-    if bbox["y"] < 90:
-        return None
-    if section_id == "page_header":
-        if _screen_map_text_is_noise(text, allow_short=True):
-            return None
-        if _header_ocr_text_is_noise(text, bbox):
-            return None
-        return "nav_text_action"
-    if bbox["y"] < 180 and ("." in text or "mousetester" in lowered):
-        return None
-    if _looks_like_more_button_text(text):
-        return "button"
-    if len(text) > 24:
-        return None
-    if any(mark in text for mark in ["、", "，", ","]) and not text.startswith(("点击", "立即")):
-        return None
-    if "峰值" in text or "成功次数" in text or "上次间隔" in text:
-        return None
-    action_terms = [
-        "click",
-        "start",
-        "open",
-        "apply",
-        "test",
-        "reset",
-        "join",
-        "点击",
-        "开始",
-        "启动",
-        "停止",
-        "测试",
-        "重置",
-        "左键",
-        "中键",
-        "右键",
-        "前进",
-        "后退",
-        "加入",
-        "参与",
-    ]
-    card_terms = [
-        "dpi",
-        "cps",
-        "hz",
-        "回报率",
-        "双击",
-        "按键",
-        "滚轮",
-        "平滑度",
-        "灵敏度",
-        "键盘",
-        "白噪音",
-    ]
-    if any(term in lowered or term in text for term in action_terms):
-        return "nav_text_action" if bbox["y"] < 180 else "text_action"
-    if bbox["y"] >= 250 and any(term in lowered or term in text for term in card_terms):
-        return "content_card"
-    return None
-
-
-def _header_ocr_text_is_noise(text: str, bbox: dict[str, int]) -> bool:
-    value = str(text or "").strip()
-    if not value:
-        return True
-    lowered = value.casefold()
-    known_short_nav = {"home", "world", "local", "sports", "health", "science", "for you", "中国", "全球"}
-    if lowered in known_short_nav or value in known_short_nav:
-        return False
-    alnum_count = sum(1 for char in value if char.isalnum())
-    alpha_count = sum(1 for char in value if char.isalpha())
-    digit_count = sum(1 for char in value if char.isdigit())
-    # Top toolbar OCR often turns icons, avatars, extension badges, and the search icon into tiny text.
-    if bbox.get("y", 0) < 130:
-        if len(value) <= 3:
-            return True
-        if digit_count and digit_count >= alpha_count:
-            return True
-    if len(value) <= 2 and value not in known_short_nav:
-        return True
-    if alnum_count <= 1 and len(value) <= 3:
-        return True
-    if digit_count and digit_count >= max(1, alpha_count):
-        return True
-    return False
-
-
-def _screen_map_text_is_noise(text: str, *, allow_short: bool = False) -> bool:
-    value = str(text or "").strip()
-    if not value:
-        return True
-    lowered = value.casefold()
-    if "://" in lowered or lowered.startswith("http"):
-        return True
-    if len(value) == 1 and not allow_short:
-        return True
-    if len(value) == 1 and allow_short and not value.isalnum():
-        return True
-    if all(not char.isalnum() for char in value):
-        return True
-    return False
-
-
-def _screen_map_card_candidates(result: dict[str, Any], *, sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    candidates: list[dict[str, Any]] = []
-    text_items = _screen_map_texts(result)
-    section_by_id = {str(section.get("section_id")): section for section in sections if isinstance(section, dict)}
-    for section_id in ("main_content", "right_sidebar", "promo_strip", "lower_content", "primary_area", "bottom_bar"):
-        section = section_by_id.get(section_id)
-        section_bbox = _normalize_map_bbox((section or {}).get("bbox"))
-        if not section_bbox:
-            continue
-        section_texts = _texts_in_bbox(text_items, section_bbox)
-        seed_boxes = [
-            bbox
-            for item in section_texts
-            if (bbox := _normalize_map_bbox(item.get("bbox")))
-            and _is_card_seed_label(
-                _normalize_ocr_candidate_label(_first_compact_text(item.get("text"))),
-                section_id=section_id,
-                bbox=bbox,
-            )
-        ]
-        used_centers: list[dict[str, int]] = []
-        for index, text_item in enumerate(section_texts):
-            seed_bbox = _normalize_map_bbox(text_item.get("bbox"))
-            label = _normalize_ocr_candidate_label(_first_compact_text(text_item.get("text")))
-            if not seed_bbox or not _is_card_seed_label(label, section_id=section_id, bbox=seed_bbox):
-                continue
-            seed_center = _normalize_map_point(None, seed_bbox)
-            if seed_center and any(_point_inside_bbox(seed_center, used) for used in used_centers):
-                continue
-            card_bbox = _card_bbox_for_seed(section_texts, seed_bbox=seed_bbox, seed_boxes=seed_boxes, section_bbox=section_bbox)
-            if not card_bbox:
-                continue
-            used_centers.append(card_bbox)
-            card_texts = _texts_in_bbox(section_texts, card_bbox)
-            card_role = (
-                "recommendation_item"
-                if section_id == "right_sidebar"
-                else ("news_card" if section_id == "main_content" else _card_role_for_bbox(card_bbox, section_bbox=section_bbox))
-            )
-            candidates.append(
-                {
-                    "id": f"card_{section_id}_{index}",
-                    "label": label,
-                    "type": card_role,
-                    "section_id": section_id,
-                    "bbox": card_bbox,
-                    "click_point": _normalize_map_point(None, card_bbox),
-                    "confidence": _bounded_float(text_item.get("confidence")) or 0.75,
-                    "interaction_policy": {
-                        "allowed": None,
-                        "reasons": ["card_group_candidate", f"section:{section_id}"],
-                    },
-                    "verification_hints": {"expected_changes": [f"open or focus the {label} card"]},
-                    "evidence_level": "ocr_grouped_card",
-                    "text_id": text_item.get("id"),
-                    "screen_map_rule": "card_texts_grouped_as_single_candidate",
-                    "text_sample": [_first_compact_text(item.get("text")) for item in card_texts[:8] if _first_compact_text(item.get("text"))],
-                    "text_count": len(card_texts),
-                    "children": _card_children_from_texts(card_texts, seed_text_id=text_item.get("id")),
-                }
-            )
-    return candidates
-
-
-def _is_card_seed_label(label: str, *, section_id: str, bbox: dict[str, int] | None = None) -> bool:
-    text = str(label or "").strip()
-    if _screen_map_text_is_noise(text):
-        return False
-    if _looks_like_more_button_text(text):
-        return False
-    lowered = text.casefold()
-    if _is_generic_article_seed_label(text, bbox=bbox, section_id=section_id):
-        return True
-    if any(text.startswith(prefix) for prefix in ("点击", "检测", "测试鼠标", "请输入", "输入")):
-        return False
-    if section_id == "promo_strip":
-        return len(text) >= 3 and any(term in text or term in lowered for term in ["测试", "工具", "dpi", "cps", "延迟", "灵敏度", "白噪音", "键盘"])
-    return any(
-        term in text or term in lowered
-        for term in [
-            "测试",
-            "按键",
-            "滚轮",
-            "回报率",
-            "双击",
-            "轮询率",
-            "平滑度",
-            "灵敏度",
-            "dpi",
-            "cps",
-            "hz",
-            "键盘",
-            "白噪音",
-            "建房",
-            "加入",
-        ]
-    )
-
-
-def _is_generic_article_seed_label(label: str, *, bbox: dict[str, int] | None, section_id: str) -> bool:
-    text = str(label or "").strip()
-    if section_id in {"page_header", "top_bar"} or _screen_map_text_is_noise(text):
-        return False
-    if _looks_like_more_button_text(text):
-        return False
-    lowered = text.casefold()
-    if any(token in lowered for token in ["http", "google", "search", "setting", "privacy", "cookie"]):
-        return False
-    if _looks_like_metadata_text(text):
-        return False
-    alpha_count = sum(1 for char in text if char.isalpha())
-    digit_count = sum(1 for char in text if char.isdigit())
-    non_ascii_count = sum(1 for char in text if ord(char) > 127)
-    word_count = len([part for part in text.replace("-", " ").split() if part.strip()])
-    width = int((bbox or {}).get("w") or 0)
-    if digit_count and digit_count >= max(2, alpha_count):
-        return False
-    if len(text) >= 10 and (non_ascii_count >= 4 or word_count >= 4):
-        return True
-    if width >= 140 and len(text) >= 8 and (non_ascii_count >= 3 or word_count >= 3):
-        return True
-    return False
-
-
-def _looks_like_more_button_text(label: str) -> bool:
-    text = str(label or "").strip()
-    if not text:
-        return False
-    lowered = text.casefold()
-    compact = "".join(char for char in lowered if char.isalnum() or ord(char) > 127)
-    if any(token in text for token in ["查看更多", "更多", "显示更多", "加载更多"]):
-        return True
-    more_phrases = [
-        "more",
-        "see more",
-        "view more",
-        "read more",
-        "show more",
-        "load more",
-        "more stories",
-        "more news",
-        "more headlines",
-    ]
-    if any(phrase in lowered for phrase in more_phrases):
-        return True
-    return compact in {"more", "seemore", "viewmore", "readmore", "showmore", "loadmore"}
-
-
-def _looks_like_metadata_text(label: str) -> bool:
-    text = str(label or "").strip()
-    lowered = text.casefold()
-    if not text:
-        return True
-    if any(char.isdigit() for char in text):
-        time_markers = [
-            "ago",
-            "hour",
-            "hours",
-            "minute",
-            "minutes",
-            "day",
-            "days",
-            "\u5c0f\u65f6",
-            "\u5c0f\u6642",
-            "\u5206\u949f",
-            "\u5206\u9418",
-            "\u524d",
-            "\u00b7",
-            "\u00c2\u00b7",
-            "\u00e5\u00b0\u008f\u00e6\u0097\u00b6",
-        ]
-        if any(token in lowered for token in time_markers):
-            return True
-    metadata_tokens = [
-        "ago",
-        "hour",
-        "hours",
-        "minute",
-        "minutes",
-        "today",
-        "yesterday",
-        "source",
-        "author",
-        "å°æ¶",
-        "åé",
-        "å¤©å",
-        "ä½è€",
-    ]
-    if any(token in lowered for token in metadata_tokens):
-        return True
-    if len(text) <= 14 and any(char.isdigit() for char in text) and not any(char in text for char in "!?？！“”\""):
-        return True
-    if len(text) <= 12 and sum(1 for char in text if char.isalpha()) <= 2 and any(ord(char) > 127 for char in text):
-        return True
-    return False
-
-
-def _card_role_for_bbox(card_bbox: dict[str, int], *, section_bbox: dict[str, int]) -> str:
-    center_x = card_bbox["x"] + card_bbox["w"] / 2
-    right_threshold = section_bbox["x"] + section_bbox["w"] * 0.58
-    if center_x >= right_threshold and card_bbox["w"] <= max(360, section_bbox["w"] * 0.34):
-        return "recommendation_item"
-    return "news_card"
-
-
-def _card_children_from_texts(texts: list[dict[str, Any]], *, seed_text_id: Any) -> list[dict[str, Any]]:
-    children: list[dict[str, Any]] = []
-    for index, text_item in enumerate(texts[:12]):
-        label = _normalize_ocr_candidate_label(_first_compact_text(text_item.get("text")))
-        bbox = _normalize_map_bbox(text_item.get("bbox"))
-        if not label or not bbox or _screen_map_text_is_noise(label, allow_short=False):
-            continue
-        role = "title" if text_item.get("id") == seed_text_id else ("metadata" if _looks_like_metadata_text(label) else "text")
-        children.append(
-            {
-                "contract_version": "screen_map_child_v1",
-                "child_id": str(text_item.get("id") or f"text_{index}")[:100],
-                "role": role,
-                "label": label,
-                "bbox": bbox,
-                "click_point": _normalize_map_point(None, bbox),
-                "confidence": _bounded_float(text_item.get("confidence")),
-                "source": "ocr_text",
-            }
-        )
-    return children
-
-
-def _card_bbox_for_seed(
-    texts: list[dict[str, Any]],
-    *,
-    seed_bbox: dict[str, int],
-    seed_boxes: list[dict[str, int]],
-    section_bbox: dict[str, int],
-) -> dict[str, int] | None:
-    seed_cx = seed_bbox["x"] + seed_bbox["w"] / 2
-    half_width = min(260, max(150, int(section_bbox["w"] * 0.11)))
-    x1 = max(section_bbox["x"], int(seed_cx - half_width))
-    x2 = min(section_bbox["x"] + section_bbox["w"], int(seed_cx + half_width))
-    x1, x2 = _card_column_bounds(seed_bbox=seed_bbox, seed_boxes=seed_boxes, fallback_x1=x1, fallback_x2=x2, section_bbox=section_bbox)
-    y1 = max(section_bbox["y"], seed_bbox["y"] - 24)
-    y2 = min(section_bbox["y"] + section_bbox["h"], seed_bbox["y"] + max(120, int(section_bbox["h"] * 0.34)))
-    candidate_rows: list[dict[str, Any]] = []
-    for text_item in texts:
-        bbox = _normalize_map_bbox(text_item.get("bbox"))
-        if not bbox:
-            continue
-        cx = bbox["x"] + bbox["w"] / 2
-        cy = bbox["y"] + bbox["h"] / 2
-        if x1 <= cx <= x2 and y1 <= cy <= y2:
-            candidate_rows.append({"bbox": bbox, "cy": cy})
-    candidate_rows.sort(key=lambda item: (item["cy"], item["bbox"]["x"]))
-    seed_cy = seed_bbox["y"] + seed_bbox["h"] / 2
-    seed_index = next(
-        (
-            index
-            for index, item in enumerate(candidate_rows)
-            if _bbox_overlap_area(item["bbox"], seed_bbox) > 0
-        ),
-        None,
-    )
-    if seed_index is None:
-        candidate_rows.append({"bbox": seed_bbox, "cy": seed_cy})
-        candidate_rows.sort(key=lambda item: (item["cy"], item["bbox"]["x"]))
-        seed_index = next(index for index, item in enumerate(candidate_rows) if item["bbox"] == seed_bbox)
-    cluster = [candidate_rows[seed_index]["bbox"]]
-    max_gap = 46
-    previous_cy = candidate_rows[seed_index]["cy"]
-    for item in reversed(candidate_rows[:seed_index]):
-        if previous_cy - item["cy"] > max_gap:
-            break
-        cluster.append(item["bbox"])
-        previous_cy = item["cy"]
-    previous_cy = candidate_rows[seed_index]["cy"]
-    for item in candidate_rows[seed_index + 1 :]:
-        if item["cy"] - previous_cy > max_gap:
-            break
-        cluster.append(item["bbox"])
-        previous_cy = item["cy"]
-    bbox = _bbox_union(cluster)
-    if not bbox:
-        return None
-    return _pad_bbox(bbox, pad=18, max_width=section_bbox["x"] + section_bbox["w"], max_height=section_bbox["y"] + section_bbox["h"])
-
-
-def _card_column_bounds(
-    *,
-    seed_bbox: dict[str, int],
-    seed_boxes: list[dict[str, int]],
-    fallback_x1: int,
-    fallback_x2: int,
-    section_bbox: dict[str, int],
-) -> tuple[int, int]:
-    seed_cx = seed_bbox["x"] + seed_bbox["w"] / 2
-    seed_cy = seed_bbox["y"] + seed_bbox["h"] / 2
-    row_peers = [
-        box
-        for box in seed_boxes
-        if abs((box["y"] + box["h"] / 2) - seed_cy) <= 80
-    ]
-    centers = sorted({round(box["x"] + box["w"] / 2) for box in row_peers})
-    if len(centers) < 2:
-        return fallback_x1, fallback_x2
-    center = round(seed_cx)
-    left_centers = [item for item in centers if item < center]
-    right_centers = [item for item in centers if item > center]
-    left_bound = section_bbox["x"]
-    right_bound = section_bbox["x"] + section_bbox["w"]
-    if left_centers:
-        left_bound = max(left_bound, int(round((left_centers[-1] + center) / 2)))
-    if right_centers:
-        right_bound = min(right_bound, int(round((right_centers[0] + center) / 2)))
-    return max(fallback_x1, left_bound), min(fallback_x2, right_bound)
-
-
-def _point_inside_bbox(point: dict[str, int], bbox: dict[str, int]) -> bool:
-    return bbox["x"] <= point["x"] <= bbox["x"] + bbox["w"] and bbox["y"] <= point["y"] <= bbox["y"] + bbox["h"]
-
-
-def _expected_effect_for_ocr_text(label: str, role: str) -> str:
-    if role == "content_card":
-        return f"open or focus the {label} section"
-    return f"activate {label}"
-
-
-def _screen_map_candidates(result: dict[str, Any], *, sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    sources: list[tuple[str, list[Any]]] = []
-    screen_reading = result.get("screen_reading") if isinstance(result.get("screen_reading"), dict) else {}
-    ui = screen_reading.get("ui") if isinstance(screen_reading.get("ui"), dict) else {}
-    sources.append(("screen_reading.ui.elements", _as_list(ui.get("elements"))))
-    sources.append(("screen_reading.ui.icon_candidates", _as_list(ui.get("icon_candidates"))))
-    sources.append(("screen_reading.ui_elements", _as_list(screen_reading.get("ui_elements"))))
-    sources.append(("top_level.ui.elements", _as_list(result.get("ui", {}).get("elements") if isinstance(result.get("ui"), dict) else None)))
-    sources.append(("top_level.ui.icon_candidates", _as_list(result.get("ui", {}).get("icon_candidates") if isinstance(result.get("ui"), dict) else None)))
-    sources.append(("top_level.ui_elements", _as_list(result.get("ui_elements"))))
-    sources.append(("top_level.elements", _as_list(result.get("elements"))))
-    sources.append(("top_level.controls", _as_list(result.get("controls"))))
-    sources.append(("ocr_card_groups", _screen_map_card_candidates(result, sections=sections)))
-    sources.append(("ocr_text_actions", _screen_map_text_candidates(result, sections=sections)))
-
-    seen: set[str] = set()
-    candidates: list[dict[str, Any]] = []
-    for source_name, items in sources:
-        for index, item in enumerate(items):
-            if not isinstance(item, dict):
-                continue
-            candidate = _screen_map_candidate(item, source=source_name, index=index, sections=sections)
-            if candidate is None:
-                continue
-            dedupe_key = f"{candidate['label']}|{candidate.get('bbox')}"
-            if dedupe_key in seen:
-                continue
-            seen.add(dedupe_key)
-            candidates.append(candidate)
-    return candidates[:80]
-
-
-def _screen_map_candidate(item: dict[str, Any], *, source: str, index: int, sections: list[dict[str, Any]]) -> dict[str, Any] | None:
-    label = _first_compact_text(
-        item.get("label"),
-        item.get("text"),
-        item.get("name"),
-        item.get("title"),
-        item.get("description"),
-        item.get("role_guess"),
-        item.get("role"),
-        item.get("type"),
-    )
-    label = _normalize_ocr_candidate_label(label)
-    if not label:
-        return None
-    bbox = _normalize_map_bbox(item.get("bbox") or item.get("bounding_box") or item.get("bounds") or item.get("rect") or item.get("region"))
-    click_point = _normalize_map_point(item.get("click_point") or item.get("clickPoint"), bbox)
-    role = _first_compact_text(item.get("type"), item.get("role_guess"), item.get("role"), item.get("control_type")) or "control"
-    policy = _interaction_policy_from_item(item)
-    risk_class, risk_reasons = _risk_class_for_candidate(label=label, role=role, policy=policy)
-    expected_effect = _expected_effect_from_item(item, role=role)
-    candidate_id = str(item.get("id") or item.get("element_id") or item.get("candidate_id") or f"screen_map_{index}")
-    return {
-        "contract_version": "screen_map_candidate_v1",
-        "candidate_id": candidate_id[:100],
-        "label": label,
-        "role": role,
-        "goal_hint": _goal_hint_for_candidate(label=label, role=role),
-        "expected_effect": expected_effect,
-        "risk_class": risk_class,
-        "risk_reasons": risk_reasons,
-        "section_id": _first_compact_text(item.get("section_id")) or _section_id_for_bbox(bbox, sections),
-        "bbox": bbox,
-        "click_point": click_point,
-        "confidence": _bounded_float(item.get("confidence")),
-        "source": source,
-        "source_id": item.get("id") or item.get("element_id") or item.get("candidate_id"),
-        "screen_map_rule": item.get("screen_map_rule"),
-        "children": _as_list(item.get("children")),
-        "evidence": {
-            "interaction_policy": policy,
-            "coordinate_confidence": item.get("coordinate_confidence"),
-            "evidence_level": item.get("evidence_level"),
-            "memory_key": item.get("memory_key"),
-            "source_text_id": item.get("text_id"),
-            "screen_map_rule": item.get("screen_map_rule"),
-        },
-    }
-
-
-def _interaction_policy_from_item(item: dict[str, Any]) -> dict[str, Any]:
-    evidence = item.get("evidence") if isinstance(item.get("evidence"), dict) else {}
-    policy = evidence.get("interaction_policy") if isinstance(evidence.get("interaction_policy"), dict) else {}
-    if not policy and isinstance(item.get("interaction_policy"), dict):
-        policy = item["interaction_policy"]
-    return dict(policy)
-
-
-def _risk_class_for_candidate(*, label: str, role: str, policy: dict[str, Any]) -> tuple[str, list[str]]:
-    reasons = [str(item) for item in _as_list(policy.get("reasons")) if str(item or "").strip()]
-    risk_text = " ".join([label, role, " ".join(reasons), str(policy.get("zone_type") or "")]).casefold()
-    if _looks_like_high_risk_action_text(risk_text):
-        return "requires_user_confirmation", sorted(set([*reasons, "potential_side_effect_action"]))
-    if policy.get("allowed") is False:
-        if _looks_like_low_risk_navigation_candidate(label=label, role=role, extra_text=risk_text):
-            return "safe_click_allowed", sorted(set([*reasons, "low_risk_navigation_policy_relaxed"]))
-        return "blocked", sorted(set(reasons or ["interaction_policy_blocked"]))
-    if policy.get("allowed") is True:
-        return "safe_click_allowed", sorted(set(reasons))
-    if any(token in str(role).casefold() for token in ["input", "textbox", "search"]):
-        return "safe_click_allowed", sorted(set(reasons))
-    return "safe_dry_run_only", sorted(set(reasons or ["requires_precise_location_before_click"]))
 
 
 def _execution_allowed_for_risk_class(*, label: str, role: str, risk_class: str) -> tuple[bool, str]:
@@ -5865,48 +3926,6 @@ def _looks_like_final_submit_action_text(text: str) -> bool:
     return any(term in normalized for term in final_terms)
 
 
-def _looks_like_high_risk_action_text(text: str) -> bool:
-    normalized = str(text or "").casefold()
-    tokens = set(re.findall(r"[a-z0-9]+", normalized))
-    if "pay" in tokens and "filter" in tokens and not any(
-        phrase in normalized
-        for phrase in [
-            "pay now",
-            "pay invoice",
-            "make payment",
-            "payment",
-            "checkout",
-            "purchase",
-        ]
-    ):
-        return False
-    dangerous_phrases = [
-        "quick apply",
-        "submit application",
-        "send application",
-        "complete application",
-        "confirm application",
-        "make payment",
-        "pay now",
-        "pay invoice",
-        "save changes",
-        "close window",
-        "删除",
-        "移除",
-        "支付",
-        "购买",
-        "发送",
-        "提交",
-        "申请",
-        "授权",
-        "关闭窗口",
-    ]
-    if any(term in normalized for term in dangerous_phrases):
-        return True
-    dangerous_tokens = {"delete", "remove", "purchase", "send", "submit", "apply", "authorize", "permission", "upload", "pay", "payment"}
-    return bool(tokens & dangerous_tokens)
-
-
 def _looks_like_apply_entry_action_text(text: str) -> bool:
     normalized = str(text or "").casefold()
     if _looks_like_final_submit_action_text(normalized):
@@ -5915,212 +3934,6 @@ def _looks_like_apply_entry_action_text(text: str) -> bool:
     if "apply" in tokens:
         return True
     return "quick apply" in normalized or "申请" in normalized
-
-
-def _looks_like_low_risk_navigation_candidate(*, label: str, role: str, extra_text: str = "") -> bool:
-    text = " ".join([label, role, extra_text]).casefold()
-    role_tokens = [
-        "card",
-        "news_card",
-        "job_card",
-        "result",
-        "search_result",
-        "link",
-        "title",
-        "row",
-        "list_item",
-        "article",
-        "detail",
-    ]
-    effect_tokens = [
-        "open",
-        "view",
-        "read",
-        "detail",
-        "article",
-        "job",
-        "card",
-        "result",
-        "recommended",
-        "recommendation",
-        "listing",
-    ]
-    return any(token in text for token in role_tokens) or any(token in text for token in effect_tokens)
-
-
-def _expected_effect_from_item(item: dict[str, Any], *, role: str) -> str:
-    verification = item.get("verification_hints") if isinstance(item.get("verification_hints"), dict) else {}
-    evidence = item.get("evidence") if isinstance(item.get("evidence"), dict) else {}
-    evidence_verification = evidence.get("verification_hints") if isinstance(evidence.get("verification_hints"), dict) else {}
-    for value in (
-        item.get("expected_effect"),
-        item.get("possible_navigation"),
-        item.get("possible_destinations"),
-        item.get("action"),
-        item.get("interaction_type"),
-        verification.get("expected_changes"),
-        evidence_verification.get("expected_changes"),
-    ):
-        text = _first_compact_text(value)
-        if text:
-            return text
-    role_text = str(role or "").casefold()
-    if any(token in role_text for token in ["input", "textbox", "search"]):
-        return "focus or edit input"
-    return "click may change the current interface"
-
-
-def _goal_hint_for_candidate(*, label: str, role: str) -> str:
-    role_text = str(role or "control").replace("_", " ")
-    return f"{role_text}: {label}"[:120]
-
-
-def _section_id_for_bbox(bbox: dict[str, int] | None, sections: list[dict[str, Any]]) -> str | None:
-    if not bbox:
-        return None
-    cx = bbox["x"] + bbox["w"] / 2
-    cy = bbox["y"] + bbox["h"] / 2
-    best_section = None
-    best_score = -1
-    for section in sections:
-        section_bbox = _normalize_map_bbox(section.get("bbox"))
-        if not section_bbox:
-            continue
-        inside = (
-            section_bbox["x"] <= cx <= section_bbox["x"] + section_bbox["w"]
-            and section_bbox["y"] <= cy <= section_bbox["y"] + section_bbox["h"]
-        )
-        overlap = _bbox_overlap_area(bbox, section_bbox)
-        score = overlap + (1_000_000 if inside else 0)
-        if score > best_score:
-            best_score = score
-            best_section = section
-    return str(best_section.get("section_id")) if best_section else None
-
-
-def _max_text_edge(result: dict[str, Any], *, axis: str) -> int | None:
-    edge = 0
-    for text in _screen_map_texts(result):
-        bbox = _normalize_map_bbox(text.get("bbox"))
-        if not bbox:
-            continue
-        if axis == "x":
-            edge = max(edge, bbox["x"] + bbox["w"])
-        else:
-            edge = max(edge, bbox["y"] + bbox["h"])
-    return edge or None
-
-
-def _texts_in_bbox(texts: list[dict[str, Any]], bbox: dict[str, int]) -> list[dict[str, Any]]:
-    selected = []
-    for text in texts:
-        text_bbox = _normalize_map_bbox(text.get("bbox"))
-        if not text_bbox:
-            continue
-        cx = text_bbox["x"] + text_bbox["w"] / 2
-        cy = text_bbox["y"] + text_bbox["h"] / 2
-        if bbox["x"] <= cx <= bbox["x"] + bbox["w"] and bbox["y"] <= cy <= bbox["y"] + bbox["h"]:
-            selected.append(text)
-    selected.sort(key=lambda item: ((_normalize_map_bbox(item.get("bbox")) or {}).get("y", 0), (_normalize_map_bbox(item.get("bbox")) or {}).get("x", 0)))
-    return selected
-
-
-def _bbox_union(boxes: list[dict[str, int] | None]) -> dict[str, int] | None:
-    valid = [box for box in boxes if box]
-    if not valid:
-        return None
-    x1 = min(box["x"] for box in valid)
-    y1 = min(box["y"] for box in valid)
-    x2 = max(box["x"] + box["w"] for box in valid)
-    y2 = max(box["y"] + box["h"] for box in valid)
-    return {"x": x1, "y": y1, "w": max(1, x2 - x1), "h": max(1, y2 - y1)}
-
-
-def _pad_bbox(bbox: dict[str, int], *, pad: int, max_width: int, max_height: int) -> dict[str, int]:
-    x = max(0, bbox["x"] - pad)
-    y = max(0, bbox["y"] - pad)
-    x2 = min(max_width, bbox["x"] + bbox["w"] + pad)
-    y2 = min(max_height, bbox["y"] + bbox["h"] + pad)
-    return {"x": x, "y": y, "w": max(1, x2 - x), "h": max(1, y2 - y)}
-
-
-def _bbox_overlap_area(a: dict[str, int], b: dict[str, int]) -> int:
-    x1 = max(a["x"], b["x"])
-    y1 = max(a["y"], b["y"])
-    x2 = min(a["x"] + a["w"], b["x"] + b["w"])
-    y2 = min(a["y"] + a["h"], b["y"] + b["h"])
-    return max(0, x2 - x1) * max(0, y2 - y1)
-
-
-def _screen_state_signature(*, app_name: str, state_hint: str, screen_summary: str, image_path: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
-    labels = [str(item.get("label") or "")[:60] for item in candidates[:20]]
-    source = "|".join([app_name or "", state_hint or "", screen_summary or "", image_path or "", *labels])
-    digest = hashlib.sha256(source.encode("utf-8", errors="ignore")).hexdigest()[:16]
-    return {
-        "state_id": f"state_{digest}",
-        "app_name": app_name,
-        "state_hint": state_hint,
-        "screen_summary_hash": hashlib.sha256(str(screen_summary or "").encode("utf-8", errors="ignore")).hexdigest()[:16],
-        "image_path": image_path,
-        "candidate_label_sample": labels[:12],
-        "candidate_count": len(candidates),
-    }
-
-
-def _normalize_map_bbox(value: Any) -> dict[str, int] | None:
-    if not isinstance(value, dict):
-        return None
-    x = _number(value.get("x", value.get("left", value.get("x1"))))
-    y = _number(value.get("y", value.get("top", value.get("y1"))))
-    right = _number(value.get("right", value.get("x2")))
-    bottom = _number(value.get("bottom", value.get("y2")))
-    width = _number(value.get("w", value.get("width")))
-    height = _number(value.get("h", value.get("height")))
-    if width is None and right is not None and x is not None:
-        width = right - x
-    if height is None and bottom is not None and y is not None:
-        height = bottom - y
-    if x is None or y is None or width is None or height is None or width <= 0 or height <= 0:
-        return None
-    return {"x": int(round(x)), "y": int(round(y)), "w": int(round(width)), "h": int(round(height))}
-
-
-def _normalize_map_point(value: Any, bbox: dict[str, int] | None) -> dict[str, int] | None:
-    if isinstance(value, dict):
-        x = _number(value.get("x"))
-        y = _number(value.get("y"))
-        if x is not None and y is not None:
-            return {"x": int(round(x)), "y": int(round(y))}
-    if bbox:
-        return {"x": int(round(bbox["x"] + bbox["w"] / 2)), "y": int(round(bbox["y"] + bbox["h"] / 2))}
-    return None
-
-
-def _number(value: Any) -> float | None:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    return number if number == number else None
-
-
-def _bounded_float(value: Any) -> float | None:
-    number = _number(value)
-    if number is None:
-        return None
-    return round(max(0.0, min(1.0, number)), 4)
-
-
-def _first_compact_text(*values: Any) -> str:
-    for value in values:
-        if isinstance(value, list):
-            text = "; ".join(str(item).strip() for item in value if str(item or "").strip())
-        else:
-            text = str(value or "").strip()
-        text = " ".join(text.split())
-        if text:
-            return text[:160]
-    return ""
 
 
 def _learn_all_targets_requested(request: VisionLocateTargetRequestModel, metadata: dict[str, Any]) -> bool:
@@ -6157,10 +3970,10 @@ def _stage2_calibration_locator_context(
         f"Locate the exact {role} numbered {number} in {region_label or 'the current region'}.",
         f"It is item {item_index} of {item_count} in that region.",
     ]
+    if label:
+        prompt_parts.append(f"Its visible label is {label}.")
     if child_labels:
         prompt_parts.append(f"It contains visible text: {' | '.join(child_labels)}.")
-    elif label:
-        prompt_parts.append(f"Its visible label is {label}.")
     prompt_parts.append("Return one point inside this exact item, not a nearby sibling.")
     context = {
         "contract_version": "stage2_calibration_locator_context_v1",
@@ -6170,6 +3983,10 @@ def _stage2_calibration_locator_context(
         "item_index": item_index,
         "item_count": item_count,
         "child_labels": child_labels,
+        "calibration_target_kind": _first_compact_text(
+            item.get("calibration_target_kind"),
+            "numbered_item",
+        ),
     }
     return " ".join(prompt_parts), context
 
@@ -6179,6 +3996,7 @@ def _attach_two_stage_calibration_candidates(
     *,
     report_path_value: Any,
     image_path: str,
+    expected_final_numbering_revision: Any = None,
 ) -> dict[str, Any]:
     report_path_text = str(report_path_value or "").strip()
     if not report_path_text:
@@ -6199,6 +4017,53 @@ def _attach_two_stage_calibration_candidates(
         }
     if not isinstance(report, dict):
         return observe_reuse
+    expected_revision = str(expected_final_numbering_revision or "").strip()
+    review_repair = report.get("model_review_repair") if isinstance(report.get("model_review_repair"), dict) else {}
+    stage2 = report.get("stage2_numbering") if isinstance(report.get("stage2_numbering"), dict) else {}
+    final_numbering = stage2.get("final_numbering") if isinstance(stage2.get("final_numbering"), dict) else {}
+    actual_revision = str(
+        final_numbering.get("revision")
+        or review_repair.get("final_numbering_revision")
+        or stage2.get("graph_revision")
+        or ""
+    ).strip()
+    if expected_revision:
+        review_gate = review_repair.get("integrity_gate") if isinstance(review_repair.get("integrity_gate"), dict) else {}
+        if (
+            review_repair.get("calibration_permission") is not True
+            or review_gate.get("passed") is not True
+        ):
+            return {
+                **observe_reuse,
+                "screen_map": {
+                    **(observe_reuse.get("screen_map") if isinstance(observe_reuse.get("screen_map"), dict) else {}),
+                    "calibration_candidates": [],
+                    "two_stage_calibration_authoritative": False,
+                },
+                "two_stage_calibration_source": {
+                    "status": "invalid_review_gate",
+                    "reason": "review_repair_integrity_gate_not_passed",
+                    "report_path": str(report_path.resolve()),
+                    "expected_final_numbering_revision": expected_revision,
+                    "actual_final_numbering_revision": actual_revision,
+                },
+            }
+        if not actual_revision or actual_revision != expected_revision:
+            return {
+                **observe_reuse,
+                "screen_map": {
+                    **(observe_reuse.get("screen_map") if isinstance(observe_reuse.get("screen_map"), dict) else {}),
+                    "calibration_candidates": [],
+                    "two_stage_calibration_authoritative": False,
+                },
+                "two_stage_calibration_source": {
+                    "status": "stale_graph",
+                    "reason": "final_numbering_revision_mismatch",
+                    "report_path": str(report_path.resolve()),
+                    "expected_final_numbering_revision": expected_revision,
+                    "actual_final_numbering_revision": actual_revision,
+                },
+            }
     source_image_text = str(report.get("source_image_path") or "").strip()
     if source_image_text:
         source_image = Path(source_image_text)
@@ -6215,7 +4080,6 @@ def _attach_two_stage_calibration_candidates(
                     "actual_image_path": str(source_image.resolve()),
                 },
             }
-    stage2 = report.get("stage2_numbering") if isinstance(report.get("stage2_numbering"), dict) else {}
     stage1_localization = report.get("stage1_region_localization") if isinstance(report.get("stage1_region_localization"), dict) else {}
     stage1_structure = report.get("stage1_structure") if isinstance(report.get("stage1_structure"), dict) else {}
     structure_regions = [
@@ -6240,7 +4104,8 @@ def _attach_two_stage_calibration_candidates(
     for region in _as_list(stage2.get("regions")):
         if not isinstance(region, dict):
             continue
-        region_id = _first_compact_text(region.get("region_id"), f"region_{len(calibration_candidates) + 1}")
+        source_region_id = _first_compact_text(region.get("region_id"), f"region_{len(calibration_candidates) + 1}")
+        region_id = _first_compact_text(region.get("final_region_id"), source_region_id)
         region_label = _first_compact_text(region.get("label"), region_id)
         region_bbox = _normalize_map_bbox(region.get("bbox"))
         calibratable_items, child_evidence_items = partition_stage2_calibration_items(region)
@@ -6249,7 +4114,14 @@ def _attach_two_stage_calibration_candidates(
                 "region_id": region_id,
                 "item_id": _first_compact_text(item.get("item_id"), item.get("number")),
                 "label": _first_compact_text(item.get("label"), item.get("text")),
-                "reason": "child_evidence_is_calibrated_through_parent_region",
+                "reason": _first_compact_text(
+                    (
+                        item.get("display_hierarchy", {}).get("demotion_reason")
+                        if isinstance(item.get("display_hierarchy"), dict)
+                        else None
+                    ),
+                    "child_evidence_is_calibrated_through_parent_region",
+                ),
             }
             for item in child_evidence_items
         )
@@ -6259,7 +4131,13 @@ def _attach_two_stage_calibration_candidates(
             bbox = _normalize_map_bbox(item.get("bbox"))
             if not bbox:
                 continue
-            item_id = _first_compact_text(item.get("item_id"), item.get("number"), f"item_{len(calibration_candidates) + 1}")
+            source_item_id = _first_compact_text(item.get("source_item_id"), item.get("item_id"), item.get("number"))
+            item_id = _first_compact_text(
+                item.get("final_item_id"),
+                item.get("item_id"),
+                item.get("number"),
+                f"item_{len(calibration_candidates) + 1}",
+            )
             locator_prompt, locator_context = _stage2_calibration_locator_context(
                 item,
                 region_label=region_label,
@@ -6267,6 +4145,11 @@ def _attach_two_stage_calibration_candidates(
                 item_index=item_index,
                 item_count=len(calibratable_items),
             )
+            member_source_item_ids = [
+                _first_compact_text(child.get("child_id"))
+                for child in _as_list(item.get("children"))
+                if isinstance(child, dict) and _first_compact_text(child.get("child_id"))
+            ]
             calibration_candidates.append(
                 {
                     "contract_version": "screen_map_calibration_candidate_v1",
@@ -6276,6 +4159,14 @@ def _attach_two_stage_calibration_candidates(
                     "bbox": bbox,
                     "click_point": _normalize_map_point(item.get("click_point"), bbox),
                     "section_id": region_id,
+                    "source_region_id": source_region_id,
+                    "source_item_id": source_item_id,
+                    "calibration_target_kind": _first_compact_text(
+                        item.get("calibration_target_kind"),
+                        "numbered_item",
+                    ),
+                    "member_source_item_ids": member_source_item_ids,
+                    "final_numbering_revision": actual_revision or None,
                     "source": "two_stage_stage2_numbering",
                     "confidence": item.get("confidence"),
                     "locator_prompt": locator_prompt,
@@ -6296,6 +4187,16 @@ def _attach_two_stage_calibration_candidates(
             "calibration_candidates": calibration_candidates,
             "two_stage_calibration_authoritative": bool(calibration_candidates),
             "two_stage_structure_regions": structure_regions,
+            "surface_adapter_decision": dict(
+                report.get("surface_adapter_decision")
+                if isinstance(report.get("surface_adapter_decision"), dict)
+                else {}
+            ),
+            "surface_adapter_application": dict(
+                report.get("surface_adapter_application")
+                if isinstance(report.get("surface_adapter_application"), dict)
+                else {}
+            ),
         },
         "two_stage_calibration_source": {
             "status": "ready" if calibration_candidates else "empty",
@@ -6306,6 +4207,7 @@ def _attach_two_stage_calibration_candidates(
             "source_image_path": str(Path(image_path).resolve()),
             "numbered_overlay_path": numbered_overlay_path,
             "numbered_overlay_available": bool(numbered_overlay_path and Path(numbered_overlay_path).exists()),
+            "final_numbering_revision": actual_revision or None,
         },
     }
 
@@ -6600,28 +4502,20 @@ def _learn_target_candidate_is_tiny_noise(candidate: dict[str, Any]) -> bool:
 def _learn_target_candidate_is_browser_chrome(candidate: dict[str, Any], *, image_size: dict[str, int], screen_map: dict[str, Any]) -> bool:
     if _path_graph_candidate_is_browser_chrome(candidate):
         return True
-    app_name = _first_compact_text(screen_map.get("app_name"), screen_map.get("state_hint"), screen_map.get("state_id"))
-    browser_surface = _is_browser_app_name(app_name) or _looks_like_web_app_name(app_name) or _screen_map_looks_like_browser_surface(screen_map)
     bbox = _normalize_map_bbox(candidate.get("bbox") or candidate.get("bounding_box") or candidate.get("bounds"))
-    if not bbox:
-        return False
-    if not browser_surface:
-        return False
-    if _learn_target_candidate_is_os_taskbar(candidate, bbox=bbox, image_size=image_size):
-        return True
-    chrome_bottom = min(int(image_size.get("height") or 0), max(72, round(int(image_size.get("height") or 0) * 0.065)))
-    if bbox["y"] > chrome_bottom:
-        return False
-    text = " ".join(
-        part
-        for part in [
-            _first_compact_text(candidate.get("label"), candidate.get("text"), candidate.get("description")),
-            _first_compact_text(candidate.get("role"), candidate.get("type")),
-        ]
-        if part
+    explicit_shell_zone = _first_compact_text(
+        candidate.get("section_id"),
+        candidate.get("surface_zone"),
+        candidate.get("source"),
     ).casefold()
-    chrome_tokens = ("http://", "https://", "www.", ".com", ".org", "address", "tab", "new tab", "back", "reload")
-    return bbox["y"] <= 56 or any(token in text for token in chrome_tokens)
+    if bbox and "taskbar" in explicit_shell_zone:
+        return _learn_target_candidate_is_os_taskbar(candidate, bbox=bbox, image_size=image_size)
+    decision = (
+        screen_map.get("surface_adapter_decision")
+        if isinstance(screen_map.get("surface_adapter_decision"), dict)
+        else {}
+    )
+    return surface_adapter_excludes_inventory_item(decision, candidate)
 
 
 def _learn_target_candidate_is_non_actionable_content(candidate: dict[str, Any]) -> bool:
@@ -6747,12 +4641,6 @@ def _learn_target_image_size(image_path: str) -> dict[str, int]:
     except Exception:
         return {"width": 0, "height": 0}
 
-
-def _point_inside_bbox(point: dict[str, int] | None, bbox: dict[str, int] | None) -> bool:
-    if not point or not bbox:
-        return False
-    x = int(point.get("x", 0))
-    y = int(point.get("y", 0))
     return bbox["x"] <= x <= bbox["x"] + bbox["w"] and bbox["y"] <= y <= bbox["y"] + bbox["h"]
 
 
@@ -6827,10 +4715,21 @@ def _learn_vista_coordinate_validation_options(request: VisionLocateTargetReques
         raw_max_targets = raw.get("max_targets") or raw.get("max_candidates") or 5
         validate_all_targets = str(raw_max_targets).casefold() == "all"
         max_targets = 9999 if validate_all_targets else int(raw_max_targets)
+        raw_batch_size = raw.get("batch_size")
+        batch_size = max(0, min(20, int(raw_batch_size or 0)))
+        resume_results = [
+            dict(item)
+            for item in raw.get("resume_results") or []
+            if isinstance(item, dict)
+        ]
         return {
             "enabled": raw.get("enabled", True) is not False,
             "max_targets": max_targets,
             "validate_all_targets": validate_all_targets,
+            "batch_size": batch_size,
+            "resume_results": resume_results,
+            "resume_revision": str(raw.get("resume_revision") or "").strip(),
+            "expected_final_numbering_revision": str(metadata.get("final_numbering_revision") or "").strip(),
             "update_click_point": raw.get("update_click_point", True) is not False,
             "padding": int(raw.get("padding") or 10),
             "per_target_timeout_seconds": float(raw.get("per_target_timeout_seconds") or 12),
@@ -6840,6 +4739,10 @@ def _learn_vista_coordinate_validation_options(request: VisionLocateTargetReques
     return {
         "enabled": True,
         "max_targets": 5,
+        "batch_size": 0,
+        "resume_results": [],
+        "resume_revision": "",
+        "expected_final_numbering_revision": str(metadata.get("final_numbering_revision") or "").strip(),
         "update_click_point": True,
         "padding": 10,
         "per_target_timeout_seconds": 12.0,
@@ -7099,6 +5002,58 @@ def _apply_vista_coordinate_validation_to_learn_targets(
         }
     validate_all_targets = options.get("validate_all_targets") is True
     max_targets = len(targets) if validate_all_targets else max(0, int(options.get("max_targets") or 40))
+    scoped_targets = targets[:max_targets]
+    scoped_candidate_ids = [str(target.get("candidate_id") or "").strip() for target in scoped_targets]
+    scoped_candidate_id_set = {candidate_id for candidate_id in scoped_candidate_ids if candidate_id}
+    expected_revision = str(options.get("expected_final_numbering_revision") or "").strip()
+    resume_revision = str(options.get("resume_revision") or "").strip()
+    retryable_failure_categories = {"request_timeout", "model_busy"}
+    resume_results = [
+        dict(item)
+        for item in options.get("resume_results") or []
+        if isinstance(item, dict)
+        and str(item.get("failure_category") or "").strip() not in retryable_failure_categories
+    ]
+    resume_ids = [str(item.get("candidate_id") or "").strip() for item in resume_results]
+    resume_id_set = {candidate_id for candidate_id in resume_ids if candidate_id}
+    resume_failure_reason = None
+    if resume_results and expected_revision and resume_revision != expected_revision:
+        resume_failure_reason = "resume_revision_mismatch"
+    elif len(resume_id_set) != len(resume_ids) or any(not candidate_id for candidate_id in resume_ids):
+        resume_failure_reason = "resume_candidate_id_invalid"
+    elif any(candidate_id not in scoped_candidate_id_set for candidate_id in resume_ids):
+        resume_failure_reason = "resume_candidate_not_found"
+    elif expected_revision and any(
+        str(target.get("final_numbering_revision") or expected_revision).strip() != expected_revision
+        for target in scoped_targets
+    ):
+        resume_failure_reason = "target_revision_mismatch"
+    if resume_failure_reason:
+        return {
+            "contract_version": "learn_vista_coordinate_validation_v1",
+            "status": "blocked",
+            "abort_reason": resume_failure_reason,
+            "validated_count": 0,
+            "attempted_count": 0,
+            "inside_count": 0,
+            "outside_count": 0,
+            "needs_review_count": 0,
+            "precise_review_pass_count": 0,
+            "failed_count": 0,
+            "skipped_count": len(scoped_targets),
+            "results": [],
+            "batch_aborted": True,
+            "batch": {
+                "contract_version": "learn_vista_calibration_batch_v1",
+                "final_numbering_revision": expected_revision,
+                "already_completed_count": 0,
+                "attempted_count": 0,
+                "remaining_count": len(scoped_targets),
+                "attempted_candidate_ids": [],
+                "remaining_candidate_ids": scoped_candidate_ids,
+                "resumable": False,
+            },
+        }
     padding = max(0, int(options.get("padding") or 10))
     update_click_point = options.get("update_click_point", True) is not False
     per_target_timeout = max(1.0, float(options.get("per_target_timeout_seconds") or timeout_seconds))
@@ -7106,9 +5061,35 @@ def _apply_vista_coordinate_validation_to_learn_targets(
     region_roi_max_edge = max(0, int(options.get("region_roi_max_edge") or 0))
     stop_on_failure = options.get("stop_on_failure", True) is not False
     use_numbered_overlay = options.get("use_numbered_overlay") is True
-    results: list[dict[str, Any]] = []
+    results: list[dict[str, Any]] = resume_results
+    for target in scoped_targets:
+        candidate_id = str(target.get("candidate_id") or "").strip()
+        prior_result = next(
+            (item for item in resume_results if str(item.get("candidate_id") or "").strip() == candidate_id),
+            None,
+        )
+        if prior_result is not None:
+            target["vista_coordinate_validation"] = prior_result
+            selected_candidate = (
+                ((prior_result.get("precise_locator_evidence") or {}).get("selected_candidate"))
+                if isinstance(prior_result.get("precise_locator_evidence"), dict)
+                else None
+            )
+            if prior_result.get("updated_click_point") is True and isinstance(prior_result.get("vista_point"), dict):
+                if isinstance(selected_candidate, dict) and _normalize_map_bbox(selected_candidate.get("bbox")):
+                    target["bbox"] = _normalize_map_bbox(selected_candidate.get("bbox"))
+                target["click_point"] = _normalize_map_point(prior_result.get("vista_point"), _normalize_map_bbox(target.get("bbox")))
+                target["coordinate_source"] = "precise_locator_v1_resumed"
+                _validate_learn_target_coordinates(target, image_size=image_size)
     abort_reason: str | None = None
-    validated_targets = targets[:max_targets]
+    pending_targets = [
+        target
+        for target in scoped_targets
+        if str(target.get("candidate_id") or "").strip() not in resume_id_set
+    ]
+    batch_size = max(0, int(options.get("batch_size") or 0))
+    validated_targets = pending_targets[:batch_size] if batch_size else pending_targets
+    batch_results: list[dict[str, Any]] = []
     for index, target in enumerate(validated_targets, start=1):
         bbox = _normalize_map_bbox(target.get("bbox"))
         label = _first_compact_text(target.get("label"), target.get("candidate_id"))
@@ -7118,10 +5099,12 @@ def _apply_vista_coordinate_validation_to_learn_targets(
                 "status": "skipped",
                 "reason": "missing_label_or_bbox",
                 "candidate_id": target.get("candidate_id"),
+                "final_numbering_revision": target.get("final_numbering_revision") or expected_revision,
                 "label": label,
             }
             target["vista_coordinate_validation"] = result
             results.append(result)
+            batch_results.append(result)
             continue
         role = _first_compact_text(target.get("role"), "control")
         normalized_target_role = role.strip().casefold().replace("-", "_").replace(" ", "_")
@@ -7264,6 +5247,7 @@ def _apply_vista_coordinate_validation_to_learn_targets(
                 "contract_version": "learn_vista_target_coordinate_validation_v1",
                 "status": "valid" if precise_pass else "needs_review",
                 "candidate_id": target.get("candidate_id"),
+                "final_numbering_revision": target.get("final_numbering_revision") or expected_revision,
                 "label": label,
                 "role": target.get("role"),
                 "bbox": bbox,
@@ -7289,6 +5273,7 @@ def _apply_vista_coordinate_validation_to_learn_targets(
                 "contract_version": "learn_vista_target_coordinate_validation_v1",
                 "status": "failed",
                 "candidate_id": target.get("candidate_id"),
+                "final_numbering_revision": target.get("final_numbering_revision") or expected_revision,
                 "label": label,
                 "bbox": bbox,
                 "error": str(exc),
@@ -7298,12 +5283,33 @@ def _apply_vista_coordinate_validation_to_learn_targets(
                 result["failure_category"] = failure_category
         target["vista_coordinate_validation"] = result
         results.append(result)
+        batch_results.append(result)
         if result.get("failure_category"):
             abort_reason = str(result["failure_category"])
             break
         if result.get("status") == "failed" and stop_on_failure:
             break
-    skipped_count = max(0, len(targets) - len(results))
+    attempted_candidate_ids = [str(item.get("candidate_id") or "").strip() for item in batch_results]
+    retryable_failure_candidate_ids = [
+        str(item.get("candidate_id") or "").strip()
+        for item in batch_results
+        if str(item.get("failure_category") or "").strip() in retryable_failure_categories
+    ]
+    retryable_failure_candidate_id_set = {
+        candidate_id for candidate_id in retryable_failure_candidate_ids if candidate_id
+    }
+    completed_candidate_ids = resume_ids + [
+        candidate_id
+        for candidate_id in attempted_candidate_ids
+        if candidate_id and candidate_id not in retryable_failure_candidate_id_set
+    ]
+    completed_candidate_id_set = {candidate_id for candidate_id in completed_candidate_ids if candidate_id}
+    remaining_candidate_ids = [
+        candidate_id
+        for candidate_id in scoped_candidate_ids
+        if candidate_id and candidate_id not in completed_candidate_id_set
+    ]
+    skipped_count = len(remaining_candidate_ids)
     inside_count = sum(1 for item in results if item.get("vista_point_inside_bbox") is True)
     outside_count = sum(1 for item in results if item.get("vista_point_inside_bbox") is False)
     needs_review_count = sum(1 for item in results if item.get("status") == "needs_review")
@@ -7313,9 +5319,21 @@ def _apply_vista_coordinate_validation_to_learn_targets(
         for item in results
         if ((item.get("precise_locator_evidence") or {}).get("dry_run_gate") or {}).get("status") == "locate_review_pass"
     )
+    fatal_abort = abort_reason in {"model_unreachable", "model_unavailable"}
+    resumable = bool(remaining_candidate_ids) and not fatal_abort
+    if fatal_abort:
+        status = "blocked"
+    elif remaining_candidate_ids:
+        status = "partial_resumable"
+    elif results and failed_count:
+        status = "partial"
+    elif results:
+        status = "ready"
+    else:
+        status = "empty"
     return {
         "contract_version": "learn_vista_coordinate_validation_v1",
-        "status": "blocked" if abort_reason else ("ready" if results and failed_count == 0 else ("partial" if results else "empty")),
+        "status": status,
         "grounding_profile_id": local_config.get("profile_id"),
         "grounding_model_family": local_config.get("model_family") or "VISTA",
         "model_name": local_config.get("model_name"),
@@ -7335,6 +5353,21 @@ def _apply_vista_coordinate_validation_to_learn_targets(
         "stop_on_failure": stop_on_failure,
         "batch_aborted": abort_reason is not None,
         "abort_reason": abort_reason,
+        "batch": {
+            "contract_version": "learn_vista_calibration_batch_v1",
+            "final_numbering_revision": expected_revision or resume_revision,
+            "batch_size": batch_size or len(scoped_targets),
+            "eligible_count": len(scoped_targets),
+            "already_completed_count": len(resume_ids),
+            "attempted_count": len(batch_results),
+            "completed_count": len(completed_candidate_id_set),
+            "remaining_count": len(remaining_candidate_ids),
+            "attempted_candidate_ids": attempted_candidate_ids,
+            "retryable_failure_candidate_ids": retryable_failure_candidate_ids,
+            "completed_candidate_ids": completed_candidate_ids,
+            "remaining_candidate_ids": remaining_candidate_ids,
+            "resumable": resumable,
+        },
         "use_numbered_overlay": use_numbered_overlay,
         "interpretation": "dry-run locator evidence only; no click authorization and no action executed",
         "results": results,
@@ -8010,11 +6043,12 @@ def _build_learn_all_targets_from_screen_map(
         1 for item in calibration_targets if (item.get("coordinate_validation") or {}).get("status") == "valid"
     )
     vista_blocked = bool(isinstance(vista_summary, dict) and vista_summary.get("status") == "blocked")
+    vista_partial = bool(isinstance(vista_summary, dict) and vista_summary.get("status") == "partial_resumable")
     return {
         "contract_version": "learn_all_target_locations_v1",
-        "status": "blocked" if vista_blocked else (
+        "status": "blocked" if vista_blocked else ("partial" if vista_partial else (
             "ready" if (targets or calibration_targets) and invalid_count == 0 else ("needs_review" if targets else "empty")
-        ),
+        )),
         "state_id": screen_map.get("state_id"),
         "source_trace_path": observe_reuse.get("trace_path"),
         "image_size": image_size,
@@ -8054,7 +6088,13 @@ def _learn_all_targets_location_status(learn_all_targets: dict[str, Any]) -> str
         if isinstance(learn_all_targets.get("vista_coordinate_validation"), dict)
         else {}
     )
-    if vista_validation.get("status") == "blocked" or vista_validation.get("batch_aborted") is True:
+    batch = vista_validation.get("batch") if isinstance(vista_validation.get("batch"), dict) else {}
+    batch_resumable = batch.get("resumable") is True
+    if vista_validation.get("status") == "partial_resumable" and batch_resumable:
+        return "learn_calibration_partial"
+    if vista_validation.get("status") == "blocked" or (
+        vista_validation.get("batch_aborted") is True and not batch_resumable
+    ):
         return "learn_calibration_blocked"
     target_count = int(learn_all_targets.get("target_count") or 0)
     invalid_count = int(learn_all_targets.get("invalid_count") or 0)
@@ -8068,8 +6108,6 @@ def _learn_all_targets_location_status(learn_all_targets: dict[str, Any]) -> str
         return "learn_review_boxes_ready"
     return "not_located"
 
-
-def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
@@ -8102,6 +6140,7 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
             observe_reuse,
             report_path_value=metadata.get("two_stage_report_path"),
             image_path=image_path,
+            expected_final_numbering_revision=metadata.get("final_numbering_revision"),
         )
         if observe_reuse.get("status") == "ready":
             metadata["reused_ocr_anchors"] = observe_reuse["ocr_anchors"]
@@ -8242,80 +6281,79 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
             )
             data = VisionResultData(result=locate_result)
             return APIResponse(success=True, message="Learn targets located", data=data.model_dump(), error=None)
-        plan_request = VisionRecognitionPlanRequestModel(
-            image_path=image_path,
-            task=request.task,
-            app_name=request.app_name,
-            goal=request.goal,
-            state_hint=request.state_hint,
-            provider_mode=request.provider_mode or "local_grounding",
-            agent_mode=request.agent_mode,
-            learn_depth=request.learn_depth,
-            write_policy=request.write_policy,
-            metadata={
-                **metadata,
-                "ocr_anchors": {"enabled": True, "max_anchors": "all", **dict(metadata.get("ocr_anchors") or {})}
-                if isinstance(metadata.get("ocr_anchors"), dict)
-                else metadata.get("ocr_anchors", {"enabled": True, "max_anchors": "all"}),
-            },
-            top_k=request.top_k,
-            observe_trace_path=request.observe_trace_path,
-            operation_context=operation_context,
+        upstream_response: APIResponse | None = None
+
+        def run_recognition_plan(
+            plan: Any,
+        ) -> LocateRecognitionPlanResult:
+            nonlocal upstream_response
+            response = recognition_plan(
+                VisionRecognitionPlanRequestModel(
+                    image_path=plan.image_path,
+                    task=plan.task,
+                    app_name=plan.app_name,
+                    goal=plan.goal,
+                    state_hint=plan.state_hint,
+                    provider_mode=plan.provider_mode,
+                    agent_mode=plan.agent_mode,
+                    learn_depth=plan.learn_depth,
+                    write_policy=plan.write_policy.model_dump(mode="json"),
+                    metadata=plan.metadata,
+                    top_k=plan.top_k,
+                    observe_trace_path=plan.observe_trace_path,
+                    operation_context=plan.operation_context,
+                )
+            )
+            upstream_response = response
+            error = response.error
+            if hasattr(error, "model_dump"):
+                error = error.model_dump(mode="json")
+            payload = None
+            if response.success and isinstance(response.data, dict):
+                candidate = response.data.get("result")
+                if isinstance(candidate, dict):
+                    payload = candidate
+            return LocateRecognitionPlanResult(
+                success=response.success,
+                message=response.message,
+                payload=payload,
+                error=error,
+            )
+
+        locate_task_result = run_single_target_locate(
+            LocateSingleTargetTaskInput(
+                image_path=image_path,
+                task=request.task,
+                app_name=request.app_name,
+                goal=request.goal,
+                state_hint=request.state_hint,
+                provider_mode=request.provider_mode or "local_grounding",
+                agent_mode=request.agent_mode,
+                learn_depth=request.learn_depth,
+                write_policy=request.write_policy.model_dump(mode="json"),
+                metadata=metadata,
+                top_k=request.top_k,
+                live_capture=live_capture,
+                observe_trace_path=request.observe_trace_path,
+                operation_context=operation_context,
+                observe_reuse=observe_reuse,
+            ),
+            recognition_plan_runner=run_recognition_plan,
+            path_map_review_builder=_build_path_map_review_from_locate,
+            timer=timer,
         )
-        with timer.step("recognition_plan"):
-            response = recognition_plan(plan_request)
-        if not response.success or not response.data:
-            if isinstance(response.data, dict):
-                response.data["timings"] = timer.to_dict()
-            return response
-        result = response.data["result"]
-        recommended_target = _locatable_target_from_plan_result(result)
-        recommended_element = recommended_target.get("element") if isinstance(recommended_target, dict) else {}
-        recommended_element = recommended_element if isinstance(recommended_element, dict) else {}
-        selected_click_point = ((result.get("pre_click_decision") or {}).get("selected_click_point"))
-        located_bbox = _locatable_bbox(recommended_target)
-        located_point = selected_click_point if isinstance(selected_click_point, dict) else _locatable_point(recommended_target, located_bbox)
-        located_source = str(recommended_target.get("location_source") or "recommended_target.element.click_point")
-        path_map_review = _build_path_map_review_from_locate(
-            observe_reuse=observe_reuse,
-            recognition_result=result,
-            goal=request.goal,
-            located_bbox=located_bbox,
-            located_point=located_point,
-        )
-        locate_result = {
-            "contract_version": "target_location_v1",
-            **_mode_payload(request, fallback_contract="locate_target_v1"),
-            "goal": request.goal,
-            "image_path": image_path,
-            "live_capture": live_capture,
-            "recognition_plan": result,
-            "pre_click_decision": result.get("pre_click_decision"),
-            "selected_click_point": selected_click_point,
-            "recommended_target": recommended_target,
-            "located_bbox": located_bbox,
-            "located_point": located_point,
-            "location_status": "pre_click_verified" if selected_click_point else ("requires_pre_click_confirmation" if located_point else "not_located"),
-            "path_map_review": path_map_review,
-            "operation_context": operation_context,
-            "operation_trace_link": operation_trace_link(operation_context, result_status="success", evidence_refs=[image_path]),
-            "observe_trace_reuse": {
-                key: value
-                for key, value in observe_reuse.items()
-                if key not in {"ocr_anchors", "screen_map", "observe_result"}
-            },
-            "execution_path": {
-                **dict(result.get("execution_path") or {}),
-                "action_executed": False,
-                "coordinate_source": "pre_click_decision_v1.selected_click_point",
-                "located_coordinate_source": located_source,
-                "ocr_anchor_reused_from_observe": observe_reuse.get("status") == "ready",
-                "ocr_anchor_reuse_source": observe_reuse.get("anchor_source"),
-                "ocr_anchor_reuse_trace_path": observe_reuse.get("trace_path") if observe_reuse.get("status") == "ready" else None,
-                "agent_must_call_for_click": "POST /action/execute_recognition_plan",
-            },
-        }
-        locate_result["timings"] = timer.to_dict()
+        if locate_task_result.outcome != "completed":
+            if upstream_response is not None:
+                if isinstance(upstream_response.data, dict):
+                    upstream_response.data["timings"] = timer.to_dict()
+                return upstream_response
+            failure = locate_task_result.failure
+            raise RuntimeError(
+                failure.details
+                if failure is not None
+                else "Recognition plan failed"
+            )
+        locate_result = dict(locate_task_result.payload)
         locate_result["trace_path"] = _write_trace_if_enabled(
             request,
             category="vision",
@@ -8340,47 +6378,6 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
             data={"trace_path": trace_path, "timings": timings},
             error=ErrorModel(code="locate_target_failed", details=str(exc)),
         )
-
-
-def _locatable_target_from_plan_result(result: dict[str, Any]) -> dict[str, Any]:
-    recommended = result.get("recommended_target") if isinstance(result.get("recommended_target"), dict) else {}
-    if isinstance(recommended.get("element"), dict):
-        recommended.setdefault("location_source", "recommended_target.element.click_point")
-        return recommended
-
-    candidate_result = result.get("candidate_result") if isinstance(result.get("candidate_result"), dict) else {}
-    for source_key, source_name in (("candidates", "candidate_result.candidates[0]"), ("rejected", "candidate_result.rejected[0]")):
-        candidates = candidate_result.get(source_key) if isinstance(candidate_result.get(source_key), list) else []
-        for candidate in candidates:
-            if not isinstance(candidate, dict) or not isinstance(candidate.get("element"), dict):
-                continue
-            candidate = dict(candidate)
-            candidate["location_source"] = source_name
-            return candidate
-    return {}
-
-
-def _locatable_bbox(target: dict[str, Any]) -> dict[str, Any] | None:
-    refined = target.get("refined_bbox")
-    if isinstance(refined, dict):
-        return refined
-    element = target.get("element") if isinstance(target.get("element"), dict) else {}
-    bbox = element.get("bbox") if isinstance(element, dict) else None
-    return bbox if isinstance(bbox, dict) else None
-
-
-def _locatable_point(target: dict[str, Any], bbox: dict[str, Any] | None) -> dict[str, int] | None:
-    element = target.get("element") if isinstance(target.get("element"), dict) else {}
-    point = element.get("click_point") if isinstance(element, dict) else None
-    if isinstance(point, dict):
-        return {"x": int(point.get("x", 0)), "y": int(point.get("y", 0))}
-    if not isinstance(bbox, dict):
-        return None
-    width = int(bbox.get("w", bbox.get("width", 0)) or 0)
-    height = int(bbox.get("h", bbox.get("height", 0)) or 0)
-    if width <= 0 or height <= 0:
-        return None
-    return {"x": int(bbox.get("x", 0)) + width // 2, "y": int(bbox.get("y", 0)) + height // 2}
 
 
 def _build_path_map_review_from_locate(
@@ -8592,34 +6589,10 @@ def _path_bbox_conflicts(observed: dict[str, Any], ai_candidate: dict[str, Any])
     return overlap_ratio >= 0.72 and label_score < 0.45
 
 
-def _path_bbox_similarity(a: dict[str, int] | None, b: dict[str, int] | None) -> float:
-    if not a or not b:
-        return 0.0
-    overlap = _bbox_overlap_area(a, b)
-    union = a["w"] * a["h"] + b["w"] * b["h"] - overlap
-    iou = overlap / union if union > 0 else 0.0
-    acx = a["x"] + a["w"] / 2
-    acy = a["y"] + a["h"] / 2
-    bcx = b["x"] + b["w"] / 2
-    bcy = b["y"] + b["h"] / 2
-    distance = ((acx - bcx) ** 2 + (acy - bcy) ** 2) ** 0.5
-    max_size = max(a["w"], a["h"], b["w"], b["h"], 1)
-    center_score = max(0.0, 1.0 - distance / max_size)
-    return max(iou, center_score * 0.8)
 
 
-def _path_label_key(value: Any) -> str:
-    return "".join(char for char in str(value or "").casefold() if char.isalnum())
 
 
-def _path_label_similarity(a: str, b: str) -> float:
-    if not a or not b:
-        return 0.0
-    if a == b:
-        return 1.0
-    if a in b or b in a:
-        return min(len(a), len(b)) / max(len(a), len(b))
-    return SequenceMatcher(None, a, b).ratio()
 
 
 @router.post("/recognition_plan", response_model=APIResponse)

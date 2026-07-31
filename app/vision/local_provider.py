@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import copy
 import json
+import os
 import re
 import tempfile
 import time
@@ -196,6 +197,11 @@ class LocalVisionProvider:
                 },
             ],
         }
+        request_id = str(os.environ.get("AGENT_GUI_MODEL_REQUEST_ID") or "").strip()
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        if request_id:
+            payload["request_id"] = request_id
+            headers["X-Agent-GUI-Request-ID"] = request_id
         if request_timeout_seconds is not None and float(request_timeout_seconds) > 0:
             payload["request_timeout_seconds"] = float(request_timeout_seconds)
         body = json.dumps(payload).encode("utf-8")
@@ -204,7 +210,7 @@ class LocalVisionProvider:
             request = Request(
                 self._chat_completions_url(),
                 data=body,
-                headers={"Content-Type": "application/json", "Accept": "application/json"},
+                headers=headers,
                 method="POST",
             )
             try:

@@ -1,0 +1,2492 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.api import panel as panel_api
+from app.learn import workflow_service
+from app.learn.workflow_service import (
+    LearningWorkflowStageOperationError,
+    cancel_learning_workflow_stage_operation,
+    finish_learning_workflow_stage_operation,
+    recover_expired_learning_workflow_stage_operation,
+    start_learning_workflow_stage_operation,
+)
+from app.learn.workflow_state import (
+    LEARNING_WORKFLOW_COMPLETION_EVIDENCE,
+    LEARNING_WORKFLOW_STAGES,
+)
+from app.learn.workflow_store import LearningWorkflowRunStore
+from app.main import app
+
+
+NOW = datetime(2026, 7, 24, 12, 0, tzinfo=timezone.utc)
+
+
+def _completion_evidence(stage: str) -> dict[str, str]:
+    return {
+        field: f"artifacts/learning-runs/run-stage-operation/{stage}-{field}.json"
+        for field in LEARNING_WORKFLOW_COMPLETION_EVIDENCE[stage]
+    }
+
+
+def _store_at_completed_review() -> tuple[LearningWorkflowRunStore, dict]:
+    store = LearningWorkflowRunStore()
+    state: dict | None = None
+    for stage in LEARNING_WORKFLOW_STAGES:
+        state = store.transition(
+            run_id="run-stage-operation",
+            expected_revision=0 if state is None else state["revision"],
+            stage=stage,
+            outcome="running",
+        )
+        state = store.transition(
+            run_id="run-stage-operation",
+            expected_revision=state["revision"],
+            stage=stage,
+            outcome="completed",
+            evidence_refs=_completion_evidence(stage),
+        )
+        if stage == "review_repair":
+            return store, state
+    raise AssertionError("review_repair stage was not reached")
+
+
+def _store_at_completed_bind_capture() -> tuple[LearningWorkflowRunStore, dict]:
+    store = LearningWorkflowRunStore()
+    state = store.transition(
+        run_id="run-stage-operation",
+        expected_revision=0,
+        stage="bind_capture",
+        outcome="running",
+    )
+    state = store.transition(
+        run_id="run-stage-operation",
+        expected_revision=state["revision"],
+        stage="bind_capture",
+        outcome="completed",
+        evidence_refs=_completion_evidence("bind_capture"),
+    )
+    return store, state
+
+
+def _store_at_completed_screen_understanding() -> tuple[
+    LearningWorkflowRunStore,
+    dict,
+]:
+    store, state = _store_at_completed_bind_capture()
+    state = store.transition(
+        run_id="run-stage-operation",
+        expected_revision=state["revision"],
+        stage="screen_understanding",
+        outcome="running",
+    )
+    state = store.transition(
+        run_id="run-stage-operation",
+        expected_revision=state["revision"],
+        stage="screen_understanding",
+        outcome="completed",
+        evidence_refs=_completion_evidence("screen_understanding"),
+    )
+    return store, state
+
+
+def _store_at_completed_numbered_map() -> tuple[LearningWorkflowRunStore, dict]:
+    store = LearningWorkflowRunStore()
+    state: dict | None = None
+    for stage in LEARNING_WORKFLOW_STAGES:
+        state = store.transition(
+            run_id="run-stage-operation",
+            expected_revision=0 if state is None else state["revision"],
+            stage=stage,
+            outcome="running",
+        )
+        state = store.transition(
+            run_id="run-stage-operation",
+            expected_revision=state["revision"],
+            stage=stage,
+            outcome="completed",
+            evidence_refs=_completion_evidence(stage),
+        )
+        if stage == "numbered_map":
+            return store, state
+    raise AssertionError("numbered_map stage was not reached")
+
+
+def _store_at_completed_precise_calibration() -> tuple[LearningWorkflowRunStore, dict]:
+    store = LearningWorkflowRunStore()
+    state: dict | None = None
+    for stage in LEARNING_WORKFLOW_STAGES:
+        state = store.transition(
+            run_id="run-stage-operation",
+            expected_revision=0 if state is None else state["revision"],
+            stage=stage,
+            outcome="running",
+        )
+        state = store.transition(
+            run_id="run-stage-operation",
+            expected_revision=state["revision"],
+            stage=stage,
+            outcome="completed",
+            evidence_refs=_completion_evidence(stage),
+        )
+        if stage == "precise_calibration":
+            return store, state
+    raise AssertionError("precise_calibration stage was not reached")
+
+
+def _write_trial(tmp_path: Path) -> Path:
+    trial_path = (
+        tmp_path
+        / "artifacts"
+        / "learning-runs"
+        / "run-stage-operation"
+        / "fusion-trial.json"
+    )
+    trial_path.parent.mkdir(parents=True, exist_ok=True)
+    trial_path.write_text(
+        json.dumps(
+            {"contract_version": "learning_model_trial_v1"},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return trial_path
+
+
+def test_stage_operation_start_issues_server_owned_lease() -> None:
+    store, review_state = _store_at_completed_review()
+
+    result = start_learning_workflow_stage_operation(
+        store=store,
+        project_root=Path("."),
+        run_id="run-stage-operation",
+        expected_revision=review_state["revision"],
+        stage="fusion",
+        reason="fusing reviewed learning evidence",
+        lease_seconds=600,
+        now=NOW,
+        operation_id="operation-fusion-1",
+    )
+
+    assert result["contract_version"] == "learning_workflow_stage_operation_v1"
+    assert result["operation_id"] == "operation-fusion-1"
+    assert result["stage"] == "fusion"
+    assert result["status"] == "running"
+    assert result["started_at"] == NOW.isoformat()
+    assert result["lease_expires_at"] == (NOW + timedelta(seconds=600)).isoformat()
+    state = result["workflow_state"]
+    assert state["stages"]["fusion"]["status"] == "running"
+    execution = state["stages"]["fusion"]["evidence_refs"]["stage_execution"]
+    assert execution["owner"] == "backend_lease"
+    assert execution["operation_id"] == "operation-fusion-1"
+
+
+def test_stage_operation_matching_finish_completes_with_verified_evidence(
+    tmp_path: Path,
+) -> None:
+    store, review_state = _store_at_completed_review()
+    started = start_learning_workflow_stage_operation(
+        store=store,
+        project_root=tmp_path,
+        run_id="run-stage-operation",
+        expected_revision=review_state["revision"],
+        stage="fusion",
+        lease_seconds=600,
+        now=NOW,
+        operation_id="operation-fusion-2",
+    )
+    trial_path = _write_trial(tmp_path)
+
+    result = finish_learning_workflow_stage_operation(
+        store=store,
+        project_root=tmp_path,
+        run_id="run-stage-operation",
+        expected_revision=started["workflow_state"]["revision"],
+        stage="fusion",
+        operation_id="operation-fusion-2",
+        outcome="completed",
+        reason="fusion trial ready",
+        evidence_refs={"trial_path": str(trial_path)},
+        now=NOW + timedelta(seconds=30),
+    )
+
+    assert result["status"] == "completed"
+    state = result["workflow_state"]
+    assert state["stages"]["fusion"]["status"] == "completed"
+    evidence = state["stages"]["fusion"]["evidence_refs"]
+    assert evidence["evidence_integrity"]["verified"] is True
+    assert evidence["stage_execution"]["operation_id"] == "operation-fusion-2"
+    assert evidence["stage_execution"]["finished_at"] == (
+        NOW + timedelta(seconds=30)
+    ).isoformat()
+
+
+def test_stage_operation_rejects_mismatched_operation_id() -> None:
+    store, review_state = _store_at_completed_review()
+    started = start_learning_workflow_stage_operation(
+        store=store,
+        project_root=Path("."),
+        run_id="run-stage-operation",
+        expected_revision=review_state["revision"],
+        stage="fusion",
+        lease_seconds=600,
+        now=NOW,
+        operation_id="operation-fusion-owner",
+    )
+
+    with pytest.raises(
+        LearningWorkflowStageOperationError,
+        match="operation_id does not match",
+    ):
+        finish_learning_workflow_stage_operation(
+            store=store,
+            project_root=Path("."),
+            run_id="run-stage-operation",
+            expected_revision=started["workflow_state"]["revision"],
+            stage="fusion",
+            operation_id="operation-fusion-stale",
+            outcome="failed",
+            reason="stale caller",
+            now=NOW + timedelta(seconds=10),
+        )
+
+    persisted = store.get("run-stage-operation")
+    assert persisted["revision"] == started["workflow_state"]["revision"]
+    assert persisted["stages"]["fusion"]["status"] == "running"
+
+
+def test_stage_operation_rejects_late_finish_after_lease_expiry() -> None:
+    store, review_state = _store_at_completed_review()
+    started = start_learning_workflow_stage_operation(
+        store=store,
+        project_root=Path("."),
+        run_id="run-stage-operation",
+        expected_revision=review_state["revision"],
+        stage="fusion",
+        lease_seconds=60,
+        now=NOW,
+        operation_id="operation-fusion-expired",
+    )
+
+    with pytest.raises(
+        LearningWorkflowStageOperationError,
+        match="lease expired",
+    ):
+        finish_learning_workflow_stage_operation(
+            store=store,
+            project_root=Path("."),
+            run_id="run-stage-operation",
+            expected_revision=started["workflow_state"]["revision"],
+            stage="fusion",
+            operation_id="operation-fusion-expired",
+            outcome="failed",
+            reason="late result",
+            now=NOW + timedelta(seconds=61),
+        )
+
+    assert store.get("run-stage-operation")["stages"]["fusion"]["status"] == "running"
+
+
+def test_stage_operation_heartbeat_extends_lease_and_remains_replayable(
+    tmp_path: Path,
+) -> None:
+    store, review_state = _store_at_completed_review()
+    started = start_learning_workflow_stage_operation(
+        store=store,
+        project_root=tmp_path,
+        run_id="run-stage-operation",
+        expected_revision=review_state["revision"],
+        stage="fusion",
+        lease_seconds=600,
+        now=NOW,
+        operation_id="operation-fusion-heartbeat",
+    )
+
+    heartbeat = workflow_service.heartbeat_learning_workflow_stage_operation(
+        store=store,
+        project_root=tmp_path,
+        run_id="run-stage-operation",
+        expected_revision=started["workflow_state"]["revision"],
+        stage="fusion",
+        operation_id="operation-fusion-heartbeat",
+        lease_seconds=600,
+        now=NOW + timedelta(seconds=590),
+    )
+
+    assert heartbeat["status"] == "running"
+    assert heartbeat["heartbeat_count"] == 1
+    assert heartbeat["last_heartbeat_at"] == (
+        NOW + timedelta(seconds=590)
+    ).isoformat()
+    assert heartbeat["lease_expires_at"] == (
+        NOW + timedelta(seconds=1190)
+    ).isoformat()
+    replayed = store.get("run-stage-operation")
+    assert replayed == heartbeat["workflow_state"]
+
+    trial_path = _write_trial(tmp_path)
+    finished = finish_learning_workflow_stage_operation(
+        store=store,
+        project_root=tmp_path,
+        run_id="run-stage-operation",
+        expected_revision=heartbeat["workflow_state"]["revision"],
+        stage="fusion",
+        operation_id="operation-fusion-heartbeat",
+        outcome="completed",
+        reason="completed after renewed lease",
+        evidence_refs={"trial_path": str(trial_path)},
+        now=NOW + timedelta(seconds=900),
+    )
+
+    assert finished["status"] == "completed"
+    execution = finished["workflow_state"]["stages"]["fusion"]["evidence_refs"][
+        "stage_execution"
+    ]
+    assert execution["heartbeat_count"] == 1
+    assert execution["lease_expires_at"] == (
+        NOW + timedelta(seconds=1190)
+    ).isoformat()
+
+
+def test_stage_operation_heartbeat_rejects_expired_or_mismatched_owner() -> None:
+    store, review_state = _store_at_completed_review()
+    started = start_learning_workflow_stage_operation(
+        store=store,
+        project_root=Path("."),
+        run_id="run-stage-operation",
+        expected_revision=review_state["revision"],
+        stage="fusion",
+        lease_seconds=600,
+        now=NOW,
+        operation_id="operation-fusion-heartbeat-owner",
+    )
+    revision = started["workflow_state"]["revision"]
+
+    with pytest.raises(
+        LearningWorkflowStageOperationError,
+        match="operation_id does not match",
+    ):
+        workflow_service.heartbeat_learning_workflow_stage_operation(
+            store=store,
+            project_root=Path("."),
+            run_id="run-stage-operation",
+            expected_revision=revision,
+            stage="fusion",
+            operation_id="operation-fusion-stale-owner",
+            lease_seconds=600,
+            now=NOW + timedelta(seconds=30),
+        )
+
+    with pytest.raises(
+        LearningWorkflowStageOperationError,
+        match="lease expired before heartbeat",
+    ):
+        workflow_service.heartbeat_learning_workflow_stage_operation(
+            store=store,
+            project_root=Path("."),
+            run_id="run-stage-operation",
+            expected_revision=revision,
+            stage="fusion",
+            operation_id="operation-fusion-heartbeat-owner",
+            lease_seconds=600,
+            now=NOW + timedelta(seconds=601),
+        )
+
+    persisted = store.get("run-stage-operation")
+    assert persisted["revision"] == revision
+    assert persisted["stages"]["fusion"]["status"] == "running"
+
+
+def test_stage_operation_cancel_safe_stops_owned_operation_and_rejects_late_result(
+    tmp_path: Path,
+) -> None:
+    store, review_state = _store_at_completed_review()
+    started = start_learning_workflow_stage_operation(
+        store=store,
+        project_root=tmp_path,
+        run_id="run-stage-operation",
+        expected_revision=review_state["revision"],
+        stage="fusion",
+        lease_seconds=600,
+        now=NOW,
+        operation_id="operation-fusion-cancel",
+    )
+
+    cancelled = cancel_learning_workflow_stage_operation(
+        store=store,
+        project_root=tmp_path,
+        run_id="run-stage-operation",
+        expected_revision=started["workflow_state"]["revision"],
+        stage="fusion",
+        operation_id="operation-fusion-cancel",
+        reason="user requested cancellation",
+        now=NOW + timedelta(seconds=30),
+    )
+
+    assert cancelled["status"] == "safe_stopped"
+    assert cancelled["cancellation_status"] == "state_cancelled"
+    assert cancelled["backend_compute_termination"] == "not_covered"
+    state = cancelled["workflow_state"]
+    assert state["terminal"] is True
+    assert state["workflow_status"] == "safe_stopped"
+    assert state["stages"]["fusion"]["status"] == "safe_stopped"
+    execution = state["stages"]["fusion"]["evidence_refs"]["stage_execution"]
+    assert execution["operation_id"] == "operation-fusion-cancel"
+    assert execution["result_outcome"] == "safe_stopped"
+    assert execution["cancellation"]["requested_at"] == (
+        NOW + timedelta(seconds=30)
+    ).isoformat()
+    assert execution["cancellation"]["requested_by"] == "panel_user"
+    assert execution["cancellation"]["backend_compute_termination"] == "not_covered"
+
+    with pytest.raises(LearningWorkflowStageOperationError, match="not running"):
+        workflow_service.heartbeat_learning_workflow_stage_operation(
+            store=store,
+            project_root=tmp_path,
+            run_id="run-stage-operation",
+            expected_revision=state["revision"],
+            stage="fusion",
+            operation_id="operation-fusion-cancel",
+            now=NOW + timedelta(seconds=31),
+        )
+
+    with pytest.raises(LearningWorkflowStageOperationError, match="not running"):
+        finish_learning_workflow_stage_operation(
+            store=store,
+            project_root=tmp_path,
+            run_id="run-stage-operation",
+            expected_revision=state["revision"],
+            stage="fusion",
+            operation_id="operation-fusion-cancel",
+            outcome="completed",
+            reason="late result",
+            evidence_refs={"trial_path": str(_write_trial(tmp_path))},
+            now=NOW + timedelta(seconds=31),
+        )
+
+
+def test_stage_operation_cancel_rejects_mismatched_or_expired_owner() -> None:
+    store, review_state = _store_at_completed_review()
+    started = start_learning_workflow_stage_operation(
+        store=store,
+        project_root=Path("."),
+        run_id="run-stage-operation",
+        expected_revision=review_state["revision"],
+        stage="fusion",
+        lease_seconds=60,
+        now=NOW,
+        operation_id="operation-fusion-cancel-owner",
+    )
+    revision = started["workflow_state"]["revision"]
+
+    with pytest.raises(
+        LearningWorkflowStageOperationError,
+        match="operation_id does not match",
+    ):
+        cancel_learning_workflow_stage_operation(
+            store=store,
+            project_root=Path("."),
+            run_id="run-stage-operation",
+            expected_revision=revision,
+            stage="fusion",
+            operation_id="operation-fusion-stale-owner",
+            reason="wrong owner",
+            now=NOW + timedelta(seconds=30),
+        )
+
+    with pytest.raises(
+        LearningWorkflowStageOperationError,
+        match="lease expired before cancellation",
+    ):
+        cancel_learning_workflow_stage_operation(
+            store=store,
+            project_root=Path("."),
+            run_id="run-stage-operation",
+            expected_revision=revision,
+            stage="fusion",
+            operation_id="operation-fusion-cancel-owner",
+            reason="late cancellation",
+            now=NOW + timedelta(seconds=61),
+        )
+
+    persisted = store.get("run-stage-operation")
+    assert persisted["revision"] == revision
+    assert persisted["stages"]["fusion"]["status"] == "running"
+
+
+def test_expired_stage_operation_recovery_marks_exact_stage_failed() -> None:
+    store, review_state = _store_at_completed_review()
+    started = start_learning_workflow_stage_operation(
+        store=store,
+        project_root=Path("."),
+        run_id="run-stage-operation",
+        expected_revision=review_state["revision"],
+        stage="fusion",
+        lease_seconds=60,
+        now=NOW,
+        operation_id="operation-fusion-recover",
+    )
+
+    result = recover_expired_learning_workflow_stage_operation(
+        store=store,
+        project_root=Path("."),
+        run_id="run-stage-operation",
+        expected_revision=started["workflow_state"]["revision"],
+        now=NOW + timedelta(seconds=61),
+    )
+
+    assert result["recovered"] is True
+    assert result["recovery_status"] == "expired_operation_failed"
+    state = result["workflow_state"]
+    assert state["terminal"] is True
+    assert state["workflow_status"] == "failed"
+    assert state["stages"]["fusion"]["status"] == "failed"
+    assert "lease expired" in state["stages"]["fusion"]["reason"]
+    assert state["stages"]["page_details"]["status"] == "pending"
+
+
+def test_stage_operation_recovery_does_not_change_live_or_legacy_running_stage() -> None:
+    store, review_state = _store_at_completed_review()
+    started = start_learning_workflow_stage_operation(
+        store=store,
+        project_root=Path("."),
+        run_id="run-stage-operation",
+        expected_revision=review_state["revision"],
+        stage="fusion",
+        lease_seconds=600,
+        now=NOW,
+        operation_id="operation-fusion-live",
+    )
+
+    live = recover_expired_learning_workflow_stage_operation(
+        store=store,
+        project_root=Path("."),
+        run_id="run-stage-operation",
+        expected_revision=started["workflow_state"]["revision"],
+        now=NOW + timedelta(seconds=30),
+    )
+
+    assert live["recovered"] is False
+    assert live["recovery_status"] == "lease_active"
+    assert live["workflow_state"]["revision"] == started["workflow_state"]["revision"]
+
+    legacy_store, legacy_review = _store_at_completed_review()
+    legacy_running = legacy_store.transition(
+        run_id="run-stage-operation",
+        expected_revision=legacy_review["revision"],
+        stage="fusion",
+        outcome="running",
+    )
+    legacy = recover_expired_learning_workflow_stage_operation(
+        store=legacy_store,
+        project_root=Path("."),
+        run_id="run-stage-operation",
+        expected_revision=legacy_running["revision"],
+        now=NOW + timedelta(days=1),
+    )
+
+    assert legacy["recovered"] is False
+    assert legacy["recovery_status"] == "not_managed"
+    assert legacy["workflow_state"]["revision"] == legacy_running["revision"]
+
+
+def test_stage_operation_api_round_trip_and_direct_fusion_transition_rejection(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store, review_state = _store_at_completed_review()
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    client = TestClient(app)
+
+    direct = client.post(
+        "/panel/transition_learning_workflow_state",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": review_state["revision"],
+            "stage": "fusion",
+            "outcome": "running",
+        },
+    ).json()
+    assert direct["success"] is False
+    assert direct["error"]["code"] == "learning_workflow_stage_operation_required"
+
+    started = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": review_state["revision"],
+            "stage": "fusion",
+            "reason": "panel fusion",
+            "lease_seconds": 600,
+        },
+    ).json()
+    assert started["success"] is True
+    operation_id = started["data"]["operation_id"]
+    trial_path = _write_trial(tmp_path)
+
+    finished = client.post(
+        "/panel/finish_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": started["data"]["workflow_state"]["revision"],
+            "stage": "fusion",
+            "operation_id": operation_id,
+            "outcome": "completed",
+            "reason": "fusion trial ready",
+            "evidence_refs": {"trial_path": str(trial_path)},
+        },
+    ).json()
+
+    assert finished["success"] is True
+    assert finished["data"]["workflow_state"]["stages"]["fusion"]["status"] == "completed"
+
+
+def test_stage_operation_heartbeat_api_renews_owned_operation(
+    monkeypatch,
+) -> None:
+    store, review_state = _store_at_completed_review()
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+    client = TestClient(app)
+    started = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": review_state["revision"],
+            "stage": "fusion",
+            "reason": "panel fusion",
+            "lease_seconds": 30,
+        },
+    ).json()["data"]
+
+    heartbeat = client.post(
+        "/panel/heartbeat_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": started["workflow_state"]["revision"],
+            "stage": "fusion",
+            "operation_id": started["operation_id"],
+            "lease_seconds": 600,
+        },
+    ).json()
+
+    assert heartbeat["success"] is True
+    assert heartbeat["data"]["heartbeat_count"] == 1
+    assert heartbeat["data"]["workflow_state"]["revision"] == (
+        started["workflow_state"]["revision"] + 1
+    )
+    assert (
+        heartbeat["data"]["workflow_state"]["stages"]["fusion"]["evidence_refs"][
+            "stage_execution"
+        ]["operation_id"]
+        == started["operation_id"]
+    )
+
+
+def test_stage_operation_cancel_api_safe_stops_owned_operation(
+    monkeypatch,
+) -> None:
+    store, review_state = _store_at_completed_review()
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+    client = TestClient(app)
+    started = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": review_state["revision"],
+            "stage": "fusion",
+            "reason": "panel fusion",
+            "lease_seconds": 600,
+        },
+    ).json()["data"]
+
+    cancelled = client.post(
+        "/panel/cancel_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": started["workflow_state"]["revision"],
+            "stage": "fusion",
+            "operation_id": started["operation_id"],
+            "reason": "user requested cancellation",
+        },
+    ).json()
+
+    assert cancelled["success"] is True
+    assert cancelled["data"]["status"] == "safe_stopped"
+    assert cancelled["data"]["cancellation_status"] == "state_cancelled"
+    assert cancelled["data"]["backend_compute_termination"] == "not_covered"
+
+
+def test_stage_worker_api_requires_owned_operation_and_returns_status(
+    monkeypatch,
+) -> None:
+    store, review_state = _store_at_completed_review()
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+
+    class _WorkerRegistry:
+        def start(self, **kwargs):
+            assert kwargs["run_id"] == "run-stage-operation"
+            assert kwargs["stage"] == "fusion"
+            assert kwargs["task_kind"] == "panel_learning_recognition_trial"
+            return {
+                "contract_version": "learning_stage_worker_v1",
+                "worker_id": "worker-1",
+                "run_id": kwargs["run_id"],
+                "stage": kwargs["stage"],
+                "operation_id": kwargs["operation_id"],
+                "task_kind": kwargs["task_kind"],
+                "status": "running",
+                "backend_compute_owner": "backend_process_worker",
+            }
+
+        def status(self, **kwargs):
+            assert kwargs["worker_id"] == "worker-1"
+            return {
+                "contract_version": "learning_stage_worker_v1",
+                "worker_id": "worker-1",
+                "run_id": kwargs["run_id"],
+                "stage": "fusion",
+                "operation_id": kwargs["operation_id"],
+                "task_kind": "panel_learning_recognition_trial",
+                "status": "completed",
+                "backend_compute_owner": "backend_process_worker",
+                "result_available": True,
+                "result_adopted": False,
+            }
+
+        def adopt_result(self, **kwargs):
+            assert kwargs["worker_id"] == "worker-1"
+            assert kwargs["stage"] == "fusion"
+            return {
+                "contract_version": "learning_stage_worker_result_adoption_v1",
+                "status": "adopted",
+                "receipt": {
+                    "contract_version": "learning_stage_worker_result_adoption_v1",
+                    "worker_id": "worker-1",
+                    "result_sha256": "a" * 64,
+                },
+                "response": {"success": True, "data": {"trial_path": "trial.json"}},
+            }
+
+    monkeypatch.setattr(panel_api, "learning_stage_worker_registry", _WorkerRegistry())
+    client = TestClient(app)
+    started_operation = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": review_state["revision"],
+            "stage": "fusion",
+            "reason": "panel fusion",
+            "lease_seconds": 600,
+        },
+    ).json()["data"]
+
+    started_worker = client.post(
+        "/panel/start_learning_stage_worker",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": started_operation["workflow_state"]["revision"],
+            "stage": "fusion",
+            "operation_id": started_operation["operation_id"],
+            "task_kind": "panel_learning_recognition_trial",
+            "payload": {"app_name": "test"},
+        },
+    ).json()
+    assert started_worker["success"] is True
+    assert started_worker["data"]["backend_compute_owner"] == "backend_process_worker"
+
+    worker_status = client.get(
+        "/panel/learning_stage_worker/worker-1",
+        params={
+            "run_id": "run-stage-operation",
+            "operation_id": started_operation["operation_id"],
+        },
+    ).json()
+    assert worker_status["success"] is True
+    assert worker_status["data"]["status"] == "completed"
+    assert worker_status["data"]["result_available"] is True
+    assert "response" not in worker_status["data"]
+
+    adopted = client.post(
+        "/panel/adopt_learning_stage_worker_result",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": started_operation["workflow_state"]["revision"],
+            "stage": "fusion",
+            "operation_id": started_operation["operation_id"],
+            "worker_id": "worker-1",
+        },
+    ).json()
+    assert adopted["success"] is True
+    assert adopted["data"]["status"] == "adopted"
+    assert adopted["data"]["response"]["data"]["trial_path"] == "trial.json"
+
+
+def test_continuation_finishes_numbered_map_from_adopted_worker_result(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    store, screen_state = _store_at_completed_screen_understanding()
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    report_path = tmp_path / "artifacts" / "numbered-map-report.json"
+    overlay_path = tmp_path / "artifacts" / "numbered-map-overlay.png"
+    report_path.parent.mkdir(parents=True)
+    report_path.write_text(
+        json.dumps(
+            {
+                "status": "passed",
+                "app_name": "qq",
+                "state_hint": "chat",
+                "source_trace_path": "logs/traces/vision/qq-observe.json",
+                "observe_bundle": {
+                    "image_path": "artifacts/screenshots/qq.png",
+                },
+                "source_graph_revision": "numbering-revision-1",
+                "stage2_numbering": {
+                    "calibration_candidate_count": 3,
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    overlay_path.write_bytes(b"overlay")
+
+    class _WorkerRegistry:
+        def __init__(self) -> None:
+            self.started: list[dict] = []
+
+        def read_adopted_result(self, **kwargs):
+            assert kwargs["stage"] == "numbered_map"
+            return {
+                "receipt": {
+                    "contract_version": "learning_stage_worker_result_adoption_v1",
+                    "worker_id": "worker-numbered",
+                    "task_kind": "panel_learning_two_stage_understanding",
+                    "result_sha256": "a" * 64,
+                },
+                "response": {
+                    "success": True,
+                    "data": {
+                        "result": {
+                            "report_path": "artifacts/numbered-map-report.json",
+                            "compiled_overlay_path": (
+                                "artifacts/numbered-map-overlay.png"
+                            ),
+                            "stage1_gate": {"status": "passed"},
+                            "stage2_numbering_skipped": False,
+                        }
+                    },
+                },
+            }
+
+        def start(self, **kwargs):
+            self.started.append(kwargs)
+            return {
+                "contract_version": "learning_stage_worker_v1",
+                "worker_id": "worker-calibration-auto",
+                "run_id": kwargs["run_id"],
+                "stage": kwargs["stage"],
+                "operation_id": kwargs["operation_id"],
+                "task_kind": kwargs["task_kind"],
+                "status": "running",
+            }
+
+    registry = _WorkerRegistry()
+    monkeypatch.setattr(panel_api, "learning_stage_worker_registry", registry)
+    client = TestClient(app)
+    started = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": screen_state["revision"],
+            "stage": "numbered_map",
+            "reason": "numbering",
+            "lease_seconds": 600,
+        },
+    ).json()["data"]
+    request = {
+        "run_id": "run-stage-operation",
+        "expected_revision": started["workflow_state"]["revision"],
+        "stage": "numbered_map",
+        "operation_id": started["operation_id"],
+        "worker_id": "worker-numbered",
+    }
+
+    continued = client.post(
+        "/panel/continue_learning_stage_worker_result",
+        json=request,
+    ).json()
+
+    assert continued["success"] is True
+    assert continued["data"]["contract_version"] == (
+        "learning_stage_worker_continuation_v1"
+    )
+    assert continued["data"]["stage_finished"] is True
+    assert continued["data"]["outcome"] == "completed"
+    workflow_state = continued["data"]["workflow_state"]
+    assert workflow_state["stages"]["numbered_map"]["status"] == "completed"
+    evidence = workflow_state["stages"]["numbered_map"]["evidence_refs"]
+    assert evidence["worker_continuation"]["worker_id"] == "worker-numbered"
+    assert evidence["worker_continuation"]["result_sha256"] == "a" * 64
+    next_operation = continued["data"]["next_stage_operation"]
+    assert next_operation["stage"] == "precise_calibration"
+    assert next_operation["task_kind"] == "panel_learning_calibration_sequence"
+    assert workflow_state["current_stage"] == "precise_calibration"
+    assert workflow_state["stages"]["precise_calibration"]["status"] == "running"
+    next_worker = continued["data"]["next_stage_worker"]
+    assert next_worker["worker_id"] == "worker-calibration-auto"
+    calibration_start = registry.started[0]
+    assert calibration_start["stage"] == "precise_calibration"
+    assert calibration_start["operation_id"] == next_operation["operation_id"]
+    assert calibration_start["task_kind"] == "panel_learning_calibration_sequence"
+    assert calibration_start["reuse_active_identical"] is True
+    assert calibration_start["payload"] == {
+        "contract_version": "learning_calibration_sequence_request_v1",
+        "profile_id": None,
+        "candidate_count": 3,
+        "calibration_source_revision": "numbering-revision-1",
+        "maximum_batch_size": 8,
+        "locate_payload": {
+            "goal": "learn all visible controls",
+            "provider_mode": "local_grounding",
+            "capture_live": False,
+            "image_path": "artifacts/screenshots/qq.png",
+            "app_name": "qq",
+            "state_hint": "chat",
+            "observe_trace_path": "logs/traces/vision/qq-observe.json",
+            "agent_mode": "learn",
+            "learn_depth": "deep",
+            "dry_run": True,
+            "trace": True,
+            "metadata": {
+                "learning_interface_flow": True,
+                "no_live_click_authorization": True,
+                "learn_all_targets": True,
+                "two_stage_report_path": "artifacts/numbered-map-report.json",
+            },
+        },
+    }
+
+    repeated = client.post(
+        "/panel/continue_learning_stage_worker_result",
+        json=request,
+    ).json()
+    assert repeated["success"] is True
+    assert repeated["data"]["idempotent_replay"] is True
+    assert repeated["data"]["workflow_state"]["revision"] == workflow_state["revision"]
+    assert repeated["data"]["next_stage_operation"]["operation_id"] == (
+        next_operation["operation_id"]
+    )
+    assert repeated["data"]["next_stage_worker"]["worker_id"] == (
+        "worker-calibration-auto"
+    )
+    assert len(registry.started) == 2
+
+
+def test_continuation_closes_next_operation_when_worker_start_fails(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    store, screen_state = _store_at_completed_screen_understanding()
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    report_path = tmp_path / "artifacts" / "numbered-map-report.json"
+    overlay_path = tmp_path / "artifacts" / "numbered-map-overlay.png"
+    report_path.parent.mkdir(parents=True)
+    report_path.write_text(
+        json.dumps(
+            {
+                "status": "passed",
+                "app_name": "qq",
+                "state_hint": "chat",
+                "observe_bundle": {
+                    "image_path": "artifacts/screenshots/qq.png",
+                },
+                "stage2_numbering": {
+                    "calibration_candidate_count": 3,
+                    "graph_revision": "numbering-revision-1",
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    overlay_path.write_bytes(b"overlay")
+
+    class _WorkerRegistry:
+        def read_adopted_result(self, **_kwargs):
+            return {
+                "receipt": {
+                    "contract_version": "learning_stage_worker_result_adoption_v1",
+                    "worker_id": "worker-numbered",
+                    "task_kind": "panel_learning_two_stage_understanding",
+                    "result_sha256": "a" * 64,
+                },
+                "response": {
+                    "success": True,
+                    "data": {
+                        "result": {
+                            "report_path": "artifacts/numbered-map-report.json",
+                            "compiled_overlay_path": "artifacts/numbered-map-overlay.png",
+                            "stage1_gate": {"status": "passed"},
+                            "stage2_numbering_skipped": False,
+                        }
+                    },
+                },
+            }
+
+        def start(self, **_kwargs):
+            raise LearningStageWorkerError("worker process start failed")
+
+    monkeypatch.setattr(
+        panel_api,
+        "learning_stage_worker_registry",
+        _WorkerRegistry(),
+    )
+    client = TestClient(app)
+    started = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": screen_state["revision"],
+            "stage": "numbered_map",
+            "reason": "numbering",
+            "lease_seconds": 600,
+        },
+    ).json()["data"]
+
+    continued = client.post(
+        "/panel/continue_learning_stage_worker_result",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": started["workflow_state"]["revision"],
+            "stage": "numbered_map",
+            "operation_id": started["operation_id"],
+            "worker_id": "worker-numbered",
+        },
+    ).json()
+
+    assert continued["success"] is False
+    workflow_state = store.get("run-stage-operation")
+    assert workflow_state["workflow_status"] == "failed", continued
+    assert workflow_state["terminal"] is True
+    assert workflow_state["stages"]["precise_calibration"]["status"] == "failed"
+    assert "worker start failed" in workflow_state["current_reason"]
+
+
+def test_stage_worker_request_accepts_backend_calibration_task_kind() -> None:
+    request = panel_api.PanelStartLearningStageWorkerRequest.model_validate(
+        {
+            "run_id": "run-1",
+            "expected_revision": 1,
+            "stage": "precise_calibration",
+            "operation_id": "operation-1",
+            "task_kind": "panel_learning_calibration_sequence",
+            "payload": {},
+        }
+    )
+
+    assert request.task_kind == "panel_learning_calibration_sequence"
+
+
+def test_continuation_safe_stops_blocked_numbered_map(
+    monkeypatch,
+) -> None:
+    store, screen_state = _store_at_completed_screen_understanding()
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+
+    class _WorkerRegistry:
+        def read_adopted_result(self, **kwargs):
+            return {
+                "receipt": {
+                    "contract_version": "learning_stage_worker_result_adoption_v1",
+                    "worker_id": "worker-blocked",
+                    "task_kind": "panel_learning_two_stage_understanding",
+                    "result_sha256": "b" * 64,
+                },
+                "response": {
+                    "success": True,
+                    "data": {
+                        "result": {
+                            "stage1_gate": {"status": "blocked"},
+                            "stage2_numbering_skipped": True,
+                        }
+                    },
+                },
+            }
+
+    monkeypatch.setattr(panel_api, "learning_stage_worker_registry", _WorkerRegistry())
+    client = TestClient(app)
+    started = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": screen_state["revision"],
+            "stage": "numbered_map",
+            "reason": "numbering",
+            "lease_seconds": 600,
+        },
+    ).json()["data"]
+
+    continued = client.post(
+        "/panel/continue_learning_stage_worker_result",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": started["workflow_state"]["revision"],
+            "stage": "numbered_map",
+            "operation_id": started["operation_id"],
+            "worker_id": "worker-blocked",
+        },
+    ).json()
+
+    assert continued["success"] is True
+    assert continued["data"]["stage_finished"] is True
+    assert continued["data"]["outcome"] == "safe_stopped"
+    assert continued["data"]["workflow_state"]["terminal"] is True
+
+
+def test_continuation_persists_calibration_artifact_and_finishes_stage(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    store, numbered_state = _store_at_completed_numbered_map()
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    source_image = tmp_path / "artifacts" / "screenshots" / "capture.png"
+    numbering_report = tmp_path / "artifacts" / "numbered-map-report.json"
+    overlay_path = tmp_path / "artifacts" / "review-overlays" / "calibrated.png"
+    trace_path = tmp_path / "logs" / "traces" / "vision" / "calibration.json"
+    for path in (source_image, numbering_report, overlay_path, trace_path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    source_image.write_bytes(b"capture")
+    numbering_report.write_text('{"status":"passed"}', encoding="utf-8")
+    overlay_path.write_bytes(b"overlay")
+    trace_path.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "request": {
+                    "image_path": str(source_image),
+                    "metadata": {
+                        "two_stage_report_path": str(numbering_report),
+                        "learning_interface_flow": True,
+                        "no_live_click_authorization": True,
+                    },
+                },
+                "result": {
+                    "image_path": str(source_image),
+                    "learn_all_targets": {
+                        "overlay_path": str(overlay_path),
+                        "vista_coordinate_validation": {
+                            "validated_count": 3,
+                            "failed_count": 0,
+                            "batch": {
+                                "completed_count": 3,
+                                "remaining_count": 0,
+                                "resumable": False,
+                            },
+                        },
+                    },
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    class _WorkerRegistry:
+        def __init__(self) -> None:
+            self.started: list[dict] = []
+
+        def read_adopted_result(self, **kwargs):
+            return {
+                "receipt": {
+                    "contract_version": "learning_stage_worker_result_adoption_v1",
+                    "worker_id": "worker-calibration",
+                    "task_kind": "panel_learning_calibration_sequence",
+                    "result_sha256": "c" * 64,
+                },
+                "response": {
+                    "success": True,
+                    "data": {
+                        "result": {
+                            "image_path": str(source_image),
+                            "learn_all_targets": {
+                                "overlay_path": str(overlay_path),
+                                "vista_coordinate_validation": {
+                                    "status": "completed",
+                                    "validated_count": 3,
+                                    "failed_count": 0,
+                                    "batch": {
+                                        "completed_count": 3,
+                                        "remaining_count": 0,
+                                        "resumable": False,
+                                    },
+                                },
+                            },
+                            "calibration_sequence": {
+                                "contract_version": (
+                                    "learning_calibration_sequence_result_v1"
+                                ),
+                                "status": "completed",
+                                "remaining_count": 0,
+                                "artifact_inputs": {
+                                    "trace_path": str(trace_path),
+                                    "source_image_path": str(source_image),
+                                    "numbering_report_path": str(numbering_report),
+                                    "overlay_path": str(overlay_path),
+                                },
+                            },
+                        }
+                    },
+                },
+            }
+
+        def start(self, **kwargs):
+            self.started.append(kwargs)
+            return {
+                "contract_version": "learning_stage_worker_v1",
+                "worker_id": "worker-review-auto",
+                "run_id": kwargs["run_id"],
+                "stage": kwargs["stage"],
+                "operation_id": kwargs["operation_id"],
+                "task_kind": kwargs["task_kind"],
+                "status": "running",
+            }
+
+    registry = _WorkerRegistry()
+    monkeypatch.setattr(panel_api, "learning_stage_worker_registry", registry)
+    client = TestClient(app)
+    started = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": numbered_state["revision"],
+            "stage": "precise_calibration",
+            "reason": "calibration",
+            "lease_seconds": 600,
+        },
+    ).json()["data"]
+
+    continued = client.post(
+        "/panel/continue_learning_stage_worker_result",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": started["workflow_state"]["revision"],
+            "stage": "precise_calibration",
+            "operation_id": started["operation_id"],
+            "worker_id": "worker-calibration",
+        },
+    ).json()
+
+    assert continued["success"] is True
+    assert continued["data"]["stage_finished"] is True
+    assert continued["data"]["outcome"] == "completed"
+    workflow_state = continued["data"]["workflow_state"]
+    stage = workflow_state["stages"]["precise_calibration"]
+    assert stage["status"] == "completed"
+    result_path = stage["evidence_refs"]["result_path"]
+    assert result_path == (
+        "artifacts/learning-runs/run-stage-operation/calibration_result.json"
+    )
+    assert (tmp_path / result_path).is_file()
+    assert stage["evidence_refs"]["overlay_path"] == (
+        "artifacts/review-overlays/calibrated.png"
+    )
+    assert stage["evidence_refs"]["worker_continuation"]["worker_id"] == (
+        "worker-calibration"
+    )
+    next_operation = continued["data"]["next_stage_operation"]
+    assert next_operation["stage"] == "review_repair"
+    assert next_operation["task_kind"] == "panel_learning_model_review_repair"
+    assert workflow_state["current_stage"] == "review_repair"
+    assert workflow_state["stages"]["review_repair"]["status"] == "running"
+    next_worker = continued["data"]["next_stage_worker"]
+    assert next_worker["worker_id"] == "worker-review-auto"
+    assert registry.started == [
+        {
+            "run_id": "run-stage-operation",
+            "stage": "review_repair",
+            "operation_id": next_operation["operation_id"],
+            "task_kind": "panel_learning_model_review_repair",
+            "payload": {
+                "two_stage_report_path": "artifacts/numbered-map-report.json",
+                "screenshot_path": "artifacts/screenshots/capture.png",
+                "composite_overlay_path": (
+                    "artifacts/review-overlays/calibrated.png"
+                ),
+                "model_profile_id": "learn_mode_qwen3_vl_8b",
+                "timeout_seconds": 240,
+            },
+            "reuse_active_identical": True,
+        }
+    ]
+
+
+def test_continuation_fails_calibration_when_artifact_evidence_is_missing(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    store, numbered_state = _store_at_completed_numbered_map()
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+
+    class _WorkerRegistry:
+        def read_adopted_result(self, **kwargs):
+            return {
+                "receipt": {
+                    "contract_version": "learning_stage_worker_result_adoption_v1",
+                    "worker_id": "worker-calibration-missing",
+                    "task_kind": "panel_learning_calibration_sequence",
+                    "result_sha256": "d" * 64,
+                },
+                "response": {
+                    "success": True,
+                    "data": {
+                        "result": {
+                            "calibration_sequence": {
+                                "contract_version": (
+                                    "learning_calibration_sequence_result_v1"
+                                ),
+                                "status": "completed",
+                                "remaining_count": 0,
+                                "artifact_inputs": {
+                                    "trace_path": "logs/missing-trace.json",
+                                    "source_image_path": (
+                                        "artifacts/screenshots/missing.png"
+                                    ),
+                                    "numbering_report_path": (
+                                        "artifacts/missing-report.json"
+                                    ),
+                                    "overlay_path": (
+                                        "artifacts/review-overlays/missing.png"
+                                    ),
+                                },
+                            },
+                        }
+                    },
+                },
+            }
+
+    monkeypatch.setattr(panel_api, "learning_stage_worker_registry", _WorkerRegistry())
+    client = TestClient(app)
+    started = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": numbered_state["revision"],
+            "stage": "precise_calibration",
+            "reason": "calibration",
+            "lease_seconds": 600,
+        },
+    ).json()["data"]
+    continued = client.post(
+        "/panel/continue_learning_stage_worker_result",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": started["workflow_state"]["revision"],
+            "stage": "precise_calibration",
+            "operation_id": started["operation_id"],
+            "worker_id": "worker-calibration-missing",
+        },
+    ).json()
+
+    assert continued["success"] is True
+    assert continued["data"]["outcome"] == "failed"
+    assert "artifact persistence failed" in continued["data"]["reason"]
+    assert continued["data"]["workflow_state"]["stages"][
+        "precise_calibration"
+    ]["status"] == "failed"
+
+
+def test_continuation_starts_recognition_trial_after_observe(
+    monkeypatch,
+) -> None:
+    store, bind_state = _store_at_completed_bind_capture()
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+
+    class _WorkerRegistry:
+        def __init__(self) -> None:
+            self.started_payloads = []
+
+        def read_adopted_result(self, **kwargs):
+            return {
+                "receipt": {
+                    "contract_version": "learning_stage_worker_result_adoption_v1",
+                    "worker_id": "worker-observe",
+                    "task_kind": "vision_observe_screen",
+                    "result_sha256": "c" * 64,
+                },
+                "response": {
+                    "success": True,
+                    "data": {
+                        "result": {
+                            "app_name": "example_app",
+                            "state_guess": "home",
+                            "image_path": "artifacts/screen.png",
+                            "screen_size": {"width": 1280, "height": 720},
+                            "screen_summary": "Example home screen",
+                            "interface_classification": {
+                                "category": "feed_workspace",
+                                "confidence": 0.97,
+                                "reason": "Visible repeated news cards",
+                                "structure_signals": {
+                                    "feed_items": True,
+                                    "news_items": True,
+                                },
+                            },
+                            "screen_map": {
+                                "candidates": [
+                                    {
+                                        "candidate_id": "region-1",
+                                        "label": "Search",
+                                        "bbox": {"x": 10, "y": 20, "w": 200, "h": 40},
+                                    }
+                                ]
+                            },
+                            "trace_path": "logs/observe.json",
+                        }
+                    },
+                },
+            }
+
+        def start(self, **kwargs):
+            self.started_payloads.append(kwargs)
+            return {
+                "contract_version": "learning_stage_worker_v1",
+                "worker_id": "worker-trial",
+                "run_id": kwargs["run_id"],
+                "stage": kwargs["stage"],
+                "operation_id": kwargs["operation_id"],
+                "task_kind": kwargs["task_kind"],
+                "status": "running",
+                "backend_compute_owner": "backend_process_worker",
+            }
+
+    registry = _WorkerRegistry()
+    monkeypatch.setattr(panel_api, "learning_stage_worker_registry", registry)
+    client = TestClient(app)
+    started = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": bind_state["revision"],
+            "stage": "screen_understanding",
+            "reason": "observe",
+            "lease_seconds": 600,
+        },
+    ).json()["data"]
+    running_revision = started["workflow_state"]["revision"]
+
+    continued = client.post(
+        "/panel/continue_learning_stage_worker_result",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": running_revision,
+            "stage": "screen_understanding",
+            "operation_id": started["operation_id"],
+            "worker_id": "worker-observe",
+        },
+    ).json()
+
+    assert continued["success"] is True
+    assert continued["data"]["stage_finished"] is False
+    assert continued["data"]["continuation_status"] == "next_worker_started"
+    assert continued["data"]["workflow_state"]["revision"] == running_revision
+    assert continued["data"]["workflow_state"]["stages"]["screen_understanding"][
+        "status"
+    ] == "running"
+    assert continued["data"]["next_worker"]["worker_id"] == "worker-trial"
+    assert continued["data"]["next_worker"]["task_kind"] == (
+        "panel_learning_recognition_trial"
+    )
+    assert len(registry.started_payloads) == 1
+    next_payload = registry.started_payloads[0]
+    assert next_payload["stage"] == "screen_understanding"
+    assert next_payload["task_kind"] == "panel_learning_recognition_trial"
+    assert next_payload["payload"]["app_name"] == "example_app"
+    assert next_payload["payload"]["state_hint"] == "home"
+    assert next_payload["payload"]["observation_evidence"]["current_image_path"] == (
+        "artifacts/screen.png"
+    )
+    assert next_payload["payload"]["observation_evidence"]["screen_map"][
+        "candidates"
+    ][0]["candidate_id"] == "region-1"
+    assert next_payload["payload"]["observation_evidence"][
+        "interface_classification"
+    ] == {
+        "category": "feed_workspace",
+        "confidence": 0.97,
+        "reason": "Visible repeated news cards",
+        "structure_signals": {
+            "feed_items": True,
+            "news_items": True,
+        },
+    }
+
+    repeated = client.post(
+        "/panel/continue_learning_stage_worker_result",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": running_revision,
+            "stage": "screen_understanding",
+            "operation_id": started["operation_id"],
+            "worker_id": "worker-observe",
+        },
+    ).json()
+    assert repeated["success"] is True
+    assert repeated["data"]["next_worker"]["worker_id"] == "worker-trial"
+    assert len(registry.started_payloads) == 2
+
+
+def test_continuation_finishes_screen_understanding_from_trial(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    store, bind_state = _store_at_completed_bind_capture()
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    trial_path = tmp_path / "artifacts" / "screen-understanding-trial.json"
+    trial_path.parent.mkdir(parents=True)
+    trial_path.write_text(
+        json.dumps(
+            {
+                "artifact_type": "learn_recognition_trial",
+                "app_name": "notepad",
+                "state_hint": "editor",
+                "observe_bundle": {
+                    "image_path": "artifacts/screenshots/notepad.png",
+                    "trace_path": "logs/traces/vision/notepad-observe.json",
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    class _WorkerRegistry:
+        def __init__(self) -> None:
+            self.started: list[dict] = []
+
+        def read_adopted_result(self, **kwargs):
+            return {
+                "receipt": {
+                    "contract_version": "learning_stage_worker_result_adoption_v1",
+                    "worker_id": "worker-trial",
+                    "task_kind": "panel_learning_recognition_trial",
+                    "result_sha256": "e" * 64,
+                },
+                "response": {
+                    "success": True,
+                    "data": {
+                        "trial_path": "artifacts/screen-understanding-trial.json",
+                        "summary": {
+                            "screen_inventory_count": 2,
+                            "draft_section_counts": {
+                                "regions": 2,
+                                "action_templates": 0,
+                            },
+                        },
+                    },
+                },
+            }
+
+        def start(self, **kwargs):
+            self.started.append(kwargs)
+            return {
+                "contract_version": "learning_stage_worker_v1",
+                "worker_id": "worker-numbered-auto",
+                "run_id": kwargs["run_id"],
+                "stage": kwargs["stage"],
+                "operation_id": kwargs["operation_id"],
+                "task_kind": kwargs["task_kind"],
+                "status": "running",
+            }
+
+    registry = _WorkerRegistry()
+    monkeypatch.setattr(panel_api, "learning_stage_worker_registry", registry)
+    client = TestClient(app)
+    started = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": bind_state["revision"],
+            "stage": "screen_understanding",
+            "reason": "observe",
+            "lease_seconds": 600,
+        },
+    ).json()["data"]
+
+    continued = client.post(
+        "/panel/continue_learning_stage_worker_result",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": started["workflow_state"]["revision"],
+            "stage": "screen_understanding",
+            "operation_id": started["operation_id"],
+            "worker_id": "worker-trial",
+        },
+    ).json()
+
+    assert continued["success"] is True
+    assert continued["data"]["stage_finished"] is True
+    assert continued["data"]["outcome"] == "completed"
+    assert continued["data"]["workflow_state"]["stages"]["screen_understanding"][
+        "status"
+    ] == "completed"
+    evidence = continued["data"]["workflow_state"]["stages"][
+        "screen_understanding"
+    ]["evidence_refs"]
+    assert evidence["trial_path"] == "artifacts/screen-understanding-trial.json"
+    next_operation = continued["data"]["next_stage_operation"]
+    assert next_operation["stage"] == "numbered_map"
+    assert next_operation["task_kind"] == "panel_learning_two_stage_understanding"
+    assert continued["data"]["workflow_state"]["current_stage"] == "numbered_map"
+    assert continued["data"]["workflow_state"]["stages"]["numbered_map"]["status"] == (
+        "running"
+    )
+    next_worker = continued["data"]["next_stage_worker"]
+    assert next_worker["worker_id"] == "worker-numbered-auto"
+    assert registry.started == [
+        {
+            "run_id": "run-stage-operation",
+            "stage": "numbered_map",
+            "operation_id": next_operation["operation_id"],
+            "task_kind": "panel_learning_two_stage_understanding",
+            "payload": {
+                "app_name": "notepad",
+                "state_hint": "editor",
+                "trace_path": "artifacts/screen-understanding-trial.json",
+                "source_image_path": "artifacts/screenshots/notepad.png",
+                "require_stage1_gate": True,
+                "stage2_region_strategy": "partitioned",
+            },
+            "reuse_active_identical": True,
+        }
+    ]
+
+
+def test_continuation_safe_stops_screen_understanding_without_trial_evidence(
+    monkeypatch,
+) -> None:
+    store, bind_state = _store_at_completed_bind_capture()
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+
+    class _WorkerRegistry:
+        def read_adopted_result(self, **kwargs):
+            return {
+                "receipt": {
+                    "contract_version": "learning_stage_worker_result_adoption_v1",
+                    "worker_id": "worker-trial-empty",
+                    "task_kind": "panel_learning_recognition_trial",
+                    "result_sha256": "f" * 64,
+                },
+                "response": {
+                    "success": True,
+                    "data": {
+                        "trial_path": "",
+                        "summary": {
+                            "screen_inventory_count": 0,
+                            "draft_section_counts": {
+                                "regions": 0,
+                                "action_templates": 0,
+                            },
+                        },
+                    },
+                },
+            }
+
+    monkeypatch.setattr(panel_api, "learning_stage_worker_registry", _WorkerRegistry())
+    client = TestClient(app)
+    started = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": bind_state["revision"],
+            "stage": "screen_understanding",
+            "reason": "observe",
+            "lease_seconds": 600,
+        },
+    ).json()["data"]
+
+    continued = client.post(
+        "/panel/continue_learning_stage_worker_result",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": started["workflow_state"]["revision"],
+            "stage": "screen_understanding",
+            "operation_id": started["operation_id"],
+            "worker_id": "worker-trial-empty",
+        },
+    ).json()
+
+    assert continued["success"] is True
+    assert continued["data"]["stage_finished"] is True
+    assert continued["data"]["outcome"] == "safe_stopped"
+    assert continued["data"]["workflow_state"]["terminal"] is True
+
+
+def test_continuation_fails_screen_understanding_when_observe_response_failed(
+    monkeypatch,
+) -> None:
+    store, bind_state = _store_at_completed_bind_capture()
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+
+    class _WorkerRegistry:
+        def read_adopted_result(self, **kwargs):
+            return {
+                "receipt": {
+                    "contract_version": "learning_stage_worker_result_adoption_v1",
+                    "worker_id": "worker-observe-failed",
+                    "task_kind": "vision_observe_screen",
+                    "result_sha256": "1" * 64,
+                },
+                "response": {
+                    "success": False,
+                    "message": "Screen observation failed",
+                    "error": {
+                        "code": "observe_screen_failed",
+                        "details": "model protocol error",
+                    },
+                },
+            }
+
+    monkeypatch.setattr(panel_api, "learning_stage_worker_registry", _WorkerRegistry())
+    client = TestClient(app)
+    started = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": bind_state["revision"],
+            "stage": "screen_understanding",
+            "reason": "observe",
+            "lease_seconds": 600,
+        },
+    ).json()["data"]
+
+    continued = client.post(
+        "/panel/continue_learning_stage_worker_result",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": started["workflow_state"]["revision"],
+            "stage": "screen_understanding",
+            "operation_id": started["operation_id"],
+            "worker_id": "worker-observe-failed",
+        },
+    ).json()
+
+    assert continued["success"] is True
+    assert continued["data"]["stage_finished"] is True
+    assert continued["data"]["outcome"] == "failed"
+    assert "Screen observation failed" in continued["data"]["reason"]
+    assert continued["data"]["workflow_state"]["stages"]["screen_understanding"][
+        "status"
+    ] == "failed"
+
+
+def test_continuation_finishes_fusion_from_trial_artifact(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    store, review_state = _store_at_completed_review()
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    trial_path = tmp_path / "artifacts" / "fusion-trial.json"
+    trial_path.parent.mkdir(parents=True)
+    trial_path.write_text(
+        '{"contract_version":"learning_model_trial_v1"}',
+        encoding="utf-8",
+    )
+
+    class _WorkerRegistry:
+        def read_adopted_result(self, **kwargs):
+            assert kwargs["stage"] == "fusion"
+            return {
+                "receipt": {
+                    "contract_version": "learning_stage_worker_result_adoption_v1",
+                    "worker_id": "worker-fusion",
+                    "task_kind": "panel_learning_recognition_trial",
+                    "result_sha256": "9" * 64,
+                },
+                "response": {
+                    "success": True,
+                    "data": {
+                        "trial_path": "artifacts/fusion-trial.json",
+                        "summary": {
+                            "screen_inventory_count": 0,
+                            "draft_section_counts": {"regions": 0},
+                        },
+                    },
+                },
+            }
+
+    monkeypatch.setattr(panel_api, "learning_stage_worker_registry", _WorkerRegistry())
+    client = TestClient(app)
+    started = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": review_state["revision"],
+            "stage": "fusion",
+            "reason": "fusion",
+            "lease_seconds": 600,
+        },
+    ).json()["data"]
+    request = {
+        "run_id": "run-stage-operation",
+        "expected_revision": started["workflow_state"]["revision"],
+        "stage": "fusion",
+        "operation_id": started["operation_id"],
+        "worker_id": "worker-fusion",
+    }
+
+    continued = client.post(
+        "/panel/continue_learning_stage_worker_result",
+        json=request,
+    ).json()
+
+    assert continued["success"] is True
+    assert continued["data"]["stage_finished"] is True
+    assert continued["data"]["outcome"] == "completed"
+    workflow_state = continued["data"]["workflow_state"]
+    assert workflow_state["stages"]["fusion"]["status"] == "completed"
+    evidence = workflow_state["stages"]["fusion"]["evidence_refs"]
+    assert evidence["trial_path"] == "artifacts/fusion-trial.json"
+    assert evidence["worker_continuation"]["worker_id"] == "worker-fusion"
+
+    repeated = client.post(
+        "/panel/continue_learning_stage_worker_result",
+        json=request,
+    ).json()
+    assert repeated["success"] is True
+    assert repeated["data"]["idempotent_replay"] is True
+    assert repeated["data"]["workflow_state"]["revision"] == workflow_state["revision"]
+
+
+def test_continuation_safe_stops_fusion_without_trial_artifact(
+    monkeypatch,
+) -> None:
+    store, review_state = _store_at_completed_review()
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+
+    class _WorkerRegistry:
+        def read_adopted_result(self, **kwargs):
+            return {
+                "receipt": {
+                    "contract_version": "learning_stage_worker_result_adoption_v1",
+                    "worker_id": "worker-fusion-empty",
+                    "task_kind": "panel_learning_recognition_trial",
+                    "result_sha256": "8" * 64,
+                },
+                "response": {
+                    "success": True,
+                    "data": {
+                        "trial_path": "",
+                        "summary": {},
+                    },
+                },
+            }
+
+    monkeypatch.setattr(panel_api, "learning_stage_worker_registry", _WorkerRegistry())
+    client = TestClient(app)
+    started = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": review_state["revision"],
+            "stage": "fusion",
+            "reason": "fusion",
+            "lease_seconds": 600,
+        },
+    ).json()["data"]
+
+    continued = client.post(
+        "/panel/continue_learning_stage_worker_result",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": started["workflow_state"]["revision"],
+            "stage": "fusion",
+            "operation_id": started["operation_id"],
+            "worker_id": "worker-fusion-empty",
+        },
+    ).json()
+
+    assert continued["success"] is True
+    assert continued["data"]["stage_finished"] is True
+    assert continued["data"]["outcome"] == "safe_stopped"
+    assert continued["data"]["workflow_state"]["terminal"] is True
+    assert continued["data"]["workflow_state"]["stages"]["fusion"]["status"] == (
+        "safe_stopped"
+    )
+
+
+def test_continuation_finishes_review_repair_from_integrity_gate(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    store, calibration_state = _store_at_completed_precise_calibration()
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    report_path = tmp_path / "artifacts" / "review-report.json"
+    overlay_path = tmp_path / "artifacts" / "review-overlay.png"
+    source_image_path = tmp_path / "artifacts" / "screenshots" / "qq.png"
+    report_path.parent.mkdir(parents=True)
+    source_image_path.parent.mkdir(parents=True)
+    source_image_path.write_bytes(b"screenshot")
+    report_path.write_text(
+        json.dumps(
+            {
+                "status": "passed",
+                "app_name": "qq",
+                "state_hint": "chat",
+                "source_image_path": "artifacts/screenshots/qq.png",
+                "observe_bundle": {
+                    "screen_size": {"width": 1280, "height": 960},
+                    "screen_reading": {"screen_summary": "QQ chat window"},
+                    "screen_map": {"contract_version": "screen_map_v1"},
+                },
+                "fusion": {
+                    "compiled_overlay_path": "artifacts/review-overlay.png",
+                    "fused_review_boxes": [
+                        {
+                            "candidate_id": "message-input",
+                            "label": "message input",
+                            "bbox": {"x": 500, "y": 800, "width": 400, "height": 80},
+                        }
+                    ],
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    overlay_path.write_bytes(b"overlay")
+
+    class _WorkerRegistry:
+        def __init__(self) -> None:
+            self.started: list[dict] = []
+
+        def read_adopted_result(self, **kwargs):
+            return {
+                "receipt": {
+                    "contract_version": "learning_stage_worker_result_adoption_v1",
+                    "worker_id": "worker-review",
+                    "task_kind": "panel_learning_model_review_repair",
+                    "result_sha256": "d" * 64,
+                },
+                "response": {
+                    "success": True,
+                    "data": {
+                        "result": {
+                            "calibration_permission": True,
+                            "integrity_gate": {"passed": True},
+                            "final_stage2_report_path": (
+                                "artifacts/review-report.json"
+                            ),
+                            "final_repaired_overlay_path": (
+                                "artifacts/review-overlay.png"
+                            ),
+                            "final_numbering_revision": "revision-1",
+                        }
+                    },
+                },
+            }
+
+        def start(self, **kwargs):
+            self.started.append(kwargs)
+            return {
+                "contract_version": "learning_stage_worker_v1",
+                "worker_id": "worker-fusion-auto",
+                "run_id": kwargs["run_id"],
+                "stage": kwargs["stage"],
+                "operation_id": kwargs["operation_id"],
+                "task_kind": kwargs["task_kind"],
+                "status": "running",
+            }
+
+    registry = _WorkerRegistry()
+    monkeypatch.setattr(panel_api, "learning_stage_worker_registry", registry)
+    client = TestClient(app)
+    started = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": calibration_state["revision"],
+            "stage": "review_repair",
+            "reason": "review",
+            "lease_seconds": 600,
+        },
+    ).json()["data"]
+
+    continued = client.post(
+        "/panel/continue_learning_stage_worker_result",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": started["workflow_state"]["revision"],
+            "stage": "review_repair",
+            "operation_id": started["operation_id"],
+            "worker_id": "worker-review",
+        },
+    ).json()
+
+    assert continued["success"] is True, continued
+    assert continued["data"]["stage_finished"] is True
+    assert continued["data"]["outcome"] == "completed"
+    assert continued["data"]["workflow_state"]["stages"]["review_repair"][
+        "status"
+    ] == "completed"
+    next_operation = continued["data"]["next_stage_operation"]
+    assert next_operation["stage"] == "fusion"
+    assert next_operation["task_kind"] == "panel_learning_recognition_trial"
+    assert continued["data"]["workflow_state"]["current_stage"] == "fusion"
+    assert continued["data"]["workflow_state"]["stages"]["fusion"]["status"] == (
+        "running"
+    )
+    next_worker = continued["data"]["next_stage_worker"]
+    assert next_worker["worker_id"] == "worker-fusion-auto"
+    fusion_start = registry.started[0]
+    assert fusion_start["stage"] == "fusion"
+    assert fusion_start["operation_id"] == next_operation["operation_id"]
+    assert fusion_start["task_kind"] == "panel_learning_recognition_trial"
+    assert fusion_start["reuse_active_identical"] is True
+    fusion_payload = fusion_start["payload"]
+    assert fusion_payload["app_name"] == "qq"
+    assert fusion_payload["state_hint"] == "chat"
+    assert fusion_payload["summary"] == "QQ chat window"
+    assert fusion_payload["two_stage_report_path"] == "artifacts/review-report.json"
+    evidence = fusion_payload["observation_evidence"]
+    assert evidence["current_image_path"] == "artifacts/screenshots/qq.png"
+    assert evidence["coordinate_overlay_path"] == "artifacts/review-overlay.png"
+    assert evidence["review_boxes"][0]["candidate_id"] == "message-input"
+    assert evidence["no_click_authorization"] is True
+    assert evidence["execute_binding_enabled"] is False
+
+
+def test_stage_worker_request_accepts_managed_observe_task() -> None:
+    request = panel_api.PanelStartLearningStageWorkerRequest.model_validate(
+        {
+            "run_id": "run-observe",
+            "expected_revision": 1,
+            "stage": "screen_understanding",
+            "operation_id": "operation-observe",
+            "task_kind": "vision_observe_screen",
+            "payload": {"capture_live": False, "image_path": "screen.png"},
+        }
+    )
+
+    assert request.task_kind == "vision_observe_screen"
+
+
+def test_stage_operation_cancel_api_records_worker_termination(
+    monkeypatch,
+) -> None:
+    store, review_state = _store_at_completed_review()
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+
+    class _WorkerRegistry:
+        def cancel_by_operation(self, **kwargs):
+            assert kwargs["stage"] == "fusion"
+            return {
+                "contract_version": "learning_stage_worker_v1",
+                "worker_id": "worker-1",
+                "status": "cancelled",
+                "backend_compute_termination": "terminated",
+                "model_service_compute_termination": "terminated",
+                "model_request_id": "learn-worker-1",
+                "model_request_cancellation": {
+                    "contract_version": "model_request_cancellation_v1",
+                    "status": "terminated",
+                },
+            }
+
+    monkeypatch.setattr(panel_api, "learning_stage_worker_registry", _WorkerRegistry())
+    client = TestClient(app)
+    started = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": review_state["revision"],
+            "stage": "fusion",
+            "reason": "panel fusion",
+            "lease_seconds": 600,
+        },
+    ).json()["data"]
+
+    cancelled = client.post(
+        "/panel/cancel_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": started["workflow_state"]["revision"],
+            "stage": "fusion",
+            "operation_id": started["operation_id"],
+            "reason": "user requested cancellation",
+        },
+    ).json()
+
+    assert cancelled["success"] is True
+    assert cancelled["data"]["backend_compute_termination"] == "terminated"
+    assert cancelled["data"]["model_service_compute_termination"] == "terminated"
+    cancellation = cancelled["data"]["workflow_state"]["stages"]["fusion"][
+        "evidence_refs"
+    ]["stage_execution"]["cancellation"]
+    assert cancellation["backend_compute_termination"] == "terminated"
+    assert cancellation["model_service_compute_termination"] == "terminated"
+    assert cancellation["model_request_id"] == "learn-worker-1"
+    assert cancellation["worker_id"] == "worker-1"
+
+
+def test_precise_calibration_api_requires_managed_stage_operation(
+    monkeypatch,
+) -> None:
+    store, numbered_state = _store_at_completed_numbered_map()
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+    client = TestClient(app)
+
+    direct = client.post(
+        "/panel/transition_learning_workflow_state",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": numbered_state["revision"],
+            "stage": "precise_calibration",
+            "outcome": "running",
+        },
+    ).json()
+    assert direct["success"] is False
+    assert direct["error"]["code"] == "learning_workflow_stage_operation_required"
+
+    started = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": numbered_state["revision"],
+            "stage": "precise_calibration",
+            "reason": "panel precise calibration",
+            "lease_seconds": 600,
+        },
+    ).json()
+    assert started["success"] is True
+    operation_id = started["data"]["operation_id"]
+
+    finished = client.post(
+        "/panel/finish_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": started["data"]["workflow_state"]["revision"],
+            "stage": "precise_calibration",
+            "operation_id": operation_id,
+            "outcome": "failed",
+            "reason": "locator model unavailable",
+        },
+    ).json()
+
+    assert finished["success"] is True
+    workflow_state = finished["data"]["workflow_state"]
+    assert workflow_state["stages"]["precise_calibration"]["status"] == "failed"
+    assert workflow_state["stages"]["review_repair"]["status"] == "pending"
+
+
+def test_review_repair_api_requires_managed_stage_operation(
+    monkeypatch,
+) -> None:
+    store, calibration_state = _store_at_completed_precise_calibration()
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+    client = TestClient(app)
+
+    direct = client.post(
+        "/panel/transition_learning_workflow_state",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": calibration_state["revision"],
+            "stage": "review_repair",
+            "outcome": "running",
+        },
+    ).json()
+    assert direct["success"] is False
+    assert direct["error"]["code"] == "learning_workflow_stage_operation_required"
+
+    started = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": calibration_state["revision"],
+            "stage": "review_repair",
+            "reason": "panel model review and repair",
+            "lease_seconds": 600,
+        },
+    ).json()
+    assert started["success"] is True
+    operation_id = started["data"]["operation_id"]
+
+    finished = client.post(
+        "/panel/finish_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": started["data"]["workflow_state"]["revision"],
+            "stage": "review_repair",
+            "operation_id": operation_id,
+            "outcome": "failed",
+            "reason": "review model unavailable",
+        },
+    ).json()
+
+    assert finished["success"] is True
+    workflow_state = finished["data"]["workflow_state"]
+    assert workflow_state["stages"]["review_repair"]["status"] == "failed"
+    assert workflow_state["stages"]["fusion"]["status"] == "pending"
+
+
+@pytest.mark.parametrize(
+    ("stage", "store_factory", "next_stage"),
+    [
+        (
+            "screen_understanding",
+            _store_at_completed_bind_capture,
+            "numbered_map",
+        ),
+        (
+            "numbered_map",
+            _store_at_completed_screen_understanding,
+            "precise_calibration",
+        ),
+    ],
+)
+def test_inference_stage_api_requires_managed_stage_operation(
+    monkeypatch,
+    stage: str,
+    store_factory,
+    next_stage: str,
+) -> None:
+    store, previous_state = store_factory()
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+    client = TestClient(app)
+
+    direct = client.post(
+        "/panel/transition_learning_workflow_state",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": previous_state["revision"],
+            "stage": stage,
+            "outcome": "running",
+        },
+    ).json()
+    assert direct["success"] is False
+    assert direct["error"]["code"] == "learning_workflow_stage_operation_required"
+
+    started = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": previous_state["revision"],
+            "stage": stage,
+            "reason": f"panel {stage}",
+            "lease_seconds": 600,
+        },
+    ).json()
+    assert started["success"] is True
+
+    finished = client.post(
+        "/panel/finish_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": started["data"]["workflow_state"]["revision"],
+            "stage": stage,
+            "operation_id": started["data"]["operation_id"],
+            "outcome": "failed",
+            "reason": f"{stage} model unavailable",
+        },
+    ).json()
+
+    assert finished["success"] is True
+    workflow_state = finished["data"]["workflow_state"]
+    assert workflow_state["stages"][stage]["status"] == "failed"
+    assert workflow_state["stages"][next_stage]["status"] == "pending"
+
+
+def test_panel_fusion_uses_managed_stage_operation() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8")
+    start = panel_js.index("async function runLearningInterfaceFlow")
+    end = panel_js.index("async function completeLearningInterfaceReadonlyFlow", start)
+    body = panel_js[start:end]
+
+    assert "/panel/start_learning_workflow_stage_operation" in panel_js
+    assert "/panel/finish_learning_workflow_stage_operation" in panel_js
+    assert "/panel/recover_learning_workflow_stage_operation" in panel_js
+    assert 'transitionLearningWorkflowState(\n      "fusion"' not in body
+    assert "backendContinuationStageWorker" in panel_js
+    assert "continuationData?.next_stage_operation" in panel_js
+    assert "continuationData?.next_stage_worker" in panel_js
+    assert "runLearningDraftTrial(" not in body
+    assert "nextLearningStageOperation(" not in body
+
+
+def test_panel_uses_backend_issued_operations_after_screen_understanding() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8")
+    start = panel_js.index("async function runLearningInterfaceFlow")
+    end = panel_js.index("async function completeLearningInterfaceReadonlyFlow", start)
+    body = panel_js[start:end]
+
+    assert body.count("await startLearningWorkflowStageOperation(") == 1
+    assert "followContinuationChain: true" in body
+    assert "nextLearningStageOperation(" not in body
+    assert "backendContinuationStageWorker" in panel_js
+    assert "activeLearningStageOperation = nextStage.operation" in panel_js
+
+
+def test_panel_precise_calibration_uses_managed_stage_operation() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8")
+    start = panel_js.index("async function runLearningInterfaceFlow")
+    end = panel_js.index("async function completeLearningInterfaceReadonlyFlow", start)
+    body = panel_js[start:end]
+    assert 'transitionLearningWorkflowState(\n      "precise_calibration"' not in body
+    assert "runLearningDeepCalibration(" not in body
+    assert 'taskKind === "panel_learning_calibration_sequence"' in panel_js
+    assert "lastLearningDeepCalibrationResponse = response" in panel_js
+
+
+def test_panel_review_repair_uses_managed_stage_operation() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8")
+    start = panel_js.index("async function runLearningInterfaceFlow")
+    end = panel_js.index("async function completeLearningInterfaceReadonlyFlow", start)
+    body = panel_js[start:end]
+    assert 'transitionLearningWorkflowState(\n      "review_repair"' not in body
+    assert "runLearningModelReviewRepair(" not in body
+    assert 'taskKind === "panel_learning_model_review_repair"' in panel_js
+    assert "lastLearningReviewRepairResponse = response" in panel_js
+
+
+@pytest.mark.parametrize(
+    ("stage", "operation_name", "next_operation_name"),
+    [
+        (
+            "screen_understanding",
+            "screenUnderstandingOperation",
+            "numberedMapOperation",
+        ),
+    ],
+)
+def test_panel_inference_stage_uses_managed_stage_operation(
+    stage: str,
+    operation_name: str,
+    next_operation_name: str,
+) -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8")
+    start = panel_js.index("async function runLearningInterfaceFlow")
+    end = panel_js.index("async function completeLearningInterfaceReadonlyFlow", start)
+    body = panel_js[start:end]
+    operation_start = body.index(
+        f"const {operation_name} = await startLearningWorkflowStageOperation"
+    )
+    operation_body = body[operation_start:]
+
+    assert f'transitionLearningWorkflowState(\n      "{stage}"' not in operation_body
+    assert f"{operation_name}.operation_id" in operation_body
+    assert f"activeLearningStageOperation = {operation_name}" in operation_body
+    assert 'screenUnderstandingOperation,\n        "completed"' not in operation_body
+    assert 'screenUnderstandingOperation,\n        "safe_stopped"' not in operation_body
+    assert "nextLearningStageOperation(" not in operation_body
+    assert "followContinuationChain: true" in operation_body
+    assert "learningStageContinuationFinished(trialResponse)" in operation_body
+
+
+def test_panel_numbered_map_uses_backend_continuation() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8")
+    start = panel_js.index("async function runLearningInterfaceFlow")
+    end = panel_js.index("async function completeLearningInterfaceReadonlyFlow", start)
+    body = panel_js[start:end]
+    assert "runLearningTwoStageUnderstanding(" not in body
+    assert "continuationData?.next_stage_worker" in panel_js
+    assert "backendContinuationStageWorker(continuationData)" in panel_js
+    assert "/panel/continue_learning_stage_worker_result" in panel_js
+
+
+def test_panel_managed_model_tasks_run_with_heartbeat() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8")
+    start = panel_js.index("async function runLearningInterfaceFlow")
+    end = panel_js.index("async function completeLearningInterfaceReadonlyFlow", start)
+    body = panel_js[start:end]
+
+    assert "/panel/heartbeat_learning_workflow_stage_operation" in panel_js
+    assert "async function runLearningStageTaskWithHeartbeat" in panel_js
+    assert body.count("runLearningStageTaskWithHeartbeat(") == 1
+    assert (
+        "runLearningStageTaskWithHeartbeat(\n"
+        "      screenUnderstandingOperation"
+    ) in body
+    assert "taskContext.operation" in panel_js
+    assert "activeLearningStageTaskContext.operation = nextStage.operation" in panel_js
+
+
+def test_panel_suspends_heartbeat_while_backend_continuation_changes_stage() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8")
+    heartbeat_start = panel_js.index("async function runLearningStageTaskWithHeartbeat")
+    worker_start = panel_js.index("async function pollManagedLearningStageWorker")
+    heartbeat_body = panel_js[heartbeat_start:worker_start]
+    worker_end = panel_js.index("function learningStageContinuation", worker_start)
+    worker_body = panel_js[worker_start:worker_end]
+
+    assert "heartbeatSuspended: false" in heartbeat_body
+    assert "taskContext.heartbeatSuspended" in heartbeat_body
+    suspend_at = worker_body.index("heartbeatContext.heartbeatSuspended = true")
+    continue_at = worker_body.index('"/panel/continue_learning_stage_worker_result"')
+    adopt_next_at = worker_body.index(
+        "activeLearningStageTaskContext.operation = nextStage.operation"
+    )
+    resume_at = worker_body.index(
+        "activeLearningStageTaskContext.heartbeatSuspended = false",
+        adopt_next_at,
+    )
+    assert suspend_at < continue_at < adopt_next_at < resume_at
+
+
+def test_panel_exposes_authoritative_managed_stage_cancellation() -> None:
+    panel_html = Path("app/web_panel/index.html").read_text(encoding="utf-8")
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8")
+
+    assert 'id="learningInterfaceCancelBtn"' in panel_html
+    assert 'data-i18n="learning_interface_cancel"' in panel_html
+    assert "/panel/cancel_learning_workflow_stage_operation" in panel_js
+    assert "async function cancelActiveLearningInterfaceFlow" in panel_js
+    assert 'on("learningInterfaceCancelBtn", "click", cancelActiveLearningInterfaceFlow)' in panel_js
+    assert "signal: taskController.signal" in panel_js
+    assert "operation," in panel_js
+    assert "options.signal" in panel_js
+    assert "if (options.signal?.aborted)" in panel_js
+    assert "signal: options.signal" in panel_js
+
+
+def test_panel_runs_managed_stage_requests_through_backend_worker() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    assert "/panel/start_learning_stage_worker" in panel_js
+    assert "/panel/learning_stage_worker/" in panel_js
+    assert "vision_observe_screen" in panel_js
+    assert "panel_learning_recognition_trial" in panel_js
+    assert "panel_learning_two_stage_understanding" in panel_js
+    assert "panel_learning_model_review_repair" in panel_js
+    assert "panel_learning_calibration_sequence" in panel_js
+    assert '"vision_locate_target"' not in panel_js
+    assert "backend_process_worker" in panel_js
+    assert "backend_compute_termination" in panel_js
+    assert "activeLearningStageTaskContext?.cancelled === true" in panel_js
+
+
+def test_panel_production_flow_follows_backend_started_stage_workers() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    start = panel_js.index("async function runLearningInterfaceFlow")
+    end = panel_js.index("async function completeLearningInterfaceReadonlyFlow", start)
+    body = panel_js[start:end]
+
+    assert "followContinuationChain: true" in body
+    assert "next_stage_worker" in panel_js
+    assert "runLearningTwoStageUnderstanding(" not in body
+    assert "runLearningDeepCalibration(" not in body
+    assert "runLearningModelReviewRepair(" not in body
+    assert "runLearningDraftTrial(" not in body
+    assert "nextLearningStageOperation(" not in body

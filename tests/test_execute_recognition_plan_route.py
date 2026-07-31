@@ -620,6 +620,61 @@ def test_final_submit_authorization_blocks_unsupported_yes_answers() -> None:
     assert "unsupported_answer_or_hard_risk_present" in guard["authorization_check"]["errors"]
 
 
+def test_final_submit_guard_uses_overlapping_action_evidence_for_vista_direct_point() -> None:
+    point = {"x": 877, "y": 1159}
+    plan = _allowed_plan(
+        goal="Click the final action button at the bottom of the application form",
+        point=point,
+    )
+    plan["recommended_target"] = {
+        "candidate_id": "submit_application_uia",
+        "label": "Submit application",
+        "text": "Submit application",
+        "element": {
+            "role": "button",
+            "bbox": {"x": 802, "y": 1138, "w": 221, "h": 49},
+        },
+    }
+    plan["candidate_result"]["candidates"] = [
+        {
+            "candidate_id": "submit_application_uia",
+            "label": "Submit application",
+            "text": "Submit application",
+            "element": {
+                "role": "button",
+                "bbox": {"x": 802, "y": 1138, "w": 221, "h": 49},
+            },
+        },
+        {
+            "candidate_id": "vista_direct_candidate",
+            "label": "Click the final action button at the bottom of the application form",
+            "element": {
+                "role": "button",
+                "bbox": {"x": 853, "y": 1135, "w": 48, "h": 48},
+            },
+        },
+    ]
+    plan["pre_click_decision"].update(
+        {
+            "selected_candidate_id": "vista_direct_candidate",
+            "selected_click_point": point,
+        }
+    )
+
+    guard = action_api._final_submit_guard_decision(
+        request=ExecuteRecognitionPlanRequest(
+            goal=plan["goal"],
+            metadata={"forbid_final_submit": True},
+        ),
+        plan=plan,
+        pre_click=plan["pre_click_decision"],
+    )
+
+    assert guard["allowed"] is False
+    assert "submit application" in guard["matched_terms"]
+    assert "Submit application" in guard["selected_texts"]
+
+
 def test_execute_mode_final_submit_guard_ignores_negative_goal_constraint(monkeypatch) -> None:
     clicked: dict[str, int] = {}
     monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: _bound_window())

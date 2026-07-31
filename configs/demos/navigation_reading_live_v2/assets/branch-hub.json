@@ -1,0 +1,61 @@
+{
+  "contract_version": "single_interface_asset_v1",
+  "interface_id": "branch_hub",
+  "application_identity_key": "web:navigation-branching-lab",
+  "display_name": "Operations Workspace",
+  "surface_type": "navigation_hub",
+  "state_signature": "branch_hub:reviewed",
+  "artifact_is_authorization": false,
+  "fixed_anchors": [
+    {
+      "content_id": "hub_identity",
+      "label": "Operations Workspace Interface",
+      "source_kind": "state",
+      "source_id": "branch_hub",
+      "content_behavior": "fixed_label",
+      "agent_usage": "identity_anchor",
+      "read_policy": "on_interface_match",
+      "agent_description": "Confirm the reviewed workspace hub."
+    }
+  ],
+  "dynamic_slots": [],
+  "controls": [
+    {
+      "control_id": "open_incident",
+      "label": "Open incident report",
+      "role": "button",
+      "agent_description": "Open the incident report required by the task.",
+      "review_status": "human_reviewed"
+    },
+    {
+      "control_id": "open_policy",
+      "label": "Open policy dialog",
+      "role": "button",
+      "agent_description": "Open the policy dialog after returning from the incident report.",
+      "review_status": "human_reviewed"
+    },
+    {
+      "control_id": "open_updates",
+      "label": "Open live updates",
+      "role": "button",
+      "agent_description": "Open the bounded live updates collection after reviewing the policy dialog.",
+      "review_status": "human_reviewed"
+    }
+  ],
+  "action_candidates": [],
+  "verification_rules": [
+    {
+      "rule_id": "hub_transition_visible",
+      "description": "The selected reviewed destination identity is visible."
+    }
+  ],
+  "blockers": [],
+  "review": {
+    "status": "human_reviewed",
+    "manual_revision": {
+      "semantic_description": "Use task progress to choose the next unfinished branch."
+    }
+  },
+  "evidence": {},
+  "execute_binding_enabled": false
+}

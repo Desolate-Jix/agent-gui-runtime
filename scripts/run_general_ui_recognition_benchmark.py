@@ -23,6 +23,48 @@ from app.learn.recognition.trace_input import (
 )
 
 
+_OWNERSHIP_REGION_ROLE_ALIASES = (
+    ("conversation_list", "conversation_list"),
+    ("message_thread", "message_thread"),
+    ("browser_chrome", "browser_chrome"),
+    ("page_header", "top_bar"),
+    ("top_bar", "top_bar"),
+    ("left_sidebar", "left_nav"),
+    ("left_nav", "left_nav"),
+    ("primary_area", "main_content"),
+    ("main_content", "main_content"),
+    ("status_bar", "bottom_bar"),
+    ("bottom_bar", "bottom_bar"),
+)
+
+
+def _canonical_ownership_region_role(region_id: str) -> str:
+    normalized = str(region_id or "").casefold()
+    for token, role in _OWNERSHIP_REGION_ROLE_ALIASES:
+        if token in normalized:
+            return role
+    return normalized.removeprefix("structure_region_")
+
+
+def _resolve_ownership_region(
+    regions: dict[str, dict[str, Any]],
+    region_id: str,
+) -> tuple[dict[str, Any] | None, str, str | None]:
+    exact = regions.get(region_id)
+    if exact is not None:
+        return exact, "exact_region_id", region_id
+    expected_role = _canonical_ownership_region_role(region_id)
+    aliases = [
+        (candidate_id, region)
+        for candidate_id, region in regions.items()
+        if _canonical_ownership_region_role(candidate_id) == expected_role
+    ]
+    if len(aliases) == 1:
+        resolved_id, resolved = aliases[0]
+        return resolved, "canonical_role_alias", resolved_id
+    return None, "unresolved", None
+
+
 def _evaluate_ownership_golden(
     report: dict[str, Any],
     annotations: list[dict[str, Any]],
@@ -39,7 +81,7 @@ def _evaluate_ownership_golden(
         region_id = str(annotation.get("region_id") or "")
         item_id = str(annotation.get("item_id") or "")
         expected_role = str(annotation.get("expected_owner_role") or "")
-        region = regions.get(region_id)
+        region, region_resolution, resolved_region_id = _resolve_ownership_region(regions, region_id)
         owner_group_id = ""
         actual_role = ""
         failure_category = ""
@@ -65,6 +107,8 @@ def _evaluate_ownership_golden(
             {
                 "annotation_id": annotation_id,
                 "region_id": region_id,
+                "resolved_region_id": resolved_region_id,
+                "region_resolution": region_resolution,
                 "item_id": item_id,
                 "expected_owner_role": expected_role,
                 "actual_owner_role": actual_role or None,
@@ -379,6 +423,17 @@ def evaluate_case_report(
     for group in groups:
         role = str(group.get("role") or "")
         group_role_counts[role] = group_role_counts.get(role, 0) + 1
+    control_parents: list[dict[str, Any]] = []
+    for region in regions:
+        region_parents = region.get("control_parents") if isinstance(region.get("control_parents"), list) else None
+        if region_parents is None:
+            streams = region.get("stage2_streams") if isinstance(region.get("stage2_streams"), dict) else {}
+            region_parents = streams.get("control_parents") if isinstance(streams.get("control_parents"), list) else []
+        control_parents.extend(parent for parent in region_parents if isinstance(parent, dict))
+    control_parent_role_counts: dict[str, int] = {}
+    for parent in control_parents:
+        role = str(parent.get("role") or "")
+        control_parent_role_counts[role] = control_parent_role_counts.get(role, 0) + 1
     item_role_counts: dict[str, int] = {}
     for region in regions:
         for item in region.get("numbered_items", []) if isinstance(region.get("numbered_items"), list) else []:
@@ -564,6 +619,15 @@ def evaluate_case_report(
         for role, minimum in (expectations.get("required_group_roles") or {}).items():
             actual = int(group_role_counts.get(str(role), 0))
             add(f"required_group_role:{role}", actual >= int(minimum), {"min": int(minimum)}, actual, "semantics")
+        for role, minimum in (expectations.get("required_control_parent_roles") or {}).items():
+            actual = int(control_parent_role_counts.get(str(role), 0))
+            add(
+                f"required_control_parent_role:{role}",
+                actual >= int(minimum),
+                {"min": int(minimum)},
+                actual,
+                "visual_object_structure",
+            )
         for role in expectations.get("forbidden_group_roles") or []:
             actual = int(group_role_counts.get(str(role), 0))
             add(f"forbidden_group_role:{role}", actual == 0, 0, actual, "anti_pollution")
@@ -625,6 +689,7 @@ def evaluate_case_report(
         "safety_pass": safety_pass,
         "known_limitation_reproduced": known_limitation_reproduced,
         "group_role_counts": group_role_counts,
+        "control_parent_role_counts": control_parent_role_counts,
         "item_role_counts": item_role_counts,
         "structure_type_counts": structure_type_counts,
         "hierarchy_summary": hierarchy.get("summary") if isinstance(hierarchy.get("summary"), dict) else {},
@@ -638,7 +703,12 @@ def evaluate_case_report(
     }
 
 
-def summarize_metrics(cases: list[dict[str, Any]], invalid_cases: list[dict[str, Any]]) -> dict[str, Any]:
+def summarize_metrics(
+    cases: list[dict[str, Any]],
+    invalid_cases: list[dict[str, Any]],
+    *,
+    ownership_golden_fixture_status: str = "valid",
+) -> dict[str, Any]:
     supported = [
         case
         for case in cases
@@ -695,9 +765,30 @@ def summarize_metrics(cases: list[dict[str, Any]], invalid_cases: list[dict[str,
             "minimum_application_family_threshold": 2,
             "interpretation": "model-selected class profile coverage on fixed recorded surfaces; not class reliability",
         }
+    required_fixture_invalid = ownership_golden_fixture_status == "invalid"
+    supported_capability = (
+        {
+            "passed": 0,
+            "attempted": 0,
+            "rate": "not_covered",
+            "reason": "ownership_golden_fixture_invalid",
+            "interpretation": (
+                "required ownership golden fixture is invalid; supported case checks are diagnostic only and cannot "
+                "be reported as benchmark capability passes"
+            ),
+        }
+        if required_fixture_invalid
+        else {
+            "passed": supported_passed,
+            "attempted": attempted,
+            "rate": round(supported_passed / attempted, 4) if attempted else "not_covered",
+            "interpretation": "fixed recorded-surface hierarchy benchmark only; not model accuracy or general UI reliability",
+        }
+    )
     return {
         "case_count": len(cases) + len(invalid_cases),
         "valid_case_count": len(cases),
+        "benchmark_validity_status": "invalid_required_fixture" if required_fixture_invalid else "valid",
         "application_family_count": len(families),
         "application_families": families,
         "supported_application_family_count": len(supported_families),
@@ -707,12 +798,7 @@ def summarize_metrics(cases: list[dict[str, Any]], invalid_cases: list[dict[str,
             "minimum_diversity_reached" if len(supported_families) >= 8 else "insufficient_application_diversity"
         ),
         "reliability_family_threshold": 8,
-        "supported_capability": {
-            "passed": supported_passed,
-            "attempted": attempted,
-            "rate": round(supported_passed / attempted, 4) if attempted else "not_covered",
-            "interpretation": "fixed recorded-surface hierarchy benchmark only; not model accuracy or general UI reliability",
-        },
+        "supported_capability": supported_capability,
         "known_limitation_count": sum(1 for case in cases if case.get("case_outcome") == "known_limitation_reproduced"),
         "invalid_fixture_count": len(invalid_cases),
         "repeated_state_case_count": sum(1 for case in cases if case.get("repeated_application_state") is True),
@@ -729,6 +815,147 @@ def summarize_metrics(cases: list[dict[str, Any]], invalid_cases: list[dict[str,
             "Case count and application-family count are separate. Repeated states test regression stability and do not "
             "increase application-family coverage. No aggregate system success rate is reported."
         ),
+    }
+
+
+def build_regression_diagnosis(
+    previous_report: dict[str, Any],
+    current_report: dict[str, Any],
+) -> dict[str, Any]:
+    """对固定基准的旧失败和当前结果做逐项归因，不改变任何验收标准。"""
+    previous_cases = {
+        str(case.get("case_id") or ""): case
+        for case in previous_report.get("cases", [])
+        if isinstance(case, dict) and str(case.get("case_id") or "")
+    }
+    current_cases = {
+        str(case.get("case_id") or ""): case
+        for case in current_report.get("cases", [])
+        if isinstance(case, dict) and str(case.get("case_id") or "")
+    }
+    diagnosed_cases: list[dict[str, Any]] = []
+    category_counts: dict[str, int] = {}
+    for case_id, previous_case in previous_cases.items():
+        previous_failures = [
+            assertion
+            for assertion in previous_case.get("failed_assertions", [])
+            if isinstance(assertion, dict)
+        ]
+        if not previous_failures:
+            continue
+        current_case = current_cases.get(case_id, {})
+        current_assertions = {
+            str(assertion.get("assertion_id") or ""): assertion
+            for assertion in current_case.get("assertions", [])
+            if isinstance(assertion, dict) and str(assertion.get("assertion_id") or "")
+        }
+        diagnoses: list[dict[str, Any]] = []
+        for failure in previous_failures:
+            assertion_id = str(failure.get("assertion_id") or "")
+            if assertion_id == "ownership_golden_holdout":
+                continue
+            current_assertion = current_assertions.get(assertion_id)
+            if current_assertion is None:
+                root_category = "benchmark_expectation_changed"
+                root_cause = "the current manifest no longer evaluates this assertion; review the expectation change separately"
+                current_actual: Any = "not_evaluated"
+            elif current_assertion.get("passed") is True:
+                root_category = "code_path_repaired"
+                root_cause = "the same fixed-source assertion now passes without weakening its expected value"
+                current_actual = current_assertion.get("actual")
+            else:
+                root_category = "failure_remains"
+                root_cause = "the same fixed-source assertion still fails"
+                current_actual = current_assertion.get("actual")
+            category_counts[root_category] = category_counts.get(root_category, 0) + 1
+            diagnoses.append(
+                {
+                    "assertion_id": assertion_id,
+                    "metric_category": failure.get("category"),
+                    "expected": failure.get("expected"),
+                    "previous_actual": failure.get("actual"),
+                    "current_actual": current_actual,
+                    "root_cause_category": root_category,
+                    "root_cause": root_cause,
+                }
+            )
+
+        previous_ownership = {
+            str(check.get("annotation_id") or ""): check
+            for check in (previous_case.get("ownership_golden") or {}).get("checks", [])
+            if isinstance(check, dict)
+            and str(check.get("annotation_id") or "")
+            and check.get("passed") is not True
+        }
+        current_ownership = {
+            str(check.get("annotation_id") or ""): check
+            for check in (current_case.get("ownership_golden") or {}).get("checks", [])
+            if isinstance(check, dict) and str(check.get("annotation_id") or "")
+        }
+        ownership_diagnoses: list[dict[str, Any]] = []
+        for annotation_id, previous_check in previous_ownership.items():
+            current_check = current_ownership.get(annotation_id)
+            if current_check is None:
+                root_category = "ownership_golden_annotation_removed"
+                root_cause = "the previous human annotation is absent from the current fixture and requires adjudication"
+            elif str(previous_check.get("item_id") or "") != str(current_check.get("item_id") or ""):
+                root_category = "ownership_golden_item_id_updated"
+                root_cause = "the human annotation was rebound from an unstable generated item id to the current stable source id"
+            elif current_check.get("passed") is True:
+                root_category = "ownership_source_lineage_repaired"
+                root_cause = "the same human owner-role annotation now resolves through the repaired source lineage"
+            else:
+                root_category = "ownership_failure_remains"
+                root_cause = "the current pipeline still cannot resolve the annotated item and owner role"
+            category_counts[root_category] = category_counts.get(root_category, 0) + 1
+            ownership_diagnoses.append(
+                {
+                    "annotation_id": annotation_id,
+                    "expected_owner_role": previous_check.get("expected_owner_role"),
+                    "previous_item_id": previous_check.get("item_id"),
+                    "current_item_id": current_check.get("item_id") if current_check else None,
+                    "previous_actual_owner_role": previous_check.get("actual_owner_role"),
+                    "current_actual_owner_role": current_check.get("actual_owner_role") if current_check else None,
+                    "previous_failure_category": previous_check.get("failure_category"),
+                    "current_failure_category": current_check.get("failure_category") if current_check else None,
+                    "root_cause_category": root_category,
+                    "root_cause": root_cause,
+                }
+            )
+        diagnosed_cases.append(
+            {
+                "case_id": case_id,
+                "previous_case_outcome": previous_case.get("case_outcome"),
+                "current_case_outcome": current_case.get("case_outcome") or "missing_current_case",
+                "screenshot_path": current_case.get("screenshot_path") or previous_case.get("screenshot_path"),
+                "trace_path": current_case.get("trace_path") or previous_case.get("trace_path"),
+                "previous_overlay_path": previous_case.get("overlay_path"),
+                "current_overlay_path": current_case.get("overlay_path"),
+                "diagnoses": diagnoses,
+                "ownership_diagnoses": ownership_diagnoses,
+            }
+        )
+    remaining_failure_case_count = sum(
+        1
+        for case in current_cases.values()
+        if str(case.get("case_outcome") or "") == "supported_fail"
+        or bool(case.get("failed_assertions"))
+    )
+    fixture_statuses = {
+        "previous": str((previous_report.get("ownership_golden_fixture") or {}).get("status") or "not_reported"),
+        "current": str((current_report.get("ownership_golden_fixture") or {}).get("status") or "not_reported"),
+    }
+    return {
+        "contract_version": "general_ui_recognition_regression_diagnosis_v1",
+        "summary": {
+            "previous_failed_case_count": len(diagnosed_cases),
+            "remaining_failure_case_count": remaining_failure_case_count,
+            "root_cause_category_counts": category_counts,
+            "ownership_golden_fixture_status": fixture_statuses,
+            "stale_fixture_involved": "invalid" in fixture_statuses.values(),
+            "interpretation": "fixed-artifact regression diagnosis; not model accuracy or general UI reliability",
+        },
+        "cases": diagnosed_cases,
     }
 
 
@@ -787,7 +1014,11 @@ def run_benchmark(*, manifest_path: str | Path, out_dir: str | Path) -> dict[str
                 }
             )
         results.append(result)
-    summary = summarize_metrics(results, invalid_cases)
+    summary = summarize_metrics(
+        results,
+        invalid_cases,
+        ownership_golden_fixture_status=str(ownership_golden_fixture.get("status") or "not_configured"),
+    )
     ownership_golden_summary = _summarize_ownership_golden(results, ownership_golden_fixture)
     review_evidence_summary = {
         "available": sum(1 for result in results if (result.get("review_evidence") or {}).get("status") == "available"),

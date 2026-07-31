@@ -1,0 +1,21 @@
+{
+  "result": {
+    "app_name": "protocol fixture",
+    "image_path": "tests/fixtures/surface_adapter_protocol/screen.ppm",
+    "image_size": {"width": 1200, "height": 800},
+    "interface_classification": {
+      "category": "media_catalog",
+      "confidence": 0.93,
+      "structure_signals": {
+        "media_cards": true,
+        "playback_controls": true,
+        "feed_items": false
+      }
+    },
+    "screen_inventory": [
+      {"item_id": "controls", "role": "player_controls", "bbox": {"x": 200, "y": 0, "w": 800, "h": 72}},
+      {"item_id": "album_1", "role": "media_card", "bbox": {"x": 200, "y": 120, "w": 240, "h": 300}},
+      {"item_id": "album_2", "role": "media_card", "bbox": {"x": 460, "y": 120, "w": 240, "h": 300}}
+    ]
+  }
+}

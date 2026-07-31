@@ -50,10 +50,14 @@ def build_read_region_batch_report(
                 "scroll_trace_path": capture.get("scroll_trace_path"),
                 "scroll_wheel_clicks": capture.get("scroll_wheel_clicks"),
                 "scroll_effect_status": capture.get("scroll_effect_status"),
+                "reached_bottom": capture.get("reached_bottom") is True,
             }
         )
         if wrong_scope_detected:
             stop_reason = "wrong_scope_detected"
+            break
+        if capture.get("reached_bottom") is True:
+            stop_reason = "reached_bottom"
             break
         if consecutive_no_new_content >= max(1, int(stop_after_no_new_content)):
             stop_reason = "no_new_content"
@@ -61,6 +65,13 @@ def build_read_region_batch_report(
 
     if len(captures) < max_captures and stop_reason == "max_captures":
         stop_reason = "captures_exhausted"
+    reached_bottom = stop_reason == "reached_bottom"
+    if stop_reason == "wrong_scope_detected":
+        completion_status = "blocked"
+    elif reached_bottom:
+        completion_status = "complete"
+    else:
+        completion_status = "incomplete"
 
     return {
         "contract_version": CONTRACT_VERSION,
@@ -78,6 +89,8 @@ def build_read_region_batch_report(
         "unique_line_count": len(merged_lines),
         "wrong_scope_detected": bool(wrong_scope_detected),
         "stop_reason": stop_reason,
+        "completion_status": completion_status,
+        "reached_bottom": reached_bottom,
         "status": "blocked_wrong_scope" if wrong_scope_detected else ("ok" if merged_lines else "empty"),
     }
 

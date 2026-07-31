@@ -102,6 +102,81 @@ def test_rank_candidates_does_not_promote_negated_button_labels_over_requested_r
     assert continue_candidate.score < result.candidates[0].score
 
 
+def test_rank_candidates_prefers_explicit_radio_role_over_generic_heading_and_duplicate_text() -> None:
+    structure = _structure(
+        [
+            _element("resume_heading", "Resumé", role="text"),
+            _element("resume_radio", "WENQING_JI.pdf", role="radio"),
+            _element("resume_text", "WENQING_JI.pdf", role="text"),
+        ]
+    )
+
+    result = rank_candidates(
+        CandidateRankRequest(
+            goal="Select WENQING_JI.pdf resume radio button",
+            page_structure=structure,
+            top_k=3,
+        )
+    )
+
+    assert result.candidates[0].element_id == "resume_radio"
+    assert "explicit_goal_role_match" in result.candidates[0].reasons
+    assert result.margin_to_second is not None
+    assert result.margin_to_second >= 0.06
+
+
+def test_rank_candidates_prefers_explicit_radio_over_same_topic_textarea() -> None:
+    structure = _structure(
+        [
+            _element(
+                "cover_letter_textarea",
+                "Cover letter text box containing Dear Hiring Manager, I am writing to apply for this role.",
+                role="input",
+            ),
+            _element(
+                "no_cover_letter_radio",
+                "Don't include a cover letter",
+                role="radio",
+            ),
+        ]
+    )
+
+    result = rank_candidates(
+        CandidateRankRequest(
+            goal="Select the Don't include a cover letter radio button",
+            page_structure=structure,
+            top_k=2,
+        )
+    )
+
+    assert result.candidates[0].element_id == "no_cover_letter_radio"
+    assert "explicit_goal_role_match" in result.candidates[0].reasons
+    assert "text_entry_target_matches_field_goal" not in result.candidates[1].reasons
+
+
+def test_rank_candidates_prefers_explicit_combobox_over_duplicate_question_text() -> None:
+    label = "How many years' experience do you have as a Trading Manager?"
+    structure = _structure(
+        [
+            _element("experience_question", label, role="text"),
+            _element("experience_combobox", label, role="combobox"),
+        ]
+    )
+
+    result = rank_candidates(
+        CandidateRankRequest(
+            goal=f"Open the combobox for {label}",
+            page_structure=structure,
+            top_k=2,
+        )
+    )
+
+    assert result.candidates[0].element_id == "experience_combobox"
+    assert "explicit_goal_role_match" in result.candidates[0].reasons
+    assert result.margin_to_second is not None
+    assert result.margin_to_second >= 0.06
+
+
 def test_rank_candidates_promotes_explicit_apply_action_over_social_share_buttons() -> None:
     structure = _structure(
         [

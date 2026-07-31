@@ -9,6 +9,17 @@ def observe_bundle_from_trace_result(result: dict[str, Any], *, trace_path: Path
     """把历史或当前 observe trace 统一为学习识别输入。"""
 
     nested_bundle = result.get("observe_bundle") if isinstance(result.get("observe_bundle"), dict) else {}
+    two_stage = (
+        result.get("two_stage_understanding")
+        if isinstance(result.get("two_stage_understanding"), dict)
+        else {}
+    )
+    if not nested_bundle:
+        nested_bundle = (
+            two_stage.get("observe_bundle")
+            if isinstance(two_stage.get("observe_bundle"), dict)
+            else {}
+        )
     image_size = result.get("image_size") if isinstance(result.get("image_size"), dict) else {}
     if not image_size:
         image_size = nested_bundle.get("image_size") if isinstance(nested_bundle.get("image_size"), dict) else {}
@@ -30,7 +41,20 @@ def observe_bundle_from_trace_result(result: dict[str, Any], *, trace_path: Path
         },
         "source_trace_path": str(trace_path),
     }
+    nested_sources = (
+        nested_bundle.get("sources")
+        if isinstance(nested_bundle.get("sources"), dict)
+        else {}
+    )
+    if nested_sources:
+        bundle["sources"] = deepcopy(nested_sources)
     screen_reading = result.get("screen_reading") if isinstance(result.get("screen_reading"), dict) else {}
+    if not screen_reading:
+        screen_reading = (
+            nested_bundle.get("screen_reading")
+            if isinstance(nested_bundle.get("screen_reading"), dict)
+            else {}
+        )
     if not screen_reading:
         semantic_keys = (
             "screen_summary",
@@ -140,6 +164,19 @@ def stage1_inventory_from_trace_result(result: dict[str, Any]) -> list[dict[str,
                 },
             }
         )
+    if not items:
+        learning_draft = (
+            result.get("learning_draft")
+            if isinstance(result.get("learning_draft"), dict)
+            else {}
+        )
+        items.extend(
+            _items_from_learning_draft_regions(
+                learning_draft.get("regions")
+                if isinstance(learning_draft.get("regions"), list)
+                else []
+            )
+        )
     return [item for item in items if item.get("bbox")]
 
 
@@ -168,7 +205,7 @@ def _items_from_observe_screen_inventory(screen_inventory: dict[str, Any]) -> li
             original_source = str(value.get("source") or metadata.get("source") or source_name)
             evidence_level = str(value.get("evidence_level") or metadata.get("evidence_level") or "")
             metadata.setdefault("source", original_source)
-            metadata.setdefault("source_id", item_id)
+            metadata.setdefault("source_id", str(value.get("source_id") or item_id))
             if evidence_level:
                 metadata.setdefault("evidence_level", evidence_level)
             items.append(
@@ -211,9 +248,45 @@ def _items_from_screen_inventory_list(screen_inventory: list[Any]) -> list[dict[
                 "source_evidence": source_evidence or ["screen_inventory_item"],
                 "metadata": {
                     "source": "screen_inventory.list",
-                    "source_id": str(value.get("item_id") or value.get("id") or ""),
+                    "source_id": str(
+                        value.get("source_id") or value.get("item_id") or value.get("id") or ""
+                    ),
                     "evidence_level": str(value.get("evidence_level") or ""),
                 },
+            }
+        )
+    return items
+
+
+def _items_from_learning_draft_regions(regions: list[Any]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for index, value in enumerate(regions):
+        if not isinstance(value, dict):
+            continue
+        bbox = _bbox(value.get("bbox"))
+        if not bbox.get("w") or not bbox.get("h"):
+            continue
+        item_id = str(
+            value.get("item_id")
+            or value.get("region_id")
+            or value.get("id")
+            or f"learning_draft_region_{index + 1}"
+        )
+        label = str(value.get("label") or value.get("name") or item_id)
+        metadata = deepcopy(value.get("metadata")) if isinstance(value.get("metadata"), dict) else {}
+        metadata.setdefault("source", "learning_draft.regions")
+        metadata.setdefault("source_id", item_id)
+        items.append(
+            {
+                "item_id": item_id,
+                "label": label,
+                "role": str(value.get("role") or value.get("kind") or "review_region"),
+                "item_type": str(value.get("item_type") or "review_only"),
+                "bbox": bbox,
+                "review_only": True,
+                "grounding_eligible": False,
+                "source_evidence": ["learning_draft_region"],
+                "metadata": metadata,
             }
         )
     return items

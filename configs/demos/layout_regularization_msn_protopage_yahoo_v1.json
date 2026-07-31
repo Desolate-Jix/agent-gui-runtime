@@ -1,0 +1,24 @@
+{
+  "contract_version": "learn_layout_regularization_experiment_manifest_v1",
+  "description": "Read-only repeated-card alignment experiment using fixed class-rule replay artifacts.",
+  "cases": [
+    {
+      "case_id": "msn_aggregate_portal",
+      "replay_report_path": "logs/benchmarks/interface_class_rule_aggregate_portal_demo_v1/msn_aggregate_portal/learn_two_stage_replay_report_20260730-165407.json",
+      "source_image_path": "artifacts/screenshots/microsoft-edge__capture__full-window__20260730-035722-297980.png",
+      "minimum_group_size": 3
+    },
+    {
+      "case_id": "protopage_aggregate_portal",
+      "replay_report_path": "logs/benchmarks/interface_class_rule_aggregate_portal_demo_v1/protopage_aggregate_portal/learn_two_stage_replay_report_20260730-165405.json",
+      "source_image_path": "artifacts/screenshots/browser-class-aggregate-holdout-20260730/protopage-home.png",
+      "minimum_group_size": 3
+    },
+    {
+      "case_id": "yahoo_nz_feed_workspace",
+      "replay_report_path": "logs/benchmarks/interface_class_rule_aggregate_portal_demo_v1/yahoo_nz_feed_workspace/learn_two_stage_replay_report_20260730-165408.json",
+      "source_image_path": "artifacts/screenshots/browser-class-aggregate-holdout-20260730/yahoo-nz-home.png",
+      "minimum_group_size": 3
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "result": {
+    "app_name": "protocol holdout",
+    "image_path": "tests/fixtures/surface_adapter_protocol/screen.ppm",
+    "image_size": {"width": 1000, "height": 700},
+    "interface_classification": {
+      "category": "mail_workspace",
+      "confidence": 0.91,
+      "structure_signals": {
+        "mail_or_email_rows": true,
+        "mailbox_navigation": true
+      }
+    },
+    "screen_inventory": [
+      {"item_id": "mailbox_nav", "role": "mailbox_navigation", "label": "Inbox", "bbox": {"x": 0, "y": 0, "w": 220, "h": 700}},
+      {"item_id": "mail_1", "role": "mail_row", "label": "Only one visible row", "bbox": {"x": 220, "y": 80, "w": 780, "h": 48}}
+    ]
+  }
+}

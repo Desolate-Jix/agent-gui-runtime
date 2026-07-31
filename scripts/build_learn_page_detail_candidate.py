@@ -99,9 +99,29 @@ def build_learn_page_detail_candidate(
         or page_details.get("compiled_overlay_path")
         or ""
     ).strip()
+    screenshot_path = (
+        precise.get("screenshot_path")
+        or screen.get("image_path")
+        or source_payload.get("screenshot_path")
+        or source_visuals.get("screenshot_path")
+    )
+    compiled_overlay_path = (
+        fused_compiled_overlay_path
+        or calibration_overlay_path
+        or precise.get("compiled_overlay_path")
+        or source_visuals.get("compiled_overlay_path")
+    )
+    source_identity = _learning_repaired_source_identity(
+        source=two_stage_source or source_payload,
+        source_file=source_file,
+        root=root,
+        screenshot_path=screenshot_path,
+        compiled_overlay_path=compiled_overlay_path,
+    )
     payload = {
         "contract_version": "learn_page_detail_candidate_v1",
         "source_path": _relative_path(source_file, root),
+        "source_identity": source_identity,
         "source_detail_shape": source_detail_shape,
         "precise_understanding_candidate_path": _display_path(precise.get("report_path"), root=root),
         "screen_summary": "Auto-generated page detail candidate from Learn Mode full-screen understanding and calibration evidence.",
@@ -109,18 +129,12 @@ def build_learn_page_detail_candidate(
         if source_detail_shape == "learn_two_stage_screen_understanding_v1"
         else "spatial_bbox_order",
         "readiness_status": readiness_status,
-        "screenshot_path": precise.get("screenshot_path")
-        or screen.get("image_path")
-        or source_payload.get("screenshot_path")
-        or source_visuals.get("screenshot_path"),
+        "screenshot_path": screenshot_path,
         "full_screen_understanding_overlay_path": fused_full_overlay_path
         or calibration_overlay_path
         or precise.get("full_screen_understanding_overlay_path")
         or source_visuals.get("full_screen_understanding_overlay_path"),
-        "compiled_overlay_path": fused_compiled_overlay_path
-        or calibration_overlay_path
-        or precise.get("compiled_overlay_path")
-        or source_visuals.get("compiled_overlay_path"),
+        "compiled_overlay_path": compiled_overlay_path,
         "calibration_overlay_path": calibration_overlay_path,
         "final_fusion_overlay": bool(verified_final_fusion),
         "display_overlay_source": str(verified_final_fusion.get("display_overlay_source") or ""),
@@ -188,6 +202,64 @@ def build_learn_page_detail_candidate(
     if json_stdout:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     return payload
+
+
+def _learning_repaired_source_identity(
+    *,
+    source: dict[str, Any],
+    source_file: Path,
+    root: Path,
+    screenshot_path: Any,
+    compiled_overlay_path: Any,
+) -> dict[str, Any]:
+    review_repair = _dict(source.get("model_review_repair"))
+    stage2 = _dict(source.get("stage2_numbering"))
+    final_numbering = _dict(stage2.get("final_numbering"))
+    integrity = _dict(review_repair.get("integrity_gate"))
+    final_revision = str(
+        review_repair.get("final_numbering_revision")
+        or final_numbering.get("revision")
+        or stage2.get("graph_revision")
+        or ""
+    ).strip()
+    if not final_revision:
+        return {}
+
+    dual_stream_regions = []
+    visual_object_count = 0
+    semantic_group_count = 0
+    association_count = 0
+    for region in _list_of_dicts(stage2.get("regions")):
+        streams = _dict(region.get("stage2_streams"))
+        if streams.get("contract_version") != "learn_stage2_dual_streams_v1":
+            continue
+        dual_stream_regions.append(region)
+        visual_object_count += len(_list_of_dicts(streams.get("visual_objects")))
+        semantic_group_count += len(_list_of_dicts(streams.get("semantic_groups")))
+        association_count += len(_list_of_dicts(streams.get("associations")))
+
+    return {
+        "contract_version": "learning_repaired_source_identity_v1",
+        "source_path": _relative_path(source_file, root),
+        "source_contract_version": str(source.get("contract_version") or ""),
+        "source_artifact_type": str(source.get("artifact_type") or ""),
+        "source_graph_revision": str(review_repair.get("source_graph_revision") or ""),
+        "reviewed_graph_revision": str(review_repair.get("reviewed_graph_revision") or ""),
+        "final_numbering_revision": final_revision,
+        "capture_sha256": str(
+            integrity.get("actual_capture_sha256")
+            or integrity.get("expected_capture_sha256")
+            or final_numbering.get("capture_sha256")
+            or ""
+        ),
+        "screenshot_path": str(screenshot_path or source.get("source_image_path") or ""),
+        "compiled_overlay_path": str(compiled_overlay_path or ""),
+        "dual_stream_contract": "learn_stage2_dual_streams_v1" if dual_stream_regions else "",
+        "dual_stream_region_count": len(dual_stream_regions),
+        "visual_object_count": visual_object_count,
+        "semantic_group_count": semantic_group_count,
+        "association_count": association_count,
+    }
 
 
 def _learning_draft_page_details(source: dict[str, Any]) -> dict[str, Any]:

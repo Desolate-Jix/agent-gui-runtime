@@ -1695,7 +1695,221 @@ def test_learn_vista_validation_options_preserve_all_target_scope() -> None:
     assert options["use_numbered_overlay"] is False
 
 
-def test_learn_vista_validation_aborts_batch_on_model_busy_even_when_continue_requested(monkeypatch, tmp_path) -> None:
+def test_learn_vista_validation_options_preserve_revision_bound_batch_resume() -> None:
+    prior_result = {
+        "contract_version": "learn_vista_target_coordinate_validation_v1",
+        "candidate_id": "stage2:revision-1:item-1",
+        "status": "valid",
+    }
+    request = VisionLocateTargetRequestModel(
+        goal="calibrate reviewed controls",
+        agent_mode="learn",
+        learn_depth="deep",
+        metadata={
+            "final_numbering_revision": "revision-1",
+            "learn_vista_coordinate_validation": {
+                "enabled": True,
+                "max_targets": "all",
+                "batch_size": 2,
+                "resume_results": [prior_result],
+                "resume_revision": "revision-1",
+                "stop_on_failure": False,
+            },
+        },
+    )
+
+    options = vision_api._learn_vista_coordinate_validation_options(
+        request,
+        {"runtime": "transformers", "output_contract": "vista_point_v1"},
+    )
+
+    assert options["batch_size"] == 2
+    assert options["resume_results"] == [prior_result]
+    assert options["resume_revision"] == "revision-1"
+    assert options["expected_final_numbering_revision"] == "revision-1"
+
+
+def test_learn_vista_validation_batches_and_resumes_without_repeating_candidates(monkeypatch, tmp_path) -> None:
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (320, 200), color="white").save(image_path)
+    targets = [
+        {
+            "candidate_id": f"stage2:revision-1:item-{index}",
+            "final_numbering_revision": "revision-1",
+            "label": f"Target {index}",
+            "role": "button",
+            "bbox": {"x": 20 + index * 70, "y": 40, "w": 50, "h": 40},
+            "click_point": {"x": 45 + index * 70, "y": 60},
+        }
+        for index in range(3)
+    ]
+    calls: list[str] = []
+
+    def fake_vista(**kwargs):
+        calls.append(kwargs["goal"])
+        index = len(calls) - 1
+        point = {"x": 45 + index * 70, "y": 60}
+        return {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": kwargs["provider_name"],
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(image_path),
+            "goal": kwargs["goal"],
+            "prompt": kwargs["prompt"],
+            "raw_text": __import__("json").dumps([point["x"], point["y"]]),
+            "raw_response": {},
+            "parsed": {"contract_version": "vista_point_v1", "point": point},
+            "point": point,
+            "image_size": {"width": 320, "height": 200},
+        }
+
+    monkeypatch.setattr(vision_api, "_call_vista_point_prompt", fake_vista)
+    first = vision_api._apply_vista_coordinate_validation_to_learn_targets(
+        targets,
+        image_path=str(image_path),
+        image_size={"width": 320, "height": 200},
+        local_config={"model_name": "inclusionAI/VISTA-4B", "output_contract": "vista_point_v1"},
+        options={
+            "enabled": True,
+            "validate_all_targets": True,
+            "batch_size": 2,
+            "resume_results": [],
+            "resume_revision": "revision-1",
+            "expected_final_numbering_revision": "revision-1",
+            "stop_on_failure": False,
+        },
+        timeout_seconds=12,
+    )
+
+    assert len(calls) == 2
+    assert first["status"] == "partial_resumable"
+    assert first["batch"]["attempted_count"] == 2
+    assert first["batch"]["remaining_candidate_ids"] == ["stage2:revision-1:item-2"]
+    assert first["batch"]["resumable"] is True
+
+    second = vision_api._apply_vista_coordinate_validation_to_learn_targets(
+        targets,
+        image_path=str(image_path),
+        image_size={"width": 320, "height": 200},
+        local_config={"model_name": "inclusionAI/VISTA-4B", "output_contract": "vista_point_v1"},
+        options={
+            "enabled": True,
+            "validate_all_targets": True,
+            "batch_size": 2,
+            "resume_results": first["results"],
+            "resume_revision": "revision-1",
+            "expected_final_numbering_revision": "revision-1",
+            "stop_on_failure": False,
+        },
+        timeout_seconds=12,
+    )
+
+    assert len(calls) == 3
+    assert calls[-1] == "Click Target 2"
+    assert second["status"] == "ready"
+    assert second["validated_count"] == 3
+    assert second["batch"]["already_completed_count"] == 2
+    assert second["batch"]["remaining_count"] == 0
+    assert second["batch"]["resumable"] is False
+
+
+def test_learn_vista_validation_rejects_unknown_resume_candidate_without_model_call(monkeypatch, tmp_path) -> None:
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (320, 200), color="white").save(image_path)
+    targets = [
+        {
+            "candidate_id": "stage2:revision-1:item-1",
+            "final_numbering_revision": "revision-1",
+            "label": "Target",
+            "role": "button",
+            "bbox": {"x": 20, "y": 40, "w": 50, "h": 40},
+            "click_point": {"x": 45, "y": 60},
+        }
+    ]
+
+    def unexpected_call(**_kwargs):
+        raise AssertionError("model must not run for stale resume evidence")
+
+    monkeypatch.setattr(vision_api, "_call_vista_point_prompt", unexpected_call)
+    summary = vision_api._apply_vista_coordinate_validation_to_learn_targets(
+        targets,
+        image_path=str(image_path),
+        image_size={"width": 320, "height": 200},
+        local_config={"model_name": "inclusionAI/VISTA-4B", "output_contract": "vista_point_v1"},
+        options={
+            "enabled": True,
+            "validate_all_targets": True,
+            "batch_size": 1,
+            "resume_results": [
+                {
+                    "candidate_id": "stage2:old-revision:item-9",
+                    "status": "valid",
+                }
+            ],
+            "resume_revision": "revision-1",
+            "expected_final_numbering_revision": "revision-1",
+            "stop_on_failure": False,
+        },
+        timeout_seconds=12,
+    )
+
+    assert summary["status"] == "blocked"
+    assert summary["abort_reason"] == "resume_candidate_not_found"
+    assert summary["validated_count"] == 0
+    assert summary["batch"]["resumable"] is False
+
+
+def test_learn_vista_timeout_is_partial_resumable_when_continue_requested(monkeypatch, tmp_path) -> None:
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (320, 200), color="white").save(image_path)
+    targets = [
+        {
+            "candidate_id": f"target-{index}",
+            "label": f"Target {index}",
+            "role": "button",
+            "bbox": {"x": 20 + index * 70, "y": 40, "w": 50, "h": 40},
+            "click_point": {"x": 45 + index * 70, "y": 60},
+        }
+        for index in range(3)
+    ]
+    calls = []
+
+    def timeout_vista(**kwargs):
+        calls.append(kwargs["goal"])
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(vision_api, "_call_vista_point_prompt", timeout_vista)
+    summary = vision_api._apply_vista_coordinate_validation_to_learn_targets(
+        targets,
+        image_path=str(image_path),
+        image_size={"width": 320, "height": 200},
+        local_config={"model_name": "inclusionAI/VISTA-4B", "output_contract": "vista_point_v1"},
+        options={
+            "enabled": True,
+            "validate_all_targets": True,
+            "batch_size": 2,
+            "resume_results": [],
+            "expected_final_numbering_revision": "revision-timeout",
+            "stop_on_failure": False,
+        },
+        timeout_seconds=12,
+    )
+
+    assert calls == ["Click Target 0"]
+    assert summary["status"] == "partial_resumable"
+    assert summary["abort_reason"] == "request_timeout"
+    assert summary["failed_count"] == 1
+    assert summary["batch"]["attempted_candidate_ids"] == ["target-0"]
+    assert summary["batch"]["completed_candidate_ids"] == []
+    assert summary["batch"]["retryable_failure_candidate_ids"] == ["target-0"]
+    assert summary["batch"]["remaining_candidate_ids"] == ["target-0", "target-1", "target-2"]
+    assert summary["batch"]["resumable"] is True
+    assert summary["results"][0]["final_numbering_revision"] == "revision-timeout"
+
+
+def test_learn_vista_model_busy_is_recoverable_without_marking_candidate_completed(monkeypatch, tmp_path) -> None:
     image_path = tmp_path / "screen.png"
     Image.new("RGB", (320, 200), color="white").save(image_path)
     targets = [
@@ -1728,12 +1942,94 @@ def test_learn_vista_validation_aborts_batch_on_model_busy_even_when_continue_re
     )
 
     assert len(calls) == 1
-    assert summary["status"] == "blocked"
+    assert summary["status"] == "partial_resumable"
     assert summary["batch_aborted"] is True
     assert summary["abort_reason"] == "model_busy"
     assert summary["failed_count"] == 1
-    assert summary["skipped_count"] == 2
+    assert summary["skipped_count"] == 3
+    assert summary["batch"]["completed_candidate_ids"] == []
+    assert summary["batch"]["retryable_failure_candidate_ids"] == ["target-0"]
+    assert summary["batch"]["remaining_candidate_ids"] == ["target-0", "target-1", "target-2"]
+    assert summary["batch"]["resumable"] is True
     assert targets[0]["vista_coordinate_validation"]["failure_category"] == "model_busy"
+
+
+def test_learn_vista_resume_retries_transient_failure_instead_of_skipping_candidate(monkeypatch, tmp_path) -> None:
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (320, 200), color="white").save(image_path)
+    targets = [
+        {
+            "candidate_id": "target-0",
+            "label": "Target 0",
+            "role": "button",
+            "bbox": {"x": 20, "y": 40, "w": 50, "h": 40},
+            "click_point": {"x": 45, "y": 60},
+        }
+    ]
+    calls = []
+
+    def busy_then_ready(**kwargs):
+        calls.append(kwargs["goal"])
+        if len(calls) == 1:
+            raise RuntimeError(
+                'local vision endpoint returned HTTP 503: {"error":{"type":"model_busy"}}'
+            )
+        return {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": kwargs["provider_name"],
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(image_path),
+            "goal": kwargs["goal"],
+            "prompt": kwargs["prompt"],
+            "raw_text": "[45, 60]",
+            "raw_response": {},
+            "parsed": {"contract_version": "vista_point_v1", "point": {"x": 45, "y": 60}},
+            "point": {"x": 45, "y": 60},
+            "image_size": {"width": 320, "height": 200},
+        }
+
+    monkeypatch.setattr(vision_api, "_call_vista_point_prompt", busy_then_ready)
+    first = vision_api._apply_vista_coordinate_validation_to_learn_targets(
+        targets,
+        image_path=str(image_path),
+        image_size={"width": 320, "height": 200},
+        local_config={"model_name": "inclusionAI/VISTA-4B", "output_contract": "vista_point_v1"},
+        options={
+            "enabled": True,
+            "validate_all_targets": True,
+            "batch_size": 1,
+            "resume_results": [],
+            "resume_revision": "revision-retry",
+            "expected_final_numbering_revision": "revision-retry",
+            "stop_on_failure": False,
+        },
+        timeout_seconds=12,
+    )
+    second = vision_api._apply_vista_coordinate_validation_to_learn_targets(
+        targets,
+        image_path=str(image_path),
+        image_size={"width": 320, "height": 200},
+        local_config={"model_name": "inclusionAI/VISTA-4B", "output_contract": "vista_point_v1"},
+        options={
+            "enabled": True,
+            "validate_all_targets": True,
+            "batch_size": 1,
+            "resume_results": first["results"],
+            "resume_revision": "revision-retry",
+            "expected_final_numbering_revision": "revision-retry",
+            "stop_on_failure": False,
+        },
+        timeout_seconds=12,
+    )
+
+    assert calls == ["Click Target 0", "Click Target 0"]
+    assert second["status"] == "ready"
+    assert second["batch"]["completed_candidate_ids"] == ["target-0"]
+    assert second["batch"]["remaining_candidate_ids"] == []
+    assert len(second["results"]) == 1
+    assert second["results"][0]["status"] != "failed"
 
 
 def test_learn_all_targets_location_status_reports_blocked_vista_calibration() -> None:
@@ -1752,6 +2048,73 @@ def test_learn_all_targets_location_status_reports_blocked_vista_calibration() -
     assert vision_api._learn_all_targets_location_status(result) == "learn_calibration_blocked"
 
 
+def test_learn_all_targets_location_status_reports_resumable_vista_calibration() -> None:
+    result = {
+        "target_count": 0,
+        "invalid_count": 0,
+        "review_box_count": 0,
+        "calibration_target_count": 4,
+        "vista_coordinate_validation": {
+            "status": "partial_resumable",
+            "batch_aborted": True,
+            "abort_reason": "request_timeout",
+            "batch": {"resumable": True, "remaining_count": 3},
+        },
+    }
+
+    assert vision_api._learn_all_targets_location_status(result) == "learn_calibration_partial"
+
+
+def test_learn_all_targets_builder_preserves_resumable_calibration_status(monkeypatch, tmp_path) -> None:
+    image_path = tmp_path / "resumable_calibration.png"
+    vision_api.Image.new("RGB", (320, 200), (255, 255, 255)).save(image_path)
+    observe_reuse = {
+        "status": "ready",
+        "observe_result": {"image_size": {"width": 320, "height": 200}},
+        "screen_map": {
+            "contract_version": "screen_map_v1",
+            "state_id": "resumable_calibration",
+            "candidates": [],
+            "calibration_candidates": [
+                {
+                    "candidate_id": "target-0",
+                    "label": "Search",
+                    "role": "button",
+                    "bbox": {"x": 20, "y": 30, "w": 80, "h": 30},
+                    "click_point": {"x": 60, "y": 45},
+                    "source": "two_stage_parent_group",
+                }
+            ],
+            "two_stage_calibration_authoritative": True,
+        },
+    }
+
+    def fake_apply(*args, **kwargs):
+        return {
+            "contract_version": "learn_vista_coordinate_validation_summary_v1",
+            "status": "partial_resumable",
+            "batch_aborted": True,
+            "abort_reason": "request_timeout",
+            "batch": {"resumable": True, "remaining_count": 1},
+            "results": [],
+        }
+
+    monkeypatch.setattr(vision_api, "_apply_vista_coordinate_validation_to_learn_targets", fake_apply)
+
+    result = vision_api._build_learn_all_targets_from_screen_map(
+        observe_reuse,
+        image_path=str(image_path),
+        vista_validation={
+            "local_config": {"profile_id": "vista-test"},
+            "options": {"enabled": True},
+            "timeout_seconds": 30,
+        },
+    )
+
+    assert result["status"] == "partial"
+    assert vision_api._learn_all_targets_location_status(result) == "learn_calibration_partial"
+
+
 def test_two_stage_calibration_candidates_keep_region_and_child_locator_context(tmp_path) -> None:
     image_path = tmp_path / "screen.png"
     Image.new("RGB", (320, 200), color="white").save(image_path)
@@ -1764,6 +2127,21 @@ def test_two_stage_calibration_candidates_keep_region_and_child_locator_context(
         __import__("json").dumps(
             {
                 "source_image_path": str(image_path),
+                "surface_adapter_decision": {
+                    "contract_version": "learning_surface_adapter_decision_v1",
+                    "adapter_id": "browser",
+                    "status": "selected_from_visible_evidence",
+                    "excluded_zones": ["browser_chrome"],
+                    "excluded_item_ids": ["address_bar"],
+                    "final_geometry_allowed": False,
+                },
+                "surface_adapter_application": {
+                    "contract_version": "learning_surface_adapter_application_v1",
+                    "adapter_id": "browser",
+                    "excluded_item_ids": ["address_bar"],
+                    "fixed_height_boundary_used": False,
+                    "final_geometry_changed": False,
+                },
                 "fusion": {"compiled_overlay_path": str(numbered_overlay_path)},
                 "stage2_numbering": {
                     "regions": [
@@ -1819,6 +2197,8 @@ def test_two_stage_calibration_candidates_keep_region_and_child_locator_context(
     assert "专属心情好歌" in first["locator_prompt"]
     assert "乐享悠闲" in first["locator_prompt"]
     assert first["locator_prompt"] != second["locator_prompt"]
+    assert attached["screen_map"]["surface_adapter_decision"]["adapter_id"] == "browser"
+    assert attached["screen_map"]["surface_adapter_application"]["fixed_height_boundary_used"] is False
     converted = vision_api._screen_map_calibration_candidate_to_target(first, 0)
     assert converted is not None
     assert converted["locator_prompt"] == first["locator_prompt"]
@@ -1989,6 +2369,177 @@ def test_two_stage_calibration_candidates_use_merged_parent_instead_of_card_frag
     ]
     assert candidates[0]["bbox"] == {"x": 40, "y": 50, "w": 160, "h": 150}
     assert attached["two_stage_calibration_source"]["suppressed_child_evidence_count"] == 4
+
+
+def test_finalized_stage2_calibration_uses_revision_bound_ids_and_rejects_stale_revision(tmp_path) -> None:
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (320, 200), color="white").save(image_path)
+    report_path = tmp_path / "final_stage2.json"
+    report_path.write_text(
+        __import__("json").dumps(
+            {
+                "source_image_path": str(image_path),
+                "model_review_repair": {
+                    "calibration_permission": True,
+                    "final_numbering_revision": "revision-123",
+                    "integrity_gate": {"passed": True, "failure_categories": []},
+                },
+                "stage2_numbering": {
+                    "graph_revision": "revision-123",
+                    "final_numbering": {
+                        "revision": "revision-123",
+                        "source_ids_are_calibration_ids": False,
+                    },
+                    "regions": [
+                        {
+                            "region_id": "provisional_region",
+                            "final_region_id": "final-region:revision:0001",
+                            "label": "Main content",
+                            "bbox": {"x": 0, "y": 0, "w": 320, "h": 200},
+                            "subregion_groups": [],
+                            "numbered_items": [
+                                {
+                                    "item_id": "provisional_item",
+                                    "final_item_id": "final-item:revision:00001",
+                                    "number": "1.1",
+                                    "label": "Open",
+                                    "role": "control",
+                                    "bbox": {"x": 20, "y": 30, "w": 60, "h": 30},
+                                }
+                            ],
+                        }
+                    ],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    attached = vision_api._attach_two_stage_calibration_candidates(
+        {"screen_map": {"candidates": []}},
+        report_path_value=str(report_path),
+        image_path=str(image_path),
+        expected_final_numbering_revision="revision-123",
+    )
+
+    candidate = attached["screen_map"]["calibration_candidates"][0]
+    assert candidate["candidate_id"] == "stage2:final-region:revision:0001:final-item:revision:00001"
+    assert candidate["source_region_id"] == "provisional_region"
+    assert candidate["source_item_id"] == "provisional_item"
+    assert candidate["final_numbering_revision"] == "revision-123"
+    assert attached["two_stage_calibration_source"]["status"] == "ready"
+
+    stale = vision_api._attach_two_stage_calibration_candidates(
+        {"screen_map": {"candidates": []}},
+        report_path_value=str(report_path),
+        image_path=str(image_path),
+        expected_final_numbering_revision="different-revision",
+    )
+    assert stale["two_stage_calibration_source"]["status"] == "stale_graph"
+    assert stale["screen_map"].get("calibration_candidates", []) == []
+
+
+def test_finalized_atomic_control_parent_is_one_revision_bound_calibration_target(tmp_path) -> None:
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (420, 260), color="white").save(image_path)
+    overlay_path = tmp_path / "reviewed-overlay.png"
+    Image.new("RGB", (420, 260), color="gray").save(overlay_path)
+    report_path = tmp_path / "final_stage2.json"
+    report_path.write_text(
+        __import__("json").dumps(
+            {
+                "source_image_path": str(image_path),
+                "fusion": {"compiled_overlay_path": str(overlay_path)},
+                "model_review_repair": {
+                    "calibration_permission": True,
+                    "final_numbering_revision": "revision-control-parent",
+                    "integrity_gate": {"passed": True, "failure_categories": []},
+                },
+                "stage2_numbering": {
+                    "graph_revision": "revision-control-parent",
+                    "final_numbering": {
+                        "revision": "revision-control-parent",
+                        "source_ids_are_calibration_ids": False,
+                    },
+                    "regions": [
+                        {
+                            "region_id": "conversation_list",
+                            "final_region_id": "final-region:conversation-list",
+                            "label": "Conversation list",
+                            "bbox": {"x": 20, "y": 20, "w": 300, "h": 220},
+                            "subregion_groups": [],
+                            "numbered_items": [
+                                {
+                                    "item_id": "avatar_1",
+                                    "number": "2.1",
+                                    "label": "Avatar",
+                                    "role": "icon",
+                                    "bbox": {"x": 35, "y": 48, "w": 42, "h": 42},
+                                },
+                                {
+                                    "item_id": "title_1",
+                                    "number": "2.2",
+                                    "label": "Project discussion",
+                                    "role": "text",
+                                    "bbox": {"x": 88, "y": 48, "w": 140, "h": 20},
+                                },
+                                {
+                                    "item_id": "preview_1",
+                                    "number": "2.3",
+                                    "label": "Latest message preview",
+                                    "role": "text",
+                                    "bbox": {"x": 88, "y": 70, "w": 180, "h": 18},
+                                },
+                            ],
+                            "control_parents": [
+                                {
+                                    "object_id": "control_parent_row_1",
+                                    "final_control_parent_id": "final-control-parent:row-1",
+                                    "label": "Project discussion",
+                                    "role": "atomic_control_parent",
+                                    "bbox": {"x": 35, "y": 44, "w": 245, "h": 50},
+                                    "member_object_ids": ["avatar_1", "title_1", "preview_1"],
+                                    "source": "repeated_visual_anchor_with_row_evidence",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    attached = vision_api._attach_two_stage_calibration_candidates(
+        {"screen_map": {"candidates": []}},
+        report_path_value=str(report_path),
+        image_path=str(image_path),
+        expected_final_numbering_revision="revision-control-parent",
+    )
+
+    candidates = attached["screen_map"]["calibration_candidates"]
+    assert [candidate["candidate_id"] for candidate in candidates] == [
+        "stage2:final-region:conversation-list:final-control-parent:row-1"
+    ]
+    candidate = candidates[0]
+    assert candidate["source_item_id"] == "control_parent_row_1"
+    assert candidate["final_numbering_revision"] == "revision-control-parent"
+    assert candidate["bbox"] == {"x": 35, "y": 44, "w": 245, "h": 50}
+    assert candidate["calibration_target_kind"] == "atomic_control_parent"
+    assert candidate["member_source_item_ids"] == ["avatar_1", "title_1", "preview_1"]
+    assert candidate["locator_context"]["calibration_target_kind"] == "atomic_control_parent"
+    assert candidate["locator_context"]["child_labels"] == ["Avatar", "Latest message preview"]
+    assert "Project discussion" in candidate["locator_prompt"]
+    assert "Latest message preview" in candidate["locator_prompt"]
+    source = attached["two_stage_calibration_source"]
+    assert source["status"] == "ready"
+    assert source["candidate_count"] == 1
+    assert source["suppressed_child_evidence_count"] == 3
+    assert {
+        item["reason"] for item in source["suppressed_child_evidence"]
+    } == {"atomic_control_parent_replaces_member_fragment_calibration"}
+    assert source["numbered_overlay_path"] == str(overlay_path)
 
 
 def test_learn_vista_validation_defaults_to_raw_parent_region_roi_and_restores_full_screen_point(monkeypatch, tmp_path) -> None:
@@ -2624,6 +3175,14 @@ def test_learn_all_targets_filters_browser_chrome_and_tiny_noise(tmp_path) -> No
             "contract_version": "screen_map_v1",
             "state_id": "browser_page",
             "app_name": "python.org",
+            "surface_adapter_decision": {
+                "contract_version": "learning_surface_adapter_decision_v1",
+                "adapter_id": "browser",
+                "status": "selected_from_visible_evidence",
+                "excluded_zones": ["browser_chrome"],
+                "excluded_item_ids": ["browser_tab_title", "address_bar"],
+                "final_geometry_allowed": False,
+            },
             "candidates": [
                 {
                     "candidate_id": "tab_noise",

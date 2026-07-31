@@ -1,0 +1,24 @@
+{
+  "contract_version": "learning_practical_bar_adjudication_v1",
+  "interpretation": "Three-image adjudication fixture only; not recognition accuracy evidence.",
+  "cases": [
+    {
+      "case_id": "conversation_workspace_steam_20260713",
+      "expected_bar_types": ["top_bar", "bottom_bar"],
+      "expected_absent_bar_types": ["left_sidebar", "right_sidebar"],
+      "source_sha256": "1ba22b832e9eff6aca23f849e7c6b44b77099ff303ccd6aff3f7ed2e854de82e",
+      "stage1_sha256": "c64210383aa8be4c1db4956b00af4c180ef0cc398206e10ab041ccdc9bcfeda8",
+      "final_fusion_sha256": "1829f81affcd4465c35e2372b2713dc36fefc90fa6565850b6d53ca47e4d8a0a",
+      "adjudication": "visible_docked_group_chat_bottom_area"
+    },
+    {
+      "case_id": "conversation_workspace_steam_20260714",
+      "expected_bar_types": ["top_bar", "bottom_bar"],
+      "expected_absent_bar_types": ["left_sidebar", "right_sidebar"],
+      "source_sha256": "bd58e26bb60c3b584638bd40bfbc2ccfc2d2016d42cfc21eb619e064741a27ae",
+      "stage1_sha256": "eff506cab03b179916e13aa96e50b7d52991bd8f72426908a1ea31dcc20277de",
+      "final_fusion_sha256": "515b32cbab0d66be299408aa1d6273eea0599e9f84f491431c99fb37c13258cf",
+      "adjudication": "visible_docked_group_chat_bottom_area"
+    }
+  ]
+}

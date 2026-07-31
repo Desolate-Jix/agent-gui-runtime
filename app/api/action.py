@@ -11,6 +11,11 @@ from typing import Any, Optional
 from fastapi import APIRouter
 
 from app.core.input_controller import input_controller
+from app.agent.reviewed_interface_memory import (
+    ReviewedInterfaceMemoryStore,
+    validate_current_surface_text_anchors,
+    validate_current_target_text_anchor,
+)
 from app.core.ocr_service import ocr_service
 from app.core.runtime_artifacts import RuntimeTimer, new_learned_instruction_id, write_trace
 from app.core.screenshot import screenshot_service
@@ -56,6 +61,36 @@ APPROVED_PLANS_DIR.mkdir(parents=True, exist_ok=True)
 APPROVED_PLAN_TTL_SECONDS = 300
 LEARNED_INSTRUCTIONS_DIR = Path("artifacts/local-learning/instructions")
 LEARNED_INSTRUCTIONS_DIR.mkdir(parents=True, exist_ok=True)
+reviewed_interface_memory_store = ReviewedInterfaceMemoryStore(project_root=Path(__file__).resolve().parents[2])
+
+
+def _record_operational_memory_feedback(
+    *,
+    request: ExecuteRecognitionPlanRequest,
+    action_id: str | None,
+    failure_category: str,
+    failure_details: Any,
+    trace_path: str | None,
+) -> dict[str, Any] | None:
+    if not request.interface_memory_id:
+        return None
+    try:
+        return reviewed_interface_memory_store.record_execution_feedback(
+            interface_id=request.interface_memory_id,
+            action_id=action_id,
+            goal=request.goal,
+            failure_category=failure_category,
+            failure_details=failure_details,
+            trace_path=trace_path,
+        )
+    except Exception as exc:
+        return {
+            "contract_version": "operational_memory_execution_feedback_record_v1",
+            "review_status": "needs_human_review",
+            "recorded": False,
+            "error": str(exc),
+        }
+
 
 def _run_recognition_plan_for_execution(request: VisionRecognitionPlanRequestModel) -> APIResponse:
     from app.api.vision import recognition_plan
@@ -242,6 +277,13 @@ def _final_submit_guard_decision(
     enabled = bool(metadata.get("forbid_final_submit"))
     selected_candidate_id = pre_click.get("selected_candidate_id")
     selected_texts = _selected_target_texts(plan=plan, selected_candidate_id=selected_candidate_id)
+    selected_texts.extend(
+        _overlapping_action_target_texts(
+            plan=plan,
+            selected_click_point=pre_click.get("selected_click_point"),
+        )
+    )
+    selected_texts = _unique_nonempty_strings(selected_texts)
     selected_texts = _final_submit_guard_evidence_texts(selected_texts, goal=request.goal)
     matched_terms = _matched_final_submit_terms(selected_texts)
     authorization_check = _validate_final_submit_authorization(metadata) if matched_terms else None
@@ -283,6 +325,46 @@ def _selected_target_texts(*, plan: dict[str, Any], selected_candidate_id: Any) 
         if isinstance(result, dict) and result.get("candidate_id") == selected_candidate_id:
             texts.extend(_target_text_values(result))
 
+    return _unique_nonempty_strings(texts)
+
+
+def _overlapping_action_target_texts(
+    *,
+    plan: dict[str, Any],
+    selected_click_point: Any,
+) -> list[str]:
+    if not isinstance(selected_click_point, dict):
+        return []
+    try:
+        point = {
+            "x": int(selected_click_point["x"]),
+            "y": int(selected_click_point["y"]),
+        }
+    except (KeyError, TypeError, ValueError):
+        return []
+
+    payloads: list[dict[str, Any]] = []
+    recommended = plan.get("recommended_target")
+    if isinstance(recommended, dict):
+        payloads.append(recommended)
+    candidate_result = plan.get("candidate_result")
+    if isinstance(candidate_result, dict):
+        payloads.extend(
+            candidate
+            for candidate in candidate_result.get("candidates") or []
+            if isinstance(candidate, dict)
+        )
+
+    texts: list[str] = []
+    action_roles = {"button", "link", "menuitem", "menu_item", "submit", "input"}
+    for payload in payloads:
+        element = payload.get("element") if isinstance(payload.get("element"), dict) else {}
+        role = str(element.get("role") or payload.get("role") or "").strip().casefold()
+        if role not in action_roles:
+            continue
+        rect = _rect_from_bbox(element.get("bbox") or payload.get("bbox"))
+        if rect is not None and _point_in_rect(point, rect):
+            texts.extend(_target_text_values(payload))
     return _unique_nonempty_strings(texts)
 
 
@@ -1339,6 +1421,8 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
     bound = window_manager.get_bound_window()
     live_capture: Optional[dict[str, Any]] = None
     auto_observe_trace: dict[str, Any] | None = None
+    surface_ocr: Any = None
+    local_target_validation: dict[str, Any] | None = None
 
     def attach_timings(result: dict[str, Any]) -> dict[str, Any]:
         result["timings"] = timer.to_dict()
@@ -1658,6 +1742,207 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             effective_observe_trace_path = str(observe_trace_path)
 
         effective_provider_mode, effective_metadata = _execute_plan_request_defaults(request)
+        resolved_memory_action_id = request.interface_memory_action_id
+        memory_action_resolution: dict[str, Any] | None = None
+        if request.interface_memory_id or request.interface_memory_action_id:
+            if not request.interface_memory_id:
+                timings = timer.to_dict()
+                return APIResponse(
+                    success=False,
+                    message="Operational memory action reference is incomplete",
+                    data={"timings": timings},
+                    error=ErrorModel(
+                        code="operational_memory_action_reference_incomplete",
+                        details="interface_memory_action_id requires interface_memory_id",
+                    ),
+                )
+            if not resolved_memory_action_id:
+                with timer.step("resolve_operational_memory_action_from_goal"):
+                    memory_action_resolution = reviewed_interface_memory_store.resolve_action_for_goal(
+                        interface_id=request.interface_memory_id,
+                        goal=request.goal,
+                    )
+                resolved_memory_action_id = memory_action_resolution.get("action_id")
+                if not resolved_memory_action_id:
+                    timings = timer.to_dict()
+                    failure_result = {
+                        "contract_version": "execute_recognition_plan_v1",
+                        "goal": request.goal,
+                        "failure_reason": "operational_memory_action_goal_unresolved",
+                        "action_resolution": memory_action_resolution,
+                        "timings": timings,
+                    }
+                    trace_path = _write_execute_trace_if_enabled(
+                        request,
+                        category="actions",
+                        operation="execute_recognition_plan",
+                        payload={
+                            "success": False,
+                            "request": request.model_dump(),
+                            "result": failure_result,
+                            "failure_reason": "operational_memory_action_goal_unresolved",
+                        },
+                        name_hint=request.app_name or "operational_memory",
+                    )
+                    failure_result["trace_path"] = trace_path
+                    failure_result["learning_review_feedback"] = _record_operational_memory_feedback(
+                        request=request,
+                        action_id=None,
+                        failure_category="operational_memory_action_goal_unresolved",
+                        failure_details=memory_action_resolution,
+                        trace_path=trace_path,
+                    )
+                    _rewrite_execute_trace_result(
+                        trace_path=trace_path,
+                        success=False,
+                        request=request,
+                        result=failure_result,
+                    )
+                    return APIResponse(
+                        success=False,
+                        message="Natural-language task did not resolve to one safe memory action",
+                        data=failure_result,
+                        error=ErrorModel(
+                            code="operational_memory_action_goal_unresolved",
+                            details=memory_action_resolution,
+                        ),
+                    )
+            else:
+                memory_action_resolution = {
+                    "contract_version": "operational_memory_action_resolution_v1",
+                    "interface_id": request.interface_memory_id,
+                    "goal": request.goal,
+                    "status": "selected",
+                    "action_id": resolved_memory_action_id,
+                    "automatic_execution_allowed": True,
+                    "resolution_source": "explicit_memory_action_id",
+                }
+            try:
+                with timer.step("load_operational_memory_action"):
+                    memory_seed = reviewed_interface_memory_store.build_current_capture_action_seed(
+                        interface_id=request.interface_memory_id,
+                        action_id=resolved_memory_action_id,
+                        image_path=image_path,
+                    )
+            except Exception as exc:
+                timings = timer.to_dict()
+                failure_result = {
+                    "contract_version": "execute_recognition_plan_v1",
+                    "goal": request.goal,
+                    "failure_reason": "operational_memory_action_resolution_failed",
+                    "action_resolution": memory_action_resolution,
+                    "timings": timings,
+                }
+                trace_path = _write_execute_trace_if_enabled(
+                    request,
+                    category="actions",
+                    operation="execute_recognition_plan",
+                    payload={
+                        "success": False,
+                        "request": request.model_dump(),
+                        "result": failure_result,
+                        "error": str(exc),
+                    },
+                    name_hint=request.app_name or "operational_memory",
+                )
+                failure_result["trace_path"] = trace_path
+                failure_result["learning_review_feedback"] = _record_operational_memory_feedback(
+                    request=request,
+                    action_id=resolved_memory_action_id,
+                    failure_category="operational_memory_action_resolution_failed",
+                    failure_details=str(exc),
+                    trace_path=trace_path,
+                )
+                _rewrite_execute_trace_result(
+                    trace_path=trace_path,
+                    success=False,
+                    request=request,
+                    result=failure_result,
+                )
+                return APIResponse(
+                    success=False,
+                    message="Operational memory action could not be resolved",
+                    data=failure_result,
+                    error=ErrorModel(
+                        code="operational_memory_action_resolution_failed",
+                        details=str(exc),
+                    ),
+                )
+            try:
+                with timer.step("validate_operational_memory_surface"):
+                    surface_ocr = ocr_service.scan_image(image_path)
+                    surface_validation = validate_current_surface_text_anchors(
+                        seed=memory_seed,
+                        observed_texts=[match.text for match in surface_ocr.matches if float(match.score) >= 0.45],
+                    )
+            except Exception as exc:
+                surface_validation = {
+                    "contract_version": "operational_memory_surface_validation_v1",
+                    "allowed": False,
+                    "reason": "current_surface_evidence_unavailable",
+                    "required_text_anchors": list((memory_seed.get("locator_evidence") or {}).get("text_anchors") or []),
+                    "matched_text_anchors": [],
+                    "observed_text_count": 0,
+                    "error": str(exc),
+                }
+            if not surface_validation["allowed"]:
+                timings = timer.to_dict()
+                failure_result = {
+                    "contract_version": "execute_recognition_plan_v1",
+                    "goal": request.goal,
+                    "failure_reason": "operational_memory_surface_mismatch",
+                    "action_resolution": memory_action_resolution,
+                    "surface_validation": surface_validation,
+                    "timings": timings,
+                }
+                trace_path = _write_execute_trace_if_enabled(
+                    request,
+                    category="actions",
+                    operation="execute_recognition_plan",
+                    payload={
+                        "success": False,
+                        "request": request.model_dump(),
+                        "result": failure_result,
+                        "failure_reason": "operational_memory_surface_mismatch",
+                    },
+                    name_hint=request.app_name or "operational_memory",
+                )
+                failure_result["trace_path"] = trace_path
+                failure_result["learning_review_feedback"] = _record_operational_memory_feedback(
+                    request=request,
+                    action_id=resolved_memory_action_id,
+                    failure_category="operational_memory_surface_mismatch",
+                    failure_details=surface_validation,
+                    trace_path=trace_path,
+                )
+                _rewrite_execute_trace_result(
+                    trace_path=trace_path,
+                    success=False,
+                    request=request,
+                    result=failure_result,
+                )
+                return APIResponse(
+                    success=False,
+                    message="Current surface does not match the operational memory action",
+                    data=failure_result,
+                    error=ErrorModel(
+                        code="operational_memory_surface_mismatch",
+                        details=surface_validation,
+                    ),
+                )
+            effective_metadata["seeded_candidate_v1"] = memory_seed
+            effective_metadata["operational_memory"] = {
+                "contract_version": "operational_memory_execution_context_v1",
+                "interface_id": request.interface_memory_id,
+                "action_id": resolved_memory_action_id,
+                "action_resolution": memory_action_resolution,
+                "stable_element_id": memory_seed["stable_element_id"],
+                "current_capture_required": True,
+                "current_grounding_required": True,
+                "surface_validation": surface_validation,
+                "historical_coordinates_forbidden": True,
+                "gate_required": True,
+            }
         plan_request = VisionRecognitionPlanRequestModel(
             image_path=image_path,
             task=request.task,
@@ -1717,6 +2002,13 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 name_hint=request.app_name or "recognition_plan",
             )
             failed_result["trace_path"] = trace_path
+            failed_result["learning_review_feedback"] = _record_operational_memory_feedback(
+                request=request,
+                action_id=resolved_memory_action_id if request.interface_memory_id else None,
+                failure_category="recognition_plan_failed",
+                failure_details=plan_response.error.model_dump() if plan_response.error else None,
+                trace_path=trace_path,
+            )
             failed_result["agent_step_result"] = _agent_step_result(
                 request=request,
                 status="blocked",
@@ -1733,6 +2025,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                     "fallback_plan": fallback_plan,
                     "agent_execution_guidance": failed_result["agent_execution_guidance"],
                     "agent_step_result": failed_result["agent_step_result"],
+                    "learning_review_feedback": failed_result["learning_review_feedback"],
                     "timings": timings,
                 },
                 error=ErrorModel(code="recognition_plan_failed", details=plan_response.error.model_dump() if plan_response.error else None),
@@ -1742,6 +2035,60 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         pre_click = plan.get("pre_click_decision") or {}
         selected_point = _extract_action_point(plan)
         plan_trace_path = plan.get("trace_path")
+        if request.interface_memory_id and pre_click.get("allowed") and isinstance(selected_point, dict):
+            local_target_validation = validate_current_target_text_anchor(
+                seed=memory_seed,
+                selected_point=selected_point,
+                observed_matches=list(getattr(surface_ocr, "matches", []) or []),
+            )
+            if not local_target_validation["allowed"]:
+                timings = timer.to_dict()
+                failure_result = {
+                    "contract_version": "execute_recognition_plan_v1",
+                    "goal": request.goal,
+                    "failure_reason": "operational_memory_local_target_mismatch",
+                    "action_resolution": memory_action_resolution,
+                    "surface_validation": surface_validation,
+                    "local_target_validation": local_target_validation,
+                    "recognition_plan_trace_path": plan_trace_path,
+                    "image_path": image_path,
+                    "timings": timings,
+                }
+                trace_path = _write_execute_trace_if_enabled(
+                    request,
+                    category="actions",
+                    operation="execute_recognition_plan",
+                    payload={
+                        "success": False,
+                        "request": request.model_dump(),
+                        "result": failure_result,
+                        "failure_reason": "operational_memory_local_target_mismatch",
+                    },
+                    name_hint=request.app_name or "operational_memory",
+                )
+                failure_result["trace_path"] = trace_path
+                failure_result["learning_review_feedback"] = _record_operational_memory_feedback(
+                    request=request,
+                    action_id=resolved_memory_action_id,
+                    failure_category="operational_memory_local_target_mismatch",
+                    failure_details=local_target_validation,
+                    trace_path=trace_path,
+                )
+                _rewrite_execute_trace_result(
+                    trace_path=trace_path,
+                    success=False,
+                    request=request,
+                    result=failure_result,
+                )
+                return APIResponse(
+                    success=False,
+                    message="The grounded point is not locally associated with the current memory text anchor",
+                    data=failure_result,
+                    error=ErrorModel(
+                        code="operational_memory_local_target_mismatch",
+                        details=local_target_validation,
+                    ),
+                )
         low_risk_visual_fast_lane = _low_risk_visual_fast_lane_profile(
             request=request,
             plan=plan,
@@ -1804,6 +2151,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         "auto_observe_trace": auto_observe_trace,
         "recognition_plan_overlay": overlay,
         "pre_click_decision": pre_click,
+        "local_target_validation": local_target_validation,
         "selected_click_point": selected_point,
         "approved_plan_id": request.approved_plan_id,
         "approved_plan_reuse_validation": approval_reuse_validation,
@@ -1917,6 +2265,13 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 "failure_reason": "pre_click_rejected",
             },
             name_hint=request.app_name or "recognition_plan",
+        )
+        base_result["learning_review_feedback"] = _record_operational_memory_feedback(
+            request=request,
+            action_id=resolved_memory_action_id if request.interface_memory_id else None,
+            failure_category="pre_click_rejected",
+            failure_details=pre_click.get("reasons"),
+            trace_path=base_result.get("trace_path"),
         )
         base_result["agent_step_result"] = _agent_step_result(
             request=request,
@@ -2083,6 +2438,13 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             },
             name_hint=request.app_name or "recognition_plan",
         )
+        base_result["learning_review_feedback"] = _record_operational_memory_feedback(
+            request=request,
+            action_id=resolved_memory_action_id if request.interface_memory_id else None,
+            failure_category="recognition_plan_click_failed",
+            failure_details=str(exc),
+            trace_path=base_result.get("trace_path"),
+        )
         base_result["agent_step_result"] = _agent_step_result(
             request=request,
             status="execution_failed",
@@ -2145,6 +2507,16 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             operation="execute_recognition_plan",
             payload={"success": False, "request": request.model_dump(), "result": base_result},
             name_hint=request.app_name or "recognition_plan",
+        )
+        base_result["learning_review_feedback"] = _record_operational_memory_feedback(
+            request=request,
+            action_id=resolved_memory_action_id if request.interface_memory_id else None,
+            failure_category=error_code,
+            failure_details={
+                "post_click_verification": post_click_verification,
+                "semantic_post_click_verification": semantic_post_click_verification,
+            },
+            trace_path=base_result.get("trace_path"),
         )
         base_result["agent_step_result"] = _agent_step_result(
             request=request,

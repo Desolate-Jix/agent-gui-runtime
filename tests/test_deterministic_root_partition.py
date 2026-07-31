@@ -38,6 +38,61 @@ def test_no_reliable_cut_returns_one_root_instead_of_midpoint_split() -> None:
     assert result["diagnostics"]["fallback"] == "single_root_no_supported_cut"
 
 
+def test_obvious_full_height_color_blocks_create_vertical_root_partition(tmp_path: Path) -> None:
+    image_path = tmp_path / "vertical_color_blocks.png"
+    image = Image.new("RGB", (1000, 800), (255, 0, 0))
+    ImageDraw.Draw(image).rectangle((260, 0, 999, 799), fill=(0, 130, 0))
+    image.save(image_path)
+
+    result = build_deterministic_root_partition(
+        [],
+        {"width": 1000, "height": 800},
+        image_path=str(image_path),
+    )
+
+    assert [region["bbox"] for region in result["root_regions"]] == [
+        {"x": 0, "y": 0, "w": 260, "h": 800},
+        {"x": 260, "y": 0, "w": 740, "h": 800},
+    ]
+    assert result["diagnostics"]["root_selection"]["strategy"] == "strong_color_block_vertical_partition"
+
+
+def test_obvious_full_width_color_blocks_create_horizontal_root_partition(tmp_path: Path) -> None:
+    image_path = tmp_path / "horizontal_color_blocks.png"
+    image = Image.new("RGB", (1000, 800), (255, 0, 0))
+    ImageDraw.Draw(image).rectangle((0, 120, 999, 799), fill=(0, 130, 0))
+    image.save(image_path)
+
+    result = build_deterministic_root_partition(
+        [],
+        {"width": 1000, "height": 800},
+        image_path=str(image_path),
+    )
+
+    assert [region["bbox"] for region in result["root_regions"]] == [
+        {"x": 0, "y": 0, "w": 1000, "h": 120},
+        {"x": 0, "y": 120, "w": 1000, "h": 680},
+    ]
+    assert result["diagnostics"]["root_selection"]["strategy"] == "strong_color_block_horizontal_partition"
+
+
+def test_local_color_card_does_not_create_root_partition(tmp_path: Path) -> None:
+    image_path = tmp_path / "local_color_card.png"
+    image = Image.new("RGB", (1000, 800), (245, 245, 245))
+    ImageDraw.Draw(image).rectangle((120, 180, 420, 520), fill=(30, 120, 220))
+    image.save(image_path)
+
+    result = build_deterministic_root_partition(
+        [],
+        {"width": 1000, "height": 800},
+        image_path=str(image_path),
+    )
+
+    assert [region["bbox"] for region in result["root_regions"]] == [
+        {"x": 0, "y": 0, "w": 1000, "h": 800}
+    ]
+
+
 def test_legacy_stage1_localization_is_not_a_public_learning_api() -> None:
     assert not hasattr(recognition_package, "build_stage1_region_localization_report")
 
@@ -85,6 +140,76 @@ def test_supported_vertical_tracks_tile_the_screen_without_overlap() -> None:
     assert report["valid"] is True
     assert report["coverage_ratio"] == 1.0
     assert report["sibling_overlap_area"] == 0
+
+
+def test_independent_content_modules_do_not_promote_peer_columns_to_root_sidebars() -> None:
+    items = [
+        _item("browser_navigation", 0, 0, 1000, 40, role="browser_chrome"),
+        _item("left_1", 10, 60, 50, 80, role="content_module"),
+        _item("left_2", 10, 300, 50, 80, role="content_module"),
+        _item("left_3", 10, 500, 50, 80, role="content_module"),
+        _item("middle_1", 100, 60, 280, 80, role="content_module"),
+        _item("middle_2", 100, 300, 280, 80, role="content_module"),
+        _item("middle_3", 100, 500, 280, 80, role="content_module"),
+        _item("right_1", 450, 60, 500, 80, role="content_module"),
+        _item("right_2", 450, 300, 500, 80, role="content_module"),
+        _item("right_3", 450, 500, 500, 80, role="content_module"),
+    ]
+
+    result = build_deterministic_root_partition(
+        items,
+        {"width": 1000, "height": 600},
+        class_rule_profile={"primary_content_strategy": "independent_content_modules"},
+    )
+
+    stage1 = adapt_root_partition_to_stage1_contract(result)
+    assert "left_nav" not in [region["zone_id"] for region in stage1["structure_regions"]]
+    assert (
+        result["diagnostics"]["root_selection"]["class_rule_vertical_partition_suppressed"]
+        is True
+    )
+
+
+def test_independent_content_modules_keep_explicit_navigation_root(tmp_path: Path) -> None:
+    image_path = tmp_path / "portal_with_navigation.png"
+    image = Image.new("RGB", (1000, 600), (248, 248, 248))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 119, 599), fill=(218, 218, 218))
+    image.save(image_path)
+    items = [
+        _item("navigation", 0, 0, 120, 600, role="navigation"),
+        _item("module_1", 150, 50, 350, 220, role="content_module"),
+        _item("module_2", 520, 50, 350, 220, role="content_module"),
+    ]
+
+    result = build_deterministic_root_partition(
+        items,
+        {"width": 1000, "height": 600},
+        image_path=str(image_path),
+        class_rule_profile={"primary_content_strategy": "independent_content_modules"},
+    )
+
+    assert len(result["root_regions"]) == 2
+    assert result["root_regions"][0]["bbox"]["w"] == 120
+    assert (
+        result["diagnostics"]["root_selection"]["class_rule_vertical_partition_suppressed"]
+        is False
+    )
+
+
+def test_sparse_centered_content_with_full_window_container_is_not_three_root_columns() -> None:
+    items = [
+        _item("window", 0, 0, 1000, 600, role="window"),
+        _item("left-rail", 0, 40, 90, 520, role="navigation"),
+        _item("middle-top", 400, 90, 170, 70),
+        _item("middle-bottom", 400, 360, 170, 70),
+        _item("right-top", 750, 90, 170, 70),
+        _item("right-bottom", 750, 360, 170, 70),
+    ]
+
+    result = build_deterministic_root_partition(items, {"width": 1000, "height": 600})
+
+    assert result["diagnostics"]["root_selection"]["strategy"] != "supported_vertical_columns"
 
 
 def test_repeated_equal_width_grid_columns_do_not_become_a_left_navigation_root() -> None:
@@ -175,6 +300,43 @@ def test_dominant_data_grid_columns_do_not_become_root_sidebar(monkeypatch) -> N
     ]
 
 
+def test_full_width_document_start_caps_overgrown_top_band(monkeypatch) -> None:
+    items = [
+        _item("semantic_top_bar", 0, 0, 1200, 310, role="top_bar"),
+        _item("browser_toolbar", 0, 0, 1200, 82, role="toolbar"),
+        _item("address_input", 90, 48, 900, 28, role="input"),
+        _item("page_document", 8, 82, 1184, 718, role="document"),
+    ]
+    monkeypatch.setattr(root_partition, "_axis_cuts", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(root_partition, "_vertical_separator_cuts", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        root_partition,
+        "_horizontal_separator_cuts",
+        lambda *_args, **_kwargs: [
+            {"point": 82, "support": 0.98, "score": 1.0},
+            {"point": 310, "support": 0.96, "score": 1.0},
+        ],
+    )
+    monkeypatch.setattr(
+        root_partition,
+        "_edge_bands",
+        lambda *_args, **_kwargs: {"top_end": 310, "bottom_start": None},
+    )
+
+    proposals, selection = root_partition._select_root_proposals(
+        items,
+        width=1200,
+        height=800,
+        image_path="browser_page.png",
+    )
+
+    assert selection["document_content_start"] == 82
+    assert [proposal["bbox"] for proposal in proposals] == [
+        {"x": 0, "y": 0, "w": 1200, "h": 82},
+        {"x": 0, "y": 82, "w": 1200, "h": 718},
+    ]
+
+
 def test_atom_on_partition_cut_has_one_root_owner() -> None:
     items = [_item("on_cut", 45, 20, 10, 20)]
     left_ids = root_partition._contained_item_ids(items, {"x": 0, "y": 0, "w": 50, "h": 100})
@@ -255,7 +417,7 @@ def test_root_partition_uses_strong_image_separator_without_atomic_elements(tmp_
         {"x": 0, "y": 0, "w": 180, "h": 600},
         {"x": 180, "y": 0, "w": 820, "h": 600},
     ]
-    assert result["diagnostics"]["root_selection"]["strategy"] == "supported_image_edge_rail"
+    assert result["diagnostics"]["root_selection"]["strategy"] == "strong_color_block_vertical_partition"
 
 
 def test_formal_stage1_strategy_passes_source_image_for_separator_calibration(tmp_path: Path) -> None:
@@ -293,6 +455,20 @@ def test_long_horizontal_separator_produces_image_boundary_candidate(tmp_path: P
     assert cuts[0]["source"] == "image_long_horizontal_separator"
 
 
+def test_public_horizontal_separator_detector_exposes_current_pixel_boundary(tmp_path: Path) -> None:
+    detector = getattr(root_partition, "detect_horizontal_separator_cuts", None)
+    assert detector is not None
+    image_path = tmp_path / "chat_composer_separator.png"
+    image = Image.new("RGB", (846, 1174), "white")
+    draw = ImageDraw.Draw(image)
+    draw.line((245, 963, 845, 963), fill=(120, 120, 120), width=2)
+    image.save(image_path)
+
+    cuts = detector(str(image_path), width=846, height=1174)
+
+    assert any(abs(cut["point"] - 963) <= 3 for cut in cuts)
+
+
 def test_image_evidence_rejects_semantic_bottom_bar_without_boundary(tmp_path: Path) -> None:
     image_path = tmp_path / "no_bottom_bar.png"
     image = Image.new("RGB", (1000, 600), "white")
@@ -302,6 +478,38 @@ def test_image_evidence_rejects_semantic_bottom_bar_without_boundary(tmp_path: P
     items = [
         _item("toolbar", 0, 0, 1000, 70, role="toolbar"),
         _item("model_fake_bottom_bar", 0, 500, 1000, 90, role="bottom_bar"),
+    ]
+
+    result = build_deterministic_root_partition(
+        items,
+        {"width": 1000, "height": 600},
+        image_path=str(image_path),
+    )
+
+    assert [region["bbox"] for region in result["root_regions"]] == [
+        {"x": 0, "y": 0, "w": 1000, "h": 80},
+        {"x": 0, "y": 80, "w": 1000, "h": 520},
+    ]
+
+
+def test_model_section_semantics_cannot_promote_content_separator_to_bottom_bar(tmp_path: Path) -> None:
+    image_path = tmp_path / "content_separator.png"
+    image = Image.new("RGB", (1000, 600), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 999, 79), fill=(210, 210, 210))
+    draw.line((0, 479, 999, 479), fill=(185, 185, 185), width=2)
+    image.save(image_path)
+    fake_section = _item("bottom_bar", 0, 500, 1000, 100, role="content")
+    fake_section["item_type"] = "layout"
+    fake_section["source_evidence"] = ["screen_map_section"]
+    fake_section["metadata"] = {
+        "source": "screen_map.sections",
+        "surface_zone": "primary_area",
+    }
+    items = [
+        _item("toolbar", 0, 0, 1000, 70, role="toolbar"),
+        _item("content", 80, 120, 840, 340, role="list"),
+        fake_section,
     ]
 
     result = build_deterministic_root_partition(
@@ -484,6 +692,45 @@ def test_chat_stage1_5_scans_beyond_root_edge_range_for_wide_list_pane(tmp_path:
     assert "right_plain_text" in by_role["message_thread"]["item_ids"]
 
 
+def test_chat_stage1_5_preserves_second_separator_as_auxiliary_pane(tmp_path: Path) -> None:
+    image_path = tmp_path / "three_column_chat.png"
+    image = Image.new("RGB", (1000, 600), (235, 235, 235))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 69, 599), fill=(205, 205, 205))
+    draw.rectangle((70, 0, 299, 599), fill=(220, 220, 220))
+    draw.rectangle((300, 0, 759, 599), fill=(230, 230, 230))
+    draw.rectangle((760, 0, 999, 599), fill=(218, 218, 218))
+    image.save(image_path)
+    items = {
+        "list": _item("list", 90, 80, 190, 420, role="conversation_list"),
+        "thread": _item("thread", 320, 80, 400, 420, role="message_thread"),
+        "composer": _item("composer", 320, 500, 400, 80, role="composer"),
+        "aux_row_1": _item("aux_row_1", 780, 100, 160, 28, role="text"),
+        "aux_row_2": _item("aux_row_2", 780, 145, 160, 28, role="text"),
+    }
+    region = {
+        "region_id": "structure_region_main_content",
+        "bbox": {"x": 70, "y": 0, "w": 930, "h": 600},
+        "item_ids": list(items),
+    }
+
+    subregions = two_stage_module._stage1_5_chat_subregions(
+        region=region,
+        items_by_id=items,
+        source_image_path=str(image_path),
+        screen_size={"width": 1000, "height": 600},
+    )
+    by_role = {subregion["role"]: subregion for subregion in subregions}
+
+    assert by_role["conversation_list"]["bbox"] == {"x": 70, "y": 0, "w": 230, "h": 600}
+    assert by_role["message_thread"]["bbox"]["x"] == 300
+    assert by_role["message_thread"]["bbox"]["w"] == 460
+    assert by_role["bottom_composer"]["bbox"]["x"] == 300
+    assert by_role["bottom_composer"]["bbox"]["w"] == 460
+    assert by_role["auxiliary_pane"]["bbox"] == {"x": 760, "y": 0, "w": 240, "h": 600}
+    assert by_role["auxiliary_pane"]["item_ids"] == ["aux_row_1", "aux_row_2"]
+
+
 def test_chat_stage1_5_rejects_mid_page_send_action_as_bottom_composer(tmp_path: Path) -> None:
     image_path = tmp_path / "empty_chat_detail.png"
     image = Image.new("RGB", (1000, 1000), (235, 235, 235))
@@ -515,6 +762,53 @@ def test_chat_stage1_5_rejects_mid_page_send_action_as_bottom_composer(tmp_path:
     assert by_role["conversation_list"]["bbox"]["h"] == 1000
     assert by_role["message_thread"]["bbox"]["h"] == 1000
     assert "send_document" in by_role["message_thread"]["item_ids"]
+
+
+def test_chat_stage1_5_prefers_pixel_separator_over_semantic_only_input_boundary(tmp_path: Path) -> None:
+    image_path = tmp_path / "chat_with_real_composer_separator.png"
+    image = Image.new("RGB", (846, 1174), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((55, 92, 244, 1173), fill=(242, 242, 242))
+    draw.line((245, 963, 845, 963), fill=(110, 110, 110), width=2)
+    image.save(image_path)
+    items = {
+        "conversation_list": _item("conversation_list", 55, 92, 190, 1082, role="conversation_list"),
+        "message_thread": _item("message_thread", 245, 92, 601, 738, role="message_thread"),
+        "bottom_bar_shell": _item("bottom_bar_shell", 55, 92, 791, 1082, role="bottom_bar"),
+        "semantic_input": _item("semantic_input", 280, 830, 566, 40, role="text_input"),
+        "element_message_input_area": _item("element_message_input_area", 280, 830, 566, 40, role="text_input"),
+        "action_screen_false_icon": _item("action_screen_false_icon", 290, 840, 20, 20, role="composer"),
+        "composer_toolbar": _item("composer_toolbar", 280, 976, 280, 28, role="composer"),
+        "send_button": _item("send_button", 760, 1133, 70, 30, role="button"),
+    }
+    items["semantic_input"]["source"] = "screen_reading.ui_elements"
+    items["semantic_input"]["metadata"] = {"evidence_level": "semantic_region_only"}
+    items["action_screen_false_icon"]["source"] = "vision_regions_v1"
+    items["action_screen_false_icon"]["metadata"] = {"evidence_level": "visual_region_only"}
+    items["composer_toolbar"]["source"] = "windows_uia.controls"
+    items["composer_toolbar"]["metadata"] = {"evidence_level": "uia_control"}
+    items["send_button"]["label"] = "发送"
+    items["send_button"]["source"] = "windows_uia.controls"
+    items["send_button"]["metadata"] = {"evidence_level": "uia_control"}
+    region = {
+        "region_id": "structure_region_main_content",
+        "bbox": {"x": 55, "y": 92, "w": 791, "h": 1082},
+        "item_ids": list(items),
+    }
+
+    subregions = two_stage_module._stage1_5_chat_subregions(
+        region=region,
+        items_by_id=items,
+        source_image_path=str(image_path),
+        screen_size={"width": 846, "height": 1174},
+    )
+    by_role = {subregion["role"]: subregion for subregion in subregions}
+
+    composer_top = by_role["bottom_composer"]["bbox"]["y"]
+    assert abs(composer_top - 963) <= 3
+    assert by_role["message_thread"]["bbox"]["y"] + by_role["message_thread"]["bbox"]["h"] == composer_top
+    assert "semantic_input" in by_role["message_thread"]["item_ids"]
+    assert "composer_toolbar" in by_role["bottom_composer"]["item_ids"]
 
 
 def test_stage2_child_region_excludes_seed_items_outside_child_bbox() -> None:
@@ -565,6 +859,32 @@ def test_notepad_style_blank_remainder_is_preserved() -> None:
     assert boxes[2]["y"] > 700 and boxes[2]["y"] + boxes[2]["h"] == 800
 
 
+def test_supported_top_band_slightly_above_legacy_ratio_is_preserved(tmp_path: Path) -> None:
+    image_path = tmp_path / "visual_top_band.png"
+    image = Image.new("RGB", (1000, 1000), (248, 248, 248))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 999, 169), fill=(225, 225, 225))
+    draw.line((0, 170, 999, 170), fill=(120, 120, 120), width=2)
+    image.save(image_path)
+    items = [
+        _item("upper_region", 0, 0, 1000, 170, role="container"),
+        _item("page_content", 0, 170, 1000, 830, role="main_content"),
+    ]
+
+    result = build_deterministic_root_partition(
+        items,
+        {"width": 1000, "height": 1000},
+        image_path=str(image_path),
+    )
+    stage1 = adapt_root_partition_to_stage1_contract(result)
+
+    boxes = [region["bbox"] for region in result["root_regions"]]
+    assert len(boxes) == 2
+    assert 170 <= boxes[0]["h"] <= 172
+    assert boxes[1] == {"x": 0, "y": boxes[0]["h"], "w": 1000, "h": 1000 - boxes[0]["h"]}
+    assert [region["zone_id"] for region in stage1["structure_regions"]] == ["top_bar", "main_content"]
+
+
 def test_stacked_top_controls_and_lower_edge_rail_form_mixed_root_topology(tmp_path: Path) -> None:
     image_path = tmp_path / "stacked_top_and_left_rail.png"
     image = Image.new("RGB", (1000, 600), (240, 240, 240))
@@ -599,6 +919,278 @@ def test_stacked_top_controls_and_lower_edge_rail_form_mixed_root_topology(tmp_p
     assert validate_root_partition(result["root_regions"], {"width": 1000, "height": 600})["valid"] is True
 
 
+def test_full_height_edge_rail_and_strong_top_boundary_form_t_partition(tmp_path: Path) -> None:
+    image_path = tmp_path / "full_height_rail_with_right_top.png"
+    image = Image.new("RGB", (1000, 600), (248, 248, 248))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 79, 599), fill=(218, 218, 218))
+    draw.rectangle((80, 0, 999, 59), fill=(232, 232, 232))
+    draw.line((0, 60, 999, 60), fill=(120, 120, 120), width=2)
+    image.save(image_path)
+    items = [
+        _item("left_navigation", 0, 0, 80, 600, role="navigation"),
+        _item("top_controls", 80, 0, 920, 60, role="toolbar"),
+        _item("content", 80, 60, 920, 540, role="main_content"),
+    ]
+
+    result = build_deterministic_root_partition(
+        items,
+        {"width": 1000, "height": 600},
+        image_path=str(image_path),
+    )
+    stage1 = adapt_root_partition_to_stage1_contract(result)
+
+    boxes = [region["bbox"] for region in result["root_regions"]]
+    assert boxes[0] == {"x": 0, "y": 0, "w": 80, "h": 600}
+    assert boxes[1]["x"] == 80 and boxes[1]["y"] == 0 and boxes[1]["w"] == 920
+    assert 60 <= boxes[1]["h"] <= 62
+    assert boxes[2] == {
+        "x": 80,
+        "y": boxes[1]["h"],
+        "w": 920,
+        "h": 600 - boxes[1]["h"],
+    }
+    assert [region["zone_id"] for region in stage1["structure_regions"]] == [
+        "left_nav",
+        "top_bar",
+        "main_content",
+    ]
+    assert result["validator"]["valid"] is True
+
+
+def test_centered_web_content_margins_do_not_create_a_fake_left_navigation(tmp_path: Path) -> None:
+    image_path = tmp_path / "centered_web_content.png"
+    image = Image.new("RGB", (1000, 600), (205, 210, 220))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 999, 59), fill=(235, 235, 235))
+    draw.rectangle((190, 60, 809, 599), fill=(250, 250, 250))
+    image.save(image_path)
+    items = [
+        _item("browser_tab", 0, 0, 260, 28, role="browser_chrome"),
+        _item("browser_address", 20, 30, 760, 26, role="address_bar"),
+        _item("browser_controls", 820, 0, 180, 56, role="toolbar"),
+        _item("portal_search", 260, 80, 480, 38, role="input"),
+        _item("portal_module_1", 220, 150, 260, 180, role="content_module"),
+        _item("portal_module_2", 520, 150, 260, 180, role="content_module"),
+    ]
+
+    result = build_deterministic_root_partition(
+        items,
+        {"width": 1000, "height": 600},
+        image_path=str(image_path),
+    )
+    stage1 = adapt_root_partition_to_stage1_contract(result)
+
+    assert result["diagnostics"]["root_selection"]["centered_content_margin_pair_rejected"] is True
+    assert [region["bbox"] for region in result["root_regions"]] == [
+        {"x": 0, "y": 0, "w": 1000, "h": 60},
+        {"x": 0, "y": 60, "w": 1000, "h": 540},
+    ]
+    assert [region["zone_id"] for region in stage1["structure_regions"]] == [
+        "top_bar",
+        "main_content",
+    ]
+
+
+def test_single_visible_margin_boundary_can_reject_fake_centered_sidebar() -> None:
+    items = [
+        _item("browser_tab", 0, 0, 260, 28, role="browser_chrome"),
+        _item("browser_address", 20, 30, 760, 26, role="address_bar"),
+        _item("browser_controls", 820, 0, 180, 56, role="toolbar"),
+        _item("portal_search", 260, 80, 480, 38, role="input"),
+        _item("portal_module_1", 220, 150, 260, 180, role="content_module"),
+        _item("portal_module_2", 520, 150, 260, 180, role="content_module"),
+    ]
+
+    result = root_partition._centered_content_margin_pair(
+        items,
+        color_vertical_cuts=[
+            {
+                "axis": "x",
+                "point": 190,
+                "support": 0.9,
+                "color_distance": 52.0,
+                "source": "image_color_block_boundary",
+            }
+        ],
+        width=1000,
+        height=600,
+        content_start=60,
+    )
+
+    assert result is not None
+    assert result["left_boundary"] == 190
+    assert result["right_boundary"] == 810
+    assert result["boundary_evidence"] == "single_visible_boundary_with_mirrored_empty_margin"
+
+
+def test_class_rule_feed_does_not_promote_one_sided_blank_margin_to_navigation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    image_path = tmp_path / "one_sided_feed_margin.png"
+    image = Image.new("RGB", (1000, 600), (210, 215, 225))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 999, 59), fill=(235, 235, 235))
+    draw.rectangle((300, 60, 999, 599), fill=(250, 250, 250))
+    image.save(image_path)
+    monkeypatch.setattr(
+        root_partition,
+        "_color_block_boundary_cuts",
+        lambda _path, *, width, height, axis: (
+            [
+                {
+                    "axis": "x",
+                    "point": 300,
+                    "support": 0.85,
+                    "color_distance": 72.0,
+                    "score": 0.9,
+                    "source": "image_color_block_boundary",
+                }
+            ]
+            if axis == "x"
+            else []
+        ),
+    )
+    monkeypatch.setattr(root_partition, "_vertical_separator_cuts", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        root_partition,
+        "_horizontal_separator_cuts",
+        lambda *_args, **_kwargs: [
+            {
+                "axis": "y",
+                "point": 60,
+                "support": 1.0,
+                "score": 1.0,
+                "source": "image_long_horizontal_separator",
+            }
+        ],
+    )
+    items = [
+        _item("browser_chrome", 0, 0, 1000, 60, role="browser_chrome"),
+        _item("page_container", 0, 60, 1000, 540, role="main_content"),
+        _item("feed_1", 340, 100, 260, 120, role="feed_item"),
+        _item("feed_2", 650, 100, 300, 120, role="feed_item"),
+        _item("feed_3", 340, 260, 260, 120, role="feed_item"),
+        _item("feed_4", 650, 260, 300, 120, role="feed_item"),
+    ]
+
+    result = build_deterministic_root_partition(
+        items,
+        {"width": 1000, "height": 600},
+        image_path=str(image_path),
+        class_rule_profile={"primary_content_strategy": "feed_items"},
+    )
+    stage1 = adapt_root_partition_to_stage1_contract(result)
+
+    assert [region["zone_id"] for region in stage1["structure_regions"]] == [
+        "top_bar",
+        "main_content",
+    ]
+    assert (
+        result["diagnostics"]["root_selection"][
+            "class_rule_edge_partition_suppressed_without_navigation_evidence"
+        ]
+        is True
+    )
+
+
+def test_near_full_width_top_separator_with_edge_rail_forms_t_partition(monkeypatch) -> None:
+    monkeypatch.setattr(root_partition, "_axis_cuts", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(root_partition, "_color_block_boundary_cuts", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        root_partition,
+        "_vertical_separator_cuts",
+        lambda *_args, **_kwargs: [
+            {
+                "axis": "x",
+                "point": 73,
+                "support": 1.0,
+                "score": 1.0,
+                "source": "image_long_vertical_separator",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        root_partition,
+        "_horizontal_separator_cuts",
+        lambda *_args, **_kwargs: [
+            {
+                "axis": "y",
+                "point": 40,
+                "support": 0.9453,
+                "score": 1.0,
+                "source": "image_long_horizontal_separator",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        root_partition,
+        "_edge_bands",
+        lambda *_args, **_kwargs: {"top_end": 202, "bottom_start": None},
+    )
+
+    proposals, selection = root_partition._select_root_proposals(
+        [],
+        width=952,
+        height=1029,
+        image_path="near_full_width_top_separator.png",
+    )
+
+    assert selection["strategy"] == "full_height_edge_rail_with_right_top"
+    assert [proposal["bbox"] for proposal in proposals] == [
+        {"x": 0, "y": 0, "w": 73, "h": 1029},
+        {"x": 73, "y": 0, "w": 879, "h": 40},
+        {"x": 73, "y": 40, "w": 879, "h": 989},
+    ]
+
+
+def test_top_side_main_and_bottom_status_form_four_adjacent_roots(tmp_path: Path) -> None:
+    image_path = tmp_path / "top_side_main_bottom.png"
+    image = Image.new("RGB", (1000, 600), (248, 248, 248))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 999, 69), fill=(230, 230, 230))
+    draw.rectangle((0, 70, 139, 569), fill=(238, 238, 238))
+    draw.line((0, 70, 999, 70), fill=(110, 110, 110), width=2)
+    draw.line((140, 70, 140, 569), fill=(110, 110, 110), width=2)
+    image.save(image_path)
+    items = [
+        _item("top_toolbar", 0, 0, 1000, 70, role="toolbar"),
+        _item("left_navigation", 0, 70, 140, 500, role="navigation"),
+        _item("main_table", 140, 70, 860, 500, role="data_grid"),
+        _item("late_sidebar_item", 20, 540, 90, 20, role="text"),
+        _item("bottom_status_left", 12, 580, 80, 16, role="text"),
+        _item("bottom_status_right", 890, 578, 95, 18, role="control"),
+    ]
+
+    result = build_deterministic_root_partition(
+        items,
+        {"width": 1000, "height": 600},
+        image_path=str(image_path),
+    )
+    stage1 = adapt_root_partition_to_stage1_contract(result)
+
+    boxes = [region["bbox"] for region in result["root_regions"]]
+    assert len(boxes) == 4
+    assert boxes[0]["x"] == 0 and boxes[0]["y"] == 0 and boxes[0]["w"] == 1000
+    assert 70 <= boxes[0]["h"] <= 72
+    assert boxes[1]["x"] == 0 and boxes[1]["y"] == boxes[0]["h"]
+    assert 140 <= boxes[1]["w"] <= 142
+    assert boxes[2]["x"] == boxes[1]["w"] and boxes[2]["y"] == boxes[0]["h"]
+    assert boxes[2]["w"] == 1000 - boxes[1]["w"]
+    assert boxes[3]["x"] == 0 and boxes[3]["w"] == 1000
+    assert 570 <= boxes[3]["y"] <= 576
+    assert boxes[1]["h"] == boxes[2]["h"] == boxes[3]["y"] - boxes[0]["h"]
+    assert boxes[3]["h"] == 600 - boxes[3]["y"]
+    assert [region["zone_id"] for region in stage1["structure_regions"]] == [
+        "top_bar",
+        "left_nav",
+        "main_content",
+        "bottom_bar",
+    ]
+    assert result["validator"]["valid"] is True
+
+
 def test_bottom_content_cards_do_not_create_a_fake_root_bar() -> None:
     items = [
         _item("menu", 0, 0, 1000, 70, role="toolbar"),
@@ -621,6 +1213,23 @@ def test_semantic_bottom_panel_can_form_a_root_bar() -> None:
     ]
     result = build_deterministic_root_partition(items, {"width": 1000, "height": 800})
     boxes = [region["bbox"] for region in result["root_regions"]]
+    assert len(boxes) == 3
+    assert boxes[-1]["y"] > 600
+
+
+def test_ocr_label_can_support_a_tall_semantic_bottom_panel() -> None:
+    items = [
+        _item("menu", 0, 0, 1000, 70, role="toolbar"),
+        _item("content", 100, 160, 800, 400, role="list"),
+        {
+            **_item("ocr_content_recovery_1", 20, 680, 180, 28, role="text"),
+            "label": "群组聊天",
+        },
+    ]
+
+    result = build_deterministic_root_partition(items, {"width": 1000, "height": 800})
+    boxes = [region["bbox"] for region in result["root_regions"]]
+
     assert len(boxes) == 3
     assert boxes[-1]["y"] > 600
 

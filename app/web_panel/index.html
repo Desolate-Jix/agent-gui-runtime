@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>OpenClaw Console</title>
-    <link rel="stylesheet" href="/panel/assets/panel.css?v=20260715-learning-fusion-2" />
+    <link rel="stylesheet" href="/panel/assets/panel.css?v=20260729-workflow-control-picker-1" />
   </head>
   <body>
     <div class="app-shell">
@@ -40,20 +40,16 @@
           </div>
           <div class="nav-group nav-group-learn" data-workflow="learn">
             <div class="nav-group-title" data-i18n="nav_group_learn">Learn Mode</div>
-            <p class="nav-group-subtitle" data-i18n="nav_group_learn_flow">Bind and screenshot inside Learn interface, then review template, Trace, and safety validation</p>
-            <button class="stage active" data-stage="learn_interface" data-step="1" data-i18n="nav_learn_interface">Learn interface</button>
-            <button class="stage" data-stage="template_display" data-step="2" data-i18n="nav_template_display">Template display</button>
-            <button class="stage" data-stage="trace" data-step="3" data-i18n="nav_trace_audit">Trace Audit</button>
-            <button class="stage" data-stage="learn_validation" data-step="4" data-i18n="nav_learn_validation">PathGraph Validation</button>
+            <p class="nav-group-subtitle" data-i18n="nav_group_learn_flow">Recognize one interface, review it, then connect it to the software workflow</p>
+            <button class="stage active" data-stage="learn_interface" data-step="1" data-i18n="nav_learn_interface">Learning workspace</button>
           </div>
           <div class="nav-group nav-group-execute" data-workflow="execute">
             <div class="nav-group-title" data-i18n="nav_group_execute">Execute Mode</div>
             <p class="nav-group-subtitle" data-i18n="nav_group_execute_flow">Available actions -> locate -> gate -> action evidence</p>
             <button class="stage" data-stage="execute_actions" data-step="1" data-i18n="nav_execute_actions">Available Actions</button>
-            <button class="stage" data-stage="execute_task_run" data-step="2" data-i18n="nav_execute_task_run">PathGraph Task Run</button>
-            <button class="stage" data-stage="execute_locate" data-step="3" data-i18n="nav_execute_locate">Precise Locate</button>
-            <button class="stage" data-stage="execute" data-step="4" data-i18n="nav_execute_gate">Click Gate</button>
-            <button class="stage" data-stage="input" data-step="5" data-i18n="nav_execute_input">Input</button>
+            <button class="stage" data-stage="execute_locate" data-step="2" data-i18n="nav_execute_locate">Precise Locate</button>
+            <button class="stage" data-stage="execute" data-step="3" data-i18n="nav_execute_gate">Click Gate</button>
+            <button class="stage" data-stage="input" data-step="4" data-i18n="nav_execute_input">Input</button>
           </div>
         </nav>
         <div class="settings-entry">
@@ -85,6 +81,7 @@
               <span id="pageWorkspaceBadge">System</span>
               <span id="pageApiBadge">API: -</span>
               <span id="pageSideEffectBadge">No real action</span>
+              <a class="meta-action interface-workflow-jump-link" href="#interfaceWorkflowThreeColumnWorkbench">三栏审核</a>
               <button id="resetLayoutBtn" type="button" class="meta-action" data-i18n="reset_layout">Reset layout</button>
             </div>
           </div>
@@ -415,13 +412,9 @@
             </section>
 
             <section class="panel stage-page active" data-page="learn_replay">
-              <h3 data-i18n="learn_replay_title">Artifact Replay / PathGraph Validation</h3>
-              <div class="mode-help mode-help-learn" data-mode-scope="learn" data-i18n="learn_replay_hint">Load a learned runtime PathGraph, inspect its structure, then reuse the same single-step Execute APIs for safe validation and task timeline replay.</div>
-              <div class="learn-replay-subnav" role="tablist" aria-label="Learn replay subviews">
-                <button class="learn-replay-tab active" type="button" data-learn-replay-view="template" data-i18n="template_subinterface">Template</button>
-                <button class="learn-replay-tab" type="button" data-learn-replay-view="draft" data-i18n="learning_draft_subinterface">Learning draft</button>
-              </div>
-              <section class="learn-replay-subview active" data-learn-replay-panel="template">
+              <h3 data-i18n="learn_replay_title">Learning workspace</h3>
+              <div class="mode-help mode-help-learn" data-mode-scope="learn" data-i18n="learn_replay_hint">Recognize and review one interface, then connect approved interfaces into a reusable software workflow. Learning assets never authorize execution.</div>
+              <section class="learn-replay-subview" data-learn-replay-panel="template">
               <div class="form-grid">
                 <div class="form-section-label wide-control">
                   <strong data-i18n="template_replay_section">Template Replay</strong>
@@ -528,7 +521,7 @@
               <div class="interface-map-panel" id="replayInterfaceMapPanel"></div>
               <div class="action-table" id="replayGraphActions"></div>
               </section>
-              <section class="learn-replay-subview" data-learn-replay-panel="draft">
+              <section class="learn-replay-subview active" data-learn-replay-panel="draft">
               <section class="learning-interface-prep-card" id="learningInterfacePrepCard" aria-label="Learning interface preparation">
                 <div>
                   <strong data-i18n="learning_interface_prep_title">Open, bind, and screenshot</strong>
@@ -560,21 +553,23 @@
               <section class="learning-interface-flow-card" aria-label="Learning interface workflow">
                 <div>
                   <strong data-i18n="learning_interface_flow_title">Learn current interface</strong>
-                  <p data-i18n="learning_interface_flow_hint">Bind and screenshot, understand the full screen, number regions, calibrate with the execute locator chain, then output a fused draft and read-only PathGraph.</p>
+                  <p data-i18n="learning_interface_flow_hint">Bind and screenshot, understand the full screen, number regions, calibrate with the execute locator chain, then save the fused learning result and a read-only PathGraph.</p>
                 </div>
                 <div class="button-row learning-interface-flow-actions">
                   <button id="learningInterfaceRunBtn" type="button" class="primary" data-i18n="learning_interface_run">Learn current interface</button>
+                  <button id="learningInterfaceCancelBtn" type="button" disabled data-i18n="learning_interface_cancel">Cancel current stage</button>
                   <span id="learningInterfaceFlowStatus" class="learning-interface-flow-status" data-i18n="learning_interface_flow_idle">idle · no live click</span>
                 </div>
                 <ol class="learning-interface-flow-progress" id="learningInterfaceFlowProgress">
                   <li data-learning-flow-step="bind_capture"><span>1</span><strong data-i18n="learning_flow_bind_capture">Bind / screenshot</strong></li>
                   <li data-learning-flow-step="screen_understanding"><span>2</span><strong data-i18n="learning_flow_screen_understanding">Full-screen understanding</strong></li>
                   <li data-learning-flow-step="numbered_map"><span>3</span><strong data-i18n="learning_flow_numbered_map">Numbered selection map</strong></li>
-                  <li data-learning-flow-step="page_details"><span>4</span><strong data-i18n="learning_flow_page_details">Interface details</strong></li>
-                  <li data-learning-flow-step="precise_calibration"><span>5</span><strong data-i18n="learning_flow_precise_calibration">Precise calibration</strong></li>
+                  <li data-learning-flow-step="precise_calibration"><span>4</span><strong data-i18n="learning_flow_precise_calibration">Precise calibration</strong></li>
+                  <li data-learning-flow-step="review_repair"><span>5</span><strong data-i18n="learning_flow_review_repair">Model review / repair</strong></li>
                   <li data-learning-flow-step="fusion"><span>6</span><strong data-i18n="learning_flow_fusion">Fusion</strong></li>
-                  <li data-learning-flow-step="pathgraph_draft"><span>7</span><strong data-i18n="learning_flow_pathgraph_draft">PathGraph draft</strong></li>
-                  <li data-learning-flow-step="complete"><span>8</span><strong data-i18n="learning_flow_complete">Complete</strong></li>
+                  <li data-learning-flow-step="page_details"><span>7</span><strong data-i18n="learning_flow_page_details">Interface details</strong></li>
+                  <li data-learning-flow-step="pathgraph_draft"><span>8</span><strong data-i18n="learning_flow_pathgraph_draft">Interface paths</strong></li>
+                  <li data-learning-flow-step="complete"><span>9</span><strong data-i18n="learning_flow_complete">Complete</strong></li>
                 </ol>
               </section>
               <details class="replay-action-disclosure" id="learningDraftAdvancedDiagnostics">
@@ -673,33 +668,368 @@
                 </div>
               </details>
               <section class="learning-draft-review-workspace" aria-label="Learning draft replay workspace">
+                <section class="interface-workflow-review-panel" id="interfaceWorkflowReviewPanel">
+                  <div class="panel-header compact">
+                    <div>
+                      <strong data-i18n="interface_workflow_review_title">软件界面学习</strong>
+                      <p class="interface-workflow-review-subtitle" data-i18n="interface_workflow_review_hint">一个软件对应一张完整界面图；选择节点后在中间查看证据，在右侧修改名称、结构和跳转。</p>
+                    </div>
+                    <span id="interfaceWorkflowStatus">尚未加载</span>
+                  </div>
+                  <div class="interface-workflow-summary">
+                    <div>
+                      <small data-i18n="interface_workflow_goal">目标</small>
+                      <strong id="interfaceWorkflowGoal">--</strong>
+                    </div>
+                    <div>
+                      <small data-i18n="interface_workflow_application">软件</small>
+                      <strong id="interfaceWorkflowApplication">--</strong>
+                    </div>
+                    <div>
+                      <small data-i18n="interface_workflow_safety">执行边界</small>
+                      <strong data-i18n="interface_workflow_draft_only">正式保存，执行仍需实时验证</strong>
+                    </div>
+                  </div>
+                  <label class="interface-workflow-identity-field">
+                    <span>软件 / 网站身份</span>
+                    <input
+                      id="interfaceWorkflowIdentityInput"
+                      type="text"
+                      placeholder="网站填域名或 URL；Windows 软件填产品名"
+                      autocomplete="off"
+                    />
+                    <small>浏览器页面必须按网站归档，不会使用 Edge 进程代替网站身份。</small>
+                  </label>
+                  <div class="interface-workflow-library-manager">
+                    <label>
+                      <span>已学习的软件流程</span>
+                      <select id="interfaceWorkflowLibrarySelect">
+                        <option value="">--</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>新流程名称</span>
+                      <input id="interfaceWorkflowNewNameInput" type="text" placeholder="例如：岗位浏览与申请" />
+                    </label>
+                    <button id="interfaceWorkflowLoadSavedBtn" type="button">打开已学习流程</button>
+                    <button id="interfaceWorkflowCreateBtn" type="button">新建软件 / 网站流程</button>
+                    <button id="interfaceWorkflowOpenFolderBtn" type="button" class="secondary">打开源文件夹</button>
+                    <span id="interfaceWorkflowLibraryStatus">正在读取流程库…</span>
+                  </div>
+                  <div class="interface-workflow-source-manager">
+                    <label class="interface-workflow-source-picker">
+                      <span data-i18n="interface_workflow_add_interface">1. 选择已保存的单界面</span>
+                      <select id="interfaceWorkflowSourceSelect">
+                        <option value="">--</option>
+                      </select>
+                    </label>
+                    <button id="interfaceWorkflowSourcePreviewBtn" type="button" class="secondary">预览单界面</button>
+                    <div class="interface-workflow-source-preview" id="interfaceWorkflowSourcePreview" hidden>
+                      <div class="interface-workflow-source-preview-media" id="interfaceWorkflowSourcePreviewMedia"></div>
+                      <label>
+                        <span>单界面名称</span>
+                        <input id="interfaceWorkflowSourceNameInput" type="text" placeholder="例如：岗位搜索首页" />
+                      </label>
+                    </div>
+                    <div class="interface-workflow-attach-grid">
+                      <label>
+                        <span>2. 加入哪个软件流程</span>
+                        <select id="interfaceWorkflowAttachWorkflowSelect">
+                          <option value="">当前打开流程</option>
+                        </select>
+                      </label>
+                    </div>
+                    <button id="interfaceWorkflowAddSourceBtn" type="button" data-i18n="interface_workflow_add">加入流程</button>
+                    <button id="interfaceWorkflowRemoveSourceBtn" type="button" class="secondary" data-i18n="interface_workflow_remove">移除当前界面</button>
+                    <span id="interfaceWorkflowSourceStatus" data-i18n="interface_workflow_source_empty">当前流程尚未加入界面。</span>
+                  </div>
+                  <div class="interface-workflow-workbench-heading">
+                    <div>
+                      <strong>路径图与界面证据</strong>
+                      <small>上方选择界面和连接关系，下方核对带框证据；需要修改时再展开工具。</small>
+                    </div>
+                    <span>只读验证 · 不会点击目标软件</span>
+                  </div>
+                  <div class="interface-workflow-node-workspace" id="interfaceWorkflowThreeColumnWorkbench">
+                    <section class="interface-workflow-path-panel" id="interfaceWorkflowPathColumn">
+                      <div class="panel-header compact">
+                        <strong>界面与路径</strong>
+                        <small>圆点代表界面，连线代表操作与跳转</small>
+                      </div>
+                      <div class="interface-workflow-graph" id="interfaceWorkflowGraph">
+                        <div class="interface-workflow-graph-legend" id="interfaceWorkflowGraphLegend">
+                          <span><i class="interface-workflow-legend-node"></i>界面</span>
+                          <span><i class="interface-workflow-legend-link"></i>操作路径</span>
+                          <span>点击界面查看证据，滚轮缩放，拖动画布</span>
+                        </div>
+                        <div class="interface-workflow-graph-toolbar" aria-label="路径图视图控制">
+                          <button id="interfaceWorkflowGraphBack" type="button" class="secondary">适合画布</button>
+                          <button id="interfaceWorkflowGraphZoomOut" type="button" title="缩小" aria-label="缩小路径图">−</button>
+                          <button id="interfaceWorkflowGraphZoomIn" type="button" title="放大" aria-label="放大路径图">+</button>
+                          <button id="interfaceWorkflowGraphReset" type="button">重置</button>
+                        </div>
+                        <div class="interface-workflow-graph-stage">
+                          <canvas id="interfaceWorkflowGraphCanvas" aria-label="界面操作路径图"></canvas>
+                          <div
+                            class="interface-workflow-graph-tooltip"
+                            id="interfaceWorkflowGraphTooltip"
+                            role="status"
+                            hidden
+                          ></div>
+                          <div class="interface-workflow-graph-context-menu" id="interfaceWorkflowGraphContextMenu" hidden>
+                            <button type="button" data-interface-workflow-context-action="start-link">从此界面创建连接</button>
+                            <div id="interfaceWorkflowGraphContextEdges"></div>
+                            <button type="button" data-interface-workflow-context-action="cancel-link">取消连接</button>
+                          </div>
+                          <p class="trace-idle" id="interfaceWorkflowGraphEmpty">加入已保存界面后显示软件的完整界面与跳转关系。</p>
+                        </div>
+                        <p class="interface-workflow-graph-link-status" id="interfaceWorkflowGraphLinkStatus">右键界面可快速创建连接。</p>
+                      </div>
+                    </section>
+                    <section class="interface-workflow-evidence-panel" id="interfaceWorkflowEvidenceColumn">
+                      <div class="panel-header compact">
+                        <div>
+                          <strong id="interfaceWorkflowEvidenceTitle" data-i18n="interface_workflow_evidence">当前界面证据</strong>
+                          <div class="interface-workflow-evidence-mode" role="group" aria-label="证据来源">
+                            <button id="interfaceWorkflowEvidenceModeWorkflow" type="button" class="is-active">流程界面</button>
+                            <button id="interfaceWorkflowEvidenceModePreview" type="button" disabled>单界面预览</button>
+                          </div>
+                        </div>
+                        <div class="interface-workflow-evidence-header-actions">
+                          <div class="interface-workflow-layer-tabs" id="interfaceWorkflowLayerTabs"></div>
+                          <button id="interfaceWorkflowRefreshEvidenceBtn" type="button" class="secondary">刷新当前证据</button>
+                          <button id="interfaceWorkflowReviewToolsToggle" type="button" class="secondary">修正当前界面</button>
+                          <span
+                            class="interface-workflow-box-editor-status"
+                            id="interfaceWorkflowBoxEditorStatus"
+                            role="status"
+                            aria-live="polite"
+                            hidden
+                          ></span>
+                        </div>
+                      </div>
+                      <div id="interfaceWorkflowEvidenceAnchor" hidden></div>
+                      <div class="interface-workflow-evidence" id="interfaceWorkflowEvidence">
+                        <p class="trace-idle" data-i18n="interface_workflow_evidence_empty">尚未选择界面。</p>
+                      </div>
+                    </section>
+                    <section class="interface-workflow-inspector-panel" id="interfaceWorkflowReviewToolsColumn" hidden>
+                      <div class="panel-header compact">
+                        <div>
+                          <strong>审核工具</strong>
+                          <small>结构、常规操作与规定跳转</small>
+                        </div>
+                      </div>
+                      <div class="interface-workflow-editor">
+                        <label>
+                          <span data-i18n="interface_workflow_node_name">界面名称</span>
+                          <input id="interfaceWorkflowNodeName" type="text" />
+                        </label>
+                        <label>
+                          <span data-i18n="interface_workflow_surface_type">界面类型</span>
+                          <input id="interfaceWorkflowSurfaceType" type="text" placeholder="list / detail / form / dialog" />
+                        </label>
+                        <label>
+                          <span data-i18n="interface_workflow_review_status">审核状态</span>
+                          <select id="interfaceWorkflowNodeReviewStatus">
+                            <option value="needs_human_review">needs_human_review</option>
+                            <option value="reviewed_candidate">reviewed_candidate</option>
+                            <option value="rejected">rejected</option>
+                          </select>
+                        </label>
+                        <div hidden>
+                          <input id="interfaceWorkflowTransitionAction" type="text" />
+                          <select id="interfaceWorkflowTransitionTarget">
+                            <option value="">没有已观察到的下一界面</option>
+                          </select>
+                        </div>
+                        <section class="interface-workflow-content-editor" id="interfaceWorkflowContentEditor">
+                          <div class="interface-workflow-operation-heading">
+                            <div>
+                              <strong>框与内容语义</strong>
+                              <small>先在下方带框图选择具体控件，再说明它是什么、Agent 如何使用。</small>
+                            </div>
+                            <span id="interfaceWorkflowContentStatus">尚未选择控件</span>
+                          </div>
+                          <label>
+                            <span>当前控件</span>
+                            <input id="interfaceWorkflowContentTarget" type="text" readonly />
+                          </label>
+                          <div class="interface-workflow-operation-grid">
+                            <label>
+                              <span>内容变化方式</span>
+                              <select id="interfaceWorkflowContentBehavior">
+                                <option value="fixed_structure">固定结构</option>
+                                <option value="fixed_label">固定文字</option>
+                                <option value="dynamic_value">动态值</option>
+                                <option value="dynamic_collection">动态列表</option>
+                                <option value="user_input">用户输入</option>
+                                <option value="ephemeral">临时内容</option>
+                                <option value="sensitive_dynamic">敏感动态内容</option>
+                                <option value="ignore">忽略</option>
+                              </select>
+                            </label>
+                            <label>
+                              <span>Agent 用途</span>
+                              <select id="interfaceWorkflowContentAgentUsage">
+                                <option value="identity_anchor">识别当前界面</option>
+                                <option value="action_target">操作目标</option>
+                                <option value="decision_signal">决策信息</option>
+                                <option value="display_only">仅展示</option>
+                              </select>
+                            </label>
+                            <label>
+                              <span>读取时机</span>
+                              <select id="interfaceWorkflowContentReadPolicy">
+                                <option value="on_interface_match">匹配界面时读取</option>
+                                <option value="on_demand">需要时读取</option>
+                                <option value="never">不读取</option>
+                              </select>
+                            </label>
+                          </div>
+                          <label>
+                            <span>给 Agent 的描述</span>
+                            <textarea
+                              id="interfaceWorkflowContentDescription"
+                              rows="3"
+                              placeholder="例如：这是岗位卡片，读取当前标题和公司；点击后进入岗位详情。"
+                            ></textarea>
+                          </label>
+                          <div class="interface-workflow-operation-actions">
+                            <button id="interfaceWorkflowContentSaveBtn" type="button">保存内容说明</button>
+                          </div>
+                          <small>固定结构进入记忆；Agent 只在当前观察中读取动态值，历史文字不会当作最新内容。</small>
+                        </section>
+                        <div id="interfaceWorkflowOperationToolbarAnchor" hidden></div>
+                        <section
+                          class="interface-workflow-operation-toolbar"
+                          id="interfaceWorkflowOperationToolbar"
+                          aria-label="Agent 操作与跳转路径"
+                          hidden
+                        >
+                          <div class="interface-workflow-operation-heading">
+                            <div>
+                              <strong>3. 用当前框连接下一个界面</strong>
+                              <small>人工定义操作和目标界面；验证只做 dry-run，不点击目标软件。</small>
+                            </div>
+                            <span id="interfaceWorkflowOperationStatus">尚未选择操作</span>
+                          </div>
+                          <label>
+                            <span>当前界面的操作</span>
+                            <select id="interfaceWorkflowOperationList">
+                              <option value="">新增操作</option>
+                            </select>
+                          </label>
+                          <div class="interface-workflow-operation-grid">
+                            <label>
+                              <span>操作类型</span>
+                              <select id="interfaceWorkflowOperationType">
+                                <option value="read">读取</option>
+                                <option value="open_detail">打开详情</option>
+                                <option value="open_apply_flow">进入申请流程</option>
+                                <option value="fill_field">填写字段</option>
+                                <option value="select_option">选择选项</option>
+                                <option value="scroll">滚动</option>
+                                <option value="back">返回</option>
+                                <option value="close_modal">关闭弹窗</option>
+                                <option value="wait">等待</option>
+                                <option value="continue_next_step">继续下一步</option>
+                              </select>
+                            </label>
+                            <label>
+                              <span>显示名称</span>
+                              <input id="interfaceWorkflowOperationLabel" type="text" placeholder="例如：打开岗位详情" />
+                            </label>
+                            <label class="interface-workflow-operation-description">
+                              <span>给 Agent 的操作说明</span>
+                              <textarea
+                                id="interfaceWorkflowOperationDescription"
+                                rows="2"
+                                placeholder="例如：点击当前卡片，进入详情后确认标题与所选条目一致。"
+                              ></textarea>
+                            </label>
+                            <div class="interface-workflow-control-picker">
+                              <label>
+                                <span>目标控件</span>
+                                <select id="interfaceWorkflowOperationTargetControl">
+                                  <option value="">不指定控件</option>
+                                </select>
+                              </label>
+                              <button id="interfaceWorkflowOperationPickControlBtn" type="button" class="secondary">在证据图选择</button>
+                            </div>
+                            <label>
+                              <span>风险级别</span>
+                              <select id="interfaceWorkflowOperationRisk">
+                                <option value="low">低</option>
+                                <option value="medium">中</option>
+                                <option value="high">高</option>
+                              </select>
+                            </label>
+                            <label>
+                              <span>成功后进入</span>
+                              <select id="interfaceWorkflowOperationTargetNode">
+                                <option value="">请选择目标界面</option>
+                              </select>
+                            </label>
+                            <label>
+                              <span>或创建待学习界面</span>
+                              <input id="interfaceWorkflowOperationPlaceholderName" type="text" placeholder="例如：Quick Apply 表单" />
+                            </label>
+                          </div>
+                          <label class="interface-workflow-operation-confirmation">
+                            <input id="interfaceWorkflowOperationConfirmation" type="checkbox" />
+                            <span>执行前需要用户确认</span>
+                          </label>
+                          <div class="interface-workflow-operation-actions">
+                            <button id="interfaceWorkflowOperationAddBtn" type="button">添加</button>
+                            <button id="interfaceWorkflowOperationUpdateBtn" type="button" class="secondary">更新</button>
+                            <button id="interfaceWorkflowOperationDeleteBtn" type="button" class="secondary">删除</button>
+                            <button id="interfaceWorkflowOperationDryRunBtn" type="button">安全验证</button>
+                          </div>
+                        </section>
+                        <div class="interface-workflow-editor-actions">
+                          <button id="interfaceWorkflowEditBoxesBtn" type="button" data-i18n="interface_workflow_edit_boxes">修改当前界面框</button>
+                          <button id="interfaceWorkflowSaveBtn" type="button" data-i18n="interface_workflow_save_draft">保存学习结果</button>
+                          <button id="interfaceWorkflowMemoryBtn" type="button" class="secondary" data-i18n="interface_workflow_memory_handoff">发布与执行验证</button>
+                        </div>
+                        <p class="interface-workflow-save-status" id="interfaceWorkflowSaveStatus" data-i18n="interface_workflow_save_hint">学习结果会正式保存；真实操作仍需实时识别、Gate 与 Trace。</p>
+                      </div>
+                      <div class="interface-workflow-inspector" id="interfaceWorkflowInspector">
+                        <p class="trace-idle" data-i18n="interface_workflow_inspector_empty">选择节点后显示区域、控件、候选操作、阻碍条件和前后界面。</p>
+                      </div>
+                    </section>
+                  </div>
+                </section>
                 <section class="learning-review-section learning-draft-history-panel">
-                  <strong data-i18n="learning_draft_history_title">History learning drafts</strong>
+                  <strong data-i18n="learning_draft_history_title">Saved learning history</strong>
                   <div id="learningDraftHistoryList">
-                    <p class="trace-idle" data-i18n="learning_draft_history_empty">Load recent drafts or run learning to show history.</p>
+                    <p class="trace-idle" data-i18n="learning_draft_history_empty">Load recent results or run learning to show history.</p>
                   </div>
                 </section>
                 <section class="learning-review-section learning-draft-screenshot-panel" id="learningDraftScreenshotPanel">
-                  <strong data-i18n="learning_draft_screenshot_title">Screenshot / numbered map</strong>
+                  <div class="panel-header compact">
+                    <strong data-i18n="learning_draft_screenshot_title">Screenshot / numbered map</strong>
+                    <button id="learningDraftOpenBoxEditorBtn" type="button">Edit boxes</button>
+                  </div>
                   <div id="learningDraftScreenshotPreview">
                     <p class="trace-idle" data-i18n="learning_draft_screenshot_empty">No learning screenshot loaded.</p>
                   </div>
                 </section>
               <section class="learning-review-panel" id="learningDraftReviewPanel">
                 <div class="panel-header compact">
-                  <h4 data-i18n="learning_draft_review_title">Learning draft review</h4>
+                  <h4 data-i18n="learning_draft_review_title">Learning result review</h4>
                   <span id="learningDraftReviewStatus">needs_human_review</span>
                 </div>
-                <div class="mode-help" data-i18n="learning_draft_review_hint">Display and edit the learning draft as a reviewed template candidate. This never authorizes clicks or Execute binding.</div>
+                <div class="mode-help" data-i18n="learning_draft_review_hint">Display and edit a saved learning result. Real actions still require live localization, Gate, and Trace.</div>
                 <div class="learning-review-summary" id="learningDraftReviewSummary"></div>
-                <section class="learning-review-section learning-screen-preview-section">
-                  <div class="panel-header compact">
+                <details class="learning-review-section learning-screen-preview-section" id="learningDraftScreenUnderstandingDiagnostics">
+                  <summary>
                     <strong data-i18n="screen_understanding_preview_title">Screen Understanding Preview</strong>
                     <span id="screenUnderstandingPreviewStatus" data-i18n="screen_understanding_preview_not_available">not available</span>
-                  </div>
+                  </summary>
                   <div class="mode-help" data-i18n="screen_understanding_preview_hint">Read-only parser/classifier preview. Review-only regions are not clickable; grounded candidates still require ROI grounding and Gate.</div>
                   <div class="screen-understanding-preview" id="screenUnderstandingPreview"></div>
-                </section>
+                </details>
                 <section class="learning-review-section learning-draft-manual-edit-panel" id="learningDraftManualEditPanel">
                   <strong data-i18n="learning_draft_manual_edit_title">Manual draft edit</strong>
                   <div class="form-grid">
@@ -748,6 +1078,47 @@
                   </div>
                   <div class="button-row">
                     <button id="learningDraftManualSaveBtn" type="button" data-i18n="learning_draft_manual_save">Save manual edit</button>
+                  </div>
+                </section>
+                <section class="learning-review-section" id="learningOperationalMemoryPanel">
+                  <div class="panel-header compact">
+                    <strong data-i18n="learning_memory_title">Agent operational memory</strong>
+                    <span id="learningMemoryStatus">not_published</span>
+                  </div>
+                  <div class="mode-help" data-i18n="learning_memory_hint">Publish only a human-approved reviewed candidate. Preview and execution always recapture, re-ground, pass Gate, and verify the result; old click coordinates are never reused.</div>
+                  <div class="form-grid">
+                    <label>
+                      <span data-i18n="learning_memory_interface_id">Interface memory ID</span>
+                      <input id="learningMemoryInterfaceId" value="" placeholder="python_org_documentation" />
+                    </label>
+                    <label>
+                      <span data-i18n="learning_memory_action">Action (optional override)</span>
+                      <select id="learningMemoryActionSelect">
+                        <option value="">-- Agent resolves from goal --</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span data-i18n="learning_memory_goal">Execution goal</span>
+                      <input id="learningMemoryGoal" value="" placeholder="Open Documentation" />
+                    </label>
+                  </div>
+                  <div class="button-row">
+                    <button id="learningMemoryPublishBtn" type="button" data-i18n="learning_memory_publish">Publish reviewed memory</button>
+                    <button id="learningMemoryLoadBtn" type="button" class="secondary" data-i18n="learning_memory_load">Load active memory</button>
+                    <button id="learningMemoryDryRunBtn" type="button" data-i18n="learning_memory_preview">Preview in Execute</button>
+                    <button id="learningMemoryExecuteBtn" type="button" class="danger" data-i18n="learning_memory_execute">Execute low-risk action</button>
+                    <button id="learningMemoryReturnToEditBtn" type="button" class="secondary" data-i18n="learning_memory_return_to_edit">Return to edit boxes</button>
+                  </div>
+                </section>
+                <section class="learning-review-section learning-correction-memory-panel" id="learningCorrectionMemoryPanel">
+                  <div class="panel-header compact">
+                    <strong data-i18n="learning_correction_memory_title">CorrectionMemory candidates</strong>
+                    <button id="learningCorrectionMemoryRefreshBtn" type="button" class="secondary" data-i18n="learning_correction_memory_refresh">Refresh</button>
+                  </div>
+                  <div class="mode-help" data-i18n="learning_correction_memory_hint">Human corrections are stored as non-production candidates. Only separately verified, human-approved active rules may affect later learning runs.</div>
+                  <div id="learningCorrectionMemorySummary" class="learning-correction-memory-summary"></div>
+                  <div id="learningCorrectionMemoryList" class="learning-correction-memory-list">
+                    <p class="trace-idle" data-i18n="learning_correction_memory_empty">No correction candidates recorded.</p>
                   </div>
                 </section>
                 <details class="learning-draft-raw-details">
@@ -1198,17 +1569,140 @@
         <div class="image-inspector-body" id="imageInspectorBody">
           <div class="image-inspector-stage" id="imageInspectorStage">
             <img id="imageInspectorImage" alt="" />
+            <div class="image-inspector-draft-boxes" id="imageInspectorDraftBoxes"></div>
             <div class="image-inspector-box" id="imageInspectorBox"></div>
             <div class="image-inspector-point" id="imageInspectorPoint"></div>
           </div>
         </div>
         <div class="image-inspector-footer" id="imageInspectorFooter" style="display:none">
           <span id="imageInspectorEditHint"></span>
+          <div class="image-inspector-editor-controls" id="imageInspectorEditorControls" style="display:none">
+            <button id="imageInspectorCompactBoxesBtn" type="button" aria-pressed="true">显示全部框</button>
+            <button id="imageInspectorAddRegionBtn" type="button">Add</button>
+            <button id="imageInspectorDeleteBoxBtn" type="button">Delete</button>
+            <button id="imageInspectorUndoBtn" type="button">Undo</button>
+            <button id="imageInspectorRedoBtn" type="button">Redo</button>
+            <label class="image-inspector-label-control">
+              <span>Name</span>
+              <input id="imageInspectorLabel" type="text" placeholder="Search button" />
+            </label>
+            <label class="image-inspector-description-control">
+              <span>Agent description</span>
+              <input id="imageInspectorDescription" type="text" placeholder="What this control does" />
+            </label>
+            <label>
+              <span>Role</span>
+              <select id="imageInspectorRoleSelect">
+                <option value="review_only">review_only</option>
+                <option value="input">input</option>
+                <option value="button">button</option>
+                <option value="card">card</option>
+                <option value="filter">filter</option>
+                <option value="detail">detail</option>
+              </select>
+            </label>
+            <label>
+              <span>Action</span>
+              <select id="imageInspectorActionTypeSelect">
+                <option value="read_only">read_only</option>
+                <option value="click">click</option>
+                <option value="open_detail">open_detail</option>
+                <option value="open_flow">open_flow</option>
+                <option value="fill_field">fill_field</option>
+                <option value="type_text">type_text</option>
+                <option value="select_option">select_option</option>
+                <option value="scroll">scroll</option>
+                <option value="continue_next_step">continue_next_step</option>
+                <option value="final_submit">final_submit (blocked)</option>
+              </select>
+            </label>
+            <label>
+              <span>Input</span>
+              <input id="imageInspectorInputSemantics" type="text" placeholder="email, query, free text..." />
+            </label>
+            <label>
+              <span>Parent</span>
+              <select id="imageInspectorParentSelect"><option value="">none</option></select>
+            </label>
+            <label>
+              <span>Destination</span>
+              <select id="imageInspectorDestinationKind">
+                <option value="none">none</option>
+                <option value="interface">interface</option>
+                <option value="url">URL</option>
+              </select>
+            </label>
+            <label class="image-inspector-destination-control">
+              <span>Target</span>
+              <input id="imageInspectorDestinationValue" type="text" placeholder="interface ID or URL" />
+            </label>
+            <label class="image-inspector-verification-control">
+              <span>Verify</span>
+              <input id="imageInspectorVerificationRule" type="text" placeholder="What should change after the action" />
+            </label>
+            <label>
+              <span>Risk</span>
+              <select id="imageInspectorRiskLevel">
+                <option value="normal">normal</option>
+                <option value="review_required">review required</option>
+                <option value="dangerous">dangerous</option>
+              </select>
+            </label>
+            <label class="image-inspector-reason-control">
+              <span>Reason</span>
+              <input id="imageInspectorReason" type="text" placeholder="why this box changed" />
+            </label>
+          </div>
           <button id="imageInspectorApplyBoxBtn" type="button" data-i18n="learning_draft_apply_selected_bbox">Use selected box</button>
         </div>
       </div>
     </div>
-    <script src="/panel/assets/panel.js?v=20260715-learning-fusion-2"></script>
+    <dialog class="interface-workflow-link-dialog" id="interfaceWorkflowLinkDialog">
+      <div class="interface-workflow-link-dialog-shell">
+        <header>
+          <div>
+            <strong>连接两个界面</strong>
+            <span>选择来源界面的控件和操作；保存后路径图会建立连接。</span>
+          </div>
+          <button id="interfaceWorkflowLinkDialogCloseBtn" type="button" class="secondary" aria-label="关闭">关闭</button>
+        </header>
+        <div class="interface-workflow-link-endpoints" aria-label="连接端点">
+          <div>
+            <span>来源界面</span>
+            <strong id="interfaceWorkflowLinkDialogSource">尚未选择</strong>
+          </div>
+          <span aria-hidden="true">→</span>
+          <div>
+            <span>目标界面</span>
+            <strong id="interfaceWorkflowLinkDialogTarget">尚未选择</strong>
+          </div>
+        </div>
+        <div class="interface-workflow-link-dialog-body" id="interfaceWorkflowLinkDialogBody"></div>
+        <footer>
+          <span id="interfaceWorkflowLinkDialogStatus">连接尚未保存</span>
+          <div>
+            <button id="interfaceWorkflowLinkDialogCancelBtn" type="button" class="secondary">取消</button>
+            <button id="interfaceWorkflowLinkDialogSaveBtn" type="button">保存连接</button>
+          </div>
+        </footer>
+      </div>
+    </dialog>
+    <dialog class="interface-workflow-link-dialog interface-workflow-control-picker-dialog" id="interfaceWorkflowControlPickerDialog">
+      <div class="interface-workflow-link-dialog-shell">
+        <header>
+          <div>
+            <strong>选择跳转控件</strong>
+            <span>点击证据图中的具体框；选择后会自动返回连接编辑器。</span>
+          </div>
+          <button id="interfaceWorkflowControlPickerDialogCancelBtn" type="button" class="secondary" aria-label="返回连接编辑器">返回</button>
+        </header>
+        <div class="interface-workflow-control-picker-dialog-body" id="interfaceWorkflowControlPickerDialogBody"></div>
+      </div>
+    </dialog>
+    <script src="/panel/assets/learning_draft_editor.js?v=20260729-box-editor-status-1"></script>
+    <script src="/panel/assets/learning_workflow_review.js?v=20260729-unconnected-interface-1"></script>
+    <script src="/panel/assets/interface_workflow_graph.js?v=20260729-compact-workflow-graph-1"></script>
+    <script src="/panel/assets/panel.js?v=20260729-workflow-control-picker-1"></script>
   </body>
 </html>
 

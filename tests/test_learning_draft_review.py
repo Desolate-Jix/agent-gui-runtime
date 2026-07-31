@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from app.learn.draft_review import load_learning_draft_review
 from app.main import app
@@ -15,6 +16,84 @@ def _write_json(path: Path, payload: dict) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return path
+
+
+def test_model_review_route_preserves_legacy_response_and_safety(monkeypatch) -> None:
+    import app.api.panel as panel_api
+
+    monkeypatch.setattr(
+        panel_api,
+        "run_panel_learning_model_review_repair",
+        lambda **_kwargs: {
+            "status": "safe_stop",
+            "calibration_permission": False,
+            "integrity_gate": {"status": "failed"},
+            "final_stage2_report_path": "artifacts/final.json",
+            "final_numbering_revision": 3,
+        },
+    )
+    monkeypatch.setattr(
+        panel_api,
+        "write_trace",
+        lambda **_kwargs: "logs/traces/review.json",
+    )
+
+    response = panel_api.run_learning_model_review_repair_endpoint(
+        panel_api.PanelRunLearningModelReviewRepairRequest(
+            two_stage_report_path="artifacts/input.json",
+            screenshot_path="artifacts/input.png",
+            composite_overlay_path="artifacts/overlay.png",
+        )
+    )
+
+    payload = response.model_dump(mode="json")
+    assert payload["success"] is True
+    assert payload["message"] == "Learning model review and repair stopped safely"
+    assert payload["data"]["status"] == "safe_stop"
+    assert payload["data"]["calibration_permission"] is False
+    assert payload["data"]["real_clicks"] == 0
+    assert payload["data"]["live_fills"] == 0
+    assert payload["data"]["live_submits"] == 0
+    assert payload["data"]["trace_path"] == "logs/traces/review.json"
+    assert payload["error"] is None
+
+
+def test_model_review_route_preserves_legacy_failure_response(monkeypatch) -> None:
+    import app.api.panel as panel_api
+
+    def fail_review(**_kwargs):
+        raise RuntimeError("review failed")
+
+    monkeypatch.setattr(
+        panel_api,
+        "run_panel_learning_model_review_repair",
+        fail_review,
+    )
+
+    response = panel_api.run_learning_model_review_repair_endpoint(
+        panel_api.PanelRunLearningModelReviewRepairRequest(
+            two_stage_report_path="artifacts/input.json",
+            screenshot_path="artifacts/input.png",
+            composite_overlay_path="artifacts/overlay.png",
+        )
+    )
+
+    payload = response.model_dump(mode="json")
+    assert payload == {
+        "success": False,
+        "message": "Learning model review and repair failed",
+        "data": {
+            "status": "safe_stop",
+            "calibration_permission": False,
+            "real_clicks": 0,
+            "live_fills": 0,
+            "live_submits": 0,
+        },
+        "error": {
+            "code": "learning_model_review_repair_failed",
+            "details": "review failed",
+        },
+    }
 
 
 def _write_trial(path: Path) -> None:
@@ -1290,10 +1369,10 @@ def test_panel_deterministic_partition_report_flows_into_page_detail_and_readonl
     assert review_data["no_click_authorization"] is True
 
 
-def test_panel_calibrated_target_replay_uses_merged_support_point() -> None:
-    from app.api import panel as panel_api
+def test_recognition_task_calibrated_target_replay_uses_merged_support_point() -> None:
+    from app.learn.workflow_tasks import recognition
 
-    result = panel_api._panel_calibrated_target_grounding_adapter(
+    result = recognition._calibrated_target_grounding(
         item={
             "bbox": {"x": 1012, "y": 0, "w": 48, "h": 42},
             "metadata": {
@@ -1566,6 +1645,52 @@ def test_panel_learning_draft_review_routes_load_and_save(tmp_path: Path, monkey
     saved = json.loads(saved_path.read_text(encoding="utf-8"))
     assert saved["artifact_is_authorization"] is False
     assert saved["execute_binding_enabled"] is False
+
+
+def test_panel_learning_draft_review_fast_load_skips_related_sidecar_discovery(
+    monkeypatch,
+) -> None:
+    import app.api.panel as panel_api
+
+    calls: list[dict[str, object]] = []
+
+    def fake_load_learning_draft_review(
+        source_path,
+        *,
+        project_root,
+        discover_related_sidecars,
+    ):
+        calls.append(
+            {
+                "source_path": source_path,
+                "project_root": project_root,
+                "discover_related_sidecars": discover_related_sidecars,
+            }
+        )
+        return {
+            "contract_version": "learning_draft_review_v1",
+            "source": {"source_path": source_path},
+            "draft": {"regions": [], "action_templates": []},
+        }
+
+    monkeypatch.setattr(panel_api, "load_learning_draft_review", fake_load_learning_draft_review)
+    monkeypatch.setattr(panel_api, "write_trace", lambda **_kwargs: "logs/traces/fast-load.json")
+
+    response = panel_api.load_learning_draft_review_endpoint(
+        panel_api.PanelLoadLearningDraftReviewRequest(
+            source_path="artifacts/learning-runs/sample/trial_result.json",
+            discover_related_sidecars=False,
+        )
+    )
+
+    assert response.success is True
+    assert calls == [
+        {
+            "source_path": "artifacts/learning-runs/sample/trial_result.json",
+            "project_root": panel_api.ROOT_DIR,
+            "discover_related_sidecars": False,
+        }
+    ]
 
 
 def test_panel_attaches_detail_observe_result_review_only(tmp_path: Path, monkeypatch) -> None:
@@ -2223,6 +2348,199 @@ def test_panel_learning_draft_sources_limits_pinned_entries_to_current_demo_set(
     assert data["max_pinned_sources"] == 3
     assert [item["source_path"] for item in pinned_sources] == pinned_paths[:3]
     assert pinned_paths[3] not in [item["source_path"] for item in data["sources"]]
+
+
+def test_panel_learning_draft_sources_recommends_latest_display_complete_draft(tmp_path: Path, monkeypatch) -> None:
+    import app.api.panel as panel_api
+
+    pinned_path_text = "logs/benchmarks/pinned/learn_mode_demo_scaffold.json"
+    pinned_path = tmp_path / pinned_path_text
+    _write_json(
+        pinned_path,
+        {
+            "contract_version": "learn_mode_demo_scaffold_v1",
+            "page_detail_candidate": {
+                "contract_version": "learn_page_detail_candidate_v1",
+                "screen_summary": "Pinned review source",
+                "layout": {
+                    "bounds": {"x": 0, "y": 0, "w": 320, "h": 240},
+                    "sections": [{"section_id": "main", "label": "Main", "bbox": {"x": 0, "y": 0, "w": 320, "h": 240}}],
+                    "regions": [{"region_id": "r1", "label": "Main", "role": "review_only", "source_section_id": "main", "bbox": {"x": 10, "y": 10, "w": 100, "h": 80}}],
+                },
+            },
+        },
+    )
+
+    current_path = tmp_path / "artifacts" / "learning-runs" / "current" / "trial_result.json"
+    _write_trial(current_path)
+    screenshot_path = tmp_path / "artifacts" / "screenshots" / "current.png"
+    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+    screenshot_path.write_bytes(b"display evidence")
+    current_payload = json.loads(current_path.read_text(encoding="utf-8"))
+    current_payload["best_learning_draft"]["page_details"] = {
+        "screen": {"image_path": "artifacts/screenshots/current.png"}
+    }
+    current_path.write_text(json.dumps(current_payload, ensure_ascii=False), encoding="utf-8")
+
+    stale_intermediate = tmp_path / "artifacts" / "learning-runs" / "newer" / "final_stage2_for_calibration.json"
+    _write_trial(stale_intermediate)
+    stale_intermediate.touch()
+
+    for index in range(8):
+        incomplete_path = (
+            tmp_path
+            / "artifacts"
+            / "learning-runs"
+            / f"newer_incomplete_{index}"
+            / "trial_result.json"
+        )
+        _write_trial(incomplete_path)
+
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    monkeypatch.setattr(panel_api, "PINNED_LEARNING_DRAFT_SOURCE_PATHS", [pinned_path_text])
+
+    payload = TestClient(app).get("/panel/learning_draft_sources").json()
+
+    assert payload["success"] is True
+    data = payload["data"]
+    sources = data["sources"]
+    recommended = [item for item in sources if item.get("recommended_for_panel_review") is True]
+    assert data["include_recent"] is True
+    assert len(recommended) == 1
+    assert recommended[0]["source_path"] == "artifacts/learning-runs/current/trial_result.json"
+    assert recommended[0]["display_completeness_status"] == "ready"
+    assert recommended[0]["source_image_path"] == "artifacts/screenshots/current.png"
+    assert recommended[0]["source_image_exists"] is True
+    assert recommended[0]["pinned"] is False
+    assert not any(item["source_path"].endswith("final_stage2_for_calibration.json") for item in sources)
+    assert data["candidate_scan_count"] >= 9
+
+
+def test_panel_learning_draft_sources_avoids_unbounded_recursive_glob(tmp_path: Path, monkeypatch) -> None:
+    import app.api.panel as panel_api
+
+    pinned_path_text = "logs/benchmarks/pinned/learn_mode_demo_scaffold.json"
+    pinned_path = tmp_path / pinned_path_text
+    _write_json(
+        pinned_path,
+        {
+            "contract_version": "learn_mode_demo_scaffold_v1",
+            "page_detail_candidate": {
+                "contract_version": "learn_page_detail_candidate_v1",
+                "screen_summary": "Pinned review source",
+                "layout": {
+                    "bounds": {"x": 0, "y": 0, "w": 320, "h": 240},
+                    "sections": [
+                        {"section_id": "main", "label": "Main", "bbox": {"x": 0, "y": 0, "w": 320, "h": 240}}
+                    ],
+                    "regions": [
+                        {
+                            "region_id": "r1",
+                            "label": "Main",
+                            "role": "review_only",
+                            "source_section_id": "main",
+                            "bbox": {"x": 10, "y": 10, "w": 100, "h": 80},
+                        }
+                    ],
+                },
+            },
+        },
+    )
+    current_path = tmp_path / "artifacts" / "learning-runs" / "current" / "trial_result.json"
+    _write_trial(current_path)
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    monkeypatch.setattr(panel_api, "PINNED_LEARNING_DRAFT_SOURCE_PATHS", [pinned_path_text])
+
+    def fail_rglob(*args, **kwargs):
+        raise AssertionError("unbounded Path.rglob must not be used for panel history discovery")
+
+    monkeypatch.setattr(Path, "rglob", fail_rglob)
+
+    data = panel_api._list_recent_learning_draft_sources(limit=3)
+
+    assert data["candidate_scan_count"] == 1
+    assert {item["source_path"] for item in data["sources"]} == {
+        pinned_path_text,
+        "artifacts/learning-runs/current/trial_result.json",
+    }
+
+
+def test_learning_review_loads_adjacent_sidecar_before_global_search(tmp_path: Path, monkeypatch) -> None:
+    import app.learn.draft_review as draft_review
+
+    wrapper_path = tmp_path / "logs" / "case" / "wrapper.json"
+    wrapper_path.parent.mkdir(parents=True, exist_ok=True)
+    wrapper_path.write_text("{}", encoding="utf-8")
+    sidecar_path = wrapper_path.parent / "learn_page_detail_candidate.json"
+    sidecar_path.write_text(
+        json.dumps(
+            {
+                "contract_version": "learn_page_detail_candidate_v1",
+                "source_path": "logs/case/wrapper.json",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    def fail_rglob(*args, **kwargs):
+        raise AssertionError("global sidecar rglob must not run when the adjacent sidecar matches")
+
+    monkeypatch.setattr(Path, "rglob", fail_rglob)
+
+    result = draft_review._load_sidecar_by_source_path(
+        wrapper_path=wrapper_path,
+        root=tmp_path,
+        file_name="learn_page_detail_candidate.json",
+        contract_version="learn_page_detail_candidate_v1",
+    )
+
+    assert result["source_path"] == "logs/case/wrapper.json"
+
+
+def test_learning_review_fast_list_mode_skips_global_candidate_sidecar_search(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import app.learn.draft_review as draft_review
+
+    reviewed_path = tmp_path / "artifacts" / "learning-runs" / "case" / "trial_result.json"
+    _write_trial(reviewed_path)
+    wrapper_path = tmp_path / "artifacts" / "learning-runs" / "case" / "pathgraph_candidate.json"
+    _write_json(
+        wrapper_path,
+        {
+            "contract_version": "pathgraph_candidate_v1",
+            "reviewed_template_candidate_path": str(reviewed_path.relative_to(tmp_path)),
+            "validation_status": "blocked_pending_calibration",
+            "execute_binding_enabled": False,
+            "artifact_is_authorization": False,
+        },
+    )
+    draft_review.clear_learning_draft_sidecar_cache()
+
+    def fail_rglob(*args, **kwargs):
+        raise AssertionError("fast panel source loading must not run a global sidecar search")
+
+    monkeypatch.setattr(Path, "rglob", fail_rglob)
+
+    result = draft_review.load_learning_draft_review(
+        wrapper_path,
+        project_root=tmp_path,
+        discover_related_sidecars=False,
+    )
+
+    assert result["contract_version"] == "learning_draft_review_v1"
+    assert result["pathgraph_candidate_review"]["contract_version"] == "pathgraph_candidate_review_v1"
+
+
+def test_learning_draft_source_candidate_filter_only_accepts_reviewable_artifacts() -> None:
+    import app.api.panel as panel_api
+
+    assert panel_api._is_learning_draft_source_candidate_file(Path("trial_result.json")) is True
+    assert panel_api._is_learning_draft_source_candidate_file(Path("reviewed_template_candidate.json")) is True
+    assert panel_api._is_learning_draft_source_candidate_file(Path("pathgraph_candidate.json")) is True
+    assert panel_api._is_learning_draft_source_candidate_file(Path("final_stage2_for_calibration.json")) is False
+    assert panel_api._is_learning_draft_source_candidate_file(Path("model_review_report.json")) is False
 
 
 def test_direct_page_detail_and_scaffold_sources_load_as_review_only(tmp_path: Path, monkeypatch) -> None:
@@ -3064,14 +3382,488 @@ def test_save_learning_draft_review_applies_manual_bbox_updates(tmp_path: Path) 
     assert saved["execute_binding_enabled"] is False
 
 
+def test_save_learning_draft_review_writes_versioned_human_review_patch(tmp_path: Path) -> None:
+    from app.learn.draft_review import save_reviewed_template_candidate
+
+    screenshot_path = tmp_path / "artifacts" / "screenshots" / "manual-review.png"
+    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (320, 240), "white").save(screenshot_path)
+    screenshot_sha256 = hashlib.sha256(screenshot_path.read_bytes()).hexdigest()
+    trial_path = tmp_path / "artifacts" / "learning-runs" / "manual-review" / "trial_result.json"
+    _write_trial(trial_path)
+    payload = json.loads(trial_path.read_text(encoding="utf-8"))
+    payload["best_learning_draft"]["page_details"] = {
+        "screen": {
+            "source_image_path": "artifacts/screenshots/manual-review.png",
+            "source_image_sha256": screenshot_sha256,
+        }
+    }
+    trial_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    result = save_reviewed_template_candidate(
+        "artifacts/learning-runs/manual-review/trial_result.json",
+        {
+            "contract_version": "human_review_patch_v1",
+            "screenshot_path": "artifacts/screenshots/manual-review.png",
+            "screenshot_sha256": screenshot_sha256,
+            "reason": "人工修正搜索框范围",
+            "operations": [
+                {
+                    "op": "update_bbox",
+                    "target_kind": "region",
+                    "target_id": "r1",
+                    "before_bbox": {"x": 8, "y": 18, "w": 100, "h": 30},
+                    "after_bbox": {"x": 12, "y": 22, "w": 140, "h": 36},
+                }
+            ],
+        },
+        project_root=tmp_path,
+    )
+
+    patch_path = tmp_path / result["human_review_patch_path"]
+    patch = json.loads(patch_path.read_text(encoding="utf-8"))
+    reviewed = json.loads((tmp_path / result["reviewed_template_candidate_path"]).read_text(encoding="utf-8"))
+
+    assert patch["contract_version"] == "human_review_patch_v1"
+    assert patch["revision"] == 1
+    assert patch["screenshot_sha256"] == screenshot_sha256
+    assert patch["operations"][0]["before_bbox"] == {"x": 8, "y": 18, "w": 100, "h": 30}
+    assert patch["operations"][0]["after_bbox"] == {"x": 12, "y": 22, "w": 140, "h": 36}
+    assert patch["artifact_is_authorization"] is False
+    assert patch["execute_binding_enabled"] is False
+    assert reviewed["draft"]["regions"][0]["bbox"] == {"x": 12, "y": 22, "w": 140, "h": 36}
+    assert reviewed["audit"]["human_review_patch_path"] == result["human_review_patch_path"]
+    assert result["human_review_patch_revision"] == 1
+    overlay_path = tmp_path / result["reviewed_overlay_path"]
+    assert overlay_path.exists()
+    assert reviewed["draft"]["numbered_map_path"] == result["reviewed_overlay_path"]
+    assert reviewed["draft"]["page_details"]["compiled_overlay_path"] == result["reviewed_overlay_path"]
+
+
+def test_save_learning_draft_review_refreshes_manual_edit_and_review_overlay(tmp_path: Path) -> None:
+    from app.learn.draft_review import load_learning_draft_review, save_reviewed_template_candidate
+
+    screenshot_path = tmp_path / "artifacts" / "screenshots" / "manual-panel-refresh.png"
+    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (320, 240), "white").save(screenshot_path)
+    screenshot_sha256 = hashlib.sha256(screenshot_path.read_bytes()).hexdigest()
+    trial_path = tmp_path / "artifacts" / "learning-runs" / "manual-panel-refresh" / "trial_result.json"
+    _write_trial(trial_path)
+    payload = json.loads(trial_path.read_text(encoding="utf-8"))
+    payload["best_learning_draft"]["page_details"] = {
+        "screen": {
+            "source_image_path": "artifacts/screenshots/manual-panel-refresh.png",
+            "source_image_sha256": screenshot_sha256,
+        },
+        "two_stage_understanding": {
+            "fusion": {
+                "compiled_overlay_path": "artifacts/review-overlays/stale-before-manual-save.png",
+                "full_screen_understanding_overlay_path": "artifacts/review-overlays/stale-before-manual-save.png",
+            }
+        },
+    }
+    trial_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    result = save_reviewed_template_candidate(
+        "artifacts/learning-runs/manual-panel-refresh/trial_result.json",
+        {
+            "manual_edit": {
+                "target_region_id": "r1",
+                "target_action_template_id": "a1",
+                "region_label": "人工修正后的搜索区",
+                "region_role": "review_only",
+                "region_section": "main_content",
+                "possible_operation": "read_only",
+                "may_enter_pathgraph_draft": True,
+                "needs_recalibration": False,
+                "notes": "人工审核后应立即显示",
+            }
+        },
+        project_root=tmp_path,
+    )
+
+    refreshed = load_learning_draft_review(
+        result["reviewed_template_candidate_path"],
+        project_root=tmp_path,
+    )
+    region = refreshed["draft"]["regions"][0]
+    action = refreshed["draft"]["action_templates"][0]
+
+    assert region["label"] == "人工修正后的搜索区"
+    assert region["role"] == "review_only"
+    assert region["parent_region_id"] == "main_content"
+    assert region["description"] == "人工审核后应立即显示"
+    assert region["may_enter_pathgraph_draft"] is True
+    assert region["needs_recalibration"] is False
+    assert action["semantic_action"] == "read_only"
+    assert action["action_type"] == "read_only"
+    assert refreshed["screen_understanding_preview"]["compiled_overlay_path"] == result["reviewed_overlay_path"]
+
+
+def test_save_learning_draft_review_rejects_stale_human_review_screenshot(tmp_path: Path) -> None:
+    from app.learn.draft_review import save_reviewed_template_candidate
+
+    screenshot_path = tmp_path / "artifacts" / "screenshots" / "stale-review.png"
+    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (320, 240), "white").save(screenshot_path)
+    original_sha256 = hashlib.sha256(screenshot_path.read_bytes()).hexdigest()
+    trial_path = tmp_path / "artifacts" / "learning-runs" / "stale-review" / "trial_result.json"
+    _write_trial(trial_path)
+    payload = json.loads(trial_path.read_text(encoding="utf-8"))
+    payload["best_learning_draft"]["page_details"] = {
+        "screen": {
+            "source_image_path": "artifacts/screenshots/stale-review.png",
+            "source_image_sha256": original_sha256,
+        }
+    }
+    trial_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    Image.new("RGB", (320, 240), "black").save(screenshot_path)
+
+    with pytest.raises(ValueError, match="screenshot checksum mismatch"):
+        save_reviewed_template_candidate(
+            "artifacts/learning-runs/stale-review/trial_result.json",
+            {
+                "contract_version": "human_review_patch_v1",
+                "screenshot_path": "artifacts/screenshots/stale-review.png",
+                "screenshot_sha256": original_sha256,
+                "operations": [
+                    {
+                        "op": "update_bbox",
+                        "target_kind": "region",
+                        "target_id": "r1",
+                        "before_bbox": {"x": 8, "y": 18, "w": 100, "h": 30},
+                        "after_bbox": {"x": 12, "y": 22, "w": 140, "h": 36},
+                    }
+                ],
+            },
+            project_root=tmp_path,
+        )
+
+
+def test_save_learning_draft_review_rejects_corrupt_source_image(tmp_path: Path) -> None:
+    from app.learn.draft_review import save_reviewed_template_candidate
+
+    screenshot_path = tmp_path / "artifacts" / "screenshots" / "corrupt-review.png"
+    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+    screenshot_path.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00"
+        b"\x01\x01\x01\x00\x18\xdd\x8d\xb0\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    screenshot_sha256 = hashlib.sha256(screenshot_path.read_bytes()).hexdigest()
+    trial_path = tmp_path / "artifacts" / "learning-runs" / "corrupt-review" / "trial_result.json"
+    _write_trial(trial_path)
+    payload = json.loads(trial_path.read_text(encoding="utf-8"))
+    payload["best_learning_draft"]["page_details"] = {
+        "screen": {
+            "source_image_path": "artifacts/screenshots/corrupt-review.png",
+            "source_image_sha256": screenshot_sha256,
+        }
+    }
+    trial_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="human_review_patch screenshot is not a decodable image"):
+        save_reviewed_template_candidate(
+            "artifacts/learning-runs/corrupt-review/trial_result.json",
+            {
+                "contract_version": "human_review_patch_v1",
+                "screenshot_path": "artifacts/screenshots/corrupt-review.png",
+                "screenshot_sha256": screenshot_sha256,
+                "operations": [],
+            },
+            project_root=tmp_path,
+        )
+
+
+def test_human_review_patch_rejects_bbox_outside_source_image(tmp_path: Path) -> None:
+    from app.learn.draft_review import save_reviewed_template_candidate
+
+    screenshot_path = tmp_path / "artifacts" / "screenshots" / "bbox-bounds.png"
+    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (320, 240), "white").save(screenshot_path)
+    screenshot_sha256 = hashlib.sha256(screenshot_path.read_bytes()).hexdigest()
+    trial_path = tmp_path / "artifacts" / "learning-runs" / "bbox-bounds" / "trial_result.json"
+    _write_trial(trial_path)
+    payload = json.loads(trial_path.read_text(encoding="utf-8"))
+    payload["best_learning_draft"]["page_details"] = {
+        "screen": {
+            "source_image_path": "artifacts/screenshots/bbox-bounds.png",
+            "source_image_sha256": screenshot_sha256,
+        }
+    }
+    trial_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="outside screenshot bounds"):
+        save_reviewed_template_candidate(
+            "artifacts/learning-runs/bbox-bounds/trial_result.json",
+            {
+                "contract_version": "human_review_patch_v1",
+                "screenshot_path": "artifacts/screenshots/bbox-bounds.png",
+                "screenshot_sha256": screenshot_sha256,
+                "operations": [
+                    {
+                        "op": "update_bbox",
+                        "target_kind": "region",
+                        "target_id": "r1",
+                        "before_bbox": {"x": 8, "y": 18, "w": 100, "h": 30},
+                        "after_bbox": {"x": 300, "y": 20, "w": 40, "h": 30},
+                    }
+                ],
+            },
+            project_root=tmp_path,
+        )
+
+
+def test_human_review_patch_rejects_parent_cycle(tmp_path: Path) -> None:
+    from app.learn.draft_review import save_reviewed_template_candidate
+
+    screenshot_path = tmp_path / "artifacts" / "screenshots" / "parent-cycle.png"
+    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (320, 240), "white").save(screenshot_path)
+    screenshot_sha256 = hashlib.sha256(screenshot_path.read_bytes()).hexdigest()
+    trial_path = tmp_path / "artifacts" / "learning-runs" / "parent-cycle" / "trial_result.json"
+    _write_trial(trial_path)
+    payload = json.loads(trial_path.read_text(encoding="utf-8"))
+    payload["best_learning_draft"]["page_details"] = {
+        "screen": {
+            "source_image_path": "artifacts/screenshots/parent-cycle.png",
+            "source_image_sha256": screenshot_sha256,
+        }
+    }
+    trial_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="parent cycle"):
+        save_reviewed_template_candidate(
+            "artifacts/learning-runs/parent-cycle/trial_result.json",
+            {
+                "contract_version": "human_review_patch_v1",
+                "screenshot_path": "artifacts/screenshots/parent-cycle.png",
+                "screenshot_sha256": screenshot_sha256,
+                "operations": [
+                    {
+                        "op": "add",
+                        "target_kind": "region",
+                        "target_id": "r2",
+                        "item": {"label": "Results", "bbox": {"x": 160, "y": 40, "w": 140, "h": 160}},
+                    },
+                    {
+                        "op": "update_parent",
+                        "target_kind": "region",
+                        "target_id": "r1",
+                        "before_value": "",
+                        "after_value": "r2",
+                    },
+                    {
+                        "op": "update_parent",
+                        "target_kind": "region",
+                        "target_id": "r2",
+                        "before_value": "",
+                        "after_value": "r1",
+                    },
+                ],
+            },
+            project_root=tmp_path,
+        )
+
+
+def test_human_review_patch_supports_add_delete_role_and_parent_changes(tmp_path: Path) -> None:
+    from app.learn.draft_review import save_reviewed_template_candidate
+
+    screenshot_path = tmp_path / "artifacts" / "screenshots" / "structural-review.png"
+    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (320, 240), "white").save(screenshot_path)
+    screenshot_sha256 = hashlib.sha256(screenshot_path.read_bytes()).hexdigest()
+    trial_path = tmp_path / "artifacts" / "learning-runs" / "structural-review" / "trial_result.json"
+    _write_trial(trial_path)
+    payload = json.loads(trial_path.read_text(encoding="utf-8"))
+    payload["best_learning_draft"]["page_details"] = {
+        "screen": {
+            "source_image_path": "artifacts/screenshots/structural-review.png",
+            "source_image_sha256": screenshot_sha256,
+        }
+    }
+    trial_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    result = save_reviewed_template_candidate(
+        "artifacts/learning-runs/structural-review/trial_result.json",
+        {
+            "contract_version": "human_review_patch_v1",
+            "screenshot_path": "artifacts/screenshots/structural-review.png",
+            "screenshot_sha256": screenshot_sha256,
+            "operations": [
+                {
+                    "op": "add",
+                    "target_kind": "region",
+                    "target_id": "r2",
+                    "item": {
+                        "region_id": "r2",
+                        "label": "Results area",
+                        "role": "review_only",
+                        "bbox": {"x": 160, "y": 40, "w": 140, "h": 160},
+                    },
+                },
+                {
+                    "op": "update_role",
+                    "target_kind": "region",
+                    "target_id": "r1",
+                    "before_value": "text_input",
+                    "after_value": "input",
+                },
+                {
+                    "op": "update_parent",
+                    "target_kind": "region",
+                    "target_id": "r1",
+                    "before_value": "",
+                    "after_value": "r2",
+                },
+                {
+                    "op": "delete",
+                    "target_kind": "action",
+                    "target_id": "a1",
+                },
+            ],
+        },
+        project_root=tmp_path,
+    )
+
+    reviewed = json.loads((tmp_path / result["reviewed_template_candidate_path"]).read_text(encoding="utf-8"))
+    regions = {item["region_id"]: item for item in reviewed["draft"]["regions"]}
+
+    assert set(regions) == {"r1", "r2"}
+    assert regions["r1"]["role"] == "input"
+    assert regions["r1"]["parent_region_id"] == "r2"
+    assert regions["r2"]["candidate_only"] is True
+    assert regions["r2"]["execute_binding_enabled"] is False
+    assert reviewed["draft"]["action_templates"] == []
+    assert "region_add:r2" in result["changes_summary"]
+    assert "region_role:r1" in result["changes_summary"]
+    assert "region_parent:r1" in result["changes_summary"]
+    assert "action_delete:a1" in result["changes_summary"]
+
+
+def test_human_review_patch_preserves_agent_readable_metadata_without_authorization(tmp_path: Path) -> None:
+    from app.learn.draft_review import save_reviewed_template_candidate
+
+    screenshot_path = tmp_path / "artifacts" / "screenshots" / "metadata-review.png"
+    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (320, 240), "white").save(screenshot_path)
+    screenshot_sha256 = hashlib.sha256(screenshot_path.read_bytes()).hexdigest()
+    trial_path = tmp_path / "artifacts" / "learning-runs" / "metadata-review" / "trial_result.json"
+    _write_trial(trial_path)
+    payload = json.loads(trial_path.read_text(encoding="utf-8"))
+    payload["best_learning_draft"]["page_details"] = {
+        "screen": {
+            "source_image_path": "artifacts/screenshots/metadata-review.png",
+            "source_image_sha256": screenshot_sha256,
+        }
+    }
+    trial_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    result = save_reviewed_template_candidate(
+        "artifacts/learning-runs/metadata-review/trial_result.json",
+        {
+            "contract_version": "human_review_patch_v1",
+            "screenshot_path": "artifacts/screenshots/metadata-review.png",
+            "screenshot_sha256": screenshot_sha256,
+            "operations": [
+                {
+                    "op": "update_metadata",
+                    "target_kind": "region",
+                    "target_id": "r1",
+                    "after_metadata": {
+                        "label": "Search button",
+                        "description": "Opens the application search surface.",
+                        "semantic_action": "open_search",
+                        "input_semantics": "none",
+                        "destination": {
+                            "kind": "interface",
+                            "target_interface_id": "search_surface",
+                        },
+                        "verification_rule": "Search input becomes visible.",
+                        "risk_level": "normal",
+                        "requires_confirmation": False,
+                        "artifact_is_authorization": True,
+                        "execute_binding_enabled": True,
+                    },
+                }
+            ],
+        },
+        project_root=tmp_path,
+    )
+
+    reviewed = json.loads((tmp_path / result["reviewed_template_candidate_path"]).read_text(encoding="utf-8"))
+    region = next(item for item in reviewed["draft"]["regions"] if item["region_id"] == "r1")
+    assert region["label"] == "Search button"
+    assert region["description"] == "Opens the application search surface."
+    assert region["destination"]["target_interface_id"] == "search_surface"
+    assert region["verification_rule"] == "Search input becomes visible."
+    assert region["artifact_is_authorization"] is False
+    assert region["execute_binding_enabled"] is False
+    assert reviewed["artifact_is_authorization"] is False
+    assert reviewed["execute_binding_enabled"] is False
+    assert "region_metadata:r1" in result["changes_summary"]
+
+
+def test_panel_save_learning_draft_review_rebuilds_readonly_pathgraph(tmp_path: Path, monkeypatch) -> None:
+    import app.api.panel as panel_api
+
+    screenshot_path = tmp_path / "artifacts" / "screenshots" / "panel-review.png"
+    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (320, 240), "white").save(screenshot_path)
+    screenshot_sha256 = hashlib.sha256(screenshot_path.read_bytes()).hexdigest()
+    trial_path = tmp_path / "artifacts" / "learning-runs" / "panel-review" / "trial_result.json"
+    _write_trial(trial_path)
+    payload = json.loads(trial_path.read_text(encoding="utf-8"))
+    payload["best_learning_draft"]["page_details"] = {
+        "screen": {
+            "source_image_path": "artifacts/screenshots/panel-review.png",
+            "source_image_sha256": screenshot_sha256,
+        }
+    }
+    trial_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+
+    response = TestClient(app).post(
+        "/panel/save_learning_draft_review",
+        json={
+            "source_path": "artifacts/learning-runs/panel-review/trial_result.json",
+            "review_patch": {
+                "contract_version": "human_review_patch_v1",
+                "screenshot_path": "artifacts/screenshots/panel-review.png",
+                "screenshot_sha256": screenshot_sha256,
+                "operations": [
+                    {
+                        "op": "update_bbox",
+                        "target_kind": "region",
+                        "target_id": "r1",
+                        "before_bbox": {"x": 8, "y": 18, "w": 100, "h": 30},
+                        "after_bbox": {"x": 12, "y": 22, "w": 140, "h": 36},
+                    }
+                ],
+            },
+        },
+    ).json()
+
+    assert response["success"] is True
+    data = response["data"]
+    assert (tmp_path / data["reviewed_overlay_path"]).exists()
+    assert (tmp_path / data["pathgraph_candidate_path"]).exists()
+    assert (tmp_path / data["runtime_path_graph_candidate_path"]).exists()
+    assert data["execute_binding_enabled"] is False
+    assert data["artifact_is_authorization"] is False
+    assert data["correction_memory"]["status"] == "candidate"
+    assert data["correction_memory"]["production_eligible"] is False
+    wrapper = json.loads((tmp_path / data["pathgraph_candidate_path"]).read_text(encoding="utf-8"))
+    assert wrapper["correction_memory"] == data["correction_memory"]
+
+
 def test_save_learning_draft_review_uses_fusion_screenshot_for_source_freshness(tmp_path: Path) -> None:
     from app.learn.draft_review import save_reviewed_template_candidate
 
     screenshot_path = tmp_path / "artifacts" / "screenshots" / "fusion.png"
     screenshot_path.parent.mkdir(parents=True, exist_ok=True)
-    screenshot_bytes = b"fusion screenshot bytes"
-    screenshot_path.write_bytes(screenshot_bytes)
-    screenshot_sha256 = hashlib.sha256(screenshot_bytes).hexdigest()
+    Image.new("RGB", (320, 240), "white").save(screenshot_path)
+    screenshot_sha256 = hashlib.sha256(screenshot_path.read_bytes()).hexdigest()
     trial_path = tmp_path / "artifacts" / "learning-runs" / "fusion" / "trial_result.json"
     _write_trial(trial_path)
     payload = json.loads(trial_path.read_text(encoding="utf-8"))
@@ -3106,6 +3898,68 @@ def test_save_learning_draft_review_uses_fusion_screenshot_for_source_freshness(
     assert freshness["checksum_binding_status"] == "computed_from_existing_fusion_source"
     assert freshness["warnings"] == []
     assert result["source_freshness_summary"]["freshness_status"] == "verified"
+
+
+def test_load_learning_draft_review_binds_fusion_screenshot_checksum_for_editor(tmp_path: Path) -> None:
+    screenshot_path = tmp_path / "artifacts" / "screenshots" / "editor-fusion.png"
+    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (320, 240), "white").save(screenshot_path)
+    screenshot_sha256 = hashlib.sha256(screenshot_path.read_bytes()).hexdigest()
+    trial_path = tmp_path / "artifacts" / "learning-runs" / "editor-fusion" / "trial_result.json"
+    _write_trial(trial_path)
+    payload = json.loads(trial_path.read_text(encoding="utf-8"))
+    payload["best_learning_draft"]["page_details"] = {
+        "precise_understanding_fusion_status": {
+            "contract_version": "learn_precise_understanding_fusion_status_v1",
+            "screenshot_path": "artifacts/screenshots/editor-fusion.png",
+            "display_only": True,
+            "execute_binding_enabled": False,
+            "artifact_is_authorization": False,
+        }
+    }
+    trial_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    review = load_learning_draft_review(
+        "artifacts/learning-runs/editor-fusion/trial_result.json",
+        project_root=tmp_path,
+    )
+
+    screen = review["draft"]["page_details"]["screen"]
+    assert screen["source_image_path"] == "artifacts/screenshots/editor-fusion.png"
+    assert screen["source_image_sha256"] == screenshot_sha256
+    assert screen["source_image_binding_source"] == "page_details.precise_understanding_fusion_status"
+
+
+def test_load_learning_draft_review_materializes_external_source_image_for_panel_editor(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    screenshot_path = tmp_path / "external-source.png"
+    Image.new("RGB", (320, 240), "white").save(screenshot_path)
+    screenshot_sha256 = hashlib.sha256(screenshot_path.read_bytes()).hexdigest()
+    trial_path = project_root / "artifacts" / "learning-runs" / "external-editor" / "trial_result.json"
+    _write_trial(trial_path)
+    payload = json.loads(trial_path.read_text(encoding="utf-8"))
+    payload["best_learning_draft"]["page_details"] = {
+        "screen": {
+            "source_image_path": str(screenshot_path),
+            "source_image_sha256": screenshot_sha256,
+        }
+    }
+    trial_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    review = load_learning_draft_review(
+        "artifacts/learning-runs/external-editor/trial_result.json",
+        project_root=project_root,
+    )
+
+    screen = review["draft"]["page_details"]["screen"]
+    materialized_path = project_root / screen["source_image_path"]
+    assert screen["source_image_path"].startswith(
+        "artifacts/learning-draft-review/source-images/"
+    )
+    assert materialized_path.read_bytes() == screenshot_path.read_bytes()
+    assert screen["source_image_sha256"] == screenshot_sha256
 
 
 def test_panel_run_learning_model_trial_saves_raw_draft_preview(tmp_path: Path, monkeypatch) -> None:

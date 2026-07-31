@@ -389,7 +389,7 @@ def test_observe_prompt_uses_compact_candidate_contract_without_grounding_proof(
 
     assert "fast screen-understanding stage" in prompt
     assert '"interface_classification"' in prompt
-    assert '"category": "media_catalog|documentation_portal|settings_dashboard|conversation_workspace|file_browser|form_workflow|generic"' in prompt
+    assert '"category": "media_catalog|documentation_portal|settings_dashboard|conversation_workspace|mail_workspace|feed_workspace|aggregate_portal|search_workspace|file_browser|form_workflow|employment_workflow|generic"' in prompt
     assert '"confidence": 0.0' in prompt
     assert '"reason": "short visible evidence"' in prompt
     assert "at most 12 independently clickable candidate controls" in prompt
@@ -416,6 +416,52 @@ def test_observe_prompt_distinguishes_people_lists_from_file_browser_rows() -> N
     assert '"people_or_conversation_rows"' in prompt
     assert "friend, contact, participant, presence, or online-status rows are conversation_workspace" in prompt
     assert "they are not file_browser merely because they form a dense list" in prompt
+
+
+def test_observe_prompt_requires_topology_evidence_for_content_classification() -> None:
+    prompt = build_region_analysis_prompt(
+        VisionAnalyzeRequest(
+            image_path="screen.png",
+            task="observe_screen",
+        ),
+        ImageSize(width=800, height=600),
+        max_regions=12,
+    )
+
+    for signal in (
+        "message_thread",
+        "message_composer",
+        "mail_or_email_rows",
+        "mailbox_navigation",
+        "mail_toolbar",
+        "feed_items",
+        "mixed_content_modules",
+        "news_items",
+        "video_items",
+        "search_controls",
+        "search_results",
+        "playback_controls",
+        "media_library_navigation",
+        "employment_workflow",
+        "job_result_cards",
+        "job_detail_content",
+        "application_fields",
+        "application_review",
+    ):
+        assert f'"{signal}"' in prompt
+    assert "email rows are mail_workspace, not conversation_workspace" in prompt
+    assert "feed posts are feed_workspace, not media_catalog" in prompt
+    assert "aggregate_portal requires multiple peer content modules" in prompt
+    assert "classify by container organization before counting repeated articles" in prompt
+    assert "independently framed widgets remain peer modules even when several contain news" in prompt
+    assert "feed_workspace requires one dominant ordered stream under shared controls" in prompt
+    assert "a page with news inside one module is not automatically feed_workspace" in prompt
+    assert "search_workspace requires a visible search control and repeated result items" in prompt
+    assert "news_items and video_items describe visible content structure, not a site name" in prompt
+    assert "search_workspace can still contain news_items or video_items" in prompt
+    assert "employment_workflow covers job results, job details, application forms, and application review" in prompt
+    assert "ordinary surveys, registration forms, and checkout reviews are not employment_workflow" in prompt
+    assert "use generic when the visible topology does not disambiguate the class" in prompt
 
 
 def test_normalizer_skips_non_object_region_target_and_observer_items() -> None:

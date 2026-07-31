@@ -1,4 +1,9 @@
+import threading
+
 from scripts.model_servers.vista_openai_server import (
+    _activate_request,
+    _cancel_active_request,
+    _clear_active_request,
     _coordinate_output_complete,
     _point_payload,
     _request_timeout_seconds,
@@ -72,3 +77,23 @@ def test_vista_request_timeout_is_bounded_and_optional():
     assert _request_timeout_seconds({"request_timeout_seconds": 12}, default=30) == 12.0
     assert _request_timeout_seconds({"request_timeout_seconds": 0}, default=30) == 30.0
     assert _request_timeout_seconds({"request_timeout_seconds": 999}, default=30) == 300.0
+
+
+def test_vista_cancel_only_stops_matching_active_request():
+    cancel_event = threading.Event()
+    _activate_request(
+        request_id="request-1",
+        cancel_event=cancel_event,
+        metadata={"client": "127.0.0.1"},
+    )
+    try:
+        mismatch = _cancel_active_request("request-2")
+        assert mismatch["status"] == "request_id_mismatch"
+        assert cancel_event.is_set() is False
+
+        matched = _cancel_active_request("request-1")
+        assert matched["status"] == "cancellation_acknowledged"
+        assert matched["request_id"] == "request-1"
+        assert cancel_event.is_set() is True
+    finally:
+        _clear_active_request("request-1")

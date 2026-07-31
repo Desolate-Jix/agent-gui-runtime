@@ -133,9 +133,15 @@ def _candidate_decision(
     if not candidate.eligible:
         allowed = False
         reasons.append("candidate_not_eligible")
+        if "vista_direct_conflicts_with_exact_uia_candidate_bbox" in candidate.reasons:
+            reasons.append("vista_direct_conflicts_with_exact_uia_candidate_bbox")
     if candidate.score < min_candidate_score:
         allowed = False
         reasons.append("candidate_score_too_low")
+    requested_choice_role = _goal_explicit_choice_role(goal)
+    if requested_choice_role and _candidate_choice_role(candidate) != requested_choice_role:
+        allowed = False
+        reasons.append("candidate_goal_role_mismatch")
     goal_action_terms = _explicit_goal_action_terms(goal)
     if goal_action_terms and not (_candidate_action_terms(candidate) & goal_action_terms):
         allowed = False
@@ -232,6 +238,24 @@ def _candidate_decision(
         reasons=_unique(reasons),
         resolved_click_point=resolved_click_point,
     )
+
+
+def _goal_explicit_choice_role(goal: str) -> str | None:
+    normalized = _normalize_text(goal)
+    if any(term in normalized for term in ("radio button", "radio", "\u5355\u9009\u6846")):
+        return "radio"
+    if any(term in normalized for term in ("checkbox", "check box", "\u590d\u9009\u6846")):
+        return "checkbox"
+    return None
+
+
+def _candidate_choice_role(candidate: RecognitionCandidate) -> str | None:
+    normalized = _normalize_text(candidate.role)
+    if normalized in {"radio", "radio button"}:
+        return "radio"
+    if normalized in {"checkbox", "check box"}:
+        return "checkbox"
+    return None
 
 
 def _top_margin_ok(candidates: CandidateRankResult, *, min_margin: float) -> bool:

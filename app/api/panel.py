@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import base64
+import heapq
 import json
+import os
 import time
 import urllib.error
 import urllib.request
@@ -13,10 +15,22 @@ from fastapi.responses import FileResponse, PlainTextResponse, Response
 from PIL import Image, ImageDraw
 from pydantic import BaseModel, Field
 
+from app.agent.continuous_task_handoff import (
+    load_continuous_task_handoff,
+    start_continuous_task_resume,
+)
+from app.agent.reviewed_interface_memory import ReviewedInterfaceMemoryStore
 from app.core.runtime_artifacts import write_trace
 from app.core.model_server import load_model_profiles
 from app.core.model_server import model_base_url
-from app.learn.draft_review import load_learning_draft_review, save_reviewed_template_candidate
+from app.learn.draft_review import load_learning_draft_review
+from app.learn.interface_workflow_review import (
+    build_interface_workflow_review,
+    save_interface_workflow_review_candidate,
+)
+from app.learn.application_interface_graph import (
+    save_workflow_review_as_application_assets,
+)
 from app.learn.assisted_template_review import (
     create_assisted_template_acceptance_suggestions,
     create_assisted_template_acceptance_simulation,
@@ -29,14 +43,56 @@ from app.learn.assisted_template_review import (
     save_assisted_template_review_decisions,
 )
 from app.learn.model_artifact_loader import load_model_learning_artifact
+from app.learn.calibration_artifact import (
+    LearningCalibrationArtifactError,
+    create_learning_calibration_artifact,
+)
 from app.learn.model_trial import build_learning_model_trial
 from app.learn.pathgraph_candidate import attach_detail_observe_result_to_candidate, build_pathgraph_candidate_from_review
+from app.learn.surface_rule_registry import build_surface_rule_registry_panel_view
+from app.learn.workflow_evidence import (
+    LearningWorkflowEvidenceError,
+)
+from app.learn.workflow_continuation import (
+    LearningStageWorkerContinuationError,
+)
+from app.learn.workflow_runner import run_learning_workflow_readonly_tail
+from app.learn.workflow_service import (
+    LearningWorkflowStageOperationError,
+    cancel_learning_workflow_stage_operation,
+    continue_learning_stage_worker_result,
+    finish_learning_workflow_stage_operation,
+    heartbeat_learning_workflow_stage_operation,
+    project_learning_workflow_runtime_attachment,
+    require_active_learning_workflow_stage_operation,
+    recover_expired_learning_workflow_stage_operation,
+    start_learning_workflow_stage_operation,
+    transition_learning_workflow_run,
+)
+from app.learn.workflow_worker import (
+    LearningStageWorkerError,
+    learning_stage_worker_registry,
+)
+from app.learn.workflow_state import (
+    LEARNING_WORKFLOW_STAGES,
+    LearningWorkflowTransitionError,
+)
+from app.learn.workflow_contracts import (
+    ModelReviewTaskInput,
+    RecognitionTaskInput,
+    TwoStageUnderstandingTaskInput,
+)
+from app.learn.workflow_task_result_adapter import (
+    model_review_result_to_legacy_response,
+    recognition_result_to_legacy_response,
+    two_stage_result_to_legacy_response,
+)
+from app.learn.workflow_tasks.model_review import run_model_review_task
+from app.learn.workflow_tasks.recognition import run_recognition_task
+from app.learn.workflow_tasks.two_stage import run_two_stage_understanding_task
+from app.learn.workflow_store import learning_workflow_run_store
 from app.learn.recognition import (
-    build_inventory_layout_graph,
-    build_learning_recognition_trial,
-    build_two_stage_screen_understanding,
     fusion_status_from_two_stage,
-    model_grounding_evidence_status_from_two_stage,
 )
 from app.api.models.response import APIResponse, ErrorModel
 from scripts.report_learn_fusion_model_start_approval_packet import (
@@ -63,10 +119,7 @@ from scripts.build_learn_demo_scaffold import (
 from scripts.report_learning_mode_demo_goal_readiness import (
     report_learning_mode_demo_goal_readiness,
 )
-from app.learn.recognition.trace_input import (
-    observe_bundle_from_trace_result as _observe_bundle_from_trace_result,
-    stage1_inventory_from_trace_result as _stage1_inventory_from_trace_result,
-)
+from app.learn.recognition.panel_review_pipeline import run_panel_learning_model_review_repair
 
 PANEL_DIR = Path(__file__).resolve().parents[1] / "web_panel"
 PANEL_INDEX = PANEL_DIR / "index.html"
@@ -75,6 +128,7 @@ UPLOAD_DIR = ROOT_DIR / "artifacts" / "web-panel" / "uploads"
 SETTINGS_PANEL_ARTIFACT_DIR = ROOT_DIR / "artifacts" / "settings-panel"
 VISION_CONFIG_PATH = ROOT_DIR / "configs" / "vision.json"
 PANEL_CONFIG_PATH = ROOT_DIR / "configs" / "settings_panel.json"
+continuous_task_memory_store = ReviewedInterfaceMemoryStore(project_root=ROOT_DIR)
 
 router = APIRouter(tags=["panel"])
 
@@ -130,6 +184,19 @@ class PanelLoadModelArtifactRequest(BaseModel):
 
 class PanelLoadLearningDraftReviewRequest(BaseModel):
     source_path: str = Field(min_length=1)
+    discover_related_sidecars: bool = True
+
+
+class PanelLoadInterfaceWorkflowReviewRequest(BaseModel):
+    goal: str = ""
+    application_identity: dict[str, Any] = Field(default_factory=dict)
+    draft_source_paths: list[str] = Field(default_factory=list, max_length=100)
+    discover_related_sidecars: bool = True
+
+
+class PanelSaveInterfaceWorkflowReviewRequest(BaseModel):
+    review: dict[str, Any] = Field(default_factory=dict)
+    out_dir: Optional[str] = None
 
 
 class PanelCreateLearningDemoGoalReadinessRequest(BaseModel):
@@ -140,6 +207,11 @@ class PanelCreateLearningDemoGoalReadinessRequest(BaseModel):
 class PanelSaveLearningDraftReviewRequest(BaseModel):
     source_path: str = Field(min_length=1)
     review_patch: dict[str, Any] = Field(default_factory=dict)
+
+
+class PanelResumeContinuousTaskRequest(BaseModel):
+    run_dir: str = Field(min_length=1)
+    base_url: str = Field(min_length=1)
 
 
 class PanelRunLearningModelTrialRequest(BaseModel):
@@ -174,6 +246,140 @@ class PanelRunLearningTwoStageUnderstandingRequest(BaseModel):
     observe_result: dict[str, Any] = Field(default_factory=dict)
     require_stage1_gate: bool = True
     stage2_region_strategy: str = Field(default="partitioned", pattern="^(partitioned|global_no_partition)$")
+
+
+class PanelRunLearningModelReviewRepairRequest(BaseModel):
+    two_stage_report_path: str = Field(min_length=1)
+    screenshot_path: str = Field(min_length=1)
+    composite_overlay_path: str = Field(min_length=1)
+    model_profile_id: str = "learn_mode_qwen3_vl_8b"
+    timeout_seconds: int = Field(default=240, ge=30, le=900)
+
+
+class PanelTransitionLearningWorkflowStateRequest(BaseModel):
+    run_id: str = Field(min_length=1)
+    expected_revision: int = Field(default=0, ge=0)
+    stage: str = Field(
+        pattern=(
+            "^(bind_capture|screen_understanding|numbered_map|precise_calibration|"
+            "review_repair|fusion|page_details|pathgraph_draft|complete)$"
+        )
+    )
+    outcome: str = Field(pattern="^(running|completed|failed|safe_stopped)$")
+    reason: str = ""
+    evidence_refs: dict[str, Any] = Field(default_factory=dict)
+
+
+class PanelStartLearningWorkflowStageOperationRequest(BaseModel):
+    run_id: str = Field(min_length=1)
+    expected_revision: int = Field(ge=0)
+    stage: str = Field(
+        pattern=(
+            "^(screen_understanding|numbered_map|precise_calibration|"
+            "review_repair|fusion)$"
+        )
+    )
+    reason: str = ""
+    lease_seconds: int = Field(default=600, ge=30, le=1800)
+
+
+class PanelFinishLearningWorkflowStageOperationRequest(BaseModel):
+    run_id: str = Field(min_length=1)
+    expected_revision: int = Field(ge=0)
+    stage: str = Field(
+        pattern=(
+            "^(screen_understanding|numbered_map|precise_calibration|"
+            "review_repair|fusion)$"
+        )
+    )
+    operation_id: str = Field(min_length=1)
+    outcome: str = Field(pattern="^(completed|failed|safe_stopped)$")
+    reason: str = ""
+    evidence_refs: dict[str, Any] = Field(default_factory=dict)
+
+
+class PanelHeartbeatLearningWorkflowStageOperationRequest(BaseModel):
+    run_id: str = Field(min_length=1)
+    expected_revision: int = Field(ge=0)
+    stage: str = Field(
+        pattern=(
+            "^(screen_understanding|numbered_map|precise_calibration|"
+            "review_repair|fusion)$"
+        )
+    )
+    operation_id: str = Field(min_length=1)
+    lease_seconds: int = Field(default=600, ge=30, le=1800)
+
+
+class PanelCancelLearningWorkflowStageOperationRequest(BaseModel):
+    run_id: str = Field(min_length=1)
+    expected_revision: int = Field(ge=0)
+    stage: str = Field(
+        pattern=(
+            "^(screen_understanding|numbered_map|precise_calibration|"
+            "review_repair|fusion)$"
+        )
+    )
+    operation_id: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
+class PanelStartLearningStageWorkerRequest(BaseModel):
+    run_id: str = Field(min_length=1)
+    expected_revision: int = Field(ge=0)
+    stage: str = Field(
+        pattern="^(screen_understanding|numbered_map|precise_calibration|review_repair|fusion)$"
+    )
+    operation_id: str = Field(min_length=1)
+    task_kind: str = Field(
+        pattern=(
+            "^(panel_learning_recognition_trial|"
+            "panel_learning_two_stage_understanding|"
+            "panel_learning_model_review_repair|vision_observe_screen|"
+            "panel_learning_calibration_sequence|vision_locate_target)$"
+        )
+    )
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class PanelAdoptLearningStageWorkerResultRequest(BaseModel):
+    run_id: str = Field(min_length=1)
+    expected_revision: int = Field(ge=0)
+    stage: str = Field(
+        pattern="^(screen_understanding|numbered_map|precise_calibration|review_repair|fusion)$"
+    )
+    operation_id: str = Field(min_length=1)
+    worker_id: str = Field(min_length=1)
+
+
+class PanelContinueLearningStageWorkerResultRequest(BaseModel):
+    run_id: str = Field(min_length=1)
+    expected_revision: int = Field(ge=0)
+    stage: str = Field(
+        pattern="^(screen_understanding|numbered_map|precise_calibration|review_repair|fusion)$"
+    )
+    operation_id: str = Field(min_length=1)
+    worker_id: str = Field(min_length=1)
+
+
+class PanelRecoverLearningWorkflowStageOperationRequest(BaseModel):
+    run_id: str = Field(min_length=1)
+    expected_revision: int = Field(ge=0)
+
+
+class PanelSaveLearningCalibrationResultRequest(BaseModel):
+    run_id: str = Field(min_length=1)
+    trace_path: str = Field(min_length=1)
+    source_image_path: str = Field(min_length=1)
+    numbering_report_path: str = Field(min_length=1)
+    overlay_path: str = Field(min_length=1)
+
+
+class PanelRunLearningWorkflowReadonlyTailRequest(BaseModel):
+    run_id: str = Field(min_length=1)
+    expected_revision: int = Field(ge=0)
+    source_path: str = Field(min_length=1)
+    out_dir: Optional[str] = None
 
 
 class PanelGeneratePathGraphCandidateRequest(BaseModel):
@@ -295,6 +501,665 @@ def panel_file(path: str) -> Response:
     return response
 
 
+@router.post("/panel/save_learning_calibration_result", response_model=APIResponse)
+def save_learning_calibration_result_endpoint(
+    request: PanelSaveLearningCalibrationResultRequest,
+) -> APIResponse:
+    """保存绑定当前截图和编号报告的只读精准校准结果。"""
+
+    try:
+        result = create_learning_calibration_artifact(
+            run_id=request.run_id,
+            trace_path=request.trace_path,
+            source_image_path=request.source_image_path,
+            numbering_report_path=request.numbering_report_path,
+            overlay_path=request.overlay_path,
+            project_root=ROOT_DIR,
+        )
+        return APIResponse(
+            success=True,
+            message="Learning calibration result saved",
+            data=result,
+            error=None,
+        )
+    except LearningCalibrationArtifactError as exc:
+        return APIResponse(
+            success=False,
+            message="Learning calibration result rejected",
+            data=None,
+            error=ErrorModel(
+                code="learning_calibration_result_invalid",
+                details=str(exc),
+            ),
+        )
+
+
+@router.post("/panel/transition_learning_workflow_state", response_model=APIResponse)
+def transition_learning_workflow_state_endpoint(
+    request: PanelTransitionLearningWorkflowStateRequest,
+) -> APIResponse:
+    """由服务端状态源校验学习流程阶段和 revision。"""
+
+    managed_stages = {
+        "screen_understanding",
+        "numbered_map",
+        "precise_calibration",
+        "review_repair",
+        "fusion",
+    }
+    managed_transition_is_reachable = False
+    if request.stage in managed_stages:
+        try:
+            current = learning_workflow_run_store.get(request.run_id)
+        except LearningWorkflowTransitionError:
+            current = None
+        if (
+            isinstance(current, dict)
+            and current.get("revision") == request.expected_revision
+        ):
+            current_stage = str(current.get("current_stage") or "")
+            current_stage_record = current.get("stages", {}).get(current_stage, {})
+            if (
+                current_stage == request.stage
+                and current_stage_record.get("status") == "running"
+                and request.outcome in {"completed", "failed", "safe_stopped"}
+            ):
+                managed_transition_is_reachable = True
+            elif current_stage in LEARNING_WORKFLOW_STAGES:
+                current_index = LEARNING_WORKFLOW_STAGES.index(current_stage)
+                target_index = LEARNING_WORKFLOW_STAGES.index(request.stage)
+                managed_transition_is_reachable = (
+                    target_index == current_index + 1
+                    and current_stage_record.get("status") == "completed"
+                    and request.outcome == "running"
+                )
+    if managed_transition_is_reachable:
+        return APIResponse(
+            success=False,
+            message=f"{request.stage} must use a managed workflow stage operation",
+            data=None,
+            error=ErrorModel(
+                code="learning_workflow_stage_operation_required",
+                details=(
+                    "Use /panel/start_learning_workflow_stage_operation and "
+                    "/panel/finish_learning_workflow_stage_operation"
+                ),
+            ),
+        )
+    try:
+        workflow_state = transition_learning_workflow_run(
+            store=learning_workflow_run_store,
+            project_root=ROOT_DIR,
+            run_id=request.run_id,
+            expected_revision=request.expected_revision,
+            stage=request.stage,
+            outcome=request.outcome,
+            reason=request.reason,
+            evidence_refs=request.evidence_refs,
+        )
+        return APIResponse(
+            success=True,
+            message="Learning workflow state transitioned",
+            data={"workflow_state": workflow_state},
+            error=None,
+        )
+    except LearningWorkflowEvidenceError as exc:
+        return APIResponse(
+            success=False,
+            message="Learning workflow evidence rejected",
+            data=None,
+            error=ErrorModel(
+                code="learning_workflow_evidence_invalid",
+                details=str(exc),
+            ),
+        )
+    except LearningWorkflowTransitionError as exc:
+        return APIResponse(
+            success=False,
+            message="Learning workflow state transition rejected",
+            data=None,
+            error=ErrorModel(
+                code="learning_workflow_transition_invalid",
+                details=str(exc),
+            ),
+        )
+
+
+@router.post(
+    "/panel/start_learning_workflow_stage_operation",
+    response_model=APIResponse,
+)
+def start_learning_workflow_stage_operation_endpoint(
+    request: PanelStartLearningWorkflowStageOperationRequest,
+) -> APIResponse:
+    """签发服务端阶段租约，防止浏览器超时后遗留无主运行状态。"""
+
+    try:
+        result = start_learning_workflow_stage_operation(
+            store=learning_workflow_run_store,
+            project_root=ROOT_DIR,
+            run_id=request.run_id,
+            expected_revision=request.expected_revision,
+            stage=request.stage,
+            reason=request.reason,
+            lease_seconds=request.lease_seconds,
+        )
+        return APIResponse(
+            success=True,
+            message="Learning workflow stage operation started",
+            data=result,
+            error=None,
+        )
+    except (
+        LearningWorkflowStageOperationError,
+        LearningWorkflowTransitionError,
+    ) as exc:
+        return APIResponse(
+            success=False,
+            message="Learning workflow stage operation start rejected",
+            data=None,
+            error=ErrorModel(
+                code="learning_workflow_stage_operation_start_invalid",
+                details=str(exc),
+            ),
+        )
+
+
+@router.post(
+    "/panel/heartbeat_learning_workflow_stage_operation",
+    response_model=APIResponse,
+)
+def heartbeat_learning_workflow_stage_operation_endpoint(
+    request: PanelHeartbeatLearningWorkflowStageOperationRequest,
+) -> APIResponse:
+    """续租当前阶段 operation，并保留可回放的 heartbeat 事件。"""
+
+    try:
+        result = heartbeat_learning_workflow_stage_operation(
+            store=learning_workflow_run_store,
+            project_root=ROOT_DIR,
+            run_id=request.run_id,
+            expected_revision=request.expected_revision,
+            stage=request.stage,
+            operation_id=request.operation_id,
+            lease_seconds=request.lease_seconds,
+        )
+        return APIResponse(
+            success=True,
+            message="Learning workflow stage operation heartbeat accepted",
+            data=result,
+            error=None,
+        )
+    except (
+        LearningWorkflowStageOperationError,
+        LearningWorkflowTransitionError,
+    ) as exc:
+        return APIResponse(
+            success=False,
+            message="Learning workflow stage operation heartbeat rejected",
+            data=None,
+            error=ErrorModel(
+                code="learning_workflow_stage_operation_heartbeat_invalid",
+                details=str(exc),
+            ),
+        )
+
+
+@router.post(
+    "/panel/start_learning_stage_worker",
+    response_model=APIResponse,
+)
+def start_learning_stage_worker_endpoint(
+    request: PanelStartLearningStageWorkerRequest,
+) -> APIResponse:
+    """将当前受管 operation 的白名单任务交给隔离后端进程。"""
+
+    try:
+        require_active_learning_workflow_stage_operation(
+            store=learning_workflow_run_store,
+            run_id=request.run_id,
+            expected_revision=request.expected_revision,
+            stage=request.stage,
+            operation_id=request.operation_id,
+        )
+        result = learning_stage_worker_registry.start(
+            run_id=request.run_id,
+            stage=request.stage,
+            operation_id=request.operation_id,
+            task_kind=request.task_kind,
+            payload=request.payload,
+        )
+        try:
+            require_active_learning_workflow_stage_operation(
+                store=learning_workflow_run_store,
+                run_id=request.run_id,
+                expected_revision=request.expected_revision,
+                stage=request.stage,
+                operation_id=request.operation_id,
+            )
+        except (
+            LearningWorkflowStageOperationError,
+            LearningWorkflowTransitionError,
+        ):
+            learning_stage_worker_registry.cancel_by_operation(
+                run_id=request.run_id,
+                stage=request.stage,
+                operation_id=request.operation_id,
+            )
+            raise
+        return APIResponse(
+            success=True,
+            message="Learning stage worker started",
+            data=result,
+            error=None,
+        )
+    except (
+        LearningStageWorkerError,
+        LearningWorkflowStageOperationError,
+        LearningWorkflowTransitionError,
+    ) as exc:
+        return APIResponse(
+            success=False,
+            message="Learning stage worker start rejected",
+            data=None,
+            error=ErrorModel(
+                code="learning_stage_worker_start_invalid",
+                details=str(exc),
+            ),
+        )
+
+
+@router.get(
+    "/panel/learning_stage_worker/{worker_id}",
+    response_model=APIResponse,
+)
+def get_learning_stage_worker_endpoint(
+    worker_id: str,
+    run_id: str,
+    operation_id: str,
+) -> APIResponse:
+    """读取属于同一 run/operation 的 worker 状态和最终 API 响应。"""
+
+    try:
+        result = learning_stage_worker_registry.status(
+            worker_id=worker_id,
+            run_id=run_id,
+            operation_id=operation_id,
+        )
+        return APIResponse(
+            success=True,
+            message="Learning stage worker status",
+            data=result,
+            error=None,
+        )
+    except LearningStageWorkerError as exc:
+        return APIResponse(
+            success=False,
+            message="Learning stage worker status rejected",
+            data=None,
+            error=ErrorModel(
+                code="learning_stage_worker_status_invalid",
+                details=str(exc),
+            ),
+        )
+
+
+@router.post(
+    "/panel/adopt_learning_stage_worker_result",
+    response_model=APIResponse,
+)
+def adopt_learning_stage_worker_result_endpoint(
+    request: PanelAdoptLearningStageWorkerResultRequest,
+) -> APIResponse:
+    """接纳当前受管 operation 的完成结果；状态查询本身不暴露响应。"""
+
+    try:
+        require_active_learning_workflow_stage_operation(
+            store=learning_workflow_run_store,
+            run_id=request.run_id,
+            expected_revision=request.expected_revision,
+            stage=request.stage,
+            operation_id=request.operation_id,
+        )
+        result = learning_stage_worker_registry.adopt_result(
+            worker_id=request.worker_id,
+            run_id=request.run_id,
+            stage=request.stage,
+            operation_id=request.operation_id,
+        )
+        return APIResponse(
+            success=True,
+            message="Learning stage worker result adopted",
+            data=result,
+            error=None,
+        )
+    except (
+        LearningStageWorkerError,
+        LearningWorkflowStageOperationError,
+        LearningWorkflowTransitionError,
+    ) as exc:
+        return APIResponse(
+            success=False,
+            message="Learning stage worker result adoption rejected",
+            data=None,
+            error=ErrorModel(
+                code="learning_stage_worker_result_adoption_invalid",
+                details=str(exc),
+            ),
+        )
+
+
+@router.post(
+    "/panel/continue_learning_stage_worker_result",
+    response_model=APIResponse,
+)
+def continue_learning_stage_worker_result_endpoint(
+    request: PanelContinueLearningStageWorkerResultRequest,
+) -> APIResponse:
+    """由后端解释已接纳结果，必要时完成对应阶段。"""
+
+    try:
+        result = continue_learning_stage_worker_result(
+            store=learning_workflow_run_store,
+            worker_registry=learning_stage_worker_registry,
+            project_root=ROOT_DIR,
+            run_id=request.run_id,
+            expected_revision=request.expected_revision,
+            stage=request.stage,
+            operation_id=request.operation_id,
+            worker_id=request.worker_id,
+        )
+        return APIResponse(
+            success=True,
+            message="Learning stage worker result continued",
+            data=result,
+            error=None,
+        )
+    except (
+        LearningStageWorkerContinuationError,
+        LearningStageWorkerError,
+        LearningWorkflowEvidenceError,
+        LearningWorkflowStageOperationError,
+        LearningWorkflowTransitionError,
+    ) as exc:
+        return APIResponse(
+            success=False,
+            message="Learning stage worker result continuation rejected",
+            data=None,
+            error=ErrorModel(
+                code="learning_stage_worker_result_continuation_invalid",
+                details=str(exc),
+            ),
+        )
+
+
+@router.post(
+    "/panel/cancel_learning_workflow_stage_operation",
+    response_model=APIResponse,
+)
+def cancel_learning_workflow_stage_operation_endpoint(
+    request: PanelCancelLearningWorkflowStageOperationRequest,
+) -> APIResponse:
+    """安全停止当前受管阶段；后端计算终止能力单独报告。"""
+
+    try:
+        require_active_learning_workflow_stage_operation(
+            store=learning_workflow_run_store,
+            run_id=request.run_id,
+            expected_revision=request.expected_revision,
+            stage=request.stage,
+            operation_id=request.operation_id,
+        )
+        worker_termination = learning_stage_worker_registry.cancel_by_operation(
+            run_id=request.run_id,
+            stage=request.stage,
+            operation_id=request.operation_id,
+        )
+        result = cancel_learning_workflow_stage_operation(
+            store=learning_workflow_run_store,
+            project_root=ROOT_DIR,
+            run_id=request.run_id,
+            expected_revision=request.expected_revision,
+            stage=request.stage,
+            operation_id=request.operation_id,
+            reason=request.reason,
+            backend_compute_termination=str(
+                worker_termination.get("backend_compute_termination")
+                or "not_covered"
+            ),
+            model_service_compute_termination=str(
+                worker_termination.get("model_service_compute_termination")
+                or "not_covered"
+            ),
+            worker_id=str(worker_termination.get("worker_id") or "") or None,
+            model_request_id=str(
+                worker_termination.get("model_request_id") or ""
+            ) or None,
+            model_request_cancellation=worker_termination.get(
+                "model_request_cancellation"
+            ),
+        )
+        result["worker_termination"] = worker_termination
+        return APIResponse(
+            success=True,
+            message="Learning workflow stage operation cancelled",
+            data=result,
+            error=None,
+        )
+    except (
+        LearningStageWorkerError,
+        LearningWorkflowStageOperationError,
+        LearningWorkflowTransitionError,
+    ) as exc:
+        return APIResponse(
+            success=False,
+            message="Learning workflow stage operation cancellation rejected",
+            data=None,
+            error=ErrorModel(
+                code="learning_workflow_stage_operation_cancel_invalid",
+                details=str(exc),
+            ),
+        )
+
+
+@router.post(
+    "/panel/finish_learning_workflow_stage_operation",
+    response_model=APIResponse,
+)
+def finish_learning_workflow_stage_operation_endpoint(
+    request: PanelFinishLearningWorkflowStageOperationRequest,
+) -> APIResponse:
+    """只接受当前租约持有者提交的阶段完成或失败结果。"""
+
+    try:
+        result = finish_learning_workflow_stage_operation(
+            store=learning_workflow_run_store,
+            project_root=ROOT_DIR,
+            run_id=request.run_id,
+            expected_revision=request.expected_revision,
+            stage=request.stage,
+            operation_id=request.operation_id,
+            outcome=request.outcome,
+            reason=request.reason,
+            evidence_refs=request.evidence_refs,
+        )
+        return APIResponse(
+            success=True,
+            message="Learning workflow stage operation finished",
+            data=result,
+            error=None,
+        )
+    except LearningWorkflowEvidenceError as exc:
+        return APIResponse(
+            success=False,
+            message="Learning workflow stage operation evidence rejected",
+            data=None,
+            error=ErrorModel(
+                code="learning_workflow_evidence_invalid",
+                details=str(exc),
+            ),
+        )
+    except (
+        LearningWorkflowStageOperationError,
+        LearningWorkflowTransitionError,
+    ) as exc:
+        return APIResponse(
+            success=False,
+            message="Learning workflow stage operation finish rejected",
+            data=None,
+            error=ErrorModel(
+                code="learning_workflow_stage_operation_finish_invalid",
+                details=str(exc),
+            ),
+        )
+
+
+@router.post(
+    "/panel/recover_learning_workflow_stage_operation",
+    response_model=APIResponse,
+)
+def recover_learning_workflow_stage_operation_endpoint(
+    request: PanelRecoverLearningWorkflowStageOperationRequest,
+) -> APIResponse:
+    """刷新面板时终止已过期租约，不把仍有效或旧版阶段误判为失败。"""
+
+    try:
+        result = recover_expired_learning_workflow_stage_operation(
+            store=learning_workflow_run_store,
+            project_root=ROOT_DIR,
+            run_id=request.run_id,
+            expected_revision=request.expected_revision,
+        )
+        return APIResponse(
+            success=True,
+            message="Learning workflow stage operation recovery checked",
+            data=result,
+            error=None,
+        )
+    except (
+        LearningWorkflowStageOperationError,
+        LearningWorkflowTransitionError,
+    ) as exc:
+        return APIResponse(
+            success=False,
+            message="Learning workflow stage operation recovery rejected",
+            data=None,
+            error=ErrorModel(
+                code="learning_workflow_stage_operation_recovery_invalid",
+                details=str(exc),
+            ),
+        )
+
+
+@router.post(
+    "/panel/run_learning_workflow_readonly_tail",
+    response_model=APIResponse,
+)
+def run_learning_workflow_readonly_tail_endpoint(
+    request: PanelRunLearningWorkflowReadonlyTailRequest,
+) -> APIResponse:
+    """由后端执行页面详情、只读 PathGraph 和完成阶段。"""
+
+    try:
+        result = run_learning_workflow_readonly_tail(
+            run_id=request.run_id,
+            expected_revision=request.expected_revision,
+            source_path=request.source_path,
+            out_dir=request.out_dir,
+            project_root=ROOT_DIR,
+            store=learning_workflow_run_store,
+            page_detail_builder=build_learn_page_detail_candidate,
+            scaffold_builder=build_learn_demo_scaffold,
+        )
+        result["trace_path"] = write_trace(
+            category="panel",
+            operation="run-learning-workflow-readonly-tail",
+            payload={
+                "success": result["success"],
+                "request": request.model_dump(),
+                "result": result,
+            },
+            name_hint=request.run_id,
+        )
+        if result["success"] is True:
+            return APIResponse(
+                success=True,
+                message="Learning workflow read-only tail completed",
+                data=result,
+                error=None,
+            )
+        return APIResponse(
+            success=False,
+            message="Learning workflow read-only tail failed",
+            data=result,
+            error=ErrorModel(
+                code="learning_workflow_readonly_tail_failed",
+                details=str(result.get("error") or "read-only tail failed"),
+            ),
+        )
+    except LearningWorkflowEvidenceError as exc:
+        return APIResponse(
+            success=False,
+            message="Learning workflow read-only tail evidence rejected",
+            data=None,
+            error=ErrorModel(
+                code="learning_workflow_evidence_invalid",
+                details=str(exc),
+            ),
+        )
+    except LearningWorkflowTransitionError as exc:
+        return APIResponse(
+            success=False,
+            message="Learning workflow read-only tail transition rejected",
+            data=None,
+            error=ErrorModel(
+                code="learning_workflow_transition_invalid",
+                details=str(exc),
+            ),
+        )
+    except ValueError as exc:
+        return APIResponse(
+            success=False,
+            message="Learning workflow read-only tail request rejected",
+            data=None,
+            error=ErrorModel(
+                code="learning_workflow_readonly_tail_invalid",
+                details=str(exc),
+            ),
+        )
+
+
+@router.get("/panel/learning_workflow_state/{run_id}", response_model=APIResponse)
+def get_learning_workflow_state_endpoint(run_id: str) -> APIResponse:
+    """按 run_id 恢复服务端保存的学习流程状态。"""
+
+    try:
+        workflow_state = learning_workflow_run_store.get(run_id)
+        runtime_attachment = project_learning_workflow_runtime_attachment(
+            workflow_state=workflow_state,
+            worker_registry=learning_stage_worker_registry,
+        )
+        return APIResponse(
+            success=True,
+            message="Learning workflow state recovered",
+            data={
+                "workflow_state": workflow_state,
+                "runtime_attachment": runtime_attachment,
+            },
+            error=None,
+        )
+    except LearningWorkflowTransitionError as exc:
+        return APIResponse(
+            success=False,
+            message="Learning workflow state not found",
+            data=None,
+            error=ErrorModel(
+                code="learning_workflow_run_not_found",
+                details=str(exc),
+            ),
+        )
+
+
 @router.post("/panel/load_model_artifact", response_model=APIResponse)
 def load_model_artifact(request: PanelLoadModelArtifactRequest) -> APIResponse:
     """Load a model learning product as read-only derived replay artifacts."""
@@ -321,7 +1186,11 @@ def load_model_artifact(request: PanelLoadModelArtifactRequest) -> APIResponse:
 def load_learning_draft_review_endpoint(request: PanelLoadLearningDraftReviewRequest) -> APIResponse:
     """Load a model learning draft for display-only human review."""
     try:
-        result = load_learning_draft_review(request.source_path, project_root=ROOT_DIR)
+        result = load_learning_draft_review(
+            request.source_path,
+            project_root=ROOT_DIR,
+            discover_related_sidecars=request.discover_related_sidecars,
+        )
         trace_path = write_trace(
             category="panel",
             operation="load-learning-draft-review",
@@ -339,11 +1208,142 @@ def load_learning_draft_review_endpoint(request: PanelLoadLearningDraftReviewReq
         )
 
 
+@router.post("/panel/load_interface_workflow_review", response_model=APIResponse)
+def load_interface_workflow_review_endpoint(
+    request: PanelLoadInterfaceWorkflowReviewRequest,
+) -> APIResponse:
+    """加载多份单界面草稿，生成只读的单软件流程审核图。"""
+
+    loaded_reviews: list[dict[str, Any]] = []
+    invalid_sources: list[dict[str, Any]] = []
+    for source_path in request.draft_source_paths:
+        normalized_path = str(source_path or "").strip()
+        if not normalized_path:
+            invalid_sources.append(
+                {
+                    "source_path": "",
+                    "failure_category": "invalid_review_source",
+                    "reason": "source path is empty",
+                }
+            )
+            continue
+        try:
+            loaded_reviews.append(
+                load_learning_draft_review(
+                    normalized_path,
+                    project_root=ROOT_DIR,
+                    discover_related_sidecars=request.discover_related_sidecars,
+                )
+            )
+        except Exception as exc:
+            invalid_sources.append(
+                {
+                    "source_path": normalized_path,
+                    "failure_category": "invalid_review_source",
+                    "reason": str(exc),
+                }
+            )
+    try:
+        result = build_interface_workflow_review(
+            goal=request.goal,
+            application_identity=request.application_identity,
+            draft_sources=loaded_reviews,
+        )
+        result["invalid_sources"].extend(invalid_sources)
+        trace_path = write_trace(
+            category="panel",
+            operation="load-interface-workflow-review",
+            payload={
+                "success": True,
+                "request": request.model_dump(),
+                "result": result,
+            },
+            name_hint="interface_workflow_review",
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(
+            success=True,
+            message="Interface workflow review loaded",
+            data=result,
+            error=None,
+        )
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Interface workflow review load failed",
+            data=None,
+            error=ErrorModel(
+                code="interface_workflow_review_load_failed",
+                details=str(exc),
+            ),
+        )
+
+
+@router.post("/panel/save_interface_workflow_review", response_model=APIResponse)
+def save_interface_workflow_review_endpoint(
+    request: PanelSaveInterfaceWorkflowReviewRequest,
+) -> APIResponse:
+    """保存人工审核后的单软件流程草稿，不发布到 Agent Memory。"""
+
+    try:
+        result = save_interface_workflow_review_candidate(
+            request.review,
+            project_root=ROOT_DIR,
+            out_dir=request.out_dir,
+        )
+        if result["node_count"] > 0:
+            result["interface_asset_projection"] = save_workflow_review_as_application_assets(
+                request.review,
+                project_root=ROOT_DIR,
+            )
+        else:
+            result["interface_asset_projection"] = {
+                "status": "not_covered",
+                "reason": "workflow_has_no_interface_nodes",
+                "saved_interface_count": 0,
+                "saved_transition_count": 0,
+                "artifact_is_authorization": False,
+            }
+        trace_path = write_trace(
+            category="panel",
+            operation="save-interface-workflow-review",
+            payload={
+                "success": True,
+                "workflow_id": result["workflow_id"],
+                "saved_path": result["path"],
+                "node_count": result["node_count"],
+                "edge_count": result["edge_count"],
+                "interface_asset_projection": result["interface_asset_projection"],
+                "review_status": result["review_status"],
+                "published": False,
+                "artifact_is_authorization": False,
+            },
+            name_hint=result["workflow_id"],
+        )
+        result["trace_path"] = trace_path
+        return APIResponse(
+            success=True,
+            message="Interface workflow review draft saved",
+            data=result,
+            error=None,
+        )
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Interface workflow review save failed",
+            data=None,
+            error=ErrorModel(
+                code="interface_workflow_review_save_failed",
+                details=str(exc),
+            ),
+        )
+
+
 @router.get("/panel/learning_draft_sources", response_model=APIResponse)
-def list_learning_draft_sources_endpoint(limit: int = 3, include_recent: bool = False) -> APIResponse:
+def list_learning_draft_sources_endpoint(limit: int = 12, include_recent: bool = True) -> APIResponse:
     """List recent learning draft sources that can be loaded for review."""
     try:
-        bounded_limit = max(1, min(int(limit or 3), 50))
+        bounded_limit = max(1, min(int(limit or 12), 50))
         result = _list_recent_learning_draft_sources(limit=bounded_limit, include_recent=include_recent)
         return APIResponse(success=True, message="Learning draft sources listed", data=result, error=None)
     except Exception as exc:
@@ -355,11 +1355,26 @@ def list_learning_draft_sources_endpoint(limit: int = 3, include_recent: bool = 
         )
 
 
+@router.get("/panel/surface_rule_registry", response_model=APIResponse)
+def list_surface_rule_registry_endpoint() -> APIResponse:
+    """List safe, read-only summaries of human correction rule candidates."""
+    try:
+        result = build_surface_rule_registry_panel_view(project_root=ROOT_DIR)
+        return APIResponse(success=True, message="Surface rule registry listed", data=result, error=None)
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Surface rule registry list failed",
+            data=None,
+            error=ErrorModel(code="surface_rule_registry_list_failed", details=str(exc)),
+        )
+
+
 @router.post("/panel/save_learning_draft_review", response_model=APIResponse)
 def save_learning_draft_review_endpoint(request: PanelSaveLearningDraftReviewRequest) -> APIResponse:
     """Save a reviewed template candidate without enabling execution."""
     try:
-        result = save_reviewed_template_candidate(
+        result = build_pathgraph_candidate_from_review(
             request.source_path,
             request.review_patch,
             project_root=ROOT_DIR,
@@ -378,6 +1393,45 @@ def save_learning_draft_review_endpoint(request: PanelSaveLearningDraftReviewReq
             message="Learning draft review save failed",
             data=None,
             error=ErrorModel(code="learning_draft_review_save_failed", details=str(exc)),
+        )
+
+
+@router.get("/panel/continuous_task_handoff", response_model=APIResponse)
+def continuous_task_handoff_endpoint(run_dir: Optional[str] = None) -> APIResponse:
+    """Load a paused continuous-task handoff without operating the target app."""
+    try:
+        result = load_continuous_task_handoff(
+            project_root=ROOT_DIR,
+            run_dir=run_dir,
+            memory_store=continuous_task_memory_store,
+        )
+        return APIResponse(success=True, message="Continuous task handoff loaded", data=result, error=None)
+    except (ValueError, OSError, KeyError) as exc:
+        return APIResponse(
+            success=False,
+            message="Continuous task handoff is unavailable",
+            data=None,
+            error=ErrorModel(code="continuous_task_handoff_unavailable", details=str(exc)),
+        )
+
+
+@router.post("/panel/resume_continuous_task", response_model=APIResponse)
+def resume_continuous_task_endpoint(request: PanelResumeContinuousTaskRequest) -> APIResponse:
+    """Resume the same no-submit task only after reviewed memory passes the handoff gate."""
+    try:
+        result = start_continuous_task_resume(
+            project_root=ROOT_DIR,
+            run_dir=request.run_dir,
+            memory_store=continuous_task_memory_store,
+            base_url=request.base_url,
+        )
+        return APIResponse(success=True, message="Continuous task resume started", data=result, error=None)
+    except (ValueError, OSError, KeyError) as exc:
+        return APIResponse(
+            success=False,
+            message="Continuous task resume was blocked",
+            data=None,
+            error=ErrorModel(code="continuous_task_resume_blocked", details=str(exc)),
         )
 
 
@@ -514,157 +1568,13 @@ def run_learning_model_trial_endpoint(request: PanelRunLearningModelTrialRequest
 @router.post("/panel/run_learning_recognition_trial", response_model=APIResponse)
 def run_learning_recognition_trial_endpoint(request: PanelRunLearningRecognitionTrialRequest) -> APIResponse:
     """Build a display-only learning draft from current observe/coordinate evidence."""
-    try:
-        observe_bundle = _panel_learning_recognition_observe_bundle(request)
-        two_stage_review_evidence = _attach_two_stage_numbered_review_regions_to_observe_bundle(
-            observe_bundle,
-            request.two_stage_report_path,
-        )
-        authoritative_two_stage_report = _load_two_stage_report_for_learning_draft(request.two_stage_report_path)
-        summary = request.summary or _panel_learning_recognition_summary(request.observation_evidence)
-        result = build_learning_recognition_trial(
-            observe_bundle=observe_bundle,
-            state_guess=request.state_hint,
-            summary=summary,
-            grounding_adapter=_panel_calibrated_target_grounding_adapter,
-            crop_size=request.crop_size if request.crop_size else None,
-            two_stage_understanding_override=authoritative_two_stage_report,
-        )
-        two_stage_fusion_status = _load_two_stage_fusion_status_for_learning_draft(request.two_stage_report_path)
-        if two_stage_fusion_status:
-            two_stage_fusion_status = _attach_current_calibrated_fusion_overlay(
-                two_stage_fusion_status,
-                request.observation_evidence,
-            )
-            _attach_two_stage_fusion_status_to_learning_result(result, two_stage_fusion_status)
-        precise_understanding_status = _precise_understanding_status_from_fusion_status(two_stage_fusion_status)
-        learn_all_targets = _learning_recognition_review_box_status(
-            two_stage_review_evidence=two_stage_review_evidence,
-            two_stage_fusion_status=two_stage_fusion_status,
-        )
-        safety = {
-            **(result.get("safety") if isinstance(result.get("safety"), dict) else {}),
-            "real_clicks_performed": 0,
-            "promotion_allowed": False,
-            "artifact_is_authorization": False,
-            "execute_binding_enabled": False,
-            "live_safe_fill_attempted": 0,
-            "final_submit_forbidden": True,
-            "real_action_requires_gate": True,
-        }
-        model_provenance = _panel_model_provenance_from_observe_bundle(observe_bundle)
-        actual_model_call = model_provenance["actual_model_call_evidence_count"] > 0
-        saved_payload = {
-            **result,
-            "app_name": request.app_name,
-            "state_hint": request.state_hint,
-            "summary": summary,
-            "artifact_type": "learn_recognition_trial",
-            "draft_only": True,
-            "draft_graph_preview": True,
-            "runtime_path_graph": False,
-            "promotion_allowed": False,
-            "artifact_is_authorization": False,
-            "execute_binding_enabled": False,
-            "real_clicks": 0,
-            "live_safe_fill_attempted": 0,
-            "final_submit_forbidden": True,
-            "real_action_requires_gate": True,
-            "precise_understanding_status": precise_understanding_status,
-            "learn_all_targets": learn_all_targets,
-            "best_attempt_index": 0,
-            "best_learning_draft": result.get("learning_draft"),
-            "source_type": "panel_observe_coordinate_evidence",
-            "actual_model_call_in_this_run": actual_model_call,
-            "model_generated": actual_model_call,
-            "source_after_review": "mixed" if actual_model_call else "fixture_only",
-            "counts_as_pure_model_generated": False,
-            "model_provenance": model_provenance,
-            "panel_learning_studio": {
-                "contract_version": "panel_learning_recognition_trial_v1",
-                "draft_graph_preview": True,
-                "display_only": True,
-                "source": "panel_run_learning_recognition_trial",
-                "two_stage_report_path": _str(request.two_stage_report_path),
-                "two_stage_report_authoritative": bool(authoritative_two_stage_report),
-                "uses_execute_mode": False,
-                "live_clicks": 0,
-                "live_safe_fill": 0,
-            },
-            "observe_bundle": observe_bundle,
-            "safety": safety,
-        }
-        trial_path = _save_panel_learning_trial(saved_payload, app_name=request.app_name)
-        trace_path = write_trace(
-            category="panel",
-            operation="run-learning-recognition-trial",
-            payload={
-                "success": True,
-                "request": request.model_dump(),
-                "result": {
-                    "trial_path": trial_path,
-                    "status": saved_payload.get("status"),
-                    "artifact_type": saved_payload.get("artifact_type"),
-                    "draft_only": True,
-                    "real_clicks": 0,
-                    "promotion_allowed": False,
-                },
-            },
-            name_hint="learning_recognition_trial",
-        )
-        return APIResponse(
-            success=True,
-            message="Learning recognition draft saved",
-            data={
-                "contract_version": "panel_learning_recognition_trial_run_v1",
-                "artifact_type": "learn_recognition_trial",
-                "draft_only": True,
-                "draft_graph_preview": True,
-                "runtime_path_graph": False,
-                "trial_path": trial_path,
-                "trace_path": trace_path,
-                "status": saved_payload.get("status"),
-                "promotion_allowed": False,
-                "artifact_is_authorization": False,
-                "execute_binding_enabled": False,
-                "real_clicks": 0,
-                "live_safe_fill_attempted": 0,
-                "final_submit_forbidden": True,
-                "real_action_requires_gate": True,
-                "safety": safety,
-                "learn_all_targets": learn_all_targets,
-                "summary": {
-                    "app_name": request.app_name,
-                    "state_hint": request.state_hint,
-                    "screen_inventory_count": len(saved_payload.get("screen_inventory") or []),
-                    "two_stage_report_attached": bool(two_stage_fusion_status),
-                    "two_stage_review_region_count": _int_or_zero(two_stage_review_evidence.get("attached_count")),
-                    "two_stage_stage1_gate_status": (
-                        two_stage_fusion_status.get("stage1_gate_status") if two_stage_fusion_status else ""
-                    ),
-                    "two_stage_stage2_numbering_skipped": (
-                        bool(two_stage_fusion_status.get("stage2_numbering_skipped")) if two_stage_fusion_status else False
-                    ),
-                    "two_stage_review_box_count": (
-                        _int_or_zero(two_stage_fusion_status.get("review_box_count")) if two_stage_fusion_status else 0
-                    ),
-                    "precise_understanding_status": precise_understanding_status,
-                    "accepted_for_grounding_count": int(
-                        ((saved_payload.get("classification") or {}).get("summary") or {}).get("accepted_for_grounding_count") or 0
-                    ),
-                    "grounding_validation_count": len(saved_payload.get("grounding_validations") or []),
-                    "draft_section_counts": _learning_draft_section_counts(saved_payload.get("learning_draft")),
-                },
-            },
-            error=None,
-        )
-    except Exception as exc:
-        return APIResponse(
-            success=False,
-            message="Learning recognition draft failed",
-            data={"app_name": request.app_name, "state_hint": request.state_hint},
-            error=ErrorModel(code="learning_recognition_trial_failed", details=str(exc)),
-        )
+    result = run_recognition_task(
+        RecognitionTaskInput.model_validate(request.model_dump()),
+        project_root=ROOT_DIR,
+    )
+    return APIResponse.model_validate(
+        recognition_result_to_legacy_response(result)
+    )
 
 
 @router.post("/panel/run_learning_two_stage_understanding", response_model=APIResponse)
@@ -672,162 +1582,31 @@ def run_learning_two_stage_understanding_endpoint(
     request: PanelRunLearningTwoStageUnderstandingRequest,
 ) -> APIResponse:
     """Run the real learning-panel Stage1 gate + Stage2 numbering path."""
-    try:
-        observe_result, source_trace_path = _panel_two_stage_observe_result(request)
-        bundle = _observe_bundle_from_trace_result(observe_result, trace_path=source_trace_path)
-        bundle["app_name"] = request.app_name
-        bundle["state_hint"] = request.state_hint
-        source_image_override = _panel_apply_source_image_override(bundle, request.source_image_path)
-        screen_inventory = _stage1_inventory_from_trace_result(observe_result)
-        layout_graph = build_inventory_layout_graph(screen_inventory, screen_size=bundle.get("screen_size"))
-        report = build_two_stage_screen_understanding(
-            bundle=bundle,
-            screen_inventory=screen_inventory,
-            layout_graph=layout_graph,
-            require_stage1_gate=request.require_stage1_gate,
-            stage2_region_strategy=request.stage2_region_strategy,
-            enable_ocr_content_recovery=True,
-        )
-        report["source_trace_path"] = str(source_trace_path)
-        report["source_image_override"] = source_image_override
-        report["screen_inventory_count"] = len(screen_inventory)
-        report["layout_graph_summary"] = {
-            "node_count": layout_graph.get("node_count"),
-            "zone_count": layout_graph.get("zone_count"),
-            "zones": {
-                zone_id: len(zone.get("item_ids") if isinstance(zone, dict) and isinstance(zone.get("item_ids"), list) else [])
-                for zone_id, zone in (layout_graph.get("zones") if isinstance(layout_graph.get("zones"), dict) else {}).items()
-            },
-        }
-        report["fusion_status"] = fusion_status_from_two_stage(report)
-        report["model_grounding_evidence"] = model_grounding_evidence_status_from_two_stage(report)
-        fusion = report.get("fusion") if isinstance(report.get("fusion"), dict) else {}
-        stage1_gate = report.get("stage1_gate") if isinstance(report.get("stage1_gate"), dict) else {}
-        review_boxes = fusion.get("fused_review_boxes") if isinstance(fusion.get("fused_review_boxes"), list) else []
-        overlay_path = _str(
-            fusion.get("compiled_overlay_path")
-            or fusion.get("full_screen_understanding_overlay_path")
-            or report.get("overlay_path")
-        )
-        stage2 = report.get("stage2_numbering") if isinstance(report.get("stage2_numbering"), dict) else {}
-        learn_all_targets_payload = {
-            "status": "two_stage_stage1_gate_passed"
-            if stage1_gate.get("status") == "passed"
-            else "blocked_before_stage2_numbering",
-            "targets": [],
-            "target_count": 0,
-            "validated_count": 0,
-            "invalid_count": 0,
-            "review_boxes": review_boxes,
-            "review_box_count": len(review_boxes),
-            "overlay_path": overlay_path,
-            "trace_path": "",
-            "stage1_gate_status": stage1_gate.get("status"),
-            "stage2_numbered_region_count": len(stage2.get("regions") if isinstance(stage2.get("regions"), list) else []),
-            "stage2_calibration_candidate_count": int(stage2.get("calibration_candidate_count") or 0),
-        }
-        saved_payload = {
-            **report,
-            "app_name": request.app_name,
-            "state_hint": request.state_hint,
-            "artifact_type": "learn_two_stage_understanding",
-            "draft_only": True,
-            "draft_graph_preview": True,
-            "runtime_path_graph": False,
-            "promotion_allowed": False,
-            "artifact_is_authorization": False,
-            "execute_binding_enabled": False,
-            "real_clicks": 0,
-            "live_safe_fill_attempted": 0,
-            "final_submit_forbidden": True,
-            "source_type": "panel_live_observe_two_stage_understanding",
-            "observe_bundle": bundle,
-            "source_image_override": source_image_override,
-            "learn_all_targets": learn_all_targets_payload,
-        }
-        report_path = _save_panel_learning_trial(saved_payload, app_name=request.app_name)
-        trace_path = write_trace(
-            category="panel",
-            operation="run-learning-two-stage-understanding",
-            payload={
-                "success": True,
-                "request": request.model_dump(),
-                "result": {
-                    "report_path": report_path,
-                    "overlay_path": overlay_path,
-                    "stage1_gate_status": stage1_gate.get("status"),
-                    "stage1_source": report.get("stage1_source"),
-                    "stage2_numbering_skipped": bool(report.get("stage2_numbering_skipped")),
-                    "review_box_count": len(review_boxes),
-                    "real_clicks": 0,
-                    "promotion_allowed": False,
-                },
-            },
-            name_hint="learning_two_stage_understanding",
-        )
-        return APIResponse(
-            success=True,
-            message="Two-stage learning understanding generated",
-            data={
-                "contract_version": "panel_learning_two_stage_understanding_run_v1",
-                "artifact_type": "learn_two_stage_understanding",
-                "draft_only": True,
-                "draft_graph_preview": True,
-                "runtime_path_graph": False,
-                "report_path": report_path,
-                "trace_path": trace_path,
-                "source_trace_path": str(source_trace_path),
-                "source_image_override": source_image_override,
-                "status": stage1_gate.get("status") or "unknown",
-                "stage1_gate": stage1_gate,
-                "stage1_gate_required": bool(request.require_stage1_gate),
-                "stage1_source": report.get("stage1_source"),
-                "stage2_numbering_skipped": bool(report.get("stage2_numbering_skipped")),
-                "fusion_status": report.get("fusion_status"),
-                "model_grounding_evidence": report.get("model_grounding_evidence"),
-                "coordinate_overlay_path": overlay_path,
-                "full_screen_understanding_overlay_path": overlay_path,
-                "image_path": bundle.get("image_path") or bundle.get("source_image_path"),
-                "screen_size": bundle.get("screen_size") or {},
-                "screen_summary": ((bundle.get("screen_reading") or {}).get("screen_summary") if isinstance(bundle.get("screen_reading"), dict) else ""),
-                "learn_all_targets": {
-                    **learn_all_targets_payload,
-                    "trace_path": trace_path,
-                },
-                "summary": {
-                    "app_name": request.app_name,
-                    "state_hint": request.state_hint,
-                    "screen_inventory_count": len(screen_inventory),
-                    "stage2_numbered_item_count": int(stage2.get("numbered_item_count") or 0),
-                    "stage2_calibration_candidate_count": int(stage2.get("calibration_candidate_count") or 0),
-                    "review_box_count": len(review_boxes),
-                    "stage1_gate_status": stage1_gate.get("status"),
-                    "stage1_source": report.get("stage1_source"),
-                    "stage1_failure_categories": stage1_gate.get("failure_categories") if isinstance(stage1_gate.get("failure_categories"), list) else [],
-                    "stage2_numbering_skipped": bool(report.get("stage2_numbering_skipped")),
-                    "overlay_path": overlay_path,
-                    "model_grounding_evidence_status": (
-                        report.get("model_grounding_evidence", {}).get("status")
-                        if isinstance(report.get("model_grounding_evidence"), dict)
-                        else "unknown"
-                    ),
-                },
-                "promotion_allowed": False,
-                "artifact_is_authorization": False,
-                "execute_binding_enabled": False,
-                "real_clicks": 0,
-                "live_safe_fill_attempted": 0,
-                "final_submit_forbidden": True,
-            },
-            error=None,
-        )
-    except Exception as exc:
-        return APIResponse(
-            success=False,
-            message="Two-stage learning understanding failed",
-            data={"app_name": request.app_name, "state_hint": request.state_hint},
-            error=ErrorModel(code="learning_two_stage_understanding_failed", details=str(exc)),
-        )
+    result = run_two_stage_understanding_task(
+        TwoStageUnderstandingTaskInput.model_validate(request.model_dump()),
+        project_root=ROOT_DIR,
+    )
+    return APIResponse.model_validate(
+        two_stage_result_to_legacy_response(result)
+    )
+
+
+@router.post("/panel/run_learning_model_review_repair", response_model=APIResponse)
+def run_learning_model_review_repair_endpoint(
+    request: PanelRunLearningModelReviewRepairRequest,
+) -> APIResponse:
+    """运行只读模型复核、确定性修复、最终编号与完整性 Gate。"""
+
+    result = run_model_review_task(
+        ModelReviewTaskInput.model_validate(request.model_dump()),
+        project_root=ROOT_DIR,
+        review_runner=run_panel_learning_model_review_repair,
+        trace_writer=write_trace,
+        path_resolver=_resolve_under_root_path,
+    )
+    return APIResponse.model_validate(
+        model_review_result_to_legacy_response(result)
+    )
 
 
 @router.post("/panel/generate_pathgraph_candidate", response_model=APIResponse)
@@ -1514,6 +2293,7 @@ PINNED_LEARNING_DRAFT_SOURCE_PATHS = [
 
 MAX_PINNED_LEARNING_DRAFT_SOURCES = 3
 MAX_RECENT_LEARNING_DRAFT_CANDIDATE_ATTEMPTS = 6
+MAX_RECENT_LEARNING_DRAFT_CANDIDATE_SCAN = 64
 
 
 def _list_recent_learning_draft_sources(*, limit: int = 16, include_recent: bool = True) -> dict[str, Any]:
@@ -1548,16 +2328,32 @@ def _list_recent_learning_draft_sources(*, limit: int = 16, include_recent: bool
             seen_paths.add(resolved_text)
             suppressed_pinned_count += 1
     if include_recent:
-        for root in roots:
-            if root.exists():
-                candidates.extend(path for path in root.rglob("*.json") if path.is_file() and _is_learning_draft_source_candidate_file(path))
-        if targeted_benchmark_root.exists():
-            for file_name in ("learn_page_detail_candidate.json", "learn_mode_demo_scaffold.json"):
-                candidates.extend(path for path in targeted_benchmark_root.rglob(file_name) if path.is_file())
-        candidates.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+        candidates = _discover_recent_named_files(
+            roots,
+            names={"trial_result.json", "reviewed_template_candidate.json", "pathgraph_candidate.json"},
+            limit=MAX_RECENT_LEARNING_DRAFT_CANDIDATE_SCAN,
+        )
+        targeted_benchmark_scan_performed = targeted_benchmark_root.exists() and not candidates
+        if targeted_benchmark_scan_performed:
+            candidates = _discover_recent_named_files(
+                [targeted_benchmark_root],
+                names={"learn_page_detail_candidate.json", "learn_mode_demo_scaffold.json"},
+                limit=MAX_RECENT_LEARNING_DRAFT_CANDIDATE_SCAN,
+            )
+    else:
+        targeted_benchmark_scan_performed = False
+    scanned_candidates = candidates[:MAX_RECENT_LEARNING_DRAFT_CANDIDATE_SCAN]
+    quick_ready_candidates = []
+    quick_incomplete_candidates = []
+    for path in scanned_candidates:
+        if _learning_draft_candidate_has_display_evidence(path):
+            quick_ready_candidates.append(path)
+        else:
+            quick_incomplete_candidates.append(path)
+    ranked_candidates = quick_ready_candidates + quick_incomplete_candidates
     candidate_attempt_limit = min(MAX_RECENT_LEARNING_DRAFT_CANDIDATE_ATTEMPTS, max(0, limit - len(sources)))
     candidate_attempt_count = 0
-    for path in candidates:
+    for path in ranked_candidates:
         if len(sources) >= limit:
             break
         if str(path.resolve()) in seen_paths:
@@ -1566,13 +2362,30 @@ def _list_recent_learning_draft_sources(*, limit: int = 16, include_recent: bool
             break
         candidate_attempt_count += 1
         try:
-            source = _learning_draft_source_entry(path, pinned=False)
+            source = (
+                _learning_draft_trial_source_entry(path)
+                if path.name == "trial_result.json"
+                else _learning_draft_source_entry(path, pinned=False)
+            )
         except Exception:
             skipped_count += 1
             continue
         source["source_category"] = _learning_draft_source_category(path, default=source.get("source_category"))
         sources.append(source)
         seen_paths.add(str(path.resolve()))
+    recommended = next(
+        (
+            source
+            for source in sources
+            if source.get("pinned") is not True and source.get("display_completeness_status") == "ready"
+        ),
+        None,
+    ) or next(
+        (source for source in sources if source.get("display_completeness_status") == "ready"),
+        None,
+    )
+    for source in sources:
+        source["recommended_for_panel_review"] = source is recommended
     return {
         "contract_version": "panel_learning_draft_sources_v1",
         "roots": [_relative_panel_path(root) for root in roots],
@@ -1584,12 +2397,61 @@ def _list_recent_learning_draft_sources(*, limit: int = 16, include_recent: bool
         "include_recent": include_recent,
         "candidate_attempt_limit": candidate_attempt_limit,
         "candidate_attempt_count": candidate_attempt_count,
+        "candidate_scan_limit": MAX_RECENT_LEARNING_DRAFT_CANDIDATE_SCAN,
+        "candidate_scan_count": len(scanned_candidates),
+        "candidate_discovery_strategy": "bounded_recent_directory_walk_v1",
+        "candidate_quick_ready_count": len(quick_ready_candidates),
+        "targeted_benchmark_scan_performed": targeted_benchmark_scan_performed,
         "max_pinned_sources": MAX_PINNED_LEARNING_DRAFT_SOURCES,
         "max_recent_candidate_attempts": MAX_RECENT_LEARNING_DRAFT_CANDIDATE_ATTEMPTS,
         "suppressed_pinned_count": suppressed_pinned_count,
+        "recommended_source_path": recommended.get("source_path") if isinstance(recommended, dict) else None,
+        "recommendation_status": "display_complete_recent_draft" if isinstance(recommended, dict) else "not_available",
         "artifact_is_authorization": False,
         "execute_binding_enabled": False,
     }
+
+
+def _discover_recent_named_files(roots: list[Path], *, names: set[str], limit: int) -> list[Path]:
+    bounded_limit = max(1, int(limit or 1))
+    directory_heap: list[tuple[int, int, Path]] = []
+    candidates: list[tuple[int, Path]] = []
+    sequence = 0
+    for root in roots:
+        if not root.exists() or not root.is_dir():
+            continue
+        try:
+            modified_ns = root.stat().st_mtime_ns
+        except OSError:
+            continue
+        heapq.heappush(directory_heap, (-modified_ns, sequence, root))
+        sequence += 1
+
+    while directory_heap:
+        newest_directory_ns = -directory_heap[0][0]
+        if len(candidates) >= bounded_limit:
+            oldest_candidate_ns = min(item[0] for item in candidates)
+            if newest_directory_ns <= oldest_candidate_ns:
+                break
+        _, _, directory = heapq.heappop(directory_heap)
+        try:
+            entries = list(os.scandir(directory))
+        except OSError:
+            continue
+        for entry in entries:
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    heapq.heappush(directory_heap, (-entry.stat(follow_symlinks=False).st_mtime_ns, sequence, Path(entry.path)))
+                    sequence += 1
+                elif entry.name in names and entry.is_file(follow_symlinks=False):
+                    candidates.append((entry.stat(follow_symlinks=False).st_mtime_ns, Path(entry.path)))
+            except OSError:
+                continue
+        if len(candidates) > bounded_limit:
+            candidates.sort(key=lambda item: item[0], reverse=True)
+            del candidates[bounded_limit:]
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return [path for _, path in candidates[:bounded_limit]]
 
 
 def _learning_draft_source_category(path: Path, *, default: Any = None) -> str:
@@ -1601,7 +2463,11 @@ def _learning_draft_source_category(path: Path, *, default: Any = None) -> str:
 
 
 def _learning_draft_source_entry(path: Path, *, pinned: bool) -> dict[str, Any]:
-    review = load_learning_draft_review(_relative_panel_path(path), project_root=ROOT_DIR)
+    review = load_learning_draft_review(
+        _relative_panel_path(path),
+        project_root=ROOT_DIR,
+        discover_related_sidecars=False,
+    )
     draft = review.get("draft") if isinstance(review.get("draft"), dict) else {}
     counts = _learning_draft_section_counts(draft)
     source = review.get("source") if isinstance(review.get("source"), dict) else {}
@@ -1692,6 +2558,29 @@ def _learning_draft_source_entry(path: Path, *, pinned: bool) -> dict[str, Any]:
         "artifact_is_authorization": False,
         "execute_binding_enabled": False,
     }
+    source_image_path = _learning_draft_display_source_image_path(draft)
+    source_image_exists = False
+    if source_image_path:
+        try:
+            source_image_exists = _resolve_under_root_path(source_image_path).is_file()
+        except ValueError:
+            source_image_exists = False
+    display_missing = []
+    if not source_image_exists:
+        display_missing.append("source_image")
+    if counts["states"] < 1:
+        display_missing.append("states")
+    if counts["regions"] < 1:
+        display_missing.append("regions")
+    entry.update(
+        {
+            "source_image_path": source_image_path,
+            "source_image_exists": source_image_exists,
+            "display_completeness_status": "ready" if not display_missing else "incomplete",
+            "display_missing_fields": display_missing,
+            "recommended_for_panel_review": False,
+        }
+    )
     if readiness:
         entry.update(
             {
@@ -2166,19 +3055,123 @@ def _learning_draft_source_entry(path: Path, *, pinned: bool) -> dict[str, Any]:
 
 
 def _is_learning_draft_source_candidate_file(path: Path) -> bool:
-    return path.name not in {
-        "promotion_validation_report.json",
-        "learn_fusion_model_start_preflight_report.json",
-        "learn_fusion_demo_readiness_report.json",
-        "learn_fusion_model_start_approval_packet.json",
-        "learn_fusion_calibration_pre_run_check_report.json",
-        "learn_fusion_pathgraph_integration_readiness_report.json",
-        "learn_fusion_current_evidence_packet.json",
-        "learn_precise_understanding_candidate.json",
-        "learn_page_detail_candidate.json",
-        "learn_mode_demo_scaffold.json",
-        "learning_mode_demo_goal_readiness_report.json",
+    return path.name in {"trial_result.json", "reviewed_template_candidate.json", "pathgraph_candidate.json"}
+
+
+def _learning_draft_candidate_has_display_evidence(path: Path) -> bool:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    for draft in _learning_draft_candidate_drafts(payload):
+        states = _learning_draft_candidate_section(draft, "states")
+        regions = _learning_draft_candidate_section(draft, "regions")
+        if not states or not regions:
+            continue
+        source_image_path = _learning_draft_display_source_image_path(draft)
+        if not source_image_path:
+            continue
+        try:
+            if _resolve_under_root_path(source_image_path).is_file():
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _learning_draft_trial_source_entry(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    if not isinstance(payload, dict):
+        raise ValueError("learning draft source must be a JSON object")
+    drafts = _learning_draft_candidate_drafts(payload)
+    if not drafts:
+        raise ValueError("trial result does not contain a learning draft")
+    draft = max(
+        drafts,
+        key=lambda item: len(_learning_draft_candidate_section(item, "states"))
+        + len(_learning_draft_candidate_section(item, "regions")),
+    )
+    sections = {
+        name: len(_learning_draft_candidate_section(draft, name))
+        for name in ("states", "regions", "action_templates", "blockers", "verification_rules")
     }
+    source_image_path = _learning_draft_display_source_image_path(draft)
+    source_image_exists = False
+    if source_image_path:
+        try:
+            source_image_exists = _resolve_under_root_path(source_image_path).is_file()
+        except ValueError:
+            source_image_exists = False
+    display_missing = []
+    if not source_image_exists:
+        display_missing.append("source_image")
+    if sections["states"] < 1:
+        display_missing.append("states")
+    if sections["regions"] < 1:
+        display_missing.append("regions")
+    return {
+        "source_path": _relative_panel_path(path),
+        "source_trial_path": _relative_panel_path(path),
+        "screen_summary": str(draft.get("screen_summary") or payload.get("summary") or ""),
+        "state_guess": str(draft.get("state_guess") or payload.get("state_hint") or ""),
+        "state_count": sections["states"],
+        "region_count": sections["regions"],
+        "action_template_count": sections["action_templates"],
+        "blocker_count": sections["blockers"],
+        "verification_rule_count": sections["verification_rules"],
+        "modified_at": path.stat().st_mtime,
+        "source_category": "recent_learning_draft",
+        "pinned": False,
+        "source_image_path": source_image_path,
+        "source_image_exists": source_image_exists,
+        "display_completeness_status": "ready" if not display_missing else "incomplete",
+        "display_missing_fields": display_missing,
+        "recommended_for_panel_review": False,
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+
+
+def _learning_draft_candidate_drafts(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates = [payload.get("draft"), payload.get("best_learning_draft"), payload.get("learning_draft")]
+    two_stage = payload.get("two_stage_understanding")
+    if isinstance(two_stage, dict):
+        candidates.append(two_stage.get("learning_draft"))
+    return [item for item in candidates if isinstance(item, dict)]
+
+
+def _learning_draft_candidate_section(draft: dict[str, Any], name: str) -> list[Any]:
+    direct = draft.get(name)
+    if isinstance(direct, list):
+        return direct
+    workflow_draft = draft.get("workflow_draft") if isinstance(draft.get("workflow_draft"), dict) else {}
+    interface_draft = draft.get("interface_draft") if isinstance(draft.get("interface_draft"), dict) else {}
+    container = interface_draft if name == "regions" else workflow_draft
+    value = container.get(name)
+    return value if isinstance(value, list) else []
+
+
+def _learning_draft_display_source_image_path(draft: dict[str, Any]) -> str:
+    page_details = draft.get("page_details") if isinstance(draft.get("page_details"), dict) else {}
+    screen = page_details.get("screen") if isinstance(page_details.get("screen"), dict) else {}
+    candidates = (
+        screen.get("compiled_overlay_path"),
+        screen.get("full_screen_understanding_overlay_path"),
+        screen.get("source_image_path"),
+        screen.get("image_path"),
+        screen.get("screenshot_path"),
+        page_details.get("compiled_overlay_path"),
+        page_details.get("full_screen_understanding_overlay_path"),
+        page_details.get("source_image_path"),
+        page_details.get("image_path"),
+        page_details.get("screenshot_path"),
+        draft.get("source_image_path"),
+        draft.get("image_path"),
+        draft.get("screenshot_path"),
+    )
+    return next((str(value).strip() for value in candidates if str(value or "").strip()), "")
 
 
 def _relative_panel_path(path: Path) -> str:
@@ -2568,302 +3561,6 @@ def _learning_draft_section_counts(draft: Any) -> dict[str, int]:
     }
 
 
-def _panel_two_stage_observe_result(
-    request: PanelRunLearningTwoStageUnderstandingRequest,
-) -> tuple[dict[str, Any], Path]:
-    if request.trace_path and str(request.trace_path).strip():
-        trace_path = _resolve_panel_learning_image_path(str(request.trace_path))
-        trace = json.loads(trace_path.read_text(encoding="utf-8-sig"))
-        result = trace.get("result") if isinstance(trace.get("result"), dict) else trace
-        if not isinstance(result, dict):
-            raise ValueError("trace does not contain a dict result")
-        return result, trace_path
-
-    result = request.observe_result if isinstance(request.observe_result, dict) else {}
-    if isinstance(result.get("data"), dict):
-        result = result["data"]
-    if isinstance(result.get("result"), dict) and not result.get("image_path"):
-        result = result["result"]
-    if not result:
-        raise ValueError("observe_result or trace_path is required")
-    source_trace = _str(result.get("trace_path") or result.get("source_trace_path") or "panel_inline_observe_result.json")
-    return result, Path(source_trace)
-
-
-def _panel_apply_source_image_override(bundle: dict[str, Any], source_image_path: str | None) -> dict[str, Any]:
-    override_text = _str(source_image_path).strip()
-    if not override_text:
-        return {"applied": False, "reason": "not_requested"}
-    resolved = _resolve_panel_learning_image_path(override_text)
-    original_path = _str(bundle.get("image_path") or bundle.get("source_image_path"))
-    bundle["image_path"] = str(resolved)
-    bundle["source_image_path"] = str(resolved)
-    try:
-        with Image.open(resolved) as image:
-            size = {"width": int(image.width), "height": int(image.height)}
-            bundle["screen_size"] = size
-            bundle["image_size"] = size
-    except Exception as exc:
-        return {
-            "applied": True,
-            "status": "image_size_unreadable",
-            "reason": str(exc),
-            "original_path": original_path,
-            "path": str(resolved),
-        }
-    return {
-        "applied": True,
-        "status": "applied",
-        "reason": "explicit_source_image_override",
-        "original_path": original_path,
-        "path": str(resolved),
-    }
-
-
-def _panel_learning_recognition_observe_bundle(request: PanelRunLearningRecognitionTrialRequest) -> dict[str, Any]:
-    evidence = request.observation_evidence if isinstance(request.observation_evidence, dict) else {}
-    screen_size = _panel_first_dict(evidence.get("screen_size"), evidence.get("viewport_size"), evidence.get("image_size"))
-    targets = _normalized_panel_calibrated_targets(evidence.get("calibrated_targets"))
-    review_boxes = _normalized_panel_review_boxes(evidence.get("review_boxes"))
-    screen_map = evidence.get("screen_map") if isinstance(evidence.get("screen_map"), dict) else {}
-    sources: dict[str, Any] = {
-        "calibrated_targets": {
-            "targets": targets,
-            "source_trace_path": _str(evidence.get("coordinate_trace_path") or evidence.get("trace_path")),
-            "source_overlay_path": _str(evidence.get("coordinate_overlay_path")),
-        }
-    }
-    candidates = screen_map.get("candidates") if isinstance(screen_map.get("candidates"), list) else []
-    if candidates:
-        sources["vision"] = {"regions": candidates}
-    if review_boxes:
-        ocr_review_boxes = [item for item in review_boxes if item.get("role") == "ocr_text_review_only"]
-        region_review_boxes = [item for item in review_boxes if item.get("role") != "ocr_text_review_only"]
-        if ocr_review_boxes:
-            sources["ocr"] = {"texts": ocr_review_boxes}
-        if region_review_boxes:
-            existing_regions = list(sources.get("vision", {}).get("regions") or [])
-            sources["vision"] = {"regions": [*existing_regions, *region_review_boxes]}
-    return {
-        "contract_version": "learn_observe_bundle_v1",
-        "app_name": request.app_name,
-        "state_hint": request.state_hint,
-        "screen_size": screen_size,
-        "image_path": _str(evidence.get("current_image_path") or evidence.get("image_path")),
-        "source_image_path": _str(evidence.get("current_image_path") or evidence.get("image_path")),
-        "sources": sources,
-        "panel_observation_evidence": {
-            "contract_version": _str(evidence.get("contract_version")),
-            "evidence_quality": _str(evidence.get("evidence_quality")),
-            "model_roles": evidence.get("model_roles") if isinstance(evidence.get("model_roles"), dict) else {},
-            "coordinate_overlay_path": _str(evidence.get("coordinate_overlay_path")),
-            "learn_all_targets_summary": evidence.get("learn_all_targets_summary")
-            if isinstance(evidence.get("learn_all_targets_summary"), dict)
-            else {},
-            "review_box_count": len(review_boxes),
-        },
-    }
-
-
-def _panel_learning_recognition_summary(evidence: dict[str, Any]) -> str:
-    if not isinstance(evidence, dict):
-        return ""
-    screen_map = evidence.get("screen_map") if isinstance(evidence.get("screen_map"), dict) else {}
-    screen_summary = screen_map.get("summary") if isinstance(screen_map.get("summary"), dict) else {}
-    return _str(
-        evidence.get("screen_summary")
-        or screen_summary.get("screen_summary")
-        or screen_map.get("state_hint")
-        or evidence.get("goal")
-    )
-
-
-def _panel_model_provenance_from_observe_bundle(observe_bundle: dict[str, Any]) -> dict[str, Any]:
-    observation = (
-        observe_bundle.get("panel_observation_evidence")
-        if isinstance(observe_bundle.get("panel_observation_evidence"), dict)
-        else {}
-    )
-    model_roles = observation.get("model_roles") if isinstance(observation.get("model_roles"), dict) else {}
-    evidence: list[dict[str, Any]] = []
-    for role, role_data in model_roles.items():
-        if not isinstance(role_data, dict):
-            continue
-        trace_value = _str(role_data.get("trace_path"))
-        entry: dict[str, Any] = {
-            "role": _str(role),
-            "model_profile_id": _str(role_data.get("model_profile_id")),
-            "trace_path": trace_value,
-            "actual_model_call_in_this_run": False,
-        }
-        if not trace_value:
-            entry["reason"] = "trace_path_missing"
-            evidence.append(entry)
-            continue
-        try:
-            trace_path = _resolve_panel_artifact_file(trace_value)
-            trace_payload = json.loads(trace_path.read_text(encoding="utf-8-sig"))
-        except (FileNotFoundError, ValueError, OSError, json.JSONDecodeError) as exc:
-            entry["reason"] = f"trace_unavailable:{type(exc).__name__}"
-            evidence.append(entry)
-            continue
-        result = trace_payload.get("result") if isinstance(trace_payload, dict) and isinstance(trace_payload.get("result"), dict) else {}
-        model_io = result.get("model_io") if isinstance(result.get("model_io"), dict) else {}
-        learn_all_targets = result.get("learn_all_targets") if isinstance(result.get("learn_all_targets"), dict) else {}
-        vista = (
-            learn_all_targets.get("vista_coordinate_validation")
-            if isinstance(learn_all_targets.get("vista_coordinate_validation"), dict)
-            else {}
-        )
-        qwen_actual = (
-            trace_payload.get("success") is True
-            and model_io.get("status") == "success"
-            and bool(_str(model_io.get("raw_text")))
-        )
-        vista_results = vista.get("results") if isinstance(vista.get("results"), list) else []
-        vista_attempted = int(vista.get("attempted_count") or 0)
-        vista_actual = (
-            trace_payload.get("success") is True
-            and vista.get("status") == "ready"
-            and vista_attempted > 0
-            and any(isinstance(item, dict) and isinstance(item.get("vista_point"), dict) for item in vista_results)
-        )
-        if qwen_actual:
-            entry.update(
-                {
-                    "actual_model_call_in_this_run": True,
-                    "evidence_type": "screen_understanding_model_io",
-                    "provider": _str(model_io.get("provider")),
-                    "model_name": _str(model_io.get("model_name")),
-                    "status": _str(model_io.get("status")),
-                }
-            )
-        elif vista_actual:
-            entry.update(
-                {
-                    "actual_model_call_in_this_run": True,
-                    "evidence_type": "vista_point_grounding_batch",
-                    "provider": "local_grounding",
-                    "model_name": _str(vista.get("model_name")),
-                    "status": _str(vista.get("status")),
-                    "attempted_count": vista_attempted,
-                    "validated_count": int(vista.get("validated_count") or 0),
-                }
-            )
-        else:
-            entry["reason"] = "trace_does_not_prove_model_inference"
-        entry["trace_path"] = _relative_panel_path(trace_path)
-        evidence.append(entry)
-    actual_count = sum(1 for item in evidence if item.get("actual_model_call_in_this_run") is True)
-    return {
-        "contract_version": "panel_learning_model_provenance_v1",
-        "source_type": "mixed" if actual_count else "fixture_only",
-        "actual_model_call_evidence_count": actual_count,
-        "evidence": evidence,
-        "counts_as_pure_model_generated": False,
-        "interpretation": (
-            "Verified model traces prove inference occurred in this panel run. The saved learning draft also includes "
-            "OCR, UIA, calibration, and deterministic rules, so it is mixed rather than pure model output."
-        ),
-    }
-
-
-def _panel_calibrated_target_grounding_adapter(*, item: dict[str, Any], roi_crop: dict[str, Any]) -> dict[str, Any]:
-    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
-    layout_cleanup = metadata.get("layout_cleanup") if isinstance(metadata.get("layout_cleanup"), dict) else {}
-    merged_support = (
-        layout_cleanup.get("merged_support")
-        if isinstance(layout_cleanup.get("merged_support"), dict)
-        else {}
-    )
-    if isinstance(metadata.get("click_point"), dict):
-        point = metadata["click_point"]
-        point_source = "metadata.click_point"
-        coordinate_source = metadata.get("coordinate_source")
-    elif isinstance(merged_support.get("click_point"), dict):
-        point = merged_support["click_point"]
-        point_source = "layout_cleanup.merged_support.click_point"
-        coordinate_source = merged_support.get("coordinate_source")
-    else:
-        point = {}
-        point_source = "missing"
-        coordinate_source = ""
-    return {
-        "screen_point": _normalized_point(point) if point else {},
-        "screen_bbox": item.get("bbox") if isinstance(item.get("bbox"), dict) else {},
-        "evidence": {
-            "coordinate_transform_replay": True,
-            "screenshot_freshness": True,
-            "uia_or_dom_or_parser_overlap": True,
-            "ocr_anchor_overlap": True,
-        },
-        "debug": {
-            "adapter": "panel_calibrated_target_replay",
-            "roi_contract": roi_crop.get("contract_version"),
-            "point_source": point_source,
-            "coordinate_source": _str(coordinate_source),
-        },
-    }
-
-
-def _normalized_panel_calibrated_targets(value: Any) -> list[dict[str, Any]]:
-    targets = value if isinstance(value, list) else []
-    normalized: list[dict[str, Any]] = []
-    for index, target in enumerate(targets):
-        if not isinstance(target, dict):
-            continue
-        item = dict(target)
-        item.setdefault("candidate_id", item.get("item_id") or item.get("id") or f"panel_target_{index + 1}")
-        item.setdefault("role", item.get("semantic_action") or item.get("type") or "actionable")
-        bbox = _normalized_bbox(item.get("bbox"))
-        point = _normalized_point(item.get("click_point"))
-        item["bbox"] = bbox
-        item["click_point"] = point
-        validation = item.get("coordinate_validation") if isinstance(item.get("coordinate_validation"), dict) else {}
-        if not validation:
-            status = _str(item.get("coordinate_validation_status") or item.get("vista_status") or "valid")
-            point_inside_bbox = _point_inside_bbox(point, bbox)
-            validation = {
-                "status": status or "valid",
-                "bbox_present": bool(bbox["w"] and bbox["h"]),
-                "click_point_present": point != {"x": 0, "y": 0},
-                "bbox_inside_image": True,
-                "click_point_inside_image": True,
-                "click_point_inside_bbox": point_inside_bbox,
-            }
-        item["coordinate_validation"] = validation
-        normalized.append(item)
-    return normalized
-
-
-def _normalized_panel_review_boxes(value: Any) -> list[dict[str, Any]]:
-    boxes = value if isinstance(value, list) else []
-    normalized: list[dict[str, Any]] = []
-    for index, box in enumerate(boxes):
-        if not isinstance(box, dict):
-            continue
-        bbox = _normalized_bbox(box.get("bbox"))
-        label = _str(box.get("label") or box.get("text") or box.get("name"))
-        if not label or not bbox.get("w") or not bbox.get("h"):
-            continue
-        normalized.append(
-            {
-                "id": _str(box.get("candidate_id") or box.get("item_id") or box.get("id") or f"review_box_{index + 1}"),
-                "text": label,
-                "label": label,
-                "role": _str(box.get("role") or "review_only"),
-                "bbox": bbox,
-                "confidence": box.get("confidence"),
-                "source": _str(box.get("source") or "learn_all_targets.review_boxes"),
-                "review_status": _str(box.get("review_status") or "review_only"),
-                "children": box.get("children") if isinstance(box.get("children"), list) else [],
-                "execute_binding_enabled": False,
-                "artifact_is_authorization": False,
-            }
-        )
-    return normalized
-
-
 def _normalized_bbox(value: Any) -> dict[str, int]:
     value = value if isinstance(value, dict) else {}
     return {
@@ -2872,22 +3569,6 @@ def _normalized_bbox(value: Any) -> dict[str, int]:
         "w": max(0, _int_or_zero(value.get("w") if "w" in value else value.get("width"))),
         "h": max(0, _int_or_zero(value.get("h") if "h" in value else value.get("height"))),
     }
-
-
-def _normalized_point(value: Any) -> dict[str, int]:
-    value = value if isinstance(value, dict) else {}
-    return {"x": _int_or_zero(value.get("x")), "y": _int_or_zero(value.get("y"))}
-
-
-def _point_inside_bbox(point: dict[str, int], bbox: dict[str, int]) -> bool:
-    return bbox["x"] <= point["x"] <= bbox["x"] + bbox["w"] and bbox["y"] <= point["y"] <= bbox["y"] + bbox["h"]
-
-
-def _panel_first_dict(*values: Any) -> dict[str, Any]:
-    for value in values:
-        if isinstance(value, dict):
-            return value
-    return {}
 
 
 def _str(value: Any) -> str:
@@ -3636,6 +4317,7 @@ def panel_model_test(request: PanelModelTestRequest) -> APIResponse:
 
 PATH_GRAPH_DIR = ROOT_DIR / "artifacts" / "path-graphs"
 INTERFACE_MAP_DIR = ROOT_DIR / "artifacts" / "interface-maps"
+INTERFACE_WORKFLOW_DIR = ROOT_DIR / "artifacts" / "interface-workflow-reviews"
 
 
 @router.post("/panel/open_trace_folder", include_in_schema=False)
@@ -3677,6 +4359,35 @@ def open_path_folder() -> APIResponse:
         return APIResponse(success=True, message=f"Opened {PATH_GRAPH_DIR}", data={"folder": str(PATH_GRAPH_DIR)}, error=None)
     except Exception as exc:
         return APIResponse(success=False, message="Could not open folder", data=None, error=ErrorModel(code="folder_open_failed", details=str(exc)))
+
+
+@router.post("/panel/open_interface_workflow_folder", include_in_schema=False)
+def open_interface_workflow_folder() -> APIResponse:
+    """打开固定的已学习软件流程目录。"""
+    import subprocess
+    import sys
+
+    INTERFACE_WORKFLOW_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        if sys.platform == "win32":
+            os.startfile(str(INTERFACE_WORKFLOW_DIR))
+        elif sys.platform == "darwin":
+            subprocess.run(["open", str(INTERFACE_WORKFLOW_DIR)], check=False)
+        else:
+            subprocess.run(["xdg-open", str(INTERFACE_WORKFLOW_DIR)], check=False)
+        return APIResponse(
+            success=True,
+            message=f"Opened {INTERFACE_WORKFLOW_DIR}",
+            data={"folder": str(INTERFACE_WORKFLOW_DIR)},
+            error=None,
+        )
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Could not open learned workflow folder",
+            data=None,
+            error=ErrorModel(code="folder_open_failed", details=str(exc)),
+        )
 
 
 @router.post("/panel/save_path_graph", include_in_schema=False)

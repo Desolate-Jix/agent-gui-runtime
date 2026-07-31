@@ -1,0 +1,22 @@
+{
+  "result": {
+    "app_name": "protocol holdout",
+    "image_path": "tests/fixtures/surface_adapter_protocol/screen.ppm",
+    "image_size": {"width": 1000, "height": 700},
+    "interface_classification": {
+      "category": "media_catalog",
+      "confidence": 0.92,
+      "structure_signals": {
+        "media_cards": true,
+        "media_library_navigation": true,
+        "feed_items": false
+      }
+    },
+    "screen_inventory": [
+      {"item_id": "address", "role": "address_bar", "label": "https://music.example.test", "bbox": {"x": 0, "y": 0, "w": 1000, "h": 44}},
+      {"item_id": "library", "role": "media_library_navigation", "bbox": {"x": 0, "y": 44, "w": 180, "h": 656}},
+      {"item_id": "playlist_1", "role": "playlist_card", "bbox": {"x": 200, "y": 100, "w": 220, "h": 260}},
+      {"item_id": "playlist_2", "role": "playlist_card", "bbox": {"x": 440, "y": 100, "w": 220, "h": 260}}
+    ]
+  }
+}

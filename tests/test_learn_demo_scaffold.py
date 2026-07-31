@@ -238,6 +238,12 @@ def test_learning_demo_scaffold_can_load_direct_page_detail_candidate(tmp_path: 
         tmp_path / "logs" / "benchmarks" / "page_detail" / "learn_page_detail_candidate.json",
         {
             "contract_version": "learn_page_detail_candidate_v1",
+            "source_identity": {
+                "contract_version": "learning_repaired_source_identity_v1",
+                "final_numbering_revision": "final-revision",
+                "compiled_overlay_path": "artifacts/review-overlays/qq_reviewed.png",
+                "dual_stream_contract": "learn_stage2_dual_streams_v1",
+            },
             "source_path": "logs/benchmarks/two_stage/trial_result.json",
             "source_detail_shape": "learn_two_stage_screen_understanding_v1",
             "readiness_status": "needs_page_detail_review",
@@ -316,6 +322,10 @@ def test_learning_demo_scaffold_can_load_direct_page_detail_candidate(tmp_path: 
     assert readonly_preview["page_detail_preview"]["layout"]["display_groups"][0]["group_id"] == "main_group"
     assert readonly_preview["runtime_pathgraph_promotion"] is False
     assert readonly_preview["execute_binding_enabled"] is False
+    assert result["source_identity"]["final_numbering_revision"] == "final-revision"
+    assert readonly_preview["source_identity"] == result["source_identity"]
+    assert readonly_preview["readonly_path_graph_preview"]["source_identity"] == result["source_identity"]
+    assert result["display_readiness"]["same_repaired_source_verified"] is True
     assert result["generated_artifacts"]["page_detail_candidate_path"] == str(candidate.relative_to(tmp_path)).replace(
         "\\", "/"
     )
