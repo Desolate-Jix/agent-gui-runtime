@@ -11,6 +11,7 @@ from app.learn.agent_evidence import load_application_agent_evidence_context
 from app.learn.interface_workflow_review import (
     load_interface_workflow_agent_context,
     load_interface_workflow_library_registry,
+    load_interface_workflow_review_context,
 )
 
 
@@ -114,6 +115,34 @@ def interface_workflow_agent_context(
             data=None,
             error=ErrorModel(
                 code="interface_workflow_agent_context_failed",
+                details=str(exc),
+            ),
+        )
+
+
+@router.get("/interface_workflows/review_context", response_model=APIResponse)
+def interface_workflow_review_context(
+    application_identity_key: str = Query(min_length=3),
+    workflow_id: str = Query(min_length=3),
+) -> APIResponse:
+    try:
+        return APIResponse(
+            success=True,
+            message="Interface workflow review context loaded",
+            data=load_interface_workflow_review_context(
+                project_root=ROOT_DIR,
+                application_identity_key=application_identity_key,
+                workflow_id=workflow_id,
+            ),
+            error=None,
+        )
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Interface workflow review context load failed",
+            data=None,
+            error=ErrorModel(
+                code="interface_workflow_review_context_load_failed",
                 details=str(exc),
             ),
         )

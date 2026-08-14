@@ -2,8 +2,46 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 import app.core.input_controller as input_module
-from app.core.input_controller import InputController, VK_A, VK_CONTROL, VK_V
+from app.core.input_controller import InputController, TargetPointOccludedError, VK_A, VK_CONTROL, VK_V
+
+
+def test_click_point_rejects_occluded_point_before_mouse_down(monkeypatch) -> None:
+    controller = InputController()
+    bound = SimpleNamespace(handle=7, title="Browser")
+    events: list[str] = []
+    evidence = {
+        "allowed": False,
+        "reason": "target_point_occluded",
+        "hit_window": {"handle": 900, "title": "QQ notification"},
+    }
+
+    monkeypatch.setattr(controller, "_ensure_windows_input", lambda: None)
+    monkeypatch.setattr(controller, "_require_bound_window", lambda: bound)
+    monkeypatch.setattr(
+        controller,
+        "_resolve_window_and_screen_point",
+        lambda **kwargs: {"window_x": 315, "window_y": 246, "screen_x": 307, "screen_y": 238},
+    )
+    monkeypatch.setattr(input_module.win32gui, "GetForegroundWindow", lambda: 7)
+    monkeypatch.setattr(input_module.win32api, "GetCursorPos", lambda: (0, 0))
+    monkeypatch.setattr(controller, "_focus_window", lambda handle: True)
+    monkeypatch.setattr(controller, "_send_move", lambda x, y: events.append("move"))
+    monkeypatch.setattr(input_module.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(
+        input_module.window_manager,
+        "validate_bound_point_visibility",
+        lambda **kwargs: evidence,
+    )
+    monkeypatch.setattr(controller, "mouse_down", lambda button: events.append("mouse_down"))
+
+    with pytest.raises(TargetPointOccludedError) as exc_info:
+        controller.click_point(315, 246)
+
+    assert exc_info.value.evidence == evidence
+    assert events == ["move"]
 
 
 def test_type_text_verifies_clipboard_before_paste_and_restores_after_settle(monkeypatch) -> None:

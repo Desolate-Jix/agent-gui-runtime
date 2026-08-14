@@ -227,13 +227,21 @@ def test_workflow_review_is_frozen_as_independent_assets_and_graph(tmp_path: Pat
                     "source_screenshot_path": "artifacts/screenshots/home.png",
                     "fused_overlay_path": "artifacts/review-overlays/home.png",
                 },
-                "controls": [
-                    {
-                        "control_id": "open_detail",
-                        "label": "Open detail",
-                        "role": "button",
-                    }
-                ],
+                    "controls": [
+                        {
+                            "control_id": "open_detail",
+                            "label": "Open detail",
+                            "semantic_name": "Selected result detail control",
+                            "purpose": "Open the selected current result detail.",
+                            "role": "button",
+                            "allowed_actions": ["open_detail"],
+                            "verification_rule": {
+                                "rule_ids": ["detail_surface_visible"],
+                                "success_conditions": ["detail interface matched"],
+                            },
+                            "risk_class": "low",
+                        }
+                    ],
                 "content_descriptors": [
                     {
                         "content_id": "result_list",
@@ -257,7 +265,21 @@ def test_workflow_review_is_frozen_as_independent_assets_and_graph(tmp_path: Pat
                     "source_screenshot_path": "artifacts/screenshots/detail.png",
                     "fused_overlay_path": "artifacts/review-overlays/detail.png",
                 },
-                "controls": [{"control_id": "open_apply", "label": "Apply", "role": "button"}],
+                    "controls": [
+                        {
+                            "control_id": "open_apply",
+                            "label": "Apply",
+                            "semantic_name": "Application flow entry control",
+                            "purpose": "Open the application flow without submitting it.",
+                            "role": "button",
+                            "allowed_actions": ["open_apply_flow"],
+                            "verification_rule": {
+                                "rule_ids": ["application_flow_visible"],
+                                "success_conditions": ["application flow interface matched"],
+                            },
+                            "risk_class": "low",
+                        }
+                    ],
                 "review_status": "human_reviewed",
             },
         ],
@@ -271,7 +293,7 @@ def test_workflow_review_is_frozen_as_independent_assets_and_graph(tmp_path: Pat
                 "display_name": "打开详情",
                 "agent_description": "点击当前条目进入详情",
                 "risk_level": "low",
-                "review_status": "human_confirmed",
+                "review_status": "human_approved",
             }
         ],
         "artifact_is_authorization": False,

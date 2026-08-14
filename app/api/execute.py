@@ -10,6 +10,7 @@ from app.api.action import execute_recognition_plan as dispatch_recognition_plan
 from app.api.action import scroll as dispatch_scroll
 from app.api.action import type_text as dispatch_type_text
 from app.core.runtime_artifacts import RuntimeTimer, write_trace
+from app.operation.form_inventory import build_form_question_inventory
 from app.operation.path_graph import build_available_actions
 from app.operation.reading import build_read_region_batch_report
 from app.operation.runtime_context import build_operation_runtime_context, operation_trace_link
@@ -190,8 +191,11 @@ def form_inventory(request: ExecuteFormInventoryRequest) -> APIResponse:
     try:
         with timer.step("build_form_field_inventory", app_id=request.app_id):
             if str(request.app_id or "").casefold() in {"seek", "nz.seek.com", "seek.co.nz"}:
+                seek_flow_state = dict(request.application_flow_state)
+                if request.operation_context.capture_id and not seek_flow_state.get("capture_id"):
+                    seek_flow_state["capture_id"] = request.operation_context.capture_id
                 result = build_seek_form_field_inventory(
-                    request.application_flow_state,
+                    seek_flow_state,
                     employer_question_inventory=request.employer_question_inventory,
                     application_answer_plan=request.application_answer_plan,
                 )
@@ -556,57 +560,41 @@ def _generic_execute_observation(request: ExecuteObserveRequest) -> dict[str, An
 def _generic_form_field_inventory(request: ExecuteFormInventoryRequest) -> dict[str, Any]:
     flow = request.application_flow_state if isinstance(request.application_flow_state, dict) else {}
     inventory = flow.get("application_form_inventory") if isinstance(flow.get("application_form_inventory"), dict) else {}
-    fields: list[dict[str, Any]] = []
-    actions: list[dict[str, Any]] = []
-    for item in inventory.get("fields") or []:
-        if isinstance(item, dict):
-            fields.append(_generic_form_field(item))
-    for item in inventory.get("actions") or []:
-        if isinstance(item, dict):
-            actions.append(_compact_observation_item(item))
-    return {
-        "contract_version": "form_field_inventory_v1",
-        "form_state": flow.get("current_step") or flow.get("state_type") or "unknown",
-        "fields": fields,
-        "continue_action": _first_generic_action(actions, ("continue", "next", "review", "save")),
-        "danger_actions": [
-            action
-            for action in actions
-            if any(term in str(action.get("text") or "").casefold() for term in ("submit", "send", "complete", "delete", "pay", "purchase"))
-        ],
-        "profile_mutation_actions": [
-            action
-            for action in actions
-            if any(term in str(action.get("text") or "").casefold() for term in ("add ", "edit", "upload", "replace", "update profile"))
-        ],
-        "source_contracts": {
+    capture_id = str(request.operation_context.capture_id or flow.get("capture_id") or "").strip()
+    questions = [
+        {**item, "capture_id": item.get("capture_id") or capture_id}
+        for item in request.employer_question_inventory.get("questions") or []
+        if isinstance(item, dict)
+    ]
+    raw_fields = [item for item in inventory.get("fields") or [] if isinstance(item, dict)]
+    fields = [
+        {**item, "capture_id": item.get("capture_id") or capture_id}
+        for item in raw_fields
+        if str(item.get("role") or "").casefold() not in {"button", "link", "action"}
+    ]
+    actions = [
+        {**item, "capture_id": item.get("capture_id") or capture_id}
+        for item in [*raw_fields, *(inventory.get("actions") or [])]
+        if isinstance(item, dict) and str(item.get("role") or "").casefold() in {"button", "link", "action"}
+    ]
+    return build_form_question_inventory(
+        form_state=str(flow.get("current_step") or flow.get("state_type") or "unknown"),
+        current_capture_id=capture_id,
+        active_scope_bbox=(
+            flow.get("active_form_bbox")
+            or flow.get("active_modal_bbox")
+            or flow.get("form_bbox")
+            or inventory.get("scope_bbox")
+        ),
+        fields=fields,
+        questions=questions,
+        actions=actions,
+        source_contracts={
             "application_flow_state": flow.get("contract_version"),
             "employer_question_inventory": request.employer_question_inventory.get("contract_version"),
             "application_answer_plan": request.application_answer_plan.get("contract_version"),
         },
-    }
-
-
-def _generic_form_field(item: dict[str, Any]) -> dict[str, Any]:
-    text = str(item.get("text") or item.get("label") or "").strip()
-    role = str(item.get("role") or "unknown")
-    return {
-        "field_id": item.get("id") or text,
-        "label": text,
-        "field_type": role,
-        "field_bbox": item.get("bbox"),
-        "required": bool(item.get("required", False)),
-        "answer_source_required": True,
-        "source": item.get("collection") or item.get("source") or "application_form_inventory",
-    }
-
-
-def _first_generic_action(actions: list[dict[str, Any]], terms: tuple[str, ...]) -> dict[str, Any] | None:
-    for action in actions:
-        text = str(action.get("text") or "").casefold()
-        if any(term in text for term in terms):
-            return action
-    return None
+    )
 
 
 def _generic_observation_items(observation: dict[str, Any], flow_state: dict[str, Any]) -> list[dict[str, Any]]:

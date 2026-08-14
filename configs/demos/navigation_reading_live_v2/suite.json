@@ -125,27 +125,67 @@
     {
       "interface_id": "branch_hub",
       "path": "assets/branch-hub.json",
-      "sha256": "25fe438c6739aefcba2e8cd518e1bf9e5d8281d34c90a9b5c67c5ec80a90c717"
+      "sha256": "db99c1569f99099d99daff8f666b7051a8348d0ec1fbc68bcdacb7b33452c263",
+      "persisted_review_revision": {
+        "revision": {
+          "interface_id": "branch_hub",
+          "audit_evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "revision_hash": "28477efc60d31451a74b8afe84500e7a1de78fcb6c3fbfd3db39122ead3082f0",
+        "source_asset_sha256": "db99c1569f99099d99daff8f666b7051a8348d0ec1fbc68bcdacb7b33452c263"
+      }
     },
     {
       "interface_id": "branch_incident",
       "path": "assets/branch-incident.json",
-      "sha256": "4f01452c57dd967403aa0d0acc0ca90a9741c481fb1ac95a03e739956311f5ce"
+      "sha256": "2d89373b22d454fa77bf73e407a1bb4472ec9aadf40a4c2fb56207e676bdb3a6",
+      "persisted_review_revision": {
+        "revision": {
+          "interface_id": "branch_incident",
+          "audit_evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "revision_hash": "745659da6528c9828df0a8a7fd0d546b8256961cd259cb8460931ef0e77a05be",
+        "source_asset_sha256": "2d89373b22d454fa77bf73e407a1bb4472ec9aadf40a4c2fb56207e676bdb3a6"
+      }
     },
     {
       "interface_id": "branch_policy_modal",
       "path": "assets/branch-policy-modal.json",
-      "sha256": "af0e5b1d1f380a9bd04f83c594208ccd9b58e42ac7b5e15d3cf1c45dc6054b2b"
+      "sha256": "19b49deb67b4ff24c38f7ea2919427f91143a6c2e1c774271520778267b72a0d",
+      "persisted_review_revision": {
+        "revision": {
+          "interface_id": "branch_policy_modal",
+          "audit_evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "revision_hash": "34ae6156e719f4b57735049a9a8d2a473d625607bd7464b294aee910c127de5c",
+        "source_asset_sha256": "19b49deb67b4ff24c38f7ea2919427f91143a6c2e1c774271520778267b72a0d"
+      }
     },
     {
       "interface_id": "branch_updates",
       "path": "assets/branch-updates.json",
-      "sha256": "f14f3c027b5ebf9067c9b0ae3f4ce43e8fb1e639766d670d7fd4b7b6df8981e2"
+      "sha256": "836f0e02cc2f35c196229d2ffd6bec5a3d33bb5a57e47e4c2b42892fe8883ce1",
+      "persisted_review_revision": {
+        "revision": {
+          "interface_id": "branch_updates",
+          "audit_evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "revision_hash": "faa872625462fc11605ee84a76c8b93c855f6f74603babb0d22d099a5731f069",
+        "source_asset_sha256": "836f0e02cc2f35c196229d2ffd6bec5a3d33bb5a57e47e4c2b42892fe8883ce1"
+      }
     },
     {
       "interface_id": "branch_summary",
       "path": "assets/branch-summary.json",
-      "sha256": "5f89232078699c9bf1d940586299849537317ed4c24535dc9f7ce3307d3ef723"
+      "sha256": "29e85fd3bf8deeb5a31ca1552ae46e6f4849dadc20f12a316c84f149fe988b52",
+      "persisted_review_revision": {
+        "revision": {
+          "interface_id": "branch_summary",
+          "audit_evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "revision_hash": "3a9a52473052dcc76e24d16c0b47aee9d3d20ed33e72f979e9cda530708dfd4f",
+        "source_asset_sha256": "29e85fd3bf8deeb5a31ca1552ae46e6f4849dadc20f12a316c84f149fe988b52"
+      }
     }
   ],
   "transitions": [
@@ -159,7 +199,7 @@
       "agent_description": "Open the incident report if this branch has not been completed.",
       "operation_goal": "Click the button labeled Open incident report",
       "risk_level": "low",
-      "review_status": "human_reviewed",
+      "review_status": "human_approved",
       "success_conditions": [
         "Incident Report Interface is visible"
       ]
@@ -175,7 +215,7 @@
       "operation_goal": "Click the button labeled Return to workspace",
       "requires_completed_read": "incident_body",
       "risk_level": "low",
-      "review_status": "human_reviewed",
+      "review_status": "human_approved",
       "success_conditions": [
         "Operations Workspace Interface is visible"
       ]
@@ -190,7 +230,7 @@
       "agent_description": "Open the policy dialog after the incident branch is complete.",
       "operation_goal": "Click the button labeled Open policy dialog",
       "risk_level": "low",
-      "review_status": "human_reviewed",
+      "review_status": "human_approved",
       "success_conditions": [
         "Policy Dialog Interface is visible"
       ]
@@ -205,7 +245,7 @@
       "agent_description": "Close the policy dialog and return to the workspace.",
       "operation_goal": "Click the button labeled Close policy dialog",
       "risk_level": "low",
-      "review_status": "human_reviewed",
+      "review_status": "human_approved",
       "success_conditions": [
         "Operations Workspace Interface is visible"
       ]
@@ -220,7 +260,7 @@
       "agent_description": "Open live updates after the incident and policy branches are complete.",
       "operation_goal": "Click the button labeled Open live updates",
       "risk_level": "low",
-      "review_status": "human_reviewed",
+      "review_status": "human_approved",
       "success_conditions": [
         "Live Updates Interface is visible"
       ]
@@ -235,7 +275,7 @@
       "agent_description": "Continue only after bounded collection reading has explicitly stopped.",
       "operation_goal": "Click the button labeled Open workflow summary",
       "risk_level": "low",
-      "review_status": "human_reviewed",
+      "review_status": "human_approved",
       "success_conditions": [
         "Workflow Summary Interface is visible"
       ]

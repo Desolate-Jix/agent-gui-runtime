@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import heapq
 import json
 import os
 import time
 import urllib.error
 import urllib.request
+from copy import deepcopy
 from pathlib import Path
+from threading import Lock
 from typing import Any, Optional
+from uuid import uuid4
 
 from fastapi import APIRouter
 from fastapi.responses import FileResponse, PlainTextResponse, Response
@@ -25,12 +29,19 @@ from app.core.model_server import load_model_profiles
 from app.core.model_server import model_base_url
 from app.learn.draft_review import load_learning_draft_review
 from app.learn.interface_workflow_review import (
+    build_interface_node_review_revision,
     build_interface_workflow_review,
+    delete_interface_workflow_review_candidate,
+    delete_learning_evidence,
+    load_interface_workflow_library_registry,
+    load_interface_workflow_review_context,
+    evaluate_interface_workflow_node_integrity,
     save_interface_workflow_review_candidate,
 )
 from app.learn.application_interface_graph import (
     save_workflow_review_as_application_assets,
 )
+from app.learn.agent_evidence import PersistedReviewRevision
 from app.learn.assisted_template_review import (
     create_assisted_template_acceptance_suggestions,
     create_assisted_template_acceptance_simulation,
@@ -49,6 +60,12 @@ from app.learn.calibration_artifact import (
 )
 from app.learn.model_trial import build_learning_model_trial
 from app.learn.pathgraph_candidate import attach_detail_observe_result_to_candidate, build_pathgraph_candidate_from_review
+from app.learn.scoped_capture import (
+    SCOPED_CAPTURE_CONTRACT_VERSION,
+    ScopedCaptureCompositionError,
+    ScopedCaptureError,
+    build_scoped_capture_artifact,
+)
 from app.learn.surface_rule_registry import build_surface_rule_registry_panel_view
 from app.learn.workflow_evidence import (
     LearningWorkflowEvidenceError,
@@ -128,9 +145,12 @@ UPLOAD_DIR = ROOT_DIR / "artifacts" / "web-panel" / "uploads"
 SETTINGS_PANEL_ARTIFACT_DIR = ROOT_DIR / "artifacts" / "settings-panel"
 VISION_CONFIG_PATH = ROOT_DIR / "configs" / "vision.json"
 PANEL_CONFIG_PATH = ROOT_DIR / "configs" / "settings_panel.json"
+SCOPED_CAPTURE_ARTIFACT_DIR = ROOT_DIR / "artifacts" / "learning-runs" / "scoped-capture"
 continuous_task_memory_store = ReviewedInterfaceMemoryStore(project_root=ROOT_DIR)
 
 router = APIRouter(tags=["panel"])
+_INTERFACE_WORKFLOW_SAVE_LOCKS_GUARD = Lock()
+_INTERFACE_WORKFLOW_SAVE_LOCKS: dict[str, Lock] = {}
 
 
 class PanelImageUploadRequest(BaseModel):
@@ -187,6 +207,24 @@ class PanelLoadLearningDraftReviewRequest(BaseModel):
     discover_related_sidecars: bool = True
 
 
+class PanelLoadLiveSafeFillPreflightRequest(BaseModel):
+    preflight_path: str = Field(min_length=1)
+
+
+class PanelScopedCaptureSegmentRecord(BaseModel):
+    image_path: str = Field(min_length=1)
+    capture_id: Any = None
+    scroll_trace_path: str | None = None
+    scroll_effect: Any = None
+
+
+class PanelComposeScopedLearningCaptureRequest(BaseModel):
+    segment_records: list[PanelScopedCaptureSegmentRecord] = Field(min_length=1)
+    roi: dict[str, Any]
+    viewport: dict[str, Any]
+    stop_reason: str
+
+
 class PanelLoadInterfaceWorkflowReviewRequest(BaseModel):
     goal: str = ""
     application_identity: dict[str, Any] = Field(default_factory=dict)
@@ -197,6 +235,14 @@ class PanelLoadInterfaceWorkflowReviewRequest(BaseModel):
 class PanelSaveInterfaceWorkflowReviewRequest(BaseModel):
     review: dict[str, Any] = Field(default_factory=dict)
     out_dir: Optional[str] = None
+
+
+class PanelDeleteLearningEvidenceRequest(BaseModel):
+    source_path: str = Field(min_length=1)
+
+
+class PanelDeleteInterfaceWorkflowRequest(BaseModel):
+    workflow_id: str = Field(min_length=1)
 
 
 class PanelCreateLearningDemoGoalReadinessRequest(BaseModel):
@@ -499,6 +545,75 @@ def panel_file(path: str) -> Response:
     response.headers["Cache-Control"] = "no-store, max-age=0"
     response.headers["Pragma"] = "no-cache"
     return response
+
+
+@router.post("/panel/compose_scoped_learning_capture", response_model=APIResponse)
+def compose_scoped_learning_capture_endpoint(
+    request: PanelComposeScopedLearningCaptureRequest,
+) -> APIResponse:
+    """组合已捕获的受限区域片段，不触发实时运行时操作。"""
+
+    try:
+        segment_records = _resolve_scoped_capture_segment_records(request.segment_records)
+    except (FileNotFoundError, OSError, TypeError, ValueError) as exc:
+        return APIResponse(
+            success=False,
+            message="Scoped capture paths are not managed artifacts",
+            data=None,
+            error=ErrorModel(code="invalid_scoped_capture_path", details=str(exc)),
+        )
+
+    try:
+        manifest = build_scoped_capture_artifact(
+            segment_records=segment_records,
+            output_dir=SCOPED_CAPTURE_ARTIFACT_DIR / uuid4().hex,
+            roi=request.roi,
+            viewport=request.viewport,
+            stop_reason=request.stop_reason,
+        )
+        composite_path = Path(manifest["composite_path"])
+        manifest_path = Path(manifest["manifest_path"])
+        if not composite_path.is_file() or not manifest_path.is_file():
+            raise RuntimeError("scoped capture artifact was not published")
+    except ScopedCaptureError as exc:
+        return APIResponse(
+            success=False,
+            message="Scoped capture input is invalid",
+            data=None,
+            error=ErrorModel(code="invalid_scoped_capture_input", details=str(exc)),
+        )
+    except ScopedCaptureCompositionError as exc:
+        return APIResponse(
+            success=False,
+            message="Scoped capture composition failed",
+            data=None,
+            error=ErrorModel(code="scoped_capture_composition_failed", details=str(exc)),
+        )
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Scoped capture composition failed",
+            data=None,
+            error=ErrorModel(code="scoped_capture_composition_failed", details=str(exc)),
+        )
+
+    data = dict(manifest)
+    data.update(
+        {
+            "capture_contract_version": SCOPED_CAPTURE_CONTRACT_VERSION,
+            "capture_mode": "scoped_long",
+            "artifact_is_authorization": False,
+            "historical_coordinates_are_priors": True,
+            "runtime_execution_allowed": False,
+            "scroll_executed_by_this_route": False,
+        }
+    )
+    return APIResponse(
+        success=True,
+        message="Scoped learning capture composed",
+        data=data,
+        error=None,
+    )
 
 
 @router.post("/panel/save_learning_calibration_result", response_model=APIResponse)
@@ -1208,6 +1323,92 @@ def load_learning_draft_review_endpoint(request: PanelLoadLearningDraftReviewReq
         )
 
 
+@router.post("/panel/load_live_safe_fill_preflight", response_model=APIResponse)
+def load_live_safe_fill_preflight_endpoint(
+    request: PanelLoadLiveSafeFillPreflightRequest,
+) -> APIResponse:
+    """加载脱敏的单字段填写预检，只用于人工审查。"""
+
+    try:
+        resolved = _resolve_panel_artifact_file(request.preflight_path)
+        source = json.loads(resolved.read_text(encoding="utf-8-sig"))
+        if not isinstance(source, dict):
+            raise ValueError("live safe-fill preflight must be a JSON object")
+        if source.get("contract_version") != "seek_live_safe_fill_preflight_v1":
+            raise ValueError("unsupported live safe-fill preflight contract")
+        value_evidence = source.get("value_evidence") if isinstance(source.get("value_evidence"), dict) else {}
+        if source.get("pii_redacted") is not True or value_evidence.get("value_redacted") is not True:
+            raise ValueError("live safe-fill preflight is not redacted")
+        field = source.get("field") if isinstance(source.get("field"), dict) else {}
+        target = source.get("target") if isinstance(source.get("target"), dict) else {}
+        verification = (
+            source.get("expected_verification")
+            if isinstance(source.get("expected_verification"), dict)
+            else {}
+        )
+        safety = source.get("safety") if isinstance(source.get("safety"), dict) else {}
+        evidence = source.get("evidence") if isinstance(source.get("evidence"), dict) else {}
+        projection = {
+            "contract_version": source["contract_version"],
+            "status": source.get("status"),
+            "approval_state": source.get("approval_state"),
+            "interpretation": source.get("interpretation"),
+            "field": {
+                key: field.get(key)
+                for key in ("id", "label", "field_type", "risk_class", "required")
+            },
+            "value_evidence": {
+                key: value_evidence.get(key)
+                for key in ("answer_source", "value_length", "value_hash", "value_redacted")
+            },
+            "target": {
+                key: target.get(key)
+                for key in ("state_type", "current_step")
+            },
+            "expected_verification": {
+                key: verification.get(key)
+                for key in (
+                    "mode",
+                    "expected_value_hash",
+                    "expected_value_length",
+                    "raw_value_must_not_be_recorded",
+                )
+            },
+            "safety": {
+                key: safety.get(key)
+                for key in (
+                    "max_fields",
+                    "cover_letter_fill_allowed",
+                    "continue_allowed",
+                    "final_submit_allowed",
+                    "artifact_is_authorization",
+                )
+            },
+            "evidence": {
+                key: evidence.get(key)
+                for key in ("screenshot_path", "trace_path", "source_report_path")
+            },
+            "failure_reasons": list(source.get("failure_reasons") or []),
+            "pii_redacted": True,
+            "source_path": _relative_panel_path(resolved),
+            "display_only": True,
+            "artifact_is_authorization": False,
+        }
+        return APIResponse(
+            success=True,
+            message="Live safe-fill preflight loaded for review",
+            data=projection,
+            error=None,
+        )
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Live safe-fill preflight load failed",
+            data=None,
+            error=ErrorModel(code="live_safe_fill_preflight_load_failed", details=str(exc)),
+        )
+
+
 @router.post("/panel/load_interface_workflow_review", response_model=APIResponse)
 def load_interface_workflow_review_endpoint(
     request: PanelLoadInterfaceWorkflowReviewRequest,
@@ -1279,22 +1480,156 @@ def load_interface_workflow_review_endpoint(
         )
 
 
-@router.post("/panel/save_interface_workflow_review", response_model=APIResponse)
-def save_interface_workflow_review_endpoint(
-    request: PanelSaveInterfaceWorkflowReviewRequest,
-) -> APIResponse:
-    """保存人工审核后的单软件流程草稿，不发布到 Agent Memory。"""
+def _interface_node_review_revision_hash(revision: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            revision,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
 
-    try:
-        result = save_interface_workflow_review_candidate(
-            request.review,
+
+def _restore_unchanged_interface_review_confirmations(
+    review: dict[str, Any],
+) -> dict[str, Any]:
+    """仅用服务端已验证的同一修订续存人工审核事实。"""
+
+    prepared = deepcopy(review)
+    workflow = prepared.get("workflow") if isinstance(prepared, dict) else None
+    workflow_id = str(workflow.get("workflow_id") or "").strip() if isinstance(workflow, dict) else ""
+    if not workflow_id:
+        return prepared
+
+    registry = load_interface_workflow_library_registry(project_root=ROOT_DIR)
+    record = registry.get("workflows", {}).get(workflow_id)
+    if not isinstance(record, dict):
+        return prepared
+    identity_key = str(record.get("application_identity_key") or "").strip()
+    if not identity_key:
+        return prepared
+    persisted = load_interface_workflow_review_context(
+        project_root=ROOT_DIR,
+        application_identity_key=identity_key,
+        workflow_id=workflow_id,
+    )
+    persisted_nodes = {
+        str(node.get("node_id") or "").strip(): node
+        for node in persisted.get("nodes") or []
+        if isinstance(node, dict) and str(node.get("node_id") or "").strip()
+    }
+    reviewed_statuses = {
+        "approved",
+        "human_approved",
+        "human_confirmed",
+        "human_reviewed",
+        "reviewed",
+    }
+    for node in prepared.get("nodes") or []:
+        if not isinstance(node, dict) or node.get("reviewed_by_human") is not True:
+            continue
+        if str(node.get("review_status") or "").strip().casefold() not in reviewed_statuses:
+            continue
+        node_id = str(node.get("node_id") or "").strip()
+        previous = persisted_nodes.get(node_id)
+        if not isinstance(previous, dict) or previous.get("reviewed_by_human") is not True:
+            continue
+        if str(previous.get("review_status") or "").strip().casefold() not in reviewed_statuses:
+            continue
+        persisted_path = Path(str(record.get("path") or ""))
+        persisted_path = (
+            persisted_path.resolve()
+            if persisted_path.is_absolute()
+            else (ROOT_DIR / persisted_path).resolve()
+        )
+        persisted_source_asset_sha256 = hashlib.sha256(
+            persisted_path.read_bytes()
+        ).hexdigest()
+        integrity = evaluate_interface_workflow_node_integrity(
+            review=persisted,
+            node=previous,
+            record=record,
             project_root=ROOT_DIR,
-            out_dir=request.out_dir,
+            source_asset_sha256=persisted_source_asset_sha256,
+        )
+        if not (
+            integrity["eligibility"]["agent_usable"]
+            and integrity["integrity_verified"]
+        ):
+            continue
+        previous_revision = integrity["canonical_revision"]
+        current_revision = build_interface_node_review_revision(
+            prepared,
+            node_id=node_id,
+        )
+        if current_revision != previous_revision:
+            continue
+        node["human_review_confirmation"] = {
+            "contract_version": "interface_node_human_review_confirmation_v1",
+            "revision": current_revision,
+        }
+    return prepared
+
+
+def _interface_workflow_save_lock(review: dict[str, Any]) -> Lock:
+    workflow = review.get("workflow") if isinstance(review, dict) else None
+    workflow_id = str(workflow.get("workflow_id") or "").strip() if isinstance(workflow, dict) else ""
+    lock_key = "".join(
+        character if character.isalnum() or character in "_.-" else "_"
+        for character in workflow_id
+    ).strip("._") or "__invalid_workflow__"
+    with _INTERFACE_WORKFLOW_SAVE_LOCKS_GUARD:
+        return _INTERFACE_WORKFLOW_SAVE_LOCKS.setdefault(lock_key, Lock())
+
+
+def _save_interface_workflow_review_transaction(
+    review: dict[str, Any],
+    *,
+    out_dir: str | None,
+) -> dict[str, Any]:
+    """串行化同一流程的审核重算、落盘与只读投影。"""
+
+    with _interface_workflow_save_lock(review):
+        prepared_review = _restore_unchanged_interface_review_confirmations(review)
+        result = save_interface_workflow_review_candidate(
+            prepared_review,
+            project_root=ROOT_DIR,
+            out_dir=out_dir,
         )
         if result["node_count"] > 0:
+            saved_review_path = Path(result["path"])
+            saved_review_bytes = saved_review_path.read_bytes()
+            normalized_review = json.loads(saved_review_bytes.decode("utf-8-sig"))
+            registry = load_interface_workflow_library_registry(project_root=ROOT_DIR)
+            workflow_record = registry.get("workflows", {}).get(result["workflow_id"])
+            trusted_revisions: dict[str, PersistedReviewRevision] = {}
+            if isinstance(workflow_record, dict):
+                source_asset_sha256 = hashlib.sha256(saved_review_bytes).hexdigest()
+                for node in normalized_review.get("nodes") or []:
+                    if not isinstance(node, dict):
+                        continue
+                    node_id = str(node.get("node_id") or "").strip()
+                    integrity = evaluate_interface_workflow_node_integrity(
+                        review=normalized_review,
+                        node=node,
+                        record=workflow_record,
+                        project_root=ROOT_DIR,
+                        source_asset_sha256=source_asset_sha256,
+                    )
+                    if (
+                        integrity["integrity_verified"]
+                        and integrity["eligibility"]["agent_usable"]
+                    ):
+                        trusted_revisions[node_id] = PersistedReviewRevision(
+                            revision=integrity["canonical_revision"],
+                            revision_hash=integrity["canonical_revision_hash"],
+                            source_asset_sha256=source_asset_sha256,
+                        )
             result["interface_asset_projection"] = save_workflow_review_as_application_assets(
-                request.review,
+                normalized_review,
                 project_root=ROOT_DIR,
+                persisted_review_revisions=trusted_revisions,
             )
         else:
             result["interface_asset_projection"] = {
@@ -1304,6 +1639,20 @@ def save_interface_workflow_review_endpoint(
                 "saved_transition_count": 0,
                 "artifact_is_authorization": False,
             }
+        return result
+
+
+@router.post("/panel/save_interface_workflow_review", response_model=APIResponse)
+def save_interface_workflow_review_endpoint(
+    request: PanelSaveInterfaceWorkflowReviewRequest,
+) -> APIResponse:
+    """保存人工审核后的单软件流程草稿，不发布到 Agent Memory。"""
+
+    try:
+        result = _save_interface_workflow_review_transaction(
+            request.review,
+            out_dir=request.out_dir,
+        )
         trace_path = write_trace(
             category="panel",
             operation="save-interface-workflow-review",
@@ -1334,6 +1683,87 @@ def save_interface_workflow_review_endpoint(
             data=None,
             error=ErrorModel(
                 code="interface_workflow_review_save_failed",
+                details=str(exc),
+            ),
+        )
+
+
+@router.post("/panel/delete_learning_evidence", response_model=APIResponse)
+def delete_learning_evidence_endpoint(
+    request: PanelDeleteLearningEvidenceRequest,
+) -> APIResponse:
+    """删除未被流程引用的单界面学习证据。"""
+
+    try:
+        result = delete_learning_evidence(
+            project_root=ROOT_DIR,
+            source_path=request.source_path,
+        )
+        result["trace_path"] = write_trace(
+            category="panel",
+            operation="delete-learning-evidence",
+            payload={
+                "success": True,
+                "deleted_path": result["deleted_path"],
+                "associated_files_preserved": result["associated_files_preserved"],
+                "artifact_is_authorization": False,
+            },
+            name_hint="learning_evidence_deleted",
+        )
+        return APIResponse(
+            success=True,
+            message="Learning evidence deleted",
+            data=result,
+            error=None,
+        )
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Learning evidence delete failed",
+            data=None,
+            error=ErrorModel(
+                code="learning_evidence_delete_failed",
+                details=str(exc),
+            ),
+        )
+
+
+@router.post("/panel/delete_interface_workflow", response_model=APIResponse)
+def delete_interface_workflow_endpoint(
+    request: PanelDeleteInterfaceWorkflowRequest,
+) -> APIResponse:
+    """删除一个流程资产，但保留可由其他流程复用的单界面证据。"""
+
+    try:
+        result = delete_interface_workflow_review_candidate(
+            project_root=ROOT_DIR,
+            workflow_id=request.workflow_id,
+        )
+        result["trace_path"] = write_trace(
+            category="panel",
+            operation="delete-interface-workflow",
+            payload={
+                "success": True,
+                "workflow_id": result["workflow_id"],
+                "deleted_path": result["deleted_path"],
+                "single_interface_evidence_deleted": False,
+                "artifact_is_authorization": False,
+            },
+            name_hint=result["workflow_id"],
+        )
+        return APIResponse(
+            success=True,
+            message="Interface workflow deleted",
+            data=result,
+            error=None,
+        )
+    except Exception as exc:
+        return APIResponse(
+            success=False,
+            message="Interface workflow delete failed",
+            data=None,
+            error=ErrorModel(
+                code="interface_workflow_delete_failed",
                 details=str(exc),
             ),
         )
@@ -2274,22 +2704,7 @@ def _resolve_under_root_path(path: str | Path) -> Path:
     return resolved
 
 
-PINNED_LEARNING_DRAFT_SOURCE_PATHS = [
-    "logs/benchmarks/learn_three_interface_scaffold_20260711/applemusic/learn_mode_demo_scaffold.json",
-    "logs/benchmarks/learn_three_interface_scaffold_20260711/qq/learn_mode_demo_scaffold.json",
-    "logs/benchmarks/learn_three_interface_scaffold_20260711/python_org/learn_mode_demo_scaffold.json",
-    "logs/benchmarks/learn_two_stage_python_v105_readonly_pathgraph_scaffold/learn_mode_demo_scaffold.json",
-    "logs/benchmarks/learn_two_stage_applemusic_v105_readonly_pathgraph_scaffold/learn_mode_demo_scaffold.json",
-    "logs/benchmarks/learn_two_stage_qq_v105_readonly_pathgraph_scaffold/learn_mode_demo_scaffold.json",
-    "logs/benchmarks/learn_two_stage_python_v104_readonly_pathgraph_scaffold/learn_mode_demo_scaffold.json",
-    "logs/benchmarks/learn_two_stage_applemusic_v104_readonly_pathgraph_scaffold/learn_mode_demo_scaffold.json",
-    "logs/benchmarks/learn_two_stage_qq_v104_readonly_pathgraph_scaffold/learn_mode_demo_scaffold.json",
-    "logs/benchmarks/learn_two_stage_python_v103_readonly_pathgraph_scaffold/learn_mode_demo_scaffold.json",
-    "logs/benchmarks/learn_two_stage_applemusic_v103_readonly_pathgraph_scaffold/learn_mode_demo_scaffold.json",
-    "logs/benchmarks/learn_two_stage_qq_v103_readonly_pathgraph_scaffold/learn_mode_demo_scaffold.json",
-    "logs/benchmarks/learn_fresh_model_post_batch_refresh_v2_20260706/attached_draft/actual_parser_output_with_fusion_status.json",
-    "logs/benchmarks/learn_pathgraph_readiness_with_handoff_20260706/actual_parser_output_with_fusion_status.json",
-]
+PINNED_LEARNING_DRAFT_SOURCE_PATHS: list[str] = []
 
 MAX_PINNED_LEARNING_DRAFT_SOURCES = 3
 MAX_RECENT_LEARNING_DRAFT_CANDIDATE_ATTEMPTS = 6
@@ -2301,7 +2716,6 @@ def _list_recent_learning_draft_sources(*, limit: int = 16, include_recent: bool
         ROOT_DIR / "artifacts" / "learning-runs",
         ROOT_DIR / "artifacts" / "learning-draft-review",
     ]
-    targeted_benchmark_root = ROOT_DIR / "logs" / "benchmarks"
     pinned_paths = [ROOT_DIR / path for path in PINNED_LEARNING_DRAFT_SOURCE_PATHS]
     candidates: list[Path] = []
     sources: list[dict[str, Any]] = []
@@ -2333,15 +2747,7 @@ def _list_recent_learning_draft_sources(*, limit: int = 16, include_recent: bool
             names={"trial_result.json", "reviewed_template_candidate.json", "pathgraph_candidate.json"},
             limit=MAX_RECENT_LEARNING_DRAFT_CANDIDATE_SCAN,
         )
-        targeted_benchmark_scan_performed = targeted_benchmark_root.exists() and not candidates
-        if targeted_benchmark_scan_performed:
-            candidates = _discover_recent_named_files(
-                [targeted_benchmark_root],
-                names={"learn_page_detail_candidate.json", "learn_mode_demo_scaffold.json"},
-                limit=MAX_RECENT_LEARNING_DRAFT_CANDIDATE_SCAN,
-            )
-    else:
-        targeted_benchmark_scan_performed = False
+    targeted_benchmark_scan_performed = False
     scanned_candidates = candidates[:MAX_RECENT_LEARNING_DRAFT_CANDIDATE_SCAN]
     quick_ready_candidates = []
     quick_incomplete_candidates = []
@@ -2389,7 +2795,7 @@ def _list_recent_learning_draft_sources(*, limit: int = 16, include_recent: bool
     return {
         "contract_version": "panel_learning_draft_sources_v1",
         "roots": [_relative_panel_path(root) for root in roots],
-        "targeted_benchmark_roots": [_relative_panel_path(targeted_benchmark_root)] if targeted_benchmark_root.exists() else [],
+        "targeted_benchmark_roots": [],
         "pinned_source_paths": [_relative_panel_path(path) for path in pinned_paths if path.exists()],
         "sources": sources,
         "skipped_count": skipped_count,
@@ -3192,6 +3598,20 @@ def _resolve_panel_artifact_file(path: str) -> Path:
     if not resolved.exists() or not resolved.is_file():
         raise FileNotFoundError(str(resolved))
     return resolved
+
+
+def _resolve_scoped_capture_segment_records(
+    records: list[PanelScopedCaptureSegmentRecord],
+) -> list[dict[str, Any]]:
+    resolved_records: list[dict[str, Any]] = []
+    for record in records:
+        resolved = record.model_dump()
+        resolved["image_path"] = str(_resolve_panel_artifact_file(record.image_path))
+        scroll_trace_path = str(record.scroll_trace_path or "").strip()
+        if scroll_trace_path:
+            resolved["scroll_trace_path"] = str(_resolve_panel_artifact_file(scroll_trace_path))
+        resolved_records.append(resolved)
+    return resolved_records
 
 
 def _resolve_panel_learning_image_path(path: str) -> Path:

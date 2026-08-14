@@ -12,6 +12,7 @@ __pycache__/
 *.pfx
 *.p12
 .pytest_cache/
+.pytest-task*/
 .mypy_cache/
 .ruff_cache/
 .uv-cache/

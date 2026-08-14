@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from app.api import action as action_api
 from app.api.models.request import ExecuteRecognitionPlanRequest
 from app.api.models.response import APIResponse, VisionResultData
+from app.core.input_controller import TargetPointOccludedError
 
 
 def _bound_window(
@@ -187,6 +188,19 @@ def _final_submit_plan(*, goal: str = "Click Submit application") -> dict:
     plan["narrow_search_result"]["results"][0]["candidate_id"] = "submit_application"
     plan["narrow_search_result"]["results"][0]["matched_text"] = "Submit application"
     plan["pre_click_decision"]["selected_candidate_id"] = "submit_application"
+    return plan
+
+
+def _apply_now_plan(*, goal: str = "Click Apply now") -> dict:
+    plan = _final_submit_plan(goal=goal)
+    plan["recommended_target"]["candidate_id"] = "apply_now"
+    plan["recommended_target"]["label"] = "Apply now"
+    plan["recommended_target"]["text"] = "Apply now"
+    plan["candidate_result"]["candidates"][0]["candidate_id"] = "apply_now"
+    plan["candidate_result"]["candidates"][0]["label"] = "Apply now"
+    plan["narrow_search_result"]["results"][0]["candidate_id"] = "apply_now"
+    plan["narrow_search_result"]["results"][0]["matched_text"] = "Apply now"
+    plan["pre_click_decision"]["selected_candidate_id"] = "apply_now"
     return plan
 
 
@@ -397,6 +411,149 @@ def test_execute_mode_reuses_approved_plan_for_next_call(monkeypatch, tmp_path) 
     assert written_operations == ["execute_mode_plan_preview", "execute_mode_click"]
 
 
+def test_approved_plan_reuse_reports_occluded_point_without_click(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(action_api, "APPROVED_PLANS_DIR", tmp_path / "approved-plans")
+    action_api.APPROVED_PLANS_DIR.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: _bound_window())
+    monkeypatch.setattr(action_api.screenshot_service, "capture_window", lambda **kwargs: _capture())
+    monkeypatch.setattr(
+        action_api,
+        "_run_recognition_plan_for_execution",
+        lambda request: APIResponse(
+            success=True,
+            message="ok",
+            data=VisionResultData(result=_allowed_plan(goal=request.goal)).model_dump(),
+            error=None,
+        ),
+    )
+    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", lambda trace_path: None)
+    monkeypatch.setattr(action_api.verifier, "capture_pre_action_state", lambda action_name=None: {"image_path": "before.png"})
+    monkeypatch.setattr(
+        action_api.input_controller,
+        "click_point",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            TargetPointOccludedError(
+                {
+                    "allowed": False,
+                    "reason": "target_point_occluded",
+                    "screen_point": {"x": 307, "y": 238},
+                    "hit_window": {"handle": 900, "title": "QQ notification"},
+                }
+            )
+        ),
+    )
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: f"logs/traces/actions/{kwargs['operation']}.json")
+
+    dry = action_api.execute_recognition_plan(
+        ExecuteRecognitionPlanRequest(goal="Click Learn more link", app_name="edge", dry_run=True)
+    )
+    real = action_api.execute_recognition_plan(
+        ExecuteRecognitionPlanRequest(
+            goal="Click Learn more link",
+            app_name="edge",
+            approved_plan_id=dry.data["result"]["approved_plan_id"],
+            dry_run=False,
+        )
+    )
+
+    assert real.success is False
+    assert real.error.code == "target_point_occluded"
+    assert real.data["execution_path"]["action_executed"] is False
+    assert real.data["point_visibility"]["hit_window"]["handle"] == 900
+    assert real.data["attempts"] == []
+
+
+def test_approved_plan_reuse_retries_transient_foreground_focus_before_click(monkeypatch, tmp_path) -> None:
+    recognition_calls = {"count": 0}
+    pre_action_captures = {"count": 0}
+    clicks = {"count": 0}
+    monkeypatch.setattr(action_api, "APPROVED_PLANS_DIR", tmp_path / "approved-plans")
+    action_api.APPROVED_PLANS_DIR.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: _bound_window())
+    monkeypatch.setattr(action_api.screenshot_service, "capture_window", lambda **kwargs: _capture())
+
+    def fake_recognition_plan(request):
+        recognition_calls["count"] += 1
+        return APIResponse(
+            success=True,
+            message="ok",
+            data=VisionResultData(result=_allowed_plan(goal=request.goal)).model_dump(),
+            error=None,
+        )
+
+    def capture_pre_action_state(action_name=None):
+        pre_action_captures["count"] += 1
+        if pre_action_captures["count"] == 1:
+            raise RuntimeError(
+                "Bound window foreground verification failed: "
+                "expected_handle=100, actual_foreground_handle=200"
+            )
+        return {"image_path": "before.png"}
+
+    monkeypatch.setattr(action_api, "_run_recognition_plan_for_execution", fake_recognition_plan)
+    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", lambda trace_path: {"output_path": "overlay.png"})
+    monkeypatch.setattr(action_api.verifier, "capture_pre_action_state", capture_pre_action_state)
+    monkeypatch.setattr(
+        action_api.verifier,
+        "verify_action",
+        lambda *args, **kwargs: {
+            "verified": True,
+            "before": {"image_path": "before.png"},
+            "after": {"image_path": "after.png"},
+        },
+    )
+    monkeypatch.setattr(
+        action_api.input_controller,
+        "click_point",
+        lambda x, y, **kwargs: clicks.update({"count": clicks["count"] + 1}) or {"clicked": True},
+    )
+    monkeypatch.setattr(action_api.transition_memory, "save", lambda record: str(tmp_path / "transition.json"))
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: f"logs/traces/actions/{kwargs['operation']}.json")
+
+    dry = action_api.execute_recognition_plan(
+        ExecuteRecognitionPlanRequest(goal="Click Learn more link", app_name="edge", dry_run=True)
+    )
+    approved_plan_id = dry.data["result"]["approved_plan_id"]
+    real = action_api.execute_recognition_plan(
+        ExecuteRecognitionPlanRequest(
+            goal="Click Learn more link",
+            app_name="edge",
+            approved_plan_id=approved_plan_id,
+            dry_run=False,
+        )
+    )
+
+    assert real.success is True
+    assert recognition_calls["count"] == 1
+    assert pre_action_captures["count"] == 2
+    assert clicks["count"] == 1
+    assert real.data["result"]["execution_path"]["pre_action_focus_retry_count"] == 1
+
+
+def test_pre_action_foreground_retry_still_rejects_after_second_failure(monkeypatch) -> None:
+    calls = {"count": 0}
+
+    def capture_pre_action_state(action_name=None):
+        calls["count"] += 1
+        raise RuntimeError(
+            "Bound window foreground verification failed: "
+            "expected_handle=100, actual_foreground_handle=200"
+        )
+
+    monkeypatch.setattr(action_api.verifier, "capture_pre_action_state", capture_pre_action_state)
+
+    try:
+        action_api._capture_pre_action_state_with_foreground_retry(
+            action_name="execute_recognition_plan"
+        )
+    except RuntimeError as exc:
+        assert str(exc).startswith("Bound window foreground verification failed:")
+    else:  # pragma: no cover - 明确要求持续前台争用时保持安全失败
+        raise AssertionError("persistent foreground mismatch must not be ignored")
+
+    assert calls["count"] == 2
+
+
 def test_execute_mode_low_risk_visual_fast_lane_skips_real_overlay_and_uses_fast_click(monkeypatch) -> None:
     clicked: dict[str, int] = {}
     overlay_calls = {"count": 0}
@@ -526,6 +683,55 @@ def test_execute_mode_final_submit_guard_blocks_before_click(monkeypatch) -> Non
     assert guard["allowed"] is False
     assert "submit application" in guard["matched_terms"]
     assert response.data["agent_step_result"]["final_submit_guard"]["allowed"] is False
+
+
+def test_final_submit_guard_allows_apply_now_only_for_open_apply_entry_context() -> None:
+    request = ExecuteRecognitionPlanRequest(
+        goal="Click Apply now to open the application flow",
+        task="open_apply_flow",
+        metadata={
+            "forbid_final_submit": True,
+            "semantic_action": "open_apply_flow",
+            "surface_context": "job_detail_apply_entry",
+            "active_flow_started": False,
+        },
+    )
+    plan = _apply_now_plan(goal=request.goal)
+
+    guard = action_api._final_submit_guard_decision(
+        request=request,
+        plan=plan,
+        pre_click=plan["pre_click_decision"],
+    )
+
+    assert guard["allowed"] is True
+    assert guard["action_taxonomy"] == "open_apply_flow"
+    assert guard["surface_context"] == "job_detail_apply_entry"
+    assert guard["reason"] == "apply_entry_candidate_allowed"
+
+
+def test_final_submit_guard_blocks_apply_now_in_final_review_context() -> None:
+    request = ExecuteRecognitionPlanRequest(
+        goal="Click Apply now on the final review page",
+        metadata={
+            "forbid_final_submit": True,
+            "semantic_action": "final_submit",
+            "surface_context": "final_review_submit",
+            "active_flow_started": True,
+        },
+    )
+    plan = _apply_now_plan(goal=request.goal)
+
+    guard = action_api._final_submit_guard_decision(
+        request=request,
+        plan=plan,
+        pre_click=plan["pre_click_decision"],
+    )
+
+    assert guard["allowed"] is False
+    assert guard["action_taxonomy"] == "final_submit"
+    assert guard["surface_context"] == "final_review_submit"
+    assert guard["reason"] == "final_submit_candidate_blocked"
 
 
 def test_execute_mode_final_submit_requires_structured_authorization(monkeypatch) -> None:

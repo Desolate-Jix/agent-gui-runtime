@@ -234,6 +234,31 @@ def test_published_memory_uses_stable_semantic_ids_without_old_click_coordinates
     assert "window_handle" not in serialized
 
 
+def test_reviewed_memory_keeps_semantic_label_separate_from_visible_text_anchor(tmp_path: Path) -> None:
+    from app.agent.reviewed_interface_memory import ReviewedInterfaceMemoryStore
+
+    source_path = _write_reviewed_candidate(tmp_path)
+    candidate = json.loads(source_path.read_text(encoding="utf-8"))
+    apply_region = candidate["draft"]["regions"][1]
+    apply_region["label"] = "Apply entry button"
+    apply_region["observed_text"] = "Apply"
+    source_path.write_text(
+        json.dumps(candidate, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    store = ReviewedInterfaceMemoryStore(project_root=tmp_path)
+    store.publish(source_path=source_path, interface_id="sample_search", expected_registry_revision=0)
+
+    memory = store.load_active("sample_search")
+    element = next(item for item in memory["elements"] if item["source_region_id"] == "search_button")
+
+    assert element["label"] == "Apply entry button"
+    assert element["locator_profile"]["text_anchors"] == ["Apply"]
+    assert element["locator_profile"]["visible_text_anchors"] == ["Apply"]
+    assert element["locator_profile"]["text_anchor_source"] == "human_review_observed_text"
+
+
 def test_publish_rejects_unreviewed_or_stale_screenshot_candidate(tmp_path: Path) -> None:
     from app.agent.reviewed_interface_memory import ReviewedInterfaceMemoryStore
 

@@ -37,10 +37,13 @@
   ],
   "blockers": [],
   "review": {
-    "status": "human_reviewed",
+    "status": "human_approved",
     "manual_revision": {
       "semantic_description": "Review the modal state and close it without another side effect."
-    }
+    },
+    "reviewed_by_human": true,
+    "reviewed_revision_hash": "34ae6156e719f4b57735049a9a8d2a473d625607bd7464b294aee910c127de5c",
+    "current_revision_hash": "34ae6156e719f4b57735049a9a8d2a473d625607bd7464b294aee910c127de5c"
   },
   "evidence": {},
   "execute_binding_enabled": false

@@ -111,7 +111,11 @@ def run_navigation_reading_controller(
             "case_outcome": "pending",
             "action_executed": False,
             "dispatch_success": False,
+            "gate_allowed": False,
             "effect_verified": False,
+            "destination_observation_verified": False,
+            "expected_target_interface_id": plan.get("expected_target_interface_id"),
+            "actual_target_interface_id": None,
         }
 
         if plan["semantic_action"] == "safe_stop":
@@ -144,6 +148,7 @@ def run_navigation_reading_controller(
             break
 
         gate_result = operation["gate_result"]
+        step["gate_allowed"] = gate_result.get("allowed") is True
         if gate_result.get("allowed") is not True:
             session = record_gate_rejection(
                 session,
@@ -205,28 +210,35 @@ def run_navigation_reading_controller(
                 "operation_result_contract": OPERATION_RESULT_CONTRACT,
             },
         )
-        step["case_outcome"] = (
-            "passed"
-            if session.get("status") == "ready_for_observation"
-            else "failed"
-        )
-        steps.append(step)
         if session.get("status") in FINAL_STATUSES:
+            step["case_outcome"] = "failed"
+            steps.append(step)
             break
 
         observation = _validated_observation(observe_current())
-        expected_target = str(plan.get("expected_target_interface_id") or "").strip()
-        if expected_target and observation["interface_id"] != expected_target:
-            session["status"] = "needs_human_review"
-            session["stop_reason"] = "destination_interface_mismatch"
-            break
+        step["actual_target_interface_id"] = observation["interface_id"]
         session, interface_evidence = _accept_full_observation(
             session=session,
             observation=observation,
             load_interface_evidence=load_interface_evidence,
         )
-        _append_unique(visited_interfaces, observation["interface_id"])
-        interface_visit_history.append(observation["interface_id"])
+        expected_target = str(plan.get("expected_target_interface_id") or "").strip()
+        step["destination_observation_verified"] = (
+            (not expected_target or observation["interface_id"] == expected_target)
+            and session.get("stop_reason") != "destination_interface_mismatch"
+        )
+        if step["destination_observation_verified"]:
+            _append_unique(visited_interfaces, observation["interface_id"])
+            interface_visit_history.append(observation["interface_id"])
+        if session.get("status") == "safe_stop":
+            step["case_outcome"] = "safe_intercept"
+        elif session.get("status") == "needs_human_review":
+            step["case_outcome"] = "failed"
+        else:
+            step["case_outcome"] = "passed"
+        steps.append(step)
+        if session.get("status") in FINAL_STATUSES:
+            break
 
     if (
         len(steps) >= limit
@@ -327,7 +339,7 @@ def _validated_observation(value: Any) -> dict[str, Any]:
         or value.get("contract_version") != "current_interface_observation_v1"
     ):
         raise ValueError("current_interface_observation_v1 is required")
-    return {
+    observation = {
         "contract_version": "current_interface_observation_v1",
         "interface_id": _required_text(value.get("interface_id"), "interface_id"),
         "surface_type": _required_text(value.get("surface_type"), "surface_type"),
@@ -338,6 +350,10 @@ def _validated_observation(value: Any) -> dict[str, Any]:
         ),
         "trace_path": _required_text(value.get("trace_path"), "trace_path"),
     }
+    screenshot_path = str(value.get("screenshot_path") or "").strip()
+    if screenshot_path:
+        observation["screenshot_path"] = screenshot_path
+    return observation
 
 
 def _validated_decision(value: Any) -> dict[str, Any]:
@@ -364,11 +380,15 @@ def _validated_operation_result(value: Any) -> dict[str, Any]:
 
 
 def _observation_evidence(observation: dict[str, Any]) -> dict[str, str]:
-    return {
+    evidence = {
         "capture_id": observation["capture_id"],
         "screenshot_sha256": observation["screenshot_sha256"],
         "trace_path": observation["trace_path"],
     }
+    screenshot_path = str(observation.get("screenshot_path") or "").strip()
+    if screenshot_path:
+        evidence["screenshot_path"] = screenshot_path
+    return evidence
 
 
 def _same_freshness(expected: dict[str, Any], actual: Any) -> bool:

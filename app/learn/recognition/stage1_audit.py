@@ -26,7 +26,13 @@ def audit_stage1_region_selection(
     _audit_region_overlap(case_results)
     _audit_top_origin_coverage(case_results, height=height)
     _audit_horizontal_bar_lane(case_results, width=width)
-    _audit_stage1_partition_adjacency(case_results, width=width, height=height)
+    partition_coverage = _content_partition_coverage(case_results, width=width, height=height)
+    _audit_stage1_partition_adjacency(
+        case_results,
+        width=width,
+        height=height,
+        partition_coverage=partition_coverage,
+    )
     failed = [item for item in case_results if item["status"] != "passed"]
     return {
         "contract_version": "learn_stage1_region_selection_audit_v1",
@@ -42,6 +48,7 @@ def audit_stage1_region_selection(
         "failed_region_count": len(failed),
         "failure_categories": sorted({failure for item in failed for failure in item["failure_categories"]}),
         "structure_family_coverage": structure_family_coverage,
+        "partition_coverage": partition_coverage,
         "regions": case_results,
         "interpretation": (
             "This audit checks generic structure-region completeness. It is not a model accuracy score, "
@@ -110,6 +117,7 @@ def _audit_region(region: dict[str, Any], *, width: int, height: int) -> dict[st
     return {
         "region_id": region_id,
         "label": str(region.get("label") or ""),
+        "zone_id": str(region.get("zone_id") or ""),
         "region_type": region_type,
         "bbox": deepcopy(bbox or {}),
         "rough_bbox": deepcopy(_bbox(region.get("rough_bbox")) or {}),
@@ -275,7 +283,113 @@ def _audit_horizontal_bar_lane(case_results: list[dict[str, Any]], *, width: int
             _mark_failed(item, "horizontal_bar_lane_too_narrow")
 
 
-def _audit_stage1_partition_adjacency(case_results: list[dict[str, Any]], *, width: int, height: int) -> None:
+def _content_partition_coverage(
+    case_results: list[dict[str, Any]],
+    *,
+    width: int,
+    height: int,
+) -> dict[str, Any]:
+    """识别由多个相邻内容窗格共同覆盖可用区域的分屏布局。"""
+
+    result = {
+        "contract_version": "learn_stage1_content_partition_coverage_v1",
+        "content_panes_form_contiguous_partition": False,
+        "content_pane_count": 0,
+        "covered_bbox": {},
+    }
+    if width <= 0 or height <= 0:
+        return result
+    content_items = [
+        item
+        for item in case_results
+        if item.get("region_type") == "main_content" and _bbox(item.get("bbox"))
+    ]
+    result["content_pane_count"] = len(content_items)
+    if len(content_items) < 2:
+        return result
+
+    tolerance_x = max(12, int(width * 0.025))
+    tolerance_y = max(12, int(height * 0.025))
+    left_boundary = max(
+        (
+            bbox["x"] + bbox["w"]
+            for item in case_results
+            if item.get("region_type") == "left_sidebar"
+            for bbox in [_bbox(item.get("bbox"))]
+            if bbox
+        ),
+        default=0,
+    )
+    right_boundary = min(
+        (
+            bbox["x"]
+            for item in case_results
+            if item.get("region_type") == "right_sidebar"
+            for bbox in [_bbox(item.get("bbox"))]
+            if bbox
+        ),
+        default=width,
+    )
+    top_boundary = max(
+        (
+            bbox["y"] + bbox["h"]
+            for item in case_results
+            if item.get("region_type") == "top_bar"
+            for bbox in [_bbox(item.get("bbox"))]
+            if bbox
+        ),
+        default=0,
+    )
+    bottom_boundary = min(
+        (
+            bbox["y"]
+            for item in case_results
+            if item.get("region_type") == "bottom_bar"
+            for bbox in [_bbox(item.get("bbox"))]
+            if bbox
+        ),
+        default=height,
+    )
+    boxes = sorted((_bbox(item.get("bbox")) for item in content_items), key=lambda box: box["x"])
+    if right_boundary <= left_boundary or bottom_boundary <= top_boundary:
+        return result
+    if any(
+        box["y"] > top_boundary + tolerance_y
+        or box["y"] + box["h"] < bottom_boundary - tolerance_y
+        for box in boxes
+    ):
+        return result
+    cursor = left_boundary
+    for box in boxes:
+        if box["x"] > cursor + tolerance_x:
+            return result
+        cursor = max(cursor, box["x"] + box["w"])
+    if boxes[0]["x"] > left_boundary + tolerance_x or cursor < right_boundary - tolerance_x:
+        return result
+
+    result["content_panes_form_contiguous_partition"] = True
+    result["covered_bbox"] = {
+        "x": left_boundary,
+        "y": top_boundary,
+        "w": right_boundary - left_boundary,
+        "h": bottom_boundary - top_boundary,
+    }
+    for item in content_items:
+        failures = item.get("failure_categories")
+        if isinstance(failures, list) and "main_region_too_small" in failures:
+            failures.remove("main_region_too_small")
+            item["status"] = "passed" if not failures else "failed"
+        item["notes"].append("content_pane_validated_by_contiguous_partition")
+    return result
+
+
+def _audit_stage1_partition_adjacency(
+    case_results: list[dict[str, Any]],
+    *,
+    width: int,
+    height: int,
+    partition_coverage: dict[str, Any] | None = None,
+) -> None:
     if width <= 0 or height <= 0:
         return
     tolerance_x = max(12, int(width * 0.025))
@@ -322,6 +436,8 @@ def _audit_stage1_partition_adjacency(case_results: list[dict[str, Any]], *, wid
         default=height,
     )
     if right_boundary <= left_boundary or bottom_boundary <= top_boundary:
+        return
+    if bool((partition_coverage or {}).get("content_panes_form_contiguous_partition")):
         return
     for item in case_results:
         if item.get("region_type") != "main_content":

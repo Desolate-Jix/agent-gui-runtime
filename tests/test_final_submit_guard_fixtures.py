@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from app.gate.danger import scoped_final_submit_visible_blocker
@@ -17,6 +19,8 @@ FINAL_SUBMIT_FIXTURES = [
     ("sticky_footer_submit", "Submit application", "button", {"x": 400, "y": 940, "w": 220, "h": 48}),
     ("modal_submit", "Send application", "button", {"x": 560, "y": 560, "w": 180, "h": 48}),
 ]
+
+GENERAL_FORM_FIXTURE = Path("tests/fixtures/general_form_live_site/index.html")
 
 
 @pytest.mark.parametrize(("case_id", "text", "role", "bbox"), FINAL_SUBMIT_FIXTURES)
@@ -108,3 +112,16 @@ def test_apply_now_is_blocked_in_final_review_context() -> None:
 
     assert blocker["blocked"] is True
     assert blocker["matched_items"][0]["id"] == "final_apply_now"
+
+
+def test_general_form_fixture_has_a_second_page_with_final_action_variants() -> None:
+    source = GENERAL_FORM_FIXTURE.read_text(encoding="utf-8")
+
+    assert 'data-form-step="questions"' in source
+    assert 'data-form-step="review"' in source
+    assert 'id="continueToReview"' in source
+    for label in ("Review and submit", "Submit application", "Send", "Complete"):
+        assert f'data-final-action="{label}"' in source
+    assert "let realClicks = 0;" in source
+    assert "let submitClicks = 0;" in source
+    assert "real-clicks=0 submit-clicks=0" in source

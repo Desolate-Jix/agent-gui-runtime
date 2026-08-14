@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter
 
-from app.core.input_controller import input_controller
+from app.core.input_controller import TargetPointOccludedError, input_controller
 from app.agent.reviewed_interface_memory import (
     ReviewedInterfaceMemoryStore,
     validate_current_surface_text_anchors,
@@ -19,6 +19,8 @@ from app.agent.reviewed_interface_memory import (
 from app.core.ocr_service import ocr_service
 from app.core.runtime_artifacts import RuntimeTimer, new_learned_instruction_id, write_trace
 from app.core.screenshot import screenshot_service
+from app.gate.actions import classify_action_taxonomy
+from app.gate.danger import scoped_final_submit_visible_blocker
 from app.gate.window import validate_bound_window_for_app
 from app.core.transition_memory import transition_memory
 from app.core.verifier import verifier
@@ -285,11 +287,44 @@ def _final_submit_guard_decision(
     )
     selected_texts = _unique_nonempty_strings(selected_texts)
     selected_texts = _final_submit_guard_evidence_texts(selected_texts, goal=request.goal)
-    matched_terms = _matched_final_submit_terms(selected_texts)
+    semantic_action = str(metadata.get("semantic_action") or request.task or "click_target").strip()
+    action_taxonomy = classify_action_taxonomy(
+        semantic_action,
+        {"semantic_action_type": semantic_action},
+        label=" ".join(selected_texts),
+    )
+    surface_context = str(metadata.get("surface_context") or semantic_action or "").strip()
+    active_flow_started = bool(
+        metadata.get("active_flow_started")
+        or action_taxonomy.get("final_submit")
+        or surface_context.casefold()
+        in {"final_review_submit", "final_submit_visible", "final_review_submit_visible"}
+    )
+    scoped_decision = scoped_final_submit_visible_blocker(
+        [
+            {
+                "collection": "selected_action_targets",
+                "id": selected_candidate_id,
+                "text": text,
+                "role": "button",
+                "semantic_action": action_taxonomy.get("kind"),
+            }
+            for text in selected_texts
+        ],
+        active_flow_started=active_flow_started,
+        surface_context=surface_context,
+    )
+    matched_terms = sorted(
+        set(_matched_final_submit_terms(selected_texts))
+        | set(scoped_decision.get("matched_terms") or [])
+    )
     authorization_check = _validate_final_submit_authorization(metadata) if matched_terms else None
     allowed = not matched_terms or (not enabled and bool(authorization_check and authorization_check.get("valid")))
     if not matched_terms:
-        reason = "no_final_submit_candidate_detected" if enabled else "guard_not_needed"
+        if enabled and action_taxonomy.get("open_apply_flow"):
+            reason = "apply_entry_candidate_allowed"
+        else:
+            reason = "no_final_submit_candidate_detected" if enabled else "guard_not_needed"
     elif enabled:
         reason = "final_submit_candidate_blocked"
     elif authorization_check and authorization_check.get("valid"):
@@ -303,6 +338,10 @@ def _final_submit_guard_decision(
         "selected_candidate_id": selected_candidate_id,
         "selected_texts": selected_texts,
         "matched_terms": matched_terms,
+        "action_taxonomy": action_taxonomy.get("kind"),
+        "surface_context": surface_context,
+        "active_flow_started": active_flow_started,
+        "scoped_decision": scoped_decision,
         "authorization_required": bool(matched_terms),
         "authorization_check": authorization_check,
         "reason": reason,
@@ -1415,6 +1454,20 @@ def _validate_learned_instruction_reuse(
     }
 
 
+def _capture_pre_action_state_with_foreground_retry(
+    *,
+    action_name: str,
+) -> tuple[dict[str, Any], int]:
+    """前台争用发生在点击前时仅重试一次；两次都失败则保持安全拒绝。"""
+
+    try:
+        return verifier.capture_pre_action_state(action_name=action_name), 0
+    except RuntimeError as exc:
+        if not str(exc).startswith("Bound window foreground verification failed:"):
+            raise
+    return verifier.capture_pre_action_state(action_name=action_name), 1
+
+
 @router.post("/execute_recognition_plan", response_model=APIResponse)
 def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIResponse:
     timer = RuntimeTimer()
@@ -2337,11 +2390,15 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         for attempt_index in range(1, int(request.max_execution_attempts) + 1):
             with timer.step("execution_attempt", attempt=attempt_index):
                 with timer.step("capture_pre_action_state", attempt=attempt_index, enabled=request.enable_post_click_verification):
-                    before_state = (
-                        verifier.capture_pre_action_state(action_name="execute_recognition_plan")
-                        if request.enable_post_click_verification
-                        else None
-                    )
+                    if request.enable_post_click_verification:
+                        before_state, focus_retry_count = _capture_pre_action_state_with_foreground_retry(
+                            action_name="execute_recognition_plan"
+                        )
+                        execution_path["pre_action_focus_retry_count"] = int(
+                            execution_path.get("pre_action_focus_retry_count") or 0
+                        ) + focus_retry_count
+                    else:
+                        before_state = None
                 with timer.step("click_point", attempt=attempt_index):
                     click_result = input_controller.click_point(
                         selected_point["x"],
@@ -2401,6 +2458,49 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             final_attempt = attempt
             if attempt_verified or not retry_allowed:
                 break
+    except TargetPointOccludedError as exc:
+        failure_reason = str(exc.evidence.get("reason") or "target_point_occluded")
+        base_result["execution_path"]["action_executed"] = False
+        base_result["operation_trace_link"] = operation_trace_link(operation_context, result_status="blocked")
+        base_result["attempts"] = attempts
+        base_result["point_visibility"] = exc.evidence
+        base_result["agent_execution_guidance"] = _agent_execution_guidance(
+            request=request,
+            status="blocked",
+            result=base_result,
+            failure_reason=failure_reason,
+        )
+        base_result["agent_step_result"] = _agent_step_result(
+            request=request,
+            status="blocked",
+            result=base_result,
+            failure_reason=failure_reason,
+        )
+        attach_timings(base_result)
+        base_result["trace_path"] = _write_execute_trace_if_enabled(
+            request,
+            category="actions",
+            operation="execute_recognition_plan",
+            payload={
+                "success": False,
+                "request": request.model_dump(),
+                "result": base_result,
+                "failure_reason": failure_reason,
+            },
+            name_hint=request.app_name or "recognition_plan",
+        )
+        _rewrite_execute_trace_result(
+            trace_path=base_result.get("trace_path"),
+            success=False,
+            request=request,
+            result=base_result,
+        )
+        return APIResponse(
+            success=False,
+            message="Recognition-plan click point is not currently owned by the bound window",
+            data=base_result,
+            error=ErrorModel(code=failure_reason, details=exc.evidence),
+        )
     except Exception as exc:
         base_result["execution_path"]["action_executed"] = bool(attempts)
         base_result["operation_trace_link"] = operation_trace_link(operation_context, result_status="execution_failed")

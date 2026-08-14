@@ -19,6 +19,7 @@ def create_continuous_task_session(*, session_id: str, workflow_id: str) -> dict
         "current_memory_object_sha256": None,
         "current_observation_evidence": None,
         "current_read_state": None,
+        "current_form_step_context": None,
         "pending_agent_decision": None,
         "pending_learning": None,
         "pending_apply_confirmation": None,
@@ -46,6 +47,12 @@ def observe_interface(
     knowledge_source: str = "reviewed_interface_memory",
 ) -> dict[str, Any]:
     current = _validated_session(session)
+    previous_status = current.get("status")
+    pending_decision = (
+        deepcopy(current.get("pending_agent_decision"))
+        if isinstance(current.get("pending_agent_decision"), dict)
+        else None
+    )
     interface_id = _required_text(interface_id, "interface_id")
     surface_type = _required_text(surface_type, "surface_type")
     evidence = _validated_evidence(evidence)
@@ -54,6 +61,7 @@ def observe_interface(
     current["current_memory_object_sha256"] = memory_object_sha256
     current["current_observation_evidence"] = evidence
     current["current_read_state"] = None
+    current["current_form_step_context"] = None
     current["pending_agent_decision"] = None
     current["pending_apply_confirmation"] = None
     _append_event(
@@ -80,6 +88,36 @@ def observe_interface(
             current,
             reason="final_submit_visible",
             forbidden_next_actions=["final_submit", "send", "complete", "confirm"],
+        )
+    if previous_status == "waiting_for_destination_observation":
+        expected_interface_id = str(
+            (pending_decision or {}).get("expected_target_interface_id") or ""
+        ).strip()
+        if expected_interface_id and interface_id != expected_interface_id:
+            current["pending_agent_decision"] = None
+            _append_event(
+                current,
+                "destination_observation_rejected",
+                {
+                    "expected_interface_id": expected_interface_id,
+                    "actual_interface_id": interface_id,
+                    "evidence": evidence,
+                },
+            )
+            return _safe_stop(
+                current,
+                reason="destination_interface_mismatch",
+                forbidden_next_actions=["click", "scroll", "input", "final_submit"],
+            )
+        current["pending_agent_decision"] = None
+        _append_event(
+            current,
+            "destination_observation_verified",
+            {
+                "expected_interface_id": expected_interface_id or None,
+                "actual_interface_id": interface_id,
+                "evidence": evidence,
+            },
         )
     if learning_required and not memory_object_sha256:
         current["status"] = "paused_for_learning"
@@ -113,6 +151,7 @@ def refresh_current_observation(
     evidence = _validated_evidence(evidence)
     current["current_surface_type"] = surface_type
     current["current_observation_evidence"] = evidence
+    current["current_form_step_context"] = None
     current["pending_agent_decision"] = None
     _append_event(
         current,
@@ -149,6 +188,123 @@ def resume_after_learning(
             "interface_id": interface_id,
             "memory_object_sha256": memory_object_sha256,
             "reviewed_memory_required": True,
+        },
+    )
+    return current
+
+
+def bind_form_step_context(
+    session: dict[str, Any],
+    *,
+    capture_id: str,
+    inventory_fingerprint: str,
+    grounding_fingerprint: str,
+) -> dict[str, Any]:
+    current = _validated_session(session)
+    if current.get("status") != "ready_for_agent_decision":
+        raise ValueError("continuous session is not ready for form step binding")
+    observed = current.get("current_observation_evidence")
+    capture_id = _required_text(capture_id, "capture_id")
+    if not isinstance(observed, dict) or observed.get("capture_id") != capture_id:
+        raise ValueError("form step context does not use the current capture")
+    current["current_form_step_context"] = {
+        "capture_id": capture_id,
+        "inventory_fingerprint": _required_text(
+            inventory_fingerprint,
+            "inventory_fingerprint",
+        ),
+        "grounding_fingerprint": _required_text(
+            grounding_fingerprint,
+            "grounding_fingerprint",
+        ),
+        "valid": True,
+        "invalidated_by": None,
+    }
+    _append_event(
+        current,
+        "form_step_context_bound",
+        {
+            "capture_id": capture_id,
+            "inventory_fingerprint": current["current_form_step_context"]["inventory_fingerprint"],
+            "grounding_fingerprint": current["current_form_step_context"]["grounding_fingerprint"],
+            "artifact_is_authorization": False,
+        },
+    )
+    return current
+
+
+def record_form_workflow_turn(
+    session: dict[str, Any],
+    *,
+    decision: dict[str, Any],
+) -> dict[str, Any]:
+    current = _validated_session(session)
+    if current.get("status") != "ready_for_agent_decision":
+        raise ValueError("continuous session is not ready for a form workflow turn")
+    if (
+        not isinstance(decision, dict)
+        or decision.get("contract_version") != "form_workflow_turn_decision_v1"
+    ):
+        raise ValueError("invalid form workflow turn decision")
+    action_type = _required_text(
+        decision.get("action_type") or decision.get("semantic_action"),
+        "action_type",
+    ).casefold()
+    if action_type in FINAL_ACTIONS:
+        raise ValueError("final submit action is forbidden")
+    observed = current.get("current_observation_evidence")
+    context = current.get("current_form_step_context")
+    decision_capture_id = _required_text(decision.get("capture_id"), "capture_id")
+    if (
+        not isinstance(observed, dict)
+        or observed.get("capture_id") != decision_capture_id
+        or not isinstance(context, dict)
+        or context.get("valid") is not True
+        or context.get("capture_id") != decision_capture_id
+    ):
+        raise ValueError("form workflow turn does not use current bound evidence")
+
+    if action_type == "safe_stop":
+        return _safe_stop(
+            current,
+            reason=str(decision.get("reason") or "form_workflow_safe_stop"),
+            forbidden_next_actions=["click", "input", "continue_next_step", "final_submit"],
+        )
+    if action_type == "request_user_review":
+        current["status"] = "needs_human_review"
+        current["pending_agent_decision"] = None
+        _append_event(
+            current,
+            "form_user_review_requested",
+            {
+                "question_id": decision.get("question_id"),
+                "reason": decision.get("reason"),
+                "action_executed": False,
+            },
+        )
+        return current
+    if action_type not in {
+        "fill_field",
+        "select_option",
+        "upload_file",
+        "continue_next_step",
+    }:
+        raise ValueError("unsupported form workflow action")
+    if decision.get("operation_count") != 1 or not isinstance(decision.get("operation"), dict):
+        raise ValueError("form workflow turn must contain exactly one operation")
+
+    current["pending_agent_decision"] = deepcopy(decision)
+    current["status"] = "ready_for_operation"
+    _append_event(
+        current,
+        "form_workflow_turn_recorded",
+        {
+            "action_type": action_type,
+            "question_id": decision.get("question_id"),
+            "capture_id": decision_capture_id,
+            "artifact_is_authorization": False,
+            "current_capture_required": True,
+            "gate_required": True,
         },
     )
     return current
@@ -313,6 +469,10 @@ def record_action_result(
         if isinstance(current.get("pending_agent_decision"), dict)
         else None
     )
+    is_form_turn = (
+        isinstance(pending, dict)
+        and pending.get("contract_version") == "form_workflow_turn_decision_v1"
+    )
     if pending and str(pending.get("semantic_action") or "").casefold() != action_type:
         raise ValueError("action result does not match pending Agent decision")
     evidence = _validated_evidence(evidence)
@@ -329,9 +489,10 @@ def record_action_result(
                 "transition_audit": deepcopy(transition_audit or {}),
             },
         )
+        if is_form_turn:
+            _invalidate_form_step_context(current, invalidated_by="verification_failed")
         return current
-    current["status"] = "ready_for_observation"
-    current["pending_agent_decision"] = None
+    current["status"] = "waiting_for_destination_observation"
     _append_event(
         current,
         "action_verified",
@@ -339,10 +500,14 @@ def record_action_result(
             "action_type": action_type,
             "action_executed": True,
             "post_action_verified": True,
+            "verification_scope": "action_effect_only",
+            "destination_observation_required": True,
             "evidence": evidence,
             "transition_audit": deepcopy(transition_audit or {}),
         },
     )
+    if is_form_turn:
+        _invalidate_form_step_context(current, invalidated_by=action_type)
     return current
 
 
@@ -452,6 +617,35 @@ def _safe_stop(
     return session
 
 
+def _invalidate_form_step_context(
+    session: dict[str, Any],
+    *,
+    invalidated_by: str,
+) -> None:
+    previous = session.get("current_form_step_context")
+    session["current_form_step_context"] = {
+        "capture_id": None,
+        "inventory_fingerprint": None,
+        "grounding_fingerprint": None,
+        "valid": False,
+        "invalidated_by": invalidated_by,
+    }
+    session["current_observation_evidence"] = None
+    _append_event(
+        session,
+        "form_step_context_invalidated",
+        {
+            "invalidated_by": invalidated_by,
+            "previous_capture_id": (
+                previous.get("capture_id") if isinstance(previous, dict) else None
+            ),
+            "capture_invalidated": True,
+            "inventory_invalidated": True,
+            "grounding_invalidated": True,
+        },
+    )
+
+
 def _validated_session(session: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(session, dict) or session.get("contract_version") != SESSION_CONTRACT:
         raise ValueError("invalid continuous task session")
@@ -460,6 +654,7 @@ def _validated_session(session: dict[str, Any]) -> dict[str, Any]:
     current = deepcopy(session)
     current.setdefault("current_observation_evidence", None)
     current.setdefault("current_read_state", None)
+    current.setdefault("current_form_step_context", None)
     current.setdefault("pending_agent_decision", None)
     return current
 
@@ -467,11 +662,15 @@ def _validated_session(session: dict[str, Any]) -> dict[str, Any]:
 def _validated_evidence(evidence: dict[str, Any]) -> dict[str, str]:
     if not isinstance(evidence, dict):
         raise ValueError("continuous task session evidence is required")
-    return {
+    validated = {
         "capture_id": _required_text(evidence.get("capture_id"), "capture_id"),
         "screenshot_sha256": _required_text(evidence.get("screenshot_sha256"), "screenshot_sha256"),
         "trace_path": _required_text(evidence.get("trace_path"), "trace_path"),
     }
+    screenshot_path = str(evidence.get("screenshot_path") or "").strip()
+    if screenshot_path:
+        validated["screenshot_path"] = screenshot_path
+    return validated
 
 
 def _append_event(session: dict[str, Any], event_type: str, details: dict[str, Any]) -> None:

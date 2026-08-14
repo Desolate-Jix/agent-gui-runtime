@@ -18,6 +18,7 @@ def _observation(interface_id: str, capture_id: str) -> dict:
             else "finite_detail"
         ),
         "capture_id": capture_id,
+        "screenshot_path": f"artifacts/screenshots/{capture_id}.png",
         "screenshot_sha256": hashlib.sha256(capture_id.encode("utf-8")).hexdigest(),
         "trace_path": f"logs/traces/{capture_id}.json",
     }
@@ -76,6 +77,26 @@ def _evidence(interface_id: str) -> dict:
                 "agent_description": "按需读取当前内容。",
             }
         ],
+        "semantic_controls": (
+            [
+                {
+                    "control_id": "article_card",
+                    "semantic_name": "Selected article card",
+                    "purpose": "Open the selected current article.",
+                    "role": "card",
+                    "allowed_actions": ["open_detail"],
+                    "verification_rule": {
+                        "rule_ids": ["detail_heading_visible"],
+                        "success_conditions": ["news_detail matched"],
+                    },
+                    "risk_class": "low",
+                    "review_status": "approved",
+                    "requires_fresh_grounding": True,
+                }
+            ]
+            if is_list
+            else []
+        ),
         "available_actions": actions,
         "verification_rules": [],
         "blockers": [],
@@ -266,6 +287,14 @@ def test_controller_reobserves_after_every_read_scroll_and_transition() -> None:
     ]
     assert all("bbox" not in str(context) for context in seen_contexts)
     assert all("click_point" not in str(context) for context in seen_contexts)
+    first_observation_event = next(
+        event
+        for event in report["session"]["events"]
+        if event["event_type"] == "interface_observed"
+    )
+    assert first_observation_event["details"]["evidence"]["screenshot_path"] == (
+        "artifacts/screenshots/list-1.png"
+    )
 
 
 def test_controller_gate_rejection_never_reports_operation_execution() -> None:
@@ -525,7 +554,58 @@ def test_controller_continues_navigation_after_agent_stops_infinite_reading() ->
     ]
     assert [plan["semantic_action"] for plan in operation_plans] == ["open_detail"]
     assert report["visited_interfaces"] == ["news_list", "news_detail"]
+    transition_step = report["steps"][1]
+    assert transition_step["gate_allowed"] is True
+    assert transition_step["effect_verified"] is True
+    assert transition_step["destination_observation_verified"] is True
+    assert transition_step["expected_target_interface_id"] == "news_detail"
+    assert transition_step["actual_target_interface_id"] == "news_detail"
     assert report["final_status"] == "safe_stop"
+
+
+def test_controller_does_not_count_effect_verified_destination_mismatch_as_navigation_success() -> None:
+    observe, observe_calls = _observer(
+        [
+            _observation("news_list", "list-1"),
+            _observation("unexpected_detail", "wrong-1"),
+        ]
+    )
+
+    def execute(plan: dict, _context: dict) -> dict:
+        return {
+            "contract_version": "navigation_reading_operation_result_v1",
+            "gate_result": {"allowed": True, "reason": "low_risk"},
+            "action_type": "open_detail",
+            "action_executed": True,
+            "post_action_verified": True,
+            "source_freshness": dict(plan["freshness"]),
+        }
+
+    report = run_navigation_reading_controller(
+        goal="打开已选择的文章。",
+        workflow_id="news-reading",
+        session_id="session-destination-mismatch",
+        observe_current=observe,
+        load_interface_evidence=lambda interface_id: _evidence(interface_id),
+        decide=lambda _context: {
+            "choice_id": "transition:open_selected_article",
+            "reason": "打开已选择的文章。",
+            "decision_source": "recorded_model_output",
+        },
+        execute_operation=execute,
+        max_steps=2,
+    )
+
+    assert observe_calls == ["list-1", "wrong-1"]
+    assert report["final_status"] == "safe_stop"
+    assert report["stop_reason"] == "destination_interface_mismatch"
+    assert report["visited_interfaces"] == ["news_list"]
+    assert report["steps"][0]["case_outcome"] == "safe_intercept"
+    assert report["steps"][0]["action_executed"] is True
+    assert report["steps"][0]["effect_verified"] is True
+    assert report["steps"][0]["destination_observation_verified"] is False
+    assert report["steps"][0]["expected_target_interface_id"] == "news_detail"
+    assert report["steps"][0]["actual_target_interface_id"] == "unexpected_detail"
 
 
 def test_controller_exposes_completed_branch_history_after_returning_to_hub() -> None:
@@ -548,6 +628,22 @@ def test_controller_exposes_completed_branch_history_after_returning_to_hub() ->
     def evidence(interface_id: str) -> dict:
         value = _evidence(interface_id)
         if interface_id == "news_detail":
+            value["semantic_controls"] = [
+                {
+                    "control_id": "back_button",
+                    "semantic_name": "Back to article list",
+                    "purpose": "Return to the previously reviewed news list.",
+                    "role": "button",
+                    "allowed_actions": ["navigate_back"],
+                    "verification_rule": {
+                        "rule_ids": ["news_list_visible"],
+                        "success_conditions": ["news_list matched"],
+                    },
+                    "risk_class": "low",
+                    "review_status": "approved",
+                    "requires_fresh_grounding": True,
+                }
+            ]
             value["available_actions"] = [
                 {
                     "action_id": "return_to_list",

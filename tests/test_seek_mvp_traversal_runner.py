@@ -2566,6 +2566,7 @@ def test_safe_form_fill_attempt_uses_visible_bbox_before_model_focus(monkeypatch
         answer_plan=answer_plan,
         candidate_profile={"candidate_name": "Alex Chen"},
         execute_fill=True,
+        approved_field_id="full-name-field",
         timeout=10,
     )
 
@@ -2705,6 +2706,7 @@ def test_safe_form_fill_attempt_scrolls_and_rebuilds_when_field_below_viewport(m
         cover_letter_draft={"draft": "Dear hiring team"},
         execute_fill=True,
         allow_cover_letter_fill=True,
+        approved_field_id="cover-letter-field",
         timeout=10,
     )
 
@@ -2763,6 +2765,7 @@ def test_safe_form_fill_attempt_stops_before_focus_execute_when_dry_point_outsid
         answer_plan=answer_plan,
         candidate_profile={"candidate_name": "Alex Chen"},
         execute_fill=True,
+        approved_field_id="full-name-field",
         timeout=10,
     )
 
@@ -2925,6 +2928,120 @@ def test_safe_form_fill_attempt_limits_to_one_field_and_blocks_cover_letter_by_d
             "reason": "cover_letter_fill_requires_explicit_flag",
         }
     ]
+
+
+def test_safe_form_fill_attempt_selects_only_explicitly_approved_field() -> None:
+    answer_plan = {
+        "contract_version": "application_answer_plan_v1",
+        "status": "planned_only_not_filled",
+        "planned_answers": [
+            {
+                "category": "auto_safe_known",
+                "label": "First name",
+                "reason": "profile_first_name_available",
+                "source": {"id": "first-field", "role": "text_input"},
+                "answer_source": "candidate_profile_v1.first_name",
+                "value_preview": "Alex",
+            },
+            {
+                "category": "auto_safe_known",
+                "label": "Email",
+                "reason": "profile_email_available",
+                "source": {"id": "email-field", "role": "email_input"},
+                "answer_source": "candidate_profile_v1.email",
+                "value_preview": "alex@example.com",
+            },
+        ],
+    }
+
+    attempt = runner._safe_form_fill_attempt(
+        "http://runtime",
+        app_name="edge",
+        answer_plan=answer_plan,
+        candidate_profile={"first_name": "Alex", "email": "alex@example.com"},
+        execute_fill=False,
+        approved_field_id="email-field",
+        timeout=10,
+    )
+
+    selected = [item for item in attempt["field_results"] if item["selected_for_fill"]]
+    assert attempt["approved_field_id"] == "email-field"
+    assert attempt["selected_count"] == 1
+    assert selected[0]["safe_form_fill_trace"]["field_id"] == "email-field"
+
+
+def test_safe_form_fill_attempt_live_fill_requires_approved_field_id(monkeypatch) -> None:
+    answer_plan = {
+        "contract_version": "application_answer_plan_v1",
+        "status": "planned_only_not_filled",
+        "planned_answers": [
+            {
+                "category": "auto_safe_known",
+                "label": "Email",
+                "reason": "profile_email_available",
+                "source": {"id": "email-field", "role": "email_input"},
+                "answer_source": "candidate_profile_v1.email",
+                "value_preview": "alex@example.com",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        runner,
+        "_post_json",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("live action must not run")),
+    )
+
+    attempt = runner._safe_form_fill_attempt(
+        "http://runtime",
+        app_name="edge",
+        answer_plan=answer_plan,
+        candidate_profile={"email": "alex@example.com"},
+        execute_fill=True,
+        timeout=10,
+    )
+
+    assert attempt["status"] == "blocked_need_user_or_gpt_decision"
+    assert attempt["stop_reason"] == "explicit_safe_field_approval_required"
+    assert attempt["fields_attempted"] == 0
+    assert attempt["fields_filled"] == 0
+
+
+def test_safe_form_fill_attempt_live_fill_rejects_unknown_approved_field_id(monkeypatch) -> None:
+    answer_plan = {
+        "contract_version": "application_answer_plan_v1",
+        "status": "planned_only_not_filled",
+        "planned_answers": [
+            {
+                "category": "auto_safe_known",
+                "label": "Email",
+                "reason": "profile_email_available",
+                "source": {"id": "email-field", "role": "email_input"},
+                "answer_source": "candidate_profile_v1.email",
+                "value_preview": "alex@example.com",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        runner,
+        "_post_json",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("live action must not run")),
+    )
+
+    attempt = runner._safe_form_fill_attempt(
+        "http://runtime",
+        app_name="edge",
+        answer_plan=answer_plan,
+        candidate_profile={"email": "alex@example.com"},
+        execute_fill=True,
+        approved_field_id="different-field",
+        timeout=10,
+    )
+
+    assert attempt["status"] == "blocked_need_user_or_gpt_decision"
+    assert attempt["stop_reason"] == "approved_safe_field_not_found"
+    assert attempt["approved_field_match_count"] == 0
+    assert attempt["fields_attempted"] == 0
+    assert attempt["fields_filled"] == 0
 
 
 def test_safe_form_fill_attempt_can_preview_cover_letter_only_with_explicit_flag() -> None:
@@ -3166,6 +3283,7 @@ def test_safe_form_fill_attempt_stops_when_post_fill_verification_unverified(mon
         answer_plan=answer_plan,
         candidate_profile={"candidate_name": "Alex Chen", "email": "alex@example.com"},
         execute_fill=True,
+        approved_field_id="full-name-field",
         timeout=10,
     )
 
@@ -3246,6 +3364,7 @@ def test_safe_form_fill_attempt_stops_when_final_submit_visible_after_fill(monke
         answer_plan=answer_plan,
         candidate_profile={"candidate_name": "Alex Chen"},
         execute_fill=True,
+        approved_field_id="full-name-field",
         timeout=10,
     )
 

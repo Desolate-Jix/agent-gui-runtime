@@ -50,6 +50,7 @@ def build_navigation_reading_context(
         choices.extend(
             _transition_choices(
                 evidence.get("available_actions"),
+                semantic_controls=evidence.get("semantic_controls"),
                 read_state=read_state,
             )
         )
@@ -83,6 +84,16 @@ def build_navigation_reading_context(
             choices.append(_stop_reading_choice())
         choices.append(_safe_stop_choice("agent_requested_safe_stop"))
 
+    completed_choice_ids = set(progress["completed_choice_ids"])
+    choices = [
+        choice
+        for choice in choices
+        if not (
+            choice.get("decision_type") == "follow_transition"
+            and choice.get("choice_id") in completed_choice_ids
+        )
+    ]
+
     execution = evidence.get("execution_contract")
     return {
         "contract_version": CONTEXT_CONTRACT,
@@ -91,6 +102,7 @@ def build_navigation_reading_context(
         "current_observation": current_observation,
         "read_state": read_state,
         "task_progress": progress,
+        "semantic_controls": deepcopy(evidence.get("semantic_controls") or []),
         "choices": choices,
         "verification_rules": deepcopy(evidence.get("verification_rules") or []),
         "blockers": deepcopy(evidence.get("blockers") or []),
@@ -229,7 +241,44 @@ def _validated_interface_evidence(value: dict[str, Any]) -> dict[str, Any]:
     _required_text(interface.get("interface_id"), "interface_id")
     if value.get("artifact_is_authorization") is not False:
         raise ValueError("reviewed interface evidence must not authorize execution")
+    _validate_actionable_semantic_controls(value)
     return deepcopy(value)
+
+
+def _validate_actionable_semantic_controls(value: dict[str, Any]) -> None:
+    controls = {
+        str(item.get("control_id") or ""): item
+        for item in value.get("semantic_controls") or []
+        if isinstance(item, dict) and str(item.get("control_id") or "")
+    }
+    for action in value.get("available_actions") or []:
+        if not isinstance(action, dict):
+            continue
+        source_control_id = _required_text(
+            action.get("source_control_id"),
+            "source_control_id",
+        )
+        control = controls.get(source_control_id)
+        if not control:
+            raise ValueError("available action requires a semantic control")
+        semantic_name = str(control.get("semantic_name") or "").strip()
+        purpose = str(control.get("purpose") or "").strip()
+        risk_class = str(control.get("risk_class") or "").strip()
+        action_type = _normalize_action(action.get("action_type"))
+        allowed_actions = control.get("allowed_actions")
+        verification = control.get("verification_rule")
+        has_verification = isinstance(verification, dict) and bool(
+            verification.get("rule_ids") or verification.get("success_conditions")
+        )
+        if (
+            not semantic_name
+            or not purpose
+            or not risk_class
+            or not isinstance(allowed_actions, list)
+            or action_type not in allowed_actions
+            or not has_verification
+        ):
+            raise ValueError("available action has an incomplete semantic control")
 
 
 def _validated_observation(
@@ -274,11 +323,23 @@ def _normalized_read_state(value: dict[str, Any] | None) -> dict[str, Any]:
     strategy = _required_text(value.get("strategy"), "read strategy")
     if strategy not in _READ_STRATEGIES:
         raise ValueError(f"unsupported read strategy: {strategy}")
-    status = _required_text(value.get("status") or "reading", "read status")
+    batch_stop_reason = _required_text(
+        value.get("status") or "reading",
+        "read status",
+    )
     scrolls_used = _non_negative_int(value.get("scrolls_used"), "scrolls_used")
     max_scrolls = _non_negative_int(value.get("max_scrolls"), "max_scrolls")
     items_read = _non_negative_int(value.get("items_read"), "items_read")
     max_items = _non_negative_int(value.get("max_items"), "max_items")
+    budget_remaining = (
+        (max_scrolls <= 0 or scrolls_used < max_scrolls)
+        and (max_items <= 0 or items_read < max_items)
+    )
+    status = (
+        "capture_batch_complete"
+        if batch_stop_reason == "captures_exhausted" and budget_remaining
+        else batch_stop_reason
+    )
 
     if status == "wrong_scope_detected":
         completion = "blocked_wrong_scope"
@@ -296,6 +357,7 @@ def _normalized_read_state(value: dict[str, Any] | None) -> dict[str, Any]:
     return {
         "strategy": strategy,
         "status": status,
+        "batch_stop_reason": batch_stop_reason,
         "completion": completion,
         "content_id": str(value.get("content_id") or "").strip() or None,
         "scrolls_used": scrolls_used,
@@ -308,9 +370,17 @@ def _normalized_read_state(value: dict[str, Any] | None) -> dict[str, Any]:
 def _transition_choices(
     value: Any,
     *,
+    semantic_controls: Any,
     read_state: dict[str, Any],
 ) -> list[dict[str, Any]]:
     choices: list[dict[str, Any]] = []
+    controls_by_id = {
+        str(item.get("control_id") or ""): item
+        for item in (
+            semantic_controls if isinstance(semantic_controls, list) else []
+        )
+        if isinstance(item, dict) and str(item.get("control_id") or "")
+    }
     for item in value if isinstance(value, list) else []:
         if not isinstance(item, dict):
             continue
@@ -326,6 +396,7 @@ def _transition_choices(
         ):
             continue
         action_id = _required_text(item.get("action_id"), "action_id")
+        source_control_id = str(item.get("source_control_id") or "")
         choices.append(
             {
                 "choice_id": f"transition:{action_id}",
@@ -339,7 +410,8 @@ def _transition_choices(
                     or item.get("display_name")
                     or semantic_action
                 ),
-                "source_control_id": str(item.get("source_control_id") or ""),
+                "source_control_id": source_control_id,
+                "source_control": deepcopy(controls_by_id[source_control_id]),
                 "target_interface_id": str(item.get("target_interface_id") or ""),
                 "requires_completed_read": requires_completed_read or None,
                 "risk_level": str(item.get("risk_level") or "unknown"),

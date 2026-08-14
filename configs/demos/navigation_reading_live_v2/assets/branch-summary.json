@@ -31,6 +31,9 @@
       "completion_policy": "reached_bottom_required",
       "max_scrolls": 1,
       "max_items": 0,
+      "bottom_markers": [
+        "BRANCHING WORKFLOW SAFE STOP"
+      ],
       "agent_description": "Read the final workflow summary and then stop safely."
     }
   ],
@@ -49,10 +52,13 @@
     }
   ],
   "review": {
-    "status": "human_reviewed",
+    "status": "human_approved",
     "manual_revision": {
       "semantic_description": "No more GUI action is required on this summary."
-    }
+    },
+    "reviewed_by_human": true,
+    "reviewed_revision_hash": "3a9a52473052dcc76e24d16c0b47aee9d3d20ed33e72f979e9cda530708dfd4f",
+    "current_revision_hash": "3a9a52473052dcc76e24d16c0b47aee9d3d20ed33e72f979e9cda530708dfd4f"
   },
   "evidence": {},
   "execute_binding_enabled": false

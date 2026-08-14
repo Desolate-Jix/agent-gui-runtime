@@ -143,6 +143,71 @@ class WindowManager:
             f"expected_handle={bound.handle}, actual_foreground_handle={active_handle}"
         )
 
+    def validate_bound_point_visibility(
+        self,
+        *,
+        bound: BoundWindow,
+        x: int,
+        y: int,
+    ) -> dict[str, object]:
+        """验证窗口坐标点当前是否仍由绑定窗口拥有。"""
+        self._ensure_windows_backend()
+        screen_x = int(bound.rect.left) + int(x)
+        screen_y = int(bound.rect.top) + int(y)
+        base = {
+            "contract_version": "bound_point_visibility_v1",
+            "window_point": {"x": int(x), "y": int(y)},
+            "screen_point": {"x": screen_x, "y": screen_y},
+            "bound_window": {
+                "handle": int(bound.handle),
+                "title": bound.title,
+                "process_id": bound.process_id,
+                "process_name": bound.process_name,
+            },
+        }
+        if not (
+            int(bound.rect.left) <= screen_x < int(bound.rect.right)
+            and int(bound.rect.top) <= screen_y < int(bound.rect.bottom)
+        ):
+            return {**base, "allowed": False, "reason": "target_point_outside_bound_window"}
+
+        try:
+            hit_handle = int(win32gui.WindowFromPoint((screen_x, screen_y)) or 0)  # type: ignore[union-attr]
+            hit_root = int(win32gui.GetAncestor(hit_handle, win32con.GA_ROOT) or hit_handle)  # type: ignore[union-attr]
+            hit_root_owner = int(win32gui.GetAncestor(hit_handle, win32con.GA_ROOTOWNER) or hit_root)  # type: ignore[union-attr]
+            is_child = bool(win32gui.IsChild(int(bound.handle), hit_handle))  # type: ignore[union-attr]
+            title = str(win32gui.GetWindowText(hit_root) or "")  # type: ignore[union-attr]
+            process_id = self._get_process_id(hit_root)
+            process_name = self._get_process_name(process_id)
+        except Exception as exc:
+            return {
+                **base,
+                "allowed": False,
+                "reason": "target_point_visibility_unavailable",
+                "error": str(exc),
+            }
+
+        hit_window = {
+            "handle": hit_handle,
+            "root_handle": hit_root,
+            "root_owner_handle": hit_root_owner,
+            "title": title or None,
+            "process_id": process_id,
+            "process_name": process_name,
+        }
+        owned = bool(
+            hit_handle == int(bound.handle)
+            or is_child
+            or hit_root == int(bound.handle)
+            or hit_root_owner == int(bound.handle)
+        )
+        return {
+            **base,
+            "allowed": owned,
+            "reason": "target_point_owned_by_bound_window" if owned else "target_point_occluded",
+            "hit_window": hit_window,
+        }
+
     def resize_bound_window(
         self,
         *,
@@ -357,6 +422,7 @@ class WindowManager:
 
         attached_threads: list[int] = []
         current_thread = 0
+        thread_ids: tuple[int, int] = (0, 0)
         try:
             current_thread = int(win32api.GetCurrentThreadId())  # type: ignore[union-attr]
             foreground_handle = int(win32gui.GetForegroundWindow() or 0)  # type: ignore[union-attr]
@@ -366,13 +432,24 @@ class WindowManager:
                 else 0
             )
             target_thread = int(win32process.GetWindowThreadProcessId(handle)[0])  # type: ignore[union-attr]
-            for thread_id in (foreground_thread, target_thread):
-                if not thread_id or thread_id == current_thread or thread_id in attached_threads:
-                    continue
-                win32process.AttachThreadInput(current_thread, thread_id, True)  # type: ignore[union-attr]
-                attached_threads.append(thread_id)
+            thread_ids = (foreground_thread, target_thread)
         except Exception as exc:
-            logger.warning("Input-thread attachment failed for handle {}: {}", handle, exc)
+            logger.warning("Input-thread discovery failed for handle {}: {}", handle, exc)
+
+        for thread_id in thread_ids:
+            if not thread_id or thread_id == current_thread or thread_id in attached_threads:
+                continue
+            try:
+                win32process.AttachThreadInput(current_thread, thread_id, True)  # type: ignore[union-attr]
+            except Exception as exc:
+                logger.warning(
+                    "Input-thread attachment failed for handle {}, target_thread={}: {}",
+                    handle,
+                    thread_id,
+                    exc,
+                )
+                continue
+            attached_threads.append(thread_id)
 
         try:
             win32gui.BringWindowToTop(handle)  # type: ignore[union-attr]
@@ -397,12 +474,82 @@ class WindowManager:
             win32gui.SetForegroundWindow(handle)  # type: ignore[union-attr]
         except Exception as exc:
             logger.warning("Foreground activation failed for handle {}: {}", handle, exc)
+            if not self._retry_foreground_activation_with_alt_unlock(handle):
+                self._cycle_past_shell_notification_foreground(handle)
         finally:
             for thread_id in reversed(attached_threads):
                 try:
                     win32process.AttachThreadInput(current_thread, thread_id, False)  # type: ignore[union-attr]
                 except Exception as exc:
                     logger.warning("Input-thread detach failed for handle {}: {}", handle, exc)
+
+    def _retry_foreground_activation_with_alt_unlock(self, handle: int) -> bool:
+        """Retry foreground activation after a bounded synthetic Alt press."""
+        alt_pressed = False
+        activated = False
+        try:
+            win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)  # type: ignore[union-attr]
+            alt_pressed = True
+            win32gui.SetForegroundWindow(handle)  # type: ignore[union-attr]
+            activated = True
+        except Exception as exc:
+            logger.warning("Alt-unlock foreground retry failed for handle {}: {}", handle, exc)
+        finally:
+            if alt_pressed:
+                try:
+                    win32api.keybd_event(  # type: ignore[union-attr]
+                        win32con.VK_MENU,
+                        0,
+                        win32con.KEYEVENTF_KEYUP,
+                        0,
+                    )
+                except Exception as exc:
+                    logger.warning("Alt-unlock key release failed for handle {}: {}", handle, exc)
+        return activated
+
+    def _cycle_past_shell_notification_foreground(self, handle: int) -> bool:
+        """Cycle away from an OS notification overlay and verify the bound target wins foreground."""
+        foreground_handle = int(win32gui.GetForegroundWindow() or 0)  # type: ignore[union-attr]
+        if not foreground_handle or foreground_handle == handle:
+            return foreground_handle == handle
+
+        process_name = (self._get_process_name(self._get_process_id(foreground_handle)) or "").lower()
+        if process_name not in {"shellexperiencehost.exe", "startmenuexperiencehost.exe"}:
+            return False
+
+        alt_pressed = False
+        tab_pressed = False
+        try:
+            win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)  # type: ignore[union-attr]
+            alt_pressed = True
+            win32api.keybd_event(win32con.VK_TAB, 0, 0, 0)  # type: ignore[union-attr]
+            tab_pressed = True
+        except Exception as exc:
+            logger.warning("Shell-notification foreground cycle failed for handle {}: {}", handle, exc)
+        finally:
+            if tab_pressed:
+                try:
+                    win32api.keybd_event(  # type: ignore[union-attr]
+                        win32con.VK_TAB,
+                        0,
+                        win32con.KEYEVENTF_KEYUP,
+                        0,
+                    )
+                except Exception as exc:
+                    logger.warning("Shell-notification Tab release failed for handle {}: {}", handle, exc)
+            if alt_pressed:
+                try:
+                    win32api.keybd_event(  # type: ignore[union-attr]
+                        win32con.VK_MENU,
+                        0,
+                        win32con.KEYEVENTF_KEYUP,
+                        0,
+                    )
+                except Exception as exc:
+                    logger.warning("Shell-notification Alt release failed for handle {}: {}", handle, exc)
+
+        time.sleep(0.1)
+        return int(win32gui.GetForegroundWindow() or 0) == handle  # type: ignore[union-attr]
 
     def _get_process_id(self, handle: int) -> Optional[int]:
         """Return the process id for a window handle."""

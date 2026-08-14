@@ -1,6 +1,29 @@
 (function attachInterfaceWorkflowGraph(globalScope) {
   "use strict";
 
+  function projectInterfaceWorkflowNode(node = {}) {
+    const reviewStatus = String(node.review_status || "needs_human_review").toLowerCase();
+    const evidenceStatus = String(node.evidence_status || "unknown").toLowerCase();
+    const invalid = (
+      reviewStatus.includes("invalid")
+      || reviewStatus.includes("stale")
+      || evidenceStatus.includes("invalid")
+      || evidenceStatus.includes("stale")
+      || evidenceStatus === "evidence_missing"
+    );
+    const reviewed = !invalid && (
+      node.agent_usable === true
+      || (
+        node.reviewed_by_human === true
+        && ["human_approved", "human_reviewed", "approved", "reviewed"].includes(reviewStatus)
+      )
+    );
+    return {
+      status_tone: invalid ? "invalid" : reviewed ? "reviewed" : "unreviewed",
+      agent_usable: reviewed && node.agent_usable !== false,
+    };
+  }
+
   function buildInterfaceWorkflowTopology(graph = {}) {
     const allSourceNodes = Array.isArray(graph.nodes) ? graph.nodes : [];
     const allSourceEdges = Array.isArray(graph.edges) ? graph.edges : [];
@@ -24,6 +47,7 @@
           ? node.evidence
           : {};
         const controls = Array.isArray(node?.controls) ? node.controls : [];
+        const reviewProjection = projectInterfaceWorkflowNode(node);
         return {
           id: `interface::${node.node_id}`,
           kind: "interface",
@@ -32,6 +56,9 @@
           surface_type: String(node.surface_type || "unknown_surface"),
           evidence_status: String(node.evidence_status || "unknown"),
           review_status: String(node.review_status || "needs_human_review"),
+          reviewed_by_human: node.reviewed_by_human === true,
+          agent_usable: node.agent_usable === true,
+          status_tone: reviewProjection.status_tone,
           evidence_path: String(
             evidence.human_review_overlay_path
             || evidence.fused_overlay_path
@@ -51,26 +78,79 @@
             : node.selected === true,
         };
       });
-    const links = validEdges.map((edge) => ({
-      id: `transition::${edge.edge_id}`,
-      kind: "interface_transition",
-      ref_id: String(edge.edge_id),
-      edge_id: String(edge.edge_id),
-      source_id: `interface::${edge.source_node_id}`,
-      target_id: `interface::${edge.target_node_id}`,
-      source_node_id: String(edge.source_node_id),
-      target_node_id: String(edge.target_node_id),
-      label: String(edge.display_name || edge.action_type || edge.edge_id),
-      action_type: String(edge.action_type || "unknown_action"),
-      target_control_id: String(edge.target_control_id || ""),
-      target_region_id: String(edge.target_region_id || ""),
-      review_status: String(edge.review_status || "needs_human_review"),
-    }));
+    const projectedByRefId = new Map(interfaceNodes.map((node) => [node.ref_id, node]));
+    const links = validEdges.map((edge) => {
+      const sourceNode = projectedByRefId.get(String(edge.source_node_id));
+      const targetNode = projectedByRefId.get(String(edge.target_node_id));
+      const endpointTones = [sourceNode?.status_tone, targetNode?.status_tone];
+      const edgeReviewStatus = String(
+        edge.review_status || "needs_human_review",
+      ).toLowerCase();
+      const edgeReviewed = [
+        "human_approved",
+        "human_reviewed",
+        "approved",
+        "reviewed",
+      ].includes(edgeReviewStatus);
+      const statusTone = endpointTones.includes("invalid")
+        ? "invalid"
+        : endpointTones.includes("unreviewed") || !edgeReviewed
+          ? "unreviewed"
+          : "reviewed";
+      return {
+        id: `transition::${edge.edge_id}`,
+        kind: "interface_transition",
+        ref_id: String(edge.edge_id),
+        edge_id: String(edge.edge_id),
+        source_id: `interface::${edge.source_node_id}`,
+        target_id: `interface::${edge.target_node_id}`,
+        source_node_id: String(edge.source_node_id),
+        target_node_id: String(edge.target_node_id),
+        label: String(edge.display_name || edge.action_type || edge.edge_id),
+        action_type: String(edge.action_type || "unknown_action"),
+        target_control_id: String(edge.target_control_id || ""),
+        target_region_id: String(edge.target_region_id || ""),
+        review_status: edgeReviewStatus,
+        status_tone: statusTone,
+      };
+    });
+    const connectedNodeIds = new Set(links.flatMap((link) => [link.source_id, link.target_id]));
+    interfaceNodes.forEach((node) => {
+      node.disconnected = interfaceNodes.length > 1 && !connectedNodeIds.has(node.id);
+    });
     return {
       entry_node_id: focusNodeId || String(graph.workflow?.entry_node_id || ""),
       nodes: interfaceNodes,
       links,
     };
+  }
+
+  function summarizeWorkflowReadiness(topology = {}) {
+    const nodes = Array.isArray(topology.nodes) ? topology.nodes : [];
+    const summary = {
+      status: "empty",
+      reviewed: nodes.filter((node) => node.status_tone === "reviewed").length,
+      unreviewed: nodes.filter((node) => node.status_tone === "unreviewed").length,
+      invalid: nodes.filter((node) => node.status_tone === "invalid").length,
+      total: nodes.length,
+      agent_usable: false,
+      interpretation: "workflow has no interface nodes",
+    };
+    if (!nodes.length) return summary;
+    if (summary.invalid) {
+      summary.status = "invalid_or_stale_present";
+      summary.interpretation = "workflow contains invalid or stale interface evidence";
+      return summary;
+    }
+    if (summary.unreviewed) {
+      summary.status = "mixed_review_state";
+      summary.interpretation = "workflow contains interfaces that Agent cannot use directly";
+      return summary;
+    }
+    summary.status = "all_interfaces_reviewed";
+    summary.agent_usable = true;
+    summary.interpretation = "all interface evidence is reviewed; this is still not execution authorization";
+    return summary;
   }
 
   function interfaceWorkflowNodeDiameter(node = {}) {
@@ -695,19 +775,51 @@
     };
   }
 
-  function interfaceWorkflowNodePresentation(node = {}) {
+  function interfaceWorkflowNodePresentation(node = {}, options = {}) {
+    const english = String(options.language || "").toLowerCase().startsWith("en");
+    const copy = english
+      ? {
+        unnamed_interface: "Unnamed interface",
+        unnamed_operation: "Unnamed operation",
+        unnamed_control: "Unnamed control",
+        invalid: "Invalid evidence",
+        learning: "Needs learning",
+        reviewed: "Reviewed",
+        unreviewed: "Pending review",
+        operation_path: "Operation path",
+        interface_control: "Interface control",
+        selected: "Selected",
+      }
+      : {
+        unnamed_interface: "未命名界面",
+        unnamed_operation: "未命名操作",
+        unnamed_control: "未命名控件",
+        invalid: "证据无效",
+        learning: "待学习",
+        reviewed: "已审核",
+        unreviewed: "待审核",
+        operation_path: "操作路径",
+        interface_control: "界面控件",
+        selected: "已选择",
+      };
     const kind = String(node.kind || "");
     if (kind === "interface") {
-      const reviewed = ["human_reviewed", "approved", "reviewed"].includes(
-        String(node.review_status || "").toLowerCase(),
-      );
+      const statusTone = String(node.status_tone || projectInterfaceWorkflowNode(node).status_tone);
       const needsLearning = String(node.evidence_status || "") === "needs_learning";
       return {
-        title: String(node.label || node.ref_id || "未命名界面"),
+        title: String(node.label || node.ref_id || copy.unnamed_interface),
         subtitle: String(node.surface_type || "unknown_surface"),
-        meta: `${Number(node.control_count || 0)} 个控件 · ${Number(node.outgoing_count || 0)} 条路径`,
-        status: needsLearning ? "待学习" : reviewed ? "已审核" : "待审核",
-        status_tone: needsLearning ? "learning" : reviewed ? "reviewed" : "review",
+        meta: english
+          ? `${Number(node.control_count || 0)} controls · ${Number(node.outgoing_count || 0)} paths`
+          : `${Number(node.control_count || 0)} 个控件 · ${Number(node.outgoing_count || 0)} 条路径`,
+        status: statusTone === "invalid"
+          ? copy.invalid
+          : needsLearning
+            ? copy.learning
+            : statusTone === "reviewed" ? copy.reviewed : copy.unreviewed,
+        status_tone: statusTone === "invalid"
+          ? "invalid"
+          : needsLearning ? "learning" : statusTone,
       };
     }
     if (kind === "operation") {
@@ -715,24 +827,26 @@
         String(node.review_status || "").toLowerCase(),
       );
       return {
-        title: String(node.label || node.ref_id || "未命名操作"),
+        title: String(node.label || node.ref_id || copy.unnamed_operation),
         subtitle: String(node.action_type || "unknown_action"),
-        meta: "操作路径",
-        status: reviewed ? "已审核" : "待审核",
+        meta: copy.operation_path,
+        status: reviewed ? copy.reviewed : copy.unreviewed,
         status_tone: reviewed ? "reviewed" : "review",
       };
     }
     return {
-      title: String(node.label || node.ref_id || "未命名控件"),
+      title: String(node.label || node.ref_id || copy.unnamed_control),
       subtitle: String(node.role || "control"),
-      meta: "界面控件",
-      status: node.selected === true ? "已选择" : "",
+      meta: copy.interface_control,
+      status: node.selected === true ? copy.selected : "",
       status_tone: node.selected === true ? "selected" : "neutral",
     };
   }
 
   const api = {
     buildInterfaceWorkflowTopology,
+    projectInterfaceWorkflowNode,
+    summarizeWorkflowReadiness,
     layoutInterfaceWorkflowTopology,
     createInterfaceWorkflowSimulation,
     interfaceWorkflowHoverProjection,

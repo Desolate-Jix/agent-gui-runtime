@@ -5,8 +5,9 @@ import json
 import re
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
+from app.learn.agent_evidence import PersistedReviewRevision
 from app.learn.application_identity import normalize_application_identity
 from app.learn.interface_assets import (
     ASSET_ROOT,
@@ -265,6 +266,7 @@ def save_workflow_review_as_application_assets(
     review: dict[str, Any],
     *,
     project_root: str | Path,
+    persisted_review_revisions: Mapping[str, PersistedReviewRevision] | None = None,
 ) -> dict[str, Any]:
     """把旧流程审核格式冻结为独立界面资产与软件级关系图。"""
 
@@ -378,6 +380,7 @@ def save_workflow_review_as_application_assets(
     agent_evidence_projection = migrate_agent_evidence_assets(
         project_root=project_root,
         application_identity_key=graph["application_identity_key"],
+        persisted_review_revisions=persisted_review_revisions,
     )
     return {
         "contract_version": "workflow_review_asset_projection_result_v1",

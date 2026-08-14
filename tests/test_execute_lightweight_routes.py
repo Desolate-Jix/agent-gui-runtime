@@ -113,6 +113,7 @@ def test_execute_form_inventory_seek_exposes_fields_and_danger_actions() -> None
             "app_id": "seek",
             "application_flow_state": {
                 "contract_version": "seek_application_flow_state_v1",
+                "capture_id": "seek-route-cap-1",
                 "current_step": "questionnaire",
                 "application_form_inventory": {
                     "fields": [
@@ -142,11 +143,51 @@ def test_execute_form_inventory_seek_exposes_fields_and_danger_actions() -> None
     assert response.status_code == 200
     assert payload["success"] is True
     data = payload["data"]
-    assert data["contract_version"] == "form_field_inventory_v1"
+    assert data["contract_version"] == "form_question_inventory_v1"
     assert data["form_state"] == "questionnaire"
     assert [field["field_id"] for field in data["fields"]] == ["cover_letter", "q_country"]
     assert data["continue_action"]["text"] == "Continue"
     assert data["danger_actions"][0]["text"] == "Submit application"
     assert data["operation_context"]["skill_id"] == "detect_form"
     assert data["operation_context"]["requires_gate"] is False
+    assert data["artifact_is_authorization"] is False
+    assert data["fill_attempted"] is False
+    assert data["submit_attempted"] is False
     assert data["trace_path"]
+
+
+def test_execute_form_inventory_generic_uses_current_capture_and_scope() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/execute/form_inventory",
+        json={
+            "app_id": "generic_ats",
+            "operation_context": {"capture_id": "generic-cap-1"},
+            "application_flow_state": {
+                "contract_version": "application_flow_state_v1",
+                "current_step": "contact_details",
+                "active_form_bbox": {"x": 100, "y": 100, "w": 500, "h": 500},
+                "application_form_inventory": {
+                    "fields": [
+                        {"id": "email", "text": "Email", "input_type": "email", "role": "textbox", "bbox": {"x": 140, "y": 160, "w": 240, "h": 36}},
+                        {"id": "global_search", "text": "Search", "role": "textbox", "bbox": {"x": 10, "y": 10, "w": 240, "h": 36}},
+                    ],
+                    "actions": [
+                        {"id": "next", "text": "Continue", "role": "button", "bbox": {"x": 140, "y": 420, "w": 120, "h": 40}},
+                    ],
+                },
+            },
+        },
+    )
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["success"] is True
+    data = payload["data"]
+    assert data["capture_id"] == "generic-cap-1"
+    assert [(field["field_id"], field["field_type"]) for field in data["fields"]] == [("email", "email")]
+    assert data["excluded_outside_scope_count"] == 1
+    assert data["continue_action"]["action_id"] == "next"
+    assert data["fill_attempted"] is False
+    assert data["submit_attempted"] is False

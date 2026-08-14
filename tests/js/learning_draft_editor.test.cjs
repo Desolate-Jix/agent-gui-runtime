@@ -19,6 +19,16 @@ function loadSaveLearningDraftReview(overrides = {}) {
   const saveEnd = panelSource.indexOf("async function generatePathGraphCandidate", saveStart);
   const button = { disabled: false, textContent: "Save review" };
   const calls = [];
+  const workflowState = {
+    replaceReviewedNodeEvidenceBySource: (previousPath, reviewedPath) => {
+      calls.push(`replace:${previousPath}->${reviewedPath}`);
+      return { node: { node_id: "node1" } };
+    },
+    snapshot: () => {
+      calls.push("snapshot");
+      return { nodes: [{ node_id: "node1" }] };
+    },
+  };
   const context = {
     console,
     learningDraftEditorActive: true,
@@ -44,8 +54,12 @@ function loadSaveLearningDraftReview(overrides = {}) {
       calls.push("parent_refresh");
       return { draft: {} };
     },
-    loadInterfaceWorkflowReview: async () => {
-      calls.push("workflow_refresh");
+    interfaceWorkflowReviewState: workflowState,
+    interfaceWorkflowWorkbenchState: {
+      showWorkflowNode: (nodeId) => calls.push(`show:${nodeId}`),
+    },
+    saveInterfaceWorkflowReview: async () => {
+      calls.push("workflow_save");
       return { workflow: {} };
     },
     closeImageInspector: () => calls.push("close"),
@@ -361,7 +375,11 @@ test("learning draft editor save refreshes the parent before closing", async () 
     "source:artifacts/reviewed.json",
     "image_revision",
     "parent_refresh",
-    "workflow_refresh",
+    "replace:artifacts/source.json->artifacts/reviewed.json",
+    "show:node1",
+    "snapshot",
+    "workflow_save",
+    "snapshot",
     "close",
     "correction_memory",
     "response:true",
@@ -387,11 +405,32 @@ test("learning draft editor stays open and reports failure when parent refresh f
   assert.equal(button.textContent, "Save review");
 });
 
-test("learning draft editor stays open when workflow evidence refresh fails", async () => {
+test("learning draft editor stays open when workflow evidence replacement fails", async () => {
   const calls = [];
   const { context, button } = loadSaveLearningDraftReview({
-    loadInterfaceWorkflowReview: async () => {
-      calls.push("workflow_refresh");
+    interfaceWorkflowReviewState: {
+      replaceReviewedNodeEvidenceBySource: () => {
+        calls.push("replace");
+        return { node: null };
+      },
+    },
+    closeImageInspector: () => calls.push("close"),
+    renderResponse: (response) => calls.push(`response:${response.success}`),
+  });
+
+  const result = await context.saveLearningDraftReview();
+
+  assert.equal(result, null);
+  assert.deepEqual(calls, ["replace", "response:false"]);
+  assert.equal(button.disabled, false);
+  assert.equal(button.textContent, "Save review");
+});
+
+test("learning draft editor stays open when workflow save fails", async () => {
+  const calls = [];
+  const { context, button } = loadSaveLearningDraftReview({
+    saveInterfaceWorkflowReview: async () => {
+      calls.push("workflow_save");
       return null;
     },
     closeImageInspector: () => calls.push("close"),
@@ -401,7 +440,23 @@ test("learning draft editor stays open when workflow evidence refresh fails", as
   const result = await context.saveLearningDraftReview();
 
   assert.equal(result, null);
-  assert.deepEqual(calls, ["workflow_refresh", "response:false"]);
+  assert.deepEqual(calls, ["workflow_save", "response:false"]);
+  assert.equal(button.disabled, false);
+  assert.equal(button.textContent, "Save review");
+});
+
+test("learning draft editor fails closed when workflow state is missing", async () => {
+  const calls = [];
+  const { context, button } = loadSaveLearningDraftReview({
+    interfaceWorkflowReviewState: null,
+    closeImageInspector: () => calls.push("close"),
+    renderResponse: (response) => calls.push(`response:${response.success}`),
+  });
+
+  const result = await context.saveLearningDraftReview();
+
+  assert.equal(result, null);
+  assert.deepEqual(calls, ["response:false"]);
   assert.equal(button.disabled, false);
   assert.equal(button.textContent, "Save review");
 });

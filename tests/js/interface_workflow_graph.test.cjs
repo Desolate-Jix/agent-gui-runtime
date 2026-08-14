@@ -12,9 +12,80 @@ const {
   interfaceWorkflowHoverProjection,
   hitTestInterfaceWorkflowNode,
   resolveInterfaceWorkflowTargetEvidence,
+  summarizeWorkflowReadiness,
   interfaceWorkflowNodePresentation,
   interfaceWorkflowNodeDiameter,
 } = require("../../app/web_panel/interface_workflow_graph.js");
+
+test("separates review coverage from reliability and workflow authorization", () => {
+  const graph = branchingGraph();
+  graph.nodes[0].agent_usable = true;
+  graph.nodes[0].reviewed_by_human = true;
+  graph.nodes[1].review_status = "needs_human_review";
+  graph.nodes[2].review_status = "invalid_stale_evidence";
+
+  const topology = buildInterfaceWorkflowTopology(graph);
+  const summary = summarizeWorkflowReadiness(topology);
+
+  assert.equal(topology.nodes.find((node) => node.ref_id === "home").status_tone, "reviewed");
+  assert.equal(topology.nodes.find((node) => node.ref_id === "detail").status_tone, "unreviewed");
+  assert.equal(topology.nodes.find((node) => node.ref_id === "filters").status_tone, "invalid");
+  assert.deepEqual(summary, {
+    status: "invalid_or_stale_present",
+    reviewed: 1,
+    unreviewed: 1,
+    invalid: 1,
+    total: 3,
+    agent_usable: false,
+    interpretation: "workflow contains invalid or stale interface evidence",
+  });
+});
+
+test("marks paths through unreviewed nodes as review-required rather than successful", () => {
+  const topology = buildInterfaceWorkflowTopology(branchingGraph());
+
+  assert.equal(
+    topology.links.find((link) => link.ref_id === "open_detail").status_tone,
+    "unreviewed",
+  );
+  assert.equal(
+    topology.nodes.find((node) => node.ref_id === "detail").disconnected,
+    false,
+  );
+});
+
+test("keeps an unapproved transition review-required between approved interfaces", () => {
+  const graph = branchingGraph();
+  graph.nodes.forEach((node) => {
+    node.review_status = "human_approved";
+    node.reviewed_by_human = true;
+  });
+  graph.edges[0].review_status = "needs_human_review";
+  graph.edges[1].review_status = "human_approved";
+
+  const topology = buildInterfaceWorkflowTopology(graph);
+
+  assert.equal(
+    topology.links.find((link) => link.ref_id === "open_detail").status_tone,
+    "unreviewed",
+  );
+  assert.equal(
+    topology.links.find((link) => link.ref_id === "open_filters").status_tone,
+    "reviewed",
+  );
+});
+
+test("does not treat an approved label without human review evidence as reviewed", () => {
+  const graph = branchingGraph();
+  graph.nodes[0].agent_usable = false;
+  graph.nodes[0].reviewed_by_human = false;
+  graph.nodes[0].review_status = "human_approved";
+
+  const topology = buildInterfaceWorkflowTopology(graph);
+  const home = topology.nodes.find((node) => node.ref_id === "home");
+
+  assert.equal(home.status_tone, "unreviewed");
+});
 
 function branchingGraph() {
   return {
@@ -26,6 +97,7 @@ function branchingGraph() {
         surface_type: "job_search_results",
         evidence_status: "ready",
         review_status: "human_reviewed",
+        reviewed_by_human: true,
         evidence: {
           fused_overlay_path: "artifacts/review-overlays/home.png",
         },
@@ -143,6 +215,19 @@ test("builds concise interface node copy without child-node presentation", () =>
     subtitle: "job_search_results",
     meta: "2 个控件 · 2 条路径",
     status: "已审核",
+    status_tone: "reviewed",
+  });
+});
+
+test("localizes interface node presentation for the English panel", () => {
+  const topology = buildInterfaceWorkflowTopology(branchingGraph());
+  const home = topology.nodes.find((node) => node.id === "interface::home");
+
+  assert.deepEqual(interfaceWorkflowNodePresentation(home, { language: "en-US" }), {
+    title: "Home",
+    subtitle: "job_search_results",
+    meta: "2 controls · 2 paths",
+    status: "Reviewed",
     status_tone: "reviewed",
   });
 });

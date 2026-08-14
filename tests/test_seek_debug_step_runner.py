@@ -823,6 +823,9 @@ def test_match_step_applies_agent_suitability_pass_review(tmp_path: Path) -> Non
             "location": "Auckland CBD, Auckland",
             "requirements": ["Python", "React", "SQL"],
             "description_sections": [{"index": 0, "role": "body", "text": "Complete JD reviewed by agent."}],
+            "detail_read_state": "reached_bottom",
+            "detail_read_completion": "complete",
+            "detail_read_complete": True,
         },
         "steps": [],
         "safety": runner._default_safety(),
@@ -1048,6 +1051,85 @@ def test_read_detail_batch_confirms_no_effect_before_bottom(monkeypatch) -> None
     assert len(scroll_calls) == 2
     assert scroll_calls[0]["wheel_clicks"] == 9
     assert scroll_calls[1]["wheel_clicks"] > scroll_calls[0]["wheel_clicks"]
+
+
+def test_read_detail_batch_propagates_effect_verified_bottom(monkeypatch) -> None:
+    ocr_index = 0
+
+    def fake_ocr(_base_url, *, roi, timeout):
+        nonlocal ocr_index
+        ocr_index += 1
+        return {
+            "image_path": f"roi-{ocr_index}.png",
+            "trace_path": f"ocr-{ocr_index}.json",
+            "ocr_result": {"items": [{"text": f"Line {ocr_index}"}]},
+        }
+
+    def fake_post(_base_url, endpoint, payload, _timeout):
+        assert endpoint == "/action/scroll"
+        return {
+            "success": True,
+            "data": {
+                "result": {
+                    "trace_path": "scroll-bottom.json",
+                    "target_container_id": "seek:job_detail",
+                    "scroll_effect_validation": {
+                        "status": "bottom_reached",
+                        "non_target_panes_stable": True,
+                    },
+                }
+            },
+        }
+
+    monkeypatch.setattr(runner, "_ocr_region", fake_ocr)
+    monkeypatch.setattr(runner, "_post_json", fake_post)
+
+    batch = runner._read_detail_batch(
+        "http://runtime.test",
+        timeout=5.0,
+        detail={"detail_container": {"bbox": {"x": 10, "y": 20, "w": 300, "h": 500}}},
+        learned_artifact=None,
+        wheel_clicks=9,
+        max_captures=3,
+        stop_after_no_new_content=2,
+    )
+
+    assert batch["stop_reason"] == "reached_bottom"
+    assert batch["read_state"] == "reached_bottom"
+    assert batch["read_complete"] is True
+
+
+def test_match_uses_latest_snapshot_read_completeness(tmp_path: Path) -> None:
+    args = _args(tmp_path, "match")
+    run_dir = Path(args.run_dir)
+    run_dir.mkdir(parents=True)
+    state = {
+        "contract_version": runner.STATE_CONTRACT,
+        "run_id": "seek_debug",
+        "run_dir": str(run_dir),
+        "phase": "read_detail_batch",
+        "step_index": 6,
+        "current_job": {"job_id": "job1", "title": "Software Engineer", "company": "Example Ltd"},
+        "detail": {
+            "job_id": "job1",
+            "title": "Software Engineer",
+            "company": "Example Ltd",
+            "description_sections": [{"index": 0, "role": "body", "text": "Python and SQL"}],
+            "detail_read_state": "max_captures",
+            "detail_read_completion": "incomplete",
+            "detail_read_complete": False,
+        },
+        "steps": [],
+        "safety": runner._default_safety(),
+    }
+    runner.put_latest_detail_snapshot(state, state["detail"])
+    (run_dir / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+    payload = runner.run_step(args)
+
+    assert payload["match_decision"]["decision"] == "need_user_review"
+    assert "detail_incomplete_do_not_apply" in payload["match_decision"]["risk_flags"]
+    assert payload["detail_snapshot_read_complete"] is False
 
 
 def test_close_old_seek_windows_detect_only_does_not_close(monkeypatch, tmp_path: Path) -> None:
@@ -1789,6 +1871,7 @@ def test_continue_application_flow_generates_plan_without_reclicking_apply(monke
     args.fill_safe_fields = True
     args.allow_cover_letter_fill = True
     args.max_safe_fields_to_fill = 1
+    args.approved_live_field_id = "cover-letter-field"
     run_dir = Path(args.run_dir)
     run_dir.mkdir(parents=True)
     state = {
@@ -1823,6 +1906,7 @@ def test_continue_application_flow_generates_plan_without_reclicking_apply(monke
         calls.append("safe_fill")
         assert kwargs["execute_fill"] is True
         assert kwargs["allow_cover_letter_fill"] is True
+        assert kwargs["approved_field_id"] == "cover-letter-field"
         return {"contract_version": "safe_form_fill_attempt_v1", "status": "filled_until_review", "fields_filled": 1, "final_submissions": 0}
 
     monkeypatch.setattr(runner, "_safe_form_fill_attempt", fake_fill)
@@ -1860,6 +1944,105 @@ def test_continue_application_flow_generates_plan_without_reclicking_apply(monke
     assert payload["requires_safe_fill_focus"] is True
     assert payload["requires_post_fill_verification"] is True
     assert payload["next_allowed_steps"] == ["continue_application_flow", "capture"]
+
+
+def test_continue_application_flow_read_only_inventory_never_fills_or_continues(monkeypatch, tmp_path: Path) -> None:
+    args = _args(tmp_path, "continue_application_flow")
+    args.read_only_inventory = True
+    replay_path = tmp_path / "replay.json"
+    replay_path.write_text(
+        json.dumps(
+            {
+                "contract_version": "seek_application_flow_replay_report_v1",
+                "status": "pass",
+                "summary": {"can_run_live_strict_replay": True},
+                "timeline": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    args.application_flow_replay = str(replay_path)
+    run_dir = Path(args.run_dir)
+    run_dir.mkdir(parents=True)
+    state = {
+        "contract_version": runner.STATE_CONTRACT,
+        "run_id": "seek_debug",
+        "run_dir": str(run_dir),
+        "phase": "application_flow",
+        "step_index": 0,
+        "current_job": {"job_id": "job1", "title": "Software Engineer", "company": "Example Ltd"},
+        "detail": {"job_id": "job1", "title": "Software Engineer", "company": "Example Ltd"},
+        "match_decision": {"decision": "strong_apply", "job_id": "job1"},
+        "steps": [],
+        "safety": runner._default_safety(),
+        "next_allowed_steps": ["continue_application_flow"],
+    }
+    (run_dir / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+    monkeypatch.setattr(runner, "load_candidate_profile", lambda _path: {"contract_version": "candidate_profile_v1"})
+    monkeypatch.setattr(runner, "_capture", lambda *_args, **_kwargs: {"image_path": "shot.png", "payload": {}})
+    monkeypatch.setattr(
+        runner,
+        "_observe",
+        lambda *_args, **_kwargs: {"trace_path": "observe.json", "screen_reading": {}},
+    )
+    monkeypatch.setattr(
+        runner,
+        "assess_seek_application_flow_state",
+        lambda *_args, **_kwargs: {
+            "contract_version": "seek_application_flow_state_v1",
+            "current_step": "update_seek_profile",
+            "state_type": "application_form_step",
+            "application_form_inventory": {
+                "fields": [{"id": "email", "text": "Email", "role": "textbox"}],
+                "actions": [{"id": "continue", "text": "Continue", "role": "button"}],
+            },
+            "final_submit_visible_blocker": {"blocked": False},
+        },
+    )
+    monkeypatch.setattr(
+        runner,
+        "_execute_debug_artifacts",
+        lambda **_kwargs: {
+            "execute_observation": {"contract_version": "execute_observation_v1"},
+            "form_field_inventory": {
+                "contract_version": "form_question_inventory_v1",
+                "capture_id": "capture-1",
+                "fields": [{"field_id": "email", "label": "Email", "field_type": "email"}],
+                "questions": [],
+                "danger_actions": [],
+                "fill_attempted": False,
+                "submit_attempted": False,
+                "artifact_is_authorization": False,
+            },
+            "ui_diff_verification": {"contract_version": "ui_diff_verification_v1"},
+        },
+    )
+    monkeypatch.setattr(
+        runner,
+        "_safe_form_fill_attempt",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("read-only inventory must not fill")),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_safe_employer_question_fill_attempt",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("read-only inventory must not answer")),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_safe_continue_after_fill",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("read-only inventory must not continue")),
+    )
+
+    payload = runner.run_step(args)
+
+    assert payload["status"] == "read_only_inventory_ready"
+    assert payload["read_only_inventory"] is True
+    assert payload["live_fill_attempted"] is False
+    assert payload["submit_clicks"] == 0
+    assert payload["safe_form_fill_attempt"]["status"] == "not_attempted_read_only_inventory"
+    assert payload["continue_after_fill"]["attempted"] is False
+    assert payload["next_allowed_steps"] == ["capture"]
 
 
 def test_continue_application_flow_records_employer_question_inventory(monkeypatch, tmp_path: Path) -> None:

@@ -12,6 +12,7 @@ from app.agent.reviewed_interface_memory import (
     ReviewedInterfaceMemoryStore,
     validate_current_target_text_anchor,
 )
+from app.gate.candidates import validate_action_candidate_freshness
 from tests.test_reviewed_interface_memory import _write_reviewed_candidate
 
 
@@ -113,6 +114,50 @@ def test_local_target_anchor_accepts_current_ocr_evidence_near_selected_point() 
         "width": 72,
         "height": 28,
     }
+
+
+def test_local_target_anchor_accepts_current_point_inside_ocr_when_reference_bbox_is_prior_only() -> None:
+    result = validate_current_target_text_anchor(
+        seed={
+            "bbox": {"x": 12, "y": 12, "w": 35, "h": 15},
+            "locator_evidence": {
+                "text_anchors": ["文件(F)"],
+                "reference_bbox_is_prior_only": True,
+            },
+        },
+        selected_point={"x": 34, "y": 40},
+        observed_matches=[
+            _ocr_match("文件(F)编辑(E)格式(O)查看(V)帮助(H)", x=14, y=32, width=259, height=17),
+        ],
+    )
+
+    assert result["allowed"] is True
+    assert result["reason"] == "current_target_text_anchor_locally_matched"
+    assert result["nearest_anchor_distance"] == 0.0
+    assert result["matched_anchor_evidence"][0]["inside_seed_neighborhood"] is False
+    assert result["matched_anchor_evidence"][0]["current_point_inside_bbox"] is True
+
+
+def test_local_target_anchor_accepts_small_current_ocr_boundary_gap_when_reference_bbox_is_prior_only() -> None:
+    result = validate_current_target_text_anchor(
+        seed={
+            "bbox": {"x": 12, "y": 12, "w": 35, "h": 15},
+            "locator_evidence": {
+                "text_anchors": ["文件(F)"],
+                "reference_bbox_is_prior_only": True,
+            },
+        },
+        selected_point={"x": 13, "y": 38},
+        observed_matches=[
+            _ocr_match("文件(F)编辑(E)格式(O)查看(V)帮助(H)", x=14, y=32, width=259, height=17),
+        ],
+    )
+
+    assert result["allowed"] is True
+    assert result["reason"] == "current_target_text_anchor_locally_matched"
+    assert result["nearest_anchor_distance"] == 1.0
+    assert result["matched_anchor_evidence"][0]["inside_seed_neighborhood"] is False
+    assert result["matched_anchor_evidence"][0]["current_point_inside_bbox"] is False
 
 
 def test_local_target_anchor_rejects_same_text_elsewhere_on_current_surface() -> None:
@@ -251,6 +296,18 @@ def test_execute_route_injects_operational_memory_only_after_current_live_captur
     assert metadata["operational_memory"]["action_id"] == "sample_search::action::submit_search"
     assert metadata["seeded_candidate_v1"]["bbox"] == {"x": 860, "y": 120, "w": 180, "h": 63}
     assert metadata["seeded_candidate_v1"]["current_capture"]["screenshot_path"] == str(current_capture.resolve())
+    assert metadata["seeded_candidate_v1"]["candidate_freshness"] == {
+        "contract_version": "action_candidate_freshness_v1",
+        "capture_id": str(current_capture.resolve()),
+        "viewport_size": {"width": 1600, "height": 900},
+        "source": "reviewed_interface_memory_v1",
+        "freshness": "current_capture",
+    }
+    assert validate_action_candidate_freshness(
+        metadata["seeded_candidate_v1"],
+        current_capture_id=str(current_capture.resolve()),
+        current_viewport_size={"width": 1600, "height": 900},
+    )["allowed"] is True
     assert metadata["seeded_candidate_v1"]["require_current_grounding"] is True
     assert metadata.get("reviewed_test_execution", {}).get("allow_seeded_candidate_without_model") is not True
     assert response.success is False

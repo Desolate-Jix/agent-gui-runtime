@@ -330,3 +330,33 @@ def test_stage1_region_selection_audit_blocks_unknown_only_structure():
     assert "unknown_only_structure" in audit["failure_categories"]
     assert audit["structure_family_coverage"]["recognized_region_count"] == 0
     assert audit["structure_family_coverage"]["status"] == "not_covered"
+
+
+def test_stage1_region_selection_audit_accepts_adjacent_split_content_panes():
+    audit = audit_stage1_region_selection(
+        localized_regions=[
+            {
+                "region_id": "structure_region_left_navigation",
+                "label": "Left navigation",
+                "zone_id": "left_nav",
+                "bbox": {"x": 0, "y": 0, "w": 901, "h": 1416},
+            },
+            {
+                "region_id": "structure_region_primary_area",
+                "label": "Primary area",
+                "zone_id": "primary_area",
+                "bbox": {"x": 901, "y": 0, "w": 307, "h": 1416},
+            },
+            {
+                "region_id": "structure_region_main_content",
+                "label": "Main content",
+                "zone_id": "main_content",
+                "bbox": {"x": 1208, "y": 0, "w": 1368, "h": 1416},
+            },
+        ],
+        screen_size={"width": 2576, "height": 1416},
+    )
+
+    assert audit["passed"] is True
+    assert audit["failure_categories"] == []
+    assert audit["partition_coverage"]["content_panes_form_contiguous_partition"] is True

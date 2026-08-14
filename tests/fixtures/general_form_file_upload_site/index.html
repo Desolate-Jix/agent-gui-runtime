@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>General Form Safe Fill Fixture</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background: #eef2f7; color: #172033; }
+    main { width: min(620px, calc(100% - 48px)); margin: 48px auto; padding: 28px; background: white; border-radius: 16px; }
+    label { display: grid; gap: 10px; font-weight: 700; }
+    input, button { min-height: 44px; font: inherit; }
+    .actions { display: flex; gap: 12px; margin-top: 28px; }
+    .projection { margin-top: 24px; padding: 12px; background: #f5f7fb; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Controlled application upload</h1>
+    <p>This local fixture verifies one reviewed file selection without continuing or submitting.</p>
+    <label for="resumeUpload">
+      Upload resume
+      <input id="resumeUpload" type="file" accept=".pdf,.doc,.docx,.rtf">
+    </label>
+    <div class="actions">
+      <button id="continueButton" type="button">Continue</button>
+      <button id="finalSubmit" type="button">Submit application</button>
+    </div>
+    <div class="projection" aria-live="polite">
+      <div id="uploadState">upload-state filename-sha256=none size=0</div>
+      <div id="continueState">continue-clicks=0</div>
+      <div id="submitState">submit-clicks=0</div>
+    </div>
+  </main>
+  <script>
+    let continueClicks = 0;
+    let submitClicks = 0;
+    const upload = document.getElementById("resumeUpload");
+    upload.addEventListener("change", async () => {
+      const file = upload.files && upload.files[0];
+      if (!file) {
+        document.getElementById("uploadState").textContent = "upload-state filename-sha256=none size=0";
+        return;
+      }
+      const encoded = new TextEncoder().encode(file.name);
+      const digest = await crypto.subtle.digest("SHA-256", encoded);
+      const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+      document.getElementById("uploadState").textContent = `upload-state filename-sha256=${hash} size=${file.size}`;
+    });
+    document.getElementById("continueButton").addEventListener("click", () => {
+      continueClicks += 1;
+      document.getElementById("continueState").textContent = `continue-clicks=${continueClicks}`;
+    });
+    document.getElementById("finalSubmit").addEventListener("click", () => {
+      submitClicks += 1;
+      document.getElementById("submitState").textContent = `submit-clicks=${submitClicks}`;
+    });
+  </script>
+</body>
+</html>

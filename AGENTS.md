@@ -20,6 +20,20 @@ That means:
 
 Do not stop at draft code when a runtime or smoke check is possible.
 
+## Sub-agent Delegation Rule
+
+When a new task or requirement arrives, first assess whether bounded sub-agent delegation can reduce main-agent context and token use without reducing correctness.
+
+- Use the installed `subagent-delegation` skill whenever the task contains multiple independent investigations, repository-wide exploration, competing bug hypotheses, mechanical edits, isolated implementation work, or independent verification.
+- Prefer delegating read-only search, inventory, call-chain tracing, narrow mechanical changes, documentation work, and isolated test execution.
+- Prefer the cheapest suitable worker supported by the live tool: try Luna first for bounded low-complexity work, then escalate only when Luna is unavailable, fails, times out, or returns insufficient evidence.
+- Keep architecture decisions, ambiguous cross-cutting changes, security decisions, destructive operations, final integration, and acceptance with the Main Agent.
+- Give every worker a bounded contract covering objective, scope, allowed files, forbidden actions, deliverable, verification, and blocked behavior. Workers must not expand scope, commit, push, delete files, or spawn nested workers unless explicitly authorized.
+- The Main Agent must inspect worker evidence and actual diffs, resolve conflicts, run final verification, and remain responsible for the final answer. A sub-agent report is not proof by itself.
+- Do not delegate tiny questions, one-command tasks, or tightly coupled single-file edits when orchestration would cost more context than it saves.
+
+Delegation is an optimization, not a requirement to split every task. Correctness, safety, and evidence remain higher priority than token savings.
+
 ## Root Cause Before Fallback
 
 When a feature fails, fix the primary failure path before adding fallback behavior.

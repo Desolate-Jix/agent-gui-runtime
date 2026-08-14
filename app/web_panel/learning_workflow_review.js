@@ -43,10 +43,39 @@
       },
     };
   }
+
+  function resolveInterfaceAssetOpenTarget({ sourcePath, workflowId, nodeId } = {}) {
+    const source = String(sourcePath || "").trim();
+    const workflow = String(workflowId || "").trim();
+    const node = String(nodeId || "").trim();
+    if (workflow && node) {
+      return {
+        mode: "saved_workflow",
+        workflow_id: workflow,
+        node_id: node,
+        source_path: source,
+      };
+    }
+    if (source) {
+      return {
+        mode: "source_preview",
+        workflow_id: "",
+        node_id: "",
+        source_path: source,
+      };
+    }
+    return {
+      mode: "unavailable",
+      workflow_id: workflow,
+      node_id: node,
+      source_path: source,
+    };
+  }
   const EDITABLE_NODE_FIELDS = new Set([
     "display_name",
     "surface_type",
     "review_status",
+    "evidence",
     "regions",
     "controls",
     "action_candidates",
@@ -54,6 +83,9 @@
     "content_descriptors",
     "verification_rules",
     "manual_revision",
+    "editable_review_source_path",
+    "source_paths",
+    "page_details",
   ]);
   const EDITABLE_EDGE_FIELDS = new Set([
     "display_name",
@@ -70,12 +102,143 @@
     "failure_conditions",
     "review_status",
   ]);
+  const REVISION_METADATA_FIELDS = new Set([
+    "agent_eligibility_reason",
+    "agent_usable",
+    "artifact_is_authorization",
+    "current_revision_hash",
+    "display_only",
+    "editable_review_source_path",
+    "execute_binding_enabled",
+    "execution_verification_status",
+    "human_review_confirmation",
+    "review_bucket",
+    "review_status",
+    "reviewed_by_human",
+    "reviewed_revision_hash",
+    "source_paths",
+  ]);
+  const RUNTIME_POINT_FIELDS = new Set([
+    "actual_point",
+    "click_point",
+    "clickpoint",
+    "confirmed_point",
+    "screen_point",
+    "target_point",
+  ]);
 
   function clone(value) {
     if (typeof structuredClone === "function") {
       return structuredClone(value);
     }
     return JSON.parse(JSON.stringify(value));
+  }
+
+  function projectLearningDraftOwnershipConflicts(draft = {}) {
+    const pageDetails = draft?.page_details && typeof draft.page_details === "object"
+      ? draft.page_details
+      : {};
+    const twoStage = pageDetails.two_stage_understanding
+      && typeof pageDetails.two_stage_understanding === "object"
+      ? pageDetails.two_stage_understanding
+      : {};
+    const stage2 = twoStage.stage2_numbering && typeof twoStage.stage2_numbering === "object"
+      ? twoStage.stage2_numbering
+      : {};
+    const conflicts = [];
+    (Array.isArray(stage2.regions) ? stage2.regions : []).forEach((region) => {
+      if (!region || typeof region !== "object") return;
+      const regionId = String(region.region_id || "").trim();
+      if (!regionId) return;
+      const groups = (Array.isArray(region.subregion_groups) ? region.subregion_groups : [])
+        .filter((group) => group && typeof group === "object" && String(group.group_id || "").trim());
+      const parentGroupIds = new Set(groups.map((group) => String(
+        group.parent_group_id || group.resolved_parent_group_id || "",
+      ).trim()).filter(Boolean));
+      const leafGroups = groups.filter((group) => !parentGroupIds.has(String(group.group_id).trim()));
+      const items = new Map((Array.isArray(region.numbered_items) ? region.numbered_items : [])
+        .filter((item) => item && typeof item === "object" && String(item.item_id || "").trim())
+        .map((item) => [String(item.item_id).trim(), item]));
+      items.forEach((item, itemId) => {
+        const owners = leafGroups.filter((group) => (
+          Array.isArray(group.member_item_ids)
+          && group.member_item_ids.some((memberId) => String(memberId || "").trim() === itemId)
+        ));
+        if (owners.length < 2) return;
+        const parentGroups = owners.map((group) => ({
+          group_id: String(group.group_id).trim(),
+          label: String(group.label || group.display_name || group.group_id).trim(),
+        })).sort((left, right) => left.group_id.localeCompare(right.group_id));
+        conflicts.push({
+          conflict_id: `${regionId}:${itemId}`,
+          region_id: regionId,
+          target_id: itemId,
+          item_number: String(item.number || "").trim(),
+          item_label: String(item.label || item.display_name || item.text || itemId).trim(),
+          before_parent_group_ids: parentGroups.map((group) => group.group_id),
+          parent_groups: parentGroups,
+        });
+      });
+    });
+    return conflicts.sort((left, right) => left.conflict_id.localeCompare(right.conflict_id));
+  }
+
+  function buildLearningDraftOwnershipOperations({ conflicts = [], selections = {}, reason = "" } = {}) {
+    return (Array.isArray(conflicts) ? conflicts : []).map((conflict) => {
+      const conflictId = String(conflict?.conflict_id || "").trim();
+      const selectedParentId = String(selections?.[conflictId] || "").trim();
+      if (!selectedParentId) {
+        throw new Error(`ownership conflict explicit parent selection is required: ${conflictId}`);
+      }
+      const beforeParentIds = Array.isArray(conflict?.before_parent_group_ids)
+        ? conflict.before_parent_group_ids.map((value) => String(value || "").trim()).filter(Boolean)
+        : [];
+      if (!beforeParentIds.includes(selectedParentId)) {
+        throw new Error(`ownership conflict selected parent is not a current leaf owner: ${conflictId}`);
+      }
+      return {
+        op: "resolve_ownership",
+        target_kind: "ownership",
+        target_id: String(conflict.target_id || "").trim(),
+        region_id: String(conflict.region_id || "").trim(),
+        before_parent_group_ids: beforeParentIds,
+        after_parent_group_id: selectedParentId,
+        reason: String(reason || "").trim(),
+      };
+    });
+  }
+
+  function withoutRuntimePoints(value) {
+    if (Array.isArray(value)) return value.map(withoutRuntimePoints);
+    if (!value || typeof value !== "object") return value;
+    return Object.fromEntries(Object.entries(value)
+      .filter(([key]) => !RUNTIME_POINT_FIELDS.has(String(key)))
+      .map(([key, item]) => [key, withoutRuntimePoints(item)]));
+  }
+
+  function withoutReviewRevisionMetadata(value) {
+    if (Array.isArray(value)) return value.map(withoutReviewRevisionMetadata);
+    if (!value || typeof value !== "object") return clone(value);
+    return Object.fromEntries(Object.entries(value)
+      .filter(([key]) => !REVISION_METADATA_FIELDS.has(String(key)))
+      .map(([key, item]) => [key, withoutReviewRevisionMetadata(item)]));
+  }
+
+  function buildInterfaceNodeReviewRevision(review, nodeId) {
+    const normalizedNodeId = String(nodeId || "").trim();
+    const nodes = Array.isArray(review?.nodes) ? review.nodes : [];
+    const edges = Array.isArray(review?.edges) ? review.edges : [];
+    const matches = nodes.filter((node) => String(node?.node_id || "").trim() === normalizedNodeId);
+    if (matches.length !== 1) {
+      throw new Error(`workflow review node must exist exactly once: ${normalizedNodeId}`);
+    }
+    const node = withoutReviewRevisionMetadata(matches[0]);
+    delete node.evidence;
+    const outgoingEdges = edges
+      .filter((edge) => String(edge?.source_node_id || "").trim() === normalizedNodeId)
+      .map(withoutReviewRevisionMetadata)
+      .sort((left, right) => String(left?.edge_id || "").localeCompare(String(right?.edge_id || "")));
+    return withoutRuntimePoints({ node, outgoing_edges: outgoingEdges });
   }
 
   function nonEmptyString(value) {
@@ -110,6 +273,222 @@
       ).trim(),
       role: String(item?.role || item?.kind || "control").trim(),
     })).filter((item) => item.control_id);
+  }
+
+  function projectInterfaceWorkflowStepAudit(runtimeReport = {}, interfaceId = "") {
+    const report = runtimeReport && typeof runtimeReport === "object" ? runtimeReport : {};
+    const steps = Array.isArray(report.steps) ? report.steps : [];
+    const normalizedInterfaceId = String(interfaceId || "").trim();
+    let selectedIndex = -1;
+    for (let index = steps.length - 1; index >= 0; index -= 1) {
+      const stepInterfaceId = String(
+        steps[index]?.interface_id
+        || steps[index]?.source_interface_id
+        || "",
+      ).trim();
+      if (!normalizedInterfaceId || stepInterfaceId === normalizedInterfaceId) {
+        selectedIndex = index;
+        break;
+      }
+    }
+    if (selectedIndex < 0) {
+      return {
+        contract_version: "interface_workflow_step_audit_v1",
+        coverage_status: "not_run",
+        interpretation: "No recorded runtime step exists for this interface.",
+        agent: { status: "not_recorded", semantic_action: "", reason: "" },
+        gate: { status: "not_covered", allowed: null, reason: "" },
+        dispatch: { status: "not_covered", attempted: false },
+        effect: { status: "not_covered", verified: null },
+        post_observe: { status: "not_covered", verified: null, interface_id: "" },
+        trace: { status: "not_recorded", path: "" },
+        stop: { status: "not_run", reason: "" },
+      };
+    }
+
+    const step = steps[selectedIndex] || {};
+    const decision = step.agent_decision && typeof step.agent_decision === "object"
+      ? step.agent_decision
+      : step.decision_plan && typeof step.decision_plan === "object"
+        ? step.decision_plan
+        : {};
+    const decisionAudit = step.decision_audit && typeof step.decision_audit === "object"
+      ? step.decision_audit
+      : {};
+    const semanticAction = String(
+      decision.semantic_action || step.semantic_action || "",
+    ).trim();
+    const choiceId = String(decision.choice_id || step.choice_id || "").trim();
+    const hasAgentDecision = Object.keys(decision).length > 0
+      || Boolean(semanticAction || choiceId || String(step.decision_type || "").trim());
+    const gateResult = step.gate_result && typeof step.gate_result === "object"
+      ? step.gate_result
+      : {};
+    const gateAllowed = typeof step.gate_allowed === "boolean"
+      ? step.gate_allowed
+      : typeof gateResult.allowed === "boolean"
+        ? gateResult.allowed
+        : null;
+    const dispatchValue = typeof step.dispatch_success === "boolean"
+      ? step.dispatch_success
+      : typeof step.action_dispatched === "boolean"
+        ? step.action_dispatched
+        : typeof step.action_executed === "boolean"
+          ? step.action_executed
+          : null;
+    const effectValue = typeof step.effect_verified === "boolean"
+      ? step.effect_verified
+      : typeof step.post_action_verified === "boolean"
+        ? step.post_action_verified
+        : null;
+    const postObserveValue = typeof step.destination_observation_verified === "boolean"
+      ? step.destination_observation_verified
+      : null;
+    const tracePath = String(
+      step.trace_path
+      || step.execute_step_trace_path
+      || step.available_actions_trace_path
+      || report.trace_path
+      || report.source_report_path
+      || "",
+    ).trim();
+    const reportStoppedHere = selectedIndex === steps.length - 1
+      && ["safe_stop", "safe_stopped", "needs_human_review", "failed"].includes(
+        String(report.final_status || "").trim(),
+      );
+
+    return {
+      contract_version: "interface_workflow_step_audit_v1",
+      coverage_status: "recorded_runtime_step",
+      interpretation: "Recorded runtime evidence for this interface only; learning assets do not authorize execution.",
+      agent: {
+        status: hasAgentDecision ? "decision_recorded" : "not_recorded",
+        semantic_action: semanticAction,
+        choice_id: choiceId,
+        reason: String(
+          decision.reason
+          || decision.rationale
+          || decisionAudit.reason
+          || decisionAudit.rationale
+          || "",
+        ).trim(),
+        source: String(step.decision_source || "").trim(),
+      },
+      gate: {
+        status: gateAllowed === true ? "allowed" : gateAllowed === false ? "rejected" : "not_covered",
+        allowed: gateAllowed,
+        reason: String(gateResult.reason || step.gate_reason || "").trim(),
+      },
+      dispatch: {
+        status: dispatchValue === true
+          ? "dispatched"
+          : dispatchValue === false || gateAllowed === false
+            ? "not_dispatched"
+            : "not_covered",
+        attempted: dispatchValue !== null || gateAllowed === false,
+      },
+      effect: {
+        status: dispatchValue === false || gateAllowed === false
+          ? "not_attempted"
+          : effectValue === true
+            ? "verified"
+            : effectValue === false
+              ? "not_verified"
+              : "not_covered",
+        verified: effectValue,
+      },
+      post_observe: {
+        status: postObserveValue === true
+          ? "verified"
+          : postObserveValue === false
+            ? "not_verified"
+            : "not_covered",
+        verified: postObserveValue,
+        interface_id: String(step.actual_target_interface_id || "").trim(),
+      },
+      trace: {
+        status: tracePath ? "recorded" : "not_recorded",
+        path: tracePath,
+      },
+      stop: {
+        status: reportStoppedHere
+          ? String(report.final_status || "safe_stop").trim()
+          : "continuing",
+        reason: reportStoppedHere ? String(report.stop_reason || step.stop_reason || "").trim() : "",
+      },
+      case_outcome: String(step.case_outcome || "").trim(),
+    };
+  }
+
+  function projectLiveSafeFillPreflightReview(preflight = {}) {
+    const source = preflight && typeof preflight === "object" ? preflight : {};
+    if (source.contract_version !== "seek_live_safe_fill_preflight_v1") {
+      return { visible: false, reason: "unsupported_contract" };
+    }
+    const field = source.field && typeof source.field === "object" ? source.field : {};
+    const valueEvidence = source.value_evidence && typeof source.value_evidence === "object"
+      ? source.value_evidence
+      : {};
+    const safety = source.safety && typeof source.safety === "object" ? source.safety : {};
+    const redactionPassed = source.pii_redacted === true
+      && valueEvidence.value_redacted === true
+      && nonEmptyString(valueEvidence.value_hash)
+      && Number(valueEvidence.value_length || 0) > 0;
+    if (!redactionPassed) {
+      return { visible: false, reason: "redaction_contract_failed" };
+    }
+    const target = source.target && typeof source.target === "object" ? source.target : {};
+    const verification = source.expected_verification && typeof source.expected_verification === "object"
+      ? source.expected_verification
+      : {};
+    const evidence = source.evidence && typeof source.evidence === "object" ? source.evidence : {};
+    return {
+      visible: true,
+      contract_version: source.contract_version,
+      status: String(source.status || "").trim(),
+      approval_state: String(source.approval_state || "").trim(),
+      interpretation: String(
+        source.interpretation
+        || "single-field review evidence only; not authorization and not live safe-fill evidence",
+      ).trim(),
+      field: {
+        id: String(field.id || "").trim(),
+        label: String(field.label || field.id || "").trim(),
+        field_type: String(field.field_type || "").trim(),
+        risk_class: String(field.risk_class || "").trim(),
+        required: field.required === true,
+      },
+      value_evidence: {
+        answer_source: String(valueEvidence.answer_source || "").trim(),
+        value_length: Number(valueEvidence.value_length || 0),
+        value_hash: String(valueEvidence.value_hash || "").trim(),
+        value_redacted: true,
+      },
+      target: {
+        state_type: String(target.state_type || "").trim(),
+        current_step: String(target.current_step || "").trim(),
+      },
+      expected_verification: {
+        mode: String(verification.mode || "").trim(),
+        expected_value_hash: String(verification.expected_value_hash || "").trim(),
+        expected_value_length: Number(verification.expected_value_length || 0),
+        raw_value_must_not_be_recorded: verification.raw_value_must_not_be_recorded === true,
+      },
+      safety: {
+        max_fields: Number(safety.max_fields || 0),
+        cover_letter_fill_allowed: safety.cover_letter_fill_allowed === true,
+        continue_allowed: safety.continue_allowed === true,
+        final_submit_allowed: safety.final_submit_allowed === true,
+        artifact_is_authorization: false,
+      },
+      evidence: {
+        screenshot_path: String(evidence.screenshot_path || "").trim(),
+        trace_path: String(evidence.trace_path || "").trim(),
+        source_report_path: String(evidence.source_report_path || "").trim(),
+      },
+      source_path: String(source.source_path || "").trim(),
+      artifact_is_authorization: false,
+    };
   }
 
   function createInterfaceWorkflowWorkbenchState() {
@@ -156,6 +535,36 @@
         return this.current();
       },
     };
+  }
+
+  function resolveInterfaceWorkflowCorrectionTarget({
+    workbench = {},
+    workflowState = null,
+    sourcePreviewState = null,
+  } = {}) {
+    const sourcePreviewActive = String(workbench?.evidence_mode || "workflow") === "source_preview";
+    const authority = sourcePreviewActive ? "source_preview" : "workflow";
+    const authoritativeState = sourcePreviewActive ? sourcePreviewState : workflowState;
+    const view = authoritativeState?.current?.() || null;
+    if (!view?.node) {
+      return {
+        authority,
+        view: null,
+        reason: sourcePreviewActive
+          ? "displayed_source_preview_unavailable"
+          : "displayed_workflow_node_unavailable",
+      };
+    }
+    const displayedNodeId = String(workbench?.evidence_node_id || "").trim();
+    const currentNodeId = String(view.node.node_id || "").trim();
+    if (displayedNodeId && displayedNodeId !== currentNodeId) {
+      return {
+        authority,
+        view: null,
+        reason: "displayed_evidence_selection_mismatch",
+      };
+    }
+    return { authority, view, reason: "" };
   }
 
   function normalizedIdentifier(value, fallback) {
@@ -265,6 +674,7 @@
         available_layers: layers,
         incoming_edges: edges.filter((edge) => edge.target_node_id === node.node_id),
         outgoing_edges: edges.filter((edge) => edge.source_node_id === node.node_id),
+        step_audit: projectInterfaceWorkflowStepAudit(review.runtime_report, node.node_id),
       };
     }
 
@@ -325,6 +735,9 @@
           label: userFacingLearningLabel(node.display_name || node.node_id),
           surface_type: node.surface_type || "unknown_surface",
           evidence_status: node.evidence_status || "unknown",
+          review_status: node.review_status || "needs_human_review",
+          reviewed_by_human: node.reviewed_by_human === true,
+          agent_usable: node.agent_usable === true,
           selected: node.node_id === selectedNodeId,
           controls: nodeControls(node).map((control) => ({
             control_id: String(control?.control_id || control?.region_id || "").trim(),
@@ -361,12 +774,91 @@
       target.execute_binding_enabled = false;
     }
 
+    function revokeNodeHumanReview(node) {
+      node.review_status = "needs_human_review";
+      node.reviewed_by_human = false;
+      delete node.human_review_confirmation;
+      delete node.reviewed_revision_hash;
+      delete node.current_revision_hash;
+    }
+
+    function confirmNodeHumanReview(nodeId) {
+      const node = nodeById.get(nodeId);
+      if (!node) {
+        throw new Error(`unknown interface workflow node: ${nodeId}`);
+      }
+      node.review_status = "human_approved";
+      node.reviewed_by_human = true;
+      node.human_review_confirmation = {
+        contract_version: "interface_node_human_review_confirmation_v1",
+        revision: buildInterfaceNodeReviewRevision({ nodes, edges }, nodeId),
+      };
+      node.display_only = true;
+      node.artifact_is_authorization = false;
+      node.execute_binding_enabled = false;
+      return current();
+    }
+
     function updateNode(nodeId, patch) {
       const node = nodeById.get(nodeId);
       if (!node) {
         throw new Error(`unknown interface workflow node: ${nodeId}`);
       }
-      applyEditablePatch(node, patch, EDITABLE_NODE_FIELDS);
+      const normalizedPatch = patch && typeof patch === "object" ? { ...patch } : {};
+      const changedEvidenceFields = Object.entries(normalizedPatch).some(([key, value]) => (
+        key !== "review_status"
+        && EDITABLE_NODE_FIELDS.has(key)
+        && JSON.stringify(node[key]) !== JSON.stringify(value)
+      ));
+      applyEditablePatch(node, normalizedPatch, EDITABLE_NODE_FIELDS);
+      if (changedEvidenceFields) {
+        revokeNodeHumanReview(node);
+      } else if (
+        Object.prototype.hasOwnProperty.call(normalizedPatch, "review_status")
+        && String(normalizedPatch.review_status || "") !== "human_approved"
+      ) {
+        node.reviewed_by_human = false;
+      }
+      return current();
+    }
+
+    function replaceReviewedNodeEvidenceBySource(previousSourcePath, reviewedSourcePath, patch) {
+      const normalizedPrevious = String(previousSourcePath || "")
+        .trim()
+        .replace(/\\/g, "/")
+        .toLowerCase();
+      const normalizedReviewed = String(reviewedSourcePath || "").trim();
+      if (!normalizedPrevious || !normalizedReviewed) {
+        throw new Error("reviewed workflow evidence source paths are required");
+      }
+      const matches = nodes.filter((node) => [
+        node?.editable_review_source_path,
+        ...(Array.isArray(node?.source_paths) ? node.source_paths : []),
+      ].some((value) => (
+        String(value || "").trim().replace(/\\/g, "/").toLowerCase() === normalizedPrevious
+      )));
+      if (matches.length !== 1) {
+        throw new Error(`reviewed workflow evidence source must match exactly one node: ${matches.length}`);
+      }
+
+      const node = matches[0];
+      const normalizedPatch = patch && typeof patch === "object" ? { ...patch } : {};
+      const nextSourcePaths = [
+        normalizedReviewed,
+        ...(Array.isArray(node.source_paths) ? node.source_paths : []),
+      ].filter((value, index, values) => {
+        const normalized = String(value || "").trim().replace(/\\/g, "/").toLowerCase();
+        return normalized && normalized !== normalizedPrevious && values.findIndex((candidate) => (
+          String(candidate || "").trim().replace(/\\/g, "/").toLowerCase() === normalized
+        )) === index;
+      });
+      normalizedPatch.editable_review_source_path = normalizedReviewed;
+      normalizedPatch.source_paths = nextSourcePaths;
+      applyEditablePatch(node, normalizedPatch, EDITABLE_NODE_FIELDS);
+      revokeNodeHumanReview(node);
+      selectedNodeId = node.node_id;
+      selectedLayer = "";
+      selectedControlId = "";
       return current();
     }
 
@@ -385,7 +877,16 @@
       if (Object.prototype.hasOwnProperty.call(normalizedPatch, "action_type")) {
         normalizedPatch.action_type = normalizedActionType(normalizedPatch.action_type);
       }
+      const changedActionFields = Object.entries(normalizedPatch).some(([key, value]) => (
+        key !== "review_status"
+        && EDITABLE_EDGE_FIELDS.has(key)
+        && JSON.stringify(edge[key]) !== JSON.stringify(value)
+      ));
       applyEditablePatch(edge, normalizedPatch, EDITABLE_EDGE_FIELDS);
+      if (changedActionFields) {
+        const sourceNode = nodeById.get(edge.source_node_id);
+        if (sourceNode) revokeNodeHumanReview(sourceNode);
+      }
       return current();
     }
 
@@ -527,6 +1028,7 @@
         execute_binding_enabled: false,
       };
       edges.push(edge);
+      revokeNodeHumanReview(nodeById.get(sourceNodeId));
       if (!review.workflow || typeof review.workflow !== "object") review.workflow = {};
       review.workflow.edge_ids = edges.map((item) => item.edge_id);
       return clone(edge);
@@ -538,8 +1040,40 @@
         throw new Error(`unknown interface workflow edge: ${edgeId}`);
       }
       const [removed] = edges.splice(index, 1);
+      const sourceNode = nodeById.get(removed.source_node_id);
+      if (sourceNode) revokeNodeHumanReview(sourceNode);
       if (!review.workflow || typeof review.workflow !== "object") review.workflow = {};
       review.workflow.edge_ids = edges.map((item) => item.edge_id);
+      return clone(removed);
+    }
+
+    function removeInterfaceNode(nodeId) {
+      const normalizedNodeId = String(nodeId || "").trim();
+      const index = nodes.findIndex((item) => item.node_id === normalizedNodeId);
+      if (index < 0) {
+        throw new Error(`unknown interface workflow node: ${normalizedNodeId}`);
+      }
+      const [removed] = nodes.splice(index, 1);
+      nodeById.delete(normalizedNodeId);
+      for (let edgeIndex = edges.length - 1; edgeIndex >= 0; edgeIndex -= 1) {
+        const edge = edges[edgeIndex];
+        if (
+          edge.source_node_id === normalizedNodeId
+          || edge.target_node_id === normalizedNodeId
+        ) {
+          edges.splice(edgeIndex, 1);
+        }
+      }
+      if (!review.workflow || typeof review.workflow !== "object") review.workflow = {};
+      review.workflow.node_ids = nodes.map((item) => item.node_id);
+      review.workflow.edge_ids = edges.map((item) => item.edge_id);
+      if (review.workflow.entry_node_id === normalizedNodeId) {
+        review.workflow.entry_node_id = nodes[0]?.node_id || "";
+      }
+      if (selectedNodeId === normalizedNodeId) selectedNodeId = nodes[0]?.node_id || "";
+      if (focusedNodeId === normalizedNodeId) focusedNodeId = "";
+      selectedLayer = "";
+      selectedControlId = "";
       return clone(removed);
     }
 
@@ -568,17 +1102,37 @@
       addOperation,
       addPlaceholderNode,
       clearFocus,
+      confirmNodeHumanReview,
       current,
       focusControl,
       focusInterface,
       graph,
+      removeInterfaceNode,
       removeOperation,
       select,
       selectLayer,
       snapshot,
       updateEdge,
       updateNode,
+      replaceReviewedNodeEvidenceBySource,
     };
+  }
+
+  function commitInterfaceWorkflowReviewForSave({
+    state,
+    nodeId,
+    nodePatch,
+    commitOperation,
+    humanReviewConfirmed = false,
+  } = {}) {
+    if (!state) return null;
+    const normalizedNodeId = String(nodeId || "").trim();
+    if (normalizedNodeId) state.updateNode(normalizedNodeId, nodePatch || {});
+    if (typeof commitOperation === "function") commitOperation();
+    if (normalizedNodeId && humanReviewConfirmed) {
+      state.confirmNodeHumanReview(normalizedNodeId);
+    }
+    return state.snapshot();
   }
 
   function mergeEditableWorkflowReview(nextReview, previousReview) {
@@ -643,14 +1197,265 @@
     return merged;
   }
 
+  function buildLearningResultsReviewGroups(registry = {}, sources = []) {
+    const groups = { reviewed: [], unreviewed: [] };
+    const applications = registry && typeof registry.applications === "object"
+      ? registry.applications
+      : {};
+    const workflows = registry && typeof registry.workflows === "object"
+      ? registry.workflows
+      : {};
+    const applicationByWorkflow = new Map();
+    const attachedSourcePaths = new Set();
+    Object.entries(applications).forEach(([identityKey, application]) => {
+      (Array.isArray(application?.workflow_ids) ? application.workflow_ids : []).forEach((workflowId) => {
+        applicationByWorkflow.set(workflowId, {
+          identity_key: identityKey,
+          identity: clone(application?.application_identity || {}),
+        });
+      });
+    });
+
+    Object.entries(workflows).forEach(([workflowId, record]) => {
+      if (!record || typeof record !== "object") return;
+      const application = applicationByWorkflow.get(workflowId) || {
+        identity_key: String(record.application_identity_key || ""),
+        identity: {},
+      };
+      for (const bucket of ["unreviewed", "reviewed"]) {
+        const interfaces = Array.isArray(record?.review_groups?.[bucket])
+          ? record.review_groups[bucket].map((item) => clone(item))
+          : [];
+        interfaces.forEach((item) => {
+          const candidates = [
+            item?.editable_review_source_path,
+            ...(Array.isArray(item?.source_paths) ? item.source_paths : []),
+          ];
+          candidates.forEach((value) => {
+            const normalized = String(value || "").trim().replace(/\\/g, "/");
+            if (normalized) attachedSourcePaths.add(normalized);
+          });
+        });
+        if (!interfaces.length) continue;
+        groups[bucket].push({
+          workflow_id: workflowId,
+          goal: String(record.goal || workflowId),
+          application_identity_key: application.identity_key,
+          application_identity: application.identity,
+          interfaces,
+        });
+      }
+    });
+    const standalone = (Array.isArray(sources) ? sources : []).flatMap((source) => {
+      if (!source || typeof source !== "object") return [];
+      const candidates = [
+        source.reviewed_template_candidate_path,
+        source.source_path,
+        source.source_trial_path,
+        source.trial_result_path,
+      ].map((value) => String(value || "").trim().replace(/\\/g, "/")).filter(Boolean);
+      if (!candidates.length || candidates.some((value) => attachedSourcePaths.has(value))) return [];
+      return [{
+        node_id: "",
+        display_name: String(source.screen_summary || source.state_guess || "未命名界面"),
+        review_status: String(source.review_status || "needs_human_review"),
+        source_path: candidates[0],
+      }];
+    });
+    if (standalone.length) {
+      groups.unreviewed.unshift({
+        workflow_id: "",
+        goal: "待加入流程",
+        application_identity_key: "",
+        application_identity: {},
+        interfaces: standalone,
+      });
+    }
+    return groups;
+  }
+
+  function buildInterfaceAssetLibrary(registry = {}, sources = []) {
+    const applications = registry && typeof registry.applications === "object"
+      ? registry.applications
+      : {};
+    const workflows = registry && typeof registry.workflows === "object"
+      ? registry.workflows
+      : {};
+    const applicationByWorkflow = new Map();
+    Object.entries(applications).forEach(([identityKey, application]) => {
+      (Array.isArray(application?.workflow_ids) ? application.workflow_ids : []).forEach((workflowId) => {
+        applicationByWorkflow.set(String(workflowId), {
+          identity_key: String(identityKey || ""),
+          identity: clone(application?.application_identity || {}),
+        });
+      });
+    });
+
+    const assets = new Map();
+    const normalizedPath = (value) => String(value || "").trim().replace(/\\/g, "/");
+    const assetKeyFor = (item, applicationIdentityKey = "") => {
+      const sourcePath = normalizedPath(
+        item?.editable_review_source_path
+        || item?.source_path
+        || (Array.isArray(item?.source_paths) ? item.source_paths[0] : ""),
+      );
+      if (sourcePath) return { asset_key: `path:${sourcePath.toLowerCase()}`, source_path: sourcePath };
+      const nodeId = String(item?.node_id || item?.interface_id || "").trim();
+      return {
+        asset_key: `node:${String(applicationIdentityKey || "unknown").toLowerCase()}:${nodeId || "unknown"}`,
+        source_path: "",
+      };
+    };
+    const mergeAsset = (
+      item,
+      membership = null,
+      application = {},
+      projectionSource = "untrusted_parallel_projection",
+    ) => {
+      if (!item || typeof item !== "object") return;
+      const identityKey = String(application.identity_key || "");
+      const key = assetKeyFor(item, identityKey);
+      const explicitlyUsable = (
+        projectionSource === "server_reviewed"
+        && String(item.review_status || "").trim() === "human_approved"
+        && item.agent_usable === true
+        && item.reviewed_by_human === true
+        && item.agent_eligibility_reason === "human_reviewed_current_revision"
+      );
+      const blockedReason = projectionSource === "untrusted_parallel_projection"
+        ? projectionSource
+        : String(item.agent_eligibility_reason || "human_review_required");
+      const existing = assets.get(key.asset_key);
+      if (!existing) {
+        assets.set(key.asset_key, {
+          asset_key: key.asset_key,
+          node_id: String(item.node_id || item.interface_id || ""),
+          display_name: String(item.display_name || item.screen_summary || item.state_guess || "未命名界面"),
+          review_status: String(item.review_status || "needs_human_review"),
+          agent_usable: explicitlyUsable,
+          agent_eligibility_reason: explicitlyUsable
+            ? "human_reviewed_current_revision"
+            : blockedReason,
+          application_identity_key: identityKey,
+          application_identity: clone(application.identity || {}),
+          workflow_memberships: membership ? [membership] : [],
+          source_path: key.source_path,
+          source_paths: Array.from(new Set([
+            key.source_path,
+            ...(Array.isArray(item.source_paths) ? item.source_paths.map(normalizedPath) : []),
+          ].filter(Boolean))),
+        });
+        return;
+      }
+      if (membership && !existing.workflow_memberships.some((entry) => entry.workflow_id === membership.workflow_id)) {
+        existing.workflow_memberships.push(membership);
+      }
+      existing.source_paths = Array.from(new Set([
+        ...existing.source_paths,
+        ...(Array.isArray(item.source_paths) ? item.source_paths.map(normalizedPath) : []),
+      ].filter(Boolean)));
+      if (!explicitlyUsable) {
+        existing.agent_usable = false;
+        existing.review_status = String(item.review_status || "needs_human_review");
+        existing.agent_eligibility_reason = blockedReason;
+      }
+    };
+
+    Object.entries(workflows).forEach(([workflowId, record]) => {
+      if (!record || typeof record !== "object") return;
+      const application = applicationByWorkflow.get(String(workflowId)) || {
+        identity_key: String(record.application_identity_key || ""),
+        identity: {},
+      };
+      const membership = {
+        workflow_id: String(workflowId),
+        goal: String(record.goal || workflowId),
+      };
+      for (const bucket of ["reviewed", "unreviewed"]) {
+        (Array.isArray(record?.review_groups?.[bucket]) ? record.review_groups[bucket] : [])
+          .forEach((item) => mergeAsset(
+            item,
+            membership,
+            application,
+            bucket === "reviewed" ? "server_reviewed" : "server_unreviewed",
+          ));
+      }
+    });
+
+    (Array.isArray(sources) ? sources : []).forEach((source) => {
+      if (!source || typeof source !== "object") return;
+      const sourcePath = normalizedPath(
+        source.reviewed_template_candidate_path
+        || source.source_path
+        || source.source_trial_path
+        || source.trial_result_path,
+      );
+      if (!sourcePath) return;
+      const key = `path:${sourcePath.toLowerCase()}`;
+      if (assets.has(key)) return;
+      mergeAsset(
+        { ...source, source_path: sourcePath },
+        null,
+        {},
+        "untrusted_parallel_projection",
+      );
+    });
+
+    const result = { reviewed: [], unreviewed: [] };
+    Array.from(assets.values())
+      .sort((left, right) => left.display_name.localeCompare(right.display_name, "zh-CN"))
+      .forEach((asset) => {
+        asset.workflow_memberships.sort((left, right) => left.workflow_id.localeCompare(right.workflow_id));
+        result[asset.agent_usable ? "reviewed" : "unreviewed"].push(asset);
+      });
+    return result;
+  }
+
+  function buildAttachDialogModel(asset = {}, workflows = []) {
+    const sourcePath = String(
+      asset.source_path
+      || (Array.isArray(asset.source_paths) ? asset.source_paths[0] : "")
+      || "",
+    ).trim();
+    const agentUsable = asset.agent_usable === true;
+    return {
+      asset_key: String(asset.asset_key || ""),
+      display_name: userFacingLearningLabel(
+        asset.display_name || asset.node_id || "未命名界面",
+      ),
+      source_path: sourcePath,
+      review_status: String(asset.review_status || "needs_human_review"),
+      agent_usable: agentUsable,
+      can_attach: Boolean(sourcePath),
+      can_agent_use: agentUsable,
+      warning: agentUsable
+        ? "审核通过仍不是执行授权；真实动作必须重新定位并经过 Gate。"
+        : "未审核界面仅可加入流程继续人工整理，Agent 不可直接使用。",
+      workflows: (Array.isArray(workflows) ? workflows : []).map((workflow) => ({
+        workflow_id: String(workflow?.workflow_id || ""),
+        label: String(workflow?.label || workflow?.goal || workflow?.workflow_id || "未命名流程"),
+      })).filter((workflow) => workflow.workflow_id),
+    };
+  }
+
   const api = {
     CONTRACT_VERSION,
+    buildAttachDialogModel,
+    buildInterfaceAssetLibrary,
+    buildLearningResultsReviewGroups,
+    commitInterfaceWorkflowReviewForSave,
     createEmptyInterfaceWorkflowReview,
     createLatestInterfaceWorkflowLoadGuard,
     createInterfaceWorkflowWorkbenchState,
     createInterfaceWorkflowReviewState,
     interfaceWorkflowControlChoices,
     mergeEditableWorkflowReview,
+    projectLiveSafeFillPreflightReview,
+    projectInterfaceWorkflowStepAudit,
+    projectLearningDraftOwnershipConflicts,
+    buildLearningDraftOwnershipOperations,
+    resolveInterfaceAssetOpenTarget,
+    resolveInterfaceWorkflowCorrectionTarget,
     userFacingLearningLabel,
   };
 

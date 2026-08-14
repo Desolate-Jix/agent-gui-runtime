@@ -12,6 +12,97 @@ def test_window_title_match_normalization_removes_format_controls() -> None:
     assert manager._normalize_match_text("Microsoft\u200b Edge") == "microsoft edge"
 
 
+def test_validate_bound_point_visibility_accepts_descendant_window(monkeypatch) -> None:
+    manager = WindowManager()
+    bound = BoundWindow(
+        handle=100,
+        title="Browser",
+        process_id=10,
+        process_name="msedge.exe",
+        rect=WindowRect(left=-8, top=-8, right=1192, bottom=792),
+        is_active=True,
+    )
+
+    class DescendantWin32Gui:
+        @staticmethod
+        def WindowFromPoint(point):
+            assert point == (307, 238)
+            return 101
+
+        @staticmethod
+        def IsChild(parent, child):
+            return parent == 100 and child == 101
+
+        @staticmethod
+        def GetAncestor(handle, flag):
+            return 100
+
+        @staticmethod
+        def GetWindowText(handle):
+            return "Browser renderer"
+
+    monkeypatch.setattr(window_manager_module, "WINDOWS_BACKEND_AVAILABLE", True)
+    monkeypatch.setattr(window_manager_module, "win32gui", DescendantWin32Gui)
+    monkeypatch.setattr(manager, "_get_process_id", lambda handle: 10)
+    monkeypatch.setattr(manager, "_get_process_name", lambda process_id: "msedge.exe")
+
+    result = manager.validate_bound_point_visibility(bound=bound, x=315, y=246)
+
+    assert result["allowed"] is True
+    assert result["reason"] == "target_point_owned_by_bound_window"
+    assert result["screen_point"] == {"x": 307, "y": 238}
+    assert result["hit_window"]["handle"] == 101
+
+
+def test_validate_bound_point_visibility_rejects_foreign_top_level_window(monkeypatch) -> None:
+    manager = WindowManager()
+    bound = BoundWindow(
+        handle=100,
+        title="Browser",
+        process_id=10,
+        process_name="msedge.exe",
+        rect=WindowRect(left=-8, top=-8, right=1192, bottom=792),
+        is_active=True,
+    )
+
+    class OccludedWin32Gui:
+        @staticmethod
+        def WindowFromPoint(point):
+            assert point == (307, 238)
+            return 900
+
+        @staticmethod
+        def IsChild(parent, child):
+            return False
+
+        @staticmethod
+        def GetAncestor(handle, flag):
+            return 900
+
+        @staticmethod
+        def GetWindowText(handle):
+            return "QQ notification"
+
+    monkeypatch.setattr(window_manager_module, "WINDOWS_BACKEND_AVAILABLE", True)
+    monkeypatch.setattr(window_manager_module, "win32gui", OccludedWin32Gui)
+    monkeypatch.setattr(manager, "_get_process_id", lambda handle: 99)
+    monkeypatch.setattr(manager, "_get_process_name", lambda process_id: "QQ.exe")
+
+    result = manager.validate_bound_point_visibility(bound=bound, x=315, y=246)
+
+    assert result["allowed"] is False
+    assert result["reason"] == "target_point_occluded"
+    assert result["bound_window"]["handle"] == 100
+    assert result["hit_window"] == {
+        "handle": 900,
+        "root_handle": 900,
+        "root_owner_handle": 900,
+        "title": "QQ notification",
+        "process_id": 99,
+        "process_name": "QQ.exe",
+    }
+
+
 def test_candidate_window_filter_accepts_visible_top_level_titled_window(monkeypatch) -> None:
     manager = WindowManager()
 
@@ -402,4 +493,199 @@ def test_activate_window_temporarily_attaches_input_threads(monkeypatch) -> None
         (20, 22, True),
         (20, 22, False),
         (20, 21, False),
+    ]
+
+
+def test_activate_window_continues_after_foreground_thread_attach_failure(monkeypatch) -> None:
+    manager = WindowManager()
+    attach_calls = []
+
+    class FocusWin32Gui:
+        @staticmethod
+        def IsIconic(handle):
+            return False
+
+        @staticmethod
+        def GetForegroundWindow():
+            return 999
+
+        @staticmethod
+        def BringWindowToTop(handle):
+            return None
+
+        @staticmethod
+        def SetWindowPos(*_args):
+            return None
+
+        @staticmethod
+        def SetForegroundWindow(handle):
+            return None
+
+    class FocusWin32Process:
+        @staticmethod
+        def GetWindowThreadProcessId(handle):
+            return (21 if handle == 999 else 22, 1)
+
+        @staticmethod
+        def AttachThreadInput(source_thread, target_thread, attach):
+            attach_calls.append((source_thread, target_thread, attach))
+            if target_thread == 21 and attach:
+                raise OSError("access denied")
+
+    class FocusWin32Api:
+        @staticmethod
+        def GetCurrentThreadId():
+            return 20
+
+    monkeypatch.setattr(window_manager_module, "WINDOWS_BACKEND_AVAILABLE", True)
+    monkeypatch.setattr(window_manager_module, "win32gui", FocusWin32Gui)
+    monkeypatch.setattr(window_manager_module, "win32process", FocusWin32Process)
+    monkeypatch.setattr(window_manager_module, "win32api", FocusWin32Api, raising=False)
+
+    manager._activate_window(777)
+
+    assert attach_calls == [
+        (20, 21, True),
+        (20, 22, True),
+        (20, 22, False),
+    ]
+
+
+def test_activate_window_retries_foreground_with_alt_unlock_after_access_denied(monkeypatch) -> None:
+    manager = WindowManager()
+    foreground_calls = []
+    key_calls = []
+
+    class FocusWin32Gui:
+        @staticmethod
+        def IsIconic(handle):
+            return False
+
+        @staticmethod
+        def GetForegroundWindow():
+            return 999
+
+        @staticmethod
+        def BringWindowToTop(handle):
+            return None
+
+        @staticmethod
+        def SetWindowPos(*_args):
+            return None
+
+        @staticmethod
+        def SetForegroundWindow(handle):
+            foreground_calls.append(handle)
+            if len(foreground_calls) == 1:
+                raise OSError("access denied")
+
+    class FocusWin32Process:
+        @staticmethod
+        def GetWindowThreadProcessId(handle):
+            return (21 if handle == 999 else 22, 1)
+
+        @staticmethod
+        def AttachThreadInput(_source_thread, _target_thread, _attach):
+            raise OSError("access denied")
+
+    class FocusWin32Api:
+        @staticmethod
+        def GetCurrentThreadId():
+            return 20
+
+        @staticmethod
+        def keybd_event(key, scan, flags, extra):
+            key_calls.append((key, scan, flags, extra))
+
+    monkeypatch.setattr(window_manager_module, "WINDOWS_BACKEND_AVAILABLE", True)
+    monkeypatch.setattr(window_manager_module, "win32gui", FocusWin32Gui)
+    monkeypatch.setattr(window_manager_module, "win32process", FocusWin32Process)
+    monkeypatch.setattr(window_manager_module, "win32api", FocusWin32Api, raising=False)
+
+    manager._activate_window(777)
+
+    assert foreground_calls == [777, 777]
+    assert key_calls == [
+        (window_manager_module.win32con.VK_MENU, 0, 0, 0),
+        (
+            window_manager_module.win32con.VK_MENU,
+            0,
+            window_manager_module.win32con.KEYEVENTF_KEYUP,
+            0,
+        ),
+    ]
+
+
+def test_activate_window_cycles_past_shell_notification_after_foreground_retry_fails(monkeypatch) -> None:
+    manager = WindowManager()
+    foreground = {"handle": 999}
+    key_calls = []
+
+    class FocusWin32Gui:
+        @staticmethod
+        def IsIconic(handle):
+            return False
+
+        @staticmethod
+        def GetForegroundWindow():
+            return foreground["handle"]
+
+        @staticmethod
+        def BringWindowToTop(handle):
+            return None
+
+        @staticmethod
+        def SetWindowPos(*_args):
+            return None
+
+        @staticmethod
+        def SetForegroundWindow(handle):
+            raise OSError("access denied")
+
+    class FocusWin32Process:
+        @staticmethod
+        def GetWindowThreadProcessId(handle):
+            return (21 if handle == 999 else 22, 1)
+
+        @staticmethod
+        def AttachThreadInput(_source_thread, _target_thread, _attach):
+            raise OSError("access denied")
+
+    class FocusWin32Api:
+        @staticmethod
+        def GetCurrentThreadId():
+            return 20
+
+        @staticmethod
+        def keybd_event(key, scan, flags, extra):
+            key_calls.append((key, scan, flags, extra))
+            if key == window_manager_module.win32con.VK_TAB and flags == 0:
+                foreground["handle"] = 777
+
+    monkeypatch.setattr(window_manager_module, "WINDOWS_BACKEND_AVAILABLE", True)
+    monkeypatch.setattr(window_manager_module, "win32gui", FocusWin32Gui)
+    monkeypatch.setattr(window_manager_module, "win32process", FocusWin32Process)
+    monkeypatch.setattr(window_manager_module, "win32api", FocusWin32Api, raising=False)
+    monkeypatch.setattr(manager, "_get_process_id", lambda handle: 42 if handle == 999 else 43)
+    monkeypatch.setattr(manager, "_get_process_name", lambda process_id: "ShellExperienceHost.exe" if process_id == 42 else "msedge.exe")
+    monkeypatch.setattr(window_manager_module.time, "sleep", lambda _seconds: None)
+
+    manager._activate_window(777)
+
+    assert foreground["handle"] == 777
+    assert key_calls[-4:] == [
+        (window_manager_module.win32con.VK_MENU, 0, 0, 0),
+        (window_manager_module.win32con.VK_TAB, 0, 0, 0),
+        (
+            window_manager_module.win32con.VK_TAB,
+            0,
+            window_manager_module.win32con.KEYEVENTF_KEYUP,
+            0,
+        ),
+        (
+            window_manager_module.win32con.VK_MENU,
+            0,
+            window_manager_module.win32con.KEYEVENTF_KEYUP,
+            0,
+        ),
     ]

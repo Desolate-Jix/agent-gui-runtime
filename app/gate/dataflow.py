@@ -20,6 +20,8 @@ def with_detail_snapshot(detail: dict[str, Any], *, source: str, previous: dict[
         "revision": revision,
         "previous_snapshot_id": previous_snapshot.get("snapshot_id"),
         "snapshot_id": _snapshot_id(payload, revision=revision, source=source),
+        "read_state": payload.get("detail_read_state"),
+        "read_complete": payload.get("detail_read_complete") is True,
     }
     return payload
 
@@ -57,20 +59,28 @@ def merge_read_batch_into_detail_snapshot(
     )
     merged["detail_batch_status"] = batch.get("status")
     merged["detail_batch_stop_reason"] = batch.get("stop_reason")
-    merged["detail_read_state"] = str(batch.get("stop_reason") or "unknown")
+    merged["detail_read_state"] = str(
+        batch.get("read_state") or batch.get("stop_reason") or "unknown"
+    )
     merged["detail_bottom_reached"] = (
         batch.get("reached_bottom") is True
         or batch.get("stop_reason") == "reached_bottom"
     )
-    merged["detail_read_completion"] = (
-        "complete" if merged["detail_bottom_reached"]
-        else str(batch.get("completion_status") or "incomplete")
+    merged["detail_read_complete"] = (
+        batch.get("read_complete") is True
+        or merged["detail_bottom_reached"]
+    )
+    merged["detail_read_completion"] = str(
+        batch.get("completion_status")
+        or ("complete" if merged["detail_read_complete"] else "incomplete")
     )
     merged["detail_batch_unique_line_count"] = batch.get("unique_line_count")
     merged["runtime_detail_dataflow"] = {
         "contract_version": "runtime_detail_dataflow_v1",
         "source_batch_contract": batch.get("contract_version"),
         "source_batch_status": batch.get("status"),
+        "read_state": merged["detail_read_state"],
+        "read_complete": merged["detail_read_complete"],
         "merged_text_line_count": len(lines),
         "description_section_count": len(existing_sections),
     }

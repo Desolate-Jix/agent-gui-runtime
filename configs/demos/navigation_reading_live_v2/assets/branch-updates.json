@@ -52,10 +52,13 @@
   ],
   "blockers": [],
   "review": {
-    "status": "human_reviewed",
+    "status": "human_approved",
     "manual_revision": {
       "semantic_description": "Read a bounded sample rather than treating the collection as finite."
-    }
+    },
+    "reviewed_by_human": true,
+    "reviewed_revision_hash": "faa872625462fc11605ee84a76c8b93c855f6f74603babb0d22d099a5731f069",
+    "current_revision_hash": "faa872625462fc11605ee84a76c8b93c855f6f74603babb0d22d099a5731f069"
   },
   "evidence": {},
   "execute_binding_enabled": false

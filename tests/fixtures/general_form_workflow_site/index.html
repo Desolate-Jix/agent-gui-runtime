@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>General Form Safe Fill Fixture</title>
+  <style>
+    :root { color-scheme: light; font-family: "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #eef2f5; color: #18232b; }
+    main { width: min(620px, calc(100vw - 32px)); margin: 20px auto; padding: 20px 24px; background: #fff; border: 1px solid #cfd8df; border-radius: 8px; }
+    h1 { margin: 0 0 4px; font-size: 22px; }
+    p { margin: 0 0 14px; color: #52616b; }
+    label, legend { font-weight: 600; }
+    .field { margin-top: 12px; }
+    #firstName, .combo-trigger, input[type="file"] { width: 100%; min-height: 38px; margin-top: 5px; padding: 7px 10px; border: 2px solid #7a8a96; border-radius: 4px; background: #fff; }
+    .combo { position: relative; }
+    .combo-trigger { text-align: left; font-size: 15px; }
+    .combo-options { position: absolute; z-index: 2; inset: 43px 0 auto; margin: 0; padding: 4px; border: 2px solid #7a8a96; border-radius: 4px; background: #fff; }
+    .combo-options button { width: 100%; padding: 7px 9px; border: 0; background: #fff; text-align: left; }
+    .combo-options button:disabled { color: #8c989f; }
+    fieldset { margin: 12px 0 0; padding: 8px 10px; border: 1px solid #cfd8df; border-radius: 4px; }
+    .choice-row { display: flex; gap: 18px; align-items: center; }
+    .choice { display: flex; gap: 6px; align-items: center; min-height: 28px; }
+    .choice label { font-weight: 400; }
+    output { display: block; min-height: 17px; margin-top: 4px; font: 11px Consolas, monospace; color: #36515f; }
+    [hidden] { display: none !important; }
+    .continue { margin-top: 16px; padding: 9px 18px; border: 0; border-radius: 4px; background: #137c6b; color: white; font-weight: 700; }
+    .review { padding: 12px; border: 2px solid #d6a300; border-radius: 6px; background: #fffbea; }
+    .review h2 { margin: 0 0 6px; }
+    .final-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .final-submit { padding: 9px 13px; border: 0; border-radius: 4px; background: #b42318; color: white; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Controlled application workflow</h1>
+    <p>Reviewed fields may be completed. Final actions must never be clicked.</p>
+    <section data-form-step="questions" aria-label="Application questions">
+      <div class="field">
+        <label for="firstName">First name</label>
+        <input id="firstName" name="firstName" autocomplete="off" aria-describedby="fieldState">
+        <output id="fieldState" aria-live="polite">field-state length=0 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855</output>
+      </div>
+      <div class="field">
+        <label for="country">Country</label>
+        <div class="combo">
+          <button id="country" class="combo-trigger" type="button" role="combobox" aria-expanded="false" aria-controls="countryOptions" aria-describedby="countryState">Choose country</button>
+          <div id="countryOptions" class="combo-options" role="listbox" aria-label="Country options" hidden>
+            <button type="button" role="option">Australia</button>
+            <button type="button" role="option">New Zealand</button>
+            <button type="button" role="option" disabled>Disabled decoy</button>
+          </div>
+        </div>
+        <output id="countryState" aria-live="polite">country-state length=0 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855</output>
+      </div>
+      <fieldset>
+        <legend>Reviewed choices</legend>
+        <div class="choice-row">
+          <div class="choice">
+            <input id="contactEmail" type="radio" name="contactMethod" value="Email" aria-describedby="contactState">
+            <label for="contactEmail">Email</label>
+          </div>
+          <div class="choice">
+            <input id="contactPhone" type="radio" name="contactMethod" value="Phone" aria-describedby="contactState">
+            <label for="contactPhone">Phone</label>
+          </div>
+          <div class="choice">
+            <input id="statusUpdates" type="checkbox" aria-describedby="updatesState">
+            <label for="statusUpdates">Receive status updates</label>
+          </div>
+        </div>
+        <output id="contactState" aria-live="polite">contact-state checked=false</output>
+        <output id="updatesState" aria-live="polite">updates-state checked=false</output>
+      </fieldset>
+      <div class="field">
+        <label for="resumeUpload">Upload resume</label>
+        <input id="resumeUpload" type="file" accept=".pdf,.doc,.docx,.rtf" aria-describedby="uploadState">
+        <output id="uploadState" aria-live="polite">upload-state filename-sha256=none size=0</output>
+      </div>
+      <button id="continueToReview" class="continue" type="button">Continue</button>
+    </section>
+    <section class="review" data-form-step="review" aria-label="Final review" hidden>
+      <h2>Review your application</h2>
+      <p>Stop here. These buttons exist only to verify the final-action guard.</p>
+      <div class="final-actions">
+        <button id="finalReviewAndSubmit" class="final-submit" type="button">Review and submit</button>
+        <button id="finalSubmit" class="final-submit" type="button">Submit application</button>
+        <button id="finalSend" class="final-submit" type="button">Send</button>
+        <button id="finalComplete" class="final-submit" type="button">Complete</button>
+      </div>
+      <output id="submitState" aria-live="polite">real-clicks=0 submit-clicks=0</output>
+    </section>
+  </main>
+  <script>
+    const field = document.querySelector("#firstName");
+    const fieldState = document.querySelector("#fieldState");
+    const country = document.querySelector("#country");
+    const countryOptions = document.querySelector("#countryOptions");
+    const countryState = document.querySelector("#countryState");
+    const contactEmail = document.querySelector("#contactEmail");
+    const contactPhone = document.querySelector("#contactPhone");
+    const contactState = document.querySelector("#contactState");
+    const statusUpdates = document.querySelector("#statusUpdates");
+    const updatesState = document.querySelector("#updatesState");
+    const resumeUpload = document.querySelector("#resumeUpload");
+    const uploadState = document.querySelector("#uploadState");
+    const questionStep = document.querySelector('[data-form-step="questions"]');
+    const reviewStep = document.querySelector('[data-form-step="review"]');
+    const submitState = document.querySelector("#submitState");
+    let realClicks = 0;
+    let submitClicks = 0;
+
+    async function sha256(text) {
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+      return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+    }
+    field.addEventListener("input", async () => {
+      fieldState.textContent = `field-state length=${field.value.length} sha256=${await sha256(field.value)}`;
+    });
+    country.addEventListener("click", () => {
+      const expanded = country.getAttribute("aria-expanded") === "true";
+      country.setAttribute("aria-expanded", String(!expanded));
+      countryOptions.hidden = expanded;
+    });
+    countryOptions.addEventListener("click", async event => {
+      const option = event.target.closest('[role="option"]');
+      if (!option || option.disabled) return;
+      const selected = option.textContent.trim();
+      country.textContent = selected;
+      country.setAttribute("aria-expanded", "false");
+      countryOptions.hidden = true;
+      countryState.textContent = `country-state length=${selected.length} sha256=${await sha256(selected)}`;
+    });
+    [contactEmail, contactPhone].forEach(control => control.addEventListener("change", () => {
+      contactState.textContent = `contact-state checked=${contactEmail.checked}`;
+    }));
+    statusUpdates.addEventListener("change", () => {
+      updatesState.textContent = `updates-state checked=${statusUpdates.checked}`;
+    });
+    resumeUpload.addEventListener("change", async () => {
+      const file = resumeUpload.files && resumeUpload.files[0];
+      uploadState.textContent = file
+        ? `upload-state filename-sha256=${await sha256(file.name)} size=${file.size}`
+        : "upload-state filename-sha256=none size=0";
+    });
+    document.querySelector("#continueToReview").addEventListener("click", () => {
+      questionStep.hidden = true;
+      reviewStep.hidden = false;
+    });
+    document.querySelectorAll(".final-submit").forEach(action => action.addEventListener("click", () => {
+      realClicks += 1;
+      submitClicks += 1;
+      submitState.textContent = `real-clicks=${realClicks} submit-clicks=${submitClicks}`;
+    }));
+  </script>
+</body>
+</html>

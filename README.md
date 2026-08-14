@@ -2,6 +2,22 @@
 
 Windows GUI Agent Runtime for observing, understanding, locating, safely operating, tracing, and learning reusable interface structures across websites and desktop software.
 
+## 2026-08-15 Current full offline verification and subordinate focused evidence
+
+本阶段当前完整离线验证为：
+
+- Python：`uv run pytest tests -q` → `2762 passed, 1 skipped` in `149.42s`；
+- JavaScript full suite：`128 passed, 0 failed`。
+
+一次被忽略但必需的 Python.org screenshot fixture 已从 `logs` 下已有的、SHA-256 完全相同的副本恢复；这是测试证据恢复，不是代码变更或提交产物。focused 证据作为下位、分组证据保留：form `286 passed`、learning `412 passed`、navigation/SEEK offline `443 passed`、JavaScript focused `104 passed`。完整离线回归已完成，但这些结果仍不代表真实 SEEK/live Demo、live safe-fill、unattended reliability 或推送完成。
+
+本阶段还完成了持久化 materialization revision、服务端 registry provenance、navigation replay revision 合约和 continuous projection reload 的最小修复。缺失、无效或陈旧 revision 仍 fail closed，不进入 Agent context、Gate 或 Operation；`artifact_is_authorization=false`、`execute_binding_enabled=false`、`final_submit_forbidden=true` 没有放宽。
+
+当前公开行为说明只到 Quick Apply/no-submit 范围：系统可以在当前证据和审核语义下展示或 dry-run `Quick Apply` 的 `open_apply_flow` 入口，并在最终提交边界 safe-stop；`Review and submit`、`Submit application`、`Send`、`Complete` 等终端动作仍禁止。不要将该范围扩展为 live safe-fill、ATS E2E 或 unattended apply。
+
+受管 artifacts 的本地写权限证据边界，以及单 API owner 模型下 registry 并发 stale save，列在 [`docs/DEFERRED_SECURITY_DEBT.md`](docs/DEFERRED_SECURITY_DEBT.md)。在这两项债务关闭前，缺失 provenance、路径/内容完整性无法证明、revision 不匹配或并发保存版本不明确时，继续保持 needs-human-review / invalid case 的 fail-closed 补偿。
+
+
 ## Deployment
 
 ### Requirements
@@ -96,6 +112,14 @@ Learning Interface progress follows the backend-owned `learning_workflow_state_v
 
 Observe now has a transport-neutral service boundary. `/vision/observe_screen` and the Learn Worker both call `app.learn.workflow_tasks.observe.run_observe_task`, which composes the Operation read-only observation with Learn-only screen-map, read-only PathGraph, deep-review, and visual-asset enrichment. The Worker no longer loads `app.api.*` for Observe. Public request/response fields and no-action safety behavior remain unchanged; Locate is still API-coupled and is intentionally deferred to a separate extraction.
 
+Form inspection is also a common read-only Operation. `/execute/form_inventory` now returns `form_question_inventory_v1`, which binds fields and questions to the current capture and active form/modal scope, groups repeated options under their owning question, excludes controls outside that scope, and classifies disabled, unsupported file-upload, navigation, and final actions. Site adapters only convert evidence into the common contract. This inventory does not fill fields, click controls, submit a form, or authorize later execution.
+
+The corresponding Agent policy layer produces redacted `form_answer_decision_v1` records. Reviewed name, email, or phone evidence can become an `auto_fill` candidate; exact reviewed answer drafts can become `derived_with_evidence`; salary, relocation, and complex work-rights questions require review; sensitive questions are blocked; file upload is unsupported; and final submit remains forbidden. Reports retain evidence references, hashes, lengths, and redacted previews instead of raw PII. Policy approval is not execution approval and still requires current grounding and Gate review.
+
+The first controlled text-fill closure is available through `scripts/run_general_form_fixture_smoke.py`. It launches an isolated local Edge fixture, exposes its web controls through the Windows accessibility tree, captures the current window, recalls the ordinary `First name` field, obtains a dry-run RecognitionPlan approval, executes the approved one-time field click, types with `clear_existing=true` and `submit=false`, and verifies the visible field projection by hash and length. The verified report is `logs/smoke/general_form_fixture_cp9c_next2/general_form_fixture_smoke_report.json`: one fixture fill was attempted, its effect was observed, and the final-submit decoy remained at zero clicks. Reports and action traces contain no raw test value. This is fixture-only evidence, not live ATS safe-fill reliability or final-submit coverage.
+
+The controlled dropdown checkpoint is also closed for a page-contained ARIA combobox/listbox. `scripts/run_general_form_fixture_smoke.py --mode dropdown` performs `open dropdown -> re-observe -> select option -> re-observe`, sends both clicks through current localization and Gate, and verifies the selected-state hash without clicking the submit decoy. The verified report is `logs/smoke/general_form_dropdown_cp10a_final/general_form_dropdown_fixture_smoke_report.json`; it records one open, one select, a verified effect, and zero submit clicks. Report values are redacted, while action Trace may retain option labels that were visibly present on the current screen as grounding evidence. Native Chromium `<select>` popup geometry is not covered yet. This remains fixture-only evidence and does not establish live ATS safe-fill reliability.
+
 ### Generic Single-Application Workflow Review
 
 The Learning workspace can project an ordered set of reviewed learning artifacts into `single_application_workflow_review_v1`. Each interface node owns its fused, numbered, and source screenshots, page details, candidate actions, blockers, verification rules, and incoming/outgoing transitions. Its review workbench places a compact, viewport-responsive force-directed interface graph directly above the checksum-bound evidence viewer, so the graph and the beginning of the selected interface screenshot remain visible together. Correction tools live inside the current-interface section and stay hidden until requested. Like a compact Connected Papers view, the graph renders interfaces as circular points with evidence- and connectivity-weighted sizes, while each operation is written as small plain text parallel to its arrow without a label container. Link text measures the actual clear curve span between the two circular boundaries, then truncates and scales to fit; links that are too short to keep readable text clear of both nodes show only the arrow. Controls stay attached to an interface instead of becoming graph nodes. A deterministic initial layout and bounded force simulation keep the selected interface near the centre, separate neighbouring interfaces, and produce the same settled positions for the same topology after a brief entry animation. Hovering a node highlights that interface, its one-hop neighbours, and their transition links while dimming unrelated paths; a tooltip shows interface type, control count, path count, and review state. Clicking an interface centres it and opens its evidence without removing any other interface or link from the software-wide graph. Reviewers can zoom, pan, or use `适合画布` to restore the application-wide fit.
@@ -104,9 +128,9 @@ Saved single-interface preview evidence and current workflow-node evidence are s
 
 Saving is deliberately non-authorizing: the artifact remains `display_only=true`, `artifact_is_authorization=false`, `execute_binding_enabled=false`, has no published memory version, and contains no reusable runtime click point. The saver rejects duplicate node/edge IDs, missing entry nodes, mismatched graph indexes, dangling transition targets, unsupported actions, and forbidden high-impact actions. The operation toolbar unlocks `Safe validation` only after save; that path forces `capture_live=true` and `dry_run=true`, performs fresh localization plus Gate review, and never dispatches the action. `Publish and execution verification` only prepares the existing Agent Memory panel. Publication still requires separate human approval, while any later execution must recapture the current interface, localize again, pass Gate, and verify the result.
 
-Reviewed workflows are indexed into an application-scoped library. Browser captures use a canonical site domain/origin such as `web:seek.co.nz`; Edge or Chrome without URL/domain evidence remains `needs_domain_review` and is never treated as the website identity. Native applications use executable plus product identity. The Agent may load this library as read-only planning context, but historical coordinates are forbidden and every action still requires a current capture, fresh grounding, Gate, and post-action verification.
+Reviewed workflows are indexed into an application-scoped library. Browser captures use a canonical site domain/origin such as `web:seek.co.nz`; Edge or Chrome without URL/domain evidence remains `needs_domain_review` and is never treated as the website identity. Native applications use executable plus product identity. The Agent may load this library as read-only planning context, but historical coordinates are forbidden and every action still requires a current capture, fresh grounding, Gate, and post-action verification. A node is Agent-usable only when its explicit human confirmation, canonical semantic revision, registry source-asset checksum, and materialized evidence digests all match; changed or unverifiable evidence returns it to human review.
 
-Learning evidence now has an explicit Agent-facing semantic projection. `agent_evidence_context_v1` describes the interface responsibility, fixed identity anchors, dynamic or on-demand content, semantic controls, candidate operations, expected transitions, verification rules, blockers, and evidence-file references without exposing historical bbox or click points. The contract is available through `GET /memory/interface_assets/agent_context` and inside `interface_workflow_agent_context_v1.agent_evidence_workflows`. Old hierarchy-only boxes remain visible as non-actionable `legacy_recognition_candidates`; they are not promoted into Agent actions until a human supplies the missing content semantics and control linkage. `scripts/migrate_agent_evidence_assets.py` writes adjacent `agent_evidence.json` sidecars without modifying source assets. The projection is a read-only derivative of versioned assets and human review, not a second writable source of truth. Unknown actions fail closed, dangerous aliases remain forbidden, and evidence references are not expanded into historical coordinates. This projection is planning evidence, not Execute authorization.
+Learning evidence now has an explicit Agent-facing semantic projection. `agent_evidence_context_v1` describes the interface responsibility, fixed identity anchors, dynamic or on-demand content, semantic controls, candidate operations, expected transitions, verification rules, blockers, and evidence-file references without exposing historical bbox or click points. Every actionable control must provide a semantic name, purpose, allowed actions, verification evidence, and risk class; bbox-only controls are demoted to human review, and the navigation consumer validates this again before showing the action to Agent. The contract is available through `GET /memory/interface_assets/agent_context` and inside `interface_workflow_agent_context_v1.agent_evidence_workflows`. Old hierarchy-only boxes remain visible as non-actionable `legacy_recognition_candidates`; they are not promoted into Agent actions until a human supplies the missing content semantics and control linkage. `scripts/migrate_agent_evidence_assets.py` writes adjacent `agent_evidence.json` sidecars without modifying source assets. The projection is a read-only derivative of versioned assets and human review, not a second writable source of truth. Unknown actions fail closed, dangerous aliases remain forbidden, and evidence references are not expanded into historical coordinates. This projection is planning evidence, not Execute authorization.
 
 Saving a reviewed workflow now refreshes its adjacent Agent evidence projection in the same backend operation. Application identity keys are normalized only for safe filesystem segments, while the semantic identity remains unchanged. The previous `web:msn.com` learning history and Agent-evidence projection were removed after human review found that the page had been misclassified as a news site. A fresh model observation classifies the surface as `aggregate_portal`: a personalized portal/dashboard containing independent news, advertising, video, weather, sports, market, and game modules. The `independent_content_modules` policy now reaches deterministic Stage1 root partitioning instead of stopping at classification. On real-model Protopage and MSN aggregate-portal traces, Stage1 now produces a coarse top region plus one main-content region and continues to Stage2. Google News, Yahoo NZ, and YouTube control traces retain their feed/search policies. The common root-partition invariant now requires current semantic navigation evidence before a class-rule edge split can become a sidebar; this removes Yahoo NZ's false left-navigation root without adding an application-specific rule. Final fusion remains review evidence rather than Agent authorization.
 
@@ -160,6 +184,25 @@ bottom-marker comparison tolerates whitespace loss while preserving the
 original OCR text in Trace. Form filling and final submit remain outside this
 capability.
 
+The infinite-list read contract now distinguishes scroll dispatch from a
+verified content effect. Post-scroll captures expose new item fingerprints and
+wrong-scope evidence; dispatch alone is not treated as a successful scroll.
+This contract has focused offline regression coverage and one controlled live
+fixture smoke. A visible Windows notification first caused exact-HWND capture
+to fail closed. The activation loop now continues to the target application
+thread after an unrelated thread attachment failure, while strict foreground
+verification remains unchanged. The rerun used the framework's `/apps/open`
+path to launch and bind a fresh Edge fixture window; it did not dismiss the
+notification or bypass focus verification.
+
+Long-detail reading now has a separate completeness contract. A batch reports
+`still_reading`, `reached_bottom`, `max_captures`, `no_new_content`,
+`wrong_surface`, or `blocked_surface`; only `reached_bottom` is accepted as a
+complete read. The current job's latest detail snapshot carries that state,
+and suitability or application decisions cannot substitute an old card
+summary or treat capture-budget exhaustion as complete. The speed runner skips
+matching when the latest detail remains incomplete.
+
 These are two controlled local live paths, not a general reliability or
 success-rate claim. The second path covers branching, back navigation, a
 dialog, and bounded reading of an infinite-style collection, but unfamiliar
@@ -169,10 +212,12 @@ longer workflows still require broader live coverage.
 A fresh positive full-chain rerun used the framework's own `/apps/open` path to
 open and bind the controlled fixture at `branch_hub`. The preflight matched,
 the same initial capture reached the first Agent decision, and the full
-branching path completed with 14 serialized model decisions, six verified
-transitions, three reads, three effect-verified scrolls, one explicit
-`stop_reading`, zero failed step, and final `safe_stop`. This remains controlled
-fixture evidence rather than unfamiliar-application reliability.
+branching path completed with 15 actual-model decisions, six verified
+transitions, three reads, four effect-verified scrolls, one explicit bounded
+`stop_reading`, zero failed step, and final `safe_stop`. The report is
+`logs/smoke/navigation_reading_checkpoint4_final2_20260803/navigation_reading_live_smoke_report.json`.
+This remains controlled fixture evidence rather than unfamiliar-application
+reliability.
 
 Learn Mode Stage2 now applies conservative repeated-layout review enhancement before calibration and fusion. It combines existing semantic card candidates with current-image repeated rectangles, regularizes only stable peer rows/columns, preserves each raw bbox as `source_bbox`, and refuses to shrink multi-column candidates into one slot. The class rule may declare an expected peer-item family, but actual geometry changes still require current visual repetition. The fixed MSN/Protopage/Yahoo experiment remains available at `configs/demos/layout_regularization_msn_protopage_yahoo_v1.json`; it is review assistance, not recognition accuracy, Agent memory, or Execute authorization.
 
@@ -182,7 +227,9 @@ Stage2 also emits `agent_peer_card_inventory_v1`, a geometry-free semantic proje
 
 Real Qwen3-VL calls separately identified aggregate-portal, news-feed, video-search, and ordinary-search signals on MSN, Google News, YouTube, Vimeo, Bing, and Google screenshots. This is not yet browser-class runtime completion. The full two-stage Vimeo and Google holdouts still selected the conservative `generic` adapter because structured inventory did not contain enough repeated-item semantic evidence to corroborate the model signals. The next recognition fix belongs in structured inventory semantic projection and aggregate-module child grouping; the Surface Adapter evidence gate must not be weakened. Human review must compare the original screenshot, Stage1/root-partition overlay, and final fusion overlay from the same capture. A machine validator or model repair result cannot replace that three-image review.
 
-The panel exposes that library through `学习工作台 -> 已学习的软件流程`. On a normal panel start it restores the newest saved reviewed workflow before scanning the larger raw-result history, so the branching graph and per-interface evidence are available without waiting for unrelated artifact discovery. Loading a recent single-interface result no longer replaces an already opened software workflow. Saving an audited workflow refreshes the library and reopens the exact persisted version immediately. The selector and `打开已学习流程` remain available for switching to another software/workflow. `新建软件 / 网站流程` creates an empty display-only workflow for the supplied application identity, and `打开源文件夹` opens the fixed local workflow-review directory so users can inspect or manually remove unwanted assets without exposing an arbitrary filesystem path API. Reviewed multi-interface workflows are stored under `artifacts/interface-workflow-reviews/<workflow_id>/reviewed_workflow.json` and indexed by `artifacts/interface-workflow-reviews/registry.json`. Raw single-interface model outputs remain under `artifacts/learning-runs/<run_id>/trial_result.json`; the user UI presents them as saved single-interface learning results, while legacy `draft_*` field and route names remain for API compatibility. Published reviewed Agent memory, when explicitly approved, is stored separately under `artifacts/agent-memory/`.
+The panel exposes that library through `学习工作台 -> 已学习的软件流程`. On a normal panel start it restores the newest saved reviewed workflow before scanning the larger raw-result history, so the branching graph and per-interface evidence are available without waiting for unrelated artifact discovery. Loading a recent single-interface result no longer replaces an already opened software workflow. Saving an audited workflow refreshes the library and reopens the exact persisted version immediately. `新建软件 / 网站流程` creates an empty display-only workflow for the supplied application identity, and `打开源文件夹` opens the fixed local workflow-review directory so users can inspect or manually remove unwanted assets without exposing an arbitrary filesystem path API. Reviewed multi-interface workflows are stored under `artifacts/interface-workflow-reviews/<workflow_id>/reviewed_workflow.json` and indexed by `artifacts/interface-workflow-reviews/registry.json`. Raw single-interface model outputs remain under `artifacts/learning-runs/<run_id>/trial_result.json`; the user UI presents them as saved single-interface learning results, while legacy `draft_*` field and route names remain for API compatibility. Published reviewed Agent memory, when explicitly approved, is stored separately under `artifacts/agent-memory/`.
+
+The primary learning-results entry now has three top-level pages: `未审核界面`, `已审核界面`, and `软件流程`. The first two are flat, deduplicated single-interface libraries with a shared evidence workspace; the workflow page owns the radial graph and transition review. The workflow page starts with a visible `选择已有软件 / 网站流程` selector and explicit open/delete actions, followed by the separate new-workflow controls, so opening or deleting an existing asset cannot be confused with creating one. Managed standalone evidence rows expose a confirmed `删除` action; evidence referenced by any saved workflow is rejected instead of leaving a broken graph. Workflow deletion removes only that workflow record and directory and preserves reusable single-interface evidence. Successful deletion refreshes the evidence lists, workflow selector, and graph. Unknown or legacy states fail closed into `未审核界面`. `加入流程` opens an explicit dialog where the reviewer chooses one interface and one destination workflow; adding a node does not invent a transition. The graph separately shows reviewed interfaces, unreviewed interfaces, invalid evidence, reviewed links, and review-required links. A mixed workflow is labelled as mixed and is never presented as Agent-usable merely because some nodes are reviewed. Human review and workflow membership remain evidence-management states, not Execute authorization.
 
 Historical artifacts that do not carry a capture-bound application identity can be composed only as development/review scaffolding. They do not prove that the nodes belong to one application or form a real observed transition. Production-ready continuous learning must record application identity on every capture and reject mismatched sources before operational-memory promotion.
 
@@ -201,6 +248,8 @@ The Learning Draft view now includes a compact continuous-task handoff. Before Q
 The offline acceptance covers `pause -> publish reviewed memory -> resume the same run directory`; the resumed command does not reopen results or rescan cards. A bounded live run at `logs/smoke/seek_continuous_live_confirmation_20260727` opened the SEEK recommendations page, read one full job detail, produced an Agent `maybe_apply` decision, and stopped at `quick_apply_entry_confirmation_required` in about 30 seconds. Safety counters remained `submit_clicks=0` and `final_submissions=0`. The panel loaded this checkpoint in about 44 ms and displayed the confirmation button; it was not clicked. External ATS/login and final-submit-visible surfaces remain safe-stop boundaries. This is not live safe-fill or SEEK E2E reliability evidence.
 
 A supervised single-job run at `logs/smoke/seek_one_job_final_learning_20260728` learned four consecutive SEEK Quick Apply interfaces: document selection, employer questions, profile update, and final review. The saved review graph is `artifacts/interface-workflow-reviews/seek_quick_apply_one_job_final_review/reviewed_workflow.json`; it contains four evidence-ready nodes and three human-supervised `continue_next_step` transitions. It is indexed as read-only Agent context for `web:seek.co.nz`, but remains `published=false`, `artifact_is_authorization=false`, and `execute_binding_enabled=false`.
+
+The continuous runner now freezes every available `continuous_task_session_v1` into the same formal, application-scoped multi-interface workflow library before writing its final report. Observed interfaces become graph nodes and verified state changes become reviewable transitions; reviewed interface memory supplies semantic controls when available. Missing memory or unresolved source-control linkage is retained as `runtime_observation_only` / `needs_human_review`, never promoted to Agent-usable evidence. After saving, the runner reloads the exact workflow through `interface_workflow_agent_context_v1` and verifies the Agent-visible interface and transition counts. `multi_interface_requirement_met=true` therefore means that a formal multi-interface asset was saved and is visible to Agent context; it does not mean the interfaces are `agent_usable` or authorized for execution. `demo_readiness` remains `needs_human_review` until all interface evidence and source-control links pass their separate checks. An offline replay of `logs/smoke/seek_one_job_final_learning_20260728/continuous_task_session.json` produced and reloaded three interfaces and two transitions under `logs/checkpoints/continuous_workflow_projection_20260803/`. This proves persistence and reload only; the Demo acceptance still requires the live no-submit run to generate its own reviewed multi-interface workflow and the Agent to consume it through fresh grounding and Gate.
 
 The same run exposed and fixed a common final-submit safety gap: a VISTA direct candidate could point inside a real UIA submit button while hiding its text behind a synthetic candidate ID. The Action guard now associates the final point only with overlapping action-control evidence, so the live visible `Submit application` dry-run returns `final_submit_guard_rejected` with `action_executed=false`. No live free-text fill or final submit occurred. This is one supervised workflow example, not SEEK E2E or unattended-reliability evidence.
 
@@ -228,7 +277,9 @@ Completed panel `trial_result` artifacts and raw observe traces now share one re
 
 The Learning Draft panel also has a full-image manual bbox editor with add, move, eight-direction resize, delete, undo/redo, role, and parent editing. Add mode temporarily makes existing boxes pointer-transparent so a new box can be drawn over dense evidence instead of accidentally selecting an old box. Saving creates a checksum-bound, versioned `human_review_patch_v1`, rebuilds the numbered overlay, page details, and read-only PathGraph, and records the correction as a non-active CorrectionMemory candidate. The compact manual-edit fields now bind to explicit region/action IDs; after save, the panel requires the reviewed candidate path, reloads that candidate before closing the editor, increments the image revision, and refreshes the form, region list, screenshot, page detail, workflow evidence, and read-only PathGraph from the same source. The same exact-source refresh is available from `刷新当前证据` beside the workflow evidence controls. Both automatic and manual refresh skip unrelated sidecar discovery, replace only the saved interface source, and preserve every other interface and transition in the current software workflow. The save button shows an in-progress state and remains available with an explicit failure state when either parent or workflow refresh fails. CorrectionMemory refresh is auxiliary and can no longer block the saved candidate from appearing in the panel. The human-review overlay takes display precedence over the stale pre-review fusion overlay. The review panel spans the full replay workspace width while history and screenshot remain a compact two-column row, so long draft inventories expand into available space instead of leaving an unused second column. Rule promotion is strictly `candidate -> regression_verified -> human_approved -> active -> rolled_back`; model output cannot approve or activate a rule, and tampered active evidence is rejected by checksum. See `docs/learning/CORRECTION_MEMORY.md`. No correction rule is active by default, and this remains read-only Learning Mode behavior.
 
-Human-approved `reviewed_template_candidate_v1` artifacts can now be published into a checksum-addressed Agent operational-memory registry. The Learning Draft panel exposes publish, load, Execute preview, low-risk Execute, and return-to-edit controls. The action selector is an optional operator override: by default, the Agent resolves the natural-language goal to one unique low-risk memory action and rejects no-match, ambiguous, or high-risk results. Publication is not click authorization: every preview or real execution captures the current window, validates page-level text evidence, re-runs VISTA grounding and rerank, then verifies that the selected point is locally associated with a current OCR anchor inside the memory seed neighborhood before Gate and dispatch. Wrapped card titles may use adjacent OCR-line composition, while loose token matches and the same text elsewhere on the page cannot authorize the click. Successful planning responses expose the complete `local_target_validation` evidence; local mismatch responses preserve the same evidence and return the memory action to human review. Historical click coordinates remain forbidden, and post-action verification remains mandatory. Execution failures are persisted as `operational_memory_execution_feedback_v1` and point back to the reviewed candidate for human correction; the feedback artifact is not action authorization.
+Human-approved `reviewed_template_candidate_v1` artifacts can now be published into a checksum-addressed Agent operational-memory registry. The Learning Draft panel exposes publish, load, Execute preview, low-risk Execute, and return-to-edit controls. The action selector is an optional operator override: by default, the Agent resolves the natural-language goal to one unique low-risk memory action and rejects no-match, ambiguous, or high-risk results. Publication is not click authorization: every preview or real execution captures the current window, validates page-level text evidence, builds and ranks the current UIA inventory before a memory-seeded VISTA call, and uses a matching current UIA action as the compact ROI when available. A VISTA point may validate only candidates actually included in that model call; later or unrelated candidates cannot inherit the point as grounding evidence. Rerank and `operational_memory_local_target_validation_v1` then require the selected point to agree with strict current OCR evidence near the seed's reference neighborhood before Gate and dispatch. Wrapped card titles may use adjacent OCR-line composition, while loose token matches and the same text elsewhere on the page cannot authorize the click. Successful planning responses expose the complete `local_target_validation` evidence; local mismatch responses preserve the same evidence and return the memory action to human review. Historical click coordinates remain forbidden, and post-action verification remains mandatory. Execution failures are persisted as `operational_memory_execution_feedback_v1` and point back to the reviewed candidate for human correction; the feedback artifact is not action authorization.
+
+An explicit experimental fast-grounding option may skip VISTA only when the current capture contains one unique low-risk UIA control that semantically matches the reviewed action, current OCR validates the local target, and current Gate checks pass. It uses the current UIA bbox and centre; the reviewed bbox remains prior-only evidence. Ambiguous, conflicting, non-actionable, or risky matches stay on the VISTA path. Real-screenshot dry-run A/B reports for Notepad and Python.org are stored in `logs/benchmarks/operational_memory_fast_grounding_real_20260801/`. Both paths selected the intended current control with `action_executed=false`; the observed total times were approximately `2.20s -> 1.20s` and `5.06s -> 4.20s`. These two samples establish feasibility only, not accuracy, reliability, or a reason to enable the option by default. They also show that full-surface OCR is now the larger remaining latency source on the web sample.
 
 A bounded current-code run resolved `Open Documentation` without an action ID, selected `(1152, 276)`, opened Python.org Documentation, and passed post-action verification (`logs/traces/actions/20260727-012748-965096__execute-mode-click__msedge-exe.json`). A SEEK negative run rejected stale `Senior Test Engineer` memory because the exact OCR anchor was 356 pixels from the selected point, beyond the 180-pixel local threshold; no click occurred and feedback was written (`logs/traces/actions/20260727-012554-257633__execute-mode-plan-preview__msedge-exe.json`). A current wrapped-title SEEK memory then selected `(878, 817)`, opened `General Practitioner - Hauora Heretaunga`, and verified the detail panel (`logs/traces/actions/20260727-013543-423238__execute-mode-click__msedge-exe.json`). No run clicked Apply, filled a field, or submitted anything. These are bounded workflow and safety proofs, not a general success rate or unattended-reliability claim.
 
@@ -324,7 +375,7 @@ Chat image-message synthesis now inherits an already confirmed Stage1.5 `message
 
 The latest fixed nine-interface development run completed `9 / 9` review-and-repair integrity cases with `0` failed, `0` invalid, and `0` safe-stop cases. This means the recorded model responses, deterministic repair closure, final Stage2 binding, and report contract completed on those fixtures. Human-adjudicated keep precision, false-group cleanup, relabel quality, missing-region detection/recovery, and atomic-evidence quality remain `not_covered`; therefore `9 / 9` is not recognition accuracy or cross-interface reliability.
 
-A real panel API smoke produced a current final reviewed overlay, final Stage2 report, numbering revision, and trace. The resulting display-complete Apple Music learning draft loads as the panel's current recommendation and renders the same-source reviewed overlay, page details, and read-only PathGraph preview. The panel now loads the history source list during boot and visibly labels the selected artifact as `[Recommended current]`; old benchmark scaffolds are labeled `[Pinned reference]` and cannot displace a newer display-complete draft. The latest real browser replay loaded the 1154x1005 reviewed overlay, reported 32 review-only regions and zero executable action templates, rendered non-empty page details, and retained `needs_human_review · no_click_authorization=true`. No real click, fill, submit, Execute binding, live safe fill, or Runtime PathGraph promotion occurred.
+A real panel API smoke produced a current final reviewed overlay, final Stage2 report, numbering revision, and trace. The resulting display-complete Apple Music learning draft loads as the panel's current recommendation and renders the same-source reviewed overlay, page details, and read-only PathGraph preview. The panel loads the managed history source list during boot and visibly labels the selected artifact as `[Recommended current]`; legacy benchmark scaffolds are no longer pinned or injected into the current evidence library, although an explicit benchmark path can still be opened manually for regression review. The latest real browser replay loaded the 1154x1005 reviewed overlay, reported 32 review-only regions and zero executable action templates, rendered non-empty page details, and retained `needs_human_review · no_click_authorization=true`. No real click, fill, submit, Execute binding, live safe fill, or Runtime PathGraph promotion occurred.
 
 The panel history source path now has a bounded sidecar-discovery contract. `/panel/learning_draft_sources` may read explicit and adjacent PathGraph review sidecars, but it must not recursively search all `logs` and `artifacts` for every listed candidate. On the current repository with more than 1,500 learning-run directories, direct source enumeration fell from about `23.2s` to `0.34s`; a fresh Uvicorn HTTP smoke returned `/panel` in `0.006s` and `/panel/learning_draft_sources` in `0.354s`. The normal panel service on port `8765` was then restarted on the current code and returned the source endpoint in `0.389s`. Full single-artifact review keeps the existing related-sidecar discovery behavior. These timings are a local performance check, not a recognition-quality claim.
 
@@ -463,6 +514,49 @@ no new content, but that stop is not reported as proof that the feed was fully
 read. The current checkpoint is covered by fixture and trace-oriented tests; it
 does not yet establish a live multi-interface success rate.
 
+A controlled local Edge run now exercises that loop across five reviewed
+interfaces and six verified transitions. The Agent opened and finished a
+finite detail, returned to the hub, opened and closed a modal, performed two
+effect-verified bounded collection scrolls, opened the summary, and stopped
+safely. Its earlier source workflow was later removed from the active library;
+the retained human-approved Demo derivative is stored at
+`artifacts/interface-workflow-reviews/workflow_498383a74b24/reviewed_workflow.json`.
+The latest formal rerun report is
+`logs/smoke/reviewed_workflow_live_20260803_2023/navigation_reading_live_smoke_report.json`:
+all 14 decisions came from actual model calls, the five-interface route was
+visited in the expected order, and the final summary reached explicit
+`reached_bottom=true` / `completion=complete` evidence before safe stop.
+Its application asset projection preserved interface responsibility, identity
+anchors, dynamic read policies, controls, and action semantics across all five
+interfaces. Those nodes retain the older `human_reviewed` status and therefore
+require explicit `human_approved` review under the current approval contract
+before they can reload as `agent_usable`. This is a
+controlled multi-interface Demo scaffold, not an unfamiliar-site reliability
+rate. No form filling or final submission was attempted.
+
+Demo acceptance requires this multi-interface asset lifecycle: learn and save
+multiple interfaces, connect them as one application workflow, reload that
+workflow, and let the Agent consume it for cross-interface decisions. A
+single-screen recognition result is component evidence only and cannot be
+reported as Demo completion.
+
+Each saved workflow node now owns an editable evidence projection. Saving a
+node's box review replaces only that node's evidence and persists the existing
+workflow snapshot without committing unrelated workflow-editor metadata. A
+real panel save check retained all five interfaces, six transitions, five
+`human_reviewed` node statuses, and every node screenshot/editable source.
+
+Apply-entry navigation now carries the reviewed semantic action, source
+interface, current surface context, and active-flow state into the gated
+recognition API. This lets the Gate distinguish an `Apply now` entry control
+on a job-detail surface from an identically labelled final action on a review
+surface. Explicit final-submit terms remain blocked even if an upstream Agent
+mislabels the action. The API contract is covered offline, and a current-model
+no-click dry-run on a preserved ROI from a real SEEK detail page selected the
+visible `Quick apply` entry and returned `open_apply_flow` without executing an
+action. This is historical real-page-pixel evidence, not live-current website
+reliability.
+
 The first fixed replay can be rerun with:
 
 ```powershell
@@ -478,6 +572,28 @@ and wrong-scope safe stop. A dispatched action without a verified effect fails
 the case. The current manifest contains a two-interface recorded news example;
 it is a reusable scaffold for adding more reviewed interfaces, not evidence of
 actual-model quality or live GUI reliability.
+
+The continuous navigation state machine also keeps action-effect verification
+separate from destination verification. A verified low-risk navigation action
+enters `waiting_for_destination_observation`; only a fresh observation matching
+the reviewed target interface can complete that navigation step. A different
+interface emits `destination_observation_rejected` and safe-stops without
+counting the step as navigation success. Checkpoint 3 replay evidence is stored
+at `logs/benchmarks/navigation_reading_replay_checkpoint3/navigation_reading_replay_report.json`.
+
+Reviewed operational memory also has a default-off current-capture grounding
+experiment. A low-risk semantic control may skip VISTA only when the current
+UIA/OCR evidence produces one unique match inside the current viewport and the
+candidate carries current capture freshness plus complete Gate evidence. The
+historical bbox remains prior-only evidence and is never reused as the current
+click target. Ambiguous matches fall back to the existing VISTA, rerank, and
+Gate chain.
+
+Checkpoint 2 has real no-click dry-run evidence for unique Notepad and
+Python.org controls, plus a controlled WPF window containing duplicate
+`Documentation` controls that exercised the ambiguity fallback. The WPF case
+proves the fallback contract on a real current window; it does not establish
+natural-website ambiguity coverage or broad grounding reliability.
 
 Learning Mode uses a read-only chain:
 
@@ -528,6 +644,12 @@ Bind and capture
 - Workflow graph links are now edited in a centered modal. Right-click a source interface, choose a target interface, then select the source control and operation without leaving or scrolling the graph. The inline link editor stays hidden until this explicit action.
 - Selecting a transition control now opens a dedicated evidence picker. The unfinished link form remains intact while the reviewer selects a real evidence box, then the link dialog resumes with the selected control populated. This is a read-only review handoff and does not authorize target-window actions.
 
+### August 2026: Agent-Usable Evidence And Current Grounding
+
+- Actionable reviewed controls now require semantic identity, purpose, allowed actions, verification evidence, and risk class; bbox-only controls fail closed.
+- Added a default-off current-screenshot grounding path for one unique low-risk UIA/OCR match, with current-capture freshness and Gate evidence. Ambiguity returns to the full locator chain instead of reusing historical coordinates.
+- Real dry-runs cover unique Notepad and Python.org controls and a controlled WPF duplicate-label fallback. Natural website ambiguity remains unverified.
+
 ### 15 July 2026: Phase Acceptance
 
 - Completed four current real-interface evidence sets and a nine-case protected recursive regression.
@@ -544,3 +666,119 @@ Detailed history and current planning:
 - [Next steps](NEXT_STEPS.md)
 - [Agent API workflow](AGENT_API_WORKFLOW.md)
 - [API field reference](API_FIELD_REFERENCE.zh-CN.md)
+
+## Generic Form Fill Safety Contract (2026-08-03)
+
+The common form path now separates answer policy, current-capture grounding, one-time Action Gate approval, input dispatch, and post-observe effect verification. `app/operation/form_fill_executor.py` rejects stale captures, missing freshness evidence, points outside the field bbox, policy or Action Gate rejection, value-evidence mismatch, `clear_existing=false`, and final submit/send/confirm/payment actions before dispatch. Reports contain only value reference, SHA-256, length, and a redacted preview.
+
+Text input, a page-contained ARIA dropdown, radio selection, and checkbox toggling now have separate controlled-fixture evidence. Every action requires current ownership, enabled state, unique semantic identity, candidate freshness, value hash/length agreement, Gate approval, and a fresh post-action observation. Already-selected radio choices return `already_satisfied` without dispatch.
+
+The CP10B report is `logs/smoke/general_form_choice_cp10b/general_form_choice_fixture_smoke_report.json`. It records one radio selection, one checkbox toggle, verified checked-state effects, an already-selected no-dispatch check, and `submit_clicks=0`. Focused and adjacent form verification passed `78 passed`; affected Python modules compile. This is fixture-only real GUI evidence. No live ATS form was filled, no final submit was clicked, and this does not establish live safe-fill reliability.
+
+## Dynamic Form Question Understanding (2026-08-03)
+
+`app/agent/form_question_understanding.py` now projects changing question text into `normalized_question_intent_v1` before answer policy is selected. The contract keeps canonical intent, explicit Yes/No polarity, risk, confidence, matched evidence, blockers, and `artifact_is_authorization=false` separate from any answer value.
+
+Work-rights questions and sponsorship-requirement questions share one canonical intent but use opposite polarity. Explicitly negated sponsorship statements restore the positive polarity, while mixed current/future sponsorship evidence becomes `ambiguous` with zero confidence and requires review. Salary, relocation, visa, unknown open questions, and all sensitive questions remain fail-closed.
+
+This is deterministic contract coverage, not model understanding or live ATS evidence. It does not select an answer, fill a form, authorize a click, or relax final-submit/send/confirm/payment blocking.
+
+Focused normalization/planner verification passed `37 passed`; the adjacent form, PII, inventory, choice, policy, and final-submit safety suite passed `130 passed`. The affected modules compile and the scoped diff check is clean.
+
+## Reviewed Form Answer Policy Memory (2026-08-03)
+
+`app/agent/form_answer_policy_memory.py` now stores human-reviewed answer strategy references under four explicit scopes: `one_time`, `workflow_class`, `site`, and `global_profile`. Records contain canonical intent, semantic polarity, scope, review decision, opaque answer reference, evidence SHA-256, and expiry only. Raw answers, PII, screenshots, bboxes, and click points are not part of the contract.
+
+Synonymous wording may reuse a matching reviewed strategy reference. A polarity change, human rejection, expired evidence, unknown intent, or scope mismatch returns a review state instead. `ReviewedInterfaceMemoryStore.form_answer_policy_context()` exposes this as Agent-readable evidence while retaining current inventory, current target resolution, policy Gate, Action Gate, and `artifact_is_authorization=false` requirements.
+
+Focused policy-memory tests pass `11 passed`; policy-memory, interface-memory, and semantic-planner regression passes `81 passed`; the adjacent form and final-submit safety suite passes `141 passed`. This is reviewed strategy lookup evidence only. It does not reveal an answer value, authorize filling, cover a live ATS, or relax final-submit/send/confirm/payment blocking.
+
+## Multi-Step Form Workflow State Control (2026-08-03)
+
+`app/agent/form_workflow_controller.py` now selects exactly one semantic form action per Agent turn: `fill_field`, `select_option`, `continue_next_step`, `request_user_review`, or `safe_stop`. It follows the current inventory order without assuming a fixed question count or sequence. Unknown, sensitive, unsupported, stale, blocked-surface, login, and failed-verification states stop before Operation dispatch.
+
+After a verified `Continue`, `ContinuousTaskSession` invalidates the old capture, form inventory, and grounding context and waits for a fresh destination observation. The next page cannot reuse the previous page's decision or coordinates. Focused tests pass `5 passed`; the adjacent form, session, and final-submit safety regression passes `148 passed`; affected modules compile. This is fixture/state-machine evidence only: no live ATS fill, click, or submit was performed, and live safe-fill reliability remains unverified.
+
+## Final Review Safe Stop Fixture (2026-08-03)
+
+The controlled general-form fixture now has explicit `questions -> review` pages. Its review page exposes `Review and submit`, `Submit application`, `Send`, and `Complete` as final-action variants while retaining the stable `#finalSubmit` compatibility target. `FormWorkflowController` treats every variant as `final_submit_visible`, returns only `safe_stop`, and records `unsafe_prevented=true` without creating an Operation request.
+
+Focused final-submit/controller verification passes `22 passed`; adjacent form and session regression passes `141 passed`; the full repository suite passes `2525 passed, 1 skipped`. The fixture's final-action counters remain `real-clicks=0 submit-clicks=0`. This is fixture-only safety evidence: no live ATS was opened, no live safe fill or GUI click was performed, and no final action was submitted.
+
+## Panel Step Audit Projection (2026-08-03)
+
+The learning workbench now keeps the software workflow graph, selected-interface boxed evidence, and a selected-node runtime audit on one review surface. The audit separates Agent decision, Gate result, Operation dispatch, observed effect, destination observation, Trace, and safe-stop reason. An interface without matching runtime evidence is shown as `not run`; it never inherits another node's result.
+
+Legacy learning-history, raw screenshot, and raw review panels are hidden from the primary workbench. Trace remains available on demand. Saved workflow reviews retain the semantic runtime audit but remove reusable click-point fields and remain display-only, non-authorizing assets.
+
+Focused verification now passes `26` JavaScript projection tests and `155` combined panel-route/workflow-review tests. A saved controller report can be reopened through the workflow library without reusable click points; direct controller step fields are projected as Agent evidence, and saving restores the interface that the reviewer was viewing. Continuous-session and navigation-controller regression adds `23 passed`, including same-session confirmation and fail-closed Gate behavior.
+
+A system-Edge panel rehearsal also exercised a recorded node, an unvisited node, and save/reload on the real panel surface. The selected node and its audit survived reload, while the unvisited node remained `not run`. Evidence is under `logs/smoke/cp13b_panel_recorded_runtime/`. The save and reload APIs were intercepted, so no persistent user asset changed. This closes the panel technical rehearsal only; no live ATS, live fill, GUI target action, or submit was performed.
+
+## Read-Only Application Inventory (2026-08-03)
+
+The SEEK debug and timed runners now expose an independent `--read-only-inventory` mode. After an explicitly approved Quick Apply entry, it observes exactly one current application surface, records fields, employer questions, unsupported uploads, visible final actions, and redacted answer-policy metadata, then stops. It never calls safe fill, employer-question fill, Continue, or final submit.
+
+The redacted checkpoint contract is `seek_read_only_inventory_checkpoint_v1`. It now projects a `human_review` section that separates ordinary fields, review-required questions, sensitive questions, unsupported uploads, and final actions without exposing raw answer values. These buckets are review aids only and do not authorize filling. Any observed fill or submit attempt changes the checkpoint to `needs_work`; it cannot be reported as a successful read-only run. The optional `--cp14-live-uat` mode now writes `seek_cp14_apply_preflight_v1` immediately before an approved Apply-entry click and fails closed when Runtime health, shared GPU capacity, the Locate model service, bound-window, fresh-capture, Trace, Agent-decision, explicit-approval, continuous-session, or read-only evidence is missing. The offline success rehearsal preserves the successful preflight report path and proves one Apply-entry call followed by one read-only inventory call without fill, Continue, or submit flags. Speed-runner verification passes `29` tests; the full repository suite passes `2537 passed, 1 skipped`. The live UAT checklist is in `docs/SEEK_NO_SUBMIT_UAT.md`.
+
+This establishes the independent code path only. A live CP14 Quick Apply inventory has not yet been run, so live inventory, live safe-fill, and SEEK end-to-end reliability remain unverified. No live fill or submit occurred during this checkpoint.
+
+The timed runner now also fails closed before its live safe-fill branch unless `--approve-live-safe-fill` is explicitly present. `--prepare-live-safe-fill --prepare-live-safe-fill-field-id <id>` first performs one read-only inventory and writes a redacted `seek_live_safe_fill_preflight_v1` report containing the selected field, value source/hash/length, current form state, screenshot/Trace evidence, risk boundary, and expected post-observe verification. It then stops without fill or Continue. A later live approval must bind the exact report with `--approved-live-fill-preflight`, its SHA-256, and the same `--approved-live-field-id`; missing, modified, mismatched, unknown, ambiguous, or post-scroll-mismatched identity fails closed before type dispatch. CP15A is forced to one field and does not implicitly enable cover-letter filling. These flags and reports are approval prerequisites only; they do not replace current inventory, current-screenshot grounding, policy Gate, Action Gate, post-observe verification, or the final-submit hard block. Focused speed-runner verification passes `35 passed`; the traversal/debug/speed/report-audit regression passes `155 passed`; the full repository suite passes `2546 passed, 1 skipped`. No live safe fill was performed while adding these guards.
+
+The existing Learning workflow audit area can load that JSON through its collapsed `加载单字段执行前预检` control. The backend accepts only files under `artifacts/` or `logs/`, validates `seek_live_safe_fill_preflight_v1`, requires redaction evidence, and returns a field whitelist that omits raw values. The panel shows field semantics, answer-source/hash/length evidence, post-observe verification, and the one-field/Continue/submit safety boundary. Loading or reviewing this card is never execution authorization and does not fill a field, click Continue, or submit anything. Restart the local runtime after pulling this route so the backend and cache-busted panel assets use the same code revision.
+
+## Reviewed Multi-Interface Workflow Agent Decision (2026-08-03)
+
+`app/agent/reviewed_workflow_navigation.py` now loads one selected interface from a formally saved, application-scoped multi-interface workflow and projects it into the existing semantic navigation decision contract. Interfaces that are not `agent_usable`, or assets that claim execution authorization, fail closed. The Agent receives semantic controls, transitions, verification rules, and blockers only; historical bbox and click points are not supplied.
+
+`scripts/run_reviewed_workflow_navigation_smoke.py` provides a generic no-action rerun path. A real local Qwen3-VL 8B call loaded a reviewed two-interface workflow and selected its low-risk `items -> detail` transition. The existing validator then required fresh Operation resolution, Gate approval, and post-action destination verification. Evidence is stored at `logs/checkpoints/reviewed_workflow_agent_decision_20260803/agent_decision_report.json`. Focused workflow/navigation tests pass `24 passed`. No GUI action, fill, Continue, or submit was attempted; this proves semantic consumption only, not runtime or Demo reliability.
+
+## Multi-Interface Demo Audit Persistence (2026-08-03)
+
+The controlled Demo asset is a real saved multi-interface learning workflow, not a single-screen preview. The retained `workflow_498383a74b24` contains five human-approved interfaces and six transitions. Selecting an interface in the workbench projects only that interface's Agent decision, Gate result, Operation dispatch/effect, destination observation, and Trace evidence.
+
+The compact audit excludes the full continuous session and reusable historical click coordinates. The final interface remains an explicit Gate-rejected, non-dispatched safe stop. A single learned screen cannot satisfy Demo acceptance; later Demo work must preserve save, reload, node switching, and evidence review across multiple interfaces. No live fill or final submit occurred.
+
+The same five-interface asset is covered by a saved-workflow controller reload check recorded under the previous review-status contract. The current loader now rejects its older `human_reviewed` node statuses until the user explicitly changes each complete interface to `human_approved`. The deterministic check still documents persistence and controller consumption, but it is not a current approval result or a live GUI execution result. A real Demo must still localize every action from a fresh screenshot, pass Gate, execute through Operation, record Trace, and verify the destination interface.
+
+The formal live rerun persisted its own derived multi-interface learning workflow instead of reporting that the earlier source workflow was merely reused. The real traversal generated `workflow_498383a74b24` with five interfaces and six transitions. The report records `learned_workflow_lineage_v1`, `source_and_generated_are_distinct=true`, and `relation=derived_from_live_traversal`. The earlier source/test workflow has since been removed from the active workflow library; the retained Demo remains visible in both the panel workflow registry and `interface_workflow_agent_context_v1`. It remains non-authorizing (`execute_binding_enabled=false`, `artifact_is_authorization=false`). Evidence: `logs/smoke/reviewed_workflow_live_multilearn_20260803_2053/navigation_reading_live_smoke_report.json`.
+
+## Independent Four-Interface Learning Flow (2026-08-03)
+
+A second controlled workflow historically verified that the Demo contract was not limited to the earlier branching fixture. Its four-interface `needs_human_review` test asset was later removed from the active workflow library so the panel now exposes only the retained Demo. The historical Trace remains a test record, not an approved `agent_usable` workflow.
+
+## Explicit Human Approval Contract (2026-08-04)
+
+Interface approval now requires both `review_status=human_approved` and `reviewed_by_human=true` for the current persisted revision. Saving a candidate, choosing the status label alone, `reviewed_candidate`, and legacy statuses such as `human_reviewed` are not approval. The panel exposes a one-shot `确认当前 revision 已人工审核` checkbox; opening or ordinarily saving a node never sets the fact. Editing evidence, semantics, controls, actions, rules, or source revision clears it and returns the node to `needs_human_review`. Complete interface responsibility, identity anchors, semantic content, control/action linkage, and verification evidence are still required independently. The resulting artifact remains non-authorizing: current capture, fresh grounding, Gate, Operation, Trace, and post-action verification are still mandatory.
+
+The same exact approval boundary now applies independently to every Agent-visible action and workflow transition. Only `review_status=human_approved` may enter `available_actions`; missing, pending, `human_confirmed`, `human_reviewed`, and runtime-only `observed_and_gate_verified` statuses remain in `actions_needing_review` and keep the source interface out of `agent_usable`. A successful historical Gate check proves only that one captured action was safe and effective; it does not approve that edge for future reuse. Dangerous and final actions remain forbidden regardless of review status.
+
+The read-state contract now distinguishes a completed capture batch from an exhausted task budget. Raw `captures_exhausted` remains available as `batch_stop_reason`, while the Agent-visible status becomes `capture_batch_complete` when scroll/item budget remains. This prevents a one-capture batch from being misread as permission to stop the multi-interface task. Evidence: `logs/smoke/navigation_reading_multilearn_fixed_20260803_2146/navigation_reading_live_smoke_report.json`. A real panel rehearsal loaded the four-node graph, switched all four per-interface evidence views without stale cross-node content, opened the evidence editor, performed a no-op review save, and reloaded the same workflow. This is controlled multi-interface learn/save/reload/consume evidence only; it does not establish unfamiliar-site reliability. No live fill or final submit occurred.
+
+## Final Demo Scaffold Verification (2026-08-10)
+
+The final controlled Demo scaffold remains at `artifacts/interface-workflow-reviews/workflow_498383a74b24/reviewed_workflow.json`, but its five nodes carry legacy `human_approved` labels without `reviewed_by_human=true`; the current formal Agent loader therefore blocks all 5/5 nodes. The Learning workbench can inspect its graph, switch each interface's boxed evidence, edit review boxes, persist the review, and show the selected node's Agent, Gate, Operation, effect, destination, and Trace audit. Each current revision must be explicitly confirmed before Agent eligibility can be restored, and the asset remains non-authorizing even after confirmation.
+
+The active software-workflow registry is intentionally reduced to that single Demo. SEEK experiments, duplicate Navigation Branching derivatives, the Navigation Reading test workflow, and an orphan test workflow directory were removed from `artifacts/interface-workflow-reviews`; raw Trace and safety fixtures were not deleted. Review-page tab changes now only switch existing DOM panels instead of rebuilding both interface catalogs, and exact single-interface preview requests disable related-sidecar discovery. This reduces repeated rendering and filesystem scanning without changing review semantics, Agent evidence, Gate, Operation, or final-submit safety.
+
+A fresh real Edge traversal consumed that reviewed semantic workflow, made 14 actual Qwen3-VL 8B decisions, visited `branch_hub -> branch_incident -> branch_hub -> branch_policy_modal -> branch_hub -> branch_updates -> branch_summary`, executed 12 current-capture actions through Gate and Operation, verified all 12 effects, completed exactly two bounded update scrolls, and ended with an explicit Agent `safe_stop`. The report is `logs/smoke/reviewed_workflow_navigation_final_20260810/navigation_reading_live_smoke_report.json`. It also persisted a distinct derived five-interface workflow with lineage; four derived interfaces remain `needs_human_review`, so the derived asset is not advertised as reusable Agent memory until reviewed.
+
+The controlled form workflow report is `logs/smoke/general_form_workflow_final_20260810/general_form_workflow_fixture_smoke_report.json`. It covers ordinary text fill, country selection, radio selection, checkbox selection, file upload, one Continue, and a final-review safe stop. All five safe-fill policy assertions passed, upload effect was verified, the slowest form action was `6922 ms`, and `Review and submit`, `Submit application`, and `Complete` were blocked with `real_clicks=0` and `submit_clicks=0` at the final-action stage. PII is redacted. This is fixture-only form evidence, not live ATS safe-fill reliability.
+
+A historical 2026-08-10 checkpoint reported `2619 passed, 1 skipped` and `31` Learning workflow JavaScript tests; those numbers remain historical evidence. The current full offline verification and subordinate focused evidence are listed at the top. The Demo therefore demonstrates reviewed learning evidence, human correction, Agent semantic decisions, current-screen localization, Gate-controlled Operation, Trace, form/upload handling on a controlled fixture, and a no-submit stop. It does not claim unfamiliar-site reliability, live ATS safe-fill reliability, or permission to click a final submit action.
+
+## SEEK Human-Reviewed Learning Flow Checkpoint (2026-08-11)
+
+The current supervised three-interface learning asset is `artifacts/interface-workflow-reviews/workflow_fd24392cfde8/reviewed_workflow.json`: SEEK recommendations, selected job detail, and the SEEK `Choose documents` application step. All three interfaces and both semantic transitions were corrected and explicitly approved through the human-review layer. The accepted graph screenshot is `artifacts/interface-workflow-reviews/workflow_fd24392cfde8/panel_graph_preview_r0011.png`; blank, loading, stale-status, or cropped screenshots were rejected during supervision.
+
+Fresh Qwen3-VL 8B semantic-consumption checks are stored under `logs/reviews/seek_reviewed_workflow_agent_dry_run_20260811/`. The Agent selected read on recommendations, `open_apply_flow` on the detail interface, and read/safe handling on `Choose documents`. These were semantic dry-runs only: no GUI click, live fill, file upload, Continue, or submit was attempted. The reviewed asset remains non-authorizing and still requires current capture, fresh grounding, Gate, Operation, Trace, and post-action verification before any real action.
+
+The maintenance policy for learning errors is deliberately bounded: a simple reusable contract defect may receive one minimal common fix followed by immediate current- and old-interface regression. If it does not improve the result, makes it worse, pollutes other interfaces, or needs application-specific follow-up, the change is reverted and the learning asset is corrected by human review. Learn Mode is not required to produce a 100% executable artifact automatically.
+
+The workflow graph now projects the persisted review state instead of inferring it only from endpoint geometry. A node saved as `human_approved` is rendered as reviewed, while a transition is rendered as reviewed only when both endpoint nodes and the edge itself have an approved review state. This fixes stale `待审核` colors after a formal panel save without changing recognition, Gate, Execute, or authorization semantics.
+
+## Scoped Long-Capture Composition Performance (2026-08-12)
+
+Scoped long-capture composition now avoids rescanning every full-resolution candidate strip. The overlap estimator first builds deterministic full-width row digests, uses them only to select possible exact overlaps, and still performs a full-resolution RGB equality check plus full-resolution information checks before accepting a stitch. When no exact candidate exists, a bounded-width grayscale pass selects a small diagnostic set for full-resolution MAE measurement; it never authorizes an overlap.
+
+A 2048x1046 synthetic regression failed at `75.297 s` before the fix and passes under a loose `20 s` ceiling after it. The four real Navigation Branching Lab ROI segments composed in `0.338 s` into `artifacts/learning-captures/task5-overlap-smoke-optimized/scoped_capture_composite.png` with a matching manifest. No unverified overlap was claimed, so all four frames were retained in the 2048x4184 composite. The manifest remains `artifact_is_authorization=false`; Execute, Gate, scrolling, and final-action behavior are unchanged.

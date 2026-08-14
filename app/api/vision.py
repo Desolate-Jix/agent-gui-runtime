@@ -15,7 +15,7 @@ from app.core.ocr_service import ocr_service
 from app.core.model_server import load_model_profiles
 from app.core.runtime_artifacts import ARTIFACTS_DIR, RuntimeTimer, build_review_overlay_path, write_trace
 from app.core.screenshot import screenshot_service
-from app.gate.candidates import validate_action_candidate_freshness
+from app.gate.candidates import build_candidate_freshness, validate_action_candidate_freshness
 from app.operation.observe.contracts import (
     ObserveScreenReadRequest,
     ObserveScreenReadResult,
@@ -731,13 +731,50 @@ def _seeded_candidate_payload(metadata: dict[str, Any] | None) -> dict[str, Any]
     return dict(seeded)
 
 
+def _seeded_candidate_current_text_anchors(seeded: dict[str, Any]) -> list[str]:
+    locator_evidence = seeded.get("locator_evidence")
+    raw_anchors = locator_evidence.get("text_anchors") if isinstance(locator_evidence, dict) else None
+    anchors: list[str] = []
+    if isinstance(raw_anchors, list):
+        anchors.extend(str(item).strip() for item in raw_anchors if str(item).strip())
+    elif isinstance(raw_anchors, str) and raw_anchors.strip():
+        anchors.append(raw_anchors.strip())
+    if not anchors:
+        label = str(seeded.get("label") or "").strip()
+        if label:
+            anchors.append(label)
+    return list(dict.fromkeys(anchors))
+
+
 def _candidate_freshness_decision_for_trace(
     seeded: dict[str, Any] | None,
     *,
     image_path: Path,
     image_size: ImageSize,
     grounding: LocalGroundingResult | None = None,
+    selected_candidate: RecognitionCandidate | None = None,
+    current_candidate_source: str | None = None,
 ) -> dict[str, Any] | None:
+    if selected_candidate is not None and current_candidate_source:
+        bbox = selected_candidate.refined_bbox or selected_candidate.element.bbox.to_dict()
+        point = selected_candidate.element.click_point
+        current_candidate = {
+            "bbox": bbox,
+            "click_point": point,
+            "candidate_freshness": build_candidate_freshness(
+                capture_id=str(image_path),
+                viewport_size=image_size.to_dict(),
+                source=current_candidate_source,
+            ),
+        }
+        return {
+            **validate_action_candidate_freshness(
+                current_candidate,
+                current_capture_id=str(image_path),
+                current_viewport_size=image_size.to_dict(),
+            ),
+            "candidate_id": selected_candidate.candidate_id,
+        }
     if not isinstance(seeded, dict):
         return None
     current_viewport = image_size.to_dict()
@@ -1384,6 +1421,14 @@ def _vista_candidate_roi_policy(roi_source: str) -> dict[str, Any]:
             "max_edge": 448,
             "fallback_tier": "primary",
         }
+    if roi_source == "current_uia_candidate_v1":
+        return {
+            "policy": "compact_current_uia_candidate_roi_primary",
+            "padding": 12,
+            "min_size": 96,
+            "max_edge": 448,
+            "fallback_tier": "primary",
+        }
     if roi_source in {"top1_only", "top1_score_gap"}:
         return {
             "policy": "compact_pathgraph_top1_roi_primary",
@@ -1850,16 +1895,28 @@ def _recognition_candidate_from_vista_direct(
 def _vista_direct_uia_conflicts(
     *,
     goal: str,
+    target_text: str | None,
     point: dict[str, int],
     candidates: list[RecognitionCandidate],
 ) -> list[str]:
     normalized_goal = re.sub(r"\s+", " ", str(goal or "").strip().casefold())
+    normalized_target_text = re.sub(r"\s+", " ", str(target_text or "").strip().casefold())
     exact_uia_candidates: list[RecognitionCandidate] = []
     for candidate in candidates:
         if not isinstance(candidate.element.evidence.get("screen_inventory_action"), dict):
             continue
         normalized_label = re.sub(r"\s+", " ", str(candidate.label or "").strip().casefold())
-        if len(normalized_label) < 3 or normalized_label not in normalized_goal:
+        if len(normalized_label) < 3:
+            continue
+        if normalized_target_text:
+            target_matches = (
+                normalized_label == normalized_target_text
+                or normalized_label in normalized_target_text
+                or normalized_target_text in normalized_label
+            )
+        else:
+            target_matches = normalized_label in normalized_goal
+        if not target_matches:
             continue
         exact_uia_candidates.append(candidate)
     if not exact_uia_candidates:
@@ -2022,12 +2079,90 @@ def _recognition_plan_from_vista_point(
         and isinstance(reviewed_execution, dict)
         and reviewed_execution.get("allow_seeded_candidate_without_model") is True
     )
+    fast_grounding_options = (
+        request.metadata.get("operational_memory_fast_grounding")
+        if isinstance(request.metadata, dict)
+        and isinstance(request.metadata.get("operational_memory_fast_grounding"), dict)
+        else {}
+    )
+    fast_grounding_requested = bool(
+        fast_grounding_options.get("enabled") is True
+        and fast_grounding_options.get("mode") == "current_uia_unique_match_v1"
+    )
+    fast_grounding_used = False
+    fast_grounding_reason = "not_requested" if not fast_grounding_requested else "current_uia_match_pending"
+    fast_grounding_match_count = 0
     recall_candidates = [
         _recognition_candidate_from_path_recall(item, rank=index + 1)
         for index, item in enumerate(_as_list(path_graph_recall.get("candidates")))
         if isinstance(item, dict)
     ]
     candidates = [item for item in [seed_candidate, *recall_candidates] if item is not None]
+    recalled_candidates_available = bool(candidates)
+    fast_inventory: dict[str, Any] = {
+        "contract_version": "execute_fast_inventory_v1",
+        "status": "skipped",
+        "reason": "observe_trace_reuse_has_screen_inventory" if isinstance(observe_reuse.get("screen_inventory"), dict) else "not_started",
+        "provider": "windows_uia",
+    }
+    screen_inventory = observe_reuse.get("screen_inventory") if isinstance(observe_reuse.get("screen_inventory"), dict) else None
+    screen_reading_from_fast_inventory = None
+    if screen_inventory is None:
+        with timer.step("uia_inventory_scan"):
+            fast_inventory = _execute_fast_inventory_from_uia(
+                image_path=image_path,
+                image_size=input_image_size,
+                app_name=request.app_name,
+                goal=goal,
+                metadata=request.metadata,
+            )
+        screen_inventory = fast_inventory.get("screen_inventory") if isinstance(fast_inventory.get("screen_inventory"), dict) else None
+        screen_reading_from_fast_inventory = fast_inventory.get("screen_reading") if isinstance(fast_inventory.get("screen_reading"), dict) else None
+    elif screen_inventory is not None:
+        screen_reading_from_fast_inventory = {
+            "contract_version": "screen_reading_v1",
+            "image_path": str(image_path),
+            "image_size": input_image_size.to_dict(),
+            "app_name": request.app_name,
+            "texts": [],
+            "ui_elements": [],
+            "screen_inventory": screen_inventory,
+        }
+    screen_inventory_rank_result: CandidateRankResult | None = None
+    current_uia_candidates: list[RecognitionCandidate] = []
+    if isinstance(screen_reading_from_fast_inventory, dict) and screen_inventory is not None:
+        with timer.step("rank_screen_inventory_candidates", top_k=request.top_k):
+            screen_inventory_rank_result = rank_candidates(
+                CandidateRankRequest(
+                    goal=goal,
+                    page_structure=PageStructure(
+                        image_size=input_image_size,
+                        screen_summary="execute fast inventory",
+                        state_guess=request.state_hint,
+                        elements=[],
+                        texts=[],
+                    ),
+                    top_k=request.top_k,
+                    state_hint=request.state_hint,
+                    screen_reading=screen_reading_from_fast_inventory,
+                )
+            )
+        current_uia_candidates = list(screen_inventory_rank_result.candidates)
+        if recalled_candidates_available:
+            existing_candidate_ids = {item.candidate_id for item in candidates}
+            for candidate in current_uia_candidates:
+                if candidate.candidate_id not in existing_candidate_ids:
+                    candidates.append(candidate)
+                    existing_candidate_ids.add(candidate.candidate_id)
+            candidates.sort(
+                key=lambda item: (
+                    float(item.score),
+                    float(item.score_breakdown.text_similarity),
+                    float(item.score_breakdown.screen_reading_score),
+                ),
+                reverse=True,
+            )
+            candidates = candidates[: max(1, int(request.top_k or 5))]
     vista_payload: dict[str, Any] | None = None
     vista_error: str | None = None
     selected_candidate: RecognitionCandidate | None = None
@@ -2036,6 +2171,7 @@ def _recognition_plan_from_vista_point(
     vista_direct_failure_model_io: dict[str, Any] | None = None
     seeded_primary_point_used = False
     vista_point_inside_selected_bbox = False
+    vista_evaluated_candidate_ids: set[str] = set()
     if candidates:
         if allow_reviewed_seed_without_model and seed_candidate is not None:
             selected_candidate = seed_candidate
@@ -2051,10 +2187,87 @@ def _recognition_plan_from_vista_point(
             )
             candidates = [selected_candidate, *[item for item in candidates if item.candidate_id != selected_candidate.candidate_id]]
         elif seed_candidate is not None:
-            roi_candidates, roi_source = [seed_candidate], "seeded_candidate_v1"
+            normalized_goal = re.sub(r"\s+", " ", str(goal or "").strip().casefold())
+            normalized_seed_text_anchors = {
+                re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", anchor.casefold())
+                for anchor in _seeded_candidate_current_text_anchors(seeded_candidate)
+            }
+            normalized_seed_text_anchors.discard("")
+            exact_current_uia_candidates = [
+                candidate
+                for candidate in current_uia_candidates
+                if len(str(candidate.label or "").strip()) >= 2
+                and re.sub(r"\s+", " ", str(candidate.label or "").strip().casefold()) in normalized_goal
+                and re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", str(candidate.label or "").casefold())
+                in normalized_seed_text_anchors
+            ]
+            fast_grounding_match_count = len(exact_current_uia_candidates)
+            exact_current_uia_candidate = exact_current_uia_candidates[0] if len(exact_current_uia_candidates) == 1 else None
+            fast_grounding_risk_allowed, fast_grounding_risk_reason = _execution_allowed_for_risk_class(
+                label=str(seeded_candidate.get("label") or ""),
+                role=str(seeded_candidate.get("role") or ""),
+                risk_class=str(seeded_candidate.get("risk_class") or ""),
+            )
+            fast_grounding_candidate_allowed = bool(
+                exact_current_uia_candidate is not None
+                and exact_current_uia_candidate.eligible
+                and exact_current_uia_candidate.element.interaction_policy.allowed
+                and isinstance(exact_current_uia_candidate.element.evidence.get("screen_inventory_action"), dict)
+                and isinstance(exact_current_uia_candidate.element.click_point, dict)
+            )
+            if (
+                fast_grounding_requested
+                and seeded_candidate_requires_current_grounding
+                and seeded_candidate.get("historical_click_point_reused") is False
+                and fast_grounding_risk_allowed
+                and fast_grounding_candidate_allowed
+            ):
+                selected_candidate = exact_current_uia_candidate
+                selected_candidate.score = max(float(selected_candidate.score), 0.96)
+                selected_candidate.score_breakdown.text_similarity = max(
+                    selected_candidate.score_breakdown.text_similarity,
+                    0.92,
+                )
+                selected_candidate.score_breakdown.confidence_score = max(
+                    selected_candidate.score_breakdown.confidence_score,
+                    0.94,
+                )
+                selected_candidate.reasons = _unique_list(
+                    [
+                        *selected_candidate.reasons,
+                        "operational_memory_current_uia_unique_match",
+                        "historical_coordinates_not_reused",
+                    ]
+                )
+                candidates = [
+                    selected_candidate,
+                    *[
+                        candidate
+                        for candidate in current_uia_candidates
+                        if candidate.candidate_id != selected_candidate.candidate_id
+                    ],
+                ][: max(1, int(request.top_k or 5))]
+                fast_grounding_used = True
+                fast_grounding_reason = fast_grounding_risk_reason
+            elif fast_grounding_requested:
+                if fast_grounding_match_count != 1:
+                    fast_grounding_reason = "current_uia_match_not_unique"
+                elif not fast_grounding_risk_allowed:
+                    fast_grounding_reason = fast_grounding_risk_reason
+                elif seeded_candidate.get("historical_click_point_reused") is not False:
+                    fast_grounding_reason = "historical_coordinate_policy_not_explicit"
+                elif not fast_grounding_candidate_allowed:
+                    fast_grounding_reason = "current_uia_candidate_not_actionable"
+            if seeded_candidate_requires_current_grounding and exact_current_uia_candidate is not None:
+                roi_candidates, roi_source = [exact_current_uia_candidate], "current_uia_candidate_v1"
+            elif seeded_candidate_requires_current_grounding and exact_current_uia_candidates:
+                roi_candidates, roi_source = exact_current_uia_candidates, "current_uia_candidates_v1"
+            else:
+                roi_candidates, roi_source = [seed_candidate], "seeded_candidate_v1"
         else:
             roi_candidates, roi_source = _select_pathgraph_roi_candidates(candidates)
         if selected_candidate is None:
+            vista_evaluated_candidate_ids = {candidate.candidate_id for candidate in roi_candidates}
             roi_policy = _vista_candidate_roi_policy(roi_source)
             roi_padding = int(roi_policy["padding"])
             roi_min_size = int(roi_policy["min_size"])
@@ -2101,7 +2314,7 @@ def _recognition_plan_from_vista_point(
                     timeout_seconds=float((config.get("vision") or {}).get("timeout_seconds") or 600),
                 )
             point = vista_payload["point"]
-            for candidate in candidates:
+            for candidate in roi_candidates:
                 bbox = candidate.refined_bbox or candidate.element.bbox.to_dict()
                 if _point_inside_map_bbox(point, bbox):
                     selected_candidate = candidate
@@ -2271,55 +2484,9 @@ def _recognition_plan_from_vista_point(
                     ],
                 }
 
-    fast_inventory: dict[str, Any] = {
-        "contract_version": "execute_fast_inventory_v1",
-        "status": "skipped",
-        "reason": "observe_trace_reuse_has_screen_inventory" if isinstance(observe_reuse.get("screen_inventory"), dict) else "not_started",
-        "provider": "windows_uia",
-    }
-    screen_inventory = observe_reuse.get("screen_inventory") if isinstance(observe_reuse.get("screen_inventory"), dict) else None
-    screen_reading_from_fast_inventory = None
-    if screen_inventory is None:
-        with timer.step("uia_inventory_scan"):
-            fast_inventory = _execute_fast_inventory_from_uia(
-                image_path=image_path,
-                image_size=input_image_size,
-                app_name=request.app_name,
-                goal=goal,
-                metadata=request.metadata,
-            )
-        screen_inventory = fast_inventory.get("screen_inventory") if isinstance(fast_inventory.get("screen_inventory"), dict) else None
-        screen_reading_from_fast_inventory = fast_inventory.get("screen_reading") if isinstance(fast_inventory.get("screen_reading"), dict) else None
-    elif screen_inventory is not None:
-        screen_reading_from_fast_inventory = {
-            "contract_version": "screen_reading_v1",
-            "image_path": str(image_path),
-            "image_size": input_image_size.to_dict(),
-            "app_name": request.app_name,
-            "texts": [],
-            "ui_elements": [],
-            "screen_inventory": screen_inventory,
-        }
-    screen_inventory_rank_result: CandidateRankResult | None = None
-    if isinstance(screen_reading_from_fast_inventory, dict) and screen_inventory is not None:
-        with timer.step("rank_screen_inventory_candidates", top_k=request.top_k):
-            screen_inventory_rank_result = rank_candidates(
-                CandidateRankRequest(
-                    goal=goal,
-                    page_structure=PageStructure(
-                        image_size=input_image_size,
-                        screen_summary="execute fast inventory",
-                        state_guess=request.state_hint,
-                        elements=[],
-                        texts=[],
-                    ),
-                    top_k=request.top_k,
-                    state_hint=request.state_hint,
-                    screen_reading=screen_reading_from_fast_inventory,
-                )
-            )
+    if not recalled_candidates_available and current_uia_candidates:
         existing_candidate_ids = {item.candidate_id for item in candidates}
-        for candidate in screen_inventory_rank_result.candidates:
+        for candidate in current_uia_candidates:
             if candidate.candidate_id not in existing_candidate_ids:
                 candidates.append(candidate)
                 existing_candidate_ids.add(candidate.candidate_id)
@@ -2337,6 +2504,11 @@ def _recognition_plan_from_vista_point(
     if vista_direct_used and selected_candidate is not None and isinstance(vista_payload, dict):
         vista_direct_uia_conflict_ids = _vista_direct_uia_conflicts(
             goal=goal,
+            target_text=(
+                request.metadata.get("target_text") or request.metadata.get("observed_text")
+                if isinstance(request.metadata, dict)
+                else None
+            ),
             point=vista_payload["point"],
             candidates=candidates,
         )
@@ -2378,6 +2550,10 @@ def _recognition_plan_from_vista_point(
             "vista_direct_point_grounding_attempted": vista_direct_attempted,
             "screen_inventory_candidate_rank_used": screen_inventory_rank_result is not None,
             "screen_inventory_candidate_count": len(screen_inventory_rank_result.candidates) if screen_inventory_rank_result else 0,
+            "operational_memory_fast_grounding_requested": fast_grounding_requested,
+            "operational_memory_fast_grounding_used": fast_grounding_used,
+            "operational_memory_fast_grounding_reason": fast_grounding_reason,
+            "current_uia_unique_match_count": fast_grounding_match_count,
             "vista_direct_uia_conflict_candidate_ids": vista_direct_uia_conflict_ids,
             "vista_roi_policy": vista_image_preprocess.get("roi_policy"),
             "vista_roi_source": vista_image_preprocess.get("roi_source"),
@@ -2389,7 +2565,12 @@ def _recognition_plan_from_vista_point(
     grounding_results: list[LocalGroundingCandidateResult] = []
     if vista_payload is not None:
         point = vista_payload["point"]
-        for candidate in candidates:
+        vista_grounding_candidates = (
+            [candidate for candidate in candidates if candidate.candidate_id in vista_evaluated_candidate_ids]
+            if vista_evaluated_candidate_ids
+            else candidates
+        )
+        for candidate in vista_grounding_candidates:
             inside = selected_candidate is not None and candidate.candidate_id == selected_candidate.candidate_id
             bbox = candidate.refined_bbox or candidate.element.bbox.to_dict()
             model_point_inside_bbox = _point_inside_map_bbox(point, bbox)
@@ -2449,6 +2630,11 @@ def _recognition_plan_from_vista_point(
         if not isinstance(candidate.element.evidence.get("screen_inventory_action"), dict):
             continue
         bbox = candidate.refined_bbox or candidate.element.bbox.to_dict()
+        current_uia_fast_match = bool(
+            fast_grounding_used
+            and selected_candidate is not None
+            and candidate.candidate_id == selected_candidate.candidate_id
+        )
         grounding_results.append(
             LocalGroundingCandidateResult(
                 candidate_id=candidate.candidate_id,
@@ -2457,11 +2643,29 @@ def _recognition_plan_from_vista_point(
                 crop_path=None,
                 crop_bbox=bbox,
                 refined_click_point=dict(candidate.element.click_point),
-                coordinate_source="screen_inventory_available_action",
-                confidence=0.86 if candidate.element.coordinate_confidence == "high" else 0.72,
+                coordinate_source=(
+                    "current_uia_unique_match_v1"
+                    if current_uia_fast_match
+                    else "screen_inventory_available_action"
+                ),
+                confidence=(
+                    0.94
+                    if current_uia_fast_match
+                    else 0.86
+                    if candidate.element.coordinate_confidence == "high"
+                    else 0.72
+                ),
                 matched_text=candidate.label,
                 matched_text_bbox=bbox,
-                reasons=["screen_inventory_available_action", "uia_coordinate_grounding"],
+                reasons=(
+                    [
+                        "operational_memory_current_uia_unique_match",
+                        "current_capture_uia_coordinate_grounding",
+                        "historical_coordinates_not_reused",
+                    ]
+                    if current_uia_fast_match
+                    else ["screen_inventory_available_action", "uia_coordinate_grounding"]
+                ),
             )
         )
     narrow_search_result = LocalGroundingResult(
@@ -2469,7 +2673,7 @@ def _recognition_plan_from_vista_point(
         results=grounding_results,
         recommended_candidate_id=selected_candidate.candidate_id if selected_candidate else None,
         summary={
-            "provider": "vista_point_grounding",
+            "provider": "current_uia_unique_match_v1" if fast_grounding_used else "vista_point_grounding",
             "output_contract": "vista_point_v1",
             "candidate_count": len(candidates),
             "grounded_count": 1 if selected_candidate else 0,
@@ -2486,6 +2690,7 @@ def _recognition_plan_from_vista_point(
         isinstance(reviewed_execution, dict)
         and reviewed_execution.get("allow_low_margin_when_grounded") is True
     )
+    allow_low_margin_when_grounded = allow_low_margin_when_grounded or fast_grounding_used
     with timer.step("pre_click_decision"):
         pre_click_decision = decide_pre_click(
             goal=goal,
@@ -2510,6 +2715,18 @@ def _recognition_plan_from_vista_point(
             image_path=image_path,
             image_size=input_image_size,
             grounding=narrow_search_result,
+            selected_candidate=selected_candidate,
+            current_candidate_source=(
+                "current_uia_unique_match_v1"
+                if fast_grounding_used
+                else "current_uia_vista_grounded_v1"
+                if selected_candidate is not None
+                and isinstance(
+                    selected_candidate.element.evidence.get("screen_inventory_action"),
+                    dict,
+                )
+                else None
+            ),
         ),
         "parse_result": {
             "vision_regions": {
@@ -2555,9 +2772,13 @@ def _recognition_plan_from_vista_point(
                 page_structure_generated=False,
                 ocr_region_refine_used=False,
             ),
-            "vision_provider_used": "seeded_candidate_fast_lane"
-            if allow_reviewed_seed_without_model and vista_payload is None
-            else "vista_point_grounding",
+            "vision_provider_used": (
+                "current_uia_unique_match_v1"
+                if fast_grounding_used
+                else "seeded_candidate_fast_lane"
+                if allow_reviewed_seed_without_model and vista_payload is None
+                else "vista_point_grounding"
+            ),
             "vision_model_used": bool(vista_payload),
             "coordinate_source": (
                 "seeded_candidate_v1.selected_click_point"
@@ -2598,6 +2819,10 @@ def _recognition_plan_from_vista_point(
             "uia_scan_status": fast_inventory.get("uia_scan_status") or "skipped_observe_trace_reuse",
             "narrow_search_used": True,
             "vista_point_grounding_used": vista_payload is not None,
+            "operational_memory_fast_grounding_requested": fast_grounding_requested,
+            "operational_memory_fast_grounding_used": fast_grounding_used,
+            "operational_memory_fast_grounding_reason": fast_grounding_reason,
+            "current_uia_unique_match_count": fast_grounding_match_count,
             "vista_point_inside_candidate_bbox": vista_point_inside_selected_bbox,
             "seeded_candidate_primary_point_used": seeded_primary_point_used,
             "vista_direct_point_grounding_used": vista_direct_used,
@@ -3887,6 +4112,35 @@ def _prune_learn_target_visual_overlaps(targets: list[dict[str, Any]]) -> tuple[
 def _execution_allowed_for_risk_class(*, label: str, role: str, risk_class: str) -> tuple[bool, str]:
     normalized_risk = str(risk_class or "").strip()
     risk_text = " ".join([label, role, normalized_risk]).casefold()
+    if normalized_risk == "safe_reviewed_file_upload":
+        action_text = " ".join([label, role]).casefold()
+        forbidden_terms = [
+            "submit",
+            "send",
+            "confirm",
+            "payment",
+            "pay now",
+            "delete",
+            "remove",
+            "authorize",
+            "提交",
+            "发送",
+            "确认",
+            "支付",
+            "删除",
+            "移除",
+            "授权",
+        ]
+        upload_terms = ["upload", "choose file", "select file", "attachment", "上传", "选择文件", "附件"]
+        role_allows_file_selection = any(term in str(role or "").casefold() for term in ["button", "file", "input"])
+        if (
+            role_allows_file_selection
+            and any(term in action_text for term in upload_terms)
+            and not any(term in action_text for term in forbidden_terms)
+            and not _looks_like_final_submit_action_text(action_text)
+        ):
+            return True, "risk_class_safe_reviewed_file_upload"
+        return False, "potential_side_effect_action"
     if normalized_risk == "safe_open_apply_flow" and not _looks_like_final_submit_action_text(risk_text):
         return True, "risk_class_safe_open_apply_flow"
     if (

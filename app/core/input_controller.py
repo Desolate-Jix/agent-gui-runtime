@@ -55,6 +55,14 @@ CLIPBOARD_VERIFY_TIMEOUT_SECONDS = 0.5
 CLIPBOARD_VERIFY_RETRY_SECONDS = 0.03
 
 
+class TargetPointOccludedError(RuntimeError):
+    """点击点被外部窗口遮挡或无法验证时，阻止输入下发。"""
+
+    def __init__(self, evidence: dict[str, Any]) -> None:
+        self.evidence = evidence
+        super().__init__(str(evidence.get("reason") or "target_point_occluded"))
+
+
 class MOUSEINPUT(ctypes.Structure):
     _fields_ = [
         ("dx", ctypes.c_long),
@@ -170,6 +178,14 @@ class InputController:
         else:
             move_result = {"performed": False}
 
+        point_visibility = window_manager.validate_bound_point_visibility(
+            bound=bound,
+            x=point["window_x"],
+            y=point["window_y"],
+        )
+        if not point_visibility.get("allowed"):
+            raise TargetPointOccludedError(point_visibility)
+
         down_result = self.mouse_down(button)
         if hold_ms > 0:
             time.sleep(hold_ms / 1000.0)
@@ -195,6 +211,7 @@ class InputController:
             "settle_ms": int(settle_ms),
             "hold_ms": int(hold_ms),
             "move": move_result,
+            "point_visibility": point_visibility,
             "down": down_result,
             "up": up_result,
         }

@@ -91,10 +91,12 @@ def test_known_interfaces_form_one_verified_no_submit_session() -> None:
         "interface_observed",
         "action_verified",
         "interface_observed",
+        "destination_observation_verified",
         "apply_entry_confirmation_requested",
         "apply_entry_confirmation_recorded",
         "action_verified",
         "interface_observed",
+        "destination_observation_verified",
         "action_verified",
         "interface_observed",
         "safe_stop",
@@ -280,8 +282,66 @@ def test_generic_navigation_decision_is_recorded_before_operation() -> None:
         evidence=_evidence("capture-news-detail"),
     )
 
-    assert session["status"] == "ready_for_observation"
+    assert session["status"] == "waiting_for_destination_observation"
+    assert session["pending_agent_decision"]["expected_target_interface_id"] == "news:detail"
+    assert session["events"][-1]["event_type"] == "action_verified"
+    assert session["events"][-1]["details"]["verification_scope"] == "action_effect_only"
+
+    session = observe_interface(
+        session,
+        interface_id="news:detail",
+        surface_type="finite_detail",
+        memory_object_sha256="memory-news-detail",
+        evidence=_evidence("capture-news-detail-observed"),
+    )
+
+    assert session["status"] == "ready_for_agent_decision"
     assert session["pending_agent_decision"] is None
+    assert session["events"][-1]["event_type"] == "destination_observation_verified"
+
+
+def test_navigation_destination_mismatch_safe_stops_after_effect_verification() -> None:
+    session = create_continuous_task_session(
+        session_id="news-navigation-mismatch",
+        workflow_id="news-reading",
+    )
+    session = observe_interface(
+        session,
+        interface_id="news:list",
+        surface_type="content_collection",
+        memory_object_sha256="memory-news-list",
+        evidence=_evidence("capture-news"),
+    )
+    session = record_agent_decision(
+        session,
+        decision_plan=_decision(
+            semantic_action="open_detail",
+            decision_type="follow_transition",
+        ),
+    )
+    session = record_action_result(
+        session,
+        action_type="open_detail",
+        action_executed=True,
+        post_action_verified=True,
+        evidence=_evidence("capture-news-detail-transition"),
+    )
+
+    session = observe_interface(
+        session,
+        interface_id="news:unexpected",
+        surface_type="finite_detail",
+        memory_object_sha256="memory-news-unexpected",
+        evidence=_evidence("capture-news-unexpected"),
+    )
+
+    assert session["status"] == "safe_stop"
+    assert session["stop_reason"] == "destination_interface_mismatch"
+    assert session["pending_agent_decision"] is None
+    assert session["events"][-2]["event_type"] == "destination_observation_rejected"
+    assert session["events"][-2]["details"]["expected_interface_id"] == "news:detail"
+    assert session["events"][-2]["details"]["actual_interface_id"] == "news:unexpected"
+    assert session["events"][-1]["event_type"] == "safe_stop"
 
 
 def test_gate_rejection_safe_stops_without_operation_dispatch() -> None:

@@ -18,6 +18,10 @@ from app.gate.dataflow import (
 )
 from app.gate.ocr import ocr_contextual_match
 from app.gate.scroll import build_scroll_scope_invariant
+from app.operation.reading import (
+    build_read_region_batch_report,
+    verify_collection_scroll,
+)
 from app.seek.application import assess_seek_application_flow_state
 from app.operation.recognition.schemas import LocalGroundingCandidateResult, LocalGroundingResult
 from app.vision.schemas import ImageSize
@@ -47,6 +51,9 @@ def test_dataflow_requires_latest_detail_snapshot_for_downstream_steps() -> None
     assert any(section["text"] == "Required skill: C# integration" for section in latest["description_sections"])
     assert latest["detail_bottom_reached"] is False
     assert latest["detail_read_state"] == "no_new_content"
+    assert latest["detail_read_complete"] is False
+    assert latest["runtime_detail_snapshot"]["read_state"] == "no_new_content"
+    assert latest["runtime_detail_snapshot"]["read_complete"] is False
 
 
 def test_dataflow_records_explicit_reached_bottom_as_complete() -> None:
@@ -69,6 +76,8 @@ def test_dataflow_records_explicit_reached_bottom_as_complete() -> None:
 
     assert latest["detail_bottom_reached"] is True
     assert latest["detail_read_state"] == "reached_bottom"
+    assert latest["detail_read_complete"] is True
+    assert latest["runtime_detail_snapshot"]["read_complete"] is True
 
 
 def test_candidate_freshness_rejects_stale_capture_coordinates() -> None:
@@ -235,6 +244,28 @@ def test_safe_open_apply_flow_allowed_but_final_submit_still_blocked() -> None:
     assert blocked_reason == "potential_side_effect_action"
 
 
+def test_safe_reviewed_file_upload_opens_chooser_but_never_allows_submit() -> None:
+    allowed, reason = vision_api._execution_allowed_for_risk_class(
+        label="Upload resume",
+        role="button",
+        risk_class="safe_reviewed_file_upload",
+    )
+    blocked, blocked_reason = vision_api._execution_allowed_for_risk_class(
+        label="Upload and submit application",
+        role="button",
+        risk_class="safe_reviewed_file_upload",
+    )
+    unreviewed, unreviewed_reason = vision_api._execution_allowed_for_risk_class(
+        label="Upload resume",
+        role="button",
+        risk_class="safe_click_allowed",
+    )
+
+    assert (allowed, reason) == (True, "risk_class_safe_reviewed_file_upload")
+    assert (blocked, blocked_reason) == (False, "potential_side_effect_action")
+    assert (unreviewed, unreviewed_reason) == (False, "potential_side_effect_action")
+
+
 def test_scoped_final_submit_ignores_search_submit_outside_application_flow() -> None:
     items = [
         {
@@ -301,6 +332,93 @@ def test_scroll_scope_invariant_flags_non_target_pane_change() -> None:
 
     assert invariant["wrong_scope_detected"] is True
     assert invariant["status"] == "wrong_scope_detected"
+
+
+def test_scroll_dispatch_without_new_fingerprint_is_not_effect_success() -> None:
+    result = verify_collection_scroll(
+        before=["job-a"],
+        after=["job-a"],
+        dispatched=True,
+    )
+
+    assert result["scroll_dispatch_success"] is True
+    assert result["scroll_effect_success"] is False
+    assert result["new_item_fingerprints"] == []
+    assert result["status"] == "no_new_content"
+
+
+def test_collection_scroll_wrong_scope_is_a_bounded_failure() -> None:
+    result = verify_collection_scroll(
+        before=["job-a"],
+        after=["job-a", "job-b"],
+        dispatched=True,
+        wrong_scope_detected=True,
+    )
+
+    assert result["scroll_dispatch_success"] is True
+    assert result["scroll_effect_success"] is False
+    assert result["wrong_scope_detected"] is True
+    assert result["should_stop"] is True
+    assert result["status"] == "wrong_scope_detected"
+
+
+def test_read_batch_reports_new_item_fingerprints_after_verified_scroll() -> None:
+    report = build_read_region_batch_report(
+        target_container_id="generic:list",
+        target_bbox={"x": 0, "y": 0, "w": 600, "h": 500},
+        max_captures=3,
+        captures=[
+            {
+                "capture_id": "before",
+                "item_fingerprints": ["job-a"],
+                "ocr_result": {"items": [{"text": "Job A"}]},
+            },
+            {
+                "capture_id": "after",
+                "item_fingerprints": ["job-a", "job-b"],
+                "scroll_dispatched": True,
+                "ocr_result": {
+                    "items": [{"text": "Job A"}, {"text": "Job B"}]
+                },
+            },
+        ],
+    )
+
+    assert report["captures"][1]["scroll_dispatch_success"] is True
+    assert report["captures"][1]["scroll_effect_success"] is True
+    assert report["new_item_observations"] == [
+        {"capture_id": "after", "fingerprint": "job-b"}
+    ]
+    assert report["wrong_scope_detected"] is False
+
+
+def test_read_batch_stops_when_capture_reports_wrong_scope() -> None:
+    report = build_read_region_batch_report(
+        target_container_id="generic:list",
+        target_bbox={"x": 0, "y": 0, "w": 600, "h": 500},
+        max_captures=3,
+        captures=[
+            {
+                "capture_id": "before",
+                "item_fingerprints": ["job-a"],
+                "ocr_result": {"items": [{"text": "Job A"}]},
+            },
+            {
+                "capture_id": "after",
+                "item_fingerprints": ["job-a", "job-b"],
+                "scroll_dispatched": True,
+                "wrong_scope_detected": True,
+                "ocr_result": {
+                    "items": [{"text": "Job A"}, {"text": "Job B"}]
+                },
+            },
+        ],
+    )
+
+    assert report["stop_reason"] == "wrong_scope_detected"
+    assert report["completion_status"] == "blocked"
+    assert report["wrong_scope_detected"] is True
+    assert report["captures"][1]["scroll_effect_success"] is False
 
 
 def test_ocr_canonicalization_is_short_acronym_only() -> None:

@@ -86,8 +86,14 @@ let interfaceWorkflowSourceReviewState = null;
 let interfaceWorkflowSelectedOperationId = "";
 let interfaceWorkflowSavedReviewPath = "";
 let interfaceWorkflowHasUnsavedChanges = false;
+let interfaceWorkflowSafeFillPreflight = null;
 let interfaceWorkflowControlPickMode = false;
 let interfaceWorkflowControlPickDestination = "attach";
+const interfaceAssetWorkspaceState = {
+  activePage: "unreviewed",
+  selectedAssetKey: "",
+  attachAssetKey: "",
+};
 const interfaceWorkflowWorkbenchState = globalThis.InterfaceWorkflowReview
   .createInterfaceWorkflowWorkbenchState();
 let interfaceWorkflowGraphLayout = null;
@@ -105,6 +111,8 @@ const interfaceWorkflowLoadGuard = globalThis.InterfaceWorkflowReview
   .createLatestInterfaceWorkflowLoadGuard();
 let selectedLearningDraftNodeId = "";
 let learningDraftReviewBboxEdits = { regions: {}, actions: {} };
+let learningDraftOwnershipConflicts = [];
+let learningDraftOwnershipSelections = {};
 let imageInspectorEditContext = null;
 let imageInspectorSelection = null;
 let learningDraftEditorState = null;
@@ -136,6 +144,15 @@ let currentLearningWorkflowState = null;
 let currentLearningWorkflowRunId = "";
 let activeLearningStageOperation = null;
 let activeLearningStageTaskContext = null;
+let activeScopedLearningCaptureContext = null;
+let scopedLearningCaptureState = {
+  mode: "normal",
+  segments: [],
+  scrolls: [],
+  stop_reason: "",
+  composite: null,
+};
+let scopedLearningCaptureRecommendation = null;
 
 /* Navigation path graph state */
 // Each page node:
@@ -611,6 +628,48 @@ const translations = {
     interface_workflow_add: "加入流程",
     interface_workflow_remove: "移除当前界面",
     interface_workflow_source_empty: "当前流程尚未加入界面。",
+    interface_workflow_identity: "软件 / 网站身份",
+    interface_workflow_identity_placeholder: "网站填域名或 URL；Windows 软件填产品名",
+    interface_workflow_identity_help: "浏览器页面必须按网站归档，不会使用 Edge 进程代替网站身份。",
+    interface_asset_unreviewed: "未审核界面",
+    interface_asset_reviewed: "已审核界面",
+    interface_asset_workflows: "软件流程",
+    interface_asset_unreviewed_help: "未审核界面不会提供给 Agent 直接使用",
+    interface_asset_reviewed_help: "审核通过仍不是执行授权",
+    interface_asset_single_evidence: "单界面证据",
+    interface_asset_single_evidence_help: "选择界面后，在这里查看带框图、审核状态和 Agent 可读说明。",
+    interface_workflow_library_select: "选择已有软件 / 网站流程",
+    interface_workflow_library_choose: "-- 请选择已有流程 --",
+    interface_workflow_library_open: "打开所选流程",
+    interface_workflow_library_delete: "删除流程",
+    interface_workflow_library_new_name: "新流程名称",
+    interface_workflow_library_new_placeholder: "例如：岗位浏览与申请",
+    interface_workflow_library_create: "新建软件 / 网站流程",
+    interface_workflow_library_attach: "加入单界面",
+    interface_workflow_library_folder: "打开源文件夹",
+    interface_workflow_library_loading: "正在读取流程库…",
+    interface_workflow_workbench_title: "路径图与界面证据",
+    interface_workflow_workbench_help: "上方选择界面和连接关系，下方核对带框证据；需要修改时再展开工具。",
+    interface_workflow_read_only: "只读验证 · 不会点击目标软件",
+    interface_workflow_graph_title: "界面与路径",
+    interface_workflow_graph_help: "圆点代表界面，连线代表操作与跳转",
+    interface_workflow_graph_reviewed: "已审核界面",
+    interface_workflow_graph_unreviewed: "未审核界面",
+    interface_workflow_graph_invalid: "证据无效",
+    interface_workflow_graph_reviewed_path: "已审核操作路径",
+    interface_workflow_graph_unreviewed_path: "橙色虚线路径需要人工审核",
+    interface_workflow_graph_gesture_help: "点击界面查看证据，滚轮缩放，拖动画布",
+    interface_workflow_graph_fit: "适合画布",
+    interface_workflow_graph_reset: "重置",
+    interface_workflow_graph_empty: "加入已保存界面后显示软件的完整界面与跳转关系。",
+    interface_workflow_graph_link_hint: "右键界面可快速创建连接。",
+    interface_workflow_context_start_link: "从此界面创建连接",
+    interface_workflow_context_cancel_link: "取消连接",
+    interface_workflow_evidence_workflow: "流程界面",
+    interface_workflow_evidence_preview: "单界面预览",
+    interface_workflow_refresh_evidence: "刷新当前证据",
+    interface_workflow_edit_current: "修正当前界面",
+    interface_workflow_collapse_editor: "收起修正工具",
     interface_workflow_edit_boxes: "修改当前界面框",
     interface_workflow_save_draft: "保存学习结果",
     interface_workflow_memory_handoff: "发布与执行验证",
@@ -1220,6 +1279,48 @@ const translations = {
     interface_workflow_add: "Add and connect",
     interface_workflow_remove: "Remove current interface",
     interface_workflow_source_empty: "No interface has been added to this workflow.",
+    interface_workflow_identity: "Software / website identity",
+    interface_workflow_identity_placeholder: "Enter a domain or URL for websites; a product name for Windows apps",
+    interface_workflow_identity_help: "Browser pages are filed by website identity, not by the Edge process name.",
+    interface_asset_unreviewed: "Unreviewed interfaces",
+    interface_asset_reviewed: "Reviewed interfaces",
+    interface_asset_workflows: "Software workflows",
+    interface_asset_unreviewed_help: "Unreviewed interfaces are not available for direct Agent use",
+    interface_asset_reviewed_help: "Review approval is still not execution authorization",
+    interface_asset_single_evidence: "Single-interface evidence",
+    interface_asset_single_evidence_help: "Select an interface to inspect its boxed image, review status, and Agent-readable description.",
+    interface_workflow_library_select: "Select an existing software / website workflow",
+    interface_workflow_library_choose: "-- Select an existing workflow --",
+    interface_workflow_library_open: "Open selected workflow",
+    interface_workflow_library_delete: "Delete workflow",
+    interface_workflow_library_new_name: "New workflow name",
+    interface_workflow_library_new_placeholder: "Example: Job browsing and application",
+    interface_workflow_library_create: "Create software / website workflow",
+    interface_workflow_library_attach: "Add interface",
+    interface_workflow_library_folder: "Open source folder",
+    interface_workflow_library_loading: "Loading workflow library…",
+    interface_workflow_workbench_title: "Workflow graph and interface evidence",
+    interface_workflow_workbench_help: "Choose interfaces and transitions above, then inspect boxed evidence below. Open the editor only when changes are needed.",
+    interface_workflow_read_only: "Read-only validation · No target-app clicks",
+    interface_workflow_graph_title: "Interfaces and paths",
+    interface_workflow_graph_help: "Nodes represent interfaces; links represent operations and transitions",
+    interface_workflow_graph_reviewed: "Reviewed interface",
+    interface_workflow_graph_unreviewed: "Unreviewed interface",
+    interface_workflow_graph_invalid: "Invalid evidence",
+    interface_workflow_graph_reviewed_path: "Reviewed operation path",
+    interface_workflow_graph_unreviewed_path: "Orange dashed paths require human review",
+    interface_workflow_graph_gesture_help: "Click an interface to inspect evidence; scroll to zoom; drag to pan",
+    interface_workflow_graph_fit: "Fit to canvas",
+    interface_workflow_graph_reset: "Reset",
+    interface_workflow_graph_empty: "Add saved interfaces to display the complete workflow and transitions.",
+    interface_workflow_graph_link_hint: "Right-click an interface to create a link.",
+    interface_workflow_context_start_link: "Create link from this interface",
+    interface_workflow_context_cancel_link: "Cancel link",
+    interface_workflow_evidence_workflow: "Workflow interface",
+    interface_workflow_evidence_preview: "Interface preview",
+    interface_workflow_refresh_evidence: "Refresh evidence",
+    interface_workflow_edit_current: "Edit current interface",
+    interface_workflow_collapse_editor: "Collapse editor",
     interface_workflow_edit_boxes: "Edit current interface boxes",
     interface_workflow_save_draft: "Save learning result",
     interface_workflow_memory_handoff: "Publish and verify in Execute",
@@ -1592,6 +1693,15 @@ function applyLanguage(language) {
   });
   document.querySelectorAll("[data-i18n]").forEach((element) => {
     element.textContent = t(element.dataset.i18n);
+  });
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((element) => {
+    element.setAttribute("placeholder", t(element.dataset.i18nPlaceholder));
+  });
+  document.querySelectorAll("[data-i18n-title]").forEach((element) => {
+    element.setAttribute("title", t(element.dataset.i18nTitle));
+  });
+  document.querySelectorAll("[data-i18n-aria-label]").forEach((element) => {
+    element.setAttribute("aria-label", t(element.dataset.i18nAriaLabel));
   });
   const activeStage = document.querySelector(".stage.active")?.dataset.stage || "open_bind";
   showStage(activeStage);
@@ -3764,6 +3874,25 @@ function setInterfaceWorkflowBoxEditorStatus(message = "", tone = "") {
   status.hidden = !text;
 }
 
+function localizeInterfaceWorkflowEdgeLabel(value = "") {
+  const label = String(value || "").trim();
+  if (currentLanguage !== "en-US") return label;
+  if (label.startsWith("前往 ")) return `Open ${label.slice(3).trim()}`;
+  return label;
+}
+
+function currentInterfaceWorkflowCorrectionTarget() {
+  const resolver = globalThis.InterfaceWorkflowReview?.resolveInterfaceWorkflowCorrectionTarget;
+  if (typeof resolver !== "function") {
+    return { authority: "unavailable", view: null, reason: "correction_target_resolver_unavailable" };
+  }
+  return resolver({
+    workbench: interfaceWorkflowWorkbenchState.current(),
+    workflowState: interfaceWorkflowReviewState,
+    sourcePreviewState: interfaceWorkflowSourceReviewState,
+  });
+}
+
 function interfaceWorkflowEditableImagePath(view) {
   const sourceLayer = (Array.isArray(view?.available_layers) ? view.available_layers : [])
     .find((entry) => entry?.layer === "source");
@@ -3774,12 +3903,31 @@ function interfaceWorkflowEditableImagePath(view) {
   ).trim();
 }
 
-async function openCurrentInterfaceWorkflowBoxEditor() {
-  const view = interfaceWorkflowReviewState?.current?.();
-  const editorImagePath = interfaceWorkflowEditableImagePath(view);
-  const sourcePath = (Array.isArray(view?.node?.source_paths) ? view.node.source_paths : [])
+function interfaceWorkflowEditableReviewSourcePath(view) {
+  const explicit = String(view?.node?.editable_review_source_path || "").trim();
+  if (explicit) return explicit;
+  const sourcePaths = Array.isArray(view?.node?.source_paths) ? view.node.source_paths : [];
+  return sourcePaths
     .map((value) => String(value || "").trim())
-    .find(Boolean);
+    .find(Boolean) || "";
+}
+
+async function openCurrentInterfaceWorkflowBoxEditor() {
+  const correctionTarget = currentInterfaceWorkflowCorrectionTarget();
+  const view = correctionTarget.view;
+  if (!view) {
+    const message = "当前显示证据不可编辑：证据选择已失效，请重新选择资产。";
+    setInterfaceWorkflowCorrectionOpen(false);
+    setInterfaceWorkflowBoxEditorStatus(message, "error");
+    renderResponse({
+      success: false,
+      message,
+      data: { reason: correctionTarget.reason },
+    }, "Interface workflow review");
+    return null;
+  }
+  const editorImagePath = interfaceWorkflowEditableImagePath(view);
+  const sourcePath = interfaceWorkflowEditableReviewSourcePath(view);
   if (!sourcePath) {
     setInterfaceWorkflowBoxEditorStatus("当前界面没有可编辑的学习证据", "error");
     renderResponse({
@@ -3789,6 +3937,7 @@ async function openCurrentInterfaceWorkflowBoxEditor() {
     return null;
   }
 
+  setInterfaceWorkflowCorrectionOpen(true, view);
   setInterfaceWorkflowBoxEditorStatus("正在加载可编辑证据…");
   if (currentLearningDraftReviewMatchesSource(sourcePath)) {
     setLearningDraftReviewSourcePath(sourcePath);
@@ -3807,7 +3956,6 @@ async function openCurrentInterfaceWorkflowBoxEditor() {
   }
 
   const toggle = $("interfaceWorkflowReviewToolsToggle");
-  setInterfaceWorkflowCorrectionOpen(false);
   if (toggle) {
     toggle.disabled = true;
     toggle.textContent = "正在打开框编辑器...";
@@ -3884,6 +4032,50 @@ function interfaceWorkflowSourcePathsAfterReview(previousSourcePath, reviewedPat
   return Array.from(new Set(paths));
 }
 
+function applyReviewedEvidenceToCurrentWorkflowNode({
+  previousSourcePath,
+  reviewedPath,
+  review,
+}) {
+  if (typeof interfaceWorkflowReviewState === "undefined" || !interfaceWorkflowReviewState) return false;
+  const previous = String(previousSourcePath || "").trim();
+  const reviewed = String(reviewedPath || "").trim();
+  if (!previous || !reviewed) return false;
+  const replaceBySource = interfaceWorkflowReviewState.replaceReviewedNodeEvidenceBySource;
+  if (typeof replaceBySource !== "function") return false;
+
+  const draft = review?.draft && typeof review.draft === "object" ? review.draft : {};
+  try {
+    const updated = replaceBySource(previous, reviewed, {
+      regions: Array.isArray(draft.regions) ? draft.regions : [],
+      action_candidates: Array.isArray(draft.action_templates) ? draft.action_templates : [],
+      blockers: Array.isArray(draft.blockers) ? draft.blockers : [],
+      verification_rules: Array.isArray(draft.verification_rules) ? draft.verification_rules : [],
+      page_details: draft.page_details && typeof draft.page_details === "object"
+        ? draft.page_details
+        : {},
+      manual_revision: {
+        source_path: reviewed,
+        source_after_review: String(review?.source_after_review || "mixed"),
+        artifact_is_authorization: false,
+        execute_binding_enabled: false,
+      },
+    });
+    const nodeId = String(updated?.node?.node_id || "").trim();
+    if (!nodeId) return false;
+    interfaceWorkflowWorkbenchState.showWorkflowNode(nodeId);
+  } catch (error) {
+    renderResponse({
+      success: false,
+      message: "Reviewed evidence did not match exactly one workflow node",
+      error: String(error),
+    }, "Interface workflow review");
+    return false;
+  }
+  interfaceWorkflowReview = interfaceWorkflowReviewState.snapshot();
+  return true;
+}
+
 async function refreshSavedLearningDraftReview({ previousSourcePath, reviewedPath }) {
   const sourcePath = String(reviewedPath || "").trim();
   if (!sourcePath) return null;
@@ -3897,14 +4089,21 @@ async function refreshSavedLearningDraftReview({ previousSourcePath, reviewedPat
     skipReviewRender: true,
   });
   if (!refreshedReview) return null;
-  const refreshedWorkflow = await loadInterfaceWorkflowReview(
-    interfaceWorkflowSourcePathsAfterReview(previousSourcePath, sourcePath),
-    {
-      skipResponse: true,
-      selectSourcePath: sourcePath,
-      discoverRelatedSidecars: false,
-    },
-  );
+  let refreshedWorkflow = null;
+  if (applyReviewedEvidenceToCurrentWorkflowNode({
+    previousSourcePath,
+    reviewedPath: sourcePath,
+    review: refreshedReview,
+  })) {
+    const saveResult = await saveInterfaceWorkflowReview({ commitEditor: false });
+    if (!saveResult) return null;
+    refreshedWorkflow = interfaceWorkflowReviewState?.snapshot?.() || null;
+  } else {
+    if ($("interfaceWorkflowSourceStatus")) {
+      $("interfaceWorkflowSourceStatus").textContent = "审核证据未精确匹配现有流程节点；已停止保存，未从单界面重建流程。";
+    }
+    return null;
+  }
   if (!refreshedWorkflow) return null;
   return { review: refreshedReview, workflow: refreshedWorkflow };
 }
@@ -3912,9 +4111,7 @@ async function refreshSavedLearningDraftReview({ previousSourcePath, reviewedPat
 async function refreshCurrentInterfaceWorkflowEvidence() {
   const button = $("interfaceWorkflowRefreshEvidenceBtn");
   const view = interfaceWorkflowReviewState?.current?.();
-  const sourcePath = (Array.isArray(view?.node?.source_paths) ? view.node.source_paths : [])
-    .map((value) => String(value || "").trim())
-    .find(Boolean);
+  const sourcePath = interfaceWorkflowEditableReviewSourcePath(view);
   if (!sourcePath) {
     renderResponse(
       { success: false, message: "请先在路径图选择一个有证据的界面。" },
@@ -10045,6 +10242,342 @@ function setInterfaceWorkflowSourceOptions(sources = []) {
     select.value = previousValue;
   }
   renderInterfaceWorkflowSourcePreview(null);
+  renderInterfaceWorkflowReviewGroups();
+}
+
+function renderInterfaceWorkflowReviewGroups() {
+  const reviewedList = $("interfaceWorkflowReviewedList");
+  const unreviewedList = $("interfaceWorkflowUnreviewedList");
+  const projector = globalThis.InterfaceWorkflowReview?.buildInterfaceAssetLibrary;
+  if (!reviewedList || !unreviewedList || typeof projector !== "function") return;
+  const assets = projector(interfaceWorkflowLibraryRegistry, interfaceWorkflowAvailableSources);
+
+  const renderBucket = (container, items, emptyText) => {
+    container.innerHTML = "";
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "interface-workflow-review-group-empty";
+      empty.textContent = emptyText;
+      container.appendChild(empty);
+      return;
+    }
+    items.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "interface-asset-list-row";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `interface-asset-list-item ${item.agent_usable ? "is-reviewed" : "is-unreviewed"}`;
+      button.classList.toggle("is-selected", item.asset_key === interfaceAssetWorkspaceState.selectedAssetKey);
+      button.dataset.assetKey = String(item.asset_key || "");
+      button.dataset.nodeId = String(item.node_id || "");
+      button.dataset.sourcePath = String(item.source_path || "");
+      const membership = Array.isArray(item.workflow_memberships) ? item.workflow_memberships[0] : null;
+      button.dataset.workflowId = String(membership?.workflow_id || "");
+      const name = document.createElement("strong");
+      name.textContent = InterfaceWorkflowReview.userFacingLearningLabel(
+        item.display_name || item.node_id || (currentLanguage === "en-US" ? "Unnamed interface" : "未命名界面"),
+      );
+      const status = document.createElement("small");
+      const workflowCount = Array.isArray(item.workflow_memberships) ? item.workflow_memberships.length : 0;
+      status.textContent = currentLanguage === "en-US"
+        ? `${item.agent_usable ? "Reviewed" : "Pending review"} · ${workflowCount ? `${workflowCount} workflows` : "Not in a workflow"}`
+        : `${item.agent_usable ? "已审核" : "待审核"} · ${workflowCount ? `${workflowCount} 个流程` : "未加入流程"}`;
+      button.append(name, status);
+      button.addEventListener("click", openInterfaceWorkflowReviewGroupNode);
+      const attach = document.createElement("button");
+      attach.type = "button";
+      attach.className = "interface-asset-list-attach";
+      attach.textContent = currentLanguage === "en-US" ? "Add to workflow" : "加入流程";
+      attach.dataset.assetKey = String(item.asset_key || "");
+      attach.addEventListener("click", openInterfaceAssetAttachDialog);
+      row.append(button, attach);
+      if (isManagedLearningEvidencePath(item.source_path)) {
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "interface-asset-list-delete danger";
+        remove.textContent = currentLanguage === "en-US" ? "Delete" : "删除";
+        remove.dataset.assetKey = String(item.asset_key || "");
+        remove.addEventListener("click", deleteInterfaceAssetEvidence);
+        row.appendChild(remove);
+      }
+      container.appendChild(row);
+    });
+  };
+
+  renderBucket(unreviewedList, assets.unreviewed, currentLanguage === "en-US" ? "No unreviewed interfaces" : "没有未审核界面");
+  renderBucket(reviewedList, assets.reviewed, currentLanguage === "en-US" ? "No reviewed interfaces" : "没有已审核界面");
+  const reviewedCount = assets.reviewed.length;
+  const unreviewedCount = assets.unreviewed.length;
+  if ($("interfaceWorkflowReviewedCount")) {
+    $("interfaceWorkflowReviewedCount").textContent = currentLanguage === "en-US" ? `${reviewedCount} interfaces` : `${reviewedCount} 个界面`;
+  }
+  if ($("interfaceWorkflowUnreviewedCount")) {
+    $("interfaceWorkflowUnreviewedCount").textContent = currentLanguage === "en-US" ? `${unreviewedCount} interfaces` : `${unreviewedCount} 个界面`;
+  }
+}
+
+function currentInterfaceAssetLibrary() {
+  const projector = globalThis.InterfaceWorkflowReview?.buildInterfaceAssetLibrary;
+  return typeof projector === "function"
+    ? projector(interfaceWorkflowLibraryRegistry, interfaceWorkflowAvailableSources)
+    : { reviewed: [], unreviewed: [] };
+}
+
+function interfaceAssetByKey(assetKey) {
+  const normalizedKey = String(assetKey || "").trim();
+  const library = currentInterfaceAssetLibrary();
+  return [...(library.unreviewed || []), ...(library.reviewed || [])].find(
+    (item) => String(item.asset_key || "") === normalizedKey,
+  ) || null;
+}
+
+function isManagedLearningEvidencePath(sourcePath) {
+  const normalized = String(sourcePath || "").trim().replace(/\\/g, "/").toLowerCase();
+  return normalized.includes("/artifacts/learning-runs/")
+    || normalized.startsWith("artifacts/learning-runs/")
+    || normalized.includes("/artifacts/learning-draft-review/")
+    || normalized.startsWith("artifacts/learning-draft-review/");
+}
+
+async function deleteInterfaceAssetEvidence(event) {
+  event?.stopPropagation?.();
+  const asset = interfaceAssetByKey(event?.currentTarget?.dataset?.assetKey);
+  const sourcePath = String(asset?.source_path || "").trim();
+  if (!sourcePath || !isManagedLearningEvidencePath(sourcePath)) {
+    renderResponse({ success: false, message: "该界面不是可删除的学习证据文件。" }, "删除单界面证据");
+    return null;
+  }
+  const memberships = Array.isArray(asset?.workflow_memberships) ? asset.workflow_memberships : [];
+  const workflowNotice = memberships.length
+    ? `\n该证据仍显示在 ${memberships.length} 个流程中；后端会阻止破坏引用。`
+    : "";
+  if (!window.confirm(`确定永久删除“${asset.display_name || "未命名界面"}”的学习证据吗？${workflowNotice}`)) {
+    return null;
+  }
+  const response = await api(
+    "POST",
+    "/panel/delete_learning_evidence",
+    { source_path: sourcePath },
+    {
+      summary: "POST /panel/delete_learning_evidence",
+      workflowStep: "delete_learning_evidence",
+      skipRender: true,
+    },
+  );
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "学习证据删除失败" }, "删除单界面证据");
+    return null;
+  }
+  if (interfaceAssetWorkspaceState.selectedAssetKey === String(asset.asset_key || "")) {
+    interfaceAssetWorkspaceState.selectedAssetKey = "";
+  }
+  await loadInterfaceWorkflowLibraryRegistry({
+    preferredWorkflowId: String($("interfaceWorkflowLibrarySelect")?.value || ""),
+    openSelected: false,
+  });
+  await loadLearningDetailObserveSources();
+  renderResponse(response, "删除单界面证据");
+  return response.data || {};
+}
+
+async function deleteSelectedInterfaceWorkflow() {
+  const select = $("interfaceWorkflowLibrarySelect");
+  const workflowId = String(select?.value || "").trim();
+  if (!workflowId) {
+    renderResponse({ success: false, message: "请先选择要删除的软件流程。" }, "删除软件流程");
+    return null;
+  }
+  const workflowLabel = String(select?.selectedOptions?.[0]?.textContent || workflowId).trim();
+  if (!window.confirm(`确定永久删除流程“${workflowLabel}”吗？\n单界面学习证据不会被级联删除。`)) {
+    return null;
+  }
+  const response = await api(
+    "POST",
+    "/panel/delete_interface_workflow",
+    { workflow_id: workflowId },
+    {
+      summary: "POST /panel/delete_interface_workflow",
+      workflowStep: "delete_interface_workflow",
+      skipRender: true,
+    },
+  );
+  if (!response?.success) {
+    renderResponse(response || { success: false, message: "软件流程删除失败" }, "删除软件流程");
+    return null;
+  }
+  interfaceAssetWorkspaceState.selectedAssetKey = "";
+  clearInterfaceWorkflowReview("当前软件流程已删除");
+  await loadInterfaceWorkflowLibraryRegistry({ openSelected: true });
+  await loadLearningDetailObserveSources();
+  renderResponse(response, "删除软件流程");
+  return response.data || {};
+}
+
+function closeInterfaceAssetAttachDialog() {
+  const dialog = $("interfaceAssetAttachDialog");
+  if (dialog?.open) dialog.close();
+  interfaceAssetWorkspaceState.attachAssetKey = "";
+}
+
+function openInterfaceAssetAttachDialog(event) {
+  const dialog = $("interfaceAssetAttachDialog");
+  if (!dialog) return;
+  const requestedKey = String(
+    event?.currentTarget?.dataset?.assetKey
+    || interfaceAssetWorkspaceState.selectedAssetKey
+    || "",
+  ).trim();
+  const asset = interfaceAssetByKey(requestedKey);
+  interfaceAssetWorkspaceState.attachAssetKey = String(asset?.asset_key || "");
+  const workflowSelect = $("interfaceWorkflowAttachWorkflowSelect");
+  const workflows = Array.from(workflowSelect?.options || []).map((option) => ({
+    workflow_id: String(option.value || ""),
+    label: String(option.textContent || ""),
+  })).filter((item) => item.workflow_id);
+  const modelBuilder = globalThis.InterfaceWorkflowReview?.buildAttachDialogModel;
+  const model = typeof modelBuilder === "function"
+    ? modelBuilder(asset || {}, workflows)
+    : null;
+  const sourceSelect = $("interfaceWorkflowSourceSelect");
+  if (sourceSelect && model?.source_path) {
+    let option = Array.from(sourceSelect.options).find((item) => item.value === model.source_path);
+    if (!option) {
+      option = document.createElement("option");
+      option.value = model.source_path;
+      option.textContent = model.display_name || model.source_path;
+      sourceSelect.appendChild(option);
+    }
+    sourceSelect.value = model.source_path;
+  }
+  if ($("interfaceWorkflowSourceNameInput")) {
+    $("interfaceWorkflowSourceNameInput").value = String(model?.display_name || "");
+  }
+  renderInterfaceWorkflowSourcePreview(null);
+  if ($("interfaceAssetAttachWarning")) {
+    $("interfaceAssetAttachWarning").textContent = model?.warning
+      || "请选择单界面。审核状态只决定 Agent 是否可读取，不构成执行授权。";
+    $("interfaceAssetAttachWarning").classList.toggle("is-unreviewed", model?.agent_usable !== true);
+  }
+  if ($("interfaceWorkflowSourceStatus")) {
+    $("interfaceWorkflowSourceStatus").textContent = model?.can_attach
+      ? "选择目标流程后可加入节点；是否建立连接由你明确选择。"
+      : "请先选择一个有可用来源文件的单界面。";
+  }
+  if (typeof dialog.showModal === "function") dialog.showModal();
+  else dialog.setAttribute("open", "");
+}
+
+async function attachInterfaceAssetToWorkflow({ connect = false } = {}) {
+  const targetLoaded = await selectInterfaceWorkflowAttachTarget();
+  if (!targetLoaded && !interfaceWorkflowReviewState) return null;
+  const sourceNodeId = String(interfaceWorkflowReviewState?.current?.()?.node?.node_id || "");
+  const result = await addInterfaceWorkflowSource();
+  if (!result) return null;
+  const targetNodeId = String(interfaceWorkflowReviewState?.current?.()?.node?.node_id || "");
+  closeInterfaceAssetAttachDialog();
+  showInterfaceAssetPage("workflow");
+  if (connect && sourceNodeId && targetNodeId && sourceNodeId !== targetNodeId) {
+    startInterfaceWorkflowGraphLink(sourceNodeId);
+    completeInterfaceWorkflowGraphLink(targetNodeId);
+  } else if (connect) {
+    setInterfaceWorkflowGraphLinkStatus("界面已加入；当前流程没有可用的来源界面，请在路径图中右键节点创建连接。");
+  }
+  centerInterfaceWorkflowGraphNode(targetNodeId);
+  return result;
+}
+
+function clearInterfaceWorkflowCorrectionSelection() {
+  learningDraftReviewLoadRequestToken += 1;
+  learningDraftReviewLoadPromise = null;
+  learningDraftReviewLoadSourcePath = "";
+  learningDraftReview = null;
+  learningDraftReviewBboxEdits = { regions: {}, actions: {} };
+  resetLearningDraftEditorState(null);
+  closeImageInspector();
+  setInterfaceWorkflowCorrectionOpen(false);
+  setInterfaceWorkflowBoxEditorStatus("");
+}
+
+async function openInterfaceWorkflowReviewGroupNode(event) {
+  const button = event?.currentTarget;
+  clearInterfaceWorkflowCorrectionSelection();
+  interfaceAssetWorkspaceState.selectedAssetKey = String(button?.dataset?.assetKey || "").trim();
+  renderInterfaceWorkflowReviewGroups();
+  const resolver = globalThis.InterfaceWorkflowReview?.resolveInterfaceAssetOpenTarget;
+  const target = typeof resolver === "function"
+    ? resolver({
+      sourcePath: button?.dataset?.sourcePath,
+      workflowId: button?.dataset?.workflowId,
+      nodeId: button?.dataset?.nodeId,
+    })
+    : { mode: "unavailable" };
+  if (target.mode === "saved_workflow") {
+    const librarySelect = $("interfaceWorkflowLibrarySelect");
+    if (!librarySelect) return;
+    const option = Array.from(librarySelect.options).find(
+      (item) => item.value === target.workflow_id,
+    );
+    if (!option) return;
+    librarySelect.value = target.workflow_id;
+    const review = await loadSavedInterfaceWorkflowReview();
+    if (!review || !interfaceWorkflowReviewState) return;
+    interfaceWorkflowSelectedOperationId = "";
+    interfaceWorkflowReviewState.focusInterface(target.node_id);
+    interfaceWorkflowWorkbenchState.showWorkflowNode(target.node_id);
+    interfaceWorkflowControlPickMode = false;
+    renderInterfaceWorkflowReviewSelection();
+    centerInterfaceWorkflowGraphNode(target.node_id);
+    $("interfaceWorkflowThreeColumnWorkbench")?.scrollIntoView?.({ block: "start" });
+    return;
+  }
+  if (target.mode === "source_preview") {
+    const sourceSelect = $("interfaceWorkflowSourceSelect");
+    if (sourceSelect && Array.from(sourceSelect.options).some((option) => option.value === target.source_path)) {
+      sourceSelect.value = target.source_path;
+      await previewInterfaceWorkflowSource();
+    }
+  }
+}
+
+function showInterfaceAssetPage(page) {
+  const normalizedPage = ["unreviewed", "reviewed", "workflow"].includes(page)
+    ? page
+    : "unreviewed";
+  interfaceAssetWorkspaceState.activePage = normalizedPage;
+  const assetWorkspace = $("interfaceAssetWorkspace");
+  const unreviewedPage = $("interfaceAssetUnreviewedPage");
+  const reviewedPage = $("interfaceAssetReviewedPage");
+  const workflowPage = $("interfaceWorkflowLibraryPage");
+  if (assetWorkspace) assetWorkspace.hidden = normalizedPage === "workflow";
+  if (unreviewedPage) unreviewedPage.hidden = normalizedPage !== "unreviewed";
+  if (reviewedPage) reviewedPage.hidden = normalizedPage !== "reviewed";
+  if (workflowPage) workflowPage.hidden = normalizedPage !== "workflow";
+
+  const tabState = [
+    ["interfaceAssetUnreviewedTab", "unreviewed"],
+    ["interfaceAssetReviewedTab", "reviewed"],
+    ["interfaceWorkflowLibraryTab", "workflow"],
+  ];
+  tabState.forEach(([tabId, tabPage]) => {
+    const tab = $(tabId);
+    const active = normalizedPage === tabPage;
+    tab?.classList.toggle("is-active", active);
+    tab?.setAttribute("aria-selected", active ? "true" : "false");
+  });
+
+  const evidencePanel = $("interfaceWorkflowEvidenceColumn");
+  const inspectorPanel = $("interfaceWorkflowReviewToolsColumn");
+  if (normalizedPage === "workflow") {
+    const workflowWorkbench = $("interfaceWorkflowThreeColumnWorkbench");
+    if (workflowWorkbench && evidencePanel) workflowWorkbench.appendChild(evidencePanel);
+    if (workflowWorkbench && inspectorPanel) workflowWorkbench.appendChild(inspectorPanel);
+  } else {
+    const interfaceAssetSharedEvidence = $("interfaceAssetSharedEvidence");
+    if (interfaceAssetSharedEvidence && evidencePanel) interfaceAssetSharedEvidence.appendChild(evidencePanel);
+    if (interfaceAssetSharedEvidence && inspectorPanel) interfaceAssetSharedEvidence.appendChild(inspectorPanel);
+    const empty = $("interfaceAssetSharedEvidenceEmpty");
+    if (empty) empty.hidden = Boolean(evidencePanel);
+  }
 }
 
 function setInterfaceWorkflowLibraryOptions(registry = {}, preferredWorkflowId = "") {
@@ -10068,7 +10601,9 @@ function setInterfaceWorkflowLibraryOptions(registry = {}, preferredWorkflowId =
       options.push({
         workflowId,
         identityKey,
-        label: `${applicationLabel} · ${record.goal || workflowId} · ${Number(record.node_count || 0)} 个界面`,
+        label: currentLanguage === "en-US"
+          ? `${applicationLabel} · ${record.goal || workflowId} · ${Number(record.node_count || 0)} interfaces`
+          : `${applicationLabel} · ${record.goal || workflowId} · ${Number(record.node_count || 0)} 个界面`,
       });
     });
   });
@@ -10112,6 +10647,7 @@ function setInterfaceWorkflowLibraryOptions(registry = {}, preferredWorkflowId =
       ? `已找到 ${options.length} 个已学习流程`
       : "尚无已保存的多界面流程";
   }
+  renderInterfaceWorkflowReviewGroups();
 }
 
 function syncInterfaceWorkflowAttachFromNodeOptions() {
@@ -10196,7 +10732,9 @@ function renderInterfaceWorkflowEvidenceMode() {
 function renderActiveInterfaceWorkflowEvidence() {
   renderInterfaceWorkflowEvidenceMode();
   const state = currentInterfaceWorkflowEvidenceState();
-  renderInterfaceWorkflowEvidence(state?.current?.() || null);
+  const view = state?.current?.() || null;
+  renderInterfaceWorkflowEvidence(view);
+  renderInterfaceWorkflowStepAudit(view);
 }
 
 function showInterfaceWorkflowEvidenceMode(mode) {
@@ -10258,6 +10796,7 @@ async function previewInterfaceWorkflowSource() {
     renderInterfaceWorkflowSourcePreview(null);
     return null;
   }
+  clearInterfaceWorkflowCorrectionSelection();
   if ($("interfaceWorkflowSourceStatus")) {
     $("interfaceWorkflowSourceStatus").textContent = "正在读取单界面预览…";
   }
@@ -10265,6 +10804,7 @@ async function previewInterfaceWorkflowSource() {
     goal: String($("learningTrialGoal")?.value || "").trim(),
     application_identity: currentInterfaceWorkflowApplicationIdentity(),
     draft_source_paths: [sourcePath],
+    discover_related_sidecars: false,
   }, {
     summary: "POST /panel/load_interface_workflow_review",
     workflowStep: "preview_saved_interface",
@@ -10286,6 +10826,7 @@ async function previewInterfaceWorkflowSource() {
   if (interfaceWorkflowSourceReviewState) {
     interfaceWorkflowWorkbenchState.showSourcePreview(node.node_id);
     renderActiveInterfaceWorkflowEvidence();
+    renderInterfaceWorkflowEditor(interfaceWorkflowSourceReviewState.current());
   }
   if ($("interfaceWorkflowSourceStatus")) {
     $("interfaceWorkflowSourceStatus").textContent = node
@@ -10359,16 +10900,18 @@ async function loadSavedInterfaceWorkflowReview() {
   if (status) status.textContent = "正在打开已学习流程…";
   const response = await api(
     "GET",
-    `/memory/interface_workflows/agent_context?application_identity_key=${encodeURIComponent(identityKey)}`,
+    `/memory/interface_workflows/review_context?application_identity_key=${encodeURIComponent(identityKey)}&workflow_id=${encodeURIComponent(workflowId)}`,
     null,
     {
-      summary: "GET /memory/interface_workflows/agent_context",
+      summary: "GET /memory/interface_workflows/review_context",
       workflowStep: "load_saved_interface_workflow_review",
       skipRender: true,
     },
   );
-  const workflows = Array.isArray(response?.data?.workflows) ? response.data.workflows : [];
-  const review = workflows.find((item) => String(item?.workflow?.workflow_id || "") === workflowId);
+  const review = response?.data && typeof response.data === "object"
+    && String(response.data?.workflow?.workflow_id || "") === workflowId
+    ? response.data
+    : null;
   if (!interfaceWorkflowLoadGuard.isCurrent(loadToken)) return null;
   if (!response?.success || !review) {
     if (status) status.textContent = response?.message || "已学习流程读取失败";
@@ -10386,7 +10929,9 @@ async function loadSavedInterfaceWorkflowReview() {
   ).trim();
   interfaceWorkflowHasUnsavedChanges = false;
   if (status) {
-    status.textContent = `已打开 · ${interfaceWorkflowApplicationLabel(review.workflow?.application_identity)} · ${review.nodes?.length || 0} 个界面`;
+    status.textContent = currentLanguage === "en-US"
+      ? `Opened · ${interfaceWorkflowApplicationLabel(review.workflow?.application_identity)} · ${review.nodes?.length || 0} interfaces`
+      : `已打开 · ${interfaceWorkflowApplicationLabel(review.workflow?.application_identity)} · ${review.nodes?.length || 0} 个界面`;
   }
   return review;
 }
@@ -11434,33 +11979,356 @@ function learningRecognitionTrialRequestPayload() {
   };
 }
 
-async function captureLearningDraftWindow() {
-  clearScreenUnderstandingResidualDisplays("not_loaded · immutable screenshot capture started");
-  const response = await api(
-    "POST",
-    "/state/capture_window",
-    { save_image: true },
-    {
-      summary: "POST /state/capture_window learning source capture",
-      workflowStep: "learning_bind_capture",
-      timeoutSeconds: 30,
+function scopedLearningCaptureIsAbortError(error) {
+  return error?.name === "AbortError";
+}
+
+function scopedLearningCaptureResponseData(response = {}) {
+  const data = response?.data && typeof response.data === "object" ? response.data : {};
+  return data?.result && typeof data.result === "object" ? data.result : data;
+}
+
+function scopedLearningCapturePersistedStopReason(stopReason = "") {
+  if (stopReason === "max_segments") return "max_captures";
+  if (stopReason === "duplicate_segment") return "no_new_content";
+  return stopReason;
+}
+
+function scopedLearningCaptureStopFromScroll(response = {}) {
+  const result = scopedLearningCaptureResponseData(response);
+  const effect = result?.scroll_effect_validation && typeof result.scroll_effect_validation === "object"
+    ? result.scroll_effect_validation
+    : result?.effect && typeof result.effect === "object" ? result.effect : {};
+  const targetContainer = result?.target_container && typeof result.target_container === "object"
+    ? result.target_container : {};
+  const actionExecuted = result?.execution_path?.action_executed === true;
+  const reachedBottom = effect.reached_bottom === true
+    || targetContainer.reached_bottom === true
+    || effect.can_scroll_down === false
+    || targetContainer.can_scroll_down === false;
+  if (response?.success !== true || actionExecuted !== true) {
+    return { continue_capture: false, stop_reason: "no_effect_or_unverified", effect, result };
+  }
+  if (reachedBottom) {
+    return { continue_capture: false, stop_reason: "reached_bottom", effect, result };
+  }
+  if (
+    effect.status === "unknown"
+    || effect.status === "not_run_dry_run"
+    || effect.no_effect_detected === true
+    || effect.wrong_scope_detected === true
+    || effect.status !== "moved"
+  ) {
+    return { continue_capture: false, stop_reason: "no_effect_or_unverified", effect, result };
+  }
+  return { continue_capture: true, stop_reason: "", effect, result };
+}
+
+function buildScopedLearningCaptureScrollPayload(config = {}, captureResult = {}) {
+  const roi = config.roi || {};
+  return {
+    contract_version: "scoped_learning_capture_scroll_v1",
+    source_trace_path: String(captureResult.trace_path || "").trim() || null,
+    scroll_scope: config.scroll_scope,
+    target_pane: config.target_pane,
+    target_container_id: String(config.target_container_id || "").trim() || null,
+    container_bbox: { x: roi.x, y: roi.y, width: roi.width, height: roi.height },
+    coordinate_window_size: captureResult.window_size,
+    direction: "down",
+    wheel_clicks: config.wheel_clicks,
+    reason: "Learn Mode 区域长截图",
+    expected_effect: {
+      target_content: "changed",
+      non_target_regions: "stable",
+    },
+    dry_run: false,
+    enable_verification: true,
+    metadata: {
+      agent_mode: "learn",
+      capture_mode: "scoped_long",
+      artifact_is_authorization: false,
+    },
+  };
+}
+
+async function runScopedLearningCaptureSequence({ mode = "normal", config = null, capture, scroll, compose, signal = null, onProgress = null } = {}) {
+  const state = { mode, phase: "capture", segments: [], scrolls: [], stop_reason: "", composite: null, image_path: "", model_allowed: false };
+  const publish = () => onProgress?.(state);
+  const cancelled = () => signal?.aborted === true;
+  const safeStop = (reason) => {
+    state.stop_reason = reason;
+    state.phase = "safe_stopped";
+    state.model_allowed = false;
+    if (reason === "cancelled") { state.composite = null; state.image_path = ""; }
+    publish();
+    return state;
+  };
+  const captureSegment = async () => {
+    if (cancelled()) { safeStop("cancelled"); return false; }
+    state.phase = "capture";
+    publish();
+    let response;
+    try { response = await capture(); }
+    catch (error) { safeStop(cancelled() || scopedLearningCaptureIsAbortError(error) ? "cancelled" : "capture_failed"); return false; }
+    if (cancelled()) { safeStop("cancelled"); return false; }
+    const result = scopedLearningCaptureResponseData(response);
+    const imagePath = String(result?.image_path || "").trim();
+    if (!response?.success || !imagePath) { safeStop("capture_failed"); return false; }
+    if (state.segments.some((segment) => segment.image_path === imagePath || (segment.capture_id != null && result.capture_id != null && segment.capture_id === result.capture_id))) {
+      state.stop_reason = "duplicate_segment";
+      return false;
     }
-  );
-  if (!response?.success) return null;
+    const effectiveRoi = result?.roi && typeof result.roi === "object"
+      ? {
+          x: Number(result.roi.x),
+          y: Number(result.roi.y),
+          width: Number(result.roi.width),
+          height: Number(result.roi.height),
+        }
+      : null;
+    if (effectiveRoi && Object.values(effectiveRoi).every((value) => Number.isSafeInteger(value))) {
+      if (state.roi && JSON.stringify(state.roi) !== JSON.stringify(effectiveRoi)) {
+        safeStop("capture_geometry_changed");
+        return false;
+      }
+      state.roi = effectiveRoi;
+    }
+    state.segments.push({ image_path: imagePath, capture_id: result.capture_id ?? null, capture_trace_path: String(result.trace_path || "").trim() || null, scroll_trace_path: null, scroll_effect: null });
+    state.viewport = result.window_size || state.viewport || null;
+    publish();
+    return true;
+  };
+  if (typeof capture !== "function") return safeStop("capture_failed");
+  if (mode === "normal") {
+    if (!await captureSegment()) return state;
+    if (cancelled()) return safeStop("cancelled");
+    state.stop_reason = "single_capture";
+    state.phase = "completed";
+    state.image_path = state.segments[0].image_path;
+    state.model_allowed = true;
+    publish();
+    return state;
+  }
+  if (mode !== "scoped_long" || !config || typeof scroll !== "function" || typeof compose !== "function") return safeStop("invalid_scoped_capture");
+  if (!await captureSegment()) return state;
+  while (!state.stop_reason) {
+    if (cancelled()) return safeStop("cancelled");
+    if (state.segments.length >= config.max_segments) { state.stop_reason = "max_segments"; break; }
+    const priorCapture = state.segments.at(-1);
+    state.phase = "scroll_verification";
+    publish();
+    let scrollResponse;
+    try { scrollResponse = await scroll(buildScopedLearningCaptureScrollPayload({ ...config, roi: state.roi || config.roi }, { window_size: state.viewport, trace_path: priorCapture.capture_trace_path || "" })); }
+    catch (error) { return safeStop(cancelled() || scopedLearningCaptureIsAbortError(error) ? "cancelled" : "no_effect_or_unverified"); }
+    if (cancelled()) return safeStop("cancelled");
+    const scrollDecision = scopedLearningCaptureStopFromScroll(scrollResponse);
+    const tracePath = String(scrollDecision.result?.trace_path || "").trim() || null;
+    priorCapture.scroll_trace_path = tracePath;
+    priorCapture.scroll_effect = scrollDecision.effect;
+    state.scrolls.push({ trace_path: tracePath, effect: scrollDecision.effect, response: scrollDecision.result });
+    publish();
+    if (!scrollDecision.continue_capture) { state.stop_reason = scrollDecision.stop_reason; break; }
+    if (!await captureSegment()) {
+      if (state.stop_reason === "duplicate_segment") break;
+      return state;
+    }
+  }
+  if (!["max_segments", "duplicate_segment", "reached_bottom"].includes(state.stop_reason)) return safeStop(state.stop_reason || "no_effect_or_unverified");
+  if (cancelled()) return safeStop("cancelled");
+  state.phase = "compose";
+  publish();
+  let composition;
+  try { composition = await compose({ segment_records: state.segments, segments: state.segments, roi: state.roi || config.roi, viewport: state.viewport, stop_reason: scopedLearningCapturePersistedStopReason(state.stop_reason) }); }
+  catch (error) { return safeStop(cancelled() || scopedLearningCaptureIsAbortError(error) ? "cancelled" : "compose_failed"); }
+  if (cancelled()) return safeStop("cancelled");
+  const composite = scopedLearningCaptureResponseData(composition);
+  const compositePath = String(composite?.composite_path || composite?.image_path || "").trim();
+  if (!composition?.success || !compositePath) return safeStop("compose_failed");
+  state.composite = composite;
+  state.image_path = compositePath;
+  state.model_allowed = true;
+  state.phase = "completed";
+  publish();
+  return state;
+}
+
+const scopedLearningCaptureTestExports = {
+  runScopedLearningCaptureSequence,
+  buildScopedLearningCaptureScrollPayload,
+  scopedLearningCaptureStopFromScroll,
+};
+
+function selectedLearningCaptureMode() {
+  return $("learningCaptureModeScopedLong")?.checked ? "scoped_long" : "normal";
+}
+
+function renderScopedLearningCaptureRecommendation() {
+  const target = $("learningCaptureRecommendation");
+  if (!target) return;
+  if (!scopedLearningCaptureRecommendation) {
+    target.textContent = "模型建议：未评估，人工选择为准；来源：无模型建议";
+    return;
+  }
+  const label = scopedLearningCaptureRecommendation.mode === "scoped_long" ? "区域长截图" : "普通截图";
+  target.textContent = "模型建议：" + label + "；来源：" + scopedLearningCaptureRecommendation.source + "；人工选择为准";
+}
+
+function setScopedLearningCaptureRecommendation(recommendation = null) {
+  const mode = String(recommendation?.mode || recommendation?.capture_mode || "").trim();
+  const source = String(recommendation?.source || recommendation?.model_source || "").trim();
+  scopedLearningCaptureRecommendation = ["normal", "scoped_long"].includes(mode) && source ? { mode, source } : null;
+  renderScopedLearningCaptureRecommendation();
+  return scopedLearningCaptureRecommendation;
+}
+
+function scopedLearningCaptureRecommendationFromScreenUnderstanding(response = {}) {
+  const result = resultOf(response);
+  const observation = result?.observation && typeof result.observation === "object" ? result.observation : {};
+  const screenReading = observation?.screen_reading && typeof observation.screen_reading === "object"
+    ? observation.screen_reading : {};
+  const modelIo = observation?.model_io && typeof observation.model_io === "object"
+    ? observation.model_io
+    : screenReading?.model_io && typeof screenReading.model_io === "object"
+      ? screenReading.model_io
+      : result?.model_io && typeof result.model_io === "object" ? result.model_io : {};
+  const modelJson = nestedGet(modelIo, ["raw_response", "model_json"]);
+  const candidates = [
+    result?.capture_recommendation,
+    observation?.capture_recommendation,
+    screenReading?.capture_recommendation,
+    modelJson?.capture_recommendation,
+    modelJson,
+  ];
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const mode = String(candidate.mode || candidate.capture_mode || "").trim();
+    const source = String(
+      candidate.source
+      || candidate.model_source
+      || modelJson?.model_source
+      || modelIo?.model_name
+      || modelIo?.provider
+      || ""
+    ).trim();
+    if (["normal", "scoped_long"].includes(mode) && source) return { mode, source };
+  }
+  return null;
+}
+
+function applyScopedLearningCaptureRecommendationFromScreenUnderstanding(response = {}) {
+  const recommendation = scopedLearningCaptureRecommendationFromScreenUnderstanding(response);
+  if (recommendation) setScopedLearningCaptureRecommendation(recommendation);
+  return recommendation;
+}
+
+function readScopedLearningCaptureInteger(id, minimum, maximum) {
+  const value = String($(id)?.value || "").trim();
+  if (!/^\d+$/.test(value)) return null;
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number >= minimum && number <= maximum ? number : null;
+}
+
+function readScopedLearningCaptureConfig() {
+  const roi = { x: readScopedLearningCaptureInteger("learningScopedCaptureRoiX", 0, Number.MAX_SAFE_INTEGER), y: readScopedLearningCaptureInteger("learningScopedCaptureRoiY", 0, Number.MAX_SAFE_INTEGER), width: readScopedLearningCaptureInteger("learningScopedCaptureRoiWidth", 1, Number.MAX_SAFE_INTEGER), height: readScopedLearningCaptureInteger("learningScopedCaptureRoiHeight", 1, Number.MAX_SAFE_INTEGER) };
+  const scrollScope = String($("learningScopedCaptureScrollScope")?.value || "container");
+  const targetPane = String($("learningScopedCaptureTargetPane")?.value || "unknown");
+  const wheelClicks = readScopedLearningCaptureInteger("learningScopedCaptureWheelClicks", 1, 20);
+  const maxSegments = readScopedLearningCaptureInteger("learningScopedCaptureMaxSegments", 2, 12);
+  if (!$("learningScopedCaptureConfirmed")?.checked) return { valid: false, message: "区域长截图需要用户明确确认" };
+  if (Object.values(roi).some((value) => value == null) || !["page", "container"].includes(scrollScope) || !["page", "results_list", "job_detail", "filter_panel", "modal", "dropdown", "unknown"].includes(targetPane) || wheelClicks == null || maxSegments == null) return { valid: false, message: "区域长截图参数无效" };
+  return { valid: true, config: { roi, scroll_scope: scrollScope, target_pane: targetPane, target_container_id: String($("learningScopedCaptureTargetContainerId")?.value || "").trim(), wheel_clicks: wheelClicks, max_segments: maxSegments } };
+}
+
+function renderScopedLearningCaptureState() {
+  const state = scopedLearningCaptureState;
+  const progress = $("learningScopedCaptureProgress");
+  if (progress) progress.replaceChildren(...state.segments.map((segment, index) => {
+    const item = document.createElement("li");
+    item.textContent = `${index + 1}. ${segment.image_path} \u00b7 capture=${segment.capture_id ?? "unknown"} \u00b7 trace=${segment.scroll_trace_path || "pending"} \u00b7 effect=${String(segment.scroll_effect?.status || "pending")}`;
+    return item;
+  }));
+  const status = $("learningScopedCaptureStatus");
+  if (status) status.textContent = `\u9636\u6bb5\uff1a${state.phase || "idle"} \u00b7 \u5df2\u63a5\u53d7\u7247\u6bb5\uff1a${state.segments.length} \u00b7 \u505c\u6b62\uff1a${state.stop_reason || "pending"}`;
+  const compositePath = String(state.composite?.composite_path || state.image_path || "").trim();
+  if ($("learningScopedCaptureCompositePath")) $("learningScopedCaptureCompositePath").value = compositePath;
+  if ($("learningScopedCaptureManifestPath")) $("learningScopedCaptureManifestPath").value = String(state.composite?.manifest_path || "").trim();
+  const policy = $("learningScopedCaptureArtifactPolicy");
+  if (policy) policy.textContent = `artifact_is_authorization=${state.composite?.artifact_is_authorization === true} \u00b7 historical_coordinates_are_priors=${state.composite?.historical_coordinates_are_priors === true}`;
+  const preview = $("learningScopedCapturePreview");
+  if (preview) {
+    if (compositePath) { preview.src = panelFileUrl(compositePath); preview.hidden = false; }
+    else { preview.hidden = true; preview.removeAttribute("src"); }
+  }
+  renderScopedLearningCaptureRecommendation();
+}
+
+function resetScopedLearningCaptureState() {
+  learningSourceImagePath = "";
+  setLearningTrialImagePath("");
+  setCurrentImage("");
+  scopedLearningCaptureState = { mode: selectedLearningCaptureMode(), phase: "idle", segments: [], scrolls: [], stop_reason: "", composite: null, image_path: "" };
+  renderScopedLearningCaptureState();
+}
+
+function clearScopedLearningCaptureForNewRun() {
+  resetScopedLearningCaptureState();
+  setScopedLearningCaptureRecommendation(null);
+}
+
+function syncScopedLearningCaptureControls() {
+  const fields = $("learningScopedCaptureFields");
+  if (fields) fields.hidden = selectedLearningCaptureMode() !== "scoped_long";
+  renderScopedLearningCaptureRecommendation();
+}
+
+async function captureLearningDraftWindow({ roi = null, signal = null, workflowStep = "learning_bind_capture", adoptAsLearningSource = true } = {}) {
+  clearScreenUnderstandingResidualDisplays("not_loaded \u00b7 immutable screenshot capture started");
+  const payload = { save_image: true };
+  if (roi) payload.roi = roi;
+  const response = await api("POST", "/state/capture_window", payload, { summary: "POST /state/capture_window learning source capture", workflowStep, timeoutSeconds: 30, signal });
+  if (!response?.success) return response;
   const result = resultOf(response);
   const imagePath = String(result.image_path || "").trim();
-  if (!imagePath) {
-    return {
-      success: false,
-      message: "Learning source capture returned no image_path",
-      data: result,
-    };
-  }
-  setCurrentImage(imagePath);
-  setLearningSourceImagePath(imagePath);
+  if (!imagePath) return { success: false, message: "Learning source capture returned no image_path", data: result };
+  if (adoptAsLearningSource) { setCurrentImage(imagePath); setLearningSourceImagePath(imagePath); }
   lastLearningDraftObserveResponse = null;
   lastLearningDraftObserveTracePath = "";
   return response;
+}
+
+async function runLearningInterfaceCaptureStrategy() {
+  resetScopedLearningCaptureState();
+  const mode = selectedLearningCaptureMode();
+  const configuration = mode === "scoped_long" ? readScopedLearningCaptureConfig() : { valid: true, config: null };
+  if (!configuration.valid) {
+    scopedLearningCaptureState.stop_reason = "invalid_scoped_capture";
+    scopedLearningCaptureState.phase = "safe_stopped";
+    scopedLearningCaptureState.model_allowed = false;
+    scopedLearningCaptureState.message = configuration.message;
+    renderScopedLearningCaptureState();
+    return { ...scopedLearningCaptureState, model_allowed: false };
+  }
+  const controller = new AbortController();
+  activeScopedLearningCaptureContext = { controller, cancelled: false };
+  setLearningInterfaceCancelEnabled(true);
+  try {
+    const result = await runScopedLearningCaptureSequence({
+      mode,
+      config: configuration.config,
+      signal: controller.signal,
+      capture: () => captureLearningDraftWindow({ roi: configuration.config?.roi || null, signal: controller.signal, workflowStep: "learning_scoped_capture_capture", adoptAsLearningSource: false }),
+      scroll: (payload) => api("POST", "/action/scroll", payload, { summary: "POST /action/scroll Learn Mode scoped capture", workflowStep: "learning_scoped_capture_scroll", timeoutSeconds: 30, signal: controller.signal }),
+      compose: (payload) => api("POST", "/panel/compose_scoped_learning_capture", { segment_records: payload.segment_records, roi: payload.roi, viewport: payload.viewport, stop_reason: payload.stop_reason }, { summary: "POST /panel/compose_scoped_learning_capture", workflowStep: "learning_scoped_capture_compose", timeoutSeconds: 30, signal: controller.signal }),
+      onProgress: (state) => { scopedLearningCaptureState = { ...state }; renderScopedLearningCaptureState(); },
+    });
+    scopedLearningCaptureState = { ...result };
+    if (result.model_allowed) { setCurrentImage(result.image_path); setLearningSourceImagePath(result.image_path); }
+    renderScopedLearningCaptureState();
+    return result;
+  } finally {
+    activeScopedLearningCaptureContext = null;
+    setLearningInterfaceCancelEnabled(false);
+  }
 }
 
 async function runLearningScreenObserve(options = {}) {
@@ -11790,6 +12658,16 @@ function learningWorkflowStageCancelledError() {
 }
 
 async function cancelActiveLearningInterfaceFlow() {
+  if (activeScopedLearningCaptureContext && !activeScopedLearningCaptureContext.controller.signal.aborted) {
+    activeScopedLearningCaptureContext.cancelled = true;
+    activeScopedLearningCaptureContext.controller.abort();
+    scopedLearningCaptureState.stop_reason = "cancelled";
+    scopedLearningCaptureState.phase = "safe_stopped";
+    scopedLearningCaptureState.model_allowed = false;
+    renderScopedLearningCaptureState();
+    setLearningInterfaceCancelEnabled(false);
+    return { success: true, cancelled: true, safe_stopped: true, message: t("learning_interface_cancelled") };
+  }
   const context = activeLearningStageTaskContext;
   const operation = context?.operation || activeLearningStageOperation;
   const stepId = String(operation?.stage || "").trim();
@@ -12823,6 +13701,7 @@ async function applyManagedLearningStageWorkerResponse({
   if (!response?.success) return;
   if (taskKind === "vision_observe_screen") {
     const observeResult = resultOf(response);
+    applyScopedLearningCaptureRecommendationFromScreenUnderstanding(response);
     const observeImagePath = observeResult.image_path
       || nestedGet(response, ["data", "image_path"])
       || nestedGet(observeResult, ["live_capture", "image_path"])
@@ -12879,6 +13758,7 @@ async function runLearningInterfaceFlow() {
   const previousDisabled = Boolean(button?.disabled);
   if (button) button.disabled = true;
   try {
+    clearScopedLearningCaptureForNewRun();
     clearLearningDraftWorkspaceForNewRun("not_loaded · new learning run started");
     currentLearningWorkflowRunId = newLearningWorkflowRunId();
     currentLearningWorkflowState = null;
@@ -12897,10 +13777,10 @@ async function runLearningInterfaceFlow() {
       );
       return null;
     }
-    const capture = await captureLearningDraftWindow();
-    if (!capture?.success) {
-      await transitionLearningWorkflowState("bind_capture", "failed", "capture failed");
-      return null;
+    const capture = await runLearningInterfaceCaptureStrategy();
+    if (!capture?.model_allowed) {
+      await transitionLearningWorkflowState("bind_capture", "safe_stopped", `capture safe-stopped \u00b7 ${capture?.stop_reason || "capture_failed"}`);
+      return { success: false, safe_stopped: true, cancelled: capture?.stop_reason === "cancelled", capture };
     }
     const captureResult = resultOf(capture);
     await transitionLearningWorkflowState(
@@ -12909,6 +13789,7 @@ async function runLearningInterfaceFlow() {
       `${t("learning_flow_bind_capture")} · captured`,
       {
         image_path: firstLearningSourceImagePath(
+          capture.image_path,
           captureResult.image_path,
           nestedGet(captureResult, ["live_capture", "image_path"]),
           learningSourceImagePath
@@ -13372,6 +14253,14 @@ function bindImageInspectorEditDrag() {
     learningDraftEditorExpandedGroupKey = "";
     renderLearningDraftEditorBoxes();
   });
+  $("imageInspectorOwnershipReview")?.addEventListener("change", (event) => {
+    const select = event.target?.closest?.("[data-learning-ownership-conflict]");
+    if (!select) return;
+    const conflictId = String(select.dataset.learningOwnershipConflict || "").trim();
+    const parentGroupId = String(select.value || "").trim();
+    if (!conflictId) return;
+    setLearningDraftOwnershipSelection(conflictId, parentGroupId);
+  });
   $("imageInspectorDeleteBoxBtn")?.addEventListener("click", () => {
     if (!learningDraftEditorSelected || !learningDraftEditorState) return;
     learningDraftEditorState.apply({
@@ -13403,10 +14292,13 @@ function bindImageInspectorEditDrag() {
   });
   $("imageInspectorRoleSelect")?.addEventListener("change", (event) => {
     if (!learningDraftEditorSelected || learningDraftEditorSelected.target_kind !== "region") return;
+    const nextRole = String(event.target.value || "review_only");
+    // 先提交同一表单中尚未落盘的 Agent 语义，避免重绘时清空标签和描述。
+    applyLearningDraftEditorMetadataFromControls();
     learningDraftEditorState?.apply({
       op: "update_role",
       ...learningDraftEditorSelected,
-      after_value: String(event.target.value || "review_only"),
+      after_value: nextRole,
       reason: String($("imageInspectorReason")?.value || "").trim(),
     });
     syncLearningDraftReviewFromEditor();
@@ -13414,10 +14306,13 @@ function bindImageInspectorEditDrag() {
   });
   $("imageInspectorParentSelect")?.addEventListener("change", (event) => {
     if (!learningDraftEditorSelected || learningDraftEditorSelected.target_kind !== "region") return;
+    const nextParent = String(event.target.value || "");
+    // parent 更新同样会重绘，先保留当前标签、描述、动作和验证语义。
+    applyLearningDraftEditorMetadataFromControls();
     learningDraftEditorState?.apply({
       op: "update_parent",
       ...learningDraftEditorSelected,
-      after_value: String(event.target.value || ""),
+      after_value: nextParent,
       reason: String($("imageInspectorReason")?.value || "").trim(),
     });
     syncLearningDraftReviewFromEditor();
@@ -13952,6 +14847,7 @@ function resetLearningDraftEditorState(review = null) {
   learningDraftEditorAddMode = false;
   learningDraftEditorCompactMode = true;
   learningDraftEditorExpandedGroupKey = "";
+  renderLearningDraftOwnershipReview(review);
   updateLearningDraftEditorControls();
 }
 
@@ -13980,6 +14876,72 @@ function learningDraftEditorOperations() {
   return learningDraftEditorState ? learningDraftEditorState.exportOperations() : [];
 }
 
+function setLearningDraftOwnershipSelection(conflictId, parentGroupId) {
+  const normalizedConflictId = String(conflictId || "").trim();
+  const normalizedParentId = String(parentGroupId || "").trim();
+  const conflict = learningDraftOwnershipConflicts.find(
+    (item) => String(item?.conflict_id || "").trim() === normalizedConflictId,
+  );
+  if (!conflict) throw new Error(`ownership conflict does not exist: ${normalizedConflictId}`);
+  if (!normalizedParentId) {
+    delete learningDraftOwnershipSelections[normalizedConflictId];
+    return false;
+  }
+  if (!conflict.before_parent_group_ids.includes(normalizedParentId)) {
+    throw new Error(`ownership selection is not a current parent: ${normalizedConflictId}`);
+  }
+  learningDraftOwnershipSelections[normalizedConflictId] = normalizedParentId;
+  return true;
+}
+
+function renderLearningDraftOwnershipReview(review = null) {
+  const host = $("imageInspectorOwnershipReview");
+  const projector = globalThis.InterfaceWorkflowReview?.projectLearningDraftOwnershipConflicts;
+  learningDraftOwnershipConflicts = typeof projector === "function"
+    ? projector(review?.draft || {})
+    : [];
+  learningDraftOwnershipSelections = {};
+  if (!host || !learningDraftOwnershipConflicts.length) {
+    if (host) {
+      host.hidden = true;
+      host.innerHTML = "";
+    }
+    return learningDraftOwnershipConflicts;
+  }
+  if ($("learningDraftReviewStatusSelect")) {
+    $("learningDraftReviewStatusSelect").value = "needs_human_review";
+  }
+  host.hidden = false;
+  host.innerHTML = `
+    <strong>叶节点归属冲突</strong>
+    <span>必须由人工为每个 leaf 选择唯一父组；系统不会自动选择。</span>
+    <div class="image-inspector-ownership-list">
+      ${learningDraftOwnershipConflicts.map((conflict) => `
+        <label class="image-inspector-ownership-conflict">
+          <span><strong>leaf ${escapeHtml(conflict.item_number || conflict.target_id)}</strong> ${escapeHtml(conflict.item_label || conflict.target_id)}</span>
+          <span>当前父组：${escapeHtml(conflict.before_parent_group_ids.join("、"))}</span>
+          <select data-learning-ownership-conflict="${escapeHtml(conflict.conflict_id)}">
+            <option value="">请选择唯一保留父组</option>
+            ${conflict.parent_groups.map((group) => (
+              `<option value="${escapeHtml(group.group_id)}">${escapeHtml(group.label)} · ${escapeHtml(group.group_id)}</option>`
+            )).join("")}
+          </select>
+        </label>
+      `).join("")}
+    </div>`;
+  return learningDraftOwnershipConflicts;
+}
+
+function learningDraftOwnershipOperations() {
+  const builder = globalThis.InterfaceWorkflowReview?.buildLearningDraftOwnershipOperations;
+  if (typeof builder !== "function" || !learningDraftOwnershipConflicts.length) return [];
+  return builder({
+    conflicts: learningDraftOwnershipConflicts,
+    selections: learningDraftOwnershipSelections,
+    reason: String($("imageInspectorReason")?.value || "").trim(),
+  });
+}
+
 function learningDraftReviewPatch() {
   const manualCandidate = learningDraftManualCandidate(learningDraftReview?.draft || {});
   const patch = {
@@ -14001,7 +14963,9 @@ function learningDraftReviewPatch() {
     region_bbox_updates: learningDraftReviewBboxEdits.regions,
     action_bbox_updates: learningDraftReviewBboxEdits.actions,
   };
-  const operations = learningDraftEditorOperations();
+  const ownershipOperations = learningDraftOwnershipOperations();
+  const operations = [...learningDraftEditorOperations(), ...ownershipOperations];
+  if (ownershipOperations.length) patch.review_status = "needs_human_review";
   if (!operations.length) return patch;
   return {
     ...patch,
@@ -14011,6 +14975,9 @@ function learningDraftReviewPatch() {
     reason: String($("imageInspectorReason")?.value || $("learningDraftManualNotes")?.value || "").trim(),
     source: "human_panel_editor_v1",
     operations,
+    artifact_is_authorization: false,
+    execute_binding_enabled: false,
+    final_submit_forbidden: true,
   };
 }
 
@@ -16329,16 +17296,25 @@ function interfaceWorkflowGraphCurvePoint(curve, progress) {
 
 function drawInterfaceWorkflowGraphLink(ctx, link, index, visualState = {}) {
   const curve = interfaceWorkflowGraphCurve(link, index);
+  const statusTone = String(link.status_tone || "unreviewed");
+  const baseColor = statusTone === "invalid"
+    ? "#b91c1c"
+    : statusTone === "unreviewed"
+      ? "#c2410c"
+      : "#4f716b";
   ctx.save();
   ctx.globalAlpha = visualState.dimmed ? 0.13 : 1;
+  if (statusTone === "invalid") ctx.setLineDash([4, 4]);
+  if (statusTone === "unreviewed") ctx.setLineDash([7, 5]);
   ctx.beginPath();
   ctx.moveTo(curve.start.x, curve.start.y);
   ctx.quadraticCurveTo(curve.control.x, curve.control.y, curve.end.x, curve.end.y);
-  ctx.strokeStyle = visualState.highlighted
-    ? "rgba(69, 102, 98, 0.92)"
-    : "rgba(105, 130, 127, 0.34)";
+  ctx.strokeStyle = baseColor;
+  if (!visualState.highlighted) ctx.globalAlpha = visualState.dimmed ? 0.13 : 0.58;
   ctx.lineWidth = visualState.highlighted ? 2.5 : 1.25;
   ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.globalAlpha = visualState.dimmed ? 0.13 : 1;
 
   const arrow = interfaceWorkflowGraphCurvePoint(curve, 0.88);
   const arrowBefore = interfaceWorkflowGraphCurvePoint(curve, 0.84);
@@ -16354,10 +17330,10 @@ function drawInterfaceWorkflowGraphLink(ctx, link, index, visualState = {}) {
     arrow.y - Math.sin(arrowAngle + Math.PI / 6) * 8,
   );
   ctx.closePath();
-  ctx.fillStyle = visualState.highlighted ? "#456662" : "#78918e";
+  ctx.fillStyle = baseColor;
   ctx.fill();
 
-  const label = String(link.label || link.action_type || "").trim();
+  const label = localizeInterfaceWorkflowEdgeLabel(link.label || link.action_type || "");
   const labelLayout = globalThis.InterfaceWorkflowGraph?.interfaceWorkflowEdgeLabelLayout?.(
     link.source,
     link.target,
@@ -16373,7 +17349,7 @@ function drawInterfaceWorkflowGraphLink(ctx, link, index, visualState = {}) {
     ctx.translate(labelLayout.x, labelLayout.y);
     ctx.rotate(labelLayout.angle);
     interfaceWorkflowGraphText(ctx, label, 0, 0, labelLayout.max_width, {
-      color: "#536b68",
+      color: baseColor,
       font: `500 ${labelLayout.font_size}px system-ui, sans-serif`,
     });
   }
@@ -16385,7 +17361,7 @@ function drawInterfaceWorkflowGraphNode(ctx, node, visualState = {}) {
   const needsLearning = node.evidence_status === "needs_learning";
   const selected = node.selected === true;
   const presentation = globalThis.InterfaceWorkflowGraph?.interfaceWorkflowNodePresentation
-    ? globalThis.InterfaceWorkflowGraph.interfaceWorkflowNodePresentation(node)
+      ? globalThis.InterfaceWorkflowGraph.interfaceWorkflowNodePresentation(node, { language: currentLanguage })
     : {
       title: node.label,
       subtitle: node.surface_type,
@@ -16393,7 +17369,11 @@ function drawInterfaceWorkflowGraphNode(ctx, node, visualState = {}) {
       status: "",
       status_tone: "neutral",
     };
-  const reviewed = presentation.status_tone === "reviewed";
+  const statusTone = String(presentation.status_tone || "unreviewed");
+  const reviewed = statusTone === "reviewed";
+  const invalid = statusTone === "invalid";
+  const unreviewed = statusTone === "unreviewed" || statusTone === "review";
+  const disconnected = node.disconnected === true;
   ctx.save();
   ctx.globalAlpha = visualState.dimmed ? 0.2 : 1;
   ctx.save();
@@ -16405,26 +17385,28 @@ function drawInterfaceWorkflowGraphNode(ctx, node, visualState = {}) {
   }
   ctx.beginPath();
   ctx.arc(node.x, node.y, radius - 5, 0, Math.PI * 2);
-  ctx.fillStyle = selected
-    ? "#5f7f7c"
-    : needsLearning
-      ? "#d8dfdd"
-      : reviewed
-        ? "#789a97"
-        : "#adc0be";
+  ctx.fillStyle = invalid
+    ? "#fecaca"
+    : reviewed
+      ? "#bbd8ca"
+      : needsLearning
+        ? "#d8dfdd"
+        : unreviewed
+          ? "#fed7aa"
+          : "#d8dfdd";
   ctx.fill();
   ctx.shadowBlur = 0;
-  ctx.strokeStyle = visualState.hovered
-    ? "#456662"
-    : selected
-    ? "#a24781"
-    : needsLearning
-      ? "#8c7c69"
+  ctx.strokeStyle = selected
+    ? "#2563eb"
+    : invalid
+      ? "#b91c1c"
       : reviewed
-        ? "#506f6c"
-        : "#6d8986";
+        ? "#15803d"
+        : unreviewed
+          ? "#c2410c"
+          : "#64748b";
   ctx.lineWidth = visualState.hovered ? 3.2 : selected ? 4 : visualState.highlighted ? 2.2 : 1.4;
-  if (needsLearning) ctx.setLineDash([5, 4]);
+  if (needsLearning || disconnected) ctx.setLineDash([6, 4]);
   ctx.stroke();
   ctx.setLineDash([]);
   ctx.restore();
@@ -16436,7 +17418,7 @@ function drawInterfaceWorkflowGraphNode(ctx, node, visualState = {}) {
     node.y - 6,
     node.width - 24,
     {
-      color: selected ? "#ffffff" : "#173c39",
+      color: "#173c39",
       font: "650 12px system-ui, sans-serif",
     },
   );
@@ -16447,7 +17429,7 @@ function drawInterfaceWorkflowGraphNode(ctx, node, visualState = {}) {
     node.y + 14,
     node.width - 28,
     {
-      color: selected ? "#e7f0ef" : "#486461",
+      color: "#486461",
       font: "9px system-ui, sans-serif",
     },
   );
@@ -16458,7 +17440,13 @@ function drawInterfaceWorkflowGraphNode(ctx, node, visualState = {}) {
     node.y + radius + 12,
     node.width + 24,
     {
-      color: reviewed ? "#456662" : needsLearning ? "#80694f" : "#6d7775",
+      color: invalid
+        ? "#991b1b"
+        : reviewed
+          ? "#166534"
+          : unreviewed
+            ? "#9a3412"
+            : needsLearning ? "#80694f" : "#6d7775",
       font: "600 9px system-ui, sans-serif",
     },
   );
@@ -16690,7 +17678,7 @@ function updateInterfaceWorkflowGraphHover(layoutNode, screenPoint = null) {
     return;
   }
   const presentation = globalThis.InterfaceWorkflowGraph?.interfaceWorkflowNodePresentation
-    ? globalThis.InterfaceWorkflowGraph.interfaceWorkflowNodePresentation(layoutNode)
+      ? globalThis.InterfaceWorkflowGraph.interfaceWorkflowNodePresentation(layoutNode, { language: currentLanguage })
     : {
       title: layoutNode.label,
       subtitle: layoutNode.surface_type,
@@ -16850,7 +17838,7 @@ function hideInterfaceWorkflowGraphContextMenu() {
   if (menu) menu.hidden = true;
 }
 
-function setInterfaceWorkflowGraphLinkStatus(message = "右键界面可快速创建连接。") {
+function setInterfaceWorkflowGraphLinkStatus(message = t("interface_workflow_graph_link_hint")) {
   if ($("interfaceWorkflowGraphLinkStatus")) {
     $("interfaceWorkflowGraphLinkStatus").textContent = message;
   }
@@ -16878,17 +17866,17 @@ function onInterfaceWorkflowGraphContextMenu(event) {
     contextEdges.innerHTML = outgoing.length
       ? outgoing.map((edge) => {
         const target = interfaceWorkflowNodeById(edge.target_node_id);
-        const label = InterfaceWorkflowReview.userFacingLearningLabel(
+        const label = localizeInterfaceWorkflowEdgeLabel(InterfaceWorkflowReview.userFacingLearningLabel(
           edge.display_name || edge.action_type || "未命名连接",
-        );
+        ));
         const targetLabel = InterfaceWorkflowReview.userFacingLearningLabel(
           target?.display_name || target?.node_id || "目标界面",
         );
         return `<button type="button"
           data-interface-workflow-context-action="delete-edge"
-          data-interface-workflow-edge-id="${escapeAttr(edge.edge_id)}">删除连接：${escapeHtml(label)} → ${escapeHtml(targetLabel)}</button>`;
+          data-interface-workflow-edge-id="${escapeAttr(edge.edge_id)}">${currentLanguage === "en-US" ? "Delete link" : "删除连接"}：${escapeHtml(label)} → ${escapeHtml(targetLabel)}</button>`;
       }).join("")
-      : '<span class="interface-workflow-context-empty">当前界面没有已保存连接</span>';
+      : `<span class="interface-workflow-context-empty">${currentLanguage === "en-US" ? "No saved links from this interface" : "当前界面没有已保存连接"}</span>`;
   }
   menu.style.left = `${point.screen.x}px`;
   menu.style.top = `${point.screen.y}px`;
@@ -16901,18 +17889,23 @@ function startInterfaceWorkflowGraphLink(nodeId) {
   interfaceWorkflowWorkbenchState.startLink(nodeId);
   hideInterfaceWorkflowGraphContextMenu();
   setInterfaceWorkflowGraphLinkStatus(
-    `正在从“${InterfaceWorkflowReview.userFacingLearningLabel(node.display_name || node.node_id)}”创建连接，请点击目标界面。`,
+    currentLanguage === "en-US"
+      ? `Creating a link from “${InterfaceWorkflowReview.userFacingLearningLabel(node.display_name || node.node_id)}”. Select the target interface.`
+      : `正在从“${InterfaceWorkflowReview.userFacingLearningLabel(node.display_name || node.node_id)}”创建连接，请点击目标界面。`,
   );
 }
 
-function setInterfaceWorkflowCorrectionOpen(open) {
+function setInterfaceWorkflowCorrectionOpen(open, correctionView = null) {
   const next = Boolean(open);
   interfaceWorkflowWorkbenchState.setCorrectionOpen(next);
   const tools = $("interfaceWorkflowReviewToolsColumn");
   if (tools) tools.hidden = !next;
   const toggle = $("interfaceWorkflowReviewToolsToggle");
-  if (toggle) toggle.textContent = next ? "收起修正工具" : "修正当前界面";
-  if (next) renderInterfaceWorkflowEditor(interfaceWorkflowReviewState?.current?.());
+  if (toggle) toggle.textContent = next ? t("interface_workflow_collapse_editor") : t("interface_workflow_edit_current");
+  if (next) {
+    const view = correctionView || currentInterfaceWorkflowCorrectionTarget().view;
+    if (view) renderInterfaceWorkflowEditor(view);
+  }
 }
 
 function restoreInterfaceWorkflowOperationToolbar() {
@@ -16929,7 +17922,7 @@ function closeInterfaceWorkflowLinkDialog(options = {}) {
   if (options.preserveToolbar !== true) restoreInterfaceWorkflowOperationToolbar();
   if (options.cancelled === true) {
     interfaceWorkflowWorkbenchState.clearLink();
-    setInterfaceWorkflowGraphLinkStatus("已取消创建连接。");
+    setInterfaceWorkflowGraphLinkStatus(currentLanguage === "en-US" ? "Link creation cancelled." : "已取消创建连接。");
   }
 }
 
@@ -17029,7 +18022,7 @@ function completeInterfaceWorkflowGraphLink(targetNodeId) {
   if ($("interfaceWorkflowOperationTargetNode")) $("interfaceWorkflowOperationTargetNode").value = link.target_node_id;
   const targetNode = interfaceWorkflowNodeById(link.target_node_id);
   if ($("interfaceWorkflowOperationLabel")) {
-    $("interfaceWorkflowOperationLabel").value = `前往 ${InterfaceWorkflowReview.userFacingLearningLabel(
+    $("interfaceWorkflowOperationLabel").value = `${currentLanguage === "en-US" ? "Open" : "前往"} ${InterfaceWorkflowReview.userFacingLearningLabel(
       targetNode?.display_name || targetNode?.node_id || "目标界面",
     )}`;
   }
@@ -17114,6 +18107,9 @@ function clearInterfaceWorkflowReview(reason = "") {
   if ($("interfaceWorkflowNodeName")) $("interfaceWorkflowNodeName").value = "";
   if ($("interfaceWorkflowSurfaceType")) $("interfaceWorkflowSurfaceType").value = "";
   if ($("interfaceWorkflowNodeReviewStatus")) $("interfaceWorkflowNodeReviewStatus").value = "needs_human_review";
+  if ($("interfaceWorkflowNodeHumanReviewConfirmed")) {
+    $("interfaceWorkflowNodeHumanReviewConfirmed").checked = false;
+  }
   if ($("interfaceWorkflowTransitionAction")) {
     $("interfaceWorkflowTransitionAction").value = "";
     $("interfaceWorkflowTransitionAction").dataset.edgeId = "";
@@ -17128,6 +18124,7 @@ function clearInterfaceWorkflowReview(reason = "") {
     "interfaceWorkflowNodeName",
     "interfaceWorkflowSurfaceType",
     "interfaceWorkflowNodeReviewStatus",
+    "interfaceWorkflowNodeHumanReviewConfirmed",
     "interfaceWorkflowTransitionAction",
     "interfaceWorkflowTransitionTarget",
     "interfaceWorkflowRemoveSourceBtn",
@@ -17361,6 +18358,127 @@ function renderInterfaceWorkflowEvidence(view) {
   } else {
     image?.addEventListener("load", applyNaturalViewport, { once: true });
   }
+}
+
+function renderInterfaceWorkflowStepAudit(view) {
+  const target = $("interfaceWorkflowStepAudit");
+  if (!target) return;
+  const audit = view?.step_audit;
+  if (!audit || audit.coverage_status !== "recorded_runtime_step") {
+    target.innerHTML = `
+      <div class="interface-workflow-step-audit-heading">
+        <strong>本步运行证据</strong>
+        <span>not run</span>
+      </div>
+      <p class="trace-idle">当前界面尚无 Agent 决策、Gate 或操作验证记录。</p>`;
+    return;
+  }
+  const cards = [
+    ["Agent 决策", audit.agent?.status, audit.agent?.semantic_action || audit.agent?.reason],
+    ["Gate", audit.gate?.status, audit.gate?.reason],
+    ["动作派发", audit.dispatch?.status, audit.dispatch?.attempted ? "attempted" : "not attempted"],
+    ["动作效果", audit.effect?.status, audit.effect?.verified === true ? "verified" : ""],
+    ["再次观察", audit.post_observe?.status, audit.post_observe?.interface_id],
+    ["停止状态", audit.stop?.status, audit.stop?.reason],
+  ];
+  target.innerHTML = `
+    <div class="interface-workflow-step-audit-heading">
+      <strong>本步运行证据</strong>
+      <span>${escapeHtml(audit.case_outcome || audit.coverage_status)}</span>
+    </div>
+    <div class="interface-workflow-step-audit-grid">
+      ${cards.map(([label, status, detail]) => `
+        <article class="interface-workflow-step-audit-card" data-status="${escapeHtml(status || "not_covered")}">
+          <small>${escapeHtml(label)}</small>
+          <strong>${escapeHtml(status || "not_covered")}</strong>
+          ${detail ? `<span>${escapeHtml(detail)}</span>` : ""}
+        </article>`).join("")}
+    </div>
+    ${audit.trace?.path ? `
+      <details class="interface-workflow-step-trace">
+        <summary>按需查看 Trace</summary>
+        <code>${escapeHtml(audit.trace.path)}</code>
+      </details>` : `<p class="interface-workflow-step-trace-missing">Trace not recorded</p>`}
+    <small class="interface-workflow-step-audit-note">${escapeHtml(audit.interpretation || "")}</small>`;
+}
+
+function renderInterfaceWorkflowSafeFillPreflight(preflight = interfaceWorkflowSafeFillPreflight) {
+  const target = $("interfaceWorkflowSafeFillPreflight");
+  const status = $("interfaceWorkflowSafeFillPreflightStatus");
+  if (!target) return;
+  const project = globalThis.InterfaceWorkflowReview?.projectLiveSafeFillPreflightReview;
+  const review = typeof project === "function" ? project(preflight || {}) : { visible: false };
+  if (!review.visible) {
+    target.hidden = true;
+    target.innerHTML = "";
+    if (status && preflight) status.textContent = `预检不可审查：${review.reason || "invalid"}`;
+    return;
+  }
+  const field = review.field || {};
+  const valueEvidence = review.value_evidence || {};
+  const safety = review.safety || {};
+  const verification = review.expected_verification || {};
+  target.hidden = false;
+  target.innerHTML = `
+    <div class="interface-workflow-step-audit-heading">
+      <strong>单字段执行前审查</strong>
+      <span>${escapeHtml(review.approval_state || review.status || "needs_human_review")}</span>
+    </div>
+    <div class="interface-workflow-safe-fill-summary">
+      <article>
+        <small>目标字段</small>
+        <strong>${escapeHtml(field.label || field.id || "未命名字段")}</strong>
+        <span>${escapeHtml([field.field_type, field.risk_class].filter(Boolean).join(" · "))}</span>
+      </article>
+      <article>
+        <small>脱敏答案证据</small>
+        <strong>${escapeHtml(valueEvidence.answer_source || "未记录来源")}</strong>
+        <span>length=${escapeHtml(valueEvidence.value_length)} · hash=${escapeHtml(valueEvidence.value_hash)}</span>
+      </article>
+      <article>
+        <small>填写后验证</small>
+        <strong>${escapeHtml(verification.mode || "not_covered")}</strong>
+        <span>只核对 hash 与长度</span>
+      </article>
+      <article>
+        <small>安全边界</small>
+        <strong>最多 ${escapeHtml(safety.max_fields)} 个字段</strong>
+        <span>Continue=${escapeHtml(safety.continue_allowed)} · Submit=${escapeHtml(safety.final_submit_allowed)}</span>
+      </article>
+    </div>
+    <p class="interface-workflow-safe-fill-warning">不是执行授权。加载和审查不会填写字段、点击 Continue 或触发提交。</p>
+    <small class="interface-workflow-step-audit-note">${escapeHtml(review.interpretation || "")}</small>`;
+  if (status) status.textContent = `已加载脱敏预检 · ${review.source_path || field.id || "review only"}`;
+}
+
+async function loadInterfaceWorkflowSafeFillPreflight() {
+  const path = String($("interfaceWorkflowSafeFillPreflightPath")?.value || "").trim();
+  if (!path) {
+    renderInterfaceWorkflowSafeFillPreflight({});
+    if ($("interfaceWorkflowSafeFillPreflightStatus")) {
+      $("interfaceWorkflowSafeFillPreflightStatus").textContent = "请输入预检 JSON 路径。";
+    }
+    return null;
+  }
+  const response = await api("POST", "/panel/load_live_safe_fill_preflight", {
+    preflight_path: path,
+  }, {
+    summary: "load live safe-fill preflight",
+    workflowStep: "load_live_safe_fill_preflight",
+    skipRender: true,
+    skipStatus: true,
+  });
+  if (!response?.success) {
+    interfaceWorkflowSafeFillPreflight = null;
+    renderInterfaceWorkflowSafeFillPreflight(response?.data || {});
+    if ($("interfaceWorkflowSafeFillPreflightStatus")) {
+      $("interfaceWorkflowSafeFillPreflightStatus").textContent = response?.message || "预检加载失败";
+    }
+    return null;
+  }
+  interfaceWorkflowSafeFillPreflight = response.data || null;
+  renderInterfaceWorkflowSafeFillPreflight();
+  return interfaceWorkflowSafeFillPreflight;
 }
 
 function currentInterfaceWorkflowOperation(view = null) {
@@ -17784,10 +18902,14 @@ function renderInterfaceWorkflowEditor(view) {
   }
   if ($("interfaceWorkflowNodeReviewStatus")) {
     const status = String(node?.review_status || "needs_human_review");
-    $("interfaceWorkflowNodeReviewStatus").value = ["needs_human_review", "reviewed_candidate", "rejected"].includes(status)
+    $("interfaceWorkflowNodeReviewStatus").value = ["needs_human_review", "reviewed_candidate", "human_approved", "rejected"].includes(status)
       ? status
       : "needs_human_review";
     $("interfaceWorkflowNodeReviewStatus").disabled = !enabled;
+  }
+  if ($("interfaceWorkflowNodeHumanReviewConfirmed")) {
+    $("interfaceWorkflowNodeHumanReviewConfirmed").checked = false;
+    $("interfaceWorkflowNodeHumanReviewConfirmed").disabled = !enabled;
   }
   if ($("interfaceWorkflowEditBoxesBtn")) $("interfaceWorkflowEditBoxesBtn").disabled = !enabled;
   if ($("interfaceWorkflowRemoveSourceBtn")) $("interfaceWorkflowRemoveSourceBtn").disabled = !enabled;
@@ -17800,6 +18922,12 @@ function renderInterfaceWorkflowEditor(view) {
   }
   renderInterfaceWorkflowContentEditor(view);
   renderInterfaceWorkflowOperationEditor(view);
+}
+
+function clearInterfaceWorkflowNodeHumanReviewConfirmation() {
+  if ($("interfaceWorkflowNodeHumanReviewConfirmed")) {
+    $("interfaceWorkflowNodeHumanReviewConfirmed").checked = false;
+  }
 }
 
 function renderInterfaceWorkflowReview(review) {
@@ -17835,13 +18963,42 @@ function renderInterfaceWorkflowReviewSelection() {
   const workflow = graph.workflow || {};
   const applicationLabel = interfaceWorkflowApplicationLabel(workflow.application_identity);
   if ($("interfaceWorkflowStatus")) {
-    $("interfaceWorkflowStatus").textContent = `${workflow.review_status || "needs_human_review"} · nodes=${graph.nodes.length}`;
+    const topology = globalThis.InterfaceWorkflowGraph?.buildInterfaceWorkflowTopology?.(graph) || {
+      nodes: graph.nodes || [],
+      links: graph.edges || [],
+    };
+    const readiness = globalThis.InterfaceWorkflowGraph?.summarizeWorkflowReadiness?.(topology) || {
+      status: "mixed_review_state",
+      reviewed: 0,
+      unreviewed: graph.nodes.length,
+      invalid: 0,
+      total: graph.nodes.length,
+      agent_usable: false,
+    };
+    const readinessLabel = currentLanguage === "en-US"
+      ? readiness.status === "all_interfaces_reviewed"
+        ? `All ${readiness.total} interfaces reviewed · Still not execution authorization`
+        : readiness.status === "invalid_or_stale_present"
+          ? `${readiness.invalid} invalid or stale evidence items · Not available for direct Agent use`
+          : readiness.status === "empty"
+            ? "Empty workflow · No interfaces"
+            : `Mixed review status · ${readiness.reviewed} reviewed / ${readiness.unreviewed} unreviewed`
+      : readiness.status === "all_interfaces_reviewed"
+        ? `全部 ${readiness.total} 个界面已审核 · 仍非执行授权`
+        : readiness.status === "invalid_or_stale_present"
+          ? `含 ${readiness.invalid} 个无效或过期证据 · Agent 不可直接使用`
+          : readiness.status === "empty"
+            ? "空流程 · 尚无界面"
+            : `混合审核状态 · ${readiness.reviewed} 已审核 / ${readiness.unreviewed} 未审核`;
+    $("interfaceWorkflowStatus").textContent = readinessLabel;
   }
   if ($("interfaceWorkflowGoal")) $("interfaceWorkflowGoal").textContent = workflow.goal || "--";
   if ($("interfaceWorkflowApplication")) $("interfaceWorkflowApplication").textContent = applicationLabel || "--";
   if ($("interfaceWorkflowSourceStatus")) {
-    $("interfaceWorkflowSourceStatus").textContent = interfaceWorkflowDraftSourcePaths.length
-      ? `已加入 ${interfaceWorkflowDraftSourcePaths.length} 个历史界面；选择节点可审核各自证据。`
+    $("interfaceWorkflowSourceStatus").textContent = graph.nodes.length
+      ? currentLanguage === "en-US"
+        ? `${graph.nodes.length} workflow interfaces saved; select a node to inspect its evidence.`
+        : `已保存 ${graph.nodes.length} 个流程界面；选择节点可审核各自证据。`
       : t("interface_workflow_source_empty");
   }
   renderInterfaceWorkflowGraph(graph);
@@ -17856,24 +19013,34 @@ function commitInterfaceWorkflowEditorToState() {
   const view = interfaceWorkflowReviewState.current();
   const nodeId = String(view?.node?.node_id || "").trim();
   if (!nodeId) return interfaceWorkflowReviewState.snapshot();
-  interfaceWorkflowReviewState.updateNode(nodeId, {
-    display_name: String($("interfaceWorkflowNodeName")?.value || "").trim() || nodeId,
-    surface_type: String($("interfaceWorkflowSurfaceType")?.value || "").trim() || "unknown_surface",
-    review_status: String($("interfaceWorkflowNodeReviewStatus")?.value || "needs_human_review"),
+  const humanReviewConfirmed = $("interfaceWorkflowNodeHumanReviewConfirmed")?.checked === true;
+  interfaceWorkflowReview = window.InterfaceWorkflowReview.commitInterfaceWorkflowReviewForSave({
+    state: interfaceWorkflowReviewState,
+    nodeId,
+    nodePatch: {
+      display_name: String($("interfaceWorkflowNodeName")?.value || "").trim() || nodeId,
+      surface_type: String($("interfaceWorkflowSurfaceType")?.value || "").trim() || "unknown_surface",
+      review_status: String($("interfaceWorkflowNodeReviewStatus")?.value || "needs_human_review"),
+    },
+    commitOperation: () => commitInterfaceWorkflowOperationEditor({ silent: true }),
+    humanReviewConfirmed,
   });
-  commitInterfaceWorkflowOperationEditor({ silent: true });
-  interfaceWorkflowReview = interfaceWorkflowReviewState.snapshot();
   return interfaceWorkflowReview;
 }
 
-async function saveInterfaceWorkflowReview() {
+async function saveInterfaceWorkflowReview({ commitEditor = true } = {}) {
   if (!interfaceWorkflowReviewState) {
     if ($("interfaceWorkflowSaveStatus")) {
       $("interfaceWorkflowSaveStatus").textContent = "没有可保存的界面学习结果";
     }
     return null;
   }
-  interfaceWorkflowReview = commitInterfaceWorkflowEditorToState();
+  const selectedNodeId = String(
+    interfaceWorkflowReviewState.current()?.node?.node_id || "",
+  ).trim();
+  interfaceWorkflowReview = commitEditor
+    ? commitInterfaceWorkflowEditorToState()
+    : interfaceWorkflowReviewState.snapshot();
   if (!interfaceWorkflowReview) return null;
   renderInterfaceWorkflowReviewSelection();
   if ($("interfaceWorkflowSaveBtn")) $("interfaceWorkflowSaveBtn").disabled = true;
@@ -17902,6 +19069,11 @@ async function saveInterfaceWorkflowReview() {
     preferredWorkflowId: String(response.data?.workflow_id || "").trim(),
     openSelected: true,
   });
+  if (selectedNodeId && interfaceWorkflowReviewState) {
+    interfaceWorkflowReviewState.select(selectedNodeId);
+    interfaceWorkflowWorkbenchState.showWorkflowNode(selectedNodeId);
+    renderInterfaceWorkflowReviewSelection();
+  }
   renderInterfaceWorkflowOperationEditor(interfaceWorkflowReviewState.current());
   return response.data || {};
 }
@@ -18049,6 +19221,8 @@ async function addInterfaceWorkflowSource() {
 async function removeCurrentInterfaceWorkflowSource() {
   if (!interfaceWorkflowReviewState) return null;
   const currentNode = interfaceWorkflowReviewState.current()?.node;
+  const nodeId = String(currentNode?.node_id || "").trim();
+  if (!nodeId) return null;
   const removePaths = new Set(Array.isArray(currentNode?.source_paths) ? currentNode.source_paths : []);
   const remainingPaths = interfaceWorkflowDraftSourcePaths.filter((path) => !removePaths.has(path));
   if (remainingPaths.length === interfaceWorkflowDraftSourcePaths.length) {
@@ -18059,7 +19233,12 @@ async function removeCurrentInterfaceWorkflowSource() {
     clearInterfaceWorkflowReview("当前流程尚未加入界面。");
     return {};
   }
-  return loadInterfaceWorkflowReview(remainingPaths, { preserveEdits: true, skipResponse: true });
+  interfaceWorkflowReviewState.removeInterfaceNode(nodeId);
+  interfaceWorkflowDraftSourcePaths = remainingPaths;
+  interfaceWorkflowReview = interfaceWorkflowReviewState.snapshot();
+  markInterfaceWorkflowUnsaved("界面已从当前流程移除；正在保存…");
+  renderInterfaceWorkflowReviewSelection();
+  return saveInterfaceWorkflowReview({ commitEditor: false });
 }
 
 function renderLearningDraftReview(review) {
@@ -18099,7 +19278,9 @@ function renderLearningDraftReview(review) {
   });
   if ($("learningDraftReviewBlockers")) $("learningDraftReviewBlockers").value = learningReviewLines(blockers, "blocker");
   if ($("learningDraftReviewVerificationRules")) $("learningDraftReviewVerificationRules").value = learningReviewLines(rules, "rule");
-  const status = String(review?.review_status || "needs_human_review");
+  const status = learningDraftOwnershipConflicts.length
+    ? "needs_human_review"
+    : String(review?.review_status || "needs_human_review");
   if ($("learningDraftReviewStatus")) {
     $("learningDraftReviewStatus").textContent = `${status} · no_click_authorization=${review?.no_click_authorization === true}`;
   }
@@ -18381,9 +19562,6 @@ async function loadLearningDraftReview(options = {}) {
   }
 
   const loadRequestToken = ++learningDraftReviewLoadRequestToken;
-  const workflowLoadToken = options.skipWorkflowReview
-    ? null
-    : interfaceWorkflowLoadGuard.begin();
   const loadPromise = (async () => {
     clearLearningDraftReviewDisplay(`loading · ${sourcePath}`, {
       preserveWorkflowReview: options.skipWorkflowReview === true,
@@ -18408,12 +19586,6 @@ async function loadLearningDraftReview(options = {}) {
       resetLearningDraftEditorState(data);
       if (!options.skipReviewRender) {
         renderLearningDraftReview(data);
-      }
-      if (!options.skipWorkflowReview) {
-        await loadInterfaceWorkflowReview(
-          [sourcePath],
-          { skipResponse: true, loadToken: workflowLoadToken },
-        );
       }
       if (!options.skipResponse) {
         renderResponse({
@@ -20602,6 +21774,9 @@ function bindEvents() {
   on("learningInterfaceListWindowsBtn", "click", learningInterfaceListWindows);
   on("learningInterfaceBindWindowBtn", "click", learningInterfaceBindWindow);
   on("learningInterfaceCaptureBtn", "click", learningInterfaceCapture);
+  on("learningCaptureModeNormal", "change", syncScopedLearningCaptureControls);
+  on("learningCaptureModeScopedLong", "change", syncScopedLearningCaptureControls);
+  syncScopedLearningCaptureControls();
   on("continuousTaskHandoffRefreshBtn", "click", loadContinuousTaskHandoff);
   on("continuousTaskUseForLearningBtn", "click", useContinuousTaskHandoffForLearning);
   on("continuousTaskResumeBtn", "click", resumeContinuousTaskHandoff);
@@ -20790,6 +21965,7 @@ function bindEvents() {
   on("interfaceWorkflowEvidenceModeWorkflow", "click", () => showInterfaceWorkflowEvidenceMode("workflow"));
   on("interfaceWorkflowEvidenceModePreview", "click", () => showInterfaceWorkflowEvidenceMode("source_preview"));
   on("interfaceWorkflowRefreshEvidenceBtn", "click", refreshCurrentInterfaceWorkflowEvidence);
+  on("interfaceWorkflowSafeFillPreflightLoadBtn", "click", loadInterfaceWorkflowSafeFillPreflight);
   on("interfaceWorkflowReviewToolsToggle", "click", openCurrentInterfaceWorkflowBoxEditor);
   on("interfaceWorkflowEvidence", "click", (event) => {
     const target = event.target.closest("[data-interface-workflow-control-id]");
@@ -20820,8 +21996,13 @@ function bindEvents() {
   on("interfaceWorkflowOperationDryRunBtn", "click", dryRunInterfaceWorkflowOperation);
   on("interfaceWorkflowContentSaveBtn", "click", saveInterfaceWorkflowContentDescriptor);
   on("interfaceWorkflowEditBoxesBtn", "click", openCurrentInterfaceWorkflowBoxEditor);
+  on("interfaceAssetUnreviewedTab", "click", () => showInterfaceAssetPage("unreviewed"));
+  on("interfaceAssetReviewedTab", "click", () => showInterfaceAssetPage("reviewed"));
+  on("interfaceWorkflowLibraryTab", "click", () => showInterfaceAssetPage("workflow"));
   on("interfaceWorkflowLoadSavedBtn", "click", loadSavedInterfaceWorkflowReview);
+  on("interfaceWorkflowDeleteBtn", "click", deleteSelectedInterfaceWorkflow);
   on("interfaceWorkflowCreateBtn", "click", createInterfaceWorkflow);
+  on("interfaceWorkflowOpenAttachDialogBtn", "click", openInterfaceAssetAttachDialog);
   on("interfaceWorkflowOpenFolderBtn", "click", () => api(
     "POST",
     "/panel/open_interface_workflow_folder",
@@ -20835,9 +22016,35 @@ function bindEvents() {
   on("interfaceWorkflowSourcePreviewBtn", "click", previewInterfaceWorkflowSource);
   on("interfaceWorkflowAttachWorkflowSelect", "change", selectInterfaceWorkflowAttachTarget);
   on("interfaceWorkflowAddSourceBtn", "click", addInterfaceWorkflowSource);
+  on("interfaceAssetAttachOnlyBtn", "click", () => attachInterfaceAssetToWorkflow({ connect: false }));
+  on("interfaceAssetAttachAndConnectBtn", "click", () => attachInterfaceAssetToWorkflow({ connect: true }));
+  on("interfaceAssetAttachDialogCloseBtn", "click", closeInterfaceAssetAttachDialog);
+  $("interfaceAssetAttachDialog")?.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeInterfaceAssetAttachDialog();
+  });
+  $("interfaceAssetAttachDialog")?.addEventListener("click", (event) => {
+    if (event.target === $("interfaceAssetAttachDialog")) closeInterfaceAssetAttachDialog();
+  });
   on("interfaceWorkflowRemoveSourceBtn", "click", removeCurrentInterfaceWorkflowSource);
+  on("interfaceWorkflowNodeName", "input", clearInterfaceWorkflowNodeHumanReviewConfirmation);
+  on("interfaceWorkflowSurfaceType", "input", clearInterfaceWorkflowNodeHumanReviewConfirmation);
+  on("interfaceWorkflowNodeReviewStatus", "change", clearInterfaceWorkflowNodeHumanReviewConfirmation);
+  for (const [id, eventName] of [
+    ["interfaceWorkflowOperationType", "change"],
+    ["interfaceWorkflowOperationLabel", "input"],
+    ["interfaceWorkflowOperationDescription", "input"],
+    ["interfaceWorkflowOperationTargetControl", "change"],
+    ["interfaceWorkflowOperationRisk", "change"],
+    ["interfaceWorkflowOperationTargetNode", "change"],
+    ["interfaceWorkflowOperationPlaceholderName", "input"],
+    ["interfaceWorkflowOperationConfirmation", "change"],
+  ]) {
+    on(id, eventName, clearInterfaceWorkflowNodeHumanReviewConfirmation);
+  }
   on("interfaceWorkflowSaveBtn", "click", saveInterfaceWorkflowReview);
   on("interfaceWorkflowMemoryBtn", "click", openInterfaceWorkflowMemoryVerification);
+  showInterfaceAssetPage(interfaceAssetWorkspaceState.activePage);
   on("replayLoadBtn", "click", loadReplayArtifact);
   on("replayAppProfileLoadBtn", "click", loadReplayAppProfile);
   on("replayAgentPromptLoadBtn", "click", loadReplayAgentPrompt);

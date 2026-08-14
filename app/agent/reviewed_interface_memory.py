@@ -13,6 +13,8 @@ from typing import Any
 
 from PIL import Image
 
+from app.agent.form_answer_policy_memory import FormAnswerPolicyMemoryStore
+
 
 MEMORY_CONTRACT = "reviewed_interface_memory_v1"
 REGISTRY_CONTRACT = "reviewed_interface_memory_registry_v1"
@@ -95,6 +97,7 @@ def validate_current_target_text_anchor(
     evidence_candidates.extend(_adjacent_ocr_line_candidates(ocr_lines))
     seen_evidence: set[tuple[str, int, int, int, int]] = set()
     seed_bbox = _seed_bbox(seed)
+    reference_bbox_is_prior_only = locator_evidence.get("reference_bbox_is_prior_only") is True
     for candidate in evidence_candidates:
         matched_anchor = _matching_local_anchor(required_anchors, candidate["text"])
         if not matched_anchor:
@@ -110,6 +113,7 @@ def validate_current_target_text_anchor(
         if evidence_key in seen_evidence:
             continue
         seen_evidence.add(evidence_key)
+        distance_to_selected_point = _point_to_bbox_distance(point, bbox)
         evidence.append(
             {
                 "anchor": matched_anchor,
@@ -122,7 +126,8 @@ def validate_current_target_text_anchor(
                     if seed_bbox is not None
                     else None
                 ),
-                "distance_to_selected_point": _point_to_bbox_distance(point, bbox),
+                "current_point_inside_bbox": distance_to_selected_point == 0.0,
+                "distance_to_selected_point": distance_to_selected_point,
             }
         )
 
@@ -134,6 +139,11 @@ def validate_current_target_text_anchor(
         item
         for item in evidence
         if item["inside_seed_neighborhood"] is not False
+        or (
+            reference_bbox_is_prior_only
+            and item["distance_to_selected_point"] is not None
+            and item["distance_to_selected_point"] <= 4.0
+        )
     ]
     nearest_distance = min(
         (
@@ -345,6 +355,7 @@ class ReviewedInterfaceMemoryStore:
         self.memory_root = self.project_root / MEMORY_ROOT
         self.objects_root = self.memory_root / "objects"
         self.registry_path = self.memory_root / "registry.json"
+        self.form_answer_policy_memory = FormAnswerPolicyMemoryStore(project_root=self.project_root)
 
     def publish(
         self,
@@ -461,6 +472,20 @@ class ReviewedInterfaceMemoryStore:
                 "artifact_is_authorization": False,
             },
         }
+
+    def form_answer_policy_context(
+        self,
+        *,
+        question_understanding: dict[str, Any],
+        scope_context: dict[str, Any] | None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """投影人工审核答案策略；该证据不授权填写或点击。"""
+        return self.form_answer_policy_memory.agent_context(
+            question_understanding=question_understanding,
+            scope_context=scope_context,
+            now=now,
+        )
 
     def resolve_action_for_goal(self, *, interface_id: str, goal: str) -> dict[str, Any]:
         """把自然语言任务解析为唯一的低风险记忆动作。"""
@@ -684,6 +709,13 @@ class ReviewedInterfaceMemoryStore:
                 "role_anchor": locator.get("role_anchor"),
                 "reference_bbox_is_prior_only": True,
             },
+            "candidate_freshness": {
+                "contract_version": "action_candidate_freshness_v1",
+                "capture_id": str(capture_path),
+                "viewport_size": viewport,
+                "source": MEMORY_CONTRACT,
+                "freshness": "current_capture",
+            },
             "current_capture": {
                 "screenshot_path": str(capture_path),
                 "screenshot_sha256": capture_sha256,
@@ -829,6 +861,27 @@ def _compile_element(
     }
     label = str(region.get("label") or region.get("name") or source_region_id).strip()
     role = str(region.get("role") or region.get("kind") or "unknown").strip()
+    visible_anchor_value = region.get("visible_text_anchors")
+    text_anchor_source = "human_review_visible_text_anchors"
+    if visible_anchor_value in (None, "", []):
+        visible_anchor_value = region.get("observed_text")
+        text_anchor_source = "human_review_observed_text"
+    if visible_anchor_value in (None, "", []):
+        visible_anchor_value = region.get("text_anchors")
+        text_anchor_source = "human_review_text_anchors"
+    if isinstance(visible_anchor_value, (list, tuple, set)):
+        visible_text_anchors = [
+            str(value).strip()
+            for value in visible_anchor_value
+            if str(value or "").strip()
+        ]
+    else:
+        visible_text = str(visible_anchor_value or "").strip()
+        visible_text_anchors = [visible_text] if visible_text else []
+    visible_text_anchors = list(dict.fromkeys(visible_text_anchors))
+    if not visible_text_anchors and label:
+        visible_text_anchors = [label]
+        text_anchor_source = "legacy_label_fallback"
     return {
         "element_id": f"{interface_id}::element::{source_region_id}",
         "source_region_id": source_region_id,
@@ -844,7 +897,9 @@ def _compile_element(
             "reference_bbox": bbox,
             "reference_viewport": dict(viewport),
             "normalized_bbox": normalized_bbox,
-            "text_anchors": [label] if label else [],
+            "text_anchors": list(visible_text_anchors),
+            "visible_text_anchors": list(visible_text_anchors),
+            "text_anchor_source": text_anchor_source,
             "role_anchor": role,
             "strategies": ["current_screen_recognition", "uia", "ocr", "vision_grounding"],
             "source_capture_required": True,

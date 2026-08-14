@@ -31,6 +31,9 @@
       "completion_policy": "reached_bottom_required",
       "max_scrolls": 4,
       "max_items": 0,
+      "bottom_markers": [
+        "INCIDENT REPORT END"
+      ],
       "agent_description": "Read the report through the INCIDENT REPORT END marker."
     }
   ],
@@ -52,10 +55,13 @@
   ],
   "blockers": [],
   "review": {
-    "status": "human_reviewed",
+    "status": "human_approved",
     "manual_revision": {
       "semantic_description": "Read the finite report, then return to the hub."
-    }
+    },
+    "reviewed_by_human": true,
+    "reviewed_revision_hash": "745659da6528c9828df0a8a7fd0d546b8256961cd259cb8460931ef0e77a05be",
+    "current_revision_hash": "745659da6528c9828df0a8a7fd0d546b8256961cd259cb8460931ef0e77a05be"
   },
   "evidence": {},
   "execute_binding_enabled": false

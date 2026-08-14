@@ -17,6 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 REVIEW_CONTRACT = "learning_draft_review_v1"
 REVIEWED_TEMPLATE_CONTRACT = "reviewed_template_candidate_v1"
 HUMAN_REVIEW_PATCH_CONTRACT = "human_review_patch_v1"
+HIERARCHY_OWNERSHIP_REVIEW_CONTRACT = "hierarchy_ownership_review_revision_v1"
 MODEL_START_PREFLIGHT_REPORT_NAME = "learn_fusion_model_start_preflight_report.json"
 DEMO_READINESS_REPORT_NAME = "learn_fusion_demo_readiness_report.json"
 MODEL_START_APPROVAL_PACKET_NAME = "learn_fusion_model_start_approval_packet.json"
@@ -49,6 +50,10 @@ def load_learning_draft_review(
     payload = json.loads(source_bytes.decode("utf-8-sig"))
     if not isinstance(payload, dict):
         raise ValueError("learning draft source must be a JSON object")
+    workflow_node_identity = _workflow_node_identity(payload, root)
+    preserved_review_status = str(payload.get("review_status") or "").strip()
+    preserved_reviewed_by_human = payload.get("reviewed_by_human") is True
+    preserved_source_after_review = str(payload.get("source_after_review") or "").strip()
     payload, resolved, source_bytes, source_hash, candidate_review = _resolve_review_payload(
         payload,
         resolved,
@@ -87,6 +92,12 @@ def load_learning_draft_review(
         "audit": deepcopy(payload.get("audit")) if isinstance(payload.get("audit"), dict) else {},
         "safety": _review_safety(),
     }
+    if workflow_node_identity:
+        result["workflow_node_identity"] = workflow_node_identity
+    if payload.get("contract_version") == REVIEWED_TEMPLATE_CONTRACT:
+        result["review_status"] = preserved_review_status or "needs_human_review"
+        result["reviewed_by_human"] = preserved_reviewed_by_human
+        result["source_after_review"] = preserved_source_after_review or "mixed"
     if candidate_review:
         result["pathgraph_candidate_review"] = candidate_review
     else:
@@ -101,6 +112,35 @@ def load_learning_draft_review(
     return result
 
 
+def _workflow_node_identity(payload: dict[str, Any], root: Path) -> dict[str, str]:
+    candidates = [payload]
+    source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+    for key in ("source_path", "original_draft_path"):
+        reference = str(source.get(key) or "").strip()
+        if not reference:
+            continue
+        try:
+            referenced_path = _resolve_source_path(reference, root)
+            referenced = json.loads(referenced_path.read_text(encoding="utf-8-sig"))
+        except (FileNotFoundError, ValueError, json.JSONDecodeError):
+            continue
+        if isinstance(referenced, dict):
+            candidates.append(referenced)
+
+    for candidate in candidates:
+        if candidate.get("contract_version") != "interface_workflow_node_review_source_v1":
+            continue
+        node_id = str(candidate.get("node_id") or "").strip()
+        workflow_id = str(candidate.get("workflow_id") or "").strip()
+        if not re.fullmatch(r"interface_[A-Za-z0-9_.-]+", node_id):
+            continue
+        identity = {"node_id": node_id}
+        if re.fullmatch(r"workflow_[A-Za-z0-9_.-]+", workflow_id):
+            identity["workflow_id"] = workflow_id
+        return identity
+    return {}
+
+
 def save_reviewed_template_candidate(
     source_path: str | Path,
     review_patch: dict[str, Any] | None,
@@ -110,7 +150,14 @@ def save_reviewed_template_candidate(
     """保存人工审核后的候选模板；候选件仍不授权执行。"""
     root = Path(project_root).resolve() if project_root is not None else PROJECT_ROOT
     review_patch = review_patch if isinstance(review_patch, dict) else {}
-    review = load_learning_draft_review(source_path, project_root=root)
+    review = load_learning_draft_review(
+        source_path,
+        project_root=root,
+        discover_related_sidecars=_review_source_requires_sidecar_discovery(
+            source_path,
+            root,
+        ),
+    )
     draft = deepcopy(review["draft"])
     out_dir = root / "artifacts" / "learning-draft-review" / _slug_for_output(review["source"])
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -124,6 +171,18 @@ def save_reviewed_template_candidate(
     if human_review_patch:
         review_patch = _compile_human_review_patch(review_patch, human_review_patch)
     changes: list[str] = []
+    hierarchy_ownership_review = _apply_hierarchy_ownership_corrections(
+        draft,
+        human_review_patch,
+        review=review,
+        root=root,
+        patch_path=human_review_patch_path,
+    )
+    if hierarchy_ownership_review:
+        changes.extend(
+            f"ownership_resolved:{item.get('item_id')}->{item.get('after_parent_group_id')}"
+            for item in hierarchy_ownership_review.get("corrections", [])
+        )
 
     _apply_label_updates(draft.get("regions") or [], review_patch.get("region_label_updates"), "region_id", changes)
     _apply_label_updates(
@@ -142,6 +201,8 @@ def save_reviewed_template_candidate(
         changes,
     )
     _apply_review_additions(draft, review_patch, changes)
+    # 旧版表单编辑先应用；结构化框编辑操作随后覆盖同一字段，避免空旧字段抹掉 Agent 语义。
+    _apply_manual_edit(draft, review_patch.get("manual_edit"), changes)
     _apply_role_updates(draft.get("regions") or [], review_patch.get("region_role_updates"), changes)
     _apply_parent_updates(draft.get("regions") or [], review_patch.get("region_parent_updates"), changes)
     _apply_metadata_updates(
@@ -159,7 +220,6 @@ def save_reviewed_template_candidate(
         changes,
     )
     _apply_review_deletions(draft, review_patch, changes)
-    _apply_manual_edit(draft, review_patch.get("manual_edit"), changes)
     for operation in _list_of_dicts(human_review_patch.get("operations")):
         if operation.get("op") == "add":
             changes.append(f"{operation.get('target_kind')}_add:{operation.get('target_id')}")
@@ -190,6 +250,8 @@ def save_reviewed_template_candidate(
 
     review_status = str(review_patch.get("review_status") or "needs_human_review").strip()
     if review_status not in {"needs_human_review", "approved_as_assisted_template"}:
+        review_status = "needs_human_review"
+    if hierarchy_ownership_review:
         review_status = "needs_human_review"
     requested_source = str(review_patch.get("source_after_review") or "mixed").strip()
     source_after_review = "assisted_generation" if requested_source == "assisted_generation" else "mixed"
@@ -242,21 +304,26 @@ def save_reviewed_template_candidate(
             "authorization_scope": "display_and_review_only",
         },
     }
+    if hierarchy_ownership_review:
+        candidate["audit"]["hierarchy_ownership_review"] = deepcopy(
+            hierarchy_ownership_review
+        )
     out_path = out_dir / "reviewed_template_candidate.json"
     if human_review_patch and human_review_patch_path:
         human_review_patch_path.write_text(
             json.dumps(human_review_patch, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
+    correction_memory_patch = _correction_memory_compatible_patch(human_review_patch)
     correction_memory = (
         record_human_review_correction(
-            human_review_patch,
+            correction_memory_patch,
             review=review,
             reviewed_draft=draft,
             project_root=root,
             source_patch_path=_relative_path(human_review_patch_path, root),
         )
-        if human_review_patch and human_review_patch_path
+        if correction_memory_patch and human_review_patch_path
         else None
     )
     if correction_memory:
@@ -283,7 +350,26 @@ def save_reviewed_template_candidate(
     }
     if correction_memory:
         result["correction_memory"] = correction_memory
+    if hierarchy_ownership_review:
+        result["hierarchy_ownership_review"] = deepcopy(
+            hierarchy_ownership_review
+        )
     return result
+
+
+def _review_source_requires_sidecar_discovery(
+    source_path: str | Path,
+    root: Path,
+) -> bool:
+    """正式流程节点已自带完整证据，保存时不再扫描旧 sidecar。"""
+
+    resolved = _resolve_source_path(source_path, root)
+    payload = json.loads(resolved.read_text(encoding="utf-8-sig"))
+    if not isinstance(payload, dict):
+        return True
+    return str(payload.get("contract_version") or "") != (
+        "interface_workflow_node_review_source_v1"
+    )
 
 
 def _select_draft(payload: dict[str, Any]) -> tuple[dict[str, Any], int | None]:
@@ -1989,11 +2075,34 @@ def _normalize_human_review_operations(
         str(item.get("action_template_id") or item.get("action_id") or "").strip(): item
         for item in _list_of_dicts(draft.get("action_templates"))
     }
+    stage2 = _hierarchy_ownership_stage2(draft)
+    ownership_stage2 = deepcopy(stage2) if stage2 else None
+    has_ownership_operation = False
     normalized: list[dict[str, Any]] = []
     for index, operation in enumerate(operations):
         op = str(operation.get("op") or "").strip()
+        if op == "resolve_ownership":
+            operation = _normalize_ownership_target_contract(
+                operation,
+                index=index,
+            )
         target_kind = str(operation.get("target_kind") or "").strip()
         target_id = str(operation.get("target_id") or "").strip()
+        if op == "resolve_ownership":
+            has_ownership_operation = True
+            if ownership_stage2 is None:
+                raise ValueError("human_review_patch ownership stage2 evidence is missing")
+            normalized_operation = _normalize_ownership_operation(
+                operation,
+                ownership_stage2,
+                index=index,
+            )
+            normalized.append(normalized_operation)
+            _apply_normalized_ownership_operation(
+                ownership_stage2,
+                normalized_operation,
+            )
+            continue
         items = actions if target_kind == "action" else regions if target_kind == "region" else {}
         if target_kind not in {"region", "action"} or not target_id:
             raise ValueError(f"human_review_patch operation {index} has invalid target")
@@ -2117,7 +2226,370 @@ def _normalize_human_review_operations(
             }
         )
     _validate_region_parent_graph(regions)
+    if has_ownership_operation:
+        remaining = _multiple_leaf_ownership(ownership_stage2 or {})
+        if remaining:
+            item_ids = ", ".join(sorted(remaining))
+            raise ValueError(
+                f"human_review_patch multiple leaf ownership remains: {item_ids}"
+            )
     return normalized
+
+
+def _normalize_ownership_target_contract(
+    operation: dict[str, Any],
+    *,
+    index: int,
+) -> dict[str, Any]:
+    target_kind = str(operation.get("target_kind") or "").strip()
+    target_id = str(operation.get("target_id") or "").strip()
+    if target_kind not in {"ownership", "leaf"} or not target_id:
+        raise ValueError(
+            f"human_review_patch operation {index} has invalid ownership target"
+        )
+
+    normalized = deepcopy(operation)
+    parent_target_kind = str(
+        operation.get("parent_target_kind") or ""
+    ).strip()
+    parent_target_id = str(operation.get("parent_target_id") or "").strip()
+    after_parent_group_id = str(
+        operation.get("after_parent_group_id") or ""
+    ).strip()
+    if target_kind == "leaf":
+        if parent_target_kind != "parent" or not parent_target_id:
+            raise ValueError(
+                f"human_review_patch operation {index} has invalid ownership parent target"
+            )
+        if after_parent_group_id and after_parent_group_id != parent_target_id:
+            raise ValueError(
+                f"human_review_patch operation {index} ownership parent targets disagree"
+            )
+        normalized["target_kind"] = "ownership"
+        normalized["after_parent_group_id"] = parent_target_id
+        normalized.pop("parent_target_kind", None)
+        normalized.pop("parent_target_id", None)
+        return normalized
+
+    if parent_target_kind or parent_target_id:
+        if parent_target_kind != "parent" or not parent_target_id:
+            raise ValueError(
+                f"human_review_patch operation {index} has invalid ownership parent target"
+            )
+        if after_parent_group_id and after_parent_group_id != parent_target_id:
+            raise ValueError(
+                f"human_review_patch operation {index} ownership parent targets disagree"
+            )
+        normalized["after_parent_group_id"] = parent_target_id
+        normalized.pop("parent_target_kind", None)
+        normalized.pop("parent_target_id", None)
+    return normalized
+
+
+def _hierarchy_ownership_stage2(draft: dict[str, Any]) -> dict[str, Any] | None:
+    page_details = (
+        draft.get("page_details")
+        if isinstance(draft.get("page_details"), dict)
+        else {}
+    )
+    two_stage = (
+        page_details.get("two_stage_understanding")
+        if isinstance(page_details.get("two_stage_understanding"), dict)
+        else {}
+    )
+    stage2 = two_stage.get("stage2_numbering")
+    return stage2 if isinstance(stage2, dict) else None
+
+
+def _normalize_ownership_operation(
+    operation: dict[str, Any],
+    stage2: dict[str, Any],
+    *,
+    index: int,
+) -> dict[str, Any]:
+    region_id = str(operation.get("region_id") or "").strip()
+    item_id = str(operation.get("target_id") or "").strip()
+    regions = [
+        region
+        for region in stage2.get("regions", [])
+        if isinstance(region, dict)
+        and str(region.get("region_id") or "").strip() == region_id
+    ]
+    if len(regions) != 1:
+        raise ValueError(
+            f"human_review_patch operation {index} ownership region does not exist exactly once"
+        )
+    region = regions[0]
+    item_numbers = {
+        str(item.get("item_id") or "").strip(): str(item.get("number") or "").strip()
+        for item in region.get("numbered_items", [])
+        if isinstance(item, dict) and str(item.get("item_id") or "").strip()
+    }
+    if item_id not in item_numbers:
+        raise ValueError(
+            f"human_review_patch operation {index} ownership item does not exist: {item_id}"
+        )
+    groups = _validated_ownership_groups(region, index=index)
+    after_parent_group_id = str(
+        operation.get("after_parent_group_id") or ""
+    ).strip()
+    if after_parent_group_id not in groups:
+        raise ValueError(
+            f"human_review_patch operation {index} ownership parent group does not exist: "
+            f"{after_parent_group_id}"
+        )
+    current_owners = _leaf_owner_ids(region, item_id)
+    before_parent_group_ids = sorted(
+        {
+            str(value or "").strip()
+            for value in operation.get("before_parent_group_ids", [])
+            if str(value or "").strip()
+        }
+    ) if isinstance(operation.get("before_parent_group_ids"), list) else []
+    if before_parent_group_ids != current_owners:
+        raise ValueError(
+            f"human_review_patch operation {index} ownership parent set is stale"
+        )
+    if len(current_owners) < 2 or after_parent_group_id not in current_owners:
+        raise ValueError(
+            f"human_review_patch operation {index} ownership correction must select one current leaf owner"
+        )
+    return {
+        "op": "resolve_ownership",
+        "target_kind": "ownership",
+        "target_id": item_id,
+        "region_id": region_id,
+        "before_parent_group_ids": current_owners,
+        "after_parent_group_id": after_parent_group_id,
+        "removed_from_group_ids": [
+            group_id
+            for group_id in current_owners
+            if group_id != after_parent_group_id
+        ],
+        "item_number": item_numbers[item_id],
+        "reason": str(operation.get("reason") or "").strip(),
+    }
+
+
+def _validated_ownership_groups(
+    region: dict[str, Any],
+    *,
+    index: int,
+) -> dict[str, dict[str, Any]]:
+    groups: dict[str, dict[str, Any]] = {}
+    for group in region.get("subregion_groups", []):
+        if not isinstance(group, dict):
+            raise ValueError(
+                f"human_review_patch operation {index} ownership group must be an object"
+            )
+        group_id = str(group.get("group_id") or "").strip()
+        if not group_id or group_id in groups:
+            raise ValueError(
+                f"human_review_patch operation {index} ownership group id is invalid"
+            )
+        groups[group_id] = group
+    for group_id, group in groups.items():
+        parent_group_id = str(
+            group.get("parent_group_id")
+            or group.get("resolved_parent_group_id")
+            or ""
+        ).strip()
+        if parent_group_id and (
+            parent_group_id == group_id or parent_group_id not in groups
+        ):
+            raise ValueError(
+                f"human_review_patch operation {index} ownership parent is invalid: "
+                f"{group_id}->{parent_group_id}"
+            )
+        member_ids = group.get("member_item_ids")
+        if member_ids is not None and not isinstance(member_ids, list):
+            raise ValueError(
+                f"human_review_patch operation {index} ownership membership must be an array"
+            )
+    return groups
+
+
+def _leaf_owner_ids(region: dict[str, Any], item_id: str) -> list[str]:
+    groups = {
+        str(group.get("group_id") or "").strip(): group
+        for group in region.get("subregion_groups", [])
+        if isinstance(group, dict) and str(group.get("group_id") or "").strip()
+    }
+    parent_group_ids = {
+        str(
+            group.get("parent_group_id")
+            or group.get("resolved_parent_group_id")
+            or ""
+        ).strip()
+        for group in groups.values()
+        if str(
+            group.get("parent_group_id")
+            or group.get("resolved_parent_group_id")
+            or ""
+        ).strip()
+    }
+    return sorted(
+        group_id
+        for group_id, group in groups.items()
+        if group_id not in parent_group_ids
+        and item_id
+        in {
+            str(member_id or "").strip()
+            for member_id in group.get("member_item_ids", [])
+        }
+    )
+
+
+def _multiple_leaf_ownership(stage2: dict[str, Any]) -> dict[str, list[str]]:
+    conflicts: dict[str, list[str]] = {}
+    for region in stage2.get("regions", []):
+        if not isinstance(region, dict):
+            raise ValueError("human_review_patch ownership region must be an object")
+        _validated_ownership_groups(region, index=0)
+        item_ids = {
+            str(item.get("item_id") or "").strip()
+            for item in region.get("numbered_items", [])
+            if isinstance(item, dict) and str(item.get("item_id") or "").strip()
+        }
+        for item_id in sorted(item_ids):
+            owners = _leaf_owner_ids(region, item_id)
+            if len(owners) > 1:
+                conflicts[f"{region.get('region_id')}:{item_id}"] = owners
+    return conflicts
+
+
+def _apply_normalized_ownership_operation(
+    stage2: dict[str, Any],
+    operation: dict[str, Any],
+) -> None:
+    region = next(
+        region
+        for region in stage2.get("regions", [])
+        if isinstance(region, dict)
+        and str(region.get("region_id") or "").strip() == operation["region_id"]
+    )
+    item_id = operation["target_id"]
+    item_number = operation["item_number"]
+    removed_groups = set(operation["removed_from_group_ids"])
+    canonical_groups = {
+        str(group.get("group_id") or "").strip(): group
+        for group in region.get("subregion_groups", [])
+        if isinstance(group, dict) and str(group.get("group_id") or "").strip()
+    }
+    mirror_groups = _ownership_mirror_groups(
+        region,
+        required_group_ids=removed_groups,
+    )
+    for group_id in sorted(removed_groups):
+        canonical = canonical_groups[group_id]
+        mirror = mirror_groups.get(group_id)
+        if mirror is not None and (
+            _ownership_member_ids(mirror) != _ownership_member_ids(canonical)
+            or _ownership_member_numbers(mirror)
+            != _ownership_member_numbers(canonical)
+        ):
+            raise ValueError(
+                f"human_review_patch ownership mirror is stale: {group_id}"
+            )
+        _remove_ownership_member(
+            canonical,
+            item_id=item_id,
+            item_number=item_number,
+        )
+        if mirror is not None:
+            _remove_ownership_member(
+                mirror,
+                item_id=item_id,
+                item_number=item_number,
+            )
+
+
+def _ownership_mirror_groups(
+    region: dict[str, Any],
+    *,
+    required_group_ids: set[str],
+) -> dict[str, dict[str, Any]]:
+    streams = region.get("stage2_streams")
+    if streams is None:
+        return {}
+    if not isinstance(streams, dict):
+        raise ValueError("human_review_patch ownership stage2_streams must be an object")
+    semantic_groups = streams.get("semantic_groups")
+    if semantic_groups is None:
+        return {}
+    if not isinstance(semantic_groups, list):
+        raise ValueError(
+            "human_review_patch ownership semantic_groups mirror must be an array"
+        )
+    mirrors: dict[str, dict[str, Any]] = {}
+    for group in semantic_groups:
+        if not isinstance(group, dict):
+            raise ValueError(
+                "human_review_patch ownership semantic group mirror must be an object"
+            )
+        group_id = str(group.get("group_id") or "").strip()
+        if not group_id or group_id in mirrors:
+            raise ValueError(
+                "human_review_patch ownership semantic group mirror id is invalid"
+            )
+        mirrors[group_id] = group
+    missing = sorted(required_group_ids - mirrors.keys())
+    if missing:
+        raise ValueError(
+            "human_review_patch ownership semantic group mirror is missing: "
+            + ", ".join(missing)
+        )
+    return mirrors
+
+
+def _ownership_member_ids(group: dict[str, Any]) -> list[str]:
+    values = group.get("member_item_ids")
+    if not isinstance(values, list):
+        raise ValueError("human_review_patch ownership membership must be an array")
+    return [str(value or "").strip() for value in values]
+
+
+def _ownership_member_numbers(group: dict[str, Any]) -> list[str] | None:
+    values = group.get("member_numbers")
+    if values is None:
+        return None
+    if not isinstance(values, list):
+        raise ValueError(
+            "human_review_patch ownership member numbers must be an array"
+        )
+    return [str(value or "").strip() for value in values]
+
+
+def _remove_ownership_member(
+    group: dict[str, Any],
+    *,
+    item_id: str,
+    item_number: str,
+) -> None:
+    member_ids = _ownership_member_ids(group)
+    member_numbers = _ownership_member_numbers(group)
+    if member_numbers is not None:
+        if len(member_numbers) != len(member_ids):
+            raise ValueError(
+                "human_review_patch ownership member numbers are inconsistent"
+            )
+        kept_pairs = [
+            (member_id, member_number)
+            for member_id, member_number in zip(member_ids, member_numbers)
+            if member_id != item_id
+        ]
+        group["member_item_ids"] = [member_id for member_id, _ in kept_pairs]
+        group["member_numbers"] = [number for _, number in kept_pairs]
+    else:
+        group["member_item_ids"] = [
+            member_id for member_id in member_ids if member_id != item_id
+        ]
+    if "current_evidence_member_count" in group:
+        group["current_evidence_member_count"] = len(group["member_item_ids"])
+    if item_id in group["member_item_ids"]:
+        raise ValueError("human_review_patch ownership member removal failed")
+    if item_number and item_number in group.get("member_numbers", []):
+        raise ValueError("human_review_patch ownership number removal failed")
 
 
 def _normalize_human_review_metadata(value: Any) -> dict[str, Any]:
@@ -2190,6 +2662,119 @@ def _next_human_review_patch_path(out_dir: Path) -> tuple[int, Path]:
     return revision, out_dir / f"human_review_patch_r{revision:04d}.json"
 
 
+def _apply_hierarchy_ownership_corrections(
+    draft: dict[str, Any],
+    human_review_patch: dict[str, Any],
+    *,
+    review: dict[str, Any],
+    root: Path,
+    patch_path: Path | None,
+) -> dict[str, Any]:
+    operations = [
+        operation
+        for operation in _list_of_dicts(human_review_patch.get("operations"))
+        if operation.get("op") == "resolve_ownership"
+    ]
+    if not operations:
+        return {}
+    stage2 = _hierarchy_ownership_stage2(draft)
+    if stage2 is None:
+        raise ValueError("human_review_patch ownership stage2 evidence is missing")
+    source_stage2_sha256 = _canonical_json_sha256(stage2)
+    for operation in operations:
+        _apply_normalized_ownership_operation(stage2, operation)
+    remaining = _multiple_leaf_ownership(stage2)
+    if remaining:
+        raise ValueError(
+            "human_review_patch multiple leaf ownership remains: "
+            + ", ".join(sorted(remaining))
+        )
+    reviewed_stage2_sha256 = _canonical_json_sha256(stage2)
+    reviewed_at = datetime.now().isoformat()
+    source = review.get("source") if isinstance(review.get("source"), dict) else {}
+    evidence_lineage = {
+        "source_draft_path": str(source.get("source_path") or ""),
+        "source_draft_sha256": str(source.get("sha256") or ""),
+        "screenshot_path": str(human_review_patch.get("screenshot_path") or ""),
+        "screenshot_sha256": str(human_review_patch.get("screenshot_sha256") or ""),
+        "human_review_patch_path": (
+            _relative_path(patch_path, root) if patch_path is not None else ""
+        ),
+        "human_review_patch_revision": human_review_patch.get("revision"),
+    }
+    revision = {
+        "contract_version": HIERARCHY_OWNERSHIP_REVIEW_CONTRACT,
+        "status": "corrected_needs_integrity_revalidation",
+        "integrity_revalidation_status": "pending",
+        "agent_usable": False,
+        "reviewed_by_human": True,
+        "created_at": reviewed_at,
+        "source_stage2_sha256": source_stage2_sha256,
+        "reviewed_stage2_sha256": reviewed_stage2_sha256,
+        "corrections": [
+            {
+                "region_id": operation["region_id"],
+                "item_id": operation["target_id"],
+                "before_parent_group_ids": deepcopy(
+                    operation["before_parent_group_ids"]
+                ),
+                "after_parent_group_id": operation["after_parent_group_id"],
+                "removed_from_group_ids": deepcopy(
+                    operation["removed_from_group_ids"]
+                ),
+                "reason": str(operation.get("reason") or ""),
+            }
+            for operation in operations
+        ],
+        "evidence_lineage": evidence_lineage,
+        "human_review_provenance": {
+            "source": str(
+                human_review_patch.get("source") or "human_panel_editor_v1"
+            ),
+            "reason": str(human_review_patch.get("reason") or ""),
+            "reviewed_at": reviewed_at,
+        },
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+        "final_submit_forbidden": True,
+    }
+    revision["canonical_revision_sha256"] = _canonical_json_sha256(revision)
+    page_details = (
+        draft.get("page_details")
+        if isinstance(draft.get("page_details"), dict)
+        else {}
+    )
+    page_details["hierarchy_ownership_review"] = deepcopy(revision)
+    draft["page_details"] = page_details
+    human_review_patch["hierarchy_ownership_review"] = deepcopy(revision)
+    return revision
+
+
+def _canonical_json_sha256(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _correction_memory_compatible_patch(
+    human_review_patch: dict[str, Any],
+) -> dict[str, Any]:
+    if not human_review_patch:
+        return {}
+    compatible = deepcopy(human_review_patch)
+    compatible["operations"] = [
+        deepcopy(operation)
+        for operation in _list_of_dicts(human_review_patch.get("operations"))
+        if operation.get("op") != "resolve_ownership"
+    ]
+    return compatible
+
+
 def _compile_human_review_patch(
     legacy_patch: dict[str, Any],
     human_review_patch: dict[str, Any],
@@ -2209,6 +2794,8 @@ def _compile_human_review_patch(
         op = operation.get("op")
         target_kind = operation.get("target_kind")
         target_id = str(operation.get("target_id") or "")
+        if op == "resolve_ownership":
+            continue
         if op == "add":
             (action_additions if target_kind == "action" else region_additions).append(deepcopy(operation["item"]))
             continue
@@ -2393,6 +2980,8 @@ def _apply_metadata_updates(
 
 
 def _apply_review_deletions(draft: dict[str, Any], review_patch: dict[str, Any], changes: list[str]) -> None:
+    deleted_region_ids: set[str] = set()
+    deleted_action_ids: set[str] = set()
     for draft_key, patch_key, id_key, prefix in (
         ("regions", "region_deletions", "region_id", "region"),
         ("action_templates", "action_deletions", "action_template_id", "action"),
@@ -2404,6 +2993,10 @@ def _apply_review_deletions(draft: dict[str, Any], review_patch: dict[str, Any],
         } if isinstance(review_patch.get(patch_key), list) else set()
         if not requested:
             continue
+        if draft_key == "regions":
+            deleted_region_ids.update(requested)
+        else:
+            deleted_action_ids.update(requested)
         retained: list[dict[str, Any]] = []
         for item in _list_of_dicts(draft.get(draft_key)):
             item_id = str(item.get(id_key) or item.get("action_id") or "").strip()
@@ -2412,6 +3005,179 @@ def _apply_review_deletions(draft: dict[str, Any], review_patch: dict[str, Any],
             else:
                 retained.append(item)
         draft[draft_key] = retained
+    _prune_deleted_review_references(
+        draft,
+        deleted_region_ids=deleted_region_ids,
+        deleted_action_ids=deleted_action_ids,
+    )
+
+
+def _prune_deleted_review_references(
+    draft: dict[str, Any],
+    *,
+    deleted_region_ids: set[str],
+    deleted_action_ids: set[str],
+) -> None:
+    if not deleted_region_ids and not deleted_action_ids:
+        return
+
+    for state in _list_of_dicts(draft.get("states")):
+        if isinstance(state.get("region_refs"), list):
+            state["region_refs"] = _prune_deleted_review_items(
+                state["region_refs"],
+                deleted_region_ids=deleted_region_ids,
+                deleted_action_ids=set(),
+            )
+        if isinstance(state.get("action_template_refs"), list):
+            state["action_template_refs"] = _prune_deleted_review_items(
+                state["action_template_refs"],
+                deleted_region_ids=set(),
+                deleted_action_ids=deleted_action_ids,
+            )
+
+    page_details = draft.get("page_details") if isinstance(draft.get("page_details"), dict) else {}
+    layout = page_details.get("layout") if isinstance(page_details.get("layout"), dict) else {}
+    for section in _list_of_dicts(layout.get("sections")):
+        if isinstance(section.get("regions"), list):
+            section["regions"] = _prune_deleted_review_items(
+                section["regions"],
+                deleted_region_ids=deleted_region_ids,
+                deleted_action_ids=set(),
+            )
+        if isinstance(section.get("operation_links"), list):
+            section["operation_links"] = _prune_deleted_review_items(
+                section["operation_links"],
+                deleted_region_ids=deleted_region_ids,
+                deleted_action_ids=deleted_action_ids,
+            )
+    if isinstance(layout.get("regions"), list):
+        layout["regions"] = _prune_deleted_review_items(
+            layout["regions"],
+            deleted_region_ids=deleted_region_ids,
+            deleted_action_ids=set(),
+        )
+    if isinstance(page_details.get("review_only_regions"), list):
+        page_details["review_only_regions"] = _prune_deleted_review_items(
+            page_details["review_only_regions"],
+            deleted_region_ids=deleted_region_ids,
+            deleted_action_ids=set(),
+        )
+
+    _prune_deleted_hierarchy_nodes(
+        draft.get("ui_hierarchy"),
+        deleted_region_ids=deleted_region_ids,
+        deleted_action_ids=deleted_action_ids,
+    )
+    _prune_deleted_hierarchy_nodes(
+        page_details.get("ui_hierarchy"),
+        deleted_region_ids=deleted_region_ids,
+        deleted_action_ids=deleted_action_ids,
+    )
+
+
+def _prune_deleted_review_items(
+    value: Any,
+    *,
+    deleted_region_ids: set[str],
+    deleted_action_ids: set[str],
+) -> list[Any]:
+    if not isinstance(value, list):
+        return []
+    return [
+        item
+        for item in value
+        if not _review_item_references_deleted_id(
+            item,
+            deleted_region_ids=deleted_region_ids,
+            deleted_action_ids=deleted_action_ids,
+        )
+    ]
+
+
+def _review_item_references_deleted_id(
+    item: Any,
+    *,
+    deleted_region_ids: set[str],
+    deleted_action_ids: set[str],
+) -> bool:
+    if isinstance(item, str):
+        return item.strip() in deleted_region_ids or item.strip() in deleted_action_ids
+    if not isinstance(item, dict):
+        return False
+    for key in ("region_id", "source_region_id", "target_region_id", "target_entity"):
+        if str(item.get(key) or "").strip() in deleted_region_ids:
+            return True
+    for key in ("action_template_id", "action_id", "source_action_template_id", "target_action_template_id"):
+        if str(item.get(key) or "").strip() in deleted_action_ids:
+            return True
+    for key in ("source_item_id", "item_id", "id", "source_ref", "node_id"):
+        item_id = str(item.get(key) or "").strip()
+        if item_id in deleted_region_ids or item_id in deleted_action_ids:
+            return True
+    return False
+
+
+def _prune_deleted_hierarchy_nodes(
+    value: Any,
+    *,
+    deleted_region_ids: set[str],
+    deleted_action_ids: set[str],
+) -> None:
+    if not isinstance(value, dict):
+        return
+    nodes = _list_of_dicts(value.get("nodes"))
+    removed_node_ids = {
+        str(node.get("node_id") or "").strip()
+        for node in nodes
+        if _review_item_references_deleted_id(
+            node,
+            deleted_region_ids=deleted_region_ids,
+            deleted_action_ids=deleted_action_ids,
+        )
+    }
+    while removed_node_ids:
+        descendants = {
+            str(node.get("node_id") or "").strip()
+            for node in nodes
+            if str(node.get("parent_id") or "").strip() in removed_node_ids
+        }
+        new_descendants = descendants - removed_node_ids
+        if not new_descendants:
+            break
+        removed_node_ids.update(new_descendants)
+    if not removed_node_ids:
+        return
+
+    retained_nodes = [
+        node for node in nodes if str(node.get("node_id") or "").strip() not in removed_node_ids
+    ]
+    for node in retained_nodes:
+        if isinstance(node.get("children"), list):
+            node["children"] = [
+                child for child in node["children"] if str(child or "").strip() not in removed_node_ids
+            ]
+    value["nodes"] = retained_nodes
+    if isinstance(value.get("edges"), list):
+        value["edges"] = [
+            edge
+            for edge in value["edges"]
+            if isinstance(edge, dict)
+            and not any(
+                str(edge.get(key) or "").strip() in removed_node_ids
+                for key in ("parent_id", "child_id", "source", "target", "source_node_id", "target_node_id")
+            )
+        ]
+    if isinstance(value.get("roots"), list):
+        value["roots"] = [
+            root for root in value["roots"] if str(root or "").strip() not in removed_node_ids
+        ]
+    if str(value.get("root_node_id") or "").strip() in removed_node_ids:
+        value["root_node_id"] = ""
+    summary = value.get("summary") if isinstance(value.get("summary"), dict) else None
+    if summary is not None:
+        summary["node_count"] = len(retained_nodes)
+        if isinstance(value.get("edges"), list):
+            summary["edge_count"] = len(value["edges"])
 
 
 def _apply_review_additions(draft: dict[str, Any], review_patch: dict[str, Any], changes: list[str]) -> None:
@@ -2684,6 +3450,14 @@ def _bind_review_source_image(draft: dict[str, Any], root: Path) -> None:
     expected_sha256 = str(source.get("sha256") or "").strip().lower()
     if expected_sha256 and expected_sha256 != actual_sha256:
         return
+    source_image_size: dict[str, int] = {}
+    try:
+        with Image.open(resolved) as source_image:
+            width, height = source_image.size
+        source_image_size = {"width": int(width), "height": int(height)}
+    except (OSError, UnidentifiedImageError):
+        # 损坏图片仍沿用原有完整性处理链；这里只为可读取证据补充坐标空间。
+        pass
     panel_source = _materialize_panel_review_source_image(
         resolved,
         root=root,
@@ -2697,6 +3471,8 @@ def _bind_review_source_image(draft: dict[str, Any], root: Path) -> None:
     screen["source_image_binding_source"] = str(source.get("source") or "")
     screen["source_image_binding_allows_computed_checksum"] = bool(source.get("allow_computed_checksum"))
     screen["source_image_materialized_for_panel"] = panel_source != resolved
+    if source_image_size:
+        screen["screen_size"] = source_image_size
     screen["artifact_is_authorization"] = False
     screen["execute_binding_enabled"] = False
     page_details["screen"] = screen

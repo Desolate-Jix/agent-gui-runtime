@@ -51,10 +51,13 @@
   ],
   "blockers": [],
   "review": {
-    "status": "human_reviewed",
+    "status": "human_approved",
     "manual_revision": {
       "semantic_description": "Use task progress to choose the next unfinished branch."
-    }
+    },
+    "reviewed_by_human": true,
+    "reviewed_revision_hash": "28477efc60d31451a74b8afe84500e7a1de78fcb6c3fbfd3db39122ead3082f0",
+    "current_revision_hash": "28477efc60d31451a74b8afe84500e7a1de78fcb6c3fbfd3db39122ead3082f0"
   },
   "evidence": {},
   "execute_binding_enabled": false

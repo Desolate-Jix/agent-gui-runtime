@@ -240,6 +240,44 @@ def _trace_paths(*items: Any) -> list[str]:
     return list(dict.fromkeys(paths))
 
 
+def _answer_policy_projection(plan: dict[str, Any] | None) -> dict[str, Any]:
+    """只保留回答策略元数据，避免只读审计产物写入候选人的原始答案。"""
+
+    source = plan if isinstance(plan, dict) else {}
+    items = source.get("answers") if isinstance(source.get("answers"), list) else source.get("planned_answers")
+    policies: list[dict[str, Any]] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        raw_value = item.get("planned_answer")
+        if raw_value is None:
+            raw_value = item.get("value")
+        serialized = "" if raw_value is None else json.dumps(raw_value, ensure_ascii=False, sort_keys=True)
+        item_source = item.get("source") if isinstance(item.get("source"), dict) else {}
+        policies.append(
+            {
+                "field_id": item.get("field_id") or item_source.get("id"),
+                "question_id": item.get("question_id"),
+                "label": item.get("label") or item.get("question_text"),
+                "policy": item.get("policy") or item.get("category") or item.get("status"),
+                "reason": item.get("reason"),
+                "answer_source": item.get("answer_source"),
+                "requires_user_review": item.get("requires_user_review"),
+                "value_length": len(serialized),
+                "value_hash": hashlib.sha256(serialized.encode("utf-8")).hexdigest() if serialized else None,
+                "value_redacted": bool(serialized),
+            }
+        )
+    return {
+        "contract_version": "answer_policy_projection_v1",
+        "source_contract_version": source.get("contract_version"),
+        "status": source.get("status"),
+        "counts": source.get("counts") if isinstance(source.get("counts"), dict) else {},
+        "policies": policies,
+        "pii_redacted": True,
+    }
+
+
 def _capture(base_url: str, timeout: float) -> dict[str, Any]:
     response = _post_json(base_url, "/state/capture_window", {"save_image": True}, timeout)
     if response.get("success") is not True:
@@ -1444,7 +1482,8 @@ def _read_detail_batch(
         capture_item["scroll_wheel_clicks"] = request["wheel_clicks"]
         capture_item["scroll_effect_status"] = effect.get("status")
         capture_item["scroll_response"] = _compact_action_response(scroll_response)
-        if effect.get("status") == "bottom_reached":
+        if effect.get("status") in {"bottom_reached", "reached_bottom"}:
+            capture_item["reached_bottom"] = True
             break
     return build_read_region_batch_report(
         target_container_id=learned_scroll["target_container_id"],
@@ -2814,6 +2853,8 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
             "capture_count": batch.get("capture_count"),
             "unique_line_count": batch.get("unique_line_count"),
             "stop_reason": batch.get("stop_reason"),
+            "read_state": batch.get("read_state"),
+            "read_complete": batch.get("read_complete") is True,
             "merged_description_section_count": len((merged_detail or {}).get("description_sections") or []),
             "trace_paths": [item.get("trace_path") for item in batch.get("captures", []) if item.get("trace_path")],
         }
@@ -2824,7 +2865,20 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
         card = state.get("current_job") if isinstance(state.get("current_job"), dict) else None
         detail = state.get("detail") if isinstance(state.get("detail"), dict) else None
         require_latest_detail_snapshot(state, detail)
-        decision = score_seek_job(profile=profile, card=card, detail=detail, detail_complete=True)
+        detail_snapshot = (
+            detail.get("runtime_detail_snapshot")
+            if isinstance(detail, dict) and isinstance(detail.get("runtime_detail_snapshot"), dict)
+            else {}
+        )
+        detail_complete = detail_snapshot.get("read_complete") is True
+        detail_read_state = str(detail_snapshot.get("read_state") or "unknown")
+        decision = score_seek_job(
+            profile=profile,
+            card=card,
+            detail=detail,
+            detail_complete=detail_complete,
+            missing_detail_evidence=[] if detail_complete else [detail_read_state],
+        )
         review = find_agent_suitability_review(
             agent_suitability_reviews,
             match_decision=decision,
@@ -2840,6 +2894,8 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
             "card": card,
             "detail": detail,
             "match_decision": decision,
+            "detail_snapshot_read_state": detail_read_state,
+            "detail_snapshot_read_complete": detail_complete,
             "saved_job_record_path": saved_path,
             "agent_suitability_reviews_loaded": len(agent_suitability_reviews),
             "agent_suitability_review_applied": review is not None,
@@ -2864,6 +2920,7 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
             fill_safe_fields=bool(args.fill_safe_fields and execute),
             max_safe_fields_to_fill=args.max_safe_fields_to_fill,
             allow_cover_letter_fill=bool(args.allow_cover_letter_fill and execute),
+            approved_field_id=getattr(args, "approved_live_field_id", None),
         )
         post_capture_wait_seconds = float(args.post_apply_capture_wait_seconds or 0) if execute else 0.0
         post_apply_wait = (
@@ -2920,6 +2977,7 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
         else:
             state["next_allowed_steps"] = ["execute_apply_entry", "match"]
     elif step == "continue_application_flow":
+        read_only_inventory = bool(getattr(args, "read_only_inventory", False))
         replay_report = _read_json(args.application_flow_replay)
         profile = load_candidate_profile(args.candidate_profile)
         job, detail, decision, application_context = _require_application_flow_context(
@@ -2964,7 +3022,18 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
             "final_submissions": 0,
         }
         selected_transition = replay_context.get("selected_transition") if isinstance(replay_context.get("selected_transition"), dict) else {}
-        if replay_context.get("allows_final_submit"):
+        if read_only_inventory:
+            if flow_decision.get("decision") == "continue_read_only":
+                answer_plan = build_application_answer_plan(
+                    profile=profile,
+                    application_flow_state=flow_state,
+                    cover_letter_draft=None,
+                )
+            safe_fill_attempt["status"] = "not_attempted_read_only_inventory"
+            safe_fill_attempt["stop_reason"] = "read_only_inventory_forbids_fill"
+            employer_question_fill_attempt["status"] = "not_attempted_read_only_inventory"
+            employer_question_fill_attempt["stop_reason"] = "read_only_inventory_forbids_answers"
+        elif replay_context.get("allows_final_submit"):
             safe_fill_attempt["status"] = "blocked_final_submit_forbidden"
             safe_fill_attempt["stop_reason"] = "strict_replay_transition_would_allow_final_submit"
             employer_question_fill_attempt["status"] = "blocked_final_submit_forbidden"
@@ -2999,6 +3068,7 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
                 execute_fill=bool(args.fill_safe_fields),
                 max_safe_fields_to_fill=args.max_safe_fields_to_fill,
                 allow_cover_letter_fill=bool(args.allow_cover_letter_fill),
+                approved_field_id=getattr(args, "approved_live_field_id", None),
                 timeout=args.timeout,
             )
         continue_after_fill = {
@@ -3009,7 +3079,7 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
             "submit_clicks": 0,
             "final_submissions": 0,
         }
-        if (
+        if not read_only_inventory and (
             _is_answer_questions_transition(selected_transition)
             and employer_question_fill_attempt.get("status") == "filled_until_review"
             and int(employer_question_fill_attempt.get("answered_count") or 0) > 0
@@ -3023,7 +3093,7 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
             if isinstance(continue_after_fill.get("post_continue_application_flow_state"), dict):
                 flow_state = continue_after_fill["post_continue_application_flow_state"]
                 flow_decision = build_seek_apply_flow_decision(flow_state)
-        elif (
+        elif not read_only_inventory and (
             selected_transition.get("low_level_action_type") == "type_text_and_gated_continue"
             and safe_fill_attempt.get("status") == "filled_until_review"
             and int(safe_fill_attempt.get("fields_filled") or 0) > 0
@@ -3037,7 +3107,7 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
             if isinstance(continue_after_fill.get("post_continue_application_flow_state"), dict):
                 flow_state = continue_after_fill["post_continue_application_flow_state"]
                 flow_decision = build_seek_apply_flow_decision(flow_state)
-        elif (
+        elif not read_only_inventory and (
             flow_state.get("current_step") == "update_seek_profile"
             and flow_decision.get("decision") == "continue_read_only"
             and int(safe_fill_attempt.get("final_submissions") or 0) == 0
@@ -3061,13 +3131,28 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
             after_image=after["image_path"],
             expected_change="step_changed" if continue_after_fill.get("executed") else "field_value_changed",
         )
+        stored_answer_plan = _answer_policy_projection(answer_plan) if read_only_inventory else answer_plan
+        stored_employer_answer_plan = (
+            _answer_policy_projection(employer_question_answer_plan)
+            if read_only_inventory
+            else employer_question_answer_plan
+        )
+        stored_employer_answer_preview = (
+            {
+                "contract_version": "answer_preview_redacted_v1",
+                "status": "suppressed_for_read_only_inventory",
+                "pii_redacted": True,
+            }
+            if read_only_inventory
+            else employer_question_answer_preview
+        )
         state["application_flow_state"] = flow_state
         state["apply_flow_decision"] = flow_decision
         state["cover_letter_draft"] = cover_letter_draft
-        state["application_answer_plan"] = answer_plan
+        state["application_answer_plan"] = stored_answer_plan
         state["employer_question_inventory"] = employer_question_inventory
-        state["employer_question_answer_plan"] = employer_question_answer_plan
-        state["employer_question_answer_preview"] = employer_question_answer_preview
+        state["employer_question_answer_plan"] = stored_employer_answer_plan
+        state["employer_question_answer_preview"] = stored_employer_answer_preview
         state["execute_observation"] = execute_artifacts.get("execute_observation")
         state["form_field_inventory"] = execute_artifacts.get("form_field_inventory")
         state["ui_diff_verification"] = execute_artifacts.get("ui_diff_verification")
@@ -3076,7 +3161,7 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
         state["continue_after_fill"] = continue_after_fill
         state["application_replay_context"] = replay_context
         state["application_context"] = application_context
-        report_status = (
+        report_status = "read_only_inventory_ready" if read_only_inventory else (
             continue_after_fill.get("status")
             if continue_after_fill.get("attempted")
             else (
@@ -3087,6 +3172,10 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
         )
         report = {
             "status": report_status,
+            "read_only_inventory": read_only_inventory,
+            "live_fill_attempted": False if read_only_inventory else bool(
+                safe_fill_attempt.get("enabled") or employer_question_fill_attempt.get("enabled")
+            ),
             "before_image": before["image_path"],
             "after_image": after["image_path"],
             "application_flow_state": flow_state,
@@ -3101,9 +3190,9 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
             "requires_safe_fill_focus": replay_context.get("requires_safe_fill_focus"),
             "requires_post_fill_verification": replay_context.get("requires_post_fill_verification"),
             "cover_letter_draft": cover_letter_draft,
-            "application_answer_plan": answer_plan,
-            "employer_question_answer_plan": employer_question_answer_plan,
-            "employer_question_answer_preview": employer_question_answer_preview,
+            "application_answer_plan": stored_answer_plan,
+            "employer_question_answer_plan": stored_employer_answer_plan,
+            "employer_question_answer_preview": stored_employer_answer_preview,
             "execute_observation": execute_artifacts.get("execute_observation"),
             "form_field_inventory": execute_artifacts.get("form_field_inventory"),
             "ui_diff_verification": execute_artifacts.get("ui_diff_verification"),
@@ -3113,9 +3202,12 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
             "form_fields_filled": safe_fill_attempt.get("fields_filled", 0),
             "employer_questions_answered": employer_question_fill_attempt.get("answered_count", 0),
             "final_submission_performed": False,
+            "submit_clicks": 0,
             "trace_paths": _trace_paths(observation, continue_after_fill),
         }
-        if (
+        if read_only_inventory:
+            state["next_allowed_steps"] = ["capture"]
+        elif (
             continue_after_fill.get("status") == "continued_to_next_step"
             and continue_after_fill.get("final_submit_visible") is not True
             and flow_state.get("current_step") != "review_and_submit"
@@ -3246,8 +3338,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum application-flow readiness poll after a real Apply Entry click before taking the debug screenshot.",
     )
     parser.add_argument("--fill-safe-fields", action="store_true")
+    parser.add_argument(
+        "--read-only-inventory",
+        action="store_true",
+        help="Read one live application-form inventory and answer policy, then stop without filling or continuing.",
+    )
     parser.add_argument("--max-safe-fields-to-fill", type=int, default=1)
     parser.add_argument("--allow-cover-letter-fill", action="store_true")
+    parser.add_argument(
+        "--approved-live-field-id",
+        default=None,
+        help="Stable field ID explicitly approved for this live fill. Live fill fails closed when omitted.",
+    )
     parser.add_argument(
         "--allow-close-windows",
         action="store_true",

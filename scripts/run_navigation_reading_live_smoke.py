@@ -27,6 +27,7 @@ def main() -> int:
     parser.add_argument("--runtime-endpoint", default="http://127.0.0.1:8000")
     parser.add_argument("--decision-endpoint", default="http://127.0.0.1:1240")
     parser.add_argument("--decision-model", default="qwen3-vl-8b-instruct")
+    parser.add_argument("--workflow-project-root", default=str(ROOT_DIR))
     parser.add_argument("--max-steps", type=int, default=18)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
@@ -34,6 +35,7 @@ def main() -> int:
     report = run_navigation_reading_live_smoke(
         suite_path=args.suite,
         out_dir=args.out,
+        workflow_project_root=args.workflow_project_root,
         runtime_endpoint=args.runtime_endpoint,
         decision_endpoint=args.decision_endpoint,
         decision_model=args.decision_model,

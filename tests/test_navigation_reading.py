@@ -27,6 +27,22 @@ def _evidence() -> dict:
                 "observation_status": "requires_observation",
             }
         ],
+        "semantic_controls": [
+            {
+                "control_id": "article_card",
+                "semantic_name": "Selected article card",
+                "purpose": "Open the selected current article.",
+                "role": "card",
+                "allowed_actions": ["open_detail"],
+                "verification_rule": {
+                    "rule_ids": ["detail_heading_visible"],
+                    "success_conditions": ["news:detail matched"],
+                },
+                "risk_class": "low",
+                "review_status": "approved",
+                "requires_fresh_grounding": True,
+            }
+        ],
         "available_actions": [
             {
                 "action_id": "open_article",
@@ -139,6 +155,14 @@ def test_context_exposes_reviewed_transition_and_on_demand_read_without_geometry
         "completed_read_content_ids": ["news_detail:article"],
     }
     assert context["execution_contract"]["artifact_is_authorization"] is False
+    transition = next(
+        item for item in context["choices"]
+        if item["decision_type"] == "follow_transition"
+    )
+    assert transition["source_control"]["semantic_name"] == (
+        "Selected article card"
+    )
+    assert transition["source_control"]["allowed_actions"] == ["open_detail"]
     read_choice = next(
         item for item in context["choices"]
         if item["decision_type"] == "read_region"
@@ -147,6 +171,27 @@ def test_context_exposes_reviewed_transition_and_on_demand_read_without_geometry
     assert _all_keys(context).isdisjoint(
         {"bbox", "click_point", "coordinates", "point", "viewport_size"}
     )
+
+
+def test_context_does_not_offer_a_completed_transition_again() -> None:
+    context = build_navigation_reading_context(
+        goal="Read each branch once.",
+        interface_evidence=_evidence(),
+        observation=_observation(),
+        task_progress={
+            "sequence": 2,
+            "visited_interfaces": ["news:list", "news:detail", "news:list"],
+            "completed_choice_ids": ["transition:open_article"],
+            "last_outcome": "passed",
+            "bounded_read_content_ids": [],
+            "completed_read_content_ids": [],
+        },
+    )
+
+    choice_ids = {item["choice_id"] for item in context["choices"]}
+    assert "transition:open_article" not in choice_ids
+    assert "read:article_feed" in choice_ids
+    assert "safe_stop:agent_requested_safe_stop" in choice_ids
 
 
 def test_finite_detail_reached_bottom_does_not_offer_more_scrolling() -> None:
@@ -282,6 +327,34 @@ def test_active_incomplete_read_hides_same_read_choice_and_requires_scroll() -> 
     assert "scroll:current_read_region" in choice_ids
 
 
+def test_capture_batch_exhaustion_remains_scrollable_for_finite_read() -> None:
+    evidence = _evidence()
+    evidence["interface"]["interface_id"] = "news:detail"
+    evidence["deferred_reads"][0]["content_id"] = "article_body"
+    observation = _observation()
+    observation["interface_id"] = "news:detail"
+
+    context = build_navigation_reading_context(
+        goal="Read the whole article.",
+        interface_evidence=evidence,
+        observation=observation,
+        read_progress={
+            "content_id": "article_body",
+            "strategy": "finite_detail",
+            "status": "captures_exhausted",
+            "scrolls_used": 0,
+            "max_scrolls": 6,
+        },
+    )
+
+    assert context["read_state"]["status"] == "capture_batch_complete"
+    assert context["read_state"]["batch_stop_reason"] == "captures_exhausted"
+    assert context["read_state"]["completion"] == "incomplete"
+    assert "scroll:current_read_region" in {
+        item["choice_id"] for item in context["choices"]
+    }
+
+
 def test_infinite_collection_budget_exhaustion_stops_more_scrolling() -> None:
     context = build_navigation_reading_context(
         goal="Scan up to 20 headlines.",
@@ -373,6 +446,23 @@ def test_context_rejects_unreviewed_asset_or_mismatched_observation() -> None:
             goal="Open an article.",
             interface_evidence=_evidence(),
             observation=observation,
+        )
+
+
+def test_context_rejects_agent_usable_marker_with_bbox_only_control() -> None:
+    evidence = _evidence()
+    evidence["semantic_controls"] = [
+        {
+            "control_id": "article_card",
+            "bbox": {"x": 10, "y": 20, "width": 100, "height": 80},
+        }
+    ]
+
+    with pytest.raises(ValueError, match="semantic control"):
+        build_navigation_reading_context(
+            goal="Open an article.",
+            interface_evidence=evidence,
+            observation=_observation(),
         )
 
 

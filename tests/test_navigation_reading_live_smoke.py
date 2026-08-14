@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
+
+import pytest
 from pathlib import Path
 
 from app.agent.navigation_reading_live_smoke import (
@@ -60,7 +63,7 @@ def _asset() -> dict:
                 "label": "Open next interface",
                 "role": "button",
                 "agent_description": "Open the next reviewed interface.",
-                "review_status": "human_reviewed",
+                "review_status": "human_approved",
             }
         ],
         "action_candidates": [],
@@ -72,7 +75,7 @@ def _asset() -> dict:
         ],
         "blockers": [],
         "review": {
-            "status": "human_reviewed",
+            "status": "human_approved",
             "manual_revision": {
                 "semantic_description": "Read the finite detail, then continue."
             },
@@ -82,11 +85,44 @@ def _asset() -> dict:
     }
 
 
+def _canonical_sha256(value: dict) -> str:
+    content = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(content).hexdigest()
+
+
+def _approve_asset(asset: dict) -> dict:
+    revision = {
+        "interface_id": asset["interface_id"],
+        "audit_evidence_sha256": _canonical_sha256(asset["evidence"]),
+    }
+    revision_hash = _canonical_sha256(revision)
+    asset["review"].update(
+        {
+            "reviewed_by_human": True,
+            "reviewed_revision_hash": revision_hash,
+            "current_revision_hash": revision_hash,
+        }
+    )
+    return {"revision": revision, "revision_hash": revision_hash}
+
+
+def _write_reviewed_asset(path: Path, asset: dict) -> tuple[str, dict]:
+    persisted_revision = _approve_asset(asset)
+    asset_sha = _write_json(path, asset)
+    persisted_revision["source_asset_sha256"] = asset_sha
+    return asset_sha, persisted_revision
+
+
 def test_reviewed_suite_compiles_agent_evidence_with_hash_and_read_prerequisite(
     tmp_path: Path,
 ) -> None:
     asset_path = tmp_path / "assets" / "detail.json"
-    asset_sha = _write_json(asset_path, _asset())
+    asset_sha, asset_revision = _write_reviewed_asset(asset_path, _asset())
     manifest_path = tmp_path / "suite.json"
     _write_json(
         manifest_path,
@@ -112,6 +148,7 @@ def test_reviewed_suite_compiles_agent_evidence_with_hash_and_read_prerequisite(
                     "interface_id": "lab_detail",
                     "path": "assets/detail.json",
                     "sha256": asset_sha,
+                    "persisted_review_revision": asset_revision,
                 }
             ],
             "transitions": [
@@ -126,7 +163,7 @@ def test_reviewed_suite_compiles_agent_evidence_with_hash_and_read_prerequisite(
                     "operation_goal": "Click the button labeled Open next interface",
                     "requires_completed_read": "detail_body",
                     "risk_level": "low",
-                    "review_status": "human_reviewed",
+                    "review_status": "human_approved",
                     "success_conditions": ["Lab Next Interface is visible"],
                 }
             ],
@@ -143,6 +180,109 @@ def test_reviewed_suite_compiles_agent_evidence_with_hash_and_read_prerequisite(
         "Click the button labeled Open next interface"
     )
     assert evidence["available_actions"][0]["requires_completed_read"] == "detail_body"
+
+
+def test_live_smoke_rejects_missing_persisted_revision_before_capture_or_model(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    asset_path = tmp_path / "assets" / "detail.json"
+    asset_sha, _revision = _write_reviewed_asset(asset_path, _asset())
+    manifest_path = tmp_path / "suite.json"
+    _write_json(
+        manifest_path,
+        {
+            "contract_version": "navigation_reading_live_suite_v1",
+            "suite_id": "missing-persisted-revision",
+            "goal": "Stop safely.",
+            "app_name": "Navigation Reading Lab",
+            "initial_interface_id": "lab_detail",
+            "interface_specs": [
+                {
+                    "interface_id": "lab_detail",
+                    "surface_type": "finite_detail",
+                    "identity_markers": ["Lab Detail Interface"],
+                }
+            ],
+            "interface_assets": [
+                {
+                    "interface_id": "lab_detail",
+                    "path": "assets/detail.json",
+                    "sha256": asset_sha,
+                }
+            ],
+            "transitions": [],
+        },
+    )
+
+    monkeypatch.setattr(
+        live_smoke_module,
+        "capture_navigation_runtime_record",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("capture must not run without persisted revision")
+        ),
+    )
+    monkeypatch.setattr(
+        live_smoke_module,
+        "OpenAICompatibleNavigationDecisionProvider",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("model must not run without persisted revision")
+        ),
+    )
+    monkeypatch.setattr(
+        live_smoke_module,
+        "run_navigation_reading_controller",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("Gate and operation must not run without persisted revision")
+        ),
+    )
+
+    with pytest.raises(ValueError, match="missing_persisted_review_revision"):
+        run_navigation_reading_live_smoke(
+            suite_path=manifest_path,
+            out_dir=tmp_path / "report",
+            runtime_endpoint="http://runtime.invalid",
+            decision_endpoint="http://model.invalid",
+            decision_model="controlled",
+        )
+
+
+def test_reviewed_suite_rejects_stale_persisted_revision_source_hash(
+    tmp_path: Path,
+) -> None:
+    asset_path = tmp_path / "assets" / "detail.json"
+    asset_sha, revision = _write_reviewed_asset(asset_path, _asset())
+    revision["source_asset_sha256"] = "0" * 64
+    manifest_path = tmp_path / "suite.json"
+    _write_json(
+        manifest_path,
+        {
+            "contract_version": "navigation_reading_live_suite_v1",
+            "suite_id": "stale-persisted-revision",
+            "goal": "Stop safely.",
+            "app_name": "Navigation Reading Lab",
+            "initial_interface_id": "lab_detail",
+            "interface_specs": [
+                {
+                    "interface_id": "lab_detail",
+                    "surface_type": "finite_detail",
+                    "identity_markers": ["Lab Detail Interface"],
+                }
+            ],
+            "interface_assets": [
+                {
+                    "interface_id": "lab_detail",
+                    "path": "assets/detail.json",
+                    "sha256": asset_sha,
+                    "persisted_review_revision": revision,
+                }
+            ],
+            "transitions": [],
+        },
+    )
+
+    with pytest.raises(ValueError, match="stale_persisted_review_revision"):
+        load_reviewed_navigation_suite(manifest_path)
 
 
 def test_capture_runtime_record_uses_current_capture_and_screen_reading(
@@ -258,8 +398,15 @@ def test_branching_live_suite_covers_back_modal_and_bounded_collection() -> None
     updates = suite["evidence_by_interface"]["branch_updates"]
     assert updates["deferred_reads"][0]["read_strategy"] == "infinite_collection"
     assert updates["deferred_reads"][0]["max_scrolls"] == 2
+    incident = suite["evidence_by_interface"]["branch_incident"]
+    assert incident["deferred_reads"][0]["bottom_markers"] == [
+        "INCIDENT REPORT END"
+    ]
     summary = suite["evidence_by_interface"]["branch_summary"]
     assert summary["deferred_reads"][0]["content_id"] == "summary_body"
+    assert summary["deferred_reads"][0]["bottom_markers"] == [
+        "BRANCHING WORKFLOW SAFE STOP"
+    ]
 
 
 def test_live_smoke_rejects_stale_initial_interface_before_agent_or_operation(
@@ -267,7 +414,7 @@ def test_live_smoke_rejects_stale_initial_interface_before_agent_or_operation(
     monkeypatch,
 ) -> None:
     asset_path = tmp_path / "assets" / "detail.json"
-    asset_sha = _write_json(asset_path, _asset())
+    asset_sha, asset_revision = _write_reviewed_asset(asset_path, _asset())
     manifest_path = tmp_path / "suite.json"
     _write_json(
         manifest_path,
@@ -289,6 +436,7 @@ def test_live_smoke_rejects_stale_initial_interface_before_agent_or_operation(
                     "interface_id": "lab_detail",
                     "path": "assets/detail.json",
                     "sha256": asset_sha,
+                    "persisted_review_revision": asset_revision,
                 }
             ],
             "transitions": [],
@@ -361,7 +509,7 @@ def test_live_smoke_reuses_matching_initial_capture_for_first_agent_decision(
     monkeypatch,
 ) -> None:
     asset_path = tmp_path / "assets" / "detail.json"
-    asset_sha = _write_json(asset_path, _asset())
+    asset_sha, asset_revision = _write_reviewed_asset(asset_path, _asset())
     manifest_path = tmp_path / "suite.json"
     _write_json(
         manifest_path,
@@ -383,6 +531,7 @@ def test_live_smoke_reuses_matching_initial_capture_for_first_agent_decision(
                     "interface_id": "lab_detail",
                     "path": "assets/detail.json",
                     "sha256": asset_sha,
+                    "persisted_review_revision": asset_revision,
                 }
             ],
             "transitions": [],
@@ -456,3 +605,457 @@ def test_live_smoke_reuses_matching_initial_capture_for_first_agent_decision(
     assert report["controller"]["steps"][0]["capture_id"] == "capture-current"
     assert report["controller"]["final_status"] == "safe_stop"
     assert report["controller"]["steps"][0]["case_outcome"] == "safe_stop"
+
+
+def test_compiled_reviewed_workflow_suite_runs_without_manifest_reload(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    runner = getattr(live_smoke_module, "run_navigation_reading_live_suite", None)
+    assert callable(runner), "compiled suites need a direct live runner"
+
+    source_path = tmp_path / "reviewed_workflow.json"
+    source_path.write_text("{}", encoding="utf-8")
+    evidence = {
+        "contract_version": "agent_interface_evidence_v1",
+        "interface": {
+            "interface_id": "lab_start",
+            "display_name": "Lab start",
+            "surface_type": "list",
+            "review_status": "human_approved",
+        },
+        "identity_anchors": [{"content_id": "start_title", "label": "Lab Start"}],
+        "dynamic_content": [],
+        "semantic_controls": [],
+        "available_actions": [],
+        "verification_rules": [],
+        "blockers": [],
+        "readiness": {"status": "agent_usable", "missing_fields": []},
+        "source_asset_sha256": "a" * 64,
+        "artifact_is_authorization": False,
+    }
+    next_evidence = deepcopy(evidence)
+    next_evidence["interface"] = {
+        "interface_id": "lab_next",
+        "display_name": "Lab next",
+        "surface_type": "detail",
+        "review_status": "human_approved",
+    }
+    next_evidence["identity_anchors"] = [
+        {"content_id": "next_title", "label": "Lab Next"}
+    ]
+    suite = {
+        "contract_version": "reviewed_workflow_live_suite_v1",
+        "source": "reviewed_multi_interface_workflow",
+        "suite_id": "reviewed-live",
+        "goal": "Open the next learned interface, then stop safely.",
+        "app_name": "Navigation Reading Lab",
+        "initial_interface_id": "lab_start",
+        "interface_specs": [
+            {
+                "interface_id": "lab_start",
+                "surface_type": "list",
+                "identity_markers": ["Lab Start"],
+            },
+            {
+                "interface_id": "lab_next",
+                "surface_type": "detail",
+                "identity_markers": ["Lab Next"],
+            },
+        ],
+        "transitions": [
+            {
+                "transition_id": "start_to_next",
+                "source_interface_id": "lab_start",
+                "target_interface_id": "lab_next",
+                "source_control_id": "open_next",
+                "action_type": "open_detail",
+                "operation_goal": "Click the button labeled Open next",
+            }
+        ],
+        "evidence_by_interface": {
+            "lab_start": evidence,
+            "lab_next": next_evidence,
+        },
+        "asset_paths": {
+            "lab_start": str(source_path),
+            "lab_next": str(source_path),
+        },
+        "application_identity": {
+            "kind": "web",
+            "domain": "navigation-reading.test",
+            "name": "Navigation Reading Lab",
+        },
+        "manifest_path": str(source_path),
+        "artifact_is_authorization": False,
+    }
+
+    def capture_record(**_kwargs) -> dict:
+        return {
+            "contract_version": "navigation_runtime_observation_record_v1",
+            "observation": {
+                "contract_version": "current_interface_observation_v1",
+                "interface_id": "lab_start",
+                "surface_type": "list",
+                "capture_id": "capture-start",
+                "screenshot_sha256": "b" * 64,
+                "trace_path": "logs/traces/start.json",
+            },
+            "image_path": str(tmp_path / "start.png"),
+            "window_size": {"width": 900, "height": 700},
+            "resolved_read_targets": {},
+        }
+
+    monkeypatch.setattr(
+        live_smoke_module,
+        "capture_navigation_runtime_record",
+        capture_record,
+    )
+    monkeypatch.setattr(
+        live_smoke_module,
+        "_http_post_json",
+        lambda *_args, **_kwargs: lambda _path, _body: {},
+    )
+    monkeypatch.setattr(
+        live_smoke_module,
+        "OpenAICompatibleNavigationDecisionProvider",
+        lambda **_kwargs: type("Provider", (), {"decide": lambda self, _context: {}})(),
+    )
+    monkeypatch.setattr(
+        live_smoke_module,
+        "run_navigation_reading_controller",
+        lambda **_kwargs: {
+            "contract_version": "navigation_reading_controller_report_v1",
+            "goal": suite["goal"],
+            "workflow_id": suite["suite_id"],
+            "session_id": f"live:{suite['suite_id']}",
+            "final_status": "safe_stop",
+            "stop_reason": "goal_complete",
+            "visited_interfaces": ["lab_start", "lab_next"],
+            "interface_visit_history": ["lab_start", "lab_next"],
+            "steps": [],
+            "decision_source_breakdown": {"actual_model_call": 1},
+            "actual_model_call_count": 1,
+            "session": None,
+            "safety": {
+                "final_submit_forbidden": True,
+                "final_submit_executed": False,
+                "artifact_is_authorization": False,
+            },
+        },
+    )
+
+    report = runner(
+        suite=suite,
+        out_dir=tmp_path / "report",
+        runtime_endpoint="http://runtime.invalid",
+        decision_endpoint="http://model.invalid",
+        decision_model="controlled",
+        persist_session_workflow=False,
+    )
+
+    assert report["source"] == "reviewed_multi_interface_workflow"
+    assert report["controller"]["visited_interfaces"] == ["lab_start", "lab_next"]
+    assert report["multi_interface_workflow"] == {
+        "contract_version": "reviewed_multi_interface_runtime_source_v1",
+        "status": "source_workflow_reused",
+        "path": str(source_path),
+        "node_count": 2,
+        "edge_count": 1,
+        "multi_interface_requirement_met": True,
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    assert report["safety"]["live_fill_attempted"] is False
+    assert report["safety"]["live_submit_attempted"] is False
+
+
+def test_live_smoke_saves_a_reloadable_multi_interface_workflow(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    detail = _asset()
+    detail["dynamic_slots"] = []
+    next_interface = deepcopy(detail)
+    next_interface.update(
+        {
+            "interface_id": "lab_next",
+            "display_name": "Lab next",
+            "surface_type": "read_only_summary",
+            "state_signature": "lab_next:reviewed",
+            "controls": [],
+            "dynamic_slots": [
+                {
+                    "content_id": "summary_body",
+                    "label": "Current summary",
+                    "source_kind": "region",
+                    "source_id": "summary_body",
+                    "content_behavior": "dynamic_value",
+                    "agent_usage": "decision_signal",
+                    "read_policy": "on_demand",
+                    "read_strategy": "finite_detail",
+                    "completion_policy": "reached_bottom_required",
+                    "agent_description": "Read the summary, then stop safely.",
+                }
+            ],
+            "blockers": [
+                {
+                    "blocker_id": "workflow_complete",
+                    "description": "The controlled workflow is complete. Stop safely.",
+                }
+            ],
+        }
+    )
+    next_interface["fixed_anchors"][0].update(
+        {
+            "content_id": "next_identity",
+            "label": "Lab Next Interface",
+            "source_id": "lab_next",
+        }
+    )
+    detail_path = tmp_path / "assets" / "detail.json"
+    next_path = tmp_path / "assets" / "next.json"
+    detail_image_path = tmp_path / "detail.png"
+    next_image_path = tmp_path / "next.png"
+    detail_image_path.write_bytes(b"detail screenshot")
+    next_image_path.write_bytes(b"next screenshot")
+    detail_sha, detail_revision = _write_reviewed_asset(detail_path, detail)
+    next_sha, next_revision = _write_reviewed_asset(next_path, next_interface)
+    manifest_path = tmp_path / "suite.json"
+    _write_json(
+        manifest_path,
+        {
+            "contract_version": "navigation_reading_live_suite_v1",
+            "suite_id": "multi-interface-save",
+            "goal": "Open the next reviewed interface and stop safely.",
+            "app_name": "Navigation Reading Lab",
+            "initial_interface_id": "lab_detail",
+            "interface_specs": [
+                {
+                    "interface_id": "lab_detail",
+                    "surface_type": "finite_detail",
+                    "identity_markers": ["Lab Detail Interface"],
+                },
+                {
+                    "interface_id": "lab_next",
+                    "surface_type": "read_only_summary",
+                    "identity_markers": ["Lab Next Interface"],
+                },
+            ],
+            "interface_assets": [
+                {
+                    "interface_id": "lab_detail",
+                    "path": "assets/detail.json",
+                    "sha256": detail_sha,
+                    "persisted_review_revision": detail_revision,
+                },
+                {
+                    "interface_id": "lab_next",
+                    "path": "assets/next.json",
+                    "sha256": next_sha,
+                    "persisted_review_revision": next_revision,
+                },
+            ],
+            "transitions": [
+                {
+                    "transition_id": "detail_to_next",
+                    "source_interface_id": "lab_detail",
+                    "target_interface_id": "lab_next",
+                    "source_control_id": "open_next",
+                    "action_type": "continue_next_step",
+                    "display_name": "Open next interface",
+                    "agent_description": "Open the next reviewed interface.",
+                    "operation_goal": "Click the button labeled Open next interface",
+                    "risk_level": "low",
+                    "review_status": "human_approved",
+                    "success_conditions": ["Lab Next Interface is visible"],
+                }
+            ],
+        },
+    )
+
+    monkeypatch.setattr(
+        live_smoke_module,
+        "capture_navigation_runtime_record",
+        lambda **_kwargs: {
+            "contract_version": "navigation_runtime_observation_record_v1",
+            "observation": {
+                "contract_version": "current_interface_observation_v1",
+                "interface_id": "lab_detail",
+                "surface_type": "finite_detail",
+                "capture_id": "capture-detail",
+                "screenshot_path": str(detail_image_path),
+                "screenshot_sha256": "c" * 64,
+                "trace_path": "logs/traces/detail.json",
+            },
+            "image_path": str(detail_image_path),
+            "window_size": {"width": 900, "height": 700},
+            "resolved_read_targets": {},
+        },
+    )
+    monkeypatch.setattr(
+        live_smoke_module,
+        "_http_post_json",
+        lambda *_args, **_kwargs: lambda _path, _body: {},
+    )
+    monkeypatch.setattr(
+        live_smoke_module,
+        "run_navigation_reading_controller",
+        lambda **_kwargs: {
+            "contract_version": "navigation_reading_controller_report_v1",
+            "goal": "Open the next reviewed interface and stop safely.",
+            "workflow_id": "multi-interface-save",
+            "session_id": "live:multi-interface-save",
+            "final_status": "safe_stop",
+            "stop_reason": "goal_complete",
+            "visited_interfaces": ["lab_detail", "lab_next"],
+            "interface_visit_history": ["lab_detail", "lab_next"],
+            "steps": [
+                {
+                    "sequence": 1,
+                    "interface_id": "lab_detail",
+                    "semantic_action": "continue_next_step",
+                    "choice_id": "open_next",
+                    "decision_source": "actual_model_call",
+                    "gate_allowed": True,
+                    "dispatch_success": True,
+                    "effect_verified": True,
+                    "destination_observation_verified": True,
+                    "actual_target_interface_id": "lab_next",
+                    "case_outcome": "passed",
+                }
+            ],
+            "decision_source_breakdown": {"actual_model_call": 1},
+            "actual_model_call_count": 1,
+            "session": {
+                "contract_version": "continuous_task_session_v1",
+                "session_id": "live:multi-interface-save",
+                "workflow_id": "multi-interface-save",
+                "status": "safe_stop",
+                "events": [
+                    {
+                        "sequence": 1,
+                        "event_type": "interface_observed",
+                        "details": {
+                            "interface_id": "lab_detail",
+                            "surface_type": "finite_detail",
+                            "evidence": {
+                                "capture_id": "capture-detail",
+                                "screenshot_path": str(detail_image_path),
+                                "screenshot_sha256": "c" * 64,
+                                "trace_path": "logs/traces/detail.json",
+                            },
+                        },
+                    },
+                    {
+                        "sequence": 2,
+                        "event_type": "action_verified",
+                        "details": {
+                            "action_type": "continue_next_step",
+                            "action_executed": True,
+                            "post_action_verified": True,
+                            "evidence": {
+                                "capture_id": "capture-detail",
+                                "screenshot_path": str(detail_image_path),
+                                "screenshot_sha256": "c" * 64,
+                                "trace_path": "logs/traces/detail.json",
+                            },
+                            "transition_audit": {
+                                "agent_decision": {
+                                    "semantic_action": "continue_next_step",
+                                    "source_control_id": "open_next",
+                                    "expected_target_interface_id": "lab_next",
+                                },
+                                "gate_result": {"allowed": True},
+                            },
+                        },
+                    },
+                    {
+                        "sequence": 3,
+                        "event_type": "interface_observed",
+                        "details": {
+                            "interface_id": "lab_next",
+                            "surface_type": "read_only_summary",
+                            "evidence": {
+                                "capture_id": "capture-next",
+                                "screenshot_path": str(next_image_path),
+                                "screenshot_sha256": "d" * 64,
+                                "trace_path": "logs/traces/next.json",
+                            },
+                        },
+                    },
+                ],
+                "safety": {
+                    "final_submit_forbidden": True,
+                    "final_submit_executed": False,
+                    "gate_required": True,
+                },
+            },
+            "safety": {
+                "final_submit_forbidden": True,
+                "final_submit_executed": False,
+                "artifact_is_authorization": False,
+            },
+        },
+    )
+
+    report = run_navigation_reading_live_smoke(
+        suite_path=manifest_path,
+        out_dir=tmp_path / "report",
+        workflow_project_root=tmp_path / "project",
+        runtime_endpoint="http://runtime.invalid",
+        decision_endpoint="http://model.invalid",
+        decision_model="controlled",
+    )
+
+    projection = report["multi_interface_workflow"]
+    assert projection["status"] == "saved"
+    assert projection["node_count"] == 2
+    assert projection["edge_count"] == 1
+    assert projection["multi_interface_requirement_met"] is True
+    assert projection["agent_context_reload"]["status"] == "passed"
+    lineage = report["workflow_lineage"]
+    assert lineage["source_workflow_id"] == "multi-interface-save"
+    assert lineage["source_manifest_path"] == str(manifest_path.resolve())
+    assert lineage["generated_workflow_id"] == projection["workflow_id"]
+    assert lineage["generated_workflow_path"] == projection["path"]
+    assert lineage["source_and_generated_are_distinct"] is True
+    assert lineage["relation"] == "derived_from_live_traversal"
+    agent_projection = projection["application_asset_projection"]["agent_evidence_projection"]
+    assert agent_projection["agent_usable_count"] == 0
+    assert agent_projection["needs_human_review_count"] == 2
+    source_record = next(
+        item
+        for item in agent_projection["records"]
+        if item["interface_id"] == "lab_detail"
+    )
+    assert source_record["status"] == "needs_human_review"
+    assert "action_linkage" in source_record["missing_fields"]
+    assert projection["demo_readiness"] == {
+        "status": "needs_human_review",
+        "reason": "agent_evidence_needs_human_review",
+    }
+    assert Path(projection["path"]).is_file()
+    saved_workflow = json.loads(
+        Path(projection["path"]).read_text(encoding="utf-8")
+    )
+    screenshot_paths = {
+        node["node_id"]: node["evidence"]["source_screenshot_path"]
+        for node in saved_workflow["nodes"]
+    }
+    assert set(screenshot_paths) == {"lab_detail", "lab_next"}
+    durable_screenshots = {
+        interface_id: (tmp_path / "project" / relative_path).resolve()
+        for interface_id, relative_path in screenshot_paths.items()
+    }
+    assert durable_screenshots["lab_detail"].read_bytes() == b"detail screenshot"
+    assert durable_screenshots["lab_next"].read_bytes() == b"next screenshot"
+    assert all(
+        "node-evidence" in screenshot.parts
+        for screenshot in durable_screenshots.values()
+    )
+    assert saved_workflow["runtime_report"]["steps"][0]["interface_id"] == "lab_detail"
+    assert saved_workflow["runtime_report"]["source_report_path"] == str(
+        (tmp_path / "report" / "navigation_reading_live_smoke_report.json").resolve()
+    )
+    assert "session" not in saved_workflow["runtime_report"]

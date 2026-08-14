@@ -29,6 +29,32 @@ def _write_json(path: Path, payload: dict) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+def _canonical_sha256(value: dict) -> str:
+    content = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(content).hexdigest()
+
+
+def _approve_asset(asset: dict) -> dict:
+    revision = {
+        "interface_id": asset["interface_id"],
+        "audit_evidence_sha256": _canonical_sha256(asset["evidence"]),
+    }
+    revision_hash = _canonical_sha256(revision)
+    asset["review"].update(
+        {
+            "reviewed_by_human": True,
+            "reviewed_revision_hash": revision_hash,
+            "current_revision_hash": revision_hash,
+        }
+    )
+    return {"revision": revision, "revision_hash": revision_hash}
+
+
 def _asset(
     *,
     interface_id: str,
@@ -46,7 +72,7 @@ def _asset(
                 "label": action["display_name"],
                 "role": "button",
                 "agent_description": action["agent_description"],
-                "review_status": "human_reviewed",
+                "review_status": "human_approved",
             }
         )
         action_candidates.append(
@@ -57,7 +83,7 @@ def _asset(
                 "display_name": action["display_name"],
                 "agent_description": action["agent_description"],
                 "risk_level": "low",
-                "review_status": "human_reviewed",
+                "review_status": "human_approved",
                 "verification_rule_ids": ["destination_visible"],
             }
         )
@@ -109,7 +135,7 @@ def _asset(
                     "description": "目标审核界面的身份锚点可见。",
                 }
             ],
-            "review_status": "human_reviewed",
+            "review_status": "human_approved",
             "manual_revision": {
                 "semantic_description": f"读取并操作 {interface_id} 审核界面。"
             },
@@ -157,10 +183,14 @@ def _build_manifest(tmp_path: Path) -> Path:
         content_behavior="dynamic_value",
         read_strategy="finite_detail",
     )
+    list_revision = _approve_asset(list_asset)
+    detail_revision = _approve_asset(detail_asset)
     list_path = tmp_path / "assets" / "news-list.json"
     detail_path = tmp_path / "assets" / "news-detail.json"
     list_sha = _write_json(list_path, list_asset)
     detail_sha = _write_json(detail_path, detail_asset)
+    list_revision["source_asset_sha256"] = list_sha
+    detail_revision["source_asset_sha256"] = detail_sha
 
     manifest = {
         "contract_version": "navigation_reading_replay_manifest_v1",
@@ -171,11 +201,13 @@ def _build_manifest(tmp_path: Path) -> Path:
                 "interface_id": "news_list",
                 "path": str(list_path),
                 "sha256": list_sha,
+                "persisted_review_revision": list_revision,
             },
             {
                 "interface_id": "news_detail",
                 "path": str(detail_path),
                 "sha256": detail_sha,
+                "persisted_review_revision": detail_revision,
             },
         ],
         "transitions": [
@@ -416,6 +448,87 @@ def test_stale_reviewed_asset_is_invalid_and_excluded_from_attempted(
         item["asset_path"].endswith("news-list.json")
         for item in report["invalid_cases"]
     )
+
+
+def test_missing_persisted_review_revision_invalidates_replay_cases(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _build_manifest(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["interface_assets"][0].pop("persisted_review_revision")
+    _write_json(manifest_path, manifest)
+
+    report = run_navigation_reading_replay(
+        manifest_path=manifest_path,
+        out_dir=tmp_path / "report",
+    )
+
+    assert report["summary"] == {
+        "attempted": 0,
+        "passed": 0,
+        "failed": 0,
+        "invalid": 2,
+        "safe_stop": 0,
+    }
+    assert {item["failure_category"] for item in report["invalid_cases"]} == {
+        "missing_persisted_review_revision"
+    }
+
+
+def test_stale_persisted_review_revision_invalidates_replay_cases(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _build_manifest(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["interface_assets"][0]["persisted_review_revision"][
+        "source_asset_sha256"
+    ] = "0" * 64
+    _write_json(manifest_path, manifest)
+
+    report = run_navigation_reading_replay(
+        manifest_path=manifest_path,
+        out_dir=tmp_path / "report",
+    )
+
+    assert report["summary"] == {
+        "attempted": 0,
+        "passed": 0,
+        "failed": 0,
+        "invalid": 2,
+        "safe_stop": 0,
+    }
+    assert {item["failure_category"] for item in report["invalid_cases"]} == {
+        "stale_persisted_review_revision"
+    }
+
+
+def test_stale_revision_audit_evidence_invalidates_replay_cases(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _build_manifest(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    revision = manifest["interface_assets"][0]["persisted_review_revision"]["revision"]
+    revision["audit_evidence_sha256"] = "0" * 64
+    manifest["interface_assets"][0]["persisted_review_revision"][
+        "revision_hash"
+    ] = _canonical_sha256(revision)
+    _write_json(manifest_path, manifest)
+
+    report = run_navigation_reading_replay(
+        manifest_path=manifest_path,
+        out_dir=tmp_path / "report",
+    )
+
+    assert report["summary"] == {
+        "attempted": 0,
+        "passed": 0,
+        "failed": 0,
+        "invalid": 2,
+        "safe_stop": 0,
+    }
+    assert {item["failure_category"] for item in report["invalid_cases"]} == {
+        "stale_persisted_review_revision"
+    }
 
 
 def test_gate_rejection_prevents_operation_and_is_a_safe_intercept(

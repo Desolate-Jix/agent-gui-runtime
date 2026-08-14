@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from app.operation.reading import build_read_region_batch_report, extract_ocr_text_lines
 
 
@@ -81,6 +83,58 @@ def test_read_region_batch_wrong_scope_blocks() -> None:
     assert report["status"] == "blocked_wrong_scope"
     assert report["stop_reason"] == "wrong_scope_detected"
     assert report["completion_status"] == "blocked"
+
+
+def test_read_region_batch_max_captures_is_not_complete() -> None:
+    report = build_read_region_batch_report(
+        target_container_id="seek:job_detail",
+        target_bbox={"x": 0, "y": 0, "w": 100, "h": 100},
+        max_captures=2,
+        captures=[
+            {"ocr_result": _ocr("A")},
+            {"ocr_result": _ocr("B")},
+        ],
+    )
+
+    assert report["stop_reason"] == "max_captures"
+    assert report["read_state"] == "max_captures"
+    assert report["read_complete"] is False
+
+
+@pytest.mark.parametrize(
+    ("captures", "max_captures", "wrong_scope_detected", "expected_state", "expected_complete"),
+    [
+        ([{"ocr_result": _ocr("A")}], 2, False, "still_reading", False),
+        ([{"ocr_result": _ocr("A"), "reached_bottom": True}], 2, False, "reached_bottom", True),
+        (
+            [{"ocr_result": _ocr("A")}, {"ocr_result": _ocr("A")}],
+            3,
+            False,
+            "no_new_content",
+            False,
+        ),
+        ([{"ocr_result": _ocr("A")}], 2, True, "wrong_surface", False),
+        ([{"ocr_result": _ocr("A"), "blocked_surface_detected": True}], 2, False, "blocked_surface", False),
+    ],
+)
+def test_read_region_batch_classifies_terminal_state(
+    captures: list[dict],
+    max_captures: int,
+    wrong_scope_detected: bool,
+    expected_state: str,
+    expected_complete: bool,
+) -> None:
+    report = build_read_region_batch_report(
+        target_container_id="seek:job_detail",
+        target_bbox={"x": 0, "y": 0, "w": 100, "h": 100},
+        max_captures=max_captures,
+        stop_after_no_new_content=1,
+        wrong_scope_detected=wrong_scope_detected,
+        captures=captures,
+    )
+
+    assert report["read_state"] == expected_state
+    assert report["read_complete"] is expected_complete
 
 
 def test_extract_ocr_text_lines_accepts_texts_shape() -> None:

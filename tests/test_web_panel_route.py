@@ -4,11 +4,15 @@ import base64
 import hashlib
 import json
 import re
+import shutil
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
+from app.api import memory as memory_api
 from app.api import panel as panel_api
 from app.learn.workflow_contracts import LearningTaskResult
 from app.main import app
@@ -596,6 +600,17 @@ def test_panel_image_frame_clears_transient_missing_state_after_image_loads() ->
     assert "classList.remove('image-missing')" in body
 
 
+def test_saved_workflow_status_counts_formal_interface_nodes() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8")
+
+    start = panel_js.index("function renderInterfaceWorkflowReviewSelection")
+    body = panel_js[start:panel_js.index("\nfunction ", start + 1)]
+
+    assert "graph.nodes.length" in body
+    assert "个流程界面" in body
+    assert "个历史界面" not in body
+
+
 def test_web_panel_serves_static_assets() -> None:
     client = TestClient(app)
 
@@ -1147,11 +1162,57 @@ def test_interface_workflow_exposes_manual_current_evidence_refresh() -> None:
     shared_refresh_end = panel_js.index("\n}\n", shared_refresh_start) + len("\n}")
     shared_refresh_body = panel_js[shared_refresh_start:shared_refresh_end]
     assert "refreshSavedLearningDraftReview({" in refresh_body
-    assert "interfaceWorkflowSourcePathsAfterReview" in shared_refresh_body
-    assert "selectSourcePath: sourcePath" in shared_refresh_body
+    assert "applyReviewedEvidenceToCurrentWorkflowNode" in shared_refresh_body
+    assert "saveInterfaceWorkflowReview({ commitEditor: false })" in shared_refresh_body
+    assert "loadInterfaceWorkflowReview" not in shared_refresh_body
     assert "discoverRelatedSidecars: false" in shared_refresh_body
     assert "supersedePendingLoad: true" in shared_refresh_body
     assert "skipReviewRender: true" in shared_refresh_body
+
+
+def test_learning_results_entry_splits_workflows_by_interface_review_status() -> None:
+    index_html = Path("app/web_panel/index.html").read_text(encoding="utf-8")
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    assert 'id="interfaceAssetUnreviewedPage"' in index_html
+    assert 'id="interfaceAssetReviewedPage"' in index_html
+    assert 'id="interfaceWorkflowUnreviewedList"' in index_html
+    assert 'id="interfaceWorkflowReviewedList"' in index_html
+    assert "未审核" in index_html
+    assert "已审核" in index_html
+    assert "function renderInterfaceWorkflowReviewGroups" in panel_js
+    assert "buildInterfaceAssetLibrary" in panel_js
+    assert "openInterfaceWorkflowReviewGroupNode" in panel_js
+    assert 'class="interface-workflow-existing-selector"' in index_html
+    assert 'class="interface-workflow-existing-selector" hidden' not in index_html
+    assert "选择已有软件 / 网站流程" in index_html
+    assert "打开所选流程" in index_html
+
+    page_start = panel_js.index("function showInterfaceAssetPage(page)")
+    page_end = panel_js.index("\nfunction setInterfaceWorkflowLibraryOptions", page_start)
+    page_body = panel_js[page_start:page_end]
+    assert "renderInterfaceWorkflowReviewGroups();" not in page_body
+
+
+def test_single_interface_review_uses_exact_source_without_sidecar_rescan() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    start = panel_js.index("async function previewInterfaceWorkflowSource()")
+    end = panel_js.index("\nasync function addInterfaceWorkflowSource", start)
+    body = panel_js[start:end]
+
+    assert "discover_related_sidecars: false" in body
+
+
+def test_workflow_graph_explains_review_state_without_implying_authorization() -> None:
+    index_html = Path("app/web_panel/index.html").read_text(encoding="utf-8")
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    assert "已审核界面" in index_html
+    assert "未审核界面" in index_html
+    assert "证据无效" in index_html
+    assert "橙色虚线路径需要人工审核" in index_html
+    assert "summarizeWorkflowReadiness" in panel_js
+    assert "仍非执行授权" in panel_js
 
 
 def test_learning_draft_box_editor_exposes_agent_semantics_and_destination_controls() -> None:
@@ -3738,10 +3799,10 @@ def test_learning_draft_panel_renders_open_detail_transition_hints() -> None:
     run_flow_end = panel_js.index("async function runLearningDraftTrial")
     run_flow_body = panel_js[run_flow_start:run_flow_end]
     assert "const binding = await bindSelectedWindow()" in run_flow_body
-    assert run_flow_body.index("const binding = await bindSelectedWindow()") < run_flow_body.index("captureLearningDraftWindow")
+    assert run_flow_body.index("const binding = await bindSelectedWindow()") < run_flow_body.index("runLearningInterfaceCaptureStrategy")
     assert '"bind_capture",\n        "failed",\n        `bind failed' in run_flow_body
     assert 'clearLearningDraftWorkspaceForNewRun("not_loaded · new learning run started")' in run_flow_body
-    assert run_flow_body.index("clearLearningDraftWorkspaceForNewRun") < run_flow_body.index("captureLearningDraftWindow")
+    assert run_flow_body.index("clearLearningDraftWorkspaceForNewRun") < run_flow_body.index("runLearningInterfaceCaptureStrategy")
     assert 'clearScreenUnderstandingResidualDisplays("not_loaded · screen understanding started")' in capture_trial_body
     assert "await loadLearningDraftReview({ skipResponse: true })" in run_trial_body
     assert 'clearScreenUnderstandingResidualDisplays("not_loaded · generating learning draft", {' in run_trial_body
@@ -4536,11 +4597,11 @@ def test_learning_draft_history_sources_load_during_panel_boot() -> None:
 def test_panel_learning_review_assets_use_current_cache_key() -> None:
     panel_html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
 
-    assert "/panel/assets/panel.css?v=20260729-workflow-control-picker-1" in panel_html
+    assert "/panel/assets/panel.css?v=20260810-library-delete-1" in panel_html
     assert "/panel/assets/learning_draft_editor.js?v=20260729-box-editor-status-1" in panel_html
-    assert "/panel/assets/learning_workflow_review.js?v=20260729-unconnected-interface-1" in panel_html
-    assert "/panel/assets/interface_workflow_graph.js?v=20260729-compact-workflow-graph-1" in panel_html
-    assert "/panel/assets/panel.js?v=20260729-workflow-control-picker-1" in panel_html
+    assert "/panel/assets/learning_workflow_review.js?v=20260810-review-pages-4" in panel_html
+    assert "/panel/assets/interface_workflow_graph.js?v=20260812-workflow-i18n-1" in panel_html
+    assert "/panel/assets/panel.js?v=20260812-workflow-i18n-1" in panel_html
 
 
 def test_learning_draft_history_visibly_separates_current_and_pinned_sources() -> None:
@@ -4607,11 +4668,13 @@ def test_panel_contains_generic_interface_workflow_review_workspace() -> None:
     assert 'id="interfaceWorkflowGraphReset"' in html
     assert 'id="interfaceWorkflowGraphLegend"' in html
     assert "圆点代表界面，连线代表操作与跳转" in html
-    assert "选择已保存的单界面" in html
+    assert "加入单界面" in html
+    assert 'id="interfaceAssetAttachDialog"' in html
     assert "加入流程" in html
-    assert "加入并连接" not in html
+    assert "加入并连接" in html
     assert "用当前框连接下一个界面" in html
     assert 'id="interfaceWorkflowEvidence"' in html
+    assert 'id="interfaceWorkflowStepAudit"' in html
     assert 'id="interfaceWorkflowEvidenceModeWorkflow"' in html
     assert 'id="interfaceWorkflowEvidenceModePreview"' in html
     assert 'id="interfaceWorkflowInspector"' in html
@@ -4619,6 +4682,9 @@ def test_panel_contains_generic_interface_workflow_review_workspace() -> None:
     assert 'id="interfaceWorkflowNodeName"' in html
     assert 'id="interfaceWorkflowSurfaceType"' in html
     assert 'id="interfaceWorkflowNodeReviewStatus"' in html
+    assert '<option value="human_approved">human_approved（需显式确认）</option>' in html
+    assert 'id="interfaceWorkflowNodeHumanReviewConfirmed"' in html
+    assert "确认当前 revision 已人工审核" in html
     assert 'id="interfaceWorkflowTransitionAction"' in html
     assert 'id="interfaceWorkflowTransitionTarget"' in html
     assert 'id="interfaceWorkflowSourceSelect"' in html
@@ -4643,11 +4709,433 @@ def test_panel_contains_generic_interface_workflow_review_workspace() -> None:
     assert "/panel/assets/learning_workflow_review.js" in html
     assert "/panel/assets/interface_workflow_graph.js" in html
     assert "SEEK workflow review" not in html
+    assert 'class="learning-review-section learning-draft-history-panel legacy-learning-review-panel" hidden' in html
+    assert 'class="learning-review-section learning-draft-screenshot-panel legacy-learning-review-panel" id="learningDraftScreenshotPanel" hidden' in html
+    assert 'class="learning-review-panel legacy-learning-review-panel" id="learningDraftReviewPanel" hidden' in html
 
     panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
     assert '"/panel/save_interface_workflow_review"' in panel_js
     assert "function openInterfaceWorkflowMemoryVerification" in panel_js
+    assert "function renderInterfaceWorkflowStepAudit" in panel_js
     assert 'scrollIntoView({ behavior: "smooth", block: "start" })' in panel_js
+
+
+def _human_review_persistence_review(
+    *,
+    workflow_id: str,
+    confirmed: bool,
+) -> dict:
+    node = {
+        "node_id": "reviewed_interface",
+        "display_name": "Reviewed interface",
+        "surface_type": "detail",
+        "state_signature": "reviewed-interface-v1",
+        "evidence": {
+            "source_screenshot_path": "artifacts/screenshots/reviewed-interface.png",
+        },
+        "content_descriptors": [
+            {
+                "content_id": "reviewed_title",
+                "label": "Reviewed interface",
+                "content_behavior": "fixed_label",
+                "agent_usage": "identity_anchor",
+                "read_policy": "on_interface_match",
+                "agent_description": "确认当前界面身份",
+            }
+        ],
+        "controls": [],
+        "action_candidates": [],
+        "verification_rules": [
+            {
+                "rule_id": "safe_stop_visible",
+                "expected_decision": "safe_stop",
+            }
+        ],
+        "blockers": [
+            {
+                "blocker_id": "review_complete",
+                "safe_stop_required": True,
+            }
+        ],
+        "manual_revision": {
+            "semantic_description": "读取当前界面语义后安全停止",
+        },
+    }
+    review = {
+        "contract_version": "single_application_workflow_review_v1",
+        "workflow": {
+            "workflow_id": workflow_id,
+            "goal": "Review one interface",
+            "application_identity": {
+                "url": f"https://{workflow_id}.example.test/items",
+            },
+            "entry_node_id": node["node_id"],
+            "node_ids": [node["node_id"]],
+            "edge_ids": [],
+            "review_status": "needs_human_review",
+        },
+        "nodes": [node],
+        "edges": [],
+        "display_only": True,
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    if confirmed:
+        node.update(
+            {
+                "review_status": "human_approved",
+                "reviewed_by_human": True,
+                "human_review_confirmation": {
+                    "contract_version": "interface_node_human_review_confirmation_v1",
+                    "revision": {
+                        "node": json.loads(json.dumps(node, ensure_ascii=False)),
+                        "outgoing_edges": [],
+                    },
+                },
+            }
+        )
+        revision_node = node["human_review_confirmation"]["revision"]["node"]
+        revision_node.pop("review_status", None)
+        revision_node.pop("reviewed_by_human", None)
+        revision_node.pop("human_review_confirmation", None)
+    return review
+
+
+def test_panel_save_rejects_label_only_and_client_reported_revision_hash(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    review = _human_review_persistence_review(
+        workflow_id="label-only-review",
+        confirmed=False,
+    )
+    node = review["nodes"][0]
+    node.update(
+        {
+            "review_status": "human_approved",
+            "reviewed_by_human": True,
+            "reviewed_revision_hash": "f" * 64,
+            "current_revision_hash": "f" * 64,
+        }
+    )
+
+    response = TestClient(app).post(
+        "/panel/save_interface_workflow_review",
+        json={"review": review},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True, payload
+    projection = payload["data"]["interface_asset_projection"]
+    assert projection["agent_evidence_projection"]["agent_usable_count"] == 0
+    assert projection["agent_evidence_projection"]["needs_human_review_count"] == 1
+    saved = json.loads(Path(payload["data"]["path"]).read_text(encoding="utf-8"))
+    assert saved["nodes"][0]["review_status"] == "needs_human_review"
+    assert saved["nodes"][0]["reviewed_by_human"] is False
+    assert saved["nodes"][0]["reviewed_revision_hash"] == ""
+    asset_path = tmp_path / projection["interface_results"][0]["asset_path"]
+    asset = json.loads(asset_path.read_text(encoding="utf-8"))
+    assert asset["review"]["reviewed_by_human"] is False
+    assert asset["review"]["reviewed_revision_hash"] == ""
+    assert asset["artifact_is_authorization"] is False
+
+
+def test_panel_save_revokes_stale_confirmation_for_every_agent_consumed_revision_field(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    mutations = {
+        "semantics": lambda node: node.update(display_name="Changed semantics"),
+        "source": lambda node: node.update(source_paths=["artifacts/changed-source.json"]),
+        "control": lambda node: node.update(controls=[{"control_id": "changed-control"}]),
+        "action": lambda node: node.update(
+            action_candidates=[{"action_type": "open_detail", "target_control_id": "changed-control"}]
+        ),
+        "screenshot": lambda node: node["evidence"].update(
+            source_screenshot_path="artifacts/screenshots/changed.png"
+        ),
+    }
+    client = TestClient(app)
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+
+    for name, mutate in mutations.items():
+        review = _human_review_persistence_review(
+            workflow_id=f"stale-{name}-review",
+            confirmed=True,
+        )
+        approved = client.post(
+            "/panel/save_interface_workflow_review",
+            json={"review": review},
+        ).json()
+        assert approved["success"] is True, approved
+        stale_review = json.loads(
+            Path(approved["data"]["path"]).read_text(encoding="utf-8")
+        )
+        approved_node = stale_review["nodes"][0]
+        assert approved_node["reviewed_by_human"] is True
+        assert approved_node["reviewed_revision_hash"] == approved_node["current_revision_hash"]
+        mutate(approved_node)
+
+        response = client.post(
+            "/panel/save_interface_workflow_review",
+            json={"review": stale_review},
+        )
+
+        payload = response.json()
+        assert payload["success"] is True, payload
+        saved = json.loads(Path(payload["data"]["path"]).read_text(encoding="utf-8"))
+        node = saved["nodes"][0]
+        assert node["review_status"] == "needs_human_review", name
+        assert node["reviewed_by_human"] is False, name
+        projection = payload["data"]["interface_asset_projection"]
+        assert projection["agent_evidence_projection"]["agent_usable_count"] == 0, name
+
+
+def test_panel_save_refresh_preserves_approval_only_for_the_unchanged_server_revision(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    monkeypatch.setattr(memory_api, "ROOT_DIR", tmp_path)
+    client = TestClient(app)
+    review = _human_review_persistence_review(
+        workflow_id="save-refresh-review",
+        confirmed=True,
+    )
+    first = client.post(
+        "/panel/save_interface_workflow_review",
+        json={"review": review},
+    ).json()
+    assert first["success"] is True, first
+    first_saved = json.loads(Path(first["data"]["path"]).read_text(encoding="utf-8"))
+    first_node = first_saved["nodes"][0]
+    assert first_node["reviewed_by_human"] is True
+    assert first_node["reviewed_revision_hash"] == first_node["current_revision_hash"]
+
+    refreshed = client.get(
+        "/memory/interface_workflows/review_context",
+        params={
+            "application_identity_key": first["data"]["application_identity_key"],
+            "workflow_id": first["data"]["workflow_id"],
+        },
+    ).json()
+    assert refreshed["success"] is True, refreshed
+    second = client.post(
+        "/panel/save_interface_workflow_review",
+        json={"review": refreshed["data"]},
+    ).json()
+
+    assert second["success"] is True, second
+    second_saved = json.loads(Path(second["data"]["path"]).read_text(encoding="utf-8"))
+    second_node = second_saved["nodes"][0]
+    assert second_node["reviewed_by_human"] is True
+    assert second_node["review_status"] == "human_approved"
+    assert second_node["reviewed_revision_hash"] == first_node["reviewed_revision_hash"]
+    projection = second["data"]["interface_asset_projection"]
+    assert projection["agent_evidence_projection"]["agent_usable_count"] == 1
+    assert second_saved["artifact_is_authorization"] is False
+    assert second_saved["safety"]["final_submit_forbidden"] is True
+
+
+def test_concurrent_changed_save_cannot_be_overwritten_by_stale_approved_refresh(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    baseline = TestClient(app).post(
+        "/panel/save_interface_workflow_review",
+        json={
+            "review": _human_review_persistence_review(
+                workflow_id="concurrent-review",
+                confirmed=True,
+            )
+        },
+    ).json()
+    assert baseline["success"] is True, baseline
+    approved_refresh = json.loads(
+        Path(baseline["data"]["path"]).read_text(encoding="utf-8")
+    )
+    changed_review = json.loads(json.dumps(approved_refresh, ensure_ascii=False))
+    changed_review["nodes"][0]["display_name"] = "Changed concurrently"
+
+    changed_started = threading.Event()
+    unchanged_started = threading.Event()
+    changed_saved = threading.Event()
+    real_save = panel_api.save_interface_workflow_review_candidate
+
+    def ordered_save(review, *, project_root, out_dir=None):
+        changed = review["nodes"][0]["display_name"] == "Changed concurrently"
+        if changed:
+            changed_started.set()
+            unchanged_started.wait(timeout=0.25)
+            try:
+                return real_save(review, project_root=project_root, out_dir=out_dir)
+            finally:
+                changed_saved.set()
+        unchanged_started.set()
+        assert changed_saved.wait(timeout=2)
+        return real_save(review, project_root=project_root, out_dir=out_dir)
+
+    monkeypatch.setattr(
+        panel_api,
+        "save_interface_workflow_review_candidate",
+        ordered_save,
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        changed_future = executor.submit(
+            lambda: TestClient(app).post(
+                "/panel/save_interface_workflow_review",
+                json={"review": changed_review},
+            ).json()
+        )
+        assert changed_started.wait(timeout=2)
+        unchanged_future = executor.submit(
+            lambda: TestClient(app).post(
+                "/panel/save_interface_workflow_review",
+                json={"review": approved_refresh},
+            ).json()
+        )
+        changed_response = changed_future.result(timeout=5)
+        unchanged_response = unchanged_future.result(timeout=5)
+
+    assert changed_response["success"] is True, changed_response
+    assert unchanged_response["success"] is True, unchanged_response
+    final_review = json.loads(
+        Path(unchanged_response["data"]["path"]).read_text(encoding="utf-8")
+    )
+    final_node = final_review["nodes"][0]
+    assert final_node["reviewed_by_human"] is False
+    assert final_node["review_status"] == "needs_human_review"
+    assert final_node["reviewed_revision_hash"] == ""
+    assert unchanged_response["data"]["interface_asset_projection"][
+        "agent_evidence_projection"
+    ]["agent_usable_count"] == 0
+
+
+def test_learning_assets_use_three_top_level_pages() -> None:
+    html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
+
+    for element_id in (
+        "interfaceAssetUnreviewedPage",
+        "interfaceAssetReviewedPage",
+        "interfaceWorkflowLibraryPage",
+        "interfaceAssetSharedEvidence",
+    ):
+        assert f'id="{element_id}"' in html
+    assert "interface-workflow-review-groups" not in html
+    assert "interface-workflow-source-manager" not in html
+
+
+def test_unreviewed_page_explains_agent_block() -> None:
+    html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
+
+    assert "未审核界面不会提供给 Agent 直接使用" in html
+    assert "审核通过仍不是执行授权" in html
+
+
+def test_learning_asset_tabs_switch_shared_evidence_workspace() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    assert "const interfaceAssetWorkspaceState" in panel_js
+    assert "function showInterfaceAssetPage" in panel_js
+    assert 'on("interfaceAssetUnreviewedTab", "click"' in panel_js
+    assert 'on("interfaceAssetReviewedTab", "click"' in panel_js
+    assert 'on("interfaceWorkflowLibraryTab", "click"' in panel_js
+    assert "interfaceAssetSharedEvidence.appendChild(evidencePanel)" in panel_js
+    assert "workflowWorkbench.appendChild(evidencePanel)" in panel_js
+
+
+def test_learning_asset_workspace_uses_master_detail_layout() -> None:
+    panel_css = Path("app/web_panel/panel.css").read_text(encoding="utf-8-sig")
+
+    assert ".interface-asset-workspace" in panel_css
+    assert "grid-template-columns: minmax(240px, 30%) minmax(0, 70%);" in panel_css
+    assert "height: clamp(300px, 38vh, 460px);" in panel_css
+
+
+def test_interface_workflow_evidence_and_runtime_audit_switch_together() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    render_start = panel_js.index("function renderActiveInterfaceWorkflowEvidence")
+    render_end = panel_js.index("\n}\n", render_start) + len("\n}")
+    render_body = panel_js[render_start:render_end]
+
+    assert "const view = state?.current?.() || null" in render_body
+    assert "renderInterfaceWorkflowEvidence(view)" in render_body
+    assert "renderInterfaceWorkflowStepAudit(view)" in render_body
+
+
+def test_interface_workflow_panel_exposes_non_authorizing_safe_fill_preflight_review() -> None:
+    html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    assert 'id="interfaceWorkflowSafeFillPreflightPath"' in html
+    assert 'id="interfaceWorkflowSafeFillPreflightLoadBtn"' in html
+    assert 'id="interfaceWorkflowSafeFillPreflight"' in html
+    assert 'id="interfaceWorkflowSafeFillPreflightStatus"' in html
+    assert "function renderInterfaceWorkflowSafeFillPreflight" in panel_js
+    assert 'api("POST", "/panel/load_live_safe_fill_preflight"' in panel_js
+    assert "artifact_is_authorization" in panel_js
+    assert "不是执行授权" in panel_js
+
+
+def test_panel_loads_only_redacted_live_safe_fill_preflight(tmp_path: Path) -> None:
+    client = TestClient(app)
+    preflight_dir = Path("artifacts") / "tests" / tmp_path.name
+    preflight_dir.mkdir(parents=True, exist_ok=True)
+    preflight_path = preflight_dir / "live_safe_fill_preflight.json"
+    preflight_path.write_text(
+        json.dumps(
+            {
+                "contract_version": "seek_live_safe_fill_preflight_v1",
+                "status": "ready_for_human_review",
+                "approval_state": "awaiting_explicit_approval",
+                "field": {"id": "email", "risk_class": "ordinary_field"},
+                "value_evidence": {
+                    "value_hash": "abc123",
+                    "value_length": 17,
+                    "value_redacted": True,
+                    "raw_value": "must-not-leak@example.com",
+                },
+                "safety": {"artifact_is_authorization": False},
+                "pii_redacted": True,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    try:
+        response = client.post(
+            "/panel/load_live_safe_fill_preflight",
+            json={"preflight_path": str(preflight_path)},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["success"] is True
+        assert payload["data"]["contract_version"] == "seek_live_safe_fill_preflight_v1"
+        assert payload["data"]["pii_redacted"] is True
+        assert "must-not-leak@example.com" not in response.text
+    finally:
+        preflight_path.unlink(missing_ok=True)
+        preflight_dir.rmdir()
+
+
+def test_panel_rejects_live_safe_fill_preflight_outside_artifact_roots(tmp_path: Path) -> None:
+    client = TestClient(app)
+    preflight_path = tmp_path / "live_safe_fill_preflight.json"
+    preflight_path.write_text("{}", encoding="utf-8")
+
+    response = client.post(
+        "/panel/load_live_safe_fill_preflight",
+        json={"preflight_path": str(preflight_path)},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is False
+    assert payload["error"]["code"] == "live_safe_fill_preflight_load_failed"
 
 
 def test_interface_workflow_graph_uses_branching_canvas_instead_of_linear_steps() -> None:
@@ -4668,19 +5156,67 @@ def test_interface_workflow_graph_uses_branching_canvas_instead_of_linear_steps(
     assert "Math.max(0.35" in panel_js
 
 
+def _extract_javascript_function(source: str, marker: str) -> str:
+    start = source.index(marker)
+    opening = source.index("{", start)
+    depth = 0
+    quote = ""
+    escaped = False
+    line_comment = False
+    block_comment = False
+    index = opening
+    while index < len(source):
+        char = source[index]
+        next_char = source[index + 1] if index + 1 < len(source) else ""
+        if line_comment:
+            if char in "\n":
+                line_comment = False
+        elif block_comment:
+            if char == "*" and next_char == "/":
+                block_comment = False
+                index += 1
+        elif quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = ""
+        elif char in "'\"`":
+            quote = char
+        elif char == "/" and next_char == "/":
+            line_comment = True
+            index += 1
+        elif char == "/" and next_char == "*":
+            block_comment = True
+            index += 1
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start : index + 1]
+        index += 1
+    raise AssertionError(f"unterminated JavaScript function: {marker}")
+
+
 def test_interface_workflow_correction_opens_existing_full_image_box_editor() -> None:
     html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
     panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
     handler_start = panel_js.index('on("interfaceWorkflowReviewToolsToggle"')
     handler_end = panel_js.index("\n  });", handler_start) + len("\n  });")
     handler_body = panel_js[handler_start:handler_end]
-    function_start = panel_js.index("async function openCurrentInterfaceWorkflowBoxEditor")
-    function_end = panel_js.index("\n}\n", function_start) + len("\n}")
-    function_body = panel_js[function_start:function_end]
+    function_body = _extract_javascript_function(
+        panel_js,
+        "async function openCurrentInterfaceWorkflowBoxEditor",
+    )
 
     assert "openCurrentInterfaceWorkflowBoxEditor" in handler_body
     assert "setInterfaceWorkflowCorrectionOpen" not in handler_body
     assert "function openCurrentInterfaceWorkflowBoxEditor" in panel_js
+    correction_open_index = function_body.index("setInterfaceWorkflowCorrectionOpen(true, view);")
+    current_source_index = function_body.index("if (currentLearningDraftReviewMatchesSource(sourcePath))")
+    assert correction_open_index < current_source_index
     assert "await loadLearningDraftReview({" in panel_js
     assert "skipWorkflowReview: true" in panel_js
     assert "discoverRelatedSidecars: false" in function_body
@@ -4696,9 +5232,10 @@ def test_interface_workflow_correction_opens_existing_full_image_box_editor() ->
     assert "if (!options.skipReviewRender)" in load_review_body
     assert "function interfaceWorkflowEditableImagePath" in panel_js
     assert 'entry?.layer === "source"' in panel_js
-    editable_image_start = panel_js.index("function interfaceWorkflowEditableImagePath")
-    editable_image_end = panel_js.index("\n}\n", editable_image_start) + len("\n}")
-    editable_image_body = panel_js[editable_image_start:editable_image_end]
+    editable_image_body = _extract_javascript_function(
+        panel_js,
+        "function interfaceWorkflowEditableImagePath",
+    )
     assert "view?.active_image_path" not in editable_image_body
     assert "const editorImagePath = interfaceWorkflowEditableImagePath(view);" in function_body
     assert "const currentEditorImagePath = learningDraftSourceImagePath(learningDraftReview?.draft || {})" in function_body
@@ -4721,9 +5258,7 @@ def test_interface_workflow_correction_opens_existing_full_image_box_editor() ->
         "await loadLearningDraftReview({"
     )
     assert "closeImageInspector();" in function_body
-    assert function_body.index("setInterfaceWorkflowCorrectionOpen(false);") < function_body.index(
-        'toggle.textContent = "正在打开框编辑器...";'
-    )
+    assert "setInterfaceWorkflowCorrectionOpen(false);" in function_body
     assert function_body.index('toggle.textContent = "正在打开框编辑器...";') < function_body.index(
         "await loadLearningDraftReview({"
     )
@@ -4735,6 +5270,43 @@ def test_interface_workflow_correction_opens_existing_full_image_box_editor() ->
     assert '"当前界面学习证据加载失败"' in function_body
     assert "catch (error)" in function_body
     assert '"无法打开修正工具"' in function_body
+
+
+def test_interface_workflow_box_editor_prefers_saved_editable_evidence_projection() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    function_start = panel_js.index("function interfaceWorkflowEditableReviewSourcePath")
+    function_end = panel_js.index("\n}\n", function_start) + 2
+    function_body = panel_js[function_start:function_end]
+
+    assert "editable_review_source_path" in function_body
+    assert "source_paths" in function_body
+
+
+def test_reviewed_node_refresh_preserves_the_saved_multi_interface_graph() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    helper_start = panel_js.index("function applyReviewedEvidenceToCurrentWorkflowNode")
+    helper_end = panel_js.index("\n}\n", helper_start) + 2
+    helper_body = panel_js[helper_start:helper_end]
+    refresh_start = panel_js.index("async function refreshSavedLearningDraftReview")
+    refresh_end = panel_js.index("\n}\n", refresh_start) + 2
+    refresh_body = panel_js[refresh_start:refresh_end]
+
+    assert "replaceReviewedNodeEvidenceBySource" in helper_body
+    assert "previousSourcePath" in helper_body
+    assert "reviewedPath" in helper_body
+    assert "regions" in helper_body
+    assert "action_candidates" in helper_body
+    assert "saveInterfaceWorkflowReview({ commitEditor: false })" in refresh_body
+    assert "applyReviewedEvidenceToCurrentWorkflowNode" in refresh_body
+    assert "loadInterfaceWorkflowReview" not in refresh_body
+    assert "interfaceWorkflowEditableReviewSourcePath(view)" in panel_js
+
+    save_start = panel_js.index("async function saveInterfaceWorkflowReview")
+    save_end = panel_js.index("\nasync function loadInterfaceWorkflowReview", save_start)
+    save_body = panel_js[save_start:save_end]
+    assert "{ commitEditor = true } = {}" in save_body
+    assert "commitEditor" in save_body
+    assert "interfaceWorkflowReviewState.snapshot()" in save_body
 
 
 def test_interface_workflow_refresh_skips_related_sidecar_discovery() -> None:
@@ -4770,7 +5342,7 @@ def test_interface_workflow_graph_keeps_evidence_visible_below_compact_canvas() 
     panel_css = Path("app/web_panel/panel.css").read_text(encoding="utf-8-sig")
     panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
 
-    assert "height: clamp(280px, 34vh, 360px);" in panel_css
+    assert "height: clamp(300px, 38vh, 460px);" in panel_css
     assert ".interface-workflow-graph-stage" in panel_css
     assert "#interfaceWorkflowGraphCanvas" in panel_css
     assert "height: 100%;" in panel_css
@@ -4812,6 +5384,22 @@ def test_interface_workflow_panel_composes_multiple_history_sources_without_losi
     assert 'on("interfaceWorkflowRemoveSourceBtn", "click", removeCurrentInterfaceWorkflowSource)' in panel_js
 
 
+def test_interface_asset_attach_uses_explicit_dialog() -> None:
+    html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    assert 'id="interfaceAssetAttachDialog"' in html
+    assert 'id="interfaceAssetAttachDialogCloseBtn"' in html
+    assert 'id="interfaceAssetAttachOnlyBtn"' in html
+    assert 'id="interfaceAssetAttachAndConnectBtn"' in html
+    assert 'id="interfaceAssetAttachWarning"' in html
+    assert 'class="interface-workflow-source-controls" hidden' not in html
+    assert "function openInterfaceAssetAttachDialog" in panel_js
+    assert "function closeInterfaceAssetAttachDialog" in panel_js
+    assert 'on("interfaceAssetAttachOnlyBtn", "click"' in panel_js
+    assert 'on("interfaceAssetAttachAndConnectBtn", "click"' in panel_js
+
+
 def test_interface_workflow_add_copy_does_not_imply_automatic_linking() -> None:
     panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
 
@@ -4829,23 +5417,59 @@ def test_learning_draft_add_mode_immediately_updates_overlay_pointer_state() -> 
     assert 'classList.toggle("is-add-mode", learningDraftEditorAddMode)' in body
 
 
+def test_learning_draft_role_change_preserves_pending_metadata_before_rerender() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    start = panel_js.index('$(' + '"imageInspectorRoleSelect"' + ')?.addEventListener("change"')
+    end = panel_js.index('\n  $("imageInspectorParentSelect")', start)
+    body = panel_js[start:end]
+
+    assert "applyLearningDraftEditorMetadataFromControls();" in body
+    assert body.index("applyLearningDraftEditorMetadataFromControls();") < body.index('op: "update_role"')
+
+    parent_start = panel_js.index('$("imageInspectorParentSelect")?.addEventListener("change"')
+    parent_end = panel_js.index('\n  [', parent_start)
+    parent_body = panel_js[parent_start:parent_end]
+    assert "applyLearningDraftEditorMetadataFromControls();" in parent_body
+    assert parent_body.index("applyLearningDraftEditorMetadataFromControls();") < parent_body.index('op: "update_parent"')
+
+
 def test_interface_workflow_panel_loads_saved_workflows_by_application() -> None:
     html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
     panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
 
     assert 'id="interfaceWorkflowLibrarySelect"' in html
     assert 'id="interfaceWorkflowLoadSavedBtn"' in html
+    assert 'class="interface-workflow-existing-selector"' in html
+    assert 'class="interface-workflow-existing-selector" hidden' not in html
     assert 'id="interfaceWorkflowCreateBtn"' in html
     assert 'id="interfaceWorkflowOpenFolderBtn"' in html
     assert 'id="interfaceWorkflowNewNameInput"' in html
     assert 'id="interfaceWorkflowLibraryStatus"' in html
     assert '"/memory/interface_workflows/registry"' in panel_js
-    assert "/memory/interface_workflows/agent_context?application_identity_key=" in panel_js
+    assert "/memory/interface_workflows/review_context?application_identity_key=" in panel_js
+    assert "workflow_id=${encodeURIComponent(workflowId)}" in panel_js
     assert "async function loadSavedInterfaceWorkflowReview" in panel_js
     assert "async function createInterfaceWorkflow" in panel_js
     assert 'on("interfaceWorkflowLoadSavedBtn", "click", loadSavedInterfaceWorkflowReview)' in panel_js
     assert 'on("interfaceWorkflowCreateBtn", "click", createInterfaceWorkflow)' in panel_js
     assert 'on("interfaceWorkflowOpenFolderBtn", "click"' in panel_js
+
+
+def test_interface_workflow_panel_supports_confirmed_evidence_and_workflow_deletion() -> None:
+    html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    panel_api = Path("app/api/panel.py").read_text(encoding="utf-8-sig")
+
+    assert 'id="interfaceWorkflowDeleteBtn"' in html
+    assert "interface-asset-list-delete" in panel_js
+    assert "async function deleteInterfaceAssetEvidence" in panel_js
+    assert "async function deleteSelectedInterfaceWorkflow" in panel_js
+    assert '"/panel/delete_learning_evidence"' in panel_js
+    assert '"/panel/delete_interface_workflow"' in panel_js
+    assert "window.confirm" in panel_js
+    assert 'on("interfaceWorkflowDeleteBtn", "click", deleteSelectedInterfaceWorkflow)' in panel_js
+    assert '@router.post("/panel/delete_learning_evidence"' in panel_api
+    assert '@router.post("/panel/delete_interface_workflow"' in panel_api
 
 
 def test_adding_a_single_interface_does_not_create_a_transition() -> None:
@@ -4909,6 +5533,9 @@ def test_interface_workflow_panel_reopens_saved_workflows_after_boot_and_save() 
     assert "await loadSavedInterfaceWorkflowReview()" in registry_body
     assert "response.data?.workflow_id" in save_body
     assert "openSelected: true" in save_body
+    assert "selectedNodeId" in save_body
+    assert "interfaceWorkflowReviewState.select(selectedNodeId)" in save_body
+    assert "renderInterfaceWorkflowReviewSelection()" in save_body
     assert "await loadInterfaceWorkflowLibraryRegistry({" in boot_body
     assert "openSelected: true" in boot_body
     assert boot_body.index("await loadInterfaceWorkflowLibraryRegistry({") < boot_body.index(
@@ -4933,6 +5560,45 @@ def test_recent_single_interface_load_does_not_replace_open_saved_workflow() -> 
     assert "options.skipWorkflowReview = true" in body
     assert "preserveWorkflowReview: options.skipWorkflowReview === true" in load_body
     assert "if (!options.preserveWorkflowReview) clearInterfaceWorkflowReview(reason)" in clear_body
+
+
+def test_saved_workflow_member_open_prefers_snapshot_identity_over_source_builder() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    start = panel_js.index("async function openInterfaceWorkflowReviewGroupNode")
+    end = panel_js.index("\nfunction showInterfaceAssetPage", start)
+    body = panel_js[start:end]
+
+    assert "resolveInterfaceAssetOpenTarget" in body
+    assert 'target.mode === "saved_workflow"' in body
+    assert 'target.mode === "source_preview"' in body
+    assert body.index('target.mode === "saved_workflow"') < body.index(
+        'target.mode === "source_preview"'
+    )
+
+
+def test_existing_workflow_review_save_and_remove_never_rebuild_from_source_files() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    refresh_start = panel_js.index("async function refreshSavedLearningDraftReview")
+    refresh_end = panel_js.index("\nasync function refreshCurrentInterfaceWorkflowEvidence", refresh_start)
+    refresh_body = panel_js[refresh_start:refresh_end]
+    remove_start = panel_js.index("async function removeCurrentInterfaceWorkflowSource")
+    remove_end = panel_js.index("\nfunction renderLearningDraftReview", remove_start)
+    remove_body = panel_js[remove_start:remove_end]
+
+    assert "loadInterfaceWorkflowReview" not in refresh_body
+    assert "removeInterfaceNode" in remove_body
+    assert "loadInterfaceWorkflowReview" not in remove_body
+    assert "saveInterfaceWorkflowReview" in remove_body
+
+    draft_start = panel_js.index("async function loadLearningDraftReview")
+    draft_end = panel_js.index("\nasync function saveLearningDraftReview", draft_start)
+    draft_body = panel_js[draft_start:draft_end]
+    assert "loadInterfaceWorkflowReview" not in draft_body
+
+    add_start = panel_js.index("async function addInterfaceWorkflowSource")
+    add_end = panel_js.index("\nasync function removeCurrentInterfaceWorkflowSource", add_start)
+    add_body = panel_js[add_start:add_end]
+    assert "previewInterfaceWorkflowSource" in add_body
 
 
 def test_interface_workflow_library_prefers_newest_saved_workflow() -> None:
@@ -5079,3 +5745,421 @@ def test_interface_workflow_content_semantics_editor_is_available() -> None:
     assert "function saveInterfaceWorkflowContentDescriptor" in panel_js
     assert "content_descriptors" in panel_js
     assert "Agent 只在当前观察中读取动态值" in html
+
+
+def _write_managed_scoped_capture_segments(directory: Path) -> tuple[Path, Path]:
+    directory.mkdir(parents=True, exist_ok=True)
+    first = directory / "first.png"
+    second = directory / "second.png"
+    first_rows = [(index * 37 + 11) % 251 for index in range(32)]
+    second_rows = first_rows[-16:] + [(index * 53 + 19) % 251 for index in range(16)]
+    for path, rows in ((first, first_rows), (second, second_rows)):
+        image = Image.new("L", (10, len(rows)))
+        image.putdata([(value + column * 17) % 256 for value in rows for column in range(10)])
+        image.convert("RGB").save(path)
+    return first, second
+
+
+def _scoped_capture_request(segment_records: list[dict]) -> dict:
+    return {
+        "segment_records": segment_records,
+        "roi": {"x": 0, "y": 0, "width": 10, "height": 32},
+        "viewport": {"width": 10, "height": 32},
+        "stop_reason": "reached_bottom",
+    }
+
+
+def test_panel_composes_managed_scoped_capture_and_preserves_evidence(tmp_path: Path) -> None:
+    source_dir = Path("artifacts") / "tests" / f"scoped-capture-panel-{tmp_path.name}"
+    first, second = _write_managed_scoped_capture_segments(source_dir)
+    trace_path = source_dir / "scroll-trace.json"
+    trace_path.write_text('{"changed": true}\n', encoding="utf-8")
+    client = TestClient(app)
+    response_data: dict | None = None
+    try:
+        request = _scoped_capture_request(
+            [
+                {
+                    "image_path": str(first),
+                    "capture_id": "capture-first",
+                    "scroll_trace_path": str(trace_path),
+                    "scroll_effect": {"changed": True, "delta": 16},
+                },
+                {"image_path": str(second), "capture_id": "capture-second"},
+            ]
+        )
+        request["output_dir"] = str(tmp_path / "caller-selected-output")
+
+        response = client.post("/panel/compose_scoped_learning_capture", json=request)
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["success"] is True
+        response_data = payload["data"]
+        composite_path = Path(response_data["composite_path"])
+        manifest_path = Path(response_data["manifest_path"])
+        expected_root = (panel_api.ROOT_DIR / "artifacts" / "learning-runs" / "scoped-capture").resolve()
+        assert composite_path.is_absolute() and composite_path.is_file()
+        assert manifest_path.is_absolute() and manifest_path.is_file()
+        assert expected_root in composite_path.parents
+        assert expected_root in manifest_path.parents
+        assert not (tmp_path / "caller-selected-output").exists()
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert manifest["segments"][0]["capture_id"] == "capture-first"
+        assert manifest["segments"][0]["scroll_trace_path"] == str(trace_path.resolve())
+        assert manifest["segments"][0]["scroll_effect"] == {"changed": True, "delta": 16}
+        assert response_data["capture_contract_version"] == "scoped_learning_capture_v1"
+        assert response_data["capture_mode"] == "scoped_long"
+        assert response_data["artifact_is_authorization"] is False
+        assert response_data["historical_coordinates_are_priors"] is True
+        assert response_data["runtime_execution_allowed"] is False
+        assert response_data["scroll_executed_by_this_route"] is False
+    finally:
+        if response_data:
+            shutil.rmtree(Path(response_data["manifest_path"]).parent, ignore_errors=True)
+        shutil.rmtree(source_dir, ignore_errors=True)
+
+
+def test_panel_rejects_unmanaged_scoped_capture_segment_before_builder(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        panel_api,
+        "build_scoped_capture_artifact",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("builder must not run")),
+    )
+    response = TestClient(app).post(
+        "/panel/compose_scoped_learning_capture",
+        json=_scoped_capture_request([{"image_path": str(tmp_path / "outside.png")}]),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is False
+    assert payload["error"]["code"] == "invalid_scoped_capture_path"
+
+
+def test_panel_rejects_unmanaged_scoped_capture_scroll_trace_before_builder(tmp_path: Path, monkeypatch) -> None:
+    source_dir = Path("artifacts") / "tests" / f"scoped-capture-panel-{tmp_path.name}"
+    first, _ = _write_managed_scoped_capture_segments(source_dir)
+    outside_trace = tmp_path / "outside-trace.json"
+    outside_trace.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        panel_api,
+        "build_scoped_capture_artifact",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("builder must not run")),
+    )
+    try:
+        response = TestClient(app).post(
+            "/panel/compose_scoped_learning_capture",
+            json=_scoped_capture_request(
+                [{"image_path": str(first), "scroll_trace_path": str(outside_trace)}]
+            ),
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["success"] is False
+        assert payload["error"]["code"] == "invalid_scoped_capture_path"
+    finally:
+        shutil.rmtree(source_dir, ignore_errors=True)
+
+
+def _fail_scoped_capture_runtime_boundary(*args, **kwargs):
+    raise AssertionError("scoped composition route must stay offline")
+
+
+def test_panel_scoped_capture_schema_requires_segment_and_image() -> None:
+    client = TestClient(app)
+    base_request = _scoped_capture_request([])
+
+    empty_segments = client.post("/panel/compose_scoped_learning_capture", json=base_request)
+    empty_image = client.post(
+        "/panel/compose_scoped_learning_capture",
+        json=_scoped_capture_request([{"image_path": ""}]),
+    )
+
+    assert empty_segments.status_code == 422
+    assert empty_image.status_code == 422
+
+
+def test_panel_maps_scoped_capture_composition_failure(tmp_path: Path, monkeypatch) -> None:
+    source_dir = Path("artifacts") / "tests" / f"scoped-capture-panel-{tmp_path.name}"
+    first, _ = _write_managed_scoped_capture_segments(source_dir)
+    try:
+        monkeypatch.setattr(
+            panel_api,
+            "build_scoped_capture_artifact",
+            lambda **kwargs: (_ for _ in ()).throw(
+                panel_api.ScopedCaptureCompositionError("publish failed")
+            ),
+        )
+
+        response = TestClient(app).post(
+            "/panel/compose_scoped_learning_capture",
+            json=_scoped_capture_request([{"image_path": str(first)}]),
+        )
+
+        assert response.status_code == 200
+        assert response.json()["error"]["code"] == "scoped_capture_composition_failed"
+    finally:
+        shutil.rmtree(source_dir, ignore_errors=True)
+
+
+def test_panel_rejects_missing_managed_scoped_capture_segment_before_builder(tmp_path: Path, monkeypatch) -> None:
+    missing = Path("artifacts") / "tests" / f"scoped-capture-panel-{tmp_path.name}" / "missing.png"
+    monkeypatch.setattr(panel_api, "build_scoped_capture_artifact", _fail_scoped_capture_runtime_boundary)
+
+    response = TestClient(app).post(
+        "/panel/compose_scoped_learning_capture",
+        json=_scoped_capture_request([{"image_path": str(missing)}]),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["error"]["code"] == "invalid_scoped_capture_path"
+
+
+def test_panel_rejects_scoped_capture_traversal_before_builder(monkeypatch) -> None:
+    monkeypatch.setattr(panel_api, "build_scoped_capture_artifact", _fail_scoped_capture_runtime_boundary)
+    traversal_path = str(Path("artifacts") / "tests" / ".." / ".." / "outside.png")
+
+    response = TestClient(app).post(
+        "/panel/compose_scoped_learning_capture",
+        json=_scoped_capture_request([{"image_path": traversal_path}]),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["error"]["code"] == "invalid_scoped_capture_path"
+
+
+def test_panel_scoped_capture_success_uses_unique_output_dirs_and_stays_offline(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source_dir = Path("artifacts") / "tests" / f"scoped-capture-panel-{tmp_path.name}"
+    first, _ = _write_managed_scoped_capture_segments(source_dir)
+    for name in (
+        "write_trace",
+        "model_base_url",
+        "run_learning_workflow_readonly_tail",
+        "run_model_review_task",
+        "run_recognition_task",
+        "run_two_stage_understanding_task",
+        "start_learning_workflow_stage_operation",
+    ):
+        monkeypatch.setattr(panel_api, name, _fail_scoped_capture_runtime_boundary)
+    response_data: list[dict] = []
+    try:
+        client = TestClient(app)
+        request = _scoped_capture_request([{"image_path": str(first)}])
+        for _ in range(2):
+            response = client.post("/panel/compose_scoped_learning_capture", json=request)
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["success"] is True
+            response_data.append(payload["data"])
+
+        output_dirs = {Path(data["manifest_path"]).parent for data in response_data}
+        assert len(output_dirs) == 2
+        assert all(directory.is_dir() for directory in output_dirs)
+    finally:
+        for data in response_data:
+            shutil.rmtree(Path(data["manifest_path"]).parent, ignore_errors=True)
+        shutil.rmtree(source_dir, ignore_errors=True)
+
+
+def test_panel_maps_invalid_scoped_capture_roi_to_input_error(tmp_path: Path) -> None:
+    source_dir = Path("artifacts") / "tests" / f"scoped-capture-panel-{tmp_path.name}"
+    first, _ = _write_managed_scoped_capture_segments(source_dir)
+    try:
+        request = _scoped_capture_request([{"image_path": str(first)}])
+        request["roi"] = {"x": 0, "y": 0, "width": 11, "height": 32}
+
+        response = TestClient(app).post("/panel/compose_scoped_learning_capture", json=request)
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["success"] is False
+        assert payload["error"]["code"] == "invalid_scoped_capture_input"
+    finally:
+        shutil.rmtree(source_dir, ignore_errors=True)
+
+
+def test_panel_maps_invalid_scoped_capture_stop_reason_to_input_error(tmp_path: Path) -> None:
+    source_dir = Path("artifacts") / "tests" / f"scoped-capture-panel-{tmp_path.name}"
+    first, _ = _write_managed_scoped_capture_segments(source_dir)
+    try:
+        request = _scoped_capture_request([{"image_path": str(first)}])
+        request["stop_reason"] = "not-a-builder-stop-reason"
+
+        response = TestClient(app).post("/panel/compose_scoped_learning_capture", json=request)
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["success"] is False
+        assert payload["error"]["code"] == "invalid_scoped_capture_input"
+    finally:
+        shutil.rmtree(source_dir, ignore_errors=True)
+
+
+def test_panel_maps_generic_scoped_capture_builder_runtime_error(tmp_path: Path, monkeypatch) -> None:
+    source_dir = Path("artifacts") / "tests" / f"scoped-capture-panel-{tmp_path.name}"
+    first, _ = _write_managed_scoped_capture_segments(source_dir)
+    try:
+        monkeypatch.setattr(
+            panel_api,
+            "build_scoped_capture_artifact",
+            lambda **kwargs: (_ for _ in ()).throw(RuntimeError("unexpected composition failure")),
+        )
+
+        response = TestClient(app).post(
+            "/panel/compose_scoped_learning_capture",
+            json=_scoped_capture_request([{"image_path": str(first)}]),
+        )
+
+        assert response.status_code == 200
+        assert response.json()["error"]["code"] == "scoped_capture_composition_failed"
+    finally:
+        shutil.rmtree(source_dir, ignore_errors=True)
+
+
+def test_panel_maps_server_output_resolution_failure_to_composition_error(tmp_path: Path, monkeypatch) -> None:
+    import app.learn.scoped_capture as scoped_capture
+
+    source_dir = Path("artifacts") / "tests" / f"scoped-capture-panel-{tmp_path.name}"
+    first, _ = _write_managed_scoped_capture_segments(source_dir)
+
+    class FailingOutputPath:
+        def expanduser(self):
+            return self
+
+        def resolve(self):
+            raise OSError("server output resolution failed")
+
+    try:
+        monkeypatch.setattr(scoped_capture, "Path", lambda value: FailingOutputPath())
+
+        response = TestClient(app).post(
+            "/panel/compose_scoped_learning_capture",
+            json=_scoped_capture_request([{"image_path": str(first)}]),
+        )
+
+        assert response.status_code == 200
+        assert response.json()["error"]["code"] == "scoped_capture_composition_failed"
+    finally:
+        shutil.rmtree(source_dir, ignore_errors=True)
+
+
+def test_panel_rejects_existing_traversal_target_before_builder(tmp_path: Path, monkeypatch) -> None:
+    outside_path = panel_api.ROOT_DIR.parent / f"scoped-capture-traversal-{tmp_path.name}.png"
+    Image.new("RGB", (1, 1), "white").save(outside_path)
+    traversal_path = str(panel_api.ROOT_DIR / "artifacts" / ".." / ".." / outside_path.name)
+    monkeypatch.setattr(panel_api, "build_scoped_capture_artifact", _fail_scoped_capture_runtime_boundary)
+    try:
+        response = TestClient(app).post(
+            "/panel/compose_scoped_learning_capture",
+            json=_scoped_capture_request([{"image_path": traversal_path}]),
+        )
+
+        assert response.status_code == 200
+        assert response.json()["error"]["code"] == "invalid_scoped_capture_path"
+    finally:
+        outside_path.unlink(missing_ok=True)
+
+
+def test_panel_scoped_capture_success_never_reaches_runtime_side_effect_boundaries(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from app.api import action as action_api
+    from app.api import execute as execute_api
+    from app.core import model_server
+    from app.core.input_controller import input_controller
+    from app.core.screenshot import screenshot_service
+    from app.gate import window as gate_window
+    from app.operation.vision_protocol import executor_adapter
+
+    source_dir = Path("artifacts") / "tests" / f"scoped-capture-panel-{tmp_path.name}"
+    first, _ = _write_managed_scoped_capture_segments(source_dir)
+    response_data: dict | None = None
+    try:
+        monkeypatch.setattr(screenshot_service, "capture_window", _fail_scoped_capture_runtime_boundary)
+        monkeypatch.setattr(input_controller, "scroll_window", _fail_scoped_capture_runtime_boundary)
+        monkeypatch.setattr(model_server.urllib.request, "urlopen", _fail_scoped_capture_runtime_boundary)
+        monkeypatch.setattr(gate_window, "validate_bound_window_for_app", _fail_scoped_capture_runtime_boundary)
+        monkeypatch.setattr(action_api, "execute_recognition_plan", _fail_scoped_capture_runtime_boundary)
+        monkeypatch.setattr(executor_adapter, "execute_vision_action", _fail_scoped_capture_runtime_boundary)
+        monkeypatch.setattr(execute_api, "execute_step", _fail_scoped_capture_runtime_boundary)
+        monkeypatch.setattr(execute_api, "_dispatch_low_level_step", _fail_scoped_capture_runtime_boundary)
+
+        response = TestClient(app).post(
+            "/panel/compose_scoped_learning_capture",
+            json=_scoped_capture_request([{"image_path": str(first)}]),
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["success"] is True
+        response_data = payload["data"]
+        assert response_data["artifact_is_authorization"] is False
+        assert response_data["runtime_execution_allowed"] is False
+    finally:
+        if response_data:
+            shutil.rmtree(Path(response_data["manifest_path"]).parent, ignore_errors=True)
+        shutil.rmtree(source_dir, ignore_errors=True)
+
+
+
+def test_learning_interface_scoped_capture_controls_and_flow_binding_are_present() -> None:
+    index_html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+
+    for control_id in [
+        "learningCaptureModeNormal",
+        "learningCaptureModeScopedLong",
+        "learningScopedCaptureConfirmed",
+        "learningScopedCaptureRoiX",
+        "learningScopedCaptureRoiY",
+        "learningScopedCaptureRoiWidth",
+        "learningScopedCaptureRoiHeight",
+        "learningScopedCaptureScrollScope",
+        "learningScopedCaptureTargetPane",
+        "learningScopedCaptureTargetContainerId",
+        "learningScopedCaptureWheelClicks",
+        "learningScopedCaptureMaxSegments",
+        "learningScopedCaptureProgress",
+        "learningScopedCaptureCompositePath",
+        "learningScopedCaptureManifestPath",
+        "learningScopedCaptureArtifactPolicy",
+    ]:
+        assert f'id="{control_id}"' in index_html
+    assert 'id="learningCaptureModeNormal" type="radio" name="learningCaptureMode" value="normal" checked' in index_html
+    assert 'id="learningScopedCaptureFields" hidden' in index_html
+    assert "\u672a\u8bc4\u4f30\uff0c\u4eba\u5de5\u9009\u62e9\u4e3a\u51c6" in index_html
+
+    strategy_start = panel_js.index("async function runLearningInterfaceCaptureStrategy")
+    strategy_end = panel_js.index("async function runLearningScreenObserve", strategy_start)
+    strategy_body = panel_js[strategy_start:strategy_end]
+    assert "resetScopedLearningCaptureState();" in strategy_body
+    assert "runScopedLearningCaptureSequence" in strategy_body
+    assert '"/action/scroll"' in strategy_body
+    assert '"/panel/compose_scoped_learning_capture"' in strategy_body
+    assert "setLearningSourceImagePath(result.image_path)" in strategy_body
+    assert 'learningCaptureModeScopedLong")?.checked' in panel_js
+    render_start = panel_js.index("function renderScopedLearningCaptureState")
+    render_end = panel_js.index("function resetScopedLearningCaptureState", render_start)
+    render_body = panel_js[render_start:render_end]
+    assert "artifact_is_authorization" in render_body
+    assert "historical_coordinates_are_priors" in render_body
+
+    flow_start = panel_js.index("async function runLearningInterfaceFlow")
+    flow_body = panel_js[flow_start:panel_js.index("async function completeLearningInterfaceReadonlyFlow", flow_start)]
+    assert "runLearningInterfaceCaptureStrategy" in flow_body
+    assert "if (!capture?.model_allowed)" in flow_body
+
+
+def test_learning_interface_scoped_capture_cancellation_aborts_bind_capture_sequence() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    cancel_start = panel_js.index("async function cancelActiveLearningInterfaceFlow")
+    cancel_end = panel_js.index("async function runLearningStageTaskWithHeartbeat", cancel_start)
+    cancel_body = panel_js[cancel_start:cancel_end]
+
+    assert "activeScopedLearningCaptureContext" in cancel_body
+    assert "activeScopedLearningCaptureContext.controller.abort()" in cancel_body
+    assert "cancelled" in cancel_body

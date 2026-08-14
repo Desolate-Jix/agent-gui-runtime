@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 import time
@@ -18,7 +19,7 @@ if str(REPO_ROOT) not in sys.path:
 from seek_debug_export_application_fill_record import build_record_from_debug_run  # noqa: E402
 from seek_debug_step_runner import build_parser as build_step_parser  # noqa: E402
 from seek_debug_step_runner import run_step  # noqa: E402
-from seek_mvp_traversal_runner import _post_json  # noqa: E402
+from seek_mvp_traversal_runner import _get_json, _post_json  # noqa: E402
 from app.agent.continuous_task_session import (  # noqa: E402
     confirm_apply_entry,
     create_continuous_task_session,
@@ -36,6 +37,11 @@ from app.agent.seek_continuous_demo import (  # noqa: E402
     resolve_active_memory_sha256,
     save_seek_checkpoint,
     save_seek_session,
+)
+from app.core.gpu_resources import build_model_resource_preflight  # noqa: E402
+from app.core.model_server import check_model_server, profile_for_stage  # noqa: E402
+from app.learn.continuous_workflow_projection import (  # noqa: E402
+    persist_continuous_session_workflow_candidate,
 )
 from app.seek.application_artifacts import build_seek_application_flow_artifact  # noqa: E402
 from seek_demo_readiness_report import build_demo_readiness_report, load_step_reports  # noqa: E402
@@ -77,6 +83,7 @@ def _step_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "status": payload.get("status"),
         "latency_ms": payload.get("_latency_ms"),
         "report_path": payload.get("report_path"),
+        "trace_paths": [str(path) for path in payload.get("trace_paths") or []],
         "next_allowed_steps": payload.get("next_allowed_steps"),
         "final_submissions": payload.get("final_submissions"),
         "submit_clicks": payload.get("submit_clicks"),
@@ -303,8 +310,562 @@ def _write_speed_demo_result(
     }
     if extra:
         result.update(extra)
+    result["multi_interface_workflow"] = _persist_multi_interface_workflow(
+        run_dir=run_dir,
+        args=args,
+    )
     _write_json(run_dir / "speed_demo_report.json", result)
     return result
+
+
+def _persist_multi_interface_workflow(
+    *,
+    run_dir: Path,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    session_path = run_dir / "continuous_task_session.json"
+    if not session_path.is_file():
+        return {
+            "contract_version": "continuous_workflow_projection_result_v1",
+            "status": "not_covered",
+            "reason": "continuous_session_not_available",
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    try:
+        return persist_continuous_session_workflow_candidate(
+            session=load_seek_session(run_dir),
+            application_identity={
+                "name": "Microsoft Edge",
+                "process": "msedge.exe",
+                "url": str(getattr(args, "url", "") or ""),
+            },
+            goal=(
+                "Review job results, open a matching job detail, enter the application "
+                "flow, and stop before final submit"
+            ),
+            memory_store=_build_reviewed_memory_store(),
+            project_root=REPO_ROOT,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        return {
+            "contract_version": "continuous_workflow_projection_result_v1",
+            "status": "failed",
+            "reason": "continuous_workflow_projection_failed",
+            "error": str(exc),
+            "session_path": str(session_path.resolve()),
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+
+
+def _compact_inventory_item(item: dict[str, Any], *, item_id_keys: tuple[str, ...]) -> dict[str, Any]:
+    compact: dict[str, Any] = {}
+    for key in item_id_keys:
+        if item.get(key) not in {None, ""}:
+            compact["id"] = item.get(key)
+            break
+    for key in (
+        "label",
+        "question_text",
+        "text",
+        "field_type",
+        "answer_type",
+        "risk_class",
+        "required",
+        "disabled",
+        "policy",
+        "category",
+        "reason",
+        "requires_user_review",
+        "answer_source",
+        "bbox",
+        "field_bbox",
+        "question_bbox",
+    ):
+        value = item.get(key)
+        if value is not None and value != "" and value != [] and value != {}:
+            compact[key] = value
+    return compact
+
+
+def _compact_answer_policies(plan: dict[str, Any] | None) -> list[dict[str, Any]]:
+    source = plan if isinstance(plan, dict) else {}
+    if source.get("contract_version") == "answer_policy_projection_v1":
+        return [dict(item) for item in source.get("policies") or [] if isinstance(item, dict)]
+    items = source.get("answers") if isinstance(source.get("answers"), list) else source.get("planned_answers")
+    policies: list[dict[str, Any]] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        item_source = item.get("source") if isinstance(item.get("source"), dict) else {}
+        raw_value = item.get("planned_answer")
+        if raw_value is None:
+            raw_value = item.get("value")
+        serialized = "" if raw_value is None else json.dumps(raw_value, ensure_ascii=False, sort_keys=True)
+        policies.append(
+            {
+                "field_id": item.get("field_id") or item_source.get("id"),
+                "question_id": item.get("question_id"),
+                "label": item.get("label") or item.get("question_text"),
+                "policy": item.get("policy") or item.get("category") or item.get("status"),
+                "reason": item.get("reason"),
+                "answer_source": item.get("answer_source"),
+                "requires_user_review": item.get("requires_user_review"),
+                "value_length": len(serialized),
+                "value_hash": hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+                if serialized
+                else None,
+                "value_redacted": bool(serialized),
+            }
+        )
+    return policies
+
+
+def _build_read_only_inventory_checkpoint(payload: dict[str, Any]) -> dict[str, Any]:
+    inventory = payload.get("form_field_inventory") if isinstance(payload.get("form_field_inventory"), dict) else {}
+    employer_inventory = (
+        payload.get("employer_question_inventory")
+        if isinstance(payload.get("employer_question_inventory"), dict)
+        else {}
+    )
+    fields = [
+        _compact_inventory_item(item, item_id_keys=("field_id", "id"))
+        for item in inventory.get("fields") or []
+        if isinstance(item, dict)
+    ]
+    question_sources = [
+        *(inventory.get("questions") or []),
+        *(employer_inventory.get("questions") or []),
+    ]
+    questions: list[dict[str, Any]] = []
+    seen_questions: set[str] = set()
+    for item in question_sources:
+        if not isinstance(item, dict):
+            continue
+        compact = _compact_inventory_item(item, item_id_keys=("question_id", "field_id", "id"))
+        fingerprint = json.dumps(compact, ensure_ascii=False, sort_keys=True)
+        if fingerprint not in seen_questions:
+            seen_questions.add(fingerprint)
+            questions.append(compact)
+    final_actions = [
+        _compact_inventory_item(item, item_id_keys=("action_id", "id"))
+        for item in inventory.get("danger_actions") or []
+        if isinstance(item, dict)
+    ]
+    application_policies = _compact_answer_policies(payload.get("application_answer_plan"))
+    employer_question_policies = _compact_answer_policies(payload.get("employer_question_answer_plan"))
+    answer_policies = [*application_policies, *employer_question_policies]
+    ordinary_fields = [
+        item
+        for item in fields
+        if item.get("risk_class") == "ordinary_field" and item.get("field_type") != "file_upload"
+    ]
+    unsupported_uploads = [
+        item
+        for item in fields
+        if item.get("field_type") == "file_upload" or item.get("risk_class") == "unsupported_file_upload"
+    ]
+    review_required_questions = [
+        item for item in answer_policies if item.get("question_id") and item.get("policy") == "needs_user_review"
+    ]
+    sensitive_questions = [
+        item for item in answer_policies if item.get("question_id") and item.get("policy") == "blocked_sensitive"
+    ]
+    unsupported_count = sum(
+        1
+        for item in fields
+        if item.get("field_type") == "file_upload" or item.get("risk_class") == "unsupported_file_upload"
+    )
+    sensitive_count = sum(
+        1
+        for item in [*fields, *questions]
+        if item.get("risk_class") in {"blocked_sensitive", "sensitive", "needs_user_review"}
+        or item.get("policy") in {"blocked_sensitive", "needs_user_review"}
+    )
+    live_fill_attempted = bool(
+        payload.get("live_fill_attempted")
+        or inventory.get("fill_attempted")
+        or int((payload.get("safe_form_fill_attempt") or {}).get("fields_filled") or 0)
+        or int((payload.get("employer_question_fill_attempt") or {}).get("answered_count") or 0)
+    )
+    submit_clicks = int(payload.get("submit_clicks") or 0) + int(
+        (payload.get("continue_after_fill") or {}).get("submit_clicks") or 0
+    ) + int(bool(inventory.get("submit_attempted")))
+    final_submissions = int(payload.get("final_submissions") or 0) + int(
+        (payload.get("continue_after_fill") or {}).get("final_submissions") or 0
+    ) + int(
+        (payload.get("safe_form_fill_attempt") or {}).get("final_submissions") or 0
+    ) + int(
+        (payload.get("employer_question_fill_attempt") or {}).get("final_submissions") or 0
+    )
+    contract_valid = inventory.get("contract_version") == "form_question_inventory_v1"
+    read_only_confirmed = payload.get("read_only_inventory") is True
+    status = (
+        "pass"
+        if contract_valid and read_only_confirmed and not live_fill_attempted and submit_clicks == 0 and final_submissions == 0
+        else "needs_work"
+    )
+    return {
+        "contract_version": "seek_read_only_inventory_checkpoint_v1",
+        "status": status,
+        "interpretation": "live read-only inventory evidence; not live safe-fill evidence",
+        "summary": {
+            "field_count": len(fields),
+            "question_count": len(questions),
+            "unsupported_count": unsupported_count,
+            "sensitive_or_review_count": sensitive_count,
+            "final_action_count": len(final_actions),
+        },
+        "fields": fields,
+        "questions": questions,
+        "final_actions": final_actions,
+        "answer_policies": {
+            "application": application_policies,
+            "employer_questions": employer_question_policies,
+        },
+        "human_review": {
+            "ordinary_fields": ordinary_fields,
+            "review_required_questions": review_required_questions,
+            "sensitive_questions": sensitive_questions,
+            "unsupported_uploads": unsupported_uploads,
+            "final_actions": final_actions,
+            "interpretation": "human-review buckets only; no field value is authorized or filled",
+        },
+        "safety": {
+            "read_only_inventory": read_only_confirmed,
+            "live_fill_attempted": live_fill_attempted,
+            "submit_clicks": submit_clicks,
+            "final_submissions": final_submissions,
+            "artifact_is_authorization": False,
+        },
+        "evidence": {
+            "trace_paths": [str(path) for path in payload.get("trace_paths") or []],
+            "screenshot_paths": [
+                str(path)
+                for path in (payload.get("before_image"), payload.get("after_image"))
+                if path
+            ],
+            "source_report_path": payload.get("report_path"),
+        },
+        "pii_redacted": True,
+    }
+
+
+def _build_live_safe_fill_preflight(
+    checkpoint: dict[str, Any],
+    *,
+    field_id: str,
+    current_flow_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """从只读 inventory 投影一个待人工批准的单字段填写候选。"""
+
+    normalized_field_id = str(field_id or "").strip()
+    fields = [
+        dict(item)
+        for item in checkpoint.get("fields") or []
+        if isinstance(item, dict) and str(item.get("id") or "").strip() == normalized_field_id
+    ]
+    policies = [
+        dict(item)
+        for group in (checkpoint.get("answer_policies") or {}).values()
+        if isinstance(group, list)
+        for item in group
+        if isinstance(item, dict)
+        and str(item.get("field_id") or "").strip() == normalized_field_id
+    ]
+    field = fields[0] if len(fields) == 1 else {}
+    policy = policies[0] if len(policies) == 1 else {}
+    eligible = (
+        checkpoint.get("status") == "pass"
+        and len(fields) == 1
+        and len(policies) == 1
+        and field.get("risk_class") == "ordinary_field"
+        and field.get("field_type") != "file_upload"
+        and policy.get("policy") == "auto_fill"
+        and policy.get("value_redacted") is True
+        and bool(policy.get("value_hash"))
+        and int(policy.get("value_length") or 0) > 0
+    )
+    failure_reasons: list[str] = []
+    if checkpoint.get("status") != "pass":
+        failure_reasons.append("read_only_inventory_not_passed")
+    if len(fields) != 1:
+        failure_reasons.append("field_identity_not_unique")
+    if len(policies) != 1:
+        failure_reasons.append("answer_policy_not_unique")
+    if field and field.get("risk_class") != "ordinary_field":
+        failure_reasons.append("field_not_ordinary")
+    if field and field.get("field_type") == "file_upload":
+        failure_reasons.append("file_upload_not_supported")
+    if policy and policy.get("policy") != "auto_fill":
+        failure_reasons.append("answer_policy_requires_review")
+    if policy and (
+        policy.get("value_redacted") is not True
+        or not policy.get("value_hash")
+        or int(policy.get("value_length") or 0) <= 0
+    ):
+        failure_reasons.append("redacted_value_evidence_incomplete")
+
+    field_projection = {
+        key: field[key]
+        for key in ("id", "label", "field_type", "risk_class", "required")
+        if key in field
+    }
+    value_evidence = {
+        key: policy.get(key)
+        for key in (
+            "answer_source",
+            "value_length",
+            "value_hash",
+            "value_redacted",
+        )
+    }
+    flow_state = dict(current_flow_state or {})
+    return {
+        "contract_version": "seek_live_safe_fill_preflight_v1",
+        "status": "ready_for_human_review" if eligible else "invalid",
+        "approval_state": "awaiting_explicit_approval" if eligible else "not_approvable",
+        "interpretation": (
+            "single-field review evidence only; not authorization and not live safe-fill evidence"
+        ),
+        "field": field_projection,
+        "value_evidence": value_evidence,
+        "target": {
+            "state_type": flow_state.get("state_type"),
+            "current_step": flow_state.get("current_step"),
+        },
+        "expected_verification": {
+            "mode": "post_observe_hash_and_length",
+            "expected_value_hash": policy.get("value_hash"),
+            "expected_value_length": policy.get("value_length"),
+            "raw_value_must_not_be_recorded": True,
+        },
+        "safety": {
+            "max_fields": 1,
+            "cover_letter_fill_allowed": False,
+            "continue_allowed": False,
+            "final_submit_allowed": False,
+            "artifact_is_authorization": False,
+        },
+        "evidence": dict(checkpoint.get("evidence") or {}),
+        "failure_reasons": failure_reasons,
+        "pii_redacted": True,
+    }
+
+
+def _validate_approved_live_safe_fill_preflight(
+    *,
+    path: Path | None,
+    expected_sha256: str | None,
+    approved_field_id: str,
+) -> dict[str, Any]:
+    """校验人工批准是否绑定到同一份脱敏预检资产。"""
+
+    if path is None or not str(expected_sha256 or "").strip():
+        return {"status": "invalid", "reason": "preflight_path_or_checksum_missing"}
+    if not path.is_file():
+        return {"status": "invalid", "reason": "preflight_file_missing", "path": str(path)}
+    actual_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+    if actual_sha256.casefold() != str(expected_sha256).strip().casefold():
+        return {
+            "status": "invalid",
+            "reason": "checksum_mismatch",
+            "path": str(path),
+            "expected_sha256": str(expected_sha256),
+            "actual_sha256": actual_sha256,
+        }
+    try:
+        preflight = _read_json(path)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return {
+            "status": "invalid",
+            "reason": "preflight_json_invalid",
+            "path": str(path),
+            "details": str(exc),
+        }
+    field = preflight.get("field") if isinstance(preflight.get("field"), dict) else {}
+    safety = preflight.get("safety") if isinstance(preflight.get("safety"), dict) else {}
+    checks = {
+        "contract_version": preflight.get("contract_version") == "seek_live_safe_fill_preflight_v1",
+        "review_status": preflight.get("status") == "ready_for_human_review",
+        "approval_state": preflight.get("approval_state") == "awaiting_explicit_approval",
+        "field_identity": str(field.get("id") or "").strip() == approved_field_id,
+        "ordinary_field": field.get("risk_class") == "ordinary_field"
+        and field.get("field_type") != "file_upload",
+        "single_field_only": safety.get("max_fields") == 1,
+        "cover_letter_blocked": safety.get("cover_letter_fill_allowed") is False,
+        "continue_blocked": safety.get("continue_allowed") is False,
+        "final_submit_blocked": safety.get("final_submit_allowed") is False,
+        "not_authorization_by_itself": safety.get("artifact_is_authorization") is False,
+        "pii_redacted": preflight.get("pii_redacted") is True,
+    }
+    if not all(checks.values()):
+        return {
+            "status": "invalid",
+            "reason": "preflight_contract_rejected",
+            "path": str(path),
+            "sha256": actual_sha256,
+            "checks": checks,
+        }
+    return {
+        "status": "pass",
+        "reason": "approved_preflight_bound",
+        "path": str(path),
+        "sha256": actual_sha256,
+        "field_id": approved_field_id,
+        "checks": checks,
+    }
+
+
+def _collect_cp14_runtime_preflight(args: argparse.Namespace) -> dict[str, Any]:
+    """复用公共资源与模型检查，生成 CP14 只读运行前证据。"""
+
+    try:
+        runtime_health = _get_json(
+            str(args.base_url),
+            "/health",
+            min(float(args.timeout), 5.0),
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        runtime_health = {
+            "success": False,
+            "error_code": "runtime_health_preflight_failed",
+            "details": str(exc),
+        }
+    try:
+        profile = profile_for_stage("locate")
+    except (OSError, RuntimeError, ValueError) as exc:
+        error = {
+            "status": "unavailable",
+            "error_code": "locate_profile_preflight_failed",
+            "details": str(exc),
+        }
+        return {
+            "contract_version": "seek_cp14_runtime_preflight_v1",
+            "runtime_health": runtime_health,
+            "model_resource_preflight": error,
+            "model_status": error,
+        }
+    try:
+        resource_preflight = build_model_resource_preflight(profile)
+    except (OSError, RuntimeError, ValueError) as exc:
+        resource_preflight = {
+            "status": "unavailable",
+            "model_launch_allowed": False,
+            "error_code": "gpu_resource_preflight_failed",
+            "details": str(exc),
+        }
+    try:
+        model_status = check_model_server(profile, timeout=2.0)
+    except (OSError, RuntimeError, ValueError) as exc:
+        model_status = {
+            "status": "unavailable",
+            "error_code": "locate_model_status_preflight_failed",
+            "details": str(exc),
+        }
+    return {
+        "contract_version": "seek_cp14_runtime_preflight_v1",
+        "runtime_health": runtime_health,
+        "model_resource_preflight": resource_preflight,
+        "model_status": model_status,
+    }
+
+
+def _build_cp14_apply_preflight(
+    *,
+    args: argparse.Namespace,
+    steps: list[dict[str, Any]],
+    capture_payload: dict[str, Any],
+    match_payload: dict[str, Any],
+    runtime_preflight_payload: dict[str, Any],
+) -> dict[str, Any]:
+    """在 CP14 真实 Apply 入口前汇总可复盘、只读的 fail-closed 检查。"""
+
+    capture_value = str(capture_payload.get("after_image") or "")
+    capture_path = Path(capture_value) if capture_value else None
+    fresh_capture_exists = bool(
+        capture_path and capture_path.is_file() and capture_path.stat().st_size > 0
+    )
+    report_paths: list[Path] = []
+    for step in steps:
+        if step.get("report_path"):
+            report_paths.append(Path(str(step["report_path"])))
+        report_paths.extend(Path(str(path)) for path in step.get("trace_paths") or [] if path)
+    trace_report_exists = any(path.is_file() and path.stat().st_size > 0 for path in report_paths)
+    step_status = {
+        str(step.get("step_name") or ""): str(step.get("status") or "")
+        for step in steps
+    }
+    match_decision = str((match_payload.get("match_decision") or {}).get("decision") or "")
+    runtime_health = runtime_preflight_payload.get("runtime_health") or {}
+    resource_preflight = runtime_preflight_payload.get("model_resource_preflight") or {}
+    model_status = runtime_preflight_payload.get("model_status") or {}
+    checks = [
+        {
+            "name": "continuous_session_enabled",
+            "passed": bool(getattr(args, "continuous_session", False)),
+        },
+        {
+            "name": "read_only_inventory_enabled",
+            "passed": bool(getattr(args, "read_only_inventory", False)),
+        },
+        {
+            "name": "explicit_apply_entry_approval",
+            "passed": bool(getattr(args, "approve_quick_apply_entry", False)),
+        },
+        {
+            "name": "target_binding_verified",
+            "passed": step_status.get("bind_and_resize_verify") == "ok",
+        },
+        {
+            "name": "fresh_capture_exists",
+            "passed": fresh_capture_exists,
+            "evidence_path": str(capture_path) if capture_path else None,
+        },
+        {
+            "name": "trace_report_exists",
+            "passed": trace_report_exists,
+            "evidence_paths": [str(path) for path in report_paths],
+        },
+        {
+            "name": "agent_match_decision_ready",
+            "passed": match_payload.get("status") == "ok"
+            and match_decision in {"strong_apply", "maybe_apply"},
+            "decision": match_decision or None,
+        },
+        {
+            "name": "runtime_health_ready",
+            "passed": runtime_health.get("success") is True,
+        },
+        {
+            "name": "gpu_resource_capacity_ready",
+            "passed": resource_preflight.get("status") == "ready"
+            and resource_preflight.get("model_launch_allowed") is True
+            and (resource_preflight.get("gpu") or {}).get("available") is True,
+            "resource_mode": resource_preflight.get("resource_mode"),
+            "recommended_batch_size": resource_preflight.get("recommended_batch_size"),
+            "reason_codes": resource_preflight.get("reason_codes") or [],
+        },
+        {
+            "name": "locate_model_service_ready",
+            "passed": model_status.get("status") == "running",
+            "model_status": model_status.get("status"),
+            "model_id": model_status.get("model_id"),
+        },
+    ]
+    passed = all(check["passed"] for check in checks)
+    return {
+        "contract_version": "seek_cp14_apply_preflight_v1",
+        "status": "pass" if passed else "failed",
+        "checks": checks,
+        "runtime_preflight": runtime_preflight_payload,
+        "safety": {
+            "live_fill_allowed": False,
+            "final_submit_allowed": False,
+            "next_allowed_step": "execute_apply_entry" if passed else "safe_stop",
+        },
+    }
 
 
 def _recover_seek_results_after_external_apply(
@@ -343,12 +904,119 @@ def _finish_application_flow(
     initial_flow_state: dict[str, Any] | None = None,
     continuous_session: dict[str, Any] | None = None,
     memory_store=None,
+    cp14_preflight_report_path: str | None = None,
 ) -> dict[str, Any]:
+    read_only_inventory = bool(getattr(args, "read_only_inventory", False))
+    prepare_live_safe_fill = bool(getattr(args, "prepare_live_safe_fill", False))
     last_flow_state = dict(initial_flow_state or {})
     application_stop_status: str | None = None
     application_stop_reason: str | None = None
     continuous_session_path: Path | None = None
     continuous_checkpoint_path: Path | None = None
+
+    if (
+        not read_only_inventory
+        and not prepare_live_safe_fill
+        and not bool(getattr(args, "approve_live_safe_fill", False))
+    ):
+        return _write_speed_demo_result(
+            run_dir,
+            started=started,
+            args=args,
+            steps=steps,
+            job_attempts=job_attempts,
+            result_scrolls=result_scrolls,
+            status="needs_work",
+            stop_reason="live_safe_fill_approval_required",
+            extra={
+                "application_started": True,
+                "live_fill_attempted": False,
+                "submit_clicks": 0,
+                "final_submissions": 0,
+                "last_flow_state": last_flow_state,
+            },
+        )
+    approved_live_field_id = str(getattr(args, "approved_live_field_id", None) or "").strip() or None
+    prepare_live_safe_fill_field_id = (
+        str(getattr(args, "prepare_live_safe_fill_field_id", None) or "").strip() or None
+    )
+    if prepare_live_safe_fill and prepare_live_safe_fill_field_id is None:
+        return _write_speed_demo_result(
+            run_dir,
+            started=started,
+            args=args,
+            steps=steps,
+            job_attempts=job_attempts,
+            result_scrolls=result_scrolls,
+            status="needs_work",
+            stop_reason="prepare_live_safe_fill_field_id_required",
+            extra={
+                "application_started": True,
+                "live_fill_attempted": False,
+                "submit_clicks": 0,
+                "final_submissions": 0,
+                "last_flow_state": last_flow_state,
+            },
+        )
+    if not read_only_inventory and not prepare_live_safe_fill and approved_live_field_id is None:
+        return _write_speed_demo_result(
+            run_dir,
+            started=started,
+            args=args,
+            steps=steps,
+            job_attempts=job_attempts,
+            result_scrolls=result_scrolls,
+            status="needs_work",
+            stop_reason="approved_live_field_id_required",
+            extra={
+                "application_started": True,
+                "live_fill_attempted": False,
+                "submit_clicks": 0,
+                "final_submissions": 0,
+                "last_flow_state": last_flow_state,
+            },
+        )
+    approved_live_fill_preflight_validation: dict[str, Any] | None = None
+    if not read_only_inventory and not prepare_live_safe_fill:
+        approved_preflight_value = str(
+            getattr(args, "approved_live_fill_preflight", None) or ""
+        ).strip()
+        approved_live_fill_preflight_validation = _validate_approved_live_safe_fill_preflight(
+            path=Path(approved_preflight_value) if approved_preflight_value else None,
+            expected_sha256=str(
+                getattr(args, "approved_live_fill_preflight_sha256", None) or ""
+            ).strip()
+            or None,
+            approved_field_id=approved_live_field_id or "",
+        )
+        if approved_live_fill_preflight_validation.get("status") != "pass":
+            missing = approved_live_fill_preflight_validation.get("reason") == (
+                "preflight_path_or_checksum_missing"
+            )
+            return _write_speed_demo_result(
+                run_dir,
+                started=started,
+                args=args,
+                steps=steps,
+                job_attempts=job_attempts,
+                result_scrolls=result_scrolls,
+                status="needs_work",
+                stop_reason=(
+                    "approved_live_fill_preflight_required"
+                    if missing
+                    else "approved_live_fill_preflight_invalid"
+                ),
+                extra={
+                    "application_started": True,
+                    "live_fill_attempted": False,
+                    "submit_clicks": 0,
+                    "final_submissions": 0,
+                    "last_flow_state": last_flow_state,
+                    "approved_live_fill_preflight_validation": (
+                        approved_live_fill_preflight_validation
+                    ),
+                },
+            )
 
     for _ in range(args.max_application_steps):
         if budget_exhausted(reserve_ms=12000):
@@ -371,21 +1039,86 @@ def _finish_application_flow(
                     ),
                 },
             )
-        payload = run(
-            "continue_application_flow",
-            [
-                "--fill-safe-fields",
-                "--allow-cover-letter-fill",
-                "--max-safe-fields-to-fill",
-                str(args.max_safe_fields_to_fill),
-            ],
-        )
+        application_step_args = ["--read-only-inventory"] if read_only_inventory or prepare_live_safe_fill else [
+            "--fill-safe-fields",
+            "--max-safe-fields-to-fill",
+            "1",
+            "--approved-live-field-id",
+            approved_live_field_id,
+        ]
+        payload = run("continue_application_flow", application_step_args)
         if isinstance(payload.get("application_flow_state"), dict):
             last_flow_state = payload["application_flow_state"]
         elif isinstance(payload.get("post_apply_wait"), dict) and isinstance(
             payload["post_apply_wait"].get("application_flow_state"), dict
         ):
             last_flow_state = payload["post_apply_wait"]["application_flow_state"]
+
+        if read_only_inventory or prepare_live_safe_fill:
+            checkpoint = _build_read_only_inventory_checkpoint(payload)
+            checkpoint_path = run_dir / "read_only_inventory_report.json"
+            _write_json(checkpoint_path, checkpoint)
+            if prepare_live_safe_fill:
+                preflight = _build_live_safe_fill_preflight(
+                    checkpoint,
+                    field_id=prepare_live_safe_fill_field_id or "",
+                    current_flow_state=last_flow_state,
+                )
+                preflight_path = run_dir / "live_safe_fill_preflight.json"
+                _write_json(preflight_path, preflight)
+                preflight_ready = preflight.get("status") == "ready_for_human_review"
+                return _write_speed_demo_result(
+                    run_dir,
+                    started=started,
+                    args=args,
+                    steps=steps,
+                    job_attempts=job_attempts,
+                    result_scrolls=result_scrolls,
+                    status="needs_work",
+                    stop_reason=(
+                        "live_safe_fill_preflight_ready"
+                        if preflight_ready
+                        else "live_safe_fill_preflight_contract_failed"
+                    ),
+                    extra={
+                        "application_started": True,
+                        "read_only_inventory_report_path": str(checkpoint_path),
+                        "live_safe_fill_preflight_path": str(preflight_path),
+                        "live_safe_fill_preflight_status": preflight.get("status"),
+                        "live_fill_attempted": False,
+                        "submit_clicks": checkpoint.get("safety", {}).get("submit_clicks"),
+                        "final_submissions": checkpoint.get("safety", {}).get("final_submissions"),
+                        "last_flow_state": last_flow_state,
+                    },
+                )
+            return _write_speed_demo_result(
+                run_dir,
+                started=started,
+                args=args,
+                steps=steps,
+                job_attempts=job_attempts,
+                result_scrolls=result_scrolls,
+                status="pass" if checkpoint.get("status") == "pass" else "needs_work",
+                stop_reason=(
+                    "read_only_inventory_complete"
+                    if checkpoint.get("status") == "pass"
+                    else "read_only_inventory_contract_failed"
+                ),
+                extra={
+                    "application_started": True,
+                    "read_only_inventory_report_path": str(checkpoint_path),
+                    "read_only_inventory_status": checkpoint.get("status"),
+                    "live_fill_attempted": checkpoint.get("safety", {}).get("live_fill_attempted"),
+                    "submit_clicks": checkpoint.get("safety", {}).get("submit_clicks"),
+                    "final_submissions": checkpoint.get("safety", {}).get("final_submissions"),
+                    "last_flow_state": last_flow_state,
+                    **(
+                        {"cp14_preflight_report_path": cp14_preflight_report_path}
+                        if cp14_preflight_report_path
+                        else {}
+                    ),
+                },
+            )
 
         if continuous_session is not None and memory_store is not None:
             evidence = build_step_evidence(payload, run_dir=run_dir)
@@ -522,6 +1255,16 @@ def _finish_application_flow(
         result["continuous_session_path"] = str(continuous_session_path)
     if continuous_checkpoint_path:
         result["continuous_checkpoint_path"] = str(continuous_checkpoint_path)
+    if cp14_preflight_report_path:
+        result["cp14_preflight_report_path"] = cp14_preflight_report_path
+    if approved_live_fill_preflight_validation:
+        result["approved_live_fill_preflight_validation"] = (
+            approved_live_fill_preflight_validation
+        )
+    result["multi_interface_workflow"] = _persist_multi_interface_workflow(
+        run_dir=run_dir,
+        args=args,
+    )
     _write_json(run_dir / "speed_demo_report.json", result)
     return result
 
@@ -617,6 +1360,23 @@ def run_speed_demo(args: argparse.Namespace) -> dict[str, Any]:
             raise RuntimeError(f"{step} stopped with status {payload.get('status')}")
         return payload
 
+    def run_cp14_apply_preflight(match_payload: dict[str, Any]) -> dict[str, Any] | None:
+        if not bool(getattr(args, "cp14_live_uat", False)):
+            return None
+        runtime_preflight_payload = _collect_cp14_runtime_preflight(args)
+        capture_payload = run("capture")
+        preflight = _build_cp14_apply_preflight(
+            args=args,
+            steps=steps,
+            capture_payload=capture_payload,
+            match_payload=match_payload,
+            runtime_preflight_payload=runtime_preflight_payload,
+        )
+        preflight_path = run_dir / "cp14_apply_preflight.json"
+        _write_json(preflight_path, preflight)
+        preflight["report_path"] = str(preflight_path)
+        return preflight
+
     if resume_continuous and continuous_session is not None and resume_checkpoint is not None:
         if continuous_session.get("status") == "paused_for_learning":
             return _write_speed_demo_result(
@@ -653,6 +1413,25 @@ def run_speed_demo(args: argparse.Namespace) -> dict[str, Any]:
                 )
             continuous_session = confirm_apply_entry(continuous_session, approved=True)
             continuous_session_path = save_seek_session(run_dir, continuous_session)
+            resumed_attempt = resume_checkpoint.get("job_attempt") or {}
+            preflight = run_cp14_apply_preflight(
+                {
+                    "status": "ok",
+                    "match_decision": {"decision": resumed_attempt.get("match_decision")},
+                }
+            )
+            if preflight is not None and preflight.get("status") != "pass":
+                return _write_speed_demo_result(
+                    run_dir,
+                    started=started,
+                    args=args,
+                    steps=steps,
+                    job_attempts=job_attempts,
+                    result_scrolls=result_scrolls,
+                    status="needs_work",
+                    stop_reason="cp14_apply_preflight_failed",
+                    extra={"cp14_preflight_report_path": preflight.get("report_path")},
+                )
             apply_args = ["--allow-maybe-apply"] if args.allow_maybe_apply else []
             execute_apply = run(
                 "execute_apply_entry",
@@ -767,6 +1546,7 @@ def run_speed_demo(args: argparse.Namespace) -> dict[str, Any]:
                 initial_flow_state=apply_state,
                 continuous_session=continuous_session,
                 memory_store=memory_store,
+                cp14_preflight_report_path=(preflight or {}).get("report_path"),
             )
         if resume_checkpoint.get("phase") == "quick_apply":
             return _finish_application_flow(
@@ -898,7 +1678,7 @@ def run_speed_demo(args: argparse.Namespace) -> dict[str, Any]:
                     knowledge_source="seek_runtime_profile",
                 )
                 continuous_session_path = save_seek_session(run_dir, continuous_session)
-            run(
+            detail_read = run(
                 "read_detail_batch",
                 [
                     "--batch-max-captures",
@@ -909,6 +1689,18 @@ def run_speed_demo(args: argparse.Namespace) -> dict[str, Any]:
                     str(args.wheel_clicks),
                 ],
             )
+            if detail_read.get("read_complete") is False:
+                job_attempts.append(
+                    {
+                        "job_index": job_index,
+                        "scroll_round": scroll_round,
+                        "status": "skipped_detail_incomplete",
+                        "reason": detail_read.get("read_state") or detail_read.get("stop_reason") or "unknown",
+                        "job_title": card.get("title"),
+                        "company": card.get("company"),
+                    }
+                )
+                continue
             match_args: list[str] = []
             agent_suitability_review = str(getattr(args, "agent_suitability_review", "") or "").strip()
             if agent_suitability_review:
@@ -963,6 +1755,19 @@ def run_speed_demo(args: argparse.Namespace) -> dict[str, Any]:
                     )
                 continuous_session = confirm_apply_entry(continuous_session, approved=True)
                 continuous_session_path = save_seek_session(run_dir, continuous_session)
+            preflight = run_cp14_apply_preflight(match)
+            if preflight is not None and preflight.get("status") != "pass":
+                return _write_speed_demo_result(
+                    run_dir,
+                    started=started,
+                    args=args,
+                    steps=steps,
+                    job_attempts=job_attempts,
+                    result_scrolls=result_scrolls,
+                    status="needs_work",
+                    stop_reason="cp14_apply_preflight_failed",
+                    extra={"cp14_preflight_report_path": preflight.get("report_path")},
+                )
             apply_args = ["--allow-maybe-apply"] if args.allow_maybe_apply else []
             execute_apply = run(
                 "execute_apply_entry",
@@ -1178,6 +1983,7 @@ def run_speed_demo(args: argparse.Namespace) -> dict[str, Any]:
         initial_flow_state=apply_state,
         continuous_session=continuous_session,
         memory_store=memory_store,
+        cp14_preflight_report_path=(preflight or {}).get("report_path"),
     )
 
 
@@ -1206,6 +2012,47 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--post-apply-capture-wait-seconds", type=float, default=1.0)
     parser.add_argument("--max-application-steps", type=int, default=6)
     parser.add_argument("--max-safe-fields-to-fill", type=int, default=5)
+    parser.add_argument(
+        "--read-only-inventory",
+        action="store_true",
+        help="After entering Quick Apply, read one form inventory and answer policy, then stop without filling or continuing.",
+    )
+    parser.add_argument(
+        "--cp14-live-uat",
+        action="store_true",
+        help="Require a fail-closed runtime preflight immediately before the approved Quick Apply entry click.",
+    )
+    parser.add_argument(
+        "--approve-live-safe-fill",
+        action="store_true",
+        help="Explicitly approve the live safe-fill branch. Omit this flag to fail closed before any form fill attempt.",
+    )
+    parser.add_argument(
+        "--approved-live-field-id",
+        default=None,
+        help="Stable ordinary-field ID explicitly approved for the single CP15A live fill.",
+    )
+    parser.add_argument(
+        "--prepare-live-safe-fill",
+        action="store_true",
+        help="Build one redacted single-field approval preflight from a live read-only inventory, then stop.",
+    )
+    parser.add_argument(
+        "--prepare-live-safe-fill-field-id",
+        default=None,
+        help="Candidate ordinary-field ID to project into the approval preflight; this is not authorization.",
+    )
+    parser.add_argument(
+        "--approved-live-fill-preflight",
+        type=Path,
+        default=None,
+        help="Reviewed seek_live_safe_fill_preflight_v1 file bound to the explicit field approval.",
+    )
+    parser.add_argument(
+        "--approved-live-fill-preflight-sha256",
+        default=None,
+        help="SHA-256 of the exact reviewed preflight file; mismatch fails closed before live fill.",
+    )
     parser.add_argument("--time-budget-ms", type=float, default=300000.0)
     parser.add_argument("--close-old-windows", action="store_true")
     parser.add_argument(

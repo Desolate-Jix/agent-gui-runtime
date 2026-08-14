@@ -1333,6 +1333,7 @@ def _execute_apply_entry(
     fill_safe_fields: bool = False,
     max_safe_fields_to_fill: int = 1,
     allow_cover_letter_fill: bool = False,
+    approved_field_id: str | None = None,
 ) -> dict[str, Any]:
     detail = merge_seek_job_identity(job, detail)
     decision = str(match_decision.get("decision") or "")
@@ -1713,6 +1714,7 @@ def _execute_apply_entry(
         execute_fill=fill_safe_fields,
         max_safe_fields_to_fill=max_safe_fields_to_fill,
         allow_cover_letter_fill=allow_cover_letter_fill,
+        approved_field_id=approved_field_id,
         timeout=timeout,
     )
     summary["status"] = flow_state["status"]
@@ -2362,14 +2364,17 @@ def _safe_form_fill_attempt(
     cover_letter_draft: dict[str, Any] | None = None,
     max_safe_fields_to_fill: int = 1,
     allow_cover_letter_fill: bool = False,
+    approved_field_id: str | None = None,
     timeout: float,
 ) -> dict[str, Any]:
     fill_limit = max(0, int(max_safe_fields_to_fill))
+    approved_field_id = str(approved_field_id or "").strip() or None
     attempt: dict[str, Any] = {
         "contract_version": "safe_form_fill_attempt_v1",
         "enabled": bool(execute_fill),
         "max_safe_fields_to_fill": fill_limit,
         "allow_cover_letter_fill": bool(allow_cover_letter_fill),
+        "approved_field_id": approved_field_id,
         "status": "disabled",
         "filled": False,
         "fields_attempted": 0,
@@ -2384,21 +2389,42 @@ def _safe_form_fill_attempt(
         attempt["status"] = "blocked_need_user_or_gpt_decision"
         attempt["stop_reason"] = "final_submit_visible_stop_before_fill"
         return attempt
+    if execute_fill and approved_field_id is None:
+        attempt["status"] = "blocked_need_user_or_gpt_decision"
+        attempt["stop_reason"] = "explicit_safe_field_approval_required"
+        return attempt
     candidates, skipped = _safe_fill_candidates(
         answer_plan,
         allow_cover_letter_fill=allow_cover_letter_fill,
         candidate_profile=candidate_profile,
         cover_letter_draft=cover_letter_draft,
     )
-    selected = candidates[:fill_limit] if fill_limit else []
+    selected, approved_match_count = _select_approved_safe_fill_candidates(
+        candidates,
+        approved_field_id=approved_field_id,
+        fill_limit=fill_limit,
+    )
     attempt["candidate_count"] = len(candidates)
     attempt["selected_count"] = len(selected)
+    attempt["approved_field_match_count"] = approved_match_count
     attempt["skipped_candidates"] = skipped
     if not candidates:
         attempt["status"] = "no_safe_known_fields"
         attempt["stop_reason"] = "no_auto_safe_known_fields_to_fill"
         return attempt
     if not selected:
+        if approved_field_id is not None:
+            attempt["status"] = "blocked_need_user_or_gpt_decision"
+            attempt["stop_reason"] = (
+                "approved_safe_field_ambiguous"
+                if approved_match_count > 1
+                else "approved_safe_field_not_found"
+            )
+            attempt["field_results"] = [
+                _field_fill_preview(item, value=value, selected_for_fill=False)
+                for item, value in candidates
+            ]
+            return attempt
         attempt["status"] = "no_safe_known_fields"
         attempt["stop_reason"] = "max_safe_fields_to_fill_zero"
         attempt["field_results"] = [_field_fill_preview(item, value=value, selected_for_fill=False) for item, value in candidates]
@@ -2435,13 +2461,24 @@ def _safe_form_fill_attempt(
                 candidate_profile=candidate_profile,
                 cover_letter_draft=cover_letter_draft,
             )
-            selected = candidates[:fill_limit] if fill_limit else []
+            selected, approved_match_count = _select_approved_safe_fill_candidates(
+                candidates,
+                approved_field_id=approved_field_id,
+                fill_limit=fill_limit,
+            )
             attempt["candidate_count"] = len(candidates)
             attempt["selected_count"] = len(selected)
+            attempt["approved_field_match_count"] = approved_match_count
             attempt["skipped_candidates"] = skipped
             if not selected:
                 attempt["status"] = "blocked_need_user_or_gpt_decision"
-                attempt["stop_reason"] = "safe_field_not_visible_after_scroll_refresh"
+                attempt["stop_reason"] = (
+                    "approved_safe_field_ambiguous_after_scroll_refresh"
+                    if approved_field_id is not None and approved_match_count > 1
+                    else "approved_safe_field_not_visible_after_scroll_refresh"
+                    if approved_field_id is not None
+                    else "safe_field_not_visible_after_scroll_refresh"
+                )
                 return attempt
 
     for item, value in selected:
@@ -2459,6 +2496,31 @@ def _safe_form_fill_attempt(
         attempt["filled"] = True
         attempt["stop_reason"] = "safe_known_fields_filled_stop_before_navigation"
     return attempt
+
+
+def _safe_fill_candidate_field_id(item: dict[str, Any]) -> str | None:
+    source = item.get("source") if isinstance(item.get("source"), dict) else {}
+    value = source.get("id") or item.get("field_id")
+    normalized = str(value or "").strip()
+    return normalized or None
+
+
+def _select_approved_safe_fill_candidates(
+    candidates: list[tuple[dict[str, Any], str]],
+    *,
+    approved_field_id: str | None,
+    fill_limit: int,
+) -> tuple[list[tuple[dict[str, Any], str]], int | None]:
+    if approved_field_id is None:
+        return (candidates[:fill_limit] if fill_limit else []), None
+    matches = [
+        candidate
+        for candidate in candidates
+        if _safe_fill_candidate_field_id(candidate[0]) == approved_field_id
+    ]
+    if len(matches) != 1 or fill_limit <= 0:
+        return [], len(matches)
+    return matches[:1], len(matches)
 
 
 def _safe_fill_candidates(
@@ -3406,6 +3468,7 @@ def run_traversal(
     fill_safe_fields: bool = False,
     max_safe_fields_to_fill: int = 1,
     allow_cover_letter_fill: bool = False,
+    approved_field_id: str | None = None,
     learned_artifact: dict[str, Any] | None = None,
     window_width: int | None = 2560,
     window_height: int | None = 1400,
@@ -3594,6 +3657,7 @@ def run_traversal(
                     fill_safe_fields=fill_safe_fields,
                     max_safe_fields_to_fill=max_safe_fields_to_fill,
                     allow_cover_letter_fill=allow_cover_letter_fill,
+                    approved_field_id=approved_field_id,
                 )
                 step["apply_entry"] = apply_attempt
                 apply_entries.append(apply_attempt)
@@ -3725,6 +3789,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fill-safe-fields", action="store_true", help="After Apply Entry, fill only application_answer_plan_v1 auto_safe_known fields. Continue/Next/Submit remain forbidden.")
     parser.add_argument("--max-safe-fields-to-fill", type=int, default=1, help="Maximum auto_safe_known fields to fill in one Apply Entry. Defaults to 1.")
     parser.add_argument("--allow-cover-letter-fill", action="store_true", help="Allow safe-fill to type a generated cover letter draft. Default is disabled.")
+    parser.add_argument(
+        "--approved-live-field-id",
+        default=None,
+        help="Stable field ID explicitly approved for this live fill. Live fill fails closed when omitted.",
+    )
     parser.add_argument("--candidate-profile", type=Path, default=None, help="Optional candidate_profile_v1 JSON used for job matching.")
     parser.add_argument("--agent-suitability-review", type=Path, default=None, help="Optional agent_suitability_review_v1 JSON or reviews list. Apply Entry is allowed only after a pass verdict for full JD review.")
     parser.add_argument("--learned-artifact", type=Path, default=None, help="Optional learned_app_profile_v1 or seek_learn_artifact_export_v1 JSON used to assist SEEK execution.")
@@ -3761,6 +3830,7 @@ def main(argv: list[str] | None = None) -> int:
         fill_safe_fields=args.fill_safe_fields,
         max_safe_fields_to_fill=args.max_safe_fields_to_fill,
         allow_cover_letter_fill=args.allow_cover_letter_fill,
+        approved_field_id=args.approved_live_field_id,
         learned_artifact=learned_artifact,
         window_width=args.window_width or None,
         window_height=args.window_height or None,

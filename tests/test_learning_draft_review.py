@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -1551,6 +1552,78 @@ def test_save_reviewed_template_candidate_forces_mixed_source_and_safety(tmp_pat
     assert candidate["audit"]["changes_summary"]
 
 
+def test_save_interface_workflow_node_review_skips_related_sidecar_discovery(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import app.learn.draft_review as draft_review_module
+
+    screenshot_path = tmp_path / "artifacts" / "screenshots" / "workspace.png"
+    screenshot_path.parent.mkdir(parents=True)
+    Image.new("RGB", (320, 180), "white").save(screenshot_path)
+    source_path = _write_json(
+        tmp_path
+        / "artifacts"
+        / "interface-workflow-reviews"
+        / "workflow_demo"
+        / "node-review-sources"
+        / "workspace.json",
+        {
+            "contract_version": "interface_workflow_node_review_source_v1",
+            "workflow_id": "workflow_demo",
+            "node_id": "workspace",
+            "draft": {
+                "contract_version": "learning_template_draft_v1",
+                "screen_summary": "Operations Workspace",
+                "state_guess": "workspace",
+                "states": [],
+                "regions": [],
+                "action_templates": [],
+                "blockers": [],
+                "verification_rules": [],
+                "page_details": {
+                    "screen": {
+                        "summary": "Operations Workspace",
+                        "source_image_path": "artifacts/screenshots/workspace.png",
+                    }
+                },
+                "safety": {
+                    "artifact_is_authorization": False,
+                    "execute_binding_enabled": False,
+                    "final_submit_forbidden": True,
+                },
+            },
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        },
+    )
+    calls: list[bool] = []
+    original = draft_review_module._learning_demo_artifact_review
+
+    def capture_discovery(*args, discover_related_sidecars: bool = True, **kwargs):
+        calls.append(discover_related_sidecars)
+        return original(
+            *args,
+            discover_related_sidecars=discover_related_sidecars,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        draft_review_module,
+        "_learning_demo_artifact_review",
+        capture_discovery,
+    )
+
+    result = draft_review_module.save_reviewed_template_candidate(
+        source_path,
+        {"review_status": "needs_human_review"},
+        project_root=tmp_path,
+    )
+
+    assert calls == [False]
+    assert (tmp_path / result["reviewed_template_candidate_path"]).is_file()
+
+
 def test_save_reviewed_template_candidate_accepts_review_only_pathgraph_additions(tmp_path: Path) -> None:
     from app.learn.draft_review import save_reviewed_template_candidate
 
@@ -2203,6 +2276,13 @@ def test_panel_lists_recent_learning_draft_sources(tmp_path: Path, monkeypatch) 
     bad_path.parent.mkdir(parents=True, exist_ok=True)
     bad_path.write_text("{bad json", encoding="utf-8")
     monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    monkeypatch.setattr(
+        panel_api,
+        "PINNED_LEARNING_DRAFT_SOURCE_PATHS",
+        [
+            "logs/benchmarks/learn_pathgraph_readiness_with_handoff_20260706/actual_parser_output_with_fusion_status.json"
+        ],
+    )
 
     client = TestClient(app)
     payload = client.get("/panel/learning_draft_sources", params={"limit": 16, "include_recent": "true"}).json()
@@ -2314,14 +2394,24 @@ def test_panel_lists_recent_learning_draft_sources(tmp_path: Path, monkeypatch) 
     assert data["skipped_count"] == 1
 
 
-def test_panel_pins_current_three_interface_demo_scaffolds_first() -> None:
+def test_panel_does_not_inject_legacy_benchmark_sources_into_current_evidence_library() -> None:
     import app.api.panel as panel_api
 
-    assert panel_api.PINNED_LEARNING_DRAFT_SOURCE_PATHS[:3] == [
-        "logs/benchmarks/learn_three_interface_scaffold_20260711/applemusic/learn_mode_demo_scaffold.json",
-        "logs/benchmarks/learn_three_interface_scaffold_20260711/qq/learn_mode_demo_scaffold.json",
-        "logs/benchmarks/learn_three_interface_scaffold_20260711/python_org/learn_mode_demo_scaffold.json",
-    ]
+    assert panel_api.PINNED_LEARNING_DRAFT_SOURCE_PATHS == []
+
+
+def test_panel_does_not_fall_back_to_legacy_benchmark_sources(tmp_path: Path, monkeypatch) -> None:
+    import app.api.panel as panel_api
+
+    benchmark_source = tmp_path / "logs" / "benchmarks" / "legacy" / "learn_mode_demo_scaffold.json"
+    _write_detail_surface_trial(benchmark_source)
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+
+    data = panel_api._list_recent_learning_draft_sources(limit=10)
+
+    assert data["sources"] == []
+    assert data["targeted_benchmark_scan_performed"] is False
+    assert data["targeted_benchmark_roots"] == []
 
 
 def test_panel_learning_draft_sources_limits_pinned_entries_to_current_demo_set(tmp_path: Path, monkeypatch) -> None:
@@ -2681,15 +2771,9 @@ def test_direct_page_detail_and_scaffold_sources_load_as_review_only(tmp_path: P
 
     assert payload["success"] is True
     sources = {item["source_path"]: item for item in payload["data"]["sources"]}
-    assert str(page_detail.relative_to(tmp_path)).replace("\\", "/") in sources
-    assert str(scaffold.relative_to(tmp_path)).replace("\\", "/") in sources
-    assert sources[str(page_detail.relative_to(tmp_path)).replace("\\", "/")]["source_category"] == (
-        "recent_learning_page_detail"
-    )
-    assert sources[str(scaffold.relative_to(tmp_path)).replace("\\", "/")]["source_category"] == (
-        "recent_learning_demo_scaffold"
-    )
-    assert sources[str(scaffold.relative_to(tmp_path)).replace("\\", "/")]["learning_demo_scaffold_page_detail_ready"] is True
+    assert str(page_detail.relative_to(tmp_path)).replace("\\", "/") not in sources
+    assert str(scaffold.relative_to(tmp_path)).replace("\\", "/") not in sources
+    assert payload["data"]["targeted_benchmark_scan_performed"] is False
 
 
 def test_panel_create_model_start_approval_packet_endpoint_is_no_execute(tmp_path: Path, monkeypatch) -> None:
@@ -3382,6 +3466,159 @@ def test_save_learning_draft_review_applies_manual_bbox_updates(tmp_path: Path) 
     assert saved["execute_binding_enabled"] is False
 
 
+def test_save_learning_draft_review_prunes_deleted_ids_from_derived_evidence_and_keeps_additions(
+    tmp_path: Path,
+) -> None:
+    from app.learn.draft_review import save_reviewed_template_candidate
+
+    trial_path = tmp_path / "artifacts" / "learning-runs" / "deletion-consistency" / "trial_result.json"
+    _write_trial(trial_path)
+    payload = json.loads(trial_path.read_text(encoding="utf-8"))
+    draft = payload["best_learning_draft"]
+    draft["workflow_draft"]["states"][0].update(
+        {
+            "region_refs": ["r1", "r_keep"],
+            "action_template_refs": ["a1", "a_keep"],
+        }
+    )
+    draft["interface_draft"]["regions"].append(
+        {
+            "region_id": "r_keep",
+            "label": "Keep region",
+            "role": "button",
+            "bbox": {"x": 140, "y": 18, "w": 100, "h": 30},
+        }
+    )
+    draft["workflow_draft"]["action_templates"].append(
+        {
+            "action_template_id": "a_keep",
+            "label": "Keep action",
+            "semantic_action": "read_only",
+            "target_entity": "r_keep",
+            "bbox": {"x": 142, "y": 20, "w": 80, "h": 24},
+        }
+    )
+    hierarchy = {
+        "contract_version": "ui_hierarchy_graph_v1",
+        "root_node_id": "uih:screen",
+        "nodes": [
+            {
+                "node_id": "uih:screen",
+                "source_ref": "screen",
+                "children": ["uih:r1", "uih:r_keep", "uih:a1", "uih:a_keep"],
+            },
+            {"node_id": "uih:r1", "source_ref": "r1", "children": []},
+            {
+                "node_id": "uih:r_keep",
+                "source_ref": "r_keep",
+                "children": [],
+            },
+            {
+                "node_id": "uih:a1",
+                "source_ref": "a1",
+                "children": [],
+            },
+            {
+                "node_id": "uih:a_keep",
+                "source_ref": "a_keep",
+                "children": [],
+            },
+        ],
+        "edges": [
+            {"source": "uih:screen", "target": "uih:r1"},
+            {"source": "uih:screen", "target": "uih:r_keep"},
+            {"source": "uih:screen", "target": "uih:a1"},
+            {"source": "uih:screen", "target": "uih:a_keep"},
+        ],
+        "summary": {"node_count": 5},
+    }
+    draft["ui_hierarchy"] = hierarchy
+    draft["page_details"] = {
+        "layout": {
+            "sections": [
+                {
+                    "section_id": "main",
+                    "regions": [
+                        {"region_id": "r1", "label": "Deleted PII region"},
+                        {"region_id": "r_keep", "label": "Keep region"},
+                    ],
+                    "operation_links": [
+                        {"region_id": "r1", "action_template_id": "a1"},
+                        {"region_id": "r_keep", "action_template_id": "a1"},
+                        {"region_id": "r_keep", "action_template_id": "a_keep"},
+                    ],
+                }
+            ],
+            "regions": [
+                {"region_id": "r1", "label": "Deleted PII region"},
+                {"region_id": "r_keep", "label": "Keep region"},
+            ],
+        },
+        "review_only_regions": [
+            {"region_id": "r1", "label": "Deleted PII region"},
+            {"region_id": "r_keep", "label": "Keep region"},
+        ],
+        "ui_hierarchy": hierarchy,
+    }
+    trial_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    result = save_reviewed_template_candidate(
+        "artifacts/learning-runs/deletion-consistency/trial_result.json",
+        {
+            "region_deletions": ["r1"],
+            "action_deletions": ["a1"],
+            "region_additions": [
+                {
+                    "region_id": "r_new",
+                    "label": "New reviewed region",
+                    "role": "button",
+                    "bbox": {"x": 250, "y": 18, "w": 100, "h": 30},
+                }
+            ],
+            "action_template_additions": [
+                {
+                    "action_template_id": "a_new",
+                    "label": "New reviewed action",
+                    "semantic_action": "read_only",
+                    "target_entity": "r_new",
+                    "bbox": {"x": 252, "y": 20, "w": 80, "h": 24},
+                }
+            ],
+        },
+        project_root=tmp_path,
+    )
+
+    saved = json.loads((tmp_path / result["reviewed_template_candidate_path"]).read_text(encoding="utf-8"))
+    reviewed = saved["draft"]
+    assert [item["region_id"] for item in reviewed["regions"]] == ["r_keep", "r_new"]
+    assert [item["action_template_id"] for item in reviewed["action_templates"]] == ["a_keep", "a_new"]
+    assert reviewed["states"][0]["region_refs"] == ["r_keep"]
+    assert reviewed["states"][0]["action_template_refs"] == ["a_keep"]
+
+    page_details = reviewed["page_details"]
+    section = page_details["layout"]["sections"][0]
+    assert [item["region_id"] for item in section["regions"]] == ["r_keep"]
+    assert [item["region_id"] for item in section["operation_links"]] == ["r_keep"]
+    assert [item["region_id"] for item in page_details["layout"]["regions"]] == ["r_keep"]
+    assert [item["region_id"] for item in page_details["review_only_regions"]] == ["r_keep"]
+
+    for hierarchy_key in ("ui_hierarchy",):
+        node_ids = {item["node_id"] for item in reviewed[hierarchy_key]["nodes"]}
+        assert node_ids == {"uih:screen", "uih:r_keep", "uih:a_keep"}
+        assert reviewed[hierarchy_key]["nodes"][0]["children"] == ["uih:r_keep", "uih:a_keep"]
+    page_hierarchy = page_details["ui_hierarchy"]
+    assert {item["node_id"] for item in page_hierarchy["nodes"]} == {
+        "uih:screen",
+        "uih:r_keep",
+        "uih:a_keep",
+    }
+    assert page_hierarchy["nodes"][0]["children"] == ["uih:r_keep", "uih:a_keep"]
+    assert "Deleted PII region" not in json.dumps(reviewed, ensure_ascii=False)
+    assert saved["artifact_is_authorization"] is False
+    assert saved["execute_binding_enabled"] is False
+    assert saved["final_submit_forbidden"] is True
+
+
 def test_save_learning_draft_review_writes_versioned_human_review_patch(tmp_path: Path) -> None:
     from app.learn.draft_review import save_reviewed_template_candidate
 
@@ -3438,6 +3675,342 @@ def test_save_learning_draft_review_writes_versioned_human_review_patch(tmp_path
     assert overlay_path.exists()
     assert reviewed["draft"]["numbered_map_path"] == result["reviewed_overlay_path"]
     assert reviewed["draft"]["page_details"]["compiled_overlay_path"] == result["reviewed_overlay_path"]
+
+
+def _write_ownership_ambiguity_trial(
+    tmp_path: Path,
+    *,
+    second_conflict: bool = False,
+) -> tuple[Path, str]:
+    screenshot_path = tmp_path / "artifacts" / "screenshots" / "ownership-review.png"
+    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (640, 480), "white").save(screenshot_path)
+    screenshot_sha256 = hashlib.sha256(screenshot_path.read_bytes()).hexdigest()
+    trial_path = tmp_path / "artifacts" / "learning-runs" / "ownership-review" / "trial_result.json"
+    _write_trial(trial_path)
+    payload = json.loads(trial_path.read_text(encoding="utf-8"))
+    groups = [
+        {
+            "group_id": "topbar_control_strip_4",
+            "member_item_ids": ["visual_control_1_6"],
+            "current_evidence_member_count": 1,
+        },
+        {
+            "group_id": "topbar_control_cluster_4_1",
+            "parent_group_id": "topbar_control_strip_4",
+            "member_item_ids": ["visual_control_1_6"],
+            "member_numbers": ["1.9"],
+            "current_evidence_member_count": 1,
+        },
+        {
+            "group_id": "topbar_semantic_group_4_1",
+            "parent_group_id": "topbar_control_strip_4",
+            "member_item_ids": ["visual_control_1_6"],
+            "member_numbers": ["1.9"],
+            "current_evidence_member_count": 1,
+        },
+    ]
+    numbered_items = [{"item_id": "visual_control_1_6", "number": "1.9"}]
+    if second_conflict:
+        groups.extend(
+            [
+                {
+                    "group_id": "secondary_cluster",
+                    "parent_group_id": "topbar_control_strip_4",
+                    "member_item_ids": ["visual_control_1_7"],
+                    "member_numbers": ["1.10"],
+                },
+                {
+                    "group_id": "secondary_semantic",
+                    "parent_group_id": "topbar_control_strip_4",
+                    "member_item_ids": ["visual_control_1_7"],
+                    "member_numbers": ["1.10"],
+                },
+            ]
+        )
+        numbered_items.append({"item_id": "visual_control_1_7", "number": "1.10"})
+    payload["best_learning_draft"]["page_details"] = {
+        "screen": {
+            "source_image_path": "artifacts/screenshots/ownership-review.png",
+            "source_image_sha256": screenshot_sha256,
+        },
+        "two_stage_understanding": {
+            "stage2_numbering": {
+                "contract_version": "learn_stage2_numbering_v1",
+                "regions": [
+                    {
+                        "region_id": "structure_region_top_bar",
+                        "numbered_items": numbered_items,
+                        "subregion_groups": groups,
+                        "stage2_streams": {
+                            "contract_version": "learn_stage2_dual_streams_v1",
+                            "semantic_groups": deepcopy(groups),
+                        },
+                    }
+                ],
+                "display_only": True,
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            }
+        },
+    }
+    trial_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return trial_path, screenshot_sha256
+
+
+def _ownership_review_patch(screenshot_sha256: str) -> dict:
+    return {
+        "contract_version": "human_review_patch_v1",
+        "screenshot_path": "artifacts/screenshots/ownership-review.png",
+        "screenshot_sha256": screenshot_sha256,
+        "reason": "人工确认 control cluster 是唯一 leaf owner",
+        "source": "human_panel_editor_v1",
+        "review_status": "approved_as_assisted_template",
+        "operations": [
+            {
+                "op": "resolve_ownership",
+                "target_kind": "ownership",
+                "target_id": "visual_control_1_6",
+                "region_id": "structure_region_top_bar",
+                "before_parent_group_ids": [
+                    "topbar_control_cluster_4_1",
+                    "topbar_semantic_group_4_1",
+                ],
+                "after_parent_group_id": "topbar_control_cluster_4_1",
+                "reason": "人工依据截图选择唯一父组",
+            }
+        ],
+    }
+
+
+def test_human_review_resolves_leaf_ownership_as_canonical_revision(tmp_path: Path) -> None:
+    from app.learn.draft_review import save_reviewed_template_candidate
+
+    trial_path, screenshot_sha256 = _write_ownership_ambiguity_trial(tmp_path)
+    result = save_reviewed_template_candidate(
+        trial_path,
+        _ownership_review_patch(screenshot_sha256),
+        project_root=tmp_path,
+    )
+
+    candidate = json.loads(
+        (tmp_path / result["reviewed_template_candidate_path"]).read_text(encoding="utf-8")
+    )
+    patch = json.loads(
+        (tmp_path / result["human_review_patch_path"]).read_text(encoding="utf-8")
+    )
+    ownership = candidate["draft"]["page_details"]["hierarchy_ownership_review"]
+    stage2 = candidate["draft"]["page_details"]["two_stage_understanding"]["stage2_numbering"]
+    groups = {group["group_id"]: group for group in stage2["regions"][0]["subregion_groups"]}
+    mirror_groups = {
+        group["group_id"]: group
+        for group in stage2["regions"][0]["stage2_streams"]["semantic_groups"]
+    }
+
+    assert result["review_status"] == "needs_human_review"
+    assert candidate["review_status"] == "needs_human_review"
+    assert ownership["contract_version"] == "hierarchy_ownership_review_revision_v1"
+    assert ownership["status"] == "corrected_needs_integrity_revalidation"
+    assert ownership["integrity_revalidation_status"] == "pending"
+    assert ownership["agent_usable"] is False
+    assert ownership["reviewed_by_human"] is True
+    assert ownership["human_review_provenance"]["source"] == "human_panel_editor_v1"
+    assert ownership["evidence_lineage"]["source_draft_path"].endswith("ownership-review/trial_result.json")
+    assert ownership["evidence_lineage"]["source_draft_sha256"]
+    assert ownership["evidence_lineage"]["screenshot_sha256"] == screenshot_sha256
+    assert ownership["source_stage2_sha256"] != ownership["reviewed_stage2_sha256"]
+    assert ownership["canonical_revision_sha256"]
+    assert ownership["corrections"][0]["item_id"] == "visual_control_1_6"
+    assert ownership["corrections"][0]["removed_from_group_ids"] == ["topbar_semantic_group_4_1"]
+    assert groups["topbar_control_cluster_4_1"]["member_item_ids"] == ["visual_control_1_6"]
+    assert groups["topbar_semantic_group_4_1"]["member_item_ids"] == []
+    assert groups["topbar_semantic_group_4_1"]["member_numbers"] == []
+    assert groups["topbar_semantic_group_4_1"]["current_evidence_member_count"] == 0
+    assert mirror_groups["topbar_semantic_group_4_1"]["member_item_ids"] == []
+    assert mirror_groups["topbar_semantic_group_4_1"]["member_numbers"] == []
+    assert mirror_groups["topbar_semantic_group_4_1"]["current_evidence_member_count"] == 0
+    assert mirror_groups["topbar_control_cluster_4_1"]["member_item_ids"] == [
+        "visual_control_1_6"
+    ]
+    assert patch["hierarchy_ownership_review"] == ownership
+    assert candidate["audit"]["hierarchy_ownership_review"] == ownership
+    assert result["hierarchy_ownership_review"] == ownership
+    assert candidate["artifact_is_authorization"] is False
+    assert candidate["execute_binding_enabled"] is False
+
+
+def test_human_review_accepts_explicit_leaf_and_parent_ownership_targets(
+    tmp_path: Path,
+) -> None:
+    from app.learn.draft_review import save_reviewed_template_candidate
+
+    trial_path, screenshot_sha256 = _write_ownership_ambiguity_trial(tmp_path)
+    review_patch = _ownership_review_patch(screenshot_sha256)
+    operation = review_patch["operations"][0]
+    selected_parent_id = operation.pop("after_parent_group_id")
+    operation.update(
+        {
+            "target_kind": "leaf",
+            "parent_target_kind": "parent",
+            "parent_target_id": selected_parent_id,
+        }
+    )
+
+    result = save_reviewed_template_candidate(
+        trial_path,
+        review_patch,
+        project_root=tmp_path,
+    )
+
+    persisted_patch = json.loads(
+        (tmp_path / result["human_review_patch_path"]).read_text(encoding="utf-8")
+    )
+    normalized = persisted_patch["operations"][0]
+    assert normalized["target_kind"] == "ownership"
+    assert normalized["target_id"] == "visual_control_1_6"
+    assert normalized["after_parent_group_id"] == "topbar_control_cluster_4_1"
+    assert result["review_status"] == "needs_human_review"
+    assert result["artifact_is_authorization"] is False
+    assert result["execute_binding_enabled"] is False
+
+
+@pytest.mark.parametrize(
+    ("mutation", "error"),
+    [
+        (
+            {"target_id": "unknown_leaf"},
+            "ownership item does not exist",
+        ),
+        (
+            {"parent_target_id": "unknown_parent"},
+            "ownership parent group does not exist",
+        ),
+        (
+            {"parent_target_kind": "region"},
+            "invalid ownership parent target",
+        ),
+        (
+            {"after_parent_group_id": "topbar_semantic_group_4_1"},
+            "ownership parent targets disagree",
+        ),
+    ],
+)
+def test_human_review_explicit_ownership_target_fails_closed(
+    tmp_path: Path,
+    mutation: dict,
+    error: str,
+) -> None:
+    from app.learn.draft_review import save_reviewed_template_candidate
+
+    trial_path, screenshot_sha256 = _write_ownership_ambiguity_trial(tmp_path)
+    review_patch = _ownership_review_patch(screenshot_sha256)
+    operation = review_patch["operations"][0]
+    selected_parent_id = operation.pop("after_parent_group_id")
+    operation.update(
+        {
+            "target_kind": "leaf",
+            "parent_target_kind": "parent",
+            "parent_target_id": selected_parent_id,
+            **mutation,
+        }
+    )
+
+    with pytest.raises(ValueError, match=error):
+        save_reviewed_template_candidate(
+            trial_path,
+            review_patch,
+            project_root=tmp_path,
+        )
+
+
+@pytest.mark.parametrize(
+    ("mutate", "error"),
+    [
+        (lambda operation: operation.update(target_id="unknown_item"), "ownership item does not exist"),
+        (
+            lambda operation: operation.update(after_parent_group_id="unknown_parent"),
+            "ownership parent group does not exist",
+        ),
+        (
+            lambda operation: operation.update(before_parent_group_ids=["topbar_semantic_group_4_1"]),
+            "ownership parent set is stale",
+        ),
+    ],
+)
+def test_human_review_ownership_correction_rejects_invalid_identity_or_parent(
+    tmp_path: Path,
+    mutate,
+    error: str,
+) -> None:
+    from app.learn.draft_review import save_reviewed_template_candidate
+
+    trial_path, screenshot_sha256 = _write_ownership_ambiguity_trial(tmp_path)
+    review_patch = _ownership_review_patch(screenshot_sha256)
+    mutate(review_patch["operations"][0])
+
+    with pytest.raises(ValueError, match=error):
+        save_reviewed_template_candidate(trial_path, review_patch, project_root=tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("mirror_mutation", "error"),
+    [
+        ("stale", "ownership mirror is stale"),
+        ("missing", "semantic group mirror is missing"),
+    ],
+)
+def test_human_review_ownership_correction_rejects_invalid_semantic_group_mirror(
+    tmp_path: Path,
+    mirror_mutation: str,
+    error: str,
+) -> None:
+    from app.learn.draft_review import save_reviewed_template_candidate
+
+    trial_path, screenshot_sha256 = _write_ownership_ambiguity_trial(tmp_path)
+    payload = json.loads(trial_path.read_text(encoding="utf-8"))
+    region = payload["best_learning_draft"]["page_details"]["two_stage_understanding"][
+        "stage2_numbering"
+    ]["regions"][0]
+    semantic_groups = region["stage2_streams"]["semantic_groups"]
+    target_index = next(
+        index
+        for index, group in enumerate(semantic_groups)
+        if group["group_id"] == "topbar_semantic_group_4_1"
+    )
+    if mirror_mutation == "stale":
+        semantic_groups[target_index]["member_item_ids"] = []
+        semantic_groups[target_index]["member_numbers"] = []
+    else:
+        semantic_groups.pop(target_index)
+    trial_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=error):
+        save_reviewed_template_candidate(
+            trial_path,
+            _ownership_review_patch(screenshot_sha256),
+            project_root=tmp_path,
+        )
+
+
+def test_human_review_ownership_correction_rejects_remaining_multiple_owners(tmp_path: Path) -> None:
+    from app.learn.draft_review import save_reviewed_template_candidate
+
+    trial_path, screenshot_sha256 = _write_ownership_ambiguity_trial(
+        tmp_path,
+        second_conflict=True,
+    )
+    with pytest.raises(ValueError, match="multiple leaf ownership remains"):
+        save_reviewed_template_candidate(
+            trial_path,
+            _ownership_review_patch(screenshot_sha256),
+            project_root=tmp_path,
+        )
 
 
 def test_save_learning_draft_review_refreshes_manual_edit_and_review_overlay(tmp_path: Path) -> None:
@@ -3804,6 +4377,69 @@ def test_human_review_patch_preserves_agent_readable_metadata_without_authorizat
     assert "region_metadata:r1" in result["changes_summary"]
 
 
+def test_structured_editor_metadata_overrides_empty_legacy_manual_edit(tmp_path: Path) -> None:
+    from app.learn.draft_review import save_reviewed_template_candidate
+
+    screenshot_path = tmp_path / "artifacts" / "screenshots" / "structured-review.png"
+    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (320, 240), "white").save(screenshot_path)
+    screenshot_sha256 = hashlib.sha256(screenshot_path.read_bytes()).hexdigest()
+    trial_path = tmp_path / "artifacts" / "learning-runs" / "structured-review" / "trial_result.json"
+    _write_trial(trial_path)
+    payload = json.loads(trial_path.read_text(encoding="utf-8"))
+    payload["best_learning_draft"]["page_details"] = {
+        "screen": {
+            "source_image_path": "artifacts/screenshots/structured-review.png",
+            "source_image_sha256": screenshot_sha256,
+        }
+    }
+    trial_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    result = save_reviewed_template_candidate(
+        "artifacts/learning-runs/structured-review/trial_result.json",
+        {
+            "contract_version": "human_review_patch_v1",
+            "screenshot_path": "artifacts/screenshots/structured-review.png",
+            "screenshot_sha256": screenshot_sha256,
+            "manual_edit": {
+                "target_region_id": "r1",
+                "region_label": "",
+                "region_role": "",
+                "region_section": "",
+                "notes": "",
+            },
+            "operations": [
+                {
+                    "op": "update_metadata",
+                    "target_kind": "region",
+                    "target_id": "r1",
+                    "after_metadata": {
+                        "label": "Incident report",
+                        "description": "Opens the incident report for complete reading.",
+                        "semantic_action": "open_detail",
+                        "action_type": "open_detail",
+                        "destination": {
+                            "kind": "interface",
+                            "target_interface_id": "incident_detail",
+                        },
+                        "verification_rule": "Incident detail is visible.",
+                        "risk_level": "normal",
+                        "requires_confirmation": False,
+                    },
+                }
+            ],
+        },
+        project_root=tmp_path,
+    )
+
+    reviewed = json.loads((tmp_path / result["reviewed_template_candidate_path"]).read_text(encoding="utf-8"))
+    region = next(item for item in reviewed["draft"]["regions"] if item["region_id"] == "r1")
+    assert region["label"] == "Incident report"
+    assert region["description"] == "Opens the incident report for complete reading."
+    assert region["destination"]["target_interface_id"] == "incident_detail"
+    assert region["verification_rule"] == "Incident detail is visible."
+
+
 def test_panel_save_learning_draft_review_rebuilds_readonly_pathgraph(tmp_path: Path, monkeypatch) -> None:
     import app.api.panel as panel_api
 
@@ -3927,6 +4563,7 @@ def test_load_learning_draft_review_binds_fusion_screenshot_checksum_for_editor(
     screen = review["draft"]["page_details"]["screen"]
     assert screen["source_image_path"] == "artifacts/screenshots/editor-fusion.png"
     assert screen["source_image_sha256"] == screenshot_sha256
+    assert screen["screen_size"] == {"width": 320, "height": 240}
     assert screen["source_image_binding_source"] == "page_details.precise_understanding_fusion_status"
 
 
@@ -3960,6 +4597,7 @@ def test_load_learning_draft_review_materializes_external_source_image_for_panel
     )
     assert materialized_path.read_bytes() == screenshot_path.read_bytes()
     assert screen["source_image_sha256"] == screenshot_sha256
+    assert screen["screen_size"] == {"width": 320, "height": 240}
 
 
 def test_panel_run_learning_model_trial_saves_raw_draft_preview(tmp_path: Path, monkeypatch) -> None:
@@ -5174,10 +5812,9 @@ def test_default_learning_draft_demo_artifacts_load() -> None:
     from app.learn.draft_review import load_learning_draft_review
 
     paths = [
-        Path("artifacts/learning-runs/new_site_python_org_20260702_after_similarity_fix/trial_result.json"),
-        Path("artifacts/learning-draft-review/trial_result_cae1c88703/reviewed_template_candidate.json"),
-        Path("artifacts/learning-draft-review/trial_result_cae1c88703/pathgraph_candidate/pathgraph_candidate.json"),
-        Path("artifacts/learning-draft-review/trial_result_cae1c88703/pathgraph_candidate/promotion_validation_report.json"),
+        Path("artifacts/learning-draft-review/branch_hub_2584f138b7/reviewed_template_candidate.json"),
+        Path("artifacts/learning-draft-review/branch_hub_2584f138b7/pathgraph_candidate/pathgraph_candidate.json"),
+        Path("artifacts/learning-draft-review/branch_hub_2584f138b7/pathgraph_candidate/promotion_validation_report.json"),
     ]
 
     for path in paths:

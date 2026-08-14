@@ -39,8 +39,19 @@ class BufferedNavigationRuntimeObserver:
             raise RuntimeError("current observation must be captured before Operation")
         return deepcopy(self._latest)
 
-    def capture_after_operation(self) -> dict[str, Any]:
-        record = _validated_record(self._capture_current())
+    def capture_after_operation(
+        self,
+        *,
+        expected_interface_id: str | None = None,
+    ) -> dict[str, Any]:
+        if expected_interface_id:
+            record = _validated_record(
+                self._capture_current(
+                    expected_interface_id=expected_interface_id,
+                )
+            )
+        else:
+            record = _validated_record(self._capture_current())
         self._latest = record
         self._prefetched = record
         return deepcopy(record)
@@ -71,7 +82,7 @@ class RuntimeNavigationOperationAdapter:
             return self._read(plan=plan, context=context)
         if action == "scroll":
             return self._scroll(plan=plan, context=context)
-        return self._transition(plan=plan)
+        return self._transition(plan=plan, context=context)
 
     def _read(
         self,
@@ -178,13 +189,6 @@ class RuntimeNavigationOperationAdapter:
                 "source_freshness": deepcopy(plan["freshness"]),
             }
 
-        after_record = self._observer.capture_after_operation()
-        self._append_capture(content_id, after_record, scroll_result=result)
-        report = self._merge_read_report(
-            content_id=content_id,
-            target=_read_target(after_record, content_id),
-            context=context,
-        )
         effect = (
             result.get("scroll_effect_validation")
             if isinstance(result.get("scroll_effect_validation"), dict)
@@ -193,12 +197,39 @@ class RuntimeNavigationOperationAdapter:
         action_dispatched = bool(
             (result.get("execution_path") or {}).get("action_executed")
         )
+        expected_interface_id = None
+        if action_dispatched and effect.get("wrong_scope_detected") is not True:
+            expected_interface_id = str(
+                record["observation"].get("interface_id") or ""
+            ).strip()
+        after_record = self._observer.capture_after_operation(
+            expected_interface_id=expected_interface_id,
+        )
+        self._append_capture(content_id, after_record, scroll_result=result)
+        report = self._merge_read_report(
+            content_id=content_id,
+            target=_read_target(after_record, content_id),
+            context=context,
+        )
         wrong_scope = bool(
             effect.get("wrong_scope_detected")
             or report.get("wrong_scope_detected")
         )
-        changed = bool(effect.get("target_container_content_changed"))
         reached_bottom = report.get("reached_bottom") is True
+        report_captures = [
+            item
+            for item in report.get("captures") or []
+            if isinstance(item, dict)
+        ]
+        latest_capture = report_captures[-1] if report_captures else {}
+        scroll_effect_success = bool(
+            action_dispatched
+            and not wrong_scope
+            and (
+                latest_capture.get("scroll_effect_success") is True
+                or reached_bottom
+            )
+        )
         return {
             "contract_version": OPERATION_RESULT_CONTRACT,
             "action_type": "scroll",
@@ -208,18 +239,34 @@ class RuntimeNavigationOperationAdapter:
                 "details": deepcopy(precondition),
             },
             "action_dispatched": action_dispatched,
-            "effect_verified": bool(
-                action_dispatched
-                and not wrong_scope
-                and (changed or reached_bottom)
-            ),
+            "effect_verified": scroll_effect_success,
+            "scroll_dispatch_success": action_dispatched,
+            "scroll_effect_success": scroll_effect_success,
             "read_report": report,
             "scroll_effect_validation": deepcopy(effect),
             "source_freshness": deepcopy(plan["freshness"]),
         }
 
-    def _transition(self, *, plan: dict[str, Any]) -> dict[str, Any]:
+    def _transition(
+        self,
+        *,
+        plan: dict[str, Any],
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
         self._fresh_record(plan)
+        interface = (
+            context.get("interface")
+            if isinstance(context.get("interface"), dict)
+            else {}
+        )
+        surface_context = str(
+            plan.get("surface_context")
+            or interface.get("surface_context")
+            or interface.get("surface_type")
+            or interface.get("interface_id")
+            or plan.get("semantic_action")
+            or ""
+        ).strip()
         body = {
             "agent_mode": "execute",
             "goal": _required_text(plan.get("operation_goal"), "operation_goal"),
@@ -232,6 +279,13 @@ class RuntimeNavigationOperationAdapter:
                 "forbid_final_submit": True,
                 "artifact_is_authorization": False,
                 "semantic_action": plan.get("semantic_action"),
+                "surface_context": surface_context,
+                "source_interface_id": interface.get("interface_id"),
+                "active_flow_started": bool(
+                    plan.get("active_flow_started")
+                    or context.get("active_flow_started")
+                    or interface.get("active_flow_started")
+                ),
                 "expected_target_interface_id": plan.get(
                     "expected_target_interface_id"
                 ),
@@ -242,10 +296,22 @@ class RuntimeNavigationOperationAdapter:
                 "trace": True,
             },
         }
-        dry_result = _required_api_result(
-            self._post_json("/action/execute_recognition_plan", body),
-            "recognition dry-run",
-        )
+        dry_response = self._post_json("/action/execute_recognition_plan", body)
+        rejection = _pre_click_rejection(dry_response)
+        if rejection is not None:
+            return {
+                "contract_version": OPERATION_RESULT_CONTRACT,
+                "action_type": plan.get("semantic_action"),
+                "gate_result": {
+                    "allowed": False,
+                    "reason": rejection["code"],
+                    "details": rejection["details"],
+                },
+                "action_executed": False,
+                "post_action_verified": False,
+                "source_freshness": deepcopy(plan["freshness"]),
+            }
+        dry_result = _required_api_result(dry_response, "recognition dry-run")
         pre_click = (
             dry_result.get("pre_click_decision")
             if isinstance(dry_result.get("pre_click_decision"), dict)
@@ -272,11 +338,27 @@ class RuntimeNavigationOperationAdapter:
         real_body = deepcopy(body)
         real_body["approved_plan_id"] = approved_plan_id
         real_body["dry_run"] = False
+        real_response = self._post_json(
+            "/action/execute_recognition_plan",
+            real_body,
+        )
+        safety_rejection = _execution_safety_rejection(real_response)
+        if safety_rejection is not None:
+            return {
+                "contract_version": OPERATION_RESULT_CONTRACT,
+                "action_type": plan.get("semantic_action"),
+                "gate_result": {
+                    "allowed": False,
+                    "reason": safety_rejection["reason"],
+                    "details": safety_rejection["details"],
+                },
+                "action_executed": False,
+                "post_action_verified": False,
+                "approved_plan_id": approved_plan_id,
+                "source_freshness": deepcopy(plan["freshness"]),
+            }
         real_result = _required_api_result(
-            self._post_json(
-                "/action/execute_recognition_plan",
-                real_body,
-            ),
+            real_response,
             "recognition execution",
         )
         execution_path = (
@@ -292,7 +374,12 @@ class RuntimeNavigationOperationAdapter:
         action_executed = bool(execution_path.get("action_executed"))
         post_action_verified = bool(post_click.get("verified"))
         if action_executed:
-            self._observer.capture_after_operation()
+            self._observer.capture_after_operation(
+                expected_interface_id=str(
+                    plan.get("expected_target_interface_id") or ""
+                ).strip()
+                or None,
+            )
         return {
             "contract_version": OPERATION_RESULT_CONTRACT,
             "action_type": plan.get("semantic_action"),
@@ -338,16 +425,37 @@ class RuntimeNavigationOperationAdapter:
             if isinstance((scroll_result or {}).get("scroll_effect_validation"), dict)
             else {}
         )
+        execution_path = (
+            (scroll_result or {}).get("execution_path")
+            if isinstance((scroll_result or {}).get("execution_path"), dict)
+            else {}
+        )
         captures.append(
             {
                 "capture_id": capture_id,
                 "image_path": record["image_path"],
                 "trace_path": record["observation"]["trace_path"],
                 "ocr_result": deepcopy(record.get("ocr_result") or {}),
+                "item_fingerprints": deepcopy(
+                    record.get("item_fingerprints")
+                    if isinstance(record.get("item_fingerprints"), list)
+                    else None
+                ),
                 "reached_bottom": record.get("reached_bottom") is True,
                 "scroll_trace_path": (scroll_result or {}).get("trace_path"),
                 "scroll_wheel_clicks": (scroll_result or {}).get("wheel_clicks"),
                 "scroll_effect_status": effect.get("status"),
+                "scroll_dispatched": (
+                    bool(execution_path.get("action_executed"))
+                    if scroll_result is not None
+                    else None
+                ),
+                "target_fingerprint_changed": bool(
+                    effect.get("target_container_content_changed")
+                ),
+                "wrong_scope_detected": bool(
+                    effect.get("wrong_scope_detected")
+                ),
             }
         )
 
@@ -460,6 +568,39 @@ def _required_api_result(
     data = _required_api_data(response, operation_name)
     result = data.get("result")
     return deepcopy(result) if isinstance(result, dict) else data
+
+
+def _pre_click_rejection(response: Any) -> dict[str, Any] | None:
+    if not isinstance(response, dict) or response.get("success") is True:
+        return None
+    error = response.get("error")
+    if not isinstance(error, dict) or error.get("code") != "pre_click_rejected":
+        return None
+    details = error.get("details")
+    return {
+        "code": "pre_click_rejected",
+        "details": deepcopy(details if isinstance(details, list) else []),
+    }
+
+
+def _execution_safety_rejection(response: Any) -> dict[str, Any] | None:
+    if not isinstance(response, dict) or response.get("success") is True:
+        return None
+    error = response.get("error")
+    if not isinstance(error, dict) or error.get("code") != "recognition_plan_click_failed":
+        return None
+    message = str(error.get("details") or "")
+    if not message.startswith("Bound window foreground verification failed:"):
+        return None
+    data = response.get("data") if isinstance(response.get("data"), dict) else {}
+    return {
+        "reason": "foreground_window_changed",
+        "details": {
+            "code": "recognition_plan_click_failed",
+            "message": message,
+            "trace_path": data.get("trace_path"),
+        },
+    }
 
 
 def _bbox(value: Any) -> dict[str, int]:

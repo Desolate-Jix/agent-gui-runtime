@@ -18,7 +18,10 @@ from app.agent.navigation_reading import (
     build_navigation_reading_context,
     validate_navigation_reading_decision,
 )
-from app.learn.agent_evidence import build_agent_evidence_context
+from app.learn.agent_evidence import (
+    PersistedReviewRevision,
+    build_agent_evidence_context,
+)
 
 
 MANIFEST_CONTRACT = "navigation_reading_replay_manifest_v1"
@@ -48,7 +51,7 @@ def run_navigation_reading_replay(
     if manifest.get("contract_version") != MANIFEST_CONTRACT:
         raise ValueError(f"{MANIFEST_CONTRACT} manifest is required")
 
-    assets, asset_errors = _load_assets(
+    assets, persisted_review_revisions, asset_errors = _load_assets(
         manifest.get("interface_assets"),
         base_dir=manifest_file.parent,
     )
@@ -112,6 +115,7 @@ def run_navigation_reading_replay(
         _run_case(
             case,
             assets=assets,
+            persisted_review_revisions=persisted_review_revisions,
             transitions=transitions,
             metrics=metrics,
         )
@@ -166,6 +170,7 @@ def _run_case(
     case: dict[str, Any],
     *,
     assets: dict[str, dict[str, Any]],
+    persisted_review_revisions: dict[str, PersistedReviewRevision],
     transitions: list[dict[str, Any]],
     metrics: dict[str, dict[str, int]],
 ) -> dict[str, Any]:
@@ -195,6 +200,7 @@ def _run_case(
                 goal=goal,
                 session=session,
                 assets=assets,
+                persisted_review_revisions=persisted_review_revisions,
                 transitions=transitions,
                 metrics=metrics,
                 visited_interfaces=visited_interfaces,
@@ -257,6 +263,7 @@ def _run_step(
     goal: str,
     session: dict[str, Any],
     assets: dict[str, dict[str, Any]],
+    persisted_review_revisions: dict[str, PersistedReviewRevision],
     transitions: list[dict[str, Any]],
     metrics: dict[str, dict[str, int]],
     visited_interfaces: list[str],
@@ -273,6 +280,7 @@ def _run_step(
     try:
         agent_evidence = build_agent_evidence_context(
             _asset_with_transition_targets(asset, outgoing),
+            persisted_review_revision=persisted_review_revisions.get(interface_id),
         )
         context = build_navigation_reading_context(
             goal=goal,
@@ -519,8 +527,13 @@ def _load_assets(
     value: Any,
     *,
     base_dir: Path,
-) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+) -> tuple[
+    dict[str, dict[str, Any]],
+    dict[str, PersistedReviewRevision],
+    dict[str, dict[str, Any]],
+]:
     assets: dict[str, dict[str, Any]] = {}
+    persisted_review_revisions: dict[str, PersistedReviewRevision] = {}
     errors: dict[str, dict[str, Any]] = {}
     for item in value if isinstance(value, list) else []:
         if not isinstance(item, dict):
@@ -560,8 +573,59 @@ def _load_assets(
                 "actual_sha256": actual,
             }
             continue
+        persisted_revision, revision_error = _load_persisted_review_revision(
+            item,
+            interface_id=interface_id,
+            asset=asset,
+            asset_sha256=actual,
+        )
+        if revision_error or persisted_revision is None:
+            errors[interface_id] = {
+                "failure_category": revision_error or "invalid_persisted_review_revision",
+                "asset_path": str(asset_path),
+                "expected_sha256": expected,
+                "actual_sha256": actual,
+            }
+            continue
         assets[interface_id] = asset
-    return assets, errors
+        persisted_review_revisions[interface_id] = persisted_revision
+    return assets, persisted_review_revisions, errors
+
+
+def _load_persisted_review_revision(
+    item: dict[str, Any],
+    *,
+    interface_id: str,
+    asset: dict[str, Any],
+    asset_sha256: str,
+) -> tuple[PersistedReviewRevision | None, str | None]:
+    raw = item.get("persisted_review_revision")
+    if not isinstance(raw, dict):
+        return None, "missing_persisted_review_revision"
+    revision = raw.get("revision")
+    if not isinstance(revision, dict):
+        return None, "invalid_persisted_review_revision"
+    revision_hash = str(raw.get("revision_hash") or "").strip().casefold()
+    source_asset_sha256 = str(raw.get("source_asset_sha256") or "").strip().casefold()
+    if source_asset_sha256 != asset_sha256:
+        return None, "stale_persisted_review_revision"
+    if revision_hash != _sha256_json(revision):
+        return None, "invalid_persisted_review_revision"
+    evidence = asset.get("evidence") if isinstance(asset.get("evidence"), dict) else {}
+    if (
+        str(revision.get("interface_id") or "").strip() != interface_id
+        or str(revision.get("audit_evidence_sha256") or "").strip().casefold()
+        != _sha256_json(evidence)
+    ):
+        return None, "stale_persisted_review_revision"
+    return (
+        PersistedReviewRevision(
+            revision=revision,
+            revision_hash=revision_hash,
+            source_asset_sha256=source_asset_sha256,
+        ),
+        None,
+    )
 
 
 def _case_interface_ids(case: dict[str, Any]) -> set[str]:

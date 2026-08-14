@@ -177,6 +177,13 @@ def build_single_interface_asset(
         "blockers": _dict_list(review.get("blockers")),
         "review": {
             "status": str(review.get("review_status") or "needs_human_review").strip(),
+            "reviewed_by_human": review.get("reviewed_by_human") is True,
+            "reviewed_revision_hash": str(
+                review.get("reviewed_revision_hash") or ""
+            ).strip(),
+            "current_revision_hash": str(
+                review.get("current_revision_hash") or ""
+            ).strip(),
             "manual_revision": _without_runtime_points(
                 review.get("manual_revision")
                 if isinstance(review.get("manual_revision"), dict)

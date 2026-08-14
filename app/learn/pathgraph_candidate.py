@@ -659,6 +659,11 @@ def _validate_candidate(*, reviewed: dict[str, Any], graph: dict[str, Any], inte
     draft = reviewed.get("draft") if isinstance(reviewed.get("draft"), dict) else {}
     blockers = _list_of_dicts(draft.get("blockers"))
     verification_rules = _list_of_dicts(draft.get("verification_rules"))
+    terminal_safe_stop_without_action = (
+        not actions
+        and any(item.get("safe_stop_required") is True for item in blockers)
+        and any(str(item.get("expected_decision") or "").strip() == "safe_stop" for item in verification_rules)
+    )
     region_ids = {str(item.get("region_id") or "") for item in regions}
     unsafe_actions = [_action_id(item) for item in actions if _is_unsafe_final_action(item)]
     unlinked_actions = [
@@ -678,7 +683,14 @@ def _validate_candidate(*, reviewed: dict[str, Any], graph: dict[str, Any], inte
     checks = [
         _check("states_present", bool(states), {"count": len(states)}),
         _check("regions_present", bool(regions), {"count": len(regions)}),
-        _check("action_templates_present", bool(actions), {"count": len(actions)}),
+        _check(
+            "action_templates_present",
+            bool(actions) or terminal_safe_stop_without_action,
+            {
+                "count": len(actions),
+                "terminal_safe_stop_without_action": terminal_safe_stop_without_action,
+            },
+        ),
         _check("action_region_linkage", not unlinked_actions, {"unlinked_actions": unlinked_actions}),
         _check("blockers_present", bool(blockers), {"count": len(blockers)}),
         _check("verification_rules_present", bool(verification_rules), {"count": len(verification_rules)}),

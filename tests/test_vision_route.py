@@ -1538,6 +1538,539 @@ def test_operational_memory_seed_blocks_when_vista_disagrees_with_current_roi(
     assert result["execution_path"]["seeded_candidate_primary_point_used"] is False
 
 
+def test_operational_memory_seed_uses_current_uia_candidate_for_vista_roi(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (900, 760), color=(255, 255, 255)).save(image_path)
+    vista_calls: list[dict] = []
+
+    def fake_vista(**kwargs):
+        vista_calls.append(kwargs)
+        return {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": "vista_point_grounding",
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(kwargs["image_path"]),
+            "goal": kwargs["goal"],
+            "prompt": "Locate current File menu item",
+            "raw_text": "[146, 396]",
+            "raw_response": {"choices": [{"message": {"content": "[146, 396]"}}]},
+            "parsed": {
+                "contract_version": "vista_point_v1",
+                "point": {"x": 146.0, "y": 396.0, "coordinate_space": "normalized_0_1000"},
+            },
+            "point": {"x": 14, "y": 38},
+            "image_size": {"width": 96, "height": 96},
+            "image_preprocess": kwargs["image_preprocess"],
+        }
+
+    monkeypatch.setattr("app.api.vision.VISTA_DIRECT_IMAGES_DIR", tmp_path / "vista-direct")
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr("app.api.vision._call_vista_point_grounding", fake_vista)
+    monkeypatch.setattr(
+        "app.api.vision.uia_provider.snapshot_bound_window",
+        lambda max_controls=250: {
+            "provider": "windows_uia",
+            "provider_version": "windows_uia_provider_v1",
+            "status": "ok",
+            "control_count": 2,
+            "controls": [
+                {
+                    "provider": "windows_uia",
+                    "control_id": "system-menu",
+                    "name": "System",
+                    "control_type": "MenuItem",
+                    "automation_id": "SystemMenuBar",
+                    "class_name": "MenuItem",
+                    "bbox": {"x": 8, "y": 8, "w": 22, "h": 22},
+                    "screen_bbox": {"x": 8, "y": 8, "w": 22, "h": 22},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                },
+                {
+                    "provider": "windows_uia",
+                    "control_id": "file-menu",
+                    "name": "File (F)",
+                    "control_type": "MenuItem",
+                    "automation_id": "MenuBar",
+                    "class_name": "MenuItem",
+                    "bbox": {"x": 8, "y": 31, "w": 52, "h": 19},
+                    "screen_bbox": {"x": 8, "y": 31, "w": 52, "h": 19},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                },
+            ],
+        },
+    )
+
+    response = TestClient(app).post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "Click File (F)",
+            "app_name": "Notepad",
+            "agent_mode": "execute",
+            "top_k": 5,
+            "metadata": {
+                "seeded_candidate": {
+                    "contract_version": "seeded_candidate_v1",
+                    "candidate_id": "memory-file-menu",
+                    "label": "File (F)",
+                    "role": "menu_item",
+                    "bbox": {"x": 20, "y": 22, "w": 60, "h": 29},
+                    "click_point": {"x": 50, "y": 36},
+                    "risk_class": "safe_click_allowed",
+                    "expected_effect": "file menu opens",
+                    "require_current_grounding": True,
+                    "historical_click_point_reused": False,
+                }
+            },
+        },
+    )
+
+    result = response.json()["data"]["result"]
+    assert vista_calls
+    assert vista_calls[0]["image_preprocess"]["roi_source"] == "current_uia_candidate_v1"
+    assert vista_calls[0]["candidates"][0].label == "File (F)"
+    assert vista_calls[0]["candidates"][0].element.bbox.to_dict() == {"x": 8, "y": 31, "w": 52, "h": 19}
+    assert result["pre_click_decision"]["allowed"] is True
+    assert result["pre_click_decision"]["selected_click_point"] == {"x": 14, "y": 38}
+    assert result["pre_click_decision"]["selected_candidate_id"].startswith("candidate_screen_inventory_action_uia")
+    assert result["candidate_result"]["summary"]["vista_roi_source"] == "current_uia_candidate_v1"
+
+
+def test_seeded_candidate_current_text_anchors_prefer_visible_locator_text() -> None:
+    assert vision_api._seeded_candidate_current_text_anchors(
+        {
+            "label": "Apply entry button",
+            "locator_evidence": {
+                "text_anchors": ["Apply"],
+                "role_anchor": "button",
+            },
+        }
+    ) == ["Apply"]
+
+
+def test_operational_memory_seed_ignores_unrelated_uia_for_current_vista_roi(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (900, 760), color=(255, 255, 255)).save(image_path)
+    vista_calls: list[dict] = []
+
+    def fake_vista(**kwargs):
+        vista_calls.append(kwargs)
+        return {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": "vista_point_grounding",
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(kwargs["image_path"]),
+            "goal": kwargs["goal"],
+            "prompt": "Locate Apply",
+            "raw_text": "[500, 500]",
+            "raw_response": {"choices": [{"message": {"content": "[500, 500]"}}]},
+            "parsed": {
+                "contract_version": "vista_point_v1",
+                "point": {"x": 500.0, "y": 500.0, "coordinate_space": "normalized_0_1000"},
+            },
+            "point": {"x": 525, "y": 283},
+            "image_size": {"width": 192, "height": 192},
+            "image_preprocess": kwargs["image_preprocess"],
+        }
+
+    monkeypatch.setattr("app.api.vision.VISTA_DIRECT_IMAGES_DIR", tmp_path / "vista-direct")
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr("app.api.vision._call_vista_point_grounding", fake_vista)
+    unrelated_candidate = vision_api._recognition_candidate_from_seeded_candidate(
+        {
+            "contract_version": "seeded_candidate_v1",
+            "candidate_id": "uia-submit-search",
+            "label": "Submit search",
+            "role": "button",
+            "bbox": {"x": 700, "y": 70, "w": 120, "h": 36},
+            "click_point": {"x": 760, "y": 88},
+            "risk_class": "safe_click_allowed",
+        },
+        rank=1,
+    )
+    assert unrelated_candidate is not None
+    monkeypatch.setattr(
+        "app.api.vision.rank_candidates",
+        lambda request: vision_api.CandidateRankResult(
+            goal=request.goal,
+            top_k=request.top_k,
+            candidates=[unrelated_candidate],
+            rejected=[],
+            recommended_candidate_id=unrelated_candidate.candidate_id,
+            margin_to_second=unrelated_candidate.score,
+            summary={"returned_count": 1, "has_recommendation": True},
+        ),
+    )
+    monkeypatch.setattr(
+        "app.api.vision.uia_provider.snapshot_bound_window",
+        lambda max_controls=250: {
+            "provider": "windows_uia",
+            "provider_version": "windows_uia_provider_v1",
+            "status": "ok",
+            "control_count": 2,
+            "controls": [
+                {
+                    "provider": "windows_uia",
+                    "control_id": "address-bar",
+                    "name": "https://example.test",
+                    "control_type": "Edit",
+                    "automation_id": "AddressBar",
+                    "class_name": "Edit",
+                    "bbox": {"x": 100, "y": 20, "w": 700, "h": 30},
+                    "screen_bbox": {"x": 100, "y": 20, "w": 700, "h": 30},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["ValuePattern"],
+                },
+                {
+                    "provider": "windows_uia",
+                    "control_id": "submit-search",
+                    "name": "Submit search",
+                    "control_type": "Button",
+                    "automation_id": "submit-search",
+                    "class_name": "Button",
+                    "bbox": {"x": 700, "y": 70, "w": 120, "h": 36},
+                    "screen_bbox": {"x": 700, "y": 70, "w": 120, "h": 36},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                },
+            ],
+        },
+    )
+
+    response = TestClient(app).post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "Open the application flow by clicking Apply",
+            "app_name": "Browser",
+            "agent_mode": "execute",
+            "top_k": 5,
+            "metadata": {
+                "seeded_candidate": {
+                    "contract_version": "seeded_candidate_v1",
+                    "candidate_id": "memory-apply-entry",
+                    "label": "Apply entry button",
+                    "role": "button",
+                    "bbox": {"x": 497, "y": 272, "w": 57, "h": 22},
+                    "click_point": {"x": 525, "y": 283},
+                    "risk_class": "safe_click_allowed",
+                    "expected_effect": "open_apply_flow",
+                    "require_current_grounding": True,
+                    "historical_click_point_reused": False,
+                    "locator_evidence": {"text_anchors": ["Apply"]},
+                }
+            },
+        },
+    )
+
+    result = response.json()["data"]["result"]
+    assert vista_calls
+    assert vista_calls[0]["image_preprocess"]["roi_source"] == "seeded_candidate_v1"
+    assert [candidate.candidate_id for candidate in vista_calls[0]["candidates"]] == ["seeded_memory-apply-entry"]
+    assert result["pre_click_decision"]["allowed"] is True
+
+
+def test_operational_memory_fast_grounding_uses_unique_current_uia_candidate_without_vista(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (900, 760), color=(255, 255, 255)).save(image_path)
+    vista_calls: list[dict] = []
+
+    def fake_vista(**kwargs):
+        vista_calls.append(kwargs)
+        raise AssertionError("唯一当前 UIA 命中不应调用 VISTA")
+
+    monkeypatch.setattr("app.api.vision.VISTA_DIRECT_IMAGES_DIR", tmp_path / "vista-direct")
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr("app.api.vision._call_vista_point_grounding", fake_vista)
+    monkeypatch.setattr(
+        "app.api.vision.uia_provider.snapshot_bound_window",
+        lambda max_controls=250: {
+            "provider": "windows_uia",
+            "provider_version": "windows_uia_provider_v1",
+            "status": "ok",
+            "control_count": 2,
+            "controls": [
+                {
+                    "provider": "windows_uia",
+                    "control_id": "system-menu",
+                    "name": "System",
+                    "control_type": "MenuItem",
+                    "automation_id": "SystemMenuBar",
+                    "class_name": "MenuItem",
+                    "bbox": {"x": 8, "y": 8, "w": 22, "h": 22},
+                    "screen_bbox": {"x": 8, "y": 8, "w": 22, "h": 22},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                },
+                {
+                    "provider": "windows_uia",
+                    "control_id": "file-menu",
+                    "name": "File (F)",
+                    "control_type": "MenuItem",
+                    "automation_id": "MenuBar",
+                    "class_name": "MenuItem",
+                    "bbox": {"x": 8, "y": 31, "w": 52, "h": 19},
+                    "screen_bbox": {"x": 8, "y": 31, "w": 52, "h": 19},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                },
+            ],
+        },
+    )
+
+    response = TestClient(app).post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "Click File (F)",
+            "app_name": "Notepad",
+            "agent_mode": "execute",
+            "top_k": 5,
+            "metadata": {
+                "operational_memory_fast_grounding": {
+                    "enabled": True,
+                    "mode": "current_uia_unique_match_v1",
+                },
+                "seeded_candidate": {
+                    "contract_version": "seeded_candidate_v1",
+                    "candidate_id": "memory-file-menu",
+                    "label": "File (F)",
+                    "role": "menu_item",
+                    "bbox": {"x": 20, "y": 22, "w": 60, "h": 29},
+                    "click_point": {"x": 50, "y": 36},
+                    "risk_class": "safe_click_allowed",
+                    "expected_effect": "file menu opens",
+                    "require_current_grounding": True,
+                    "historical_click_point_reused": False,
+                },
+            },
+        },
+    )
+
+    assert response.json()["success"] is True
+    result = response.json()["data"]["result"]
+    assert vista_calls == []
+    assert result["pre_click_decision"]["allowed"] is True
+    assert result["pre_click_decision"]["selected_click_point"] == {"x": 34, "y": 40}
+    assert result["pre_click_decision"]["selected_candidate_id"].startswith("candidate_screen_inventory_action_uia")
+    assert result["candidate_result"]["summary"]["operational_memory_fast_grounding_used"] is True
+    assert result["candidate_result"]["summary"]["current_uia_unique_match_count"] == 1
+    assert result["execution_path"]["vision_model_used"] is False
+    assert result["candidate_freshness_decision"]["allowed"] is True
+    assert result["candidate_freshness_decision"]["candidate_id"] == result["pre_click_decision"]["selected_candidate_id"]
+    assert result["candidate_freshness_decision"]["candidate_freshness"] == {
+        "contract_version": "action_candidate_freshness_v1",
+        "capture_id": str(image_path),
+        "viewport_size": {"width": 900, "height": 760},
+        "source": "current_uia_unique_match_v1",
+        "freshness": "current_capture",
+    }
+
+
+def test_operational_memory_fast_grounding_conflict_falls_back_to_vista_with_current_candidates(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (900, 760), color=(255, 255, 255)).save(image_path)
+    vista_calls: list[dict] = []
+
+    def fake_vista(**kwargs):
+        vista_calls.append(kwargs)
+        return {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": "vista_point_grounding",
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(kwargs["image_path"]),
+            "goal": kwargs["goal"],
+            "prompt": "Disambiguate current File menu items",
+            "raw_text": "[34, 40]",
+            "raw_response": {"choices": [{"message": {"content": "[34, 40]"}}]},
+            "parsed": {
+                "contract_version": "vista_point_v1",
+                "point": {"x": 34.0, "y": 40.0, "coordinate_space": "pixel"},
+            },
+            "point": {"x": 34, "y": 40},
+            "image_size": {"width": 900, "height": 760},
+            "image_preprocess": kwargs["image_preprocess"],
+        }
+
+    monkeypatch.setattr("app.api.vision.VISTA_DIRECT_IMAGES_DIR", tmp_path / "vista-direct")
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr("app.api.vision._call_vista_point_grounding", fake_vista)
+    monkeypatch.setattr(
+        "app.api.vision.uia_provider.snapshot_bound_window",
+        lambda max_controls=250: {
+            "provider": "windows_uia",
+            "provider_version": "windows_uia_provider_v1",
+            "status": "ok",
+            "control_count": 2,
+            "controls": [
+                {
+                    "provider": "windows_uia",
+                    "control_id": "file-menu-primary",
+                    "name": "File (F)",
+                    "control_type": "MenuItem",
+                    "automation_id": "MenuBarPrimary",
+                    "class_name": "MenuItem",
+                    "bbox": {"x": 8, "y": 31, "w": 52, "h": 19},
+                    "screen_bbox": {"x": 8, "y": 31, "w": 52, "h": 19},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                },
+                {
+                    "provider": "windows_uia",
+                    "control_id": "file-menu-secondary",
+                    "name": "File (F)",
+                    "control_type": "MenuItem",
+                    "automation_id": "MenuBarSecondary",
+                    "class_name": "MenuItem",
+                    "bbox": {"x": 108, "y": 31, "w": 52, "h": 19},
+                    "screen_bbox": {"x": 108, "y": 31, "w": 52, "h": 19},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                },
+            ],
+        },
+    )
+
+    response = TestClient(app).post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "Click File (F)",
+            "app_name": "Notepad",
+            "agent_mode": "execute",
+            "top_k": 5,
+            "metadata": {
+                "operational_memory_fast_grounding": {
+                    "enabled": True,
+                    "mode": "current_uia_unique_match_v1",
+                },
+                "seeded_candidate": {
+                    "contract_version": "seeded_candidate_v1",
+                    "candidate_id": "memory-file-menu",
+                    "label": "File (F)",
+                    "role": "menu_item",
+                    "bbox": {"x": 20, "y": 22, "w": 60, "h": 29},
+                    "click_point": {"x": 50, "y": 36},
+                    "risk_class": "safe_click_allowed",
+                    "expected_effect": "file menu opens",
+                    "require_current_grounding": True,
+                    "historical_click_point_reused": False,
+                },
+            },
+        },
+    )
+
+    assert response.json()["success"] is True
+    result = response.json()["data"]["result"]
+    assert len(vista_calls) == 1
+    assert vista_calls[0]["image_preprocess"]["roi_source"] == "current_uia_candidates_v1"
+    assert len(vista_calls[0]["candidates"]) == 2
+    assert all(candidate.candidate_id.startswith("candidate_screen_inventory_action_uia") for candidate in vista_calls[0]["candidates"])
+    assert result["candidate_result"]["summary"]["operational_memory_fast_grounding_used"] is False
+    assert result["candidate_result"]["summary"]["operational_memory_fast_grounding_reason"] == "current_uia_match_not_unique"
+    assert result["candidate_result"]["summary"]["current_uia_unique_match_count"] == 2
+    assert result["execution_path"]["vision_model_used"] is True
+    assert result["candidate_freshness_decision"]["allowed"] is True
+    assert result["candidate_freshness_decision"]["candidate_id"] == result["pre_click_decision"]["selected_candidate_id"]
+    assert result["candidate_freshness_decision"]["candidate_freshness"]["source"] == "current_uia_vista_grounded_v1"
+
+
 def test_parse_vista_point_text_accepts_pixel_bbox_quad() -> None:
     parsed = vision_api._parse_vista_point_text("[36, 48, 426, 350]")
 
@@ -1847,6 +2380,113 @@ def test_execute_recognition_plan_blocks_vista_direct_when_exact_uia_target_disa
         if item["candidate_id"].startswith("vista_direct_")
     )
     assert "vista_direct_conflicts_with_exact_uia_candidate_bbox" in direct_decision["reasons"]
+
+
+def test_execute_recognition_plan_does_not_treat_context_labels_as_explicit_target(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (500, 260), color=(255, 255, 255)).save(image_path)
+
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr(
+        "app.api.vision._call_vista_point_prompt",
+        lambda **kwargs: {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": kwargs["provider_name"],
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(image_path),
+            "goal": kwargs["goal"],
+            "prompt": kwargs["prompt"],
+            "raw_text": "[840, 500]",
+            "raw_response": {"choices": [{"message": {"content": "[840, 500]"}}]},
+            "parsed": {
+                "contract_version": "vista_point_v1",
+                "point": {"x": 840.0, "y": 500.0, "coordinate_space": "normalized_0_1000"},
+            },
+            "point": {"x": 420, "y": 130},
+            "image_size": {"width": 500, "height": 260},
+        },
+    )
+    monkeypatch.setattr(
+        "app.api.vision.uia_provider.snapshot_bound_window",
+        lambda max_controls=250: {
+            "provider": "windows_uia",
+            "provider_version": "windows_uia_provider_v1",
+            "status": "ok",
+            "control_count": 2,
+            "controls": [
+                {
+                    "provider": "windows_uia",
+                    "control_id": "seek_logo",
+                    "name": "SEEK",
+                    "control_type": "Hyperlink",
+                    "bbox": {"x": 20, "y": 20, "w": 80, "h": 30},
+                    "screen_bbox": {"x": 20, "y": 20, "w": 80, "h": 30},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                },
+                {
+                    "provider": "windows_uia",
+                    "control_id": "job_title",
+                    "name": "Digital Forensic Technician",
+                    "control_type": "Hyperlink",
+                    "bbox": {"x": 120, "y": 70, "w": 180, "h": 30},
+                    "screen_bbox": {"x": 120, "y": 70, "w": 180, "h": 30},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                },
+            ],
+        },
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "Click the Quick apply button for Digital Forensic Technician on SEEK",
+            "app_name": "seek",
+            "agent_mode": "execute",
+            "top_k": 3,
+            "metadata": {
+                "target_text": "Quick apply",
+                "observed_text": "Quick apply",
+                "semantic_action": "open_apply_flow",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()["data"]["result"]
+    direct_decision = next(
+        item
+        for item in result["pre_click_decision"]["candidate_decisions"]
+        if item["candidate_id"].startswith("vista_direct_")
+    )
+    assert "vista_direct_conflicts_with_exact_uia_candidate_bbox" not in direct_decision["reasons"]
 
 
 def test_execute_fast_inventory_filters_browser_chrome_controls() -> None:

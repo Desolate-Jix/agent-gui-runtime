@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Mapping
 
 
 AGENT_EVIDENCE_CONTRACT = "agent_evidence_context_v1"
@@ -57,11 +58,42 @@ _GEOMETRY_KEYS = {
 }
 
 
+@dataclass(frozen=True)
+class PersistedReviewRevision:
+    """服务端持久化流程为单个节点提供的可信审核修订上下文。"""
+
+    revision: dict[str, Any]
+    revision_hash: str
+    source_asset_sha256: str
+
+
+def _trusted_review_revision_hash(
+    persisted: PersistedReviewRevision | None,
+) -> str:
+    if not isinstance(persisted, PersistedReviewRevision):
+        return ""
+    claimed_hash = str(persisted.revision_hash or "").strip().lower()
+    source_asset_sha256 = str(persisted.source_asset_sha256 or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", claimed_hash) or not re.fullmatch(
+        r"[0-9a-f]{64}", source_asset_sha256
+    ):
+        return ""
+    canonical_payload = json.dumps(
+        persisted.revision,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    canonical_hash = hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
+    return canonical_hash if canonical_hash == claimed_hash else ""
+
+
 def build_agent_evidence_context(
     asset: dict[str, Any],
     *,
     outgoing_transitions: list[dict[str, Any]] | None = None,
     live_observation: dict[str, Any] | None = None,
+    persisted_review_revision: PersistedReviewRevision | None = None,
 ) -> dict[str, Any]:
     """把学习资产编译为 Agent 可理解、但不授权执行的语义证据。"""
 
@@ -115,6 +147,12 @@ def build_agent_evidence_context(
         control_ids=control_ids,
         interface_id=interface_id,
     )
+    (
+        controls,
+        available_actions,
+        control_actions_needing_review,
+    ) = _link_actionable_control_semantics(controls, available_actions)
+    actions_needing_review.extend(control_actions_needing_review)
 
     referenced_ids = {
         str(item.get("source_id") or "")
@@ -133,17 +171,30 @@ def build_agent_evidence_context(
         missing_fields.append("identity_anchor")
     if not fixed_anchors and not dynamic_content:
         missing_fields.append("semantic_content")
-    if not available_actions and not deferred_reads:
+    terminal_safe_stop = _has_reviewed_terminal_safe_stop(
+        blockers=normalized.get("blockers"),
+        verification_rules=normalized.get("verification_rules"),
+    )
+    if not available_actions and not deferred_reads and not terminal_safe_stop:
         missing_fields.append("action_semantics")
     if actions_needing_review:
         missing_fields.append("action_linkage")
-    if str(review.get("status") or "") not in {
-        "approved",
-        "human_confirmed",
-        "human_reviewed",
-        "reviewed",
-    }:
-        missing_fields.append("human_review")
+    if control_actions_needing_review:
+        missing_fields.append("control_semantics")
+    reviewed_revision_hash = str(review.get("reviewed_revision_hash") or "").strip()
+    current_revision_hash = str(review.get("current_revision_hash") or "").strip()
+    if (
+        str(review.get("status") or "") != "human_approved"
+        or review.get("reviewed_by_human") is not True
+    ):
+        missing_fields.append("human_approval")
+    trusted_revision_hash = _trusted_review_revision_hash(persisted_review_revision)
+    if not (
+        trusted_revision_hash
+        and reviewed_revision_hash == trusted_revision_hash
+        and current_revision_hash == trusted_revision_hash
+    ):
+        missing_fields.append("human_review_revision")
 
     readiness_status = "agent_usable" if not missing_fields else "needs_human_review"
     evidence = normalized.get("evidence") if isinstance(normalized.get("evidence"), dict) else {}
@@ -207,7 +258,7 @@ def build_agent_evidence_context(
         },
         "projection_contract": {
             "projection_is_read_only": True,
-            "authoritative_source": "versioned_interface_asset_and_human_review",
+            "authoritative_source": "server_persisted_canonical_workflow_revision",
             "reverse_write_forbidden": True,
             "evidence_reference_expansion_for_agent_forbidden": True,
         },
@@ -216,7 +267,29 @@ def build_agent_evidence_context(
     }
 
 
-def build_workflow_agent_evidence(review: dict[str, Any]) -> dict[str, Any]:
+def _has_reviewed_terminal_safe_stop(
+    *,
+    blockers: Any,
+    verification_rules: Any,
+) -> bool:
+    """仅把同时具备阻断证据和停止验证规则的终态视为完整语义。"""
+
+    has_blocker = any(
+        item.get("safe_stop_required") is True
+        for item in _dict_list(blockers)
+    )
+    has_stop_rule = any(
+        str(item.get("expected_decision") or "").strip().casefold() == "safe_stop"
+        for item in _dict_list(verification_rules)
+    )
+    return has_blocker and has_stop_rule
+
+
+def build_workflow_agent_evidence(
+    review: dict[str, Any],
+    *,
+    persisted_review_revisions: Mapping[str, PersistedReviewRevision] | None = None,
+) -> dict[str, Any]:
     """把审核流程节点编译为通用 Agent 证据图。"""
 
     if (
@@ -250,6 +323,7 @@ def build_workflow_agent_evidence(review: dict[str, Any]) -> dict[str, Any]:
             "display_name": str(node.get("display_name") or interface_id),
             "surface_type": str(node.get("surface_type") or "unknown_surface"),
             "state_signature": str(node.get("state_signature") or interface_id),
+            "agent_description": str(node.get("agent_description") or "").strip(),
             "evidence": _without_geometry(node.get("evidence") or {}),
             "fixed_anchors": _descriptor_bucket(
                 node.get("content_descriptors"),
@@ -269,11 +343,24 @@ def build_workflow_agent_evidence(review: dict[str, Any]) -> dict[str, Any]:
             "blockers": _dict_list(node.get("blockers")),
             "review": {
                 "status": str(node.get("review_status") or "needs_human_review"),
+                "reviewed_by_human": node.get("reviewed_by_human") is True,
+                "reviewed_revision_hash": str(
+                    node.get("reviewed_revision_hash") or ""
+                ).strip(),
+                "current_revision_hash": str(
+                    node.get("current_revision_hash") or ""
+                ).strip(),
                 "manual_revision": _without_geometry(node.get("manual_revision") or {}),
             },
         }
+        action_candidates = _dict_list(
+            node.get("action_candidates") or node.get("action_templates")
+        )
         outgoing = [
-            _workflow_edge_as_transition(edge)
+            _workflow_edge_as_transition(
+                edge,
+                action_candidates=action_candidates,
+            )
             for edge in edges
             if str(edge.get("source_node_id") or "") == interface_id
         ]
@@ -281,6 +368,9 @@ def build_workflow_agent_evidence(review: dict[str, Any]) -> dict[str, Any]:
             build_agent_evidence_context(
                 pseudo_asset,
                 outgoing_transitions=outgoing,
+                persisted_review_revision=(persisted_review_revisions or {}).get(
+                    interface_id
+                ),
             )
         )
 
@@ -385,6 +475,7 @@ def migrate_agent_evidence_assets(
     *,
     project_root: str | Path,
     application_identity_key: str | None = None,
+    persisted_review_revisions: Mapping[str, PersistedReviewRevision] | None = None,
 ) -> dict[str, Any]:
     """为旧界面资产生成旁路 Agent 证据，不修改原始 interface.json。"""
 
@@ -412,6 +503,9 @@ def migrate_agent_evidence_assets(
             context = build_agent_evidence_context(
                 payload,
                 outgoing_transitions=transitions,
+                persisted_review_revision=(persisted_review_revisions or {}).get(
+                    str(payload.get("interface_id") or "").strip()
+                ),
             )
         except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
             records.append(
@@ -496,13 +590,24 @@ def _semantic_content(
                 else "reached_bottom_required"
             )
         )
-        for field_name in ("max_scrolls", "max_items"):
+        for field_name in ("max_scrolls", "max_items", "wheel_clicks"):
             try:
                 limit = int(raw.get(field_name))
             except (TypeError, ValueError):
                 continue
             if limit > 0:
                 item[field_name] = limit
+        for field_name in ("scroll_scope", "target_pane"):
+            field_value = str(raw.get(field_name) or "").strip()
+            if field_value:
+                item[field_name] = field_value
+        bottom_markers = [
+            str(marker).strip()
+            for marker in raw.get("bottom_markers") or []
+            if str(marker).strip()
+        ]
+        if bottom_markers:
+            item["bottom_markers"] = bottom_markers
         if item["content_behavior"] in {
             "dynamic_collection",
             "dynamic_value",
@@ -537,17 +642,117 @@ def _semantic_controls(value: Any) -> list[dict[str, Any]]:
         ).strip()
         if not control_id:
             continue
-        result.append(
-            {
-                "control_id": control_id,
-                "label": str(raw.get("label") or raw.get("name") or control_id),
-                "role": str(raw.get("role") or raw.get("control_type") or "unknown"),
-                "agent_description": str(raw.get("agent_description") or ""),
-                "review_status": str(raw.get("review_status") or "needs_human_review"),
-                "requires_fresh_grounding": True,
-            }
+        control = {
+            "control_id": control_id,
+            "semantic_name": str(
+                raw.get("semantic_name")
+                or raw.get("label")
+                or raw.get("name")
+                or ""
+            ).strip(),
+            "purpose": str(
+                raw.get("purpose")
+                or raw.get("agent_description")
+                or ""
+            ).strip(),
+            "role": str(raw.get("role") or raw.get("control_type") or "unknown"),
+            "allowed_actions": [],
+            "verification_rule": {
+                "rule_ids": [],
+                "success_conditions": [],
+            },
+            "risk_class": str(
+                raw.get("risk_class") or raw.get("risk_level") or "unknown"
+            ).strip()
+            or "unknown",
+            "review_status": str(raw.get("review_status") or "needs_human_review"),
+            "requires_fresh_grounding": True,
+        }
+        visible_text_anchors = list(
+            dict.fromkeys(
+                str(anchor).strip()
+                for anchor in raw.get("visible_text_anchors") or []
+                if str(anchor).strip()
+            )
         )
+        if visible_text_anchors:
+            control["visible_text_anchors"] = visible_text_anchors
+        result.append(control)
     return result
+
+
+def _link_actionable_control_semantics(
+    controls: list[dict[str, Any]],
+    actions: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """把动作投影到语义控件；语义不完整的控件不得进入 Agent 可用动作。"""
+
+    controls_by_id = {
+        str(control.get("control_id") or ""): control
+        for control in controls
+        if str(control.get("control_id") or "")
+    }
+    available: list[dict[str, Any]] = []
+    needs_review: list[dict[str, Any]] = []
+
+    for action in actions:
+        source_control_id = str(action.get("source_control_id") or "")
+        control = controls_by_id.get(source_control_id)
+        missing: list[str] = []
+        if not control or not str(control.get("semantic_name") or "").strip():
+            missing.append("source_control_semantic_name")
+        if not control or not str(control.get("purpose") or "").strip():
+            missing.append("source_control_purpose")
+        if missing:
+            item = deepcopy(action)
+            item["missing_fields"] = missing
+            needs_review.append(item)
+            continue
+
+        action_type = _normalize_action_type(str(action.get("action_type") or ""))
+        allowed_actions = control["allowed_actions"]
+        if action_type and action_type not in allowed_actions:
+            allowed_actions.append(action_type)
+
+        verification = control["verification_rule"]
+        for rule_id in action.get("verification_rule_ids") or []:
+            normalized_rule_id = str(rule_id).strip()
+            if normalized_rule_id and normalized_rule_id not in verification["rule_ids"]:
+                verification["rule_ids"].append(normalized_rule_id)
+        for condition in action.get("success_conditions") or []:
+            normalized_condition = str(condition).strip()
+            if (
+                normalized_condition
+                and normalized_condition not in verification["success_conditions"]
+            ):
+                verification["success_conditions"].append(normalized_condition)
+
+        risk_level = str(action.get("risk_level") or "unknown").strip()
+        if risk_level and risk_level != "unknown":
+            control["risk_class"] = risk_level
+        elif control.get("risk_class") == "unknown":
+            control["risk_class"] = _default_action_risk(action_type)
+        available.append(action)
+
+    return controls, available, needs_review
+
+
+def _default_action_risk(action_type: str) -> str:
+    if action_type in {
+        "back",
+        "close_modal",
+        "open_detail",
+        "open_filter",
+        "open_link",
+        "open_modal",
+        "open_search",
+        "read",
+        "read_only",
+        "scroll",
+        "wait",
+    }:
+        return "low"
+    return "unknown"
 
 
 def _semantic_actions(
@@ -640,6 +845,8 @@ def _semantic_actions(
             missing.append("known_source_control")
         if not description:
             missing.append("agent_description")
+        if item["review_status"] != "human_approved":
+            missing.append("human_approval")
         if missing:
             item["missing_fields"] = missing
             needs_review.append(item)
@@ -720,23 +927,57 @@ def _descriptor_bucket(value: Any, *, fixed: bool) -> list[dict[str, Any]]:
     ]
 
 
-def _workflow_edge_as_transition(edge: dict[str, Any]) -> dict[str, Any]:
+def _workflow_edge_as_transition(
+    edge: dict[str, Any],
+    *,
+    action_candidates: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    source_control_id = str(
+        edge.get("source_control_id")
+        or edge.get("target_control_id")
+        or edge.get("control_id")
+        or ""
+    )
+    action_type = str(edge.get("action_type") or "")
+    target_interface_id = str(edge.get("target_node_id") or "")
+    matched_candidate = next(
+        (
+            candidate
+            for candidate in action_candidates or []
+            if str(
+                candidate.get("semantic_action")
+                or candidate.get("action_type")
+                or candidate.get("operation")
+                or ""
+            )
+            == action_type
+            and str(
+                candidate.get("target_control_id")
+                or candidate.get("source_control_id")
+                or candidate.get("target_region_id")
+                or ""
+            )
+            == source_control_id
+            and str(candidate.get("target_interface_id") or target_interface_id)
+            == target_interface_id
+        ),
+        {},
+    )
     return {
         "transition_id": str(edge.get("edge_id") or edge.get("transition_id") or ""),
         "source_interface_id": str(edge.get("source_node_id") or ""),
-        "target_interface_id": str(edge.get("target_node_id") or ""),
-        "source_control_id": str(
-            edge.get("source_control_id")
-            or edge.get("target_control_id")
-            or edge.get("control_id")
-            or ""
-        ),
-        "action_type": str(edge.get("action_type") or ""),
+        "target_interface_id": target_interface_id,
+        "source_control_id": source_control_id,
+        "action_type": action_type,
         "display_name": str(edge.get("display_name") or ""),
         "agent_description": str(edge.get("agent_description") or ""),
         "risk_level": str(edge.get("risk_level") or "unknown"),
         "review_status": str(edge.get("review_status") or "needs_human_review"),
         "success_conditions": list(edge.get("success_conditions") or []),
+        "operation_goal": str(matched_candidate.get("operation_goal") or ""),
+        "requires_completed_read": str(
+            matched_candidate.get("requires_completed_read") or ""
+        ),
     }
 
 
