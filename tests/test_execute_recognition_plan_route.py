@@ -411,6 +411,110 @@ def test_execute_mode_reuses_approved_plan_for_next_call(monkeypatch, tmp_path) 
     assert written_operations == ["execute_mode_plan_preview", "execute_mode_click"]
 
 
+def test_navigation_guard_overrides_visual_success_and_disables_retry(monkeypatch, tmp_path) -> None:
+    clicks = {"count": 0}
+    saved_transitions: list[dict] = []
+    written_traces: list[dict] = []
+    monkeypatch.setattr(action_api, "APPROVED_PLANS_DIR", tmp_path / "approved-plans")
+    action_api.APPROVED_PLANS_DIR.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: _bound_window())
+    monkeypatch.setattr(action_api.screenshot_service, "capture_window", lambda **kwargs: _capture())
+    monkeypatch.setattr(
+        action_api,
+        "_run_recognition_plan_for_execution",
+        lambda request: APIResponse(
+            success=True,
+            message="ok",
+            data=VisionResultData(result=_allowed_plan(goal=request.goal)).model_dump(),
+            error=None,
+        ),
+    )
+    monkeypatch.setattr(
+        action_api,
+        "_render_recognition_plan_overlay_for_execution",
+        lambda trace_path: {"output_path": "overlay.png"},
+    )
+    monkeypatch.setattr(
+        action_api.verifier,
+        "capture_pre_action_state",
+        lambda action_name=None: {"image_path": "before.png"},
+    )
+    monkeypatch.setattr(
+        action_api.verifier,
+        "verify_action",
+        lambda *args, **kwargs: {
+            "verified": True,
+            "before": {"image_path": "before.png"},
+            "after": {"image_path": "after.png"},
+            "diff": {"changed": True},
+        },
+    )
+
+    def fake_click(*args, **kwargs):
+        clicks["count"] += 1
+        return {"clicked": True}
+
+    monkeypatch.setattr(action_api.input_controller, "click_point", fake_click)
+    monkeypatch.setattr(
+        action_api,
+        "probe_bound_browser",
+        lambda hwnd: {
+            "status": "ok",
+            "url": "https://nz.seek.com/job/1",
+            "tab_count": 1,
+            "tab_ids": ["seek"],
+        },
+    )
+    monkeypatch.setattr(
+        action_api,
+        "probe_after_settle",
+        lambda policy, hwnd, probe, *, before=None: {
+            "verified": False,
+            "reason": "unexpected_origin",
+            "after": {
+                "status": "ok",
+                "url": "https://apply.example.test/job/1",
+                "tab_count": 2,
+                "tab_ids": ["seek", "external"],
+            },
+            "samples": [],
+        },
+    )
+    monkeypatch.setattr(action_api.transition_memory, "save", lambda record: saved_transitions.append(record))
+    monkeypatch.setattr(
+        action_api,
+        "write_trace",
+        lambda **kwargs: written_traces.append(kwargs) or f"logs/traces/actions/{kwargs['operation']}.json",
+    )
+
+    response = action_api.execute_recognition_plan(
+        ExecuteRecognitionPlanRequest(
+            goal="Click Apply",
+            app_name="edge",
+            dry_run=False,
+            max_execution_attempts=2,
+            metadata={
+                "verification_policy": {
+                    "navigation": {
+                        "required": True,
+                        "expected_origin": "https://nz.seek.com",
+                        "forbid_new_tab": True,
+                        "settle_timeout_ms": 3000,
+                    }
+                }
+            },
+        )
+    )
+
+    assert response.success is False
+    assert clicks["count"] == 1
+    assert saved_transitions == []
+    result = response.data
+    assert result["attempts"][0]["post_click_verification"]["navigation"]["reason"] == "unexpected_origin"
+    assert result["attempts"][0]["retry_allowed"] is False
+    assert written_traces[-1]["payload"]["success"] is False
+
+
 def test_approved_plan_reuse_reports_occluded_point_without_click(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(action_api, "APPROVED_PLANS_DIR", tmp_path / "approved-plans")
     action_api.APPROVED_PLANS_DIR.mkdir(parents=True, exist_ok=True)

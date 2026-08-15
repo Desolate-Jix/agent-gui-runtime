@@ -802,6 +802,8 @@ const translations = {
     learning_memory_title: "Agent 操作记忆",
     learning_memory_hint: "只发布人工批准的审阅候选。默认由 Agent 根据自然语言选择唯一低风险动作；预演和执行都会重新截图、重新定位、经过 Gate 并验证结果，失败会记录并返回人工修订。",
     learning_memory_interface_id: "界面记忆 ID",
+    learning_memory_reviewed_candidate_path: "可发布的审阅候选路径",
+    learning_memory_reviewed_candidate_path_help: "仅接受人工批准的 reviewed_template_candidate_v1；流程节点审阅来源不能发布。",
     learning_memory_action: "操作（可选人工指定）",
     learning_memory_goal: "执行目标",
     learning_memory_publish: "发布审阅记忆",
@@ -1453,6 +1455,8 @@ const translations = {
     learning_memory_title: "Agent operational memory",
     learning_memory_hint: "Publish only a human-approved reviewed candidate. By default the Agent resolves one low-risk action from the natural-language goal; preview and execution always recapture, re-ground, pass Gate, verify, and persist failures for human review.",
     learning_memory_interface_id: "Interface memory ID",
+    learning_memory_reviewed_candidate_path: "Publishable reviewed candidate path",
+    learning_memory_reviewed_candidate_path_help: "Only a human-approved reviewed_template_candidate_v1 is accepted. Workflow node review sources cannot be published.",
     learning_memory_action: "Action (optional override)",
     learning_memory_goal: "Execution goal",
     learning_memory_publish: "Publish reviewed memory",
@@ -4037,12 +4041,22 @@ function applyReviewedEvidenceToCurrentWorkflowNode({
   reviewedPath,
   review,
 }) {
-  if (typeof interfaceWorkflowReviewState === "undefined" || !interfaceWorkflowReviewState) return false;
+  if (typeof interfaceWorkflowReviewState === "undefined" || !interfaceWorkflowReviewState) return "not_bound";
   const previous = String(previousSourcePath || "").trim();
   const reviewed = String(reviewedPath || "").trim();
   if (!previous || !reviewed) return false;
   const replaceBySource = interfaceWorkflowReviewState.replaceReviewedNodeEvidenceBySource;
-  if (typeof replaceBySource !== "function") return false;
+  const snapshot = typeof interfaceWorkflowReviewState.snapshot === "function"
+    ? interfaceWorkflowReviewState.snapshot()
+    : null;
+  const normalizedPrevious = previous.replace(/\\/g, "/").toLowerCase();
+  if (!snapshot) return "not_bound";
+  const matches = Array.isArray(snapshot.nodes) ? snapshot.nodes.filter((node) => [
+    node?.editable_review_source_path,
+    ...(Array.isArray(node?.source_paths) ? node.source_paths : []),
+  ].some((value) => String(value || "").trim().replace(/\\/g, "/").toLowerCase() === normalizedPrevious)) : [];
+  if (!matches.length) return "not_bound";
+  if (matches.length !== 1 || typeof replaceBySource !== "function") return "error";
 
   const draft = review?.draft && typeof review.draft === "object" ? review.draft : {};
   try {
@@ -4062,7 +4076,7 @@ function applyReviewedEvidenceToCurrentWorkflowNode({
       },
     });
     const nodeId = String(updated?.node?.node_id || "").trim();
-    if (!nodeId) return false;
+    if (!nodeId) return "error";
     interfaceWorkflowWorkbenchState.showWorkflowNode(nodeId);
   } catch (error) {
     renderResponse({
@@ -4070,7 +4084,7 @@ function applyReviewedEvidenceToCurrentWorkflowNode({
       message: "Reviewed evidence did not match exactly one workflow node",
       error: String(error),
     }, "Interface workflow review");
-    return false;
+    return "error";
   }
   interfaceWorkflowReview = interfaceWorkflowReviewState.snapshot();
   return true;
@@ -4090,21 +4104,20 @@ async function refreshSavedLearningDraftReview({ previousSourcePath, reviewedPat
   });
   if (!refreshedReview) return null;
   let refreshedWorkflow = null;
-  if (applyReviewedEvidenceToCurrentWorkflowNode({
+  const binding = applyReviewedEvidenceToCurrentWorkflowNode({
     previousSourcePath,
     reviewedPath: sourcePath,
     review: refreshedReview,
-  })) {
+  });
+  if (binding === true) {
     const saveResult = await saveInterfaceWorkflowReview({ commitEditor: false });
     if (!saveResult) return null;
     refreshedWorkflow = interfaceWorkflowReviewState?.snapshot?.() || null;
+  } else if (binding === "not_bound") {
+    if ($("interfaceWorkflowSourceStatus")) $("interfaceWorkflowSourceStatus").textContent = "审核证据未精确匹配现有流程节点；候选已保留，未从单界面重建流程。";
   } else {
-    if ($("interfaceWorkflowSourceStatus")) {
-      $("interfaceWorkflowSourceStatus").textContent = "审核证据未精确匹配现有流程节点；已停止保存，未从单界面重建流程。";
-    }
     return null;
   }
-  if (!refreshedWorkflow) return null;
   return { review: refreshedReview, workflow: refreshedWorkflow };
 }
 
@@ -4128,7 +4141,7 @@ async function refreshCurrentInterfaceWorkflowEvidence() {
       previousSourcePath: sourcePath,
       reviewedPath: sourcePath,
     });
-    if (!refreshed) {
+    if (!refreshed || !refreshed.workflow) {
       renderResponse(
         { success: false, message: "当前界面证据刷新失败。" },
         "Interface workflow evidence refresh",
@@ -14051,10 +14064,10 @@ function learningReviewLabel(item = {}, index = 0, fallback = "item") {
 
 function learningReviewItemId(item = {}, index = 0, fallback = "item") {
   return String(
-    item.state_id
-      || item.region_id
-      || item.action_id
+    item.region_id
       || item.action_template_id
+      || item.action_id
+      || item.state_id
       || item.blocker_id
       || item.rule_id
       || `${fallback}_${index + 1}`
@@ -14335,6 +14348,8 @@ function bindImageInspectorEditDrag() {
 function bindLearningDraftPreviewButtons(container) {
   const host = container || document;
   host.querySelectorAll("[data-learning-draft-preview-bbox]").forEach((button) => {
+    if (button.dataset.learningDraftPreviewBound === "1") return;
+    button.dataset.learningDraftPreviewBound = "1";
     button.addEventListener("click", () => previewLearningDraftBbox(button));
   });
 }
@@ -17151,10 +17166,12 @@ function renderLearningDraftScreenshotPath(imagePath, label = "learning draft nu
 }
 
 function renderLearningDraftScreenshotPanel(review) {
+  const panel = $("learningDraftScreenshotPanel");
   const target = $("learningDraftScreenshotPreview");
   if (!target) return;
   const draft = review?.draft || {};
   const imagePath = learningDraftNumberedMapImagePath(review, draft);
+  if (panel) panel.hidden = !imagePath;
   if (!imagePath) {
     target.innerHTML = `<p class="trace-idle">${escapeHtml(t("learning_draft_screenshot_empty"))}</p>`;
     return;
@@ -19078,6 +19095,31 @@ async function saveInterfaceWorkflowReview({ commitEditor = true } = {}) {
   return response.data || {};
 }
 
+function reviewedTemplateCandidatePathFromWorkflowView(view) {
+  const node = view?.node && typeof view.node === "object" ? view.node : {};
+  if (String(node.review_status || "") !== "human_approved" || node.reviewed_by_human !== true) {
+    return "";
+  }
+  const manualRevision = node.manual_revision && typeof node.manual_revision === "object"
+    ? node.manual_revision
+    : {};
+  const candidates = [
+    manualRevision.source_path,
+    ...(Array.isArray(node.source_paths) ? node.source_paths : []),
+  ].map((value) => String(value || "").trim()).filter(Boolean);
+  return candidates.find((path) => /(^|[\\/])reviewed_template_candidate\.json$/i.test(path)) || "";
+}
+
+function learningOperationalMemoryReviewedCandidatePath() {
+  return String($("learningMemoryReviewedCandidatePath")?.value || "").trim();
+}
+
+function setLearningOperationalMemoryReviewedCandidatePath(path) {
+  if ($("learningMemoryReviewedCandidatePath")) {
+    $("learningMemoryReviewedCandidatePath").value = String(path || "").trim();
+  }
+}
+
 function openInterfaceWorkflowMemoryVerification() {
   if (!interfaceWorkflowReviewState) return;
   const graph = interfaceWorkflowReviewState.graph();
@@ -19101,10 +19143,18 @@ function openInterfaceWorkflowMemoryVerification() {
   if ($("learningMemoryGoal") && !$("learningMemoryGoal").value) {
     $("learningMemoryGoal").value = String(graph.workflow?.goal || "").trim();
   }
+  const reviewedCandidatePath = reviewedTemplateCandidatePathFromWorkflowView(view);
+  setLearningOperationalMemoryReviewedCandidatePath(reviewedCandidatePath);
   if ($("learningMemoryStatus")) {
-    $("learningMemoryStatus").textContent = "先保存并人工批准当前界面候选，再发布；Execute 仍需实时定位与 Gate";
+    $("learningMemoryStatus").textContent = reviewedCandidatePath
+      ? "已选择人工批准候选；发布后 Execute 仍需实时定位与 Gate"
+      : "未找到可发布的审阅候选；请先保存并人工批准当前界面候选";
   }
-  $("learningOperationalMemoryPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const memoryPanel = $("learningOperationalMemoryPanel");
+  if (memoryPanel) {
+    memoryPanel.hidden = false;
+    memoryPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 }
 
 async function loadInterfaceWorkflowReview(sourcePaths = [], options = {}) {
@@ -19243,6 +19293,9 @@ async function removeCurrentInterfaceWorkflowSource() {
 
 function renderLearningDraftReview(review) {
   learningDraftReview = review || null;
+  document.body.dataset.learningDraftReviewOpen = "true";
+  const reviewPanel = $("learningDraftReviewPanel");
+  if (reviewPanel) reviewPanel.hidden = false;
   const draft = review?.draft || {};
   const states = Array.isArray(draft.states) ? draft.states : [];
   const regions = Array.isArray(draft.regions) ? draft.regions : [];
@@ -19276,6 +19329,8 @@ function renderLearningDraftReview(review) {
     imagePath: draftImagePath,
     editKind: "action",
   });
+  bindLearningDraftPreviewButtons($("learningDraftReviewRegions"));
+  bindLearningDraftPreviewButtons($("learningDraftReviewActions"));
   if ($("learningDraftReviewBlockers")) $("learningDraftReviewBlockers").value = learningReviewLines(blockers, "blocker");
   if ($("learningDraftReviewVerificationRules")) $("learningDraftReviewVerificationRules").value = learningReviewLines(rules, "rule");
   const status = learningDraftOwnershipConflicts.length
@@ -19311,6 +19366,9 @@ function renderLearningDraftReview(review) {
 
 function clearLearningDraftReviewDisplay(reason = "", options = {}) {
   learningDraftReview = null;
+  delete document.body.dataset.learningDraftReviewOpen;
+  const reviewPanel = $("learningDraftReviewPanel");
+  if (reviewPanel) reviewPanel.hidden = true;
   if (!options.preserveWorkflowReview) clearInterfaceWorkflowReview(reason);
   learningDraftReviewBboxEdits = { regions: {}, actions: {} };
   resetLearningDraftEditorState(null);
@@ -19668,14 +19726,6 @@ async function saveLearningDraftReview() {
       }, "Learning draft review");
       return null;
     }
-    if (!refreshed.workflow) {
-      renderResponse({
-        success: false,
-        message: "Reviewed template candidate saved, but workflow evidence refresh failed",
-        data,
-      }, "Learning draft review");
-      return null;
-    }
     saveSucceeded = true;
     closeImageInspector();
     void loadLearningCorrectionMemoryRegistry({ skipResponse: true }).catch((error) => {
@@ -19709,7 +19759,7 @@ async function saveLearningDraftReview() {
 
 async function publishLearningOperationalMemory() {
   const interfaceId = String($("learningMemoryInterfaceId")?.value || "").trim();
-  const sourcePath = learningDraftReviewSourcePath();
+  const sourcePath = learningOperationalMemoryReviewedCandidatePath();
   if (!interfaceId || !sourcePath) {
     const response = {
       success: false,
@@ -19718,13 +19768,8 @@ async function publishLearningOperationalMemory() {
     renderResponse(response, "Agent operational memory");
     return null;
   }
-  if (String($("learningDraftReviewStatusSelect")?.value || "") !== "approved_as_assisted_template") {
-    const response = {
-      success: false,
-      message: "human approval is required before publishing operational memory",
-    };
-    renderResponse(response, "Agent operational memory");
-    return null;
+  if ($("learningMemoryStatus")) {
+    $("learningMemoryStatus").textContent = "publishing · backend validates selected candidate contract and human approval";
   }
   const registryResponse = await api(
     "GET",
@@ -19748,7 +19793,9 @@ async function publishLearningOperationalMemory() {
     { summary: "Publish reviewed operational memory", skipRender: true },
   );
   if (!response?.success) {
-    if ($("learningMemoryStatus")) $("learningMemoryStatus").textContent = "publish_failed · return_to_human_review";
+    if ($("learningMemoryStatus")) {
+      $("learningMemoryStatus").textContent = "publish_failed · backend_candidate_validation_required";
+    }
     renderResponse(response, "Agent operational memory");
     return null;
   }
@@ -21805,7 +21852,7 @@ function bindEvents() {
   on("learningDraftReviewLoadBtn", "click", loadLearningDraftReview);
   on("learningDraftRecommendedLoadBtn", "click", loadRecommendedLearningDraftReview);
   on("learningDraftFreshnessDemoBtn", "click", loadLearningDraftFreshnessDemo);
-  on("learningDraftOpenBoxEditorBtn", "click", openLearningDraftBoxEditor);
+  on("learningDraftOpenBoxEditorBtn", "click", () => openLearningDraftBoxEditor());
   on("learningDraftReviewSaveBtn", "click", saveLearningDraftReview);
   on("learningDraftManualSaveBtn", "click", saveLearningDraftReview);
   on("learningMemoryPublishBtn", "click", publishLearningOperationalMemory);

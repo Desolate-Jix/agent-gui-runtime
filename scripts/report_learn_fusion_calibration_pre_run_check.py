@@ -14,7 +14,7 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 REPORT_NAME = "learn_fusion_calibration_pre_run_check_report.json"
-MODEL_PORTS = [11434, 1240, 1241, 1244, 1245, 8000, 8001, 8080]
+MODEL_PORTS = [11434, 13240, 13241, 13244, 13245, 8000, 8001, 8080]
 MODEL_PROCESS_NAMES = {"ollama", "ollama.exe", "llama-server", "llama-server.exe", "llama_server", "llama_server.exe", "text-generation-launcher", "text-generation-launcher.exe"}
 MODEL_HOST_PROCESS_NAMES = {"python", "python.exe", "python3", "python3.exe", "uv", "uv.exe", "node", "node.exe"}
 SYSTEM_SERVICE_PROCESS_NAMES = {"svchost", "svchost.exe", "services", "services.exe", "lsass", "lsass.exe", "wininit", "wininit.exe", "csrss", "csrss.exe", "smss", "smss.exe"}

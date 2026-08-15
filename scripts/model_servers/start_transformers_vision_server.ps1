@@ -3,7 +3,7 @@ param(
     [string]$ModelName = "inclusionAI/VISTA-4B",
     [Alias("Host")]
     [string]$HostName = "127.0.0.1",
-    [int]$Port = 1244,
+    [int]$Port = 13244,
     [string]$Device = "auto",
     [string]$DType = "bfloat16",
     [int]$MaxNewTokens = 32,

@@ -93,7 +93,7 @@ def main() -> int:
     parser.add_argument("--workflow-id", required=True)
     parser.add_argument("--interface-id", required=True)
     parser.add_argument("--goal", required=True)
-    parser.add_argument("--endpoint", default="http://127.0.0.1:1240")
+    parser.add_argument("--endpoint", default="http://127.0.0.1:13240")
     parser.add_argument(
         "--model-name",
         default="Qwen3VL-8B-Instruct-Q4_K_M.gguf",

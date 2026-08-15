@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>OpenClaw Console</title>
-    <link rel="stylesheet" href="/panel/assets/panel.css?v=20260810-library-delete-1" />
+    <link rel="stylesheet" href="/panel/assets/panel.css?v=20260815-learning-screenshot-visibility-1" />
   </head>
   <body>
     <div class="app-shell">
@@ -1177,36 +1177,7 @@
                     <button id="learningDraftManualSaveBtn" type="button" data-i18n="learning_draft_manual_save">Save manual edit</button>
                   </div>
                 </section>
-                <section class="learning-review-section" id="learningOperationalMemoryPanel">
-                  <div class="panel-header compact">
-                    <strong data-i18n="learning_memory_title">Agent operational memory</strong>
-                    <span id="learningMemoryStatus">not_published</span>
-                  </div>
-                  <div class="mode-help" data-i18n="learning_memory_hint">Publish only a human-approved reviewed candidate. Preview and execution always recapture, re-ground, pass Gate, and verify the result; old click coordinates are never reused.</div>
-                  <div class="form-grid">
-                    <label>
-                      <span data-i18n="learning_memory_interface_id">Interface memory ID</span>
-                      <input id="learningMemoryInterfaceId" value="" placeholder="python_org_documentation" />
-                    </label>
-                    <label>
-                      <span data-i18n="learning_memory_action">Action (optional override)</span>
-                      <select id="learningMemoryActionSelect">
-                        <option value="">-- Agent resolves from goal --</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span data-i18n="learning_memory_goal">Execution goal</span>
-                      <input id="learningMemoryGoal" value="" placeholder="Open Documentation" />
-                    </label>
-                  </div>
-                  <div class="button-row">
-                    <button id="learningMemoryPublishBtn" type="button" data-i18n="learning_memory_publish">Publish reviewed memory</button>
-                    <button id="learningMemoryLoadBtn" type="button" class="secondary" data-i18n="learning_memory_load">Load active memory</button>
-                    <button id="learningMemoryDryRunBtn" type="button" data-i18n="learning_memory_preview">Preview in Execute</button>
-                    <button id="learningMemoryExecuteBtn" type="button" class="danger" data-i18n="learning_memory_execute">Execute low-risk action</button>
-                    <button id="learningMemoryReturnToEditBtn" type="button" class="secondary" data-i18n="learning_memory_return_to_edit">Return to edit boxes</button>
-                  </div>
-                </section>
+
                 <section class="learning-review-section learning-correction-memory-panel" id="learningCorrectionMemoryPanel">
                   <div class="panel-header compact">
                     <strong data-i18n="learning_correction_memory_title">CorrectionMemory candidates</strong>
@@ -1255,6 +1226,41 @@
                 </div>
                 </details>
               </section>
+                <section class="learning-review-section" id="learningOperationalMemoryPanel" hidden>
+                  <div class="panel-header compact">
+                    <strong data-i18n="learning_memory_title">Agent operational memory</strong>
+                    <span id="learningMemoryStatus">not_published</span>
+                  </div>
+                  <div class="mode-help" data-i18n="learning_memory_hint">Publish only a human-approved reviewed candidate. Preview and execution always recapture, re-ground, pass Gate, and verify the result; old click coordinates are never reused.</div>
+                  <div class="form-grid">
+                    <label>
+                      <span data-i18n="learning_memory_interface_id">Interface memory ID</span>
+                      <input id="learningMemoryInterfaceId" value="" placeholder="python_org_documentation" />
+                    </label>
+                    <label class="wide-control">
+                      <span data-i18n="learning_memory_reviewed_candidate_path">Reviewed candidate path</span>
+                      <input id="learningMemoryReviewedCandidatePath" value="" placeholder="artifacts/learning-draft-review/.../reviewed_template_candidate.json" />
+                      <small class="form-help" data-i18n="learning_memory_reviewed_candidate_path_help">Publishing accepts only a human-approved reviewed_template_candidate_v1 artifact. Workflow node review sources cannot be published.</small>
+                    </label>
+                    <label>
+                      <span data-i18n="learning_memory_action">Action (optional override)</span>
+                      <select id="learningMemoryActionSelect">
+                        <option value="">-- Agent resolves from goal --</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span data-i18n="learning_memory_goal">Execution goal</span>
+                      <input id="learningMemoryGoal" value="" placeholder="Open Documentation" />
+                    </label>
+                  </div>
+                  <div class="button-row">
+                    <button id="learningMemoryPublishBtn" type="button" data-i18n="learning_memory_publish">Publish reviewed memory</button>
+                    <button id="learningMemoryLoadBtn" type="button" class="secondary" data-i18n="learning_memory_load">Load active memory</button>
+                    <button id="learningMemoryDryRunBtn" type="button" data-i18n="learning_memory_preview">Preview in Execute</button>
+                    <button id="learningMemoryExecuteBtn" type="button" class="danger" data-i18n="learning_memory_execute">Execute low-risk action</button>
+                    <button id="learningMemoryReturnToEditBtn" type="button" class="secondary" data-i18n="learning_memory_return_to_edit">Return to edit boxes</button>
+                  </div>
+                </section>
               <section class="learning-draft-pathgraph-panel" id="learningDraftPathGraphPanel">
               <section class="learning-draft-path-preview" id="learningDraftPathPreview">
                 <div class="panel-header compact">
@@ -1705,7 +1711,8 @@
                 <option value="read_only">read_only</option>
                 <option value="click">click</option>
                 <option value="open_detail">open_detail</option>
-                <option value="open_flow">open_flow</option>
+                <option value="open_apply_flow">open_apply_flow</option>
+                <option value="open_external_apply">open_external_apply (blocked)</option>
                 <option value="fill_field">fill_field</option>
                 <option value="type_text">type_text</option>
                 <option value="select_option">select_option</option>
@@ -1844,7 +1851,7 @@
     </dialog>
     <script src="/panel/assets/learning_draft_editor.js?v=20260729-box-editor-status-1"></script>
     <script src="/panel/assets/learning_workflow_review.js?v=20260810-review-pages-4"></script>
-    <script src="/panel/assets/interface_workflow_graph.js?v=20260812-workflow-i18n-1"></script>
-    <script src="/panel/assets/panel.js?v=20260812-workflow-i18n-1"></script>
+    <script src="/panel/assets/interface_workflow_graph.js?v=20260815-workflow-layout-bounds-1"></script>
+    <script src="/panel/assets/panel.js?v=20260815-learning-screenshot-visibility-2"></script>
   </body>
 </html>

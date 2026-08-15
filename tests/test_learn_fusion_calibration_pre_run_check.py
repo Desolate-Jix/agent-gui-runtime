@@ -136,7 +136,7 @@ def test_calibration_pre_run_check_records_no_model_runtime_snapshot(tmp_path: P
         lambda: {
             "contract_version": "model_runtime_snapshot_v1",
             "checked_at": "2026-07-06T09:30:00+12:00",
-            "checked_ports": [11434, 1240],
+            "checked_ports": [11434, 13240],
             "listening_ports": [],
             "suspected_model_processes": [],
             "model_ports_clear": True,
@@ -177,7 +177,7 @@ def test_suspected_model_process_filter_rejects_graphics_service_false_positive(
     ) is True
     assert pre_run_check._is_suspected_model_process(
         "llama-server.exe",
-        r"llama-server.exe -m models\qwen3-vl-8b.gguf --port 1240",
+        r"llama-server.exe -m models\qwen3-vl-8b.gguf --port 13240",
     ) is True
 
 

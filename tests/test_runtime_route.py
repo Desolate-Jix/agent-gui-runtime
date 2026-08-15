@@ -94,7 +94,7 @@ def test_vision_config_uses_learning_quality_understanding_profile() -> None:
 
     assert local_understanding["profile_id"] == "qwen3_vl_8b_q4_k_m"
     assert local_understanding["model_name"] == "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
-    assert local_understanding["endpoint"] == "http://127.0.0.1:1240/v1/chat/completions"
+    assert local_understanding["endpoint"] == "http://127.0.0.1:13240/v1/chat/completions"
 
 
 def test_removed_learning_draft_routes_are_not_exposed() -> None:
@@ -115,7 +115,7 @@ def test_vista_transformers_profile_is_launchable() -> None:
     assert profile["runtime"] == "transformers"
     assert profile["output_contract"] == "vista_point_v1"
     assert profile["start_script"] == "scripts/model_servers/start_transformers_vision_server.ps1"
-    assert profile["endpoint"] == "http://127.0.0.1:1244/v1/chat/completions"
+    assert profile["endpoint"] == "http://127.0.0.1:13244/v1/chat/completions"
     assert Path(profile["model_path"]).exists()
     assert (Path(profile["model_path"]) / "model.safetensors.index.json").exists()
 
@@ -159,7 +159,7 @@ def test_start_model_server_passes_transformers_profile_args(monkeypatch) -> Non
             "start_script": "scripts/model_servers/start_transformers_vision_server.ps1",
             "pid_file": "logs/test-vista-transformers.pid",
             "host": "127.0.0.1",
-            "port": 1244,
+            "port": 13244,
             "device": "auto",
             "dtype": "bfloat16",
             "max_new_tokens": 32,
@@ -173,7 +173,7 @@ def test_start_model_server_passes_transformers_profile_args(monkeypatch) -> Non
     assert result["pid"] == 12345
     assert "start_transformers_vision_server.ps1" in command[5]
     assert command[command.index("-ModelName") + 1] == "inclusionAI/VISTA-4B"
-    assert command[command.index("-Port") + 1] == "1244"
+    assert command[command.index("-Port") + 1] == "13244"
     assert command[command.index("-Device") + 1] == "auto"
     assert command[command.index("-DType") + 1] == "bfloat16"
     assert command[command.index("-MaxNewTokens") + 1] == "32"
@@ -218,7 +218,7 @@ def test_start_model_server_refreshes_pid_file_from_health(monkeypatch, tmp_path
             "model_path": str(model_path),
             "start_script": str(script_path),
             "pid_file": str(pid_path),
-            "endpoint": "http://127.0.0.1:1245/v1/chat/completions",
+            "endpoint": "http://127.0.0.1:13245/v1/chat/completions",
             "startup_exit_check_seconds": 0,
             "startup_health_timeout_seconds": 0,
         }
@@ -267,7 +267,7 @@ def test_start_model_server_rejects_immediate_script_exit(monkeypatch) -> None:
                 "model_path": "models/vista-4b-safetensors",
                 "start_script": "scripts/model_servers/start_transformers_vision_server.ps1",
                 "pid_file": "logs/test-vista-transformers-failed.pid",
-                "port": 1244,
+                "port": 13244,
                 "startup_exit_check_seconds": 0,
             }
         )
@@ -304,13 +304,13 @@ def test_check_model_server_reports_vista_busy_health(monkeypatch) -> None:
             "profile_id": "vista_4b_transformers",
             "runtime": "transformers",
             "output_contract": "vista_point_v1",
-            "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+            "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
         }
     )
 
     assert result["status"] == "busy"
     assert result["health"]["pid"] == 123
-    assert requested_urls == ["http://127.0.0.1:1244/v1/health"]
+    assert requested_urls == ["http://127.0.0.1:13244/v1/health"]
 
 
 def test_ensure_model_server_does_not_start_second_vista_when_busy(monkeypatch) -> None:

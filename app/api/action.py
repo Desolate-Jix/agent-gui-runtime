@@ -25,6 +25,7 @@ from app.gate.window import validate_bound_window_for_app
 from app.core.transition_memory import transition_memory
 from app.core.verifier import verifier
 from app.core.window_manager import window_manager
+from app.core.browser_navigation_guard import probe_after_settle, probe_bound_browser, verify_navigation_policy
 from app.gate.scroll import build_scroll_effect_validation, build_scroll_precondition_decision, build_scroll_safe_point
 from app.operation.mousetester import should_verify_mouse_tester_semantics, target_bbox_from_recommended, verify_mouse_tester_post_click_semantics
 from app.operation.runtime_context import build_operation_runtime_context, operation_trace_link
@@ -1476,6 +1477,11 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
     auto_observe_trace: dict[str, Any] | None = None
     surface_ocr: Any = None
     local_target_validation: dict[str, Any] | None = None
+    effective_provider_mode, effective_metadata = _execute_plan_request_defaults(request)
+    effective_observe_trace_path = request.observe_trace_path
+    resolved_memory_action_id = request.interface_memory_action_id
+    memory_action_resolution: dict[str, Any] | None = None
+    memory_seed: dict[str, Any] | None = None
 
     def attach_timings(result: dict[str, Any]) -> dict[str, Any]:
         result["timings"] = timer.to_dict()
@@ -1734,7 +1740,6 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 error=ErrorModel(code="missing_image_source", details="Provide image_path or set capture_live=true"),
             )
 
-        effective_observe_trace_path = request.observe_trace_path
         if _auto_observe_learning_artifacts_enabled(request) and not effective_observe_trace_path:
             observe_request = VisionObserveScreenRequestModel(
                 app_name=request.app_name,
@@ -1794,9 +1799,6 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 )
             effective_observe_trace_path = str(observe_trace_path)
 
-        effective_provider_mode, effective_metadata = _execute_plan_request_defaults(request)
-        resolved_memory_action_id = request.interface_memory_action_id
-        memory_action_resolution: dict[str, Any] | None = None
         if request.interface_memory_id or request.interface_memory_action_id:
             if not request.interface_memory_id:
                 timings = timer.to_dict()
@@ -1984,6 +1986,29 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                     ),
                 )
             effective_metadata["seeded_candidate_v1"] = memory_seed
+            effective_metadata["operational_memory_fast_grounding"] = {
+                "enabled": True,
+                "mode": "current_uia_unique_match_v1",
+            }
+            if str(memory_seed.get("expected_effect") or "") == "open_apply_flow":
+                destination = (memory_seed.get("destination_url") or memory_seed.get("expected_destination_url")
+                               or (memory_seed.get("locator_evidence") or {}).get("destination_url"))
+                effective_metadata.setdefault("verification_policy", {})["navigation"] = {
+                    "required": True,
+                    "expected_origin": destination,
+                    "require_same_origin_as_before": True,
+                    "forbid_new_tab": True,
+                    "settle_timeout_ms": 3000,
+                }
+            memory_expected_effect = {
+                "contract_version": "operational_memory_expected_effect_v1",
+                "semantic_action": str(memory_seed.get("expected_effect") or ""),
+                "action_id": resolved_memory_action_id,
+                "stable_element_id": memory_seed.get("stable_element_id"),
+                "label": memory_seed.get("label"),
+                "target_label": memory_seed.get("label"),
+                "locator_evidence": dict(memory_seed.get("locator_evidence") or {}),
+            }
             effective_metadata["operational_memory"] = {
                 "contract_version": "operational_memory_execution_context_v1",
                 "interface_id": request.interface_memory_id,
@@ -1995,6 +2020,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 "surface_validation": surface_validation,
                 "historical_coordinates_forbidden": True,
                 "gate_required": True,
+                "expected_effect": memory_expected_effect,
             }
         plan_request = VisionRecognitionPlanRequestModel(
             image_path=image_path,
@@ -2223,6 +2249,8 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
     semantic_action = (
         str(request.metadata.get("semantic_action"))
         if isinstance(request.metadata, dict) and request.metadata.get("semantic_action")
+        else str(memory_seed.get("expected_effect"))
+        if isinstance(memory_seed, dict) and memory_seed.get("expected_effect")
         else ("open_apply_flow" if request.task == "open_apply_flow" else "click_target")
     )
     operation_context = build_operation_runtime_context(
@@ -2399,6 +2427,10 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                         ) + focus_retry_count
                     else:
                         before_state = None
+                navigation_policy = ((effective_metadata or {}).get("verification_policy") or {}).get("navigation")
+                navigation_before = None
+                if isinstance(navigation_policy, dict) and navigation_policy.get("required") is True:
+                    navigation_before = probe_bound_browser(int(bound.handle))
                 with timer.step("click_point", attempt=attempt_index):
                     click_result = input_controller.click_point(
                         selected_point["x"],
@@ -2418,6 +2450,23 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                         else {"verified": None, "verification_skipped": True}
                     )
                     post_click_verification = _apply_metadata_post_click_policy(request, post_click_verification)
+                navigation_verification = {"verified": True, "status": "not_required", "policy_applied": False}
+                if isinstance(navigation_policy, dict) and navigation_policy.get("required") is True:
+                    settled = probe_after_settle(
+                        navigation_policy,
+                        int(bound.handle),
+                        probe_bound_browser,
+                        before=navigation_before,
+                    )
+                    navigation_verification = verify_navigation_policy(
+                        navigation_policy, int(bound.handle), before=navigation_before,
+                        after=settled.get("after"),
+                    )
+                    navigation_verification["samples"] = settled.get("samples", [])
+                    if not settled.get("verified"):
+                        navigation_verification.update(verified=False, reason=settled.get("reason"))
+                    post_click_verification = dict(post_click_verification)
+                    post_click_verification["navigation"] = navigation_verification
                 with timer.step(
                     "semantic_post_click_verification",
                     attempt=attempt_index,
@@ -2437,12 +2486,15 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                     post_click_verification=post_click_verification,
                     semantic_post_click_verification=semantic_post_click_verification,
                 )
+                attempt_verified = bool(attempt_verified and navigation_verification.get("verified"))
                 retry_allowed, retry_reason = _retry_allowed_after_attempt(
                     request=request,
                     pre_click=pre_click,
                     attempt_index=attempt_index,
                     attempt_verified=attempt_verified,
                 )
+                if not navigation_verification.get("verified"):
+                    retry_allowed, retry_reason = False, "navigation_verification_failed"
             attempt = {
                 "attempt": attempt_index,
                 "pre_action_state": before_state,

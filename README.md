@@ -53,7 +53,7 @@ Run one API worker for the current durable Workflow Store. Starting overlapping 
 
 ### Local Vision Models
 
-The recommended route is the panel model manager. Learning observation uses Qwen3-VL 8B by default; precise grounding uses VISTA-4B. Profiles live in `configs/model_profiles/` and server scripts live in `scripts/model_servers/`.
+The recommended route is the panel model manager. Learning observation uses Qwen3-VL 8B by default on local port `13240`; precise grounding uses VISTA-4B on `13244`. Qwen3-VL 4B uses `13241` and UGround 2B uses `13245`; these model ports are outside the Windows excluded range `1199-1298`. Profiles live in `configs/model_profiles/` and server scripts live in `scripts/model_servers/`.
 
 Install the optional VISTA dependencies before its first run:
 
@@ -83,13 +83,13 @@ Manual VISTA start:
 .\scripts\model_servers\start_transformers_vision_server.ps1 `
   -ModelPath .\models\vista-4b-safetensors `
   -ModelName inclusionAI/VISTA-4B `
-  -Port 1244
+  -Port 13244
 ```
 
 Stop local services after testing:
 
 ```powershell
-.\scripts\model_servers\stop_local_vision_server.ps1 -Port 1244
+.\scripts\model_servers\stop_local_vision_server.ps1 -Port 13244
 ```
 
 Stop the manually started API with `Ctrl+C`. The runtime does not authorize real clicks merely because a model or panel is running.
@@ -127,6 +127,10 @@ The Learning workspace can project an ordered set of reviewed learning artifacts
 Saved single-interface preview evidence and current workflow-node evidence are separate modes. Opening a preview cannot silently leave the evidence title or image bound to a different graph node, and the reviewer can switch explicitly between the two sources. `加入流程` now inserts the selected reviewed interface as an unconnected node only. Transitions are created from the graph by right-clicking a source interface, choosing a target interface, and then selecting the source control and operation; individual outgoing links can be removed from the same context menu without deleting either interface. Source controls are presented by readable interface label and role; the reviewer may also choose a control directly on the boxed evidence image, after which its internal ID is filled automatically. One interface can fan out through several operations, several branches can converge on one interface, and reviewed flows can contain return edges or cycles. Missing or unverifiable target geometry is reported as unavailable rather than drawn from guessed coordinates. The Agent operation editor supports adding, updating, or deleting routine operations and target interfaces. A transition can point to an observed interface or create a clearly marked `needs_learning` placeholder. The toolbar covers read, open-detail, open-flow, fill, select, scroll, back, close-modal, wait, and continue operations; final submit, submit, send, confirm, payment, and delete are rejected. The existing full-image bbox editor remains available, and the reviewed workflow can be saved without editing JSON or Markdown. Rebuilding the graph preserves bounded human edits and custom links whose source and target interfaces still exist. The graph remains a display/review surface and does not authorize Execute.
 
 Saving is deliberately non-authorizing: the artifact remains `display_only=true`, `artifact_is_authorization=false`, `execute_binding_enabled=false`, has no published memory version, and contains no reusable runtime click point. The saver rejects duplicate node/edge IDs, missing entry nodes, mismatched graph indexes, dangling transition targets, unsupported actions, and forbidden high-impact actions. The operation toolbar unlocks `Safe validation` only after save; that path forces `capture_live=true` and `dry_run=true`, performs fresh localization plus Gate review, and never dispatches the action. `Publish and execution verification` only prepares the existing Agent Memory panel. Publication still requires separate human approval, while any later execution must recapture the current interface, localize again, pass Gate, and verify the result.
+
+Panel and server now calculate the human-confirmed workflow revision from the same stable source-evidence paths, and the server materializes durable evidence before calculating the canonical revision. A region that a reviewer explicitly annotated with a safe semantic action such as `open_detail` can therefore enter the Agent evidence and published operational-memory projections even when the draft had no separate action template. Forbidden terminal actions are still filtered, and projection never bypasses current capture, fresh grounding, Gate, or post-action verification.
+
+`发布与执行验证` now reveals the operational-memory controls as a dedicated panel instead of trying to scroll to controls hidden inside the legacy diagnostics surface. For a verified low-risk `open_detail`, the runtime may carry the reviewed expected effect into the pre-click gate only when the current UIA candidate and current narrow grounding both exactly match the reviewed text anchor. The OCR layer separately tolerates the narrow `AI` → `Al` confusion only for one standalone acronym inside a longer, otherwise strictly matching low-risk anchor; it never performs global `i/l` replacement and never relaxes bbox, distance, freshness, or dangerous-action checks.
 
 Reviewed workflows are indexed into an application-scoped library. Browser captures use a canonical site domain/origin such as `web:seek.co.nz`; Edge or Chrome without URL/domain evidence remains `needs_domain_review` and is never treated as the website identity. Native applications use executable plus product identity. The Agent may load this library as read-only planning context, but historical coordinates are forbidden and every action still requires a current capture, fresh grounding, Gate, and post-action verification. A node is Agent-usable only when its explicit human confirmation, canonical semantic revision, registry source-asset checksum, and materialized evidence digests all match; changed or unverifiable evidence returns it to human review.
 
@@ -782,3 +786,10 @@ The workflow graph now projects the persisted review state instead of inferring 
 Scoped long-capture composition now avoids rescanning every full-resolution candidate strip. The overlap estimator first builds deterministic full-width row digests, uses them only to select possible exact overlaps, and still performs a full-resolution RGB equality check plus full-resolution information checks before accepting a stitch. When no exact candidate exists, a bounded-width grayscale pass selects a small diagnostic set for full-resolution MAE measurement; it never authorizes an overlap.
 
 A 2048x1046 synthetic regression failed at `75.297 s` before the fix and passes under a loose `20 s` ceiling after it. The four real Navigation Branching Lab ROI segments composed in `0.338 s` into `artifacts/learning-captures/task5-overlap-smoke-optimized/scoped_capture_composite.png` with a matching manifest. No unverified overlap was claimed, so all four frames were retained in the 2048x4184 composite. The manifest remains `artifact_is_authorization=false`; Execute, Gate, scrolling, and final-action behavior are unchanged.
+## SEEK Same-Site Quick Apply Demo (2026-08-15)
+
+The verified demo artifact is `artifacts/live-verification/seek_same_site_quick_apply_demo_20260815.json` (SHA-256 `579749fc015e3d0f0d44e3c72f69abb243072e0df0e37e0d11c9c03b23b0b427`). It records a reviewed panel workflow with 3 nodes and 2 edges for SEEK job `93615952`, plus a six-segment scoped long-scroll capture stopped at `max_captures`.
+
+Execution used fresh current-UIA grounding (`current_uia_unique_match_v1`), one click, no retry, and no VISTA. Same-origin/new-tab navigation was enforced: the same UIA runtime/tab moved from `https://nz.seek.com/job/93615952` to `/apply`. The semantic action was `open_apply_flow`; the verified action trace is `logs/traces/actions/20260815-122136-377469__execute-mode-click__msedge-exe.json`.
+
+The run stopped at the SEEK apply entry. No field fill, typing, upload, Continue/Next, or final submit/send/confirm/payment occurred. The apply-form placeholder remains unreviewed and not agent-ready; user acceptance and demo recording are still pending. This artifact is evidence, not authorization.

@@ -145,7 +145,7 @@ def test_actual_parser_batch_can_start_and_stop_requested_profile(monkeypatch, t
             "started": True,
             "before": {"status": "unreachable"},
             "after": {"status": "running"},
-            "profile": {"profile_id": "learn_mode_qwen3_vl_8b", "port": 1240},
+            "profile": {"profile_id": "learn_mode_qwen3_vl_8b", "port": 13240},
             "start": {"pid": 1234},
         }
 
@@ -173,7 +173,7 @@ def test_actual_parser_batch_can_start_and_stop_requested_profile(monkeypatch, t
     report = run_actual_parser_batch(
         manifest_path=manifest,
         out_dir=tmp_path / "out",
-        endpoint="http://127.0.0.1:1240/v1/chat/completions",
+        endpoint="http://127.0.0.1:13240/v1/chat/completions",
         model_profile_id="learn_mode_qwen3_vl_8b",
         start_profile=True,
         start_wait_seconds=12,
@@ -184,7 +184,7 @@ def test_actual_parser_batch_can_start_and_stop_requested_profile(monkeypatch, t
     assert starts[0]["profile_id"] == "learn_mode_qwen3_vl_8b"
     assert starts[0]["wait_until_ready"] is True
     assert starts[0]["wait_seconds"] == 12
-    assert stops == [{"profile_id": "learn_mode_qwen3_vl_8b", "port": 1240}]
+    assert stops == [{"profile_id": "learn_mode_qwen3_vl_8b", "port": 13240}]
     assert report["service_lifecycle"]["started_profile"]["started"] is True
     assert report["service_lifecycle"]["stop_started_profile_requested"] is True
     assert report["service_lifecycle"]["stop_result"]["stopped"] is True

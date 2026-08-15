@@ -18,7 +18,7 @@ PLANNED_LOCAL_DIRS = {
 
 PLANNED_ENDPOINTS = {
     "learn_mode_uground_7b": "http://127.0.0.1:1246/v1/chat/completions",
-    "learn_mode_uground_2b": "http://127.0.0.1:1245/v1/chat/completions",
+    "learn_mode_uground_2b": "http://127.0.0.1:13245/v1/chat/completions",
 }
 
 PLANNED_PID_FILES = {

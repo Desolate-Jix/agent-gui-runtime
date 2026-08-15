@@ -35,7 +35,7 @@ def run_validation(
     out_dir: Path,
     probe_runner: ProbeRunner = run_probe,
     closure_runner: ClosureRunner | None = run_closure,
-    endpoint: str = "http://127.0.0.1:1240/v1/chat/completions",
+    endpoint: str = "http://127.0.0.1:13240/v1/chat/completions",
     model_name: str = "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
     timeout_seconds: float = 240.0,
 ) -> dict[str, Any]:
@@ -377,7 +377,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run actual-model Learning overlay review validation.")
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--endpoint", default="http://127.0.0.1:1240/v1/chat/completions")
+    parser.add_argument("--endpoint", default="http://127.0.0.1:13240/v1/chat/completions")
     parser.add_argument("--model-name", default="Qwen3VL-8B-Instruct-Q4_K_M.gguf")
     parser.add_argument("--timeout-seconds", type=float, default=240.0)
     parser.add_argument("--json", action="store_true")

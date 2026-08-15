@@ -156,6 +156,29 @@ VISTA_DIRECT_IMAGES_DIR = ARTIFACTS_DIR / "vista-direct"
 VISUAL_ASSET_RECALL_CONTRACT = "visual_asset_recall_v1"
 
 
+def _operational_memory_expected_effect(metadata: dict[str, Any] | None) -> dict[str, object] | None:
+    """只把 action API 注入的 operational-memory 语义传给 pre-click gate。"""
+    operational_memory = metadata.get("operational_memory") if isinstance(metadata, dict) else None
+    if not isinstance(operational_memory, dict):
+        return None
+    if operational_memory.get("contract_version") != "operational_memory_execution_context_v1":
+        return None
+    if (
+        operational_memory.get("current_grounding_required") is not True
+        or operational_memory.get("gate_required") is not True
+    ):
+        return None
+    surface_validation = operational_memory.get("surface_validation")
+    if not isinstance(surface_validation, dict) or surface_validation.get("allowed") is not True:
+        return None
+    expected_effect = operational_memory.get("expected_effect") if isinstance(operational_memory, dict) else None
+    if not isinstance(expected_effect, dict):
+        return None
+    if expected_effect.get("contract_version") != "operational_memory_expected_effect_v1":
+        return None
+    return expected_effect
+
+
 def _vision_execution_path(
     *,
     requested_mode: str | None,
@@ -744,6 +767,41 @@ def _seeded_candidate_current_text_anchors(seeded: dict[str, Any]) -> list[str]:
         if label:
             anchors.append(label)
     return list(dict.fromkeys(anchors))
+
+
+_CURRENT_UIA_SEMANTIC_STOP_TOKENS = {
+    "a",
+    "an",
+    "and",
+    "at",
+    "for",
+    "flow",
+    "in",
+    "of",
+    "on",
+    "open",
+    "the",
+    "to",
+}
+
+
+def _semantic_current_uia_candidate_matches_seed(
+    candidate: RecognitionCandidate,
+    *,
+    seeded: dict[str, Any],
+    goal: str,
+) -> bool:
+    label_tokens = set(re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]", str(candidate.label or "").casefold()))
+    goal_tokens = set(re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]", str(goal or "").casefold()))
+    effect_tokens = set(
+        re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]", str(seeded.get("expected_effect") or "").casefold())
+    ) - _CURRENT_UIA_SEMANTIC_STOP_TOKENS
+    if not label_tokens or not goal_tokens or not effect_tokens.intersection(label_tokens):
+        return False
+    entity_tokens = label_tokens - effect_tokens - _CURRENT_UIA_SEMANTIC_STOP_TOKENS
+    if not entity_tokens:
+        return label_tokens.issubset(goal_tokens)
+    return len(entity_tokens.intersection(goal_tokens)) / len(entity_tokens) >= 0.75
 
 
 def _candidate_freshness_decision_for_trace(
@@ -2201,8 +2259,28 @@ def _recognition_plan_from_vista_point(
                 and re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", str(candidate.label or "").casefold())
                 in normalized_seed_text_anchors
             ]
-            fast_grounding_match_count = len(exact_current_uia_candidates)
-            exact_current_uia_candidate = exact_current_uia_candidates[0] if len(exact_current_uia_candidates) == 1 else None
+            current_uia_seed_matches = exact_current_uia_candidates
+            surface_validation = (
+                request.metadata.get("operational_memory", {}).get("surface_validation", {})
+                if isinstance(request.metadata.get("operational_memory"), dict)
+                else {}
+            )
+            if (
+                not current_uia_seed_matches
+                and fast_grounding_requested
+                and surface_validation.get("allowed") is True
+            ):
+                current_uia_seed_matches = [
+                    candidate
+                    for candidate in current_uia_candidates
+                    if _semantic_current_uia_candidate_matches_seed(
+                        candidate,
+                        seeded=seeded_candidate,
+                        goal=goal,
+                    )
+                ]
+            fast_grounding_match_count = len(current_uia_seed_matches)
+            exact_current_uia_candidate = current_uia_seed_matches[0] if len(current_uia_seed_matches) == 1 else None
             fast_grounding_risk_allowed, fast_grounding_risk_reason = _execution_allowed_for_risk_class(
                 label=str(seeded_candidate.get("label") or ""),
                 role=str(seeded_candidate.get("role") or ""),
@@ -2260,8 +2338,8 @@ def _recognition_plan_from_vista_point(
                     fast_grounding_reason = "current_uia_candidate_not_actionable"
             if seeded_candidate_requires_current_grounding and exact_current_uia_candidate is not None:
                 roi_candidates, roi_source = [exact_current_uia_candidate], "current_uia_candidate_v1"
-            elif seeded_candidate_requires_current_grounding and exact_current_uia_candidates:
-                roi_candidates, roi_source = exact_current_uia_candidates, "current_uia_candidates_v1"
+            elif seeded_candidate_requires_current_grounding and current_uia_seed_matches:
+                roi_candidates, roi_source = current_uia_seed_matches, "current_uia_candidates_v1"
             else:
                 roi_candidates, roi_source = [seed_candidate], "seeded_candidate_v1"
         else:
@@ -2697,6 +2775,7 @@ def _recognition_plan_from_vista_point(
             candidates=candidate_result,
             grounding=narrow_search_result,
             allow_low_margin_when_grounded=allow_low_margin_when_grounded,
+            expected_effect=_operational_memory_expected_effect(request.metadata),
         )
     recommended = candidate_result.candidates[0].to_dict() if candidate_result.candidates else None
     model_io = vista_direct_failure_model_io or _vista_model_io_trace(vista_payload, error=vista_error)
@@ -7040,6 +7119,7 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
                 candidates=candidate_result,
                 grounding=narrow_search_result,
                 allow_low_margin_when_grounded=allow_low_margin_when_grounded,
+                expected_effect=_operational_memory_expected_effect(effective_request.metadata),
             )
         recommended = candidate_result.candidates[0].to_dict() if candidate_result.candidates else None
         screen_inventory = screen_reading_payload.get("screen_inventory") if isinstance(screen_reading_payload.get("screen_inventory"), dict) else None

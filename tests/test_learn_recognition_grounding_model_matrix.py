@@ -173,7 +173,7 @@ def test_grounding_model_matrix_can_start_and_stop_only_profiles_it_started(tmp_
             "profile": {
                 "profile_id": profile_id,
                 "stop_script": "scripts/model_servers/stop_local_vision_server.ps1",
-                "port": 1245 if was_started else 1244,
+                "port": 13245 if was_started else 13244,
             },
             "start": {"pid": 123} if was_started else {},
         }

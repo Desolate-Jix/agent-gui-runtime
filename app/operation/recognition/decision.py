@@ -23,6 +23,7 @@ def decide_pre_click(
     min_margin: float = 0.06,
     min_local_text_similarity: float = 0.45,
     allow_low_margin_when_grounded: bool = False,
+    expected_effect: dict[str, object] | None = None,
 ) -> PreClickDecisionResult:
     grounding_by_id = {item.candidate_id: item for item in grounding.results}
     decisions: list[PreClickCandidateDecision] = []
@@ -36,6 +37,7 @@ def decide_pre_click(
                 local=local,
                 min_candidate_score=min_candidate_score,
                 min_local_text_similarity=min_local_text_similarity,
+                expected_effect=expected_effect,
             )
         )
 
@@ -126,6 +128,7 @@ def _candidate_decision(
     local: LocalGroundingCandidateResult | None,
     min_candidate_score: float,
     min_local_text_similarity: float,
+    expected_effect: dict[str, object] | None,
 ) -> PreClickCandidateDecision:
     allowed = True
     reasons: list[str] = []
@@ -143,9 +146,24 @@ def _candidate_decision(
         allowed = False
         reasons.append("candidate_goal_role_mismatch")
     goal_action_terms = _explicit_goal_action_terms(goal)
-    if goal_action_terms and not (_candidate_action_terms(candidate) & goal_action_terms):
-        allowed = False
-        reasons.append("candidate_goal_action_mismatch")
+    expected_effect_verified = _verified_expected_effect_for_candidate(
+        expected_effect=expected_effect,
+        candidate=candidate,
+        local=local,
+    )
+    candidate_action_terms = _candidate_action_terms(candidate)
+    if goal_action_terms and not (candidate_action_terms & goal_action_terms):
+        expected_action_terms = _expected_effect_action_terms(expected_effect)
+        conflicting_candidate_terms = candidate_action_terms & {"apply", "continue", "submit", "save", "search", "filter"}
+        if (
+            expected_effect_verified
+            and not conflicting_candidate_terms
+            and goal_action_terms.issubset(expected_action_terms)
+        ):
+            reasons.append("operational_memory_expected_effect_verified")
+        else:
+            allowed = False
+            reasons.append("candidate_goal_action_mismatch")
     goal_mentions_candidate_label = _goal_explicitly_requests_candidate_label(goal, candidate)
     if candidate.score_breakdown.text_similarity < min_local_text_similarity and not goal_mentions_candidate_label:
         allowed = False
@@ -493,6 +511,70 @@ def _candidate_action_terms(candidate: RecognitionCandidate) -> set[str]:
         if any(_normalize_text(value) in text for value in values):
             terms.add(canonical)
     return terms
+
+
+def _expected_effect_action_terms(expected_effect: dict[str, object] | None) -> set[str]:
+    """把经 operational memory 验证的结构化动作映射为 gate 语义。"""
+    if not isinstance(expected_effect, dict):
+        return set()
+    if expected_effect.get("contract_version") != "operational_memory_expected_effect_v1":
+        return set()
+    action = _normalize_text(
+        str(expected_effect.get("semantic_action") or expected_effect.get("expected_effect") or "")
+    )
+    action_aliases = {
+        "open detail": {"open_detail"},
+        "open job detail": {"open_detail"},
+    }
+    return set(action_aliases.get(action, set()))
+
+
+def _verified_expected_effect_for_candidate(
+    *,
+    expected_effect: dict[str, object] | None,
+    candidate: RecognitionCandidate,
+    local: LocalGroundingCandidateResult | None,
+) -> bool:
+    """仅在 memory locator 与当前候选、当前窄定位文本同时吻合时信任动作语义。"""
+    if not _expected_effect_action_terms(expected_effect):
+        return False
+    if local is None or local.status != "grounded" or not local.matched_text:
+        return False
+    if not candidate.eligible or candidate.element.interaction_policy.ad_risk >= 0.6:
+        return False
+    if _normalize_text(candidate.role) not in {"link", "card", "listitem", "button"}:
+        return False
+    locator = expected_effect.get("locator_evidence") if isinstance(expected_effect, dict) else None
+    locator = locator if isinstance(locator, dict) else {}
+    anchors = [str(item) for item in locator.get("text_anchors") or [] if str(item).strip()]
+    anchors.extend(
+        str(item)
+        for item in (
+            expected_effect.get("label") if isinstance(expected_effect, dict) else None,
+            expected_effect.get("target_label") if isinstance(expected_effect, dict) else None,
+        )
+        if str(item or "").strip()
+    )
+    if not anchors:
+        return False
+    return _anchor_matches_any(candidate.label, anchors) and _anchor_matches_any(local.matched_text, anchors)
+
+
+def _anchor_matches_any(value: str | None, anchors: list[str]) -> bool:
+    normalized_value = _normalize_text(value or "")
+    if not normalized_value:
+        return False
+    for anchor in anchors:
+        normalized_anchor = _normalize_text(anchor)
+        if normalized_value == normalized_anchor:
+            return True
+        # 长标题 OCR 可能吞掉词间空格；仅对高信息量多词锚点放宽。
+        tokens = normalized_anchor.split()
+        compact_anchor = "".join(character for character in normalized_anchor if character.isalnum())
+        compact_value = "".join(character for character in normalized_value if character.isalnum())
+        if len(tokens) >= 3 and len(compact_anchor) >= 20 and compact_value == compact_anchor:
+            return True
+    return False
 
 
 def _has_positive_goal_term(goal_text: str, term: str) -> bool:

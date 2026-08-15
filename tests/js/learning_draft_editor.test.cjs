@@ -26,7 +26,7 @@ function loadSaveLearningDraftReview(overrides = {}) {
     },
     snapshot: () => {
       calls.push("snapshot");
-      return { nodes: [{ node_id: "node1" }] };
+      return { nodes: [{ node_id: "node1", source_paths: ["artifacts/source.json"] }] };
     },
   };
   const context = {
@@ -375,6 +375,7 @@ test("learning draft editor save refreshes the parent before closing", async () 
     "source:artifacts/reviewed.json",
     "image_revision",
     "parent_refresh",
+    "snapshot",
     "replace:artifacts/source.json->artifacts/reviewed.json",
     "show:node1",
     "snapshot",
@@ -384,6 +385,28 @@ test("learning draft editor save refreshes the parent before closing", async () 
     "correction_memory",
     "response:true",
   ]);
+});
+
+test("learning draft editor saves standalone candidate without workflow binding", async () => {
+  const calls = [];
+  const { context, button } = loadSaveLearningDraftReview({
+    interfaceWorkflowReviewState: {
+      snapshot: () => ({ nodes: [{ node_id: "other", source_paths: ["artifacts/other.json"] }] }),
+      replaceReviewedNodeEvidenceBySource: () => {
+        calls.push("replace");
+        return { node: null };
+      },
+    },
+    closeImageInspector: () => calls.push("close"),
+    renderResponse: (response) => calls.push(`response:${response.success}`),
+  });
+
+  const result = await context.saveLearningDraftReview();
+
+  assert.equal(result.reviewed_template_candidate_path, "artifacts/reviewed.json");
+  assert.deepEqual(calls, ["close", "response:true"]);
+  assert.equal(button.disabled, false);
+  assert.equal(button.textContent, "Saved");
 });
 
 test("learning draft editor stays open and reports failure when parent refresh fails", async () => {
@@ -409,6 +432,7 @@ test("learning draft editor stays open when workflow evidence replacement fails"
   const calls = [];
   const { context, button } = loadSaveLearningDraftReview({
     interfaceWorkflowReviewState: {
+      snapshot: () => ({ nodes: [{ node_id: "node1", source_paths: ["artifacts/source.json"] }] }),
       replaceReviewedNodeEvidenceBySource: () => {
         calls.push("replace");
         return { node: null };
@@ -445,7 +469,7 @@ test("learning draft editor stays open when workflow save fails", async () => {
   assert.equal(button.textContent, "Save review");
 });
 
-test("learning draft editor fails closed when workflow state is missing", async () => {
+test("learning draft editor saves standalone candidate without current workflow", async () => {
   const calls = [];
   const { context, button } = loadSaveLearningDraftReview({
     interfaceWorkflowReviewState: null,
@@ -455,10 +479,10 @@ test("learning draft editor fails closed when workflow state is missing", async 
 
   const result = await context.saveLearningDraftReview();
 
-  assert.equal(result, null);
-  assert.deepEqual(calls, ["response:false"]);
+  assert.equal(result.reviewed_template_candidate_path, "artifacts/reviewed.json");
+  assert.deepEqual(calls, ["close", "response:true"]);
   assert.equal(button.disabled, false);
-  assert.equal(button.textContent, "Save review");
+  assert.equal(button.textContent, "Saved");
 });
 
 test("reviewed operational memory publish uses the current registry revision", async () => {
@@ -468,13 +492,14 @@ test("reviewed operational memory publish uses the current registry revision", a
   const calls = [];
   const elements = {
     learningMemoryInterfaceId: { value: "python_org_documentation" },
+    learningMemoryReviewedCandidatePath: { value: "artifacts/reviewed.json" },
     learningMemoryStatus: { textContent: "" },
     learningDraftReviewStatusSelect: { value: "approved_as_assisted_template" },
   };
   const context = {
     console,
     $: (id) => elements[id] || null,
-    learningDraftReviewSourcePath: () => "artifacts/reviewed.json",
+    learningOperationalMemoryReviewedCandidatePath: () => elements.learningMemoryReviewedCandidatePath.value,
     api: async (method, path, payload = null) => {
       calls.push({ method, path, payload });
       if (method === "GET") {

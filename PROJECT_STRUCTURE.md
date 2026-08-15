@@ -1040,9 +1040,9 @@ Current shape:
 Current reality:
 
 - local and API provider entries exist
-- local understanding defaults target `Qwen3-VL 4B Q4_K_M` through `http://127.0.0.1:1241/v1/chat/completions`
-- local grounding defaults target `VISTA-4B Transformers` through `http://127.0.0.1:1244/v1/chat/completions`
-- `Qwen3-VL 8B Q4_K_M` is installed as an optional understanding baseline on port `1240`
+- local understanding defaults target `Qwen3-VL 4B Q4_K_M` through `http://127.0.0.1:13241/v1/chat/completions`
+- local grounding defaults target `VISTA-4B Transformers` through `http://127.0.0.1:13244/v1/chat/completions`
+- `Qwen3-VL 8B Q4_K_M` is installed as an optional understanding baseline on port `13240`
 - `MiniCPM-V-4.6 Transformers` is benchmark-only until a compatible OpenAI-compatible server path is added
 - local default provider timeout is conservative, but current execution performance work should prefer preprocessing, PathGraph/ROI recall, and model-specific max-edge controls over simply raising timeouts
 - full-page stability is now improved in provider code through inference scaling plus compact retry fallback

@@ -480,7 +480,7 @@ def test_learning_model_trial_profile_id_selects_model_endpoint() -> None:
         }
     )
 
-    assert provider.endpoint == "http://127.0.0.1:1241/v1/chat/completions"
+    assert provider.endpoint == "http://127.0.0.1:13241/v1/chat/completions"
     assert provider.model_name == "Qwen3VL-4B-Instruct-Q4_K_M.gguf"
     assert provider.timeout_seconds == 7.0
 

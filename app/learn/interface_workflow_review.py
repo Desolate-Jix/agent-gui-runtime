@@ -345,6 +345,26 @@ def save_interface_workflow_review_candidate(
         item["artifact_is_authorization"] = False
         item["execute_binding_enabled"] = False
     _validate_workflow_structure(workflow=workflow, nodes=nodes, edges=edges)
+    root = Path(project_root).resolve()
+    destination_root = (
+        _resolve_review_output_dir(root, out_dir)
+        if out_dir is not None
+        else root / "artifacts" / "interface-workflow-reviews"
+    )
+    safe_workflow_id = "".join(
+        character if character.isalnum() or character in "_.-" else "_"
+        for character in workflow_id
+    ).strip("._")
+    if not safe_workflow_id:
+        raise ValueError("workflow.workflow_id does not contain a safe file name")
+    destination = destination_root / safe_workflow_id / "reviewed_workflow.json"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    # 先固化证据路径，再计算确认修订，确保服务器持久化后的规范修订一致。
+    _materialize_durable_node_evidence(
+        nodes,
+        workflow_dir=destination.parent,
+        project_root=root,
+    )
     confirmed_node_revisions: dict[str, dict[str, Any]] = {}
     for node in nodes:
         status = str(node.get("review_status") or "needs_human_review").strip()
@@ -384,31 +404,12 @@ def save_interface_workflow_review_candidate(
         }
     )
 
-    root = Path(project_root).resolve()
-    destination_root = (
-        _resolve_review_output_dir(root, out_dir)
-        if out_dir is not None
-        else root / "artifacts" / "interface-workflow-reviews"
-    )
-    safe_workflow_id = "".join(
-        character if character.isalnum() or character in "_.-" else "_"
-        for character in workflow_id
-    ).strip("._")
-    if not safe_workflow_id:
-        raise ValueError("workflow.workflow_id does not contain a safe file name")
     application_identity = normalize_application_identity(
         workflow.get("application_identity")
         if isinstance(workflow.get("application_identity"), dict)
         else {}
     )
     workflow["application_identity"] = application_identity
-    destination = destination_root / safe_workflow_id / "reviewed_workflow.json"
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    _materialize_durable_node_evidence(
-        nodes,
-        workflow_dir=destination.parent,
-        project_root=root,
-    )
     _materialize_editable_node_review_sources(
         nodes,
         workflow_id=workflow_id,

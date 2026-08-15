@@ -92,7 +92,7 @@ def test_materialization_accepts_smoke_verified_launchable_profile(tmp_path: Pat
         {
             "download_status": "available_local_smoke_verified",
             "launchable": True,
-            "endpoint": "http://127.0.0.1:1245/v1/chat/completions",
+            "endpoint": "http://127.0.0.1:13245/v1/chat/completions",
         }
     )
     profile_path.write_text(json.dumps(profile, ensure_ascii=False), encoding="utf-8")

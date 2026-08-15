@@ -116,7 +116,7 @@ def test_provider_calls_model_with_semantic_context_only(monkeypatch) -> None:
         fake_urlopen,
     )
     provider = OpenAICompatibleNavigationDecisionProvider(
-        endpoint="http://127.0.0.1:1240/v1/chat/completions",
+        endpoint="http://127.0.0.1:13240/v1/chat/completions",
         model_name="Qwen3VL-8B-Instruct-Q4_K_M.gguf",
         timeout_seconds=12,
     )
@@ -171,7 +171,7 @@ def test_provider_rejects_choice_outside_current_context(monkeypatch) -> None:
         ),
     )
     provider = OpenAICompatibleNavigationDecisionProvider(
-        endpoint="http://127.0.0.1:1240/v1/chat/completions",
+        endpoint="http://127.0.0.1:13240/v1/chat/completions",
         model_name="test-model",
     )
 
@@ -194,7 +194,7 @@ def test_provider_surfaces_endpoint_failure_without_retrying_as_success(
         fail_urlopen,
     )
     provider = OpenAICompatibleNavigationDecisionProvider(
-        endpoint="http://127.0.0.1:1240/v1/chat/completions",
+        endpoint="http://127.0.0.1:13240/v1/chat/completions",
         model_name="test-model",
     )
 
@@ -217,7 +217,7 @@ def test_provider_surfaces_timeout_without_retrying_as_success(monkeypatch) -> N
         timeout_urlopen,
     )
     provider = OpenAICompatibleNavigationDecisionProvider(
-        endpoint="http://127.0.0.1:1240/v1/chat/completions",
+        endpoint="http://127.0.0.1:13240/v1/chat/completions",
         model_name="test-model",
         timeout_seconds=0.1,
     )

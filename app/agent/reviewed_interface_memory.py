@@ -14,6 +14,7 @@ from typing import Any
 from PIL import Image
 
 from app.agent.form_answer_policy_memory import FormAnswerPolicyMemoryStore
+from app.learn.interface_assets import _merge_by_identifier, _project_human_described_regions
 
 
 MEMORY_CONTRACT = "reviewed_interface_memory_v1"
@@ -37,10 +38,15 @@ def validate_current_surface_text_anchors(
     ]
     normalized_observed = [_normalize_surface_text(value) for value in observed_texts]
     combined_observed = " ".join(value for value in normalized_observed if value)
+    allow_short_token_confusion = _allow_short_token_confusion(seed)
     matched_anchors = [
         anchor
         for anchor in required_anchors
-        if _surface_anchor_matches(_normalize_surface_text(anchor), combined_observed)
+        if _surface_anchor_matches(
+            _normalize_surface_text(anchor),
+            combined_observed,
+            allow_short_token_confusion=allow_short_token_confusion,
+        )
     ]
     if not required_anchors:
         return {
@@ -74,6 +80,7 @@ def validate_current_target_text_anchor(
         if str(value).strip()
     ]
     point = _point_coordinates(selected_point)
+    allow_short_token_confusion = _allow_short_token_confusion(seed)
     matched_without_bbox = 0
     evidence: list[dict[str, Any]] = []
     ocr_lines: list[dict[str, Any]] = []
@@ -85,7 +92,11 @@ def validate_current_target_text_anchor(
             continue
         bbox = _match_bbox(match)
         if bbox is None:
-            if _matching_local_anchor(required_anchors, text):
+            if _matching_local_anchor(
+                required_anchors,
+                text,
+                allow_short_token_confusion=allow_short_token_confusion,
+            ):
                 matched_without_bbox += 1
             continue
         ocr_lines.append({"text": text, "score": score, "bbox": bbox})
@@ -99,7 +110,11 @@ def validate_current_target_text_anchor(
     seed_bbox = _seed_bbox(seed)
     reference_bbox_is_prior_only = locator_evidence.get("reference_bbox_is_prior_only") is True
     for candidate in evidence_candidates:
-        matched_anchor = _matching_local_anchor(required_anchors, candidate["text"])
+        matched_anchor = _matching_local_anchor(
+            required_anchors,
+            candidate["text"],
+            allow_short_token_confusion=allow_short_token_confusion,
+        )
         if not matched_anchor:
             continue
         bbox = candidate["bbox"]
@@ -142,7 +157,7 @@ def validate_current_target_text_anchor(
         or (
             reference_bbox_is_prior_only
             and item["distance_to_selected_point"] is not None
-            and item["distance_to_selected_point"] <= 4.0
+            and item["distance_to_selected_point"] <= max_local_distance
         )
     ]
     nearest_distance = min(
@@ -206,13 +221,22 @@ def _match_bbox(match: Any) -> dict[str, int] | None:
     return bbox
 
 
-def _matching_local_anchor(required_anchors: list[str], observed_text: str) -> str | None:
+def _matching_local_anchor(
+    required_anchors: list[str],
+    observed_text: str,
+    *,
+    allow_short_token_confusion: bool = True,
+) -> str | None:
     normalized_observed = _normalize_surface_text(observed_text)
     return next(
         (
             anchor
             for anchor in required_anchors
-            if _local_surface_anchor_matches(_normalize_surface_text(anchor), normalized_observed)
+            if _local_surface_anchor_matches(
+                _normalize_surface_text(anchor),
+                normalized_observed,
+                allow_short_token_confusion=allow_short_token_confusion,
+            )
         ),
         None,
     )
@@ -312,19 +336,98 @@ def _normalize_surface_text(value: Any) -> str:
     return " ".join(re.sub(r"[^\w]+", " ", normalized, flags=re.UNICODE).split())
 
 
-def _surface_anchor_matches(anchor: str, observed: str) -> bool:
+def _surface_anchor_matches(
+    anchor: str,
+    observed: str,
+    *,
+    allow_short_token_confusion: bool = True,
+) -> bool:
     if not anchor or not observed:
         return False
     if anchor in observed:
+        # 短锚点必须是独立词，避免把 AI 误匹配到 TAIL 等更长单词中。
+        if " " in anchor or len(anchor) >= 3:
+            return True
+        return re.search(rf"(?<!\w){re.escape(anchor)}(?!\w)", observed) is not None
+    # 长标题的 OCR 偶尔会吞掉词间空格；仅对高熵、多词锚点启用连续文本匹配。
+    if _matches_collapsed_spacing_long_anchor(anchor, observed):
         return True
     tokens = [token for token in anchor.split() if len(token) >= 2]
-    return len(tokens) >= 2 and all(re.search(rf"(?<!\w){re.escape(token)}(?!\w)", observed) for token in tokens)
+    if len(tokens) >= 2 and all(re.search(rf"(?<!\w){re.escape(token)}(?!\w)", observed) for token in tokens):
+        return True
+    return allow_short_token_confusion and _matches_ai_to_al_ocr_confusion(anchor, observed)
 
 
-def _local_surface_anchor_matches(anchor: str, observed: str) -> bool:
+def _local_surface_anchor_matches(
+    anchor: str,
+    observed: str,
+    *,
+    allow_short_token_confusion: bool = True,
+) -> bool:
     if not anchor or not observed:
         return False
-    return anchor in observed
+    return (
+        (
+            anchor in observed
+            and (" " in anchor or len(anchor) >= 3 or re.search(rf"(?<!\w){re.escape(anchor)}(?!\w)", observed))
+        )
+        or _matches_collapsed_spacing_long_anchor(anchor, observed)
+        or (allow_short_token_confusion and _matches_ai_to_al_ocr_confusion(anchor, observed))
+    )
+
+
+def _matches_collapsed_spacing_long_anchor(anchor: str, observed: str) -> bool:
+    anchor_tokens = [token for token in anchor.split() if token]
+    anchor_alphanumeric_length = len(re.sub(r"[^a-z0-9]", "", anchor.casefold()))
+    if len(anchor_tokens) < 3 or anchor_alphanumeric_length < 20:
+        return False
+    return re.sub(r"\s+", "", anchor) in re.sub(r"\s+", "", observed)
+
+
+def _allow_short_token_confusion(seed: dict[str, Any]) -> bool:
+    risk_class = str(seed.get("risk_class") or "").casefold().strip()
+    if risk_class in {"blocked_high_risk", "high_risk", "dangerous"}:
+        return False
+    semantic_action = _normalize_surface_text(
+        seed.get("expected_effect")
+        or seed.get("semantic_action")
+        or seed.get("action_type")
+        or ""
+    ).replace(" ", "_")
+    dangerous_actions = {
+        "final_submit",
+        "send_message",
+        "send_application",
+        "submit_application",
+        "complete_application",
+        "confirm_application",
+        "confirm_order",
+        "payment",
+        "purchase",
+        "delete",
+    }
+    return semantic_action not in dangerous_actions
+
+
+def _matches_ai_to_al_ocr_confusion(anchor: str, observed: str) -> bool:
+    """仅在完整锚点上下文中容许 OCR 将独立 AI 误读为 Al。"""
+    anchor_tokens = anchor.split()
+    observed_tokens = observed.split()
+    ai_indexes = [index for index, token in enumerate(anchor_tokens) if token == "ai"]
+    if len(anchor_tokens) < 3 or len(ai_indexes) != 1 or len(observed_tokens) < len(anchor_tokens):
+        return False
+    ai_index = ai_indexes[0]
+    for start in range(len(observed_tokens) - len(anchor_tokens) + 1):
+        window = observed_tokens[start : start + len(anchor_tokens)]
+        if window[ai_index] != "al":
+            continue
+        if all(
+            observed_token == anchor_token
+            for index, (anchor_token, observed_token) in enumerate(zip(anchor_tokens, window))
+            if index != ai_index
+        ):
+            return True
+    return False
 
 
 def _semantic_tokens(value: Any) -> set[str]:
@@ -455,12 +558,26 @@ class ReviewedInterfaceMemoryStore:
 
     def agent_context(self, interface_id: str) -> dict[str, Any]:
         memory = self.load_active(interface_id)
+        actions = _dict_items(memory.get("actions"))
+        has_human_region_projection = any(
+            str(action.get("source_action_template_id") or "").startswith("region_action_")
+            for action in actions
+        )
+        available_actions = [
+            action
+            for action in actions
+            if action.get("automatic_execution_allowed") is True
+            and (
+                not has_human_region_projection
+                or str(action.get("source_action_template_id") or "").startswith("region_action_")
+            )
+        ]
         return {
             "contract_version": "agent_operational_memory_context_v1",
             "interface_id": memory["interface_id"],
             "states": deepcopy(memory.get("states") or []),
             "elements": deepcopy(memory.get("elements") or []),
-            "available_actions": deepcopy(memory.get("actions") or []),
+            "available_actions": deepcopy(available_actions),
             "verification_rules": deepcopy(memory.get("verification_rules") or []),
             "blockers": deepcopy(memory.get("blockers") or []),
             "execution_contract": {
@@ -687,6 +804,9 @@ class ReviewedInterfaceMemoryStore:
             "y": int(round(bbox["y"] + bbox["h"] / 2)),
         }
         capture_sha256 = hashlib.sha256(capture_path.read_bytes()).hexdigest()
+        reviewed_candidate_sha256 = str(
+            (memory.get("source") or {}).get("reviewed_candidate_sha256") or "unknown"
+        ).strip()
         semantic_action = str(action.get("semantic_action") or "click")
         role = str(element.get("role") or "button")
         return {
@@ -702,6 +822,7 @@ class ReviewedInterfaceMemoryStore:
             "score": 0.82,
             "risk_class": "safe_click_allowed",
             "expected_effect": semantic_action,
+            "destination_url": action.get("destination_url"),
             "require_current_grounding": True,
             "historical_click_point_reused": False,
             "locator_evidence": {
@@ -711,10 +832,10 @@ class ReviewedInterfaceMemoryStore:
             },
             "candidate_freshness": {
                 "contract_version": "action_candidate_freshness_v1",
-                "capture_id": str(capture_path),
+                "capture_id": f"reviewed_candidate:{reviewed_candidate_sha256}",
                 "viewport_size": viewport,
-                "source": MEMORY_CONTRACT,
-                "freshness": "current_capture",
+                "source": "reviewed_interface_memory_reference_bbox_v1",
+                "freshness": "historical_reference",
             },
             "current_capture": {
                 "screenshot_path": str(capture_path),
@@ -749,21 +870,38 @@ class ReviewedInterfaceMemoryStore:
             raise ValueError("reviewed candidate screenshot checksum mismatch")
         viewport = _reference_viewport(screen)
 
+        regions = _dict_items(draft.get("regions"))
         elements = [
             _compile_element(interface_id=interface_id, region=region, viewport=viewport)
-            for region in _dict_items(draft.get("regions"))
+            for region in regions
         ]
         element_ids_by_source = {
             item["source_region_id"]: item["element_id"]
             for item in elements
         }
+        projected = _project_human_described_regions(
+            regions,
+            globally_reviewed=(
+                candidate.get("reviewed_by_human") is True
+                and str(candidate.get("review_status") or "").strip()
+                in {"approved", "approved_as_assisted_template", "human_reviewed"}
+            ),
+        )
+        action_templates = _merge_by_identifier(
+            _dict_items(draft.get("action_templates")),
+            [
+                *projected["action_candidates"],
+                *_project_blocked_external_apply_region_actions(regions),
+            ],
+            keys=("action_template_id", "action_id"),
+        )
         actions = [
             _compile_action(
                 interface_id=interface_id,
                 action=action,
                 element_ids_by_source=element_ids_by_source,
             )
-            for action in _dict_items(draft.get("action_templates"))
+            for action in action_templates
         ]
         states = [
             _compile_state(interface_id=interface_id, state=state)
@@ -932,6 +1070,7 @@ def _compile_action(
         or "unknown"
     ).strip()
     danger_class = _danger_class(semantic_action, str(action.get("label") or source_action_id))
+    destination = action.get("destination") if isinstance(action.get("destination"), dict) else {}
     return {
         "action_id": f"{interface_id}::action::{source_action_id}",
         "source_action_template_id": source_action_id,
@@ -942,7 +1081,49 @@ def _compile_action(
         "requires_current_resolution": True,
         "requires_gate": True,
         "automatic_execution_allowed": danger_class == "low_risk",
+        "destination_url": destination.get("url") or action.get("destination_url") or action.get("expected_destination_url"),
     }
+
+
+def _project_blocked_external_apply_region_actions(
+    regions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    actions: list[dict[str, Any]] = []
+    for region in regions:
+        region_id = str(region.get("region_id") or "").strip()
+        label = str(region.get("label") or region.get("name") or "").strip()
+        description = str(
+            region.get("agent_description") or region.get("description") or ""
+        ).strip()
+        semantic_action = str(
+            region.get("action_type") or region.get("semantic_action") or ""
+        ).casefold().strip()
+        review_status = str(region.get("review_status") or "").casefold().strip()
+        human_reviewed = isinstance(region.get("human_review"), dict) or review_status in {
+            "approved",
+            "human_confirmed",
+            "human_reviewed",
+            "reviewed",
+        }
+        if (
+            semantic_action != "open_external_apply"
+            or not region_id
+            or not label
+            or not description
+            or not human_reviewed
+        ):
+            continue
+        actions.append(
+            {
+                "action_template_id": f"region_action_{region_id}",
+                "label": label,
+                "semantic_action": semantic_action,
+                "target_region_id": region_id,
+                "risk_level": str(region.get("risk_level") or "dangerous").strip(),
+                "review_status": "human_reviewed",
+            }
+        )
+    return actions
 
 
 def _compile_state(*, interface_id: str, state: dict[str, Any]) -> dict[str, Any]:
@@ -963,6 +1144,7 @@ def _danger_class(semantic_action: str, label: str) -> str:
     if semantic == "submit_search":
         return "low_risk"
     dangerous_semantics = {
+        "open_external_apply",
         "final_submit",
         "send_message",
         "send_application",

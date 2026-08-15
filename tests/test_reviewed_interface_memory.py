@@ -89,6 +89,42 @@ def _write_reviewed_candidate(root: Path) -> Path:
     return path
 
 
+def _write_external_apply_region_candidate(root: Path) -> Path:
+    source_path = _write_reviewed_candidate(root)
+    candidate = json.loads(source_path.read_text(encoding="utf-8"))
+    external_region = candidate["draft"]["regions"][1]
+    external_region.update(
+        {
+            "region_id": "external_apply",
+            "label": "Apply on company site",
+            "description": "Leaves the current site to open the employer application.",
+            "semantic_action": "open_external_apply",
+            "action_type": "open_external_apply",
+            "risk_level": "dangerous",
+            "human_review": {"status": "approved"},
+        }
+    )
+    candidate["draft"]["action_templates"] = [
+        {
+            "action_template_id": "review_external_apply",
+            "label": "Apply on company site",
+            "semantic_action": "read_only",
+            "target_region_id": "external_apply",
+        },
+        {
+            "action_template_id": "stale_fill_field",
+            "label": "Display-only email field",
+            "semantic_action": "fill_field",
+            "target_region_id": "search_input",
+        },
+    ]
+    source_path.write_text(
+        json.dumps(candidate, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return source_path
+
+
 def test_publish_reviewed_candidate_creates_restart_loadable_agent_memory(tmp_path: Path) -> None:
     from app.agent.reviewed_interface_memory import ReviewedInterfaceMemoryStore
 
@@ -131,6 +167,147 @@ def test_publish_reviewed_candidate_accepts_full_screen_bbox_as_reference_viewpo
 
     loaded = store.load_active("sample_search")
     assert loaded["source"]["reference_viewport"] == {"width": 800, "height": 600}
+
+
+def test_publish_projects_safe_human_reviewed_region_actions_only(tmp_path: Path) -> None:
+    from app.agent.reviewed_interface_memory import ReviewedInterfaceMemoryStore
+
+    source_path = _write_reviewed_candidate(tmp_path)
+    candidate = json.loads(source_path.read_text(encoding="utf-8"))
+    candidate["draft"]["action_templates"] = []
+    job_region = candidate["draft"]["regions"][1]
+    job_region.update(
+        {
+            "label": "Graduate job card",
+            "description": "Open this in-site job detail only.",
+            "semantic_action": "open_detail",
+            "human_review": {"status": "approved"},
+        }
+    )
+    candidate["draft"]["regions"].append(
+        {
+            "region_id": "final_submit",
+            "label": "Submit application",
+            "description": "Submit the completed application.",
+            "role": "button",
+            "bbox": {"x": 430, "y": 500, "w": 180, "h": 42},
+            "semantic_action": "final_submit",
+            "human_review": {"status": "approved"},
+        }
+    )
+    source_path.write_text(
+        json.dumps(candidate, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    store = ReviewedInterfaceMemoryStore(project_root=tmp_path)
+    store.publish(
+        source_path=source_path,
+        interface_id="seek_home",
+        expected_registry_revision=0,
+    )
+
+    memory = store.load_active("seek_home")
+    assert [action["source_action_template_id"] for action in memory["actions"]] == [
+        "region_action_search_button"
+    ]
+    action = memory["actions"][0]
+    assert action["semantic_action"] == "open_detail"
+    assert action["danger_class"] == "low_risk"
+    assert action["automatic_execution_allowed"] is True
+    assert action["target_element_id"] == "seek_home::element::search_button"
+
+
+def test_publish_projects_globally_approved_manual_open_apply_region_with_destination(
+    tmp_path: Path,
+) -> None:
+    from app.agent.reviewed_interface_memory import ReviewedInterfaceMemoryStore
+
+    source_path = _write_reviewed_candidate(tmp_path)
+    candidate = json.loads(source_path.read_text(encoding="utf-8"))
+    candidate["draft"]["action_templates"] = []
+    candidate["draft"]["regions"] = [
+        {
+            "region_id": "manual_region_33",
+            "label": "Quick apply",
+            "role": "button",
+            "bbox": {"x": 71, "y": 1173, "w": 143, "h": 47},
+            "description": (
+                "Opens the SEEK-hosted application flow for job 93615952 and stops before any form fill."
+            ),
+            "semantic_action": "open_apply_flow",
+            "action_type": "open_apply_flow",
+            "verification_rule": (
+                "After click, active URL origin remains https://nz.seek.com, no new tab opens, "
+                "and the application flow is visible. Stop before fill, upload, Continue, or final submit."
+            ),
+            "risk_level": "normal",
+            "requires_human_review": True,
+            "destination": {
+                "kind": "url",
+                "url": "https://nz.seek.com/job/93615952/apply?sol=demo",
+            },
+            "real_action_requires_gate": True,
+        }
+    ]
+    source_path.write_text(
+        json.dumps(candidate, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    store = ReviewedInterfaceMemoryStore(project_root=tmp_path)
+    store.publish(
+        source_path=source_path,
+        interface_id="seek_job_93615952_quick_apply_detail",
+        expected_registry_revision=0,
+    )
+
+    memory = store.load_active("seek_job_93615952_quick_apply_detail")
+    action = next(
+        action
+        for action in memory["actions"]
+        if action["source_action_template_id"] == "region_action_manual_region_33"
+    )
+    assert action["semantic_action"] == "open_apply_flow"
+    assert action["destination_url"] == "https://nz.seek.com/job/93615952/apply?sol=demo"
+    assert action["danger_class"] == "low_risk"
+    assert action["automatic_execution_allowed"] is True
+    context = store.agent_context("seek_job_93615952_quick_apply_detail")
+    assert [item["action_id"] for item in context["available_actions"]] == [
+        action["action_id"]
+    ]
+
+
+def test_publish_projects_external_apply_region_as_explicit_blocked_action(tmp_path: Path) -> None:
+    from app.agent.reviewed_interface_memory import ReviewedInterfaceMemoryStore
+
+    source_path = _write_external_apply_region_candidate(tmp_path)
+    store = ReviewedInterfaceMemoryStore(project_root=tmp_path)
+
+    store.publish(source_path=source_path, interface_id="seek_detail", expected_registry_revision=0)
+
+    memory = store.load_active("seek_detail")
+    projected = next(
+        action
+        for action in memory["actions"]
+        if action["source_action_template_id"] == "region_action_external_apply"
+    )
+    assert projected["semantic_action"] == "open_external_apply"
+    assert projected["danger_class"] == "blocked_high_risk"
+    assert projected["automatic_execution_allowed"] is False
+    assert projected["target_element_id"] == "seek_detail::element::external_apply"
+
+
+def test_agent_context_excludes_projected_external_apply_action(tmp_path: Path) -> None:
+    from app.agent.reviewed_interface_memory import ReviewedInterfaceMemoryStore
+
+    source_path = _write_external_apply_region_candidate(tmp_path)
+    store = ReviewedInterfaceMemoryStore(project_root=tmp_path)
+    store.publish(source_path=source_path, interface_id="seek_detail", expected_registry_revision=0)
+
+    context = store.agent_context("seek_detail")
+
+    assert context["available_actions"] == []
 
 
 def test_agent_resolves_natural_language_goal_to_unique_low_risk_memory_action(tmp_path: Path) -> None:
@@ -400,6 +577,38 @@ def test_memory_action_seed_uses_current_capture_roi_and_forbids_historical_poin
     assert seed["risk_class"] == "safe_click_allowed"
 
 
+def test_open_apply_flow_seed_preserves_reviewed_destination_for_navigation_guard(
+    tmp_path: Path,
+) -> None:
+    from app.agent.reviewed_interface_memory import ReviewedInterfaceMemoryStore
+
+    source_path = _write_reviewed_candidate(tmp_path)
+    payload = json.loads(source_path.read_text(encoding="utf-8"))
+    payload["draft"]["action_templates"].append(
+        {
+            "action_template_id": "open_apply_flow",
+            "label": "Apply",
+            "semantic_action": "open_apply_flow",
+            "target_region_id": "search_button",
+            "destination": {"kind": "url", "url": "https://nz.seek.com/job/1/apply"},
+        }
+    )
+    source_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    store = ReviewedInterfaceMemoryStore(project_root=tmp_path)
+    store.publish(source_path=source_path, interface_id="seek_detail", expected_registry_revision=0)
+
+    seed = store.build_current_capture_action_seed(
+        interface_id="seek_detail",
+        action_id="seek_detail::action::open_apply_flow",
+        image_path=tmp_path / "artifacts" / "screenshots" / "sample.png",
+    )
+
+    assert seed["destination_url"] == "https://nz.seek.com/job/1/apply"
+
+
 def test_memory_action_seed_rejects_high_risk_action_before_model_or_gate(
     tmp_path: Path,
 ) -> None:
@@ -425,6 +634,35 @@ def test_memory_action_seed_rejects_high_risk_action_before_model_or_gate(
             action_id="sample_search::action::final_submit",
             image_path=tmp_path / "artifacts" / "screenshots" / "sample.png",
         )
+
+
+def test_publish_blocks_external_apply_flow_from_automatic_execution(tmp_path: Path) -> None:
+    from app.agent.reviewed_interface_memory import ReviewedInterfaceMemoryStore
+
+    source_path = _write_reviewed_candidate(tmp_path)
+    payload = json.loads(source_path.read_text(encoding="utf-8"))
+    payload["draft"]["action_templates"].append(
+        {
+            "action_template_id": "open_external_application",
+            "label": "Apply on company site",
+            "semantic_action": "open_external_apply",
+            "target_region_id": "search_button",
+        }
+    )
+    source_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    store = ReviewedInterfaceMemoryStore(project_root=tmp_path)
+
+    store.publish(source_path=source_path, interface_id="sample_search", expected_registry_revision=0)
+
+    memory = store.load_active("sample_search")
+    action = next(
+        item
+        for item in memory["actions"]
+        if item["source_action_template_id"] == "open_external_application"
+    )
+    assert action["semantic_action"] == "open_external_apply"
+    assert action["danger_class"] == "blocked_high_risk"
+    assert action["automatic_execution_allowed"] is False
 
 
 @pytest.mark.parametrize(

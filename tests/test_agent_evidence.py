@@ -554,6 +554,36 @@ def test_workflow_agent_evidence_preserves_groundable_operation_goal() -> None:
     assert "bbox" not in serialized
 
 
+def test_workflow_projects_human_reviewed_region_action() -> None:
+    review = {
+        "contract_version": "single_application_workflow_review_v1",
+        "workflow": {"application_identity": {"identity_key": "web:seek"}},
+        "nodes": [{
+            "node_id": "home",
+            "display_name": "Seek home",
+            "agent_description": "Job cards",
+            "review_status": "human_approved",
+            "reviewed_by_human": True,
+            "content_descriptors": [{
+                "content_id": "jobs", "label": "Jobs",
+                "content_behavior": "fixed_label", "agent_usage": "identity_anchor",
+            }],
+            "regions": [{
+                "region_id": "review_region_review_box_37",
+                "label": "Job card",
+                "agent_description": "Open this job card detail",
+                "semantic_action": "open_detail",
+                "human_review": {"status": "approved"},
+            }],
+        }],
+        "edges": [],
+    }
+    evidence = build_workflow_agent_evidence(review)
+    actions = evidence["interfaces"][0]["available_actions"]
+    assert actions[0]["action_id"] == "region_action_review_region_review_box_37"
+    assert actions[0]["action_type"] == "open_detail"
+
+
 def test_legacy_regions_are_visible_but_never_promoted_to_actions() -> None:
     asset = _asset()
     asset["fixed_anchors"] = []

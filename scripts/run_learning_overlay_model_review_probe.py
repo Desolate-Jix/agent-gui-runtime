@@ -62,7 +62,7 @@ def run_probe(
     screenshot_path: Path | None = None,
     recorded_response_path: Path | None = None,
     adjudication_path: Path | None = None,
-    endpoint: str = "http://127.0.0.1:1240/v1/chat/completions",
+    endpoint: str = "http://127.0.0.1:13240/v1/chat/completions",
     model_name: str = "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
     timeout_seconds: float = 240.0,
 ) -> dict[str, Any]:
@@ -824,7 +824,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--recorded-response", type=Path)
     parser.add_argument("--adjudication", type=Path)
-    parser.add_argument("--endpoint", default="http://127.0.0.1:1240/v1/chat/completions")
+    parser.add_argument("--endpoint", default="http://127.0.0.1:13240/v1/chat/completions")
     parser.add_argument("--model-name", default="Qwen3VL-8B-Instruct-Q4_K_M.gguf")
     parser.add_argument("--timeout-seconds", type=float, default=240.0)
     parser.add_argument("--json", action="store_true")

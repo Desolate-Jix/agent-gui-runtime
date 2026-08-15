@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,6 +11,7 @@ from app.api.models.request import ExecuteRecognitionPlanRequest
 from app.api.models.response import APIResponse, VisionResultData
 from app.agent.reviewed_interface_memory import (
     ReviewedInterfaceMemoryStore,
+    validate_current_surface_text_anchors,
     validate_current_target_text_anchor,
 )
 from app.gate.candidates import validate_action_candidate_freshness
@@ -96,6 +98,176 @@ def _ocr_match(text: str, *, x: int, y: int, width: int, height: int, score: flo
         score=score,
         bbox=SimpleNamespace(x=x, y=y, width=width, height=height),
     )
+
+
+def test_surface_anchor_accepts_context_limited_ai_to_al_ocr_confusion_for_low_risk_action() -> None:
+    result = validate_current_surface_text_anchors(
+        seed={
+            "expected_effect": "open_detail",
+            "risk_class": "safe_click_allowed",
+            "locator_evidence": {"text_anchors": ["Graduate - Data & AI Engineer"]},
+        },
+        observed_texts=["Graduate - Data & Al Engineer"],
+    )
+
+    assert result["allowed"] is True
+    assert result["matched_text_anchors"] == ["Graduate - Data & AI Engineer"]
+
+
+def test_local_target_anchor_accepts_ai_to_al_without_relaxing_bbox_distance_checks() -> None:
+    result = validate_current_target_text_anchor(
+        seed={
+            "expected_effect": "open_detail",
+            "risk_class": "safe_click_allowed",
+            "role": "card",
+            "bbox": {"x": 100, "y": 100, "w": 400, "h": 180},
+            "locator_evidence": {"text_anchors": ["Graduate - Data & AI Engineer"]},
+        },
+        selected_point={"x": 300, "y": 200},
+        observed_matches=[
+            _ocr_match("Graduate - Data & Al Engineer", x=120, y=120, width=260, height=28),
+        ],
+    )
+
+    assert result["allowed"] is True
+    assert result["reason"] == "current_target_text_anchor_locally_matched"
+    assert result["matched_anchor_evidence"][0]["observed_text"] == "Graduate - Data & Al Engineer"
+    assert result["nearest_anchor_distance"] == 52.0
+
+
+def test_ai_to_al_ocr_confusion_requires_two_strict_stable_tokens() -> None:
+    result = validate_current_surface_text_anchors(
+        seed={
+            "expected_effect": "open_detail",
+            "risk_class": "safe_click_allowed",
+            "locator_evidence": {"text_anchors": ["AI Engineer"]},
+        },
+        observed_texts=["Al Engineer"],
+    )
+
+    assert result["allowed"] is False
+    assert result["matched_text_anchors"] == []
+
+
+def test_ai_to_al_ocr_confusion_does_not_apply_to_final_submit() -> None:
+    result = validate_current_surface_text_anchors(
+        seed={
+            "expected_effect": "final_submit",
+            "risk_class": "safe_click_allowed",
+            "locator_evidence": {"text_anchors": ["Graduate - Data & AI Engineer"]},
+        },
+        observed_texts=["Graduate - Data & Al Engineer"],
+    )
+
+    assert result["allowed"] is False
+    assert result["matched_text_anchors"] == []
+
+
+def test_ocr_short_token_confusion_does_not_globally_replace_i_or_l() -> None:
+    result = validate_current_surface_text_anchors(
+        seed={
+            "expected_effect": "open_detail",
+            "risk_class": "safe_click_allowed",
+            "locator_evidence": {"text_anchors": ["Senior Test Engineer"]},
+        },
+        observed_texts=["Senior Test Engilneer"],
+    )
+
+    assert result["allowed"] is False
+    assert result["matched_text_anchors"] == []
+
+
+def test_surface_anchor_accepts_collapsed_spacing_for_long_multi_token_title() -> None:
+    result = validate_current_surface_text_anchors(
+        seed={
+            "expected_effect": "open_detail",
+            "risk_class": "safe_click_allowed",
+            "locator_evidence": {
+                "text_anchors": ["SOFTWARE ENGINEER SUMMER INTERNSHIP/GRADUATE"]
+            },
+        },
+        observed_texts=["SOFTWAREENGINEERSUMMERINTERNSHIP/GRADUATE"],
+    )
+
+    assert result["allowed"] is True
+    assert result["matched_text_anchors"] == ["SOFTWARE ENGINEER SUMMER INTERNSHIP/GRADUATE"]
+
+
+def test_local_target_anchor_accepts_collapsed_spacing_for_long_title_with_bbox() -> None:
+    title = "SOFTWARE ENGINEER SUMMER INTERNSHIP/GRADUATE"
+    result = validate_current_target_text_anchor(
+        seed={
+            "expected_effect": "open_detail",
+            "risk_class": "safe_click_allowed",
+            "role": "tile_card",
+            "bbox": {"x": 54, "y": 744, "w": 768, "h": 259},
+            "locator_evidence": {"text_anchors": [title]},
+        },
+        selected_point={"x": 175, "y": 751},
+        observed_matches=[
+            _ocr_match(
+                "SOFTWAREENGINEERSUMMERINTERNSHIP/GRADUATE",
+                x=78,
+                y=765,
+                width=550,
+                height=21,
+            ),
+        ],
+    )
+
+    assert result["allowed"] is True
+    assert result["reason"] == "current_target_text_anchor_locally_matched"
+
+
+def test_local_target_uses_fresh_point_near_fresh_ocr_when_reference_bbox_is_prior_only() -> None:
+    title = "SOFTWARE ENGINEER SUMMER INTERNSHIP/GRADUATE"
+    result = validate_current_target_text_anchor(
+        seed={
+            "expected_effect": "open_detail",
+            "risk_class": "safe_click_allowed",
+            "role": "tile_card",
+            "bbox": {"x": 58, "y": 849, "w": 249, "h": 80},
+            "locator_evidence": {
+                "text_anchors": [title],
+                "reference_bbox_is_prior_only": True,
+            },
+        },
+        selected_point={"x": 196, "y": 753},
+        observed_matches=[
+            _ocr_match(
+                "SOFTWAREENGINEERSUMMERINTERNSHIP/GRADUATE",
+                x=78,
+                y=765,
+                width=550,
+                height=21,
+            ),
+        ],
+    )
+
+    assert result["allowed"] is True
+    assert result["nearest_anchor_distance"] == 12.0
+
+
+def test_surface_anchor_does_not_collapse_short_tokens_or_arbitrary_substrings() -> None:
+    for anchor, observed in (("AI", "TAIL"), ("Apply now", "Applynow")):
+        result = validate_current_surface_text_anchors(
+            seed={"locator_evidence": {"text_anchors": [anchor]}},
+            observed_texts=[observed],
+        )
+        assert result["allowed"] is False
+        assert result["matched_text_anchors"] == []
+
+
+def test_local_target_anchor_does_not_match_short_token_inside_unrelated_word() -> None:
+    result = validate_current_target_text_anchor(
+        seed={"locator_evidence": {"text_anchors": ["AI"]}},
+        selected_point={"x": 100, "y": 100},
+        observed_matches=[_ocr_match("TAIL", x=90, y=90, width=60, height=20)],
+    )
+
+    assert result["allowed"] is False
+    assert result["reason"] == "current_target_text_anchor_missing"
+    assert result["matched_anchor_evidence"] == []
 
 
 def test_local_target_anchor_accepts_current_ocr_evidence_near_selected_point() -> None:
@@ -298,17 +470,22 @@ def test_execute_route_injects_operational_memory_only_after_current_live_captur
     assert metadata["seeded_candidate_v1"]["current_capture"]["screenshot_path"] == str(current_capture.resolve())
     assert metadata["seeded_candidate_v1"]["candidate_freshness"] == {
         "contract_version": "action_candidate_freshness_v1",
-        "capture_id": str(current_capture.resolve()),
+        "capture_id": metadata["seeded_candidate_v1"]["candidate_freshness"]["capture_id"],
         "viewport_size": {"width": 1600, "height": 900},
-        "source": "reviewed_interface_memory_v1",
-        "freshness": "current_capture",
+        "source": "reviewed_interface_memory_reference_bbox_v1",
+        "freshness": "historical_reference",
     }
+    assert metadata["seeded_candidate_v1"]["candidate_freshness"]["capture_id"].startswith("reviewed_candidate:")
     assert validate_action_candidate_freshness(
         metadata["seeded_candidate_v1"],
         current_capture_id=str(current_capture.resolve()),
         current_viewport_size={"width": 1600, "height": 900},
-    )["allowed"] is True
+    )["allowed"] is False
     assert metadata["seeded_candidate_v1"]["require_current_grounding"] is True
+    assert metadata["operational_memory_fast_grounding"] == {
+        "enabled": True,
+        "mode": "current_uia_unique_match_v1",
+    }
     assert metadata.get("reviewed_test_execution", {}).get("allow_seeded_candidate_without_model") is not True
     assert response.success is False
     assert response.error.code == "pre_click_rejected"
@@ -317,6 +494,88 @@ def test_execute_route_injects_operational_memory_only_after_current_live_captur
     payload = __import__("json").loads((tmp_path / feedback["feedback_path"]).read_text(encoding="utf-8"))
     assert payload["failure"]["category"] == "pre_click_rejected"
     assert payload["review_target"]["source_action_template_id"] == "submit_search"
+
+
+def test_execute_route_derives_navigation_policy_from_reviewed_apply_destination(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source_path = _write_reviewed_candidate(tmp_path)
+    payload = json.loads(source_path.read_text(encoding="utf-8"))
+    payload["draft"]["action_templates"].append(
+        {
+            "action_template_id": "open_apply_flow",
+            "label": "Apply",
+            "semantic_action": "open_apply_flow",
+            "target_region_id": "search_button",
+            "destination": {"kind": "url", "url": "https://nz.seek.com/job/1/apply"},
+        }
+    )
+    source_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    store = ReviewedInterfaceMemoryStore(project_root=tmp_path)
+    store.publish(source_path=source_path, interface_id="seek_detail", expected_registry_revision=0)
+    current_capture = tmp_path / "artifacts" / "screenshots" / "current-live.png"
+    Image.new("RGB", (1600, 900), "white").save(current_capture)
+    captured_plan_request: dict[str, object] = {}
+
+    monkeypatch.setattr(action_api, "reviewed_interface_memory_store", store)
+    monkeypatch.setattr(action_api.window_manager, "get_bound_window", _bound_window)
+    monkeypatch.setattr(
+        action_api.screenshot_service,
+        "capture_window",
+        lambda **kwargs: {
+            "image_path": str(current_capture),
+            "window_size": {"width": 1600, "height": 900},
+        },
+    )
+    monkeypatch.setattr(
+        action_api.ocr_service,
+        "scan_image",
+        lambda image_path: SimpleNamespace(
+            matches=[_ocr_match("Search", x=880, y=130, width=100, height=36)],
+            metadata={"engine": "test_ocr"},
+        ),
+    )
+
+    def fake_recognition_plan(request):
+        captured_plan_request["metadata"] = request.metadata
+        return APIResponse(
+            success=True,
+            message="plan ready",
+            data=VisionResultData(
+                result=_allowed_plan(request.goal, request.image_path, {"x": 930, "y": 148})
+            ).model_dump(),
+            error=None,
+        )
+
+    monkeypatch.setattr(action_api, "_run_recognition_plan_for_execution", fake_recognition_plan)
+    monkeypatch.setattr(action_api, "_render_recognition_plan_overlay_for_execution", lambda trace_path: None)
+    monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/memory-dry-run.json")
+
+    response = action_api.execute_recognition_plan(
+        ExecuteRecognitionPlanRequest(
+            goal="Open Apply",
+            app_name="sample",
+            interface_memory_id="seek_detail",
+            interface_memory_action_id="seek_detail::action::open_apply_flow",
+            metadata={},
+            dry_run=True,
+        )
+    )
+
+    assert response.success is True
+    assert captured_plan_request["metadata"]["verification_policy"]["navigation"] == {
+        "required": True,
+        "expected_origin": "https://nz.seek.com/job/1/apply",
+        "require_same_origin_as_before": True,
+        "forbid_new_tab": True,
+        "settle_timeout_ms": 3000,
+    }
+    assert response.data["result"]["operation_context"]["semantic_action"] == "open_apply_flow"
+    assert response.data["result"]["operation_context"]["skill_id"] == "open_apply_flow"
 
 
 def test_execute_route_blocks_operational_memory_on_current_surface_mismatch_before_model(

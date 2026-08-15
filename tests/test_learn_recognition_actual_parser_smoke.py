@@ -151,12 +151,12 @@ def test_actual_parser_default_model_caller_enables_learn_coordinate_recovery(tm
     run_actual_parser_smoke(
         screenshot_path=screenshot_path,
         out_dir=tmp_path / "out",
-        endpoint="http://127.0.0.1:1240/v1/chat/completions",
+        endpoint="http://127.0.0.1:13240/v1/chat/completions",
         model_name="fake-qwen",
         timeout_seconds=3,
     )
 
-    assert captured["endpoint"] == "http://127.0.0.1:1240/v1/chat/completions"
+    assert captured["endpoint"] == "http://127.0.0.1:13240/v1/chat/completions"
     assert captured["model_name"] == "fake-qwen"
     assert captured["timeout_seconds"] == 3
     metadata = captured["metadata"]
@@ -407,7 +407,7 @@ def test_actual_parser_smoke_resolves_learn_only_qwen_profile(tmp_path: Path) ->
 
     def fake_model_caller(image_path: Path, model_config: dict) -> dict:
         assert image_path == screenshot_path
-        assert model_config["endpoint"] == "http://127.0.0.1:1240/v1/chat/completions"
+        assert model_config["endpoint"] == "http://127.0.0.1:13240/v1/chat/completions"
         assert model_config["model_name"] == "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
         assert model_config["model_profile"]["profile_id"] == "learn_mode_qwen3_vl_8b"
         return {

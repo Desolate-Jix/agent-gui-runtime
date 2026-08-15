@@ -1362,6 +1362,16 @@ body[data-path-surface="hidden"] #pathDetailPanel {
   display: none !important;
 }
 
+/* 已加载候选时仅显示人工审核面板，不改变其他清理阶段控件。 */
+body[data-learning-draft-review-open="true"] #learningDraftReviewPanel:not([hidden]) {
+  display: grid !important;
+}
+
+/* 已加载截图时允许审核面板在回放/清理阶段展示可编辑截图。 */
+body[data-learning-draft-review-open="true"] #learningDraftScreenshotPanel:not([hidden]) {
+  display: grid !important;
+}
+
 .path-toolbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);

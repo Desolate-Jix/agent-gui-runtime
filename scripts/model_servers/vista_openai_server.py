@@ -427,7 +427,7 @@ def main() -> int:
     parser.add_argument("--model-path", required=True)
     parser.add_argument("--model-name", default="inclusionAI/VISTA-4B")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=1244)
+    parser.add_argument("--port", type=int, default=13244)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--dtype", default="bfloat16")
     parser.add_argument("--max-new-tokens", type=int, default=32)

@@ -25,7 +25,7 @@ def main() -> int:
     parser.add_argument("--suite", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--runtime-endpoint", default="http://127.0.0.1:8000")
-    parser.add_argument("--decision-endpoint", default="http://127.0.0.1:1240")
+    parser.add_argument("--decision-endpoint", default="http://127.0.0.1:13240")
     parser.add_argument("--decision-model", default="qwen3-vl-8b-instruct")
     parser.add_argument("--workflow-project-root", default=str(ROOT_DIR))
     parser.add_argument("--max-steps", type=int, default=18)

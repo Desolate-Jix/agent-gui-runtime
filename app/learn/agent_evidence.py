@@ -8,6 +8,8 @@ from pathlib import Path
 import re
 from typing import Any, Mapping
 
+from app.learn.interface_assets import _merge_by_identifier, _project_human_described_regions
+
 
 AGENT_EVIDENCE_CONTRACT = "agent_evidence_context_v1"
 AGENT_EVIDENCE_MIGRATION_REPORT_CONTRACT = "agent_evidence_migration_report_v1"
@@ -315,6 +317,23 @@ def build_workflow_agent_evidence(
         interface_id = str(node.get("node_id") or node.get("interface_id") or "").strip()
         if not interface_id:
             continue
+        regions = _dict_list(node.get("regions"))
+        projected = _project_human_described_regions(regions)
+        for action in projected["action_candidates"]:
+            action["review_status"] = "human_approved"
+        controls = _merge_by_identifier(
+            _dict_list(node.get("controls")), projected["controls"],
+            keys=("control_id", "element_id", "region_id"),
+        )
+        action_candidates = _merge_by_identifier(
+            _dict_list(node.get("action_candidates") or node.get("action_templates")),
+            projected["action_candidates"],
+            keys=("action_template_id", "action_id"),
+        )
+        verification_rules = _merge_by_identifier(
+            _dict_list(node.get("verification_rules")), projected["verification_rules"],
+            keys=("rule_id",),
+        )
         pseudo_asset = {
             "contract_version": "single_interface_asset_v1",
             "interface_id": interface_id,
@@ -334,12 +353,10 @@ def build_workflow_agent_evidence(
                 fixed=False,
             ),
             "states": _dict_list(node.get("states")),
-            "regions": _dict_list(node.get("regions")),
-            "controls": _dict_list(node.get("controls")),
-            "action_candidates": _dict_list(
-                node.get("action_candidates") or node.get("action_templates")
-            ),
-            "verification_rules": _dict_list(node.get("verification_rules")),
+            "regions": regions,
+            "controls": controls,
+            "action_candidates": action_candidates,
+            "verification_rules": verification_rules,
             "blockers": _dict_list(node.get("blockers")),
             "review": {
                 "status": str(node.get("review_status") or "needs_human_review"),
@@ -353,9 +370,6 @@ def build_workflow_agent_evidence(
                 "manual_revision": _without_geometry(node.get("manual_revision") or {}),
             },
         }
-        action_candidates = _dict_list(
-            node.get("action_candidates") or node.get("action_templates")
-        )
         outgoing = [
             _workflow_edge_as_transition(
                 edge,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
@@ -941,7 +942,7 @@ def test_vision_recognition_plan_uses_vista_point_grounding_with_path_graph(tmp_
                 "timeout_seconds": 600,
                 "local_grounding": {
                     "model_name": "inclusionAI/VISTA-4B",
-                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
                     "runtime": "transformers",
                     "output_contract": "vista_point_v1",
                 },
@@ -1040,7 +1041,7 @@ def test_vision_recognition_plan_uses_path_graph_candidate_roi_for_vista(tmp_pat
                 "timeout_seconds": 600,
                 "local_grounding": {
                     "model_name": "inclusionAI/VISTA-4B",
-                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
                     "runtime": "transformers",
                     "output_contract": "vista_point_v1",
                 },
@@ -1138,7 +1139,7 @@ def test_vision_recognition_plan_uses_seeded_candidate_roi_for_vista(tmp_path, m
                 "timeout_seconds": 600,
                 "local_grounding": {
                     "model_name": "inclusionAI/VISTA-4B",
-                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
                     "runtime": "transformers",
                     "output_contract": "vista_point_v1",
                 },
@@ -1236,7 +1237,7 @@ def test_vision_recognition_plan_visual_asset_fast_lane_skips_vista(tmp_path, mo
                 "timeout_seconds": 600,
                 "local_grounding": {
                     "model_name": "inclusionAI/VISTA-4B",
-                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
                     "runtime": "transformers",
                     "output_contract": "vista_point_v1",
                 },
@@ -1402,7 +1403,7 @@ def test_seeded_candidate_uses_seed_point_when_vista_roi_point_disagrees(tmp_pat
                 "timeout_seconds": 600,
                 "local_grounding": {
                     "model_name": "inclusionAI/VISTA-4B",
-                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
                     "runtime": "transformers",
                     "output_contract": "vista_point_v1",
                 },
@@ -1491,7 +1492,7 @@ def test_operational_memory_seed_blocks_when_vista_disagrees_with_current_roi(
                 "timeout_seconds": 600,
                 "local_grounding": {
                     "model_name": "inclusionAI/VISTA-4B",
-                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
                     "runtime": "transformers",
                     "output_contract": "vista_point_v1",
                 },
@@ -1577,7 +1578,7 @@ def test_operational_memory_seed_uses_current_uia_candidate_for_vista_roi(
                 "timeout_seconds": 600,
                 "local_grounding": {
                     "model_name": "inclusionAI/VISTA-4B",
-                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
                     "runtime": "transformers",
                     "output_contract": "vista_point_v1",
                 },
@@ -1674,6 +1675,33 @@ def test_seeded_candidate_current_text_anchors_prefer_visible_locator_text() -> 
     ) == ["Apply"]
 
 
+def test_semantic_current_uia_seed_matching_preserves_ambiguity_for_fail_closed_routing() -> None:
+    seeded = {
+        "expected_effect": "open_apply_flow",
+        "locator_evidence": {"text_anchors": ["Quick apply"]},
+    }
+    goal = "Open Quick apply for Software Engineer at TRV Trading and stop before form fill"
+
+    matches = [
+        candidate
+        for candidate in [
+            SimpleNamespace(label="Apply for Software Engineer at TRV Trading"),
+            SimpleNamespace(label="Apply for Software Engineer at TRV Trading now"),
+            SimpleNamespace(label="TRV Trading"),
+        ]
+        if vision_api._semantic_current_uia_candidate_matches_seed(
+            candidate,
+            seeded=seeded,
+            goal=goal,
+        )
+    ]
+
+    assert [candidate.label for candidate in matches] == [
+        "Apply for Software Engineer at TRV Trading",
+        "Apply for Software Engineer at TRV Trading now",
+    ]
+
+
 def test_operational_memory_seed_ignores_unrelated_uia_for_current_vista_roi(
     tmp_path,
     monkeypatch,
@@ -1713,7 +1741,7 @@ def test_operational_memory_seed_ignores_unrelated_uia_for_current_vista_roi(
                 "timeout_seconds": 600,
                 "local_grounding": {
                     "model_name": "inclusionAI/VISTA-4B",
-                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
                     "runtime": "transformers",
                     "output_contract": "vista_point_v1",
                 },
@@ -1841,7 +1869,7 @@ def test_operational_memory_fast_grounding_uses_unique_current_uia_candidate_wit
                 "timeout_seconds": 600,
                 "local_grounding": {
                     "model_name": "inclusionAI/VISTA-4B",
-                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
                     "runtime": "transformers",
                     "output_contract": "vista_point_v1",
                 },
@@ -1939,6 +1967,134 @@ def test_operational_memory_fast_grounding_uses_unique_current_uia_candidate_wit
     }
 
 
+def test_operational_memory_fast_grounding_matches_unique_current_uia_accessible_apply_label(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (1403, 931), color=(255, 255, 255)).save(image_path)
+    vista_calls: list[dict] = []
+
+    def fake_vista(**kwargs):
+        vista_calls.append(kwargs)
+        raise AssertionError("唯一语义一致的当前 UIA Apply 控件不应回退到历史坐标或 VISTA")
+
+    monkeypatch.setattr("app.api.vision.VISTA_DIRECT_IMAGES_DIR", tmp_path / "vista-direct")
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr("app.api.vision._call_vista_point_grounding", fake_vista)
+    monkeypatch.setattr(
+        "app.api.vision.uia_provider.snapshot_bound_window",
+        lambda max_controls=250: {
+            "provider": "windows_uia",
+            "provider_version": "windows_uia_provider_v1",
+            "status": "ok",
+            "control_count": 2,
+            "controls": [
+                {
+                    "provider": "windows_uia",
+                    "control_id": "company",
+                    "name": "TRV Trading",
+                    "control_type": "Button",
+                    "automation_id": "Company",
+                    "class_name": "Button",
+                    "bbox": {"x": 272, "y": 362, "w": 121, "h": 14},
+                    "screen_bbox": {"x": 272, "y": 362, "w": 121, "h": 14},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                },
+                {
+                    "provider": "windows_uia",
+                    "control_id": "quick-apply",
+                    "name": "Apply for SOFTWARE ENGINEER SUMMER INTERNSHIP/GRADUATE at TRV Trading",
+                    "control_type": "Hyperlink",
+                    "automation_id": "QuickApply",
+                    "class_name": "Hyperlink",
+                    "bbox": {"x": 272, "y": 574, "w": 146, "h": 49},
+                    "screen_bbox": {"x": 272, "y": 574, "w": 146, "h": 49},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                },
+            ],
+        },
+    )
+
+    response = TestClient(app).post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": (
+                "Open the SEEK-hosted Quick apply flow for SOFTWARE ENGINEER "
+                "SUMMER INTERNSHIP/GRADUATE at TRV Trading and stop before any form fill."
+            ),
+            "app_name": "msedge.exe",
+            "agent_mode": "execute",
+            "top_k": 3,
+            "metadata": {
+                "operational_memory_fast_grounding": {
+                    "enabled": True,
+                    "mode": "current_uia_unique_match_v1",
+                },
+                "operational_memory": {
+                    "surface_validation": {
+                        "allowed": True,
+                        "matched_text_anchors": ["Quick apply"],
+                    }
+                },
+                "seeded_candidate": {
+                    "contract_version": "seeded_candidate_v1",
+                    "candidate_id": "memory-quick-apply",
+                    "label": "Quick apply",
+                    "role": "button",
+                    "bbox": {"x": 106, "y": 230, "w": 214, "h": 9},
+                    "click_point": {"x": 213, "y": 234},
+                    "risk_class": "safe_click_allowed",
+                    "expected_effect": "open_apply_flow",
+                    "require_current_grounding": True,
+                    "historical_click_point_reused": False,
+                    "locator_evidence": {
+                        "text_anchors": ["Quick apply"],
+                        "reference_bbox_is_prior_only": True,
+                    },
+                },
+            },
+        },
+    )
+
+    assert response.json()["success"] is True
+    result = response.json()["data"]["result"]
+    assert vista_calls == []
+    assert result["pre_click_decision"]["allowed"] is True
+    assert result["pre_click_decision"]["selected_click_point"] == {"x": 345, "y": 598}
+    assert result["pre_click_decision"]["selected_candidate_id"].startswith(
+        "candidate_screen_inventory_action_uia"
+    )
+    assert result["candidate_result"]["summary"]["operational_memory_fast_grounding_used"] is True
+    assert result["candidate_result"]["summary"]["current_uia_unique_match_count"] == 1
+    assert result["candidate_result"]["summary"]["seeded_candidate_selected"] is False
+    assert result["candidate_freshness_decision"]["candidate_freshness"]["source"] == (
+        "current_uia_unique_match_v1"
+    )
+
+
 def test_operational_memory_fast_grounding_conflict_falls_back_to_vista_with_current_candidates(
     tmp_path,
     monkeypatch,
@@ -1978,7 +2134,7 @@ def test_operational_memory_fast_grounding_conflict_falls_back_to_vista_with_cur
                 "timeout_seconds": 600,
                 "local_grounding": {
                     "model_name": "inclusionAI/VISTA-4B",
-                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
                     "runtime": "transformers",
                     "output_contract": "vista_point_v1",
                 },
@@ -2140,7 +2296,7 @@ def test_execute_recognition_plan_uses_vista_direct_grounding_without_path_graph
                 "timeout_seconds": 600,
                 "local_grounding": {
                     "model_name": "inclusionAI/VISTA-4B",
-                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
                     "runtime": "transformers",
                     "output_contract": "vista_point_v1",
                 },
@@ -2192,7 +2348,7 @@ def test_execute_recognition_plan_builds_fast_inventory_from_uia_for_vista_direc
                 "timeout_seconds": 600,
                 "local_grounding": {
                     "model_name": "inclusionAI/VISTA-4B",
-                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
                     "runtime": "transformers",
                     "output_contract": "vista_point_v1",
                 },
@@ -2303,7 +2459,7 @@ def test_execute_recognition_plan_blocks_vista_direct_when_exact_uia_target_disa
                 "timeout_seconds": 600,
                 "local_grounding": {
                     "model_name": "inclusionAI/VISTA-4B",
-                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
                     "runtime": "transformers",
                     "output_contract": "vista_point_v1",
                 },
@@ -2397,7 +2553,7 @@ def test_execute_recognition_plan_does_not_treat_context_labels_as_explicit_targ
                 "timeout_seconds": 600,
                 "local_grounding": {
                     "model_name": "inclusionAI/VISTA-4B",
-                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
                     "runtime": "transformers",
                     "output_contract": "vista_point_v1",
                 },
@@ -2574,7 +2730,7 @@ def test_execute_recognition_plan_blocks_vista_direct_point_in_browser_chrome(tm
                 "timeout_seconds": 600,
                 "local_grounding": {
                     "model_name": "inclusionAI/VISTA-4B",
-                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
                     "runtime": "transformers",
                     "output_contract": "vista_point_v1",
                 },
@@ -2625,7 +2781,7 @@ def test_execute_recognition_plan_resizes_vista_direct_image_and_maps_point(tmp_
                 "timeout_seconds": 600,
                 "local_grounding": {
                     "model_name": "inclusionAI/VISTA-4B",
-                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
                     "runtime": "transformers",
                     "output_contract": "vista_point_v1",
                 },
@@ -2705,7 +2861,7 @@ def test_execute_recognition_plan_blocks_when_vista_direct_grounding_times_out(t
                 "timeout_seconds": 600,
                 "local_grounding": {
                     "model_name": "inclusionAI/VISTA-4B",
-                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
                     "runtime": "transformers",
                     "output_contract": "vista_point_v1",
                 },

@@ -5,7 +5,7 @@
     "timeout_seconds": 600,
     "local": {
       "model_name": "inclusionAI/VISTA-4B",
-      "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+      "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
       "profile_id": "vista_4b_transformers",
       "runtime": "transformers",
       "output_contract": "vista_point_v1",
@@ -16,7 +16,7 @@
     },
     "local_understanding": {
       "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
-      "endpoint": "http://127.0.0.1:1240/v1/chat/completions",
+      "endpoint": "http://127.0.0.1:13240/v1/chat/completions",
       "profile_id": "qwen3_vl_8b_q4_k_m",
       "provider_mode": "local_understanding",
       "input_format": "openai_compatible_vision",
@@ -25,7 +25,7 @@
     },
     "local_grounding": {
       "model_name": "inclusionAI/VISTA-4B",
-      "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+      "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
       "profile_id": "vista_4b_transformers",
       "runtime": "transformers",
       "output_contract": "vista_point_v1",

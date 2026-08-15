@@ -468,7 +468,7 @@ def test_local_provider_waits_for_loading_model_then_runs_same_attempt(tmp_path,
     monkeypatch.setattr("app.vision.local_provider.urlopen", fake_urlopen)
     monkeypatch.setattr("app.vision.local_provider.time.sleep", lambda seconds: sleeps.append(seconds))
 
-    result = LocalVisionProvider(endpoint="http://127.0.0.1:1240/v1/chat/completions", timeout_seconds=12).analyze(
+    result = LocalVisionProvider(endpoint="http://127.0.0.1:13240/v1/chat/completions", timeout_seconds=12).analyze(
         VisionAnalyzeRequest(image_path=str(image_path), task="observe_screen")
     )
 

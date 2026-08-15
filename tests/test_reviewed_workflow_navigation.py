@@ -361,7 +361,7 @@ def test_reviewed_workflow_navigation_smoke_writes_non_executing_report(
         workflow_id="reviewed_items_flow",
         interface_id="items",
         goal="Open the selected item and read its current detail.",
-        endpoint="http://127.0.0.1:1240",
+        endpoint="http://127.0.0.1:13240",
         model_name="test-model",
         output_path=output_path,
     )

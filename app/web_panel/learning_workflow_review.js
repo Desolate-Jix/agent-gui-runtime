@@ -117,6 +117,11 @@
     "reviewed_by_human",
     "reviewed_revision_hash",
     "source_paths",
+    "source_screenshot_sha256",
+    "review_revision_source_screenshot_path",
+    "review_revision_numbered_overlay_path",
+    "review_revision_fused_overlay_path",
+    "review_revision_human_review_overlay_path",
   ]);
   const RUNTIME_POINT_FIELDS = new Set([
     "actual_point",
@@ -233,7 +238,28 @@
       throw new Error(`workflow review node must exist exactly once: ${normalizedNodeId}`);
     }
     const node = withoutReviewRevisionMetadata(matches[0]);
-    delete node.evidence;
+    const sourcePaths = matches[0]?.source_paths;
+    if (Array.isArray(sourcePaths)) {
+      const normalizedSourcePaths = sourcePaths
+        .map((value) => String(value || "").trim())
+        .filter((value) => value && !value.replace(/\\/g, "/").includes("node-review-sources"));
+      if (normalizedSourcePaths.length) node.source_paths = normalizedSourcePaths;
+    }
+    const rawEvidence = matches[0]?.evidence;
+    if (rawEvidence && typeof rawEvidence === "object" && node.evidence && typeof node.evidence === "object") {
+      [
+        "source_screenshot_path",
+        "numbered_overlay_path",
+        "fused_overlay_path",
+        "human_review_overlay_path",
+      ].forEach((evidenceKey) => {
+        const currentPath = String(rawEvidence[evidenceKey] || "").trim();
+        const originalPath = String(rawEvidence[`review_revision_${evidenceKey}`] || "").trim();
+        if (originalPath && currentPath.replace(/\\/g, "/").includes("node-evidence")) {
+          node.evidence[evidenceKey] = originalPath;
+        }
+      });
+    }
     const outgoingEdges = edges
       .filter((edge) => String(edge?.source_node_id || "").trim() === normalizedNodeId)
       .map(withoutReviewRevisionMetadata)

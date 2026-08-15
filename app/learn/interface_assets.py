@@ -128,7 +128,12 @@ def build_single_interface_asset(
         review.get("action_candidates") or review.get("action_templates")
     )
     verification_rules = _dict_list(review.get("verification_rules"))
-    projected = _project_human_described_regions(regions)
+    projected = _project_human_described_regions(
+        regions,
+        globally_reviewed=review.get("reviewed_by_human") is True
+        and str(review.get("review_status") or "").strip()
+        in {"approved", "approved_as_assisted_template", "human_reviewed"},
+    )
     controls = _merge_by_identifier(
         controls,
         projected["controls"],
@@ -206,6 +211,8 @@ def build_single_interface_asset(
 
 def _project_human_described_regions(
     regions: list[dict[str, Any]],
+    *,
+    globally_reviewed: bool = False,
 ) -> dict[str, list[dict[str, Any]]]:
     controls: list[dict[str, Any]] = []
     actions: list[dict[str, Any]] = []
@@ -226,6 +233,13 @@ def _project_human_described_regions(
             or review_status
             in {"approved", "human_confirmed", "human_reviewed", "reviewed"}
         )
+        if (
+            not has_human_semantics
+            and globally_reviewed
+            and region.get("real_action_requires_gate") is True
+            and action_type in {"open_apply_flow", "open_detail"}
+        ):
+            has_human_semantics = True
         if (
             not region_id
             or not label
@@ -258,20 +272,26 @@ def _project_human_described_regions(
                     "review_status": "human_reviewed",
                 }
             )
-        actions.append(
-            {
-                "action_template_id": f"region_action_{region_id}",
-                "action_type": action_type,
-                "semantic_action": action_type,
-                "display_name": label,
-                "agent_description": description,
-                "target_control_id": region_id,
-                "target_region_id": region_id,
-                "risk_level": str(region.get("risk_level") or "unknown").strip(),
-                "review_status": "human_reviewed",
-                "verification_rule_ids": verification_rule_ids,
-            }
+        projected_action = {
+            "action_template_id": f"region_action_{region_id}",
+            "action_type": action_type,
+            "semantic_action": action_type,
+            "display_name": label,
+            "agent_description": description,
+            "target_control_id": region_id,
+            "target_region_id": region_id,
+            "risk_level": str(region.get("risk_level") or "unknown").strip(),
+            "review_status": "human_reviewed",
+            "verification_rule_ids": verification_rule_ids,
+        }
+        destination_url = (
+            region.get("destination", {}).get("url")
+            if isinstance(region.get("destination"), dict)
+            else region.get("destination_url") or region.get("expected_destination_url")
         )
+        if destination_url:
+            projected_action["destination_url"] = destination_url
+        actions.append(projected_action)
     return {
         "controls": controls,
         "action_candidates": actions,

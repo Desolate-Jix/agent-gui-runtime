@@ -205,6 +205,119 @@ def test_pre_click_decision_rejects_context_word_when_goal_has_explicit_action_t
     assert "goal_explicitly_mentions_candidate_label" in result.candidate_decisions[0].reasons
 
 
+def test_pre_click_decision_allows_verified_memory_open_detail_for_exact_current_link() -> None:
+    candidate = _candidate(
+        candidate_id="candidate_current_uia_job_title",
+        element_id="current_uia_job_title",
+        label="Graduate - Data & AI Engineer",
+        role="link",
+        text_similarity=0.9,
+    )
+    candidate.element.description = "Graduate - Data & AI Engineer"
+    candidate.element.text = candidate.label
+    result = decide_pre_click(
+        goal="Open the Graduate - Data & AI Engineer job detail.",
+        candidates=_rank_result(candidate),
+        grounding=_grounding(
+            candidate_id=candidate.candidate_id,
+            matched_text="Graduate - Data & AI Engineer",
+        ),
+        expected_effect={
+            "contract_version": "operational_memory_expected_effect_v1",
+            "semantic_action": "open_detail",
+            "stable_element_id": "memory::element::job_title",
+            "locator_evidence": {"text_anchors": ["Graduate - Data & AI Engineer"]},
+        },
+    )
+
+    assert result.allowed is True
+    decision = result.candidate_decisions[0]
+    assert "candidate_goal_action_mismatch" not in decision.reasons
+    assert "operational_memory_expected_effect_verified" in decision.reasons
+
+
+def test_pre_click_decision_accepts_collapsed_ocr_spacing_for_long_memory_anchor() -> None:
+    title = "SOFTWARE ENGINEER SUMMER INTERNSHIP/GRADUATE"
+    candidate = _candidate(
+        candidate_id="candidate_seek_job_title",
+        element_id="seek_job_title",
+        label=title,
+        role="link",
+        text_similarity=0.9,
+    )
+    candidate.element.description = title
+    candidate.element.text = title
+    result = decide_pre_click(
+        goal=f"Open job detail for {title}.",
+        candidates=_rank_result(candidate),
+        grounding=_grounding(
+            candidate_id=candidate.candidate_id,
+            matched_text="SOFTWAREENGINEERSUMMERINTERNSHIP/GRADUATE",
+        ),
+        expected_effect={
+            "contract_version": "operational_memory_expected_effect_v1",
+            "semantic_action": "open_detail",
+            "stable_element_id": "memory::element::job_title",
+            "locator_evidence": {"text_anchors": [title]},
+        },
+    )
+
+    assert result.allowed is True
+    assert "operational_memory_expected_effect_verified" in result.candidate_decisions[0].reasons
+
+
+def test_pre_click_decision_does_not_trust_memory_open_detail_for_unmatched_link() -> None:
+    candidate = _candidate(
+        candidate_id="candidate_other_link",
+        element_id="other_link",
+        label="Company home",
+        role="link",
+        text_similarity=0.9,
+    )
+    candidate.element.description = "Company home"
+    candidate.element.text = candidate.label
+    result = decide_pre_click(
+        goal="Open the Graduate - Data & AI Engineer job detail.",
+        candidates=_rank_result(candidate),
+        grounding=_grounding(candidate_id=candidate.candidate_id, matched_text="Company home"),
+        expected_effect={
+            "contract_version": "operational_memory_expected_effect_v1",
+            "semantic_action": "open_detail",
+            "stable_element_id": "memory::element::job_title",
+            "locator_evidence": {"text_anchors": ["Graduate - Data & AI Engineer"]},
+        },
+    )
+
+    assert result.allowed is False
+    assert "candidate_goal_action_mismatch" in result.candidate_decisions[0].reasons
+    assert "operational_memory_expected_effect_verified" not in result.candidate_decisions[0].reasons
+
+
+def test_pre_click_decision_keeps_explicit_submit_goal_incompatible_with_open_detail_memory() -> None:
+    candidate = _candidate(
+        candidate_id="candidate_current_uia_job_title",
+        element_id="current_uia_job_title",
+        label="Graduate - Data & AI Engineer",
+        role="link",
+        text_similarity=0.9,
+    )
+    candidate.element.description = candidate.label
+    candidate.element.text = candidate.label
+    result = decide_pre_click(
+        goal="Open the Graduate - Data & AI Engineer job detail and submit the application.",
+        candidates=_rank_result(candidate),
+        grounding=_grounding(candidate_id=candidate.candidate_id, matched_text=candidate.label),
+        expected_effect={
+            "contract_version": "operational_memory_expected_effect_v1",
+            "semantic_action": "open_detail",
+            "locator_evidence": {"text_anchors": [candidate.label]},
+        },
+    )
+
+    assert result.allowed is False
+    assert "candidate_goal_action_mismatch" in result.candidate_decisions[0].reasons
+
+
 def test_pre_click_decision_does_not_treat_negated_submit_terms_as_action_target() -> None:
     candidate = _candidate(
         candidate_id="seeded_numbered_region_4_c4",

@@ -22,7 +22,7 @@ def test_learning_grounding_config_uses_requested_learn_only_profile(monkeypatch
         "vision": {
             "local_grounding": {
                 "profile_id": "vista_4b_transformers",
-                "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
                 "model_name": "inclusionAI/VISTA-4B",
             }
         }
@@ -35,7 +35,7 @@ def test_learning_grounding_config_uses_requested_learn_only_profile(monkeypatch
                 "profile_id": "learn_mode_uground_2b",
                 "mode_scope": "learn_only",
                 "provider_mode": "local_grounding",
-                "endpoint": "http://127.0.0.1:1245/v1/chat/completions",
+                "endpoint": "http://127.0.0.1:13245/v1/chat/completions",
                 "model_name": "osunlp/UGround-V1-2B",
                 "output_contract": "learn_grounding_result_v1",
             }
@@ -51,7 +51,7 @@ def test_learning_grounding_config_uses_requested_learn_only_profile(monkeypatch
     selected = vision_api._selected_learning_grounding_config(config, request)
 
     assert selected["profile_id"] == "learn_mode_uground_2b"
-    assert selected["endpoint"] == "http://127.0.0.1:1245/v1/chat/completions"
+    assert selected["endpoint"] == "http://127.0.0.1:13245/v1/chat/completions"
     assert selected["model_name"] == "osunlp/UGround-V1-2B"
     options = vision_api._learn_vista_coordinate_validation_options(request, selected)
     assert options["enabled"] is True
@@ -62,7 +62,7 @@ def test_learning_grounding_config_does_not_override_execute_mode(monkeypatch) -
         "vision": {
             "local_grounding": {
                 "profile_id": "vista_4b_transformers",
-                "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
             }
         }
     }
@@ -74,7 +74,7 @@ def test_learning_grounding_config_does_not_override_execute_mode(monkeypatch) -
                 "profile_id": "learn_mode_uground_2b",
                 "mode_scope": "learn_only",
                 "provider_mode": "local_grounding",
-                "endpoint": "http://127.0.0.1:1245/v1/chat/completions",
+                "endpoint": "http://127.0.0.1:13245/v1/chat/completions",
             }
         ],
     )
@@ -87,7 +87,7 @@ def test_learning_grounding_config_does_not_override_execute_mode(monkeypatch) -
     selected = vision_api._selected_learning_grounding_config(config, request)
 
     assert selected["profile_id"] == "vista_4b_transformers"
-    assert selected["endpoint"] == "http://127.0.0.1:1244/v1/chat/completions"
+    assert selected["endpoint"] == "http://127.0.0.1:13244/v1/chat/completions"
 
 
 def test_learning_capture_readiness_rejects_splash_and_accepts_loaded_ui(tmp_path: Path) -> None:
@@ -1331,7 +1331,7 @@ def test_learn_deep_locate_skips_vista_point_model_review(monkeypatch, tmp_path)
                 "mode": "local",
                 "local_grounding": {
                     "model_name": "inclusionAI/VISTA-4B",
-                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
                     "runtime": "transformers",
                     "output_contract": "vista_point_v1",
                 },
@@ -1441,7 +1441,7 @@ def test_learn_deep_locate_validates_each_target_with_vista_point(monkeypatch, t
                 "timeout_seconds": 600,
                 "local_grounding": {
                     "model_name": "inclusionAI/VISTA-4B",
-                    "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
                     "runtime": "transformers",
                     "output_contract": "vista_point_v1",
                 },

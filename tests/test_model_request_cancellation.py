@@ -24,9 +24,9 @@ def test_cancel_model_request_verifies_vista_request_termination(monkeypatch) ->
     profile = {
         "profile_id": "vista",
         "role": ["grounding", "locate"],
-        "endpoint": "http://127.0.0.1:1244/v1/chat/completions",
+        "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
         "request_cancel_supported": True,
-        "request_cancel_endpoint": "http://127.0.0.1:1244/v1/cancel",
+        "request_cancel_endpoint": "http://127.0.0.1:13244/v1/cancel",
     }
     monkeypatch.setattr(model_server, "load_model_profiles", lambda: [profile])
 
@@ -64,7 +64,7 @@ def test_cancel_model_request_verifies_vista_request_termination(monkeypatch) ->
 
     assert requested == [
         {
-            "url": "http://127.0.0.1:1244/v1/cancel",
+            "url": "http://127.0.0.1:13244/v1/cancel",
             "body": {"request_id": "learn-worker-123"},
             "timeout": 1.0,
         }
@@ -95,7 +95,7 @@ def test_calibration_sequence_cancellation_uses_nested_locate_payload(
         "profile_id": "vista",
         "role": ["grounding", "locate"],
         "request_cancel_supported": True,
-        "request_cancel_endpoint": "http://127.0.0.1:1244/v1/cancel",
+        "request_cancel_endpoint": "http://127.0.0.1:13244/v1/cancel",
     }
     monkeypatch.setattr(model_server, "load_model_profiles", lambda: [profile])
 

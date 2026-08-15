@@ -180,7 +180,7 @@ Learn Deep / locate 阶段已经会输出 `learn_all_targets.targets[*]`，其�
 
 ## 候选模型参数和推荐位置
 
-以下 profile 是 Learn Mode 专用候选。当前 `learn_mode_qwen3_vl_8b` 已指向本地 Qwen3-VL 8B GGUF 权重和 `1240` understanding endpoint，可用于整屏 semantic inventory / 草稿结构；`learn_mode_uground_2b` 已完成本地材料化和 no-action endpoint smoke，可作为 learn-only ROI grounding candidate；VISTA-4B baseline 也可作为 learn-only actual-call baseline。其他 UGround 7B / GUI-Actor / ShowUI / OmniParser 候选仍是 metadata-only，未下载、未启动，也没有替换 Execute Mode 默认模型。每个 profile 都必须带有实验优先级、输入合同、输出合同和坐标输出解释，方便后续面板或 benchmark 读取。
+以下 profile 是 Learn Mode 专用候选。当前 `learn_mode_qwen3_vl_8b` 已指向本地 Qwen3-VL 8B GGUF 权重和 `13240` understanding endpoint，可用于整屏 semantic inventory / 草稿结构；`learn_mode_uground_2b` 已完成本地材料化和 no-action endpoint smoke，可作为 learn-only ROI grounding candidate；VISTA-4B baseline 也可作为 learn-only actual-call baseline。其他 UGround 7B / GUI-Actor / ShowUI / OmniParser 候选仍是 metadata-only，未下载、未启动，也没有替换 Execute Mode 默认模型。每个 profile 都必须带有实验优先级、输入合同、输出合同和坐标输出解释，方便后续面板或 benchmark 读取。
 
 | Priority | Profile | 模型 | 参数量 | 当前状态 | 输入合同 | 输出/坐标合同 | 推荐位置 |
 |---:|---|---|---:|---|---|---|---|

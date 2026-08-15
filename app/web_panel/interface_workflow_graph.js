@@ -316,6 +316,29 @@
         vy: 0,
       };
     });
+    let hasRetainedOverlap = false;
+    for (let leftIndex = 0; leftIndex < nodes.length && !hasRetainedOverlap; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < nodes.length; rightIndex += 1) {
+        const left = nodes[leftIndex];
+        const right = nodes[rightIndex];
+        const minimumDistance = (
+          Math.max(left.width, left.height)
+          + Math.max(right.width, right.height)
+        ) / 2;
+        if (Math.hypot(left.x - right.x, left.y - right.y) < minimumDistance) {
+          hasRetainedOverlap = true;
+          break;
+        }
+      }
+    }
+    if (hasRetainedOverlap) {
+      const initialNodeById = new Map(initialLayout.nodes.map((node) => [node.id, node]));
+      nodes.forEach((node) => {
+        const initialNode = initialNodeById.get(node.id);
+        node.x = initialNode.x;
+        node.y = initialNode.y;
+      });
+    }
     const nodeById = new Map(nodes.map((node) => [node.id, node]));
     const links = initialLayout.links.map((link) => ({
       ...link,
@@ -341,6 +364,7 @@
       links,
       bounds: initialLayout.bounds,
     };
+    updateInterfaceWorkflowLayoutBounds(layout, { width, height });
     let alpha = 1;
 
     function applyIteration() {

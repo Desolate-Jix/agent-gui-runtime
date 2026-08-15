@@ -314,7 +314,7 @@ Expected: PASS.
 
 - [ ] **Step 8: Verify model processes remain stopped**
 
-Run the repository model-process check and assert zero known model processes and zero listeners on ports `1234,1244,1245,1246,1247,1248`.
+Run the repository model-process check and assert zero known model processes and zero listeners on ports `1234,1246,1247,1248,13240,13241,13244,13245`.
 
 - [ ] **Step 9: Commit the model-review checkpoint**
 

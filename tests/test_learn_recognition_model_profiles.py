@@ -53,7 +53,8 @@ def test_learn_mode_model_profiles_are_learn_only_and_under_12b() -> None:
     assert qwen_profile["download_status"] == "available_local_baseline"
     assert qwen_profile["launchable"] is True
     assert qwen_profile["provider_mode"] == "local_understanding"
-    assert qwen_profile["endpoint"] == "http://127.0.0.1:1240/v1/chat/completions"
+    assert qwen_profile["endpoint"] == "http://127.0.0.1:13240/v1/chat/completions"
+    assert qwen_profile["port"] == 13240
     assert Path(qwen_profile["model_path"]).exists()
     assert Path(qwen_profile["mmproj_path"]).exists()
     assert qwen_profile["profile_id"] not in execute_defaults
@@ -63,7 +64,7 @@ def test_learn_mode_model_profiles_are_learn_only_and_under_12b() -> None:
     assert uground_2b_profile["launchable"] is True
     assert uground_2b_profile["provider_mode"] == "local_grounding"
     assert uground_2b_profile["runtime"] == "transformers"
-    assert uground_2b_profile["endpoint"] == "http://127.0.0.1:1245/v1/chat/completions"
+    assert uground_2b_profile["endpoint"] == "http://127.0.0.1:13245/v1/chat/completions"
     assert uground_2b_profile["start_script"] == "scripts/model_servers/start_uground_vision_server.ps1"
     assert uground_2b_profile["stop_script"] == "scripts/model_servers/stop_local_vision_server.ps1"
     assert uground_2b_profile["pid_file"] == "logs/learn-mode-uground-2b-server.pid"
@@ -106,6 +107,19 @@ def test_qwen_8b_profiles_declare_gpu_memory_budget_for_resource_preflight() -> 
         assert profile["gpu_memory_gib"] == 7
 
 
+def test_qwen_8b_profiles_share_the_reserved_range_safe_port() -> None:
+    profiles = [
+        json.loads((PROFILE_DIR / profile_name).read_text(encoding="utf-8"))
+        for profile_name in ("learn_mode_qwen3_vl_8b.json", "qwen3_vl_8b_q4_k_m.json")
+    ]
+
+    assert {profile["port"] for profile in profiles} == {13240}
+    assert {
+        profile["endpoint"]
+        for profile in profiles
+    } == {"http://127.0.0.1:13240/v1/chat/completions"}
+
+
 def test_learn_grounding_vista_baseline_profile_is_learn_only_wrapper() -> None:
     profile = json.loads((PROFILE_DIR / "learn_grounding_vista_4b_baseline.json").read_text(encoding="utf-8"))
     execute_defaults = set(STAGE_PROFILE_IDS.values())
@@ -118,11 +132,11 @@ def test_learn_grounding_vista_baseline_profile_is_learn_only_wrapper() -> None:
     assert profile["download_status"] == "available_local_baseline"
     assert profile["runtime"] == "transformers"
     assert profile["provider_mode"] == "local_grounding"
-    assert profile["endpoint"] == "http://127.0.0.1:1244/v1/chat/completions"
+    assert profile["endpoint"] == "http://127.0.0.1:13244/v1/chat/completions"
     assert profile["start_script"] == "scripts/model_servers/start_transformers_vision_server.ps1"
     assert profile["stop_script"] == "scripts/model_servers/stop_local_vision_server.ps1"
     assert profile["pid_file"] == "logs/learn-grounding-vista-4b-baseline-server.pid"
-    assert profile["port"] == 1244
+    assert profile["port"] == 13244
     assert profile["profile_id"] not in execute_defaults
     assert profile["artifact_is_authorization"] is False
     assert profile["execute_binding_enabled"] is False

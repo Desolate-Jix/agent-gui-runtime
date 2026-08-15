@@ -820,21 +820,34 @@ test("human review revision excludes only durable evidence projections", () => {
 
   const materialized = initial.snapshot();
   materialized.nodes[0].evidence = {
-    source_screenshot_path: "artifacts/interface-workflow-reviews/fixture/source.png",
-    overlay_image_path: "artifacts/interface-workflow-reviews/fixture/overlay.png",
+    source_screenshot_path: "artifacts/interface-workflow-reviews/fixture/node-evidence/node_list/source.png",
+    overlay_image_path: "artifacts/interface-workflow-reviews/fixture/node-evidence/node_list/overlay.png",
+    review_revision_source_screenshot_path: "artifacts/interface-workflow-reviews/fixture/source.png",
+    review_revision_fused_overlay_path: "",
+    review_revision_human_review_overlay_path: "",
+    review_revision_numbered_overlay_path: "",
   };
   materialized.nodes[0].editable_review_source_path = "artifacts/node-review-sources/node_list.json";
   materialized.nodes[0].source_paths = [
     "artifacts/node-review-sources/node_list.json",
-    "artifacts/interface-workflow-reviews/fixture/source.png",
+    "artifacts/interface-workflow-reviews/fixture/node-evidence/node_list/source.png",
   ];
 
   const restored = createInterfaceWorkflowReviewState(materialized);
   restored.confirmNodeHumanReview("node_list");
-  assert.deepEqual(
-    restored.snapshot().nodes[0].human_review_confirmation.revision,
-    confirmedRevision,
+  const restoredRevision = restored.snapshot().nodes[0].human_review_confirmation.revision;
+  assert.notDeepEqual(restoredRevision, confirmedRevision);
+  assert.equal(
+    restoredRevision.node.evidence.source_screenshot_path,
+    "artifacts/interface-workflow-reviews/fixture/source.png",
   );
+  assert.equal(
+    restoredRevision.node.evidence.overlay_image_path,
+    "artifacts/interface-workflow-reviews/fixture/node-evidence/node_list/overlay.png",
+  );
+  assert.deepEqual(restoredRevision.node.source_paths, [
+    "artifacts/interface-workflow-reviews/fixture/node-evidence/node_list/source.png",
+  ]);
 });
 
 test("panel save orchestration commits operation edits before binding human review", () => {
@@ -1363,6 +1376,29 @@ test("panel asset switch invalidates and clears the previous editor selection", 
   assert.equal(sandbox.snapshot.inspectorClosed, true);
   assert.equal(sandbox.snapshot.correctionOpen, false);
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.snapshot.edits)), { regions: {}, actions: {} });
+});
+
+test("the learning draft box editor click handler does not pass the browser event as an image path", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const vm = require("node:vm");
+  const panelSource = fs.readFileSync(
+    path.join(__dirname, "../../app/web_panel/panel.js"),
+    "utf8",
+  );
+  const registration = panelSource.match(
+    /on\("learningDraftOpenBoxEditorBtn",\s*"click",\s*[^;]+\);/,
+  )?.[0];
+  assert.ok(registration, "box editor click registration must exist");
+  const opened = { value: "not_called" };
+  const sandbox = {
+    console,
+    openLearningDraftBoxEditor: (value) => { opened.value = value; },
+    on: (_id, _eventName, handler) => { sandbox.handler = handler; },
+  };
+  vm.runInNewContext(`${registration};`, sandbox);
+  sandbox.handler({ type: "click" });
+  assert.equal(opened.value, undefined);
 });
 
 test("graph linking records source then target without exposing control ids", () => {

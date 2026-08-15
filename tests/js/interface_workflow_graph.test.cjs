@@ -401,6 +401,80 @@ test("force layout keeps interface nodes separated after settling", () => {
   }
 });
 
+test("rejects overlapping retained positions before the first simulation frame", () => {
+  const graph = branchingGraph();
+  graph.edges = [
+    {
+      edge_id: "detail_to_filters",
+      source_node_id: "detail",
+      target_node_id: "filters",
+      display_name: "Open filters",
+      action_type: "open_detail",
+    },
+  ];
+  const topology = buildInterfaceWorkflowTopology(graph);
+  const simulation = createInterfaceWorkflowSimulation(
+    topology,
+    { width: 720, height: 520 },
+    {
+      previousLayout: {
+        nodes: [
+          { id: "interface::home", x: 360, y: 260 },
+          { id: "interface::detail", x: 360, y: 260 },
+          { id: "interface::filters", x: 360, y: 490 },
+        ],
+      },
+    },
+  );
+
+  for (let leftIndex = 0; leftIndex < simulation.layout.nodes.length; leftIndex += 1) {
+    for (
+      let rightIndex = leftIndex + 1;
+      rightIndex < simulation.layout.nodes.length;
+      rightIndex += 1
+    ) {
+      const left = simulation.layout.nodes[leftIndex];
+      const right = simulation.layout.nodes[rightIndex];
+      assert.ok(
+        Math.hypot(left.x - right.x, left.y - right.y)
+          >= (Math.max(left.width, left.height) + Math.max(right.width, right.height)) / 2,
+        `${left.id} initially overlaps ${right.id}`,
+      );
+    }
+  }
+});
+
+test("initial simulation bounds include every retained node before fit", () => {
+  const topology = buildInterfaceWorkflowTopology(branchingGraph());
+  const simulation = createInterfaceWorkflowSimulation(
+    topology,
+    { width: 720, height: 520 },
+    {
+      previousLayout: {
+        nodes: [
+          { id: "interface::home", x: 360, y: 260 },
+          { id: "interface::detail", x: 120, y: 120 },
+          { id: "interface::filters", x: 600, y: 680 },
+        ],
+      },
+    },
+  );
+  const filters = simulation.layout.nodes.find((node) => node.id === "interface::filters");
+  const boundsBottom = simulation.layout.bounds.y + simulation.layout.bounds.height;
+  const transform = fitInterfaceWorkflowLayout(
+    simulation.layout.bounds,
+    { width: 720, height: 520 },
+    24,
+  );
+  const fittedBottom = (filters.y + filters.height / 2) * transform.zoom + transform.pan.y;
+
+  assert.ok(
+    boundsBottom >= filters.y + filters.height / 2 + 48,
+    "retained target extends beyond the initial simulation bounds",
+  );
+  assert.ok(fittedBottom <= 520 - 24, "fit leaves the retained target below the canvas");
+});
+
 test("hover projection highlights only the hovered interface and one-hop neighbours", () => {
   const graph = branchingGraph();
   graph.nodes.push({ node_id: "orphan", label: "Orphan" });

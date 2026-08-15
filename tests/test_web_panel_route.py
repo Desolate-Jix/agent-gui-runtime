@@ -1141,7 +1141,10 @@ def test_learning_draft_box_save_refreshes_parent_before_closing_editor() -> Non
     assert "discoverRelatedSidecars: false" in panel_js
     assert "supersedePendingLoad: true" in panel_js
     assert "skipReviewRender: true" in panel_js
-    assert "workflow evidence refresh failed" in save_body
+    assert "if (!refreshed?.review)" in save_body
+    assert "binding === true" in refresh_body
+    assert 'binding === "not_bound"' in refresh_body
+    assert "return null;" in refresh_body
 
 
 def test_interface_workflow_exposes_manual_current_evidence_refresh() -> None:
@@ -1229,6 +1232,15 @@ def test_learning_draft_box_editor_exposes_agent_semantics_and_destination_contr
         "imageInspectorRiskLevel",
     ):
         assert f'id="{control_id}"' in index_html
+
+
+def test_learning_draft_box_editor_exposes_blocked_external_apply_action() -> None:
+    index_html = Path("app/web_panel/index.html").read_text(encoding="utf-8")
+
+    action_select_start = index_html.index('id="imageInspectorActionTypeSelect"')
+    action_select_end = index_html.index("</select>", action_select_start)
+    action_select = index_html[action_select_start:action_select_end]
+    assert '<option value="open_external_apply">open_external_apply (blocked)</option>' in action_select
 
 
 def test_learning_draft_panel_exposes_reviewed_memory_execute_acceptance_controls() -> None:
@@ -2406,7 +2418,7 @@ def test_web_panel_applies_model_profile_to_temp_configs(tmp_path, monkeypatch) 
                 "profile_id": "demo_observe",
                 "label": "Demo Observe",
                 "model_name": "demo.gguf",
-                "endpoint": "http://127.0.0.1:1240/v1/chat/completions",
+                "endpoint": "http://127.0.0.1:13240/v1/chat/completions",
                 "runtime": "llama_cpp",
                 "output_contract": "vision_regions_v1",
                 "start_script": "scripts/start.ps1",
@@ -2458,7 +2470,7 @@ def test_web_panel_model_test_writes_model_io_trace(monkeypatch) -> None:
             {
                 "profile_id": "demo_observe",
                 "model_name": "demo-model",
-                "endpoint": "http://127.0.0.1:1240/v1",
+                "endpoint": "http://127.0.0.1:13240/v1",
             }
         ],
     )
@@ -3114,7 +3126,7 @@ def test_web_panel_inspects_failed_screen_reading_trace(tmp_path) -> None:
                     "goal": "understand the current interface",
                     "provider_mode": "local_understanding",
                 },
-                "error": "failed to reach local vision endpoint http://127.0.0.1:1240/v1/chat/completions",
+                "error": "failed to reach local vision endpoint http://127.0.0.1:13240/v1/chat/completions",
                 "model_io": {
                     "contract_version": "model_io_trace_v1",
                     "status": "failed",
@@ -4597,11 +4609,11 @@ def test_learning_draft_history_sources_load_during_panel_boot() -> None:
 def test_panel_learning_review_assets_use_current_cache_key() -> None:
     panel_html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
 
-    assert "/panel/assets/panel.css?v=20260810-library-delete-1" in panel_html
+    assert "/panel/assets/panel.css?v=20260815-learning-screenshot-visibility-1" in panel_html
     assert "/panel/assets/learning_draft_editor.js?v=20260729-box-editor-status-1" in panel_html
     assert "/panel/assets/learning_workflow_review.js?v=20260810-review-pages-4" in panel_html
-    assert "/panel/assets/interface_workflow_graph.js?v=20260812-workflow-i18n-1" in panel_html
-    assert "/panel/assets/panel.js?v=20260812-workflow-i18n-1" in panel_html
+    assert "/panel/assets/interface_workflow_graph.js?v=20260815-workflow-layout-bounds-1" in panel_html
+    assert "/panel/assets/panel.js?v=20260815-learning-screenshot-visibility-2" in panel_html
 
 
 def test_learning_draft_history_visibly_separates_current_and_pinned_sources() -> None:
