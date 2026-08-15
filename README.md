@@ -3562,17 +3562,3 @@ The v60/v62 boundary pass defines Stage1 bars/regions as parent containers and S
 The v61 Stage1 pass fixes a generic false-bottom-bar case found on Python.org: bottom-like content that is narrow, not left-aligned, and continuous with `primary_area` / `main_content` is merged back into the main region instead of being treated as a real `bottom_bar`. The report records this as `stage1_structure.zone_corrections[*].correction=bottom_bar_content_merged_into_primary_region` and `zone_correction_status=passed_with_correction`, so it is not confused with a clean Stage1 pass. Python.org now passes the Stage1 gate and reaches Stage2; AppleMusic and QQ keep their previous region/item counts. This does not claim that Python.org internal numbering is good enough yet; it only proves the Stage1 bar-selection blocker was removed without regressing the protected traces.
 
 The v100 page-detail review-emphasis pass adds a display-only taxonomy for Learning Mode page-detail candidates. Fused review boxes now carry `page_detail_review_category` and `visual_emphasis`, so background/empty review regions, boundary review regions, and partial-visible items render as low-emphasis helper boxes while primary content remains visually distinct. Preview reports now include `primary_region_count`, `review_candidate_region_count`, and `low_emphasis_region_count`. Latest artifacts: Python.org `logs\benchmarks\learn_two_stage_python_v100_page_detail_review_emphasis\learn_page_detail_candidate_preview.png`, AppleMusic `logs\benchmarks\learn_two_stage_applemusic_v100_page_detail_review_emphasis\learn_page_detail_candidate_preview.png`, QQ `logs\benchmarks\learn_two_stage_qq_v100_page_detail_review_emphasis\learn_page_detail_candidate_preview.png`. ChatGPT audit `artifacts\chatgpt_reports\stage2_v100_page_detail_review_emphasis_audit_result.json` gives overall `CONDITIONAL PASS`: AppleMusic `PASS`, Python.org and QQ `CONDITIONAL PASS`. This remains display-only/review-only evidence, not Execute authorization, Runtime PathGraph promotion, recognition accuracy, or E2E success.
-
-## SEEK Same-Site Quick Apply Demo (2026-08-15)
-
-This 16-second recording replays two reviewed operational memories through the real Agent execution path, not the learning path. Both transitions use fresh capture, current UIA grounding, dry-run approval, the gated action API, Windows `SendInput`, and post-click verification: `open_detail` moves the SEEK list to job `93615952`, then `open_apply_flow` reaches the same-origin Choose documents entry.
-
-The two memory-backed transitions were sequenced for the demo. The recording therefore demonstrates framework-executed actions, but does not claim autonomous end-to-end traversal of the saved workflow graph.
-
-The run stopped at the SEEK Choose documents entry. No field fill, typing, upload, Continue/Next, or final submit/send/confirm/payment occurred.
-
-> **Privacy note:** Personal information has been removed from the public recording. The published derivative applies a fail-closed opaque mask before the first possible apply-entry frame and passed a complete 160-frame review with zero unmasked pixels in the protected region. Raw recordings and the rejected first-pass derivative are not published.
-
-![Real Agent SEEK three-interface demo with personal information removed](artifacts/demos/seek_three_interface_real_agent_demo_16s_fail_closed.gif)
-
-The published GIF has SHA-256 `80ab0a5055d0e700f009642bd414ffdbfef1426307537dfd976c822de9d88b4f`. The recording and action traces are evidence, not authorization.
