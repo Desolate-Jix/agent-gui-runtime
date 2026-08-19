@@ -236,34 +236,49 @@ def _pinned_caption_config_source(weights_path: Path) -> Path:
     return weights_path / "icon_caption_florence"
 
 
-def _load_pinned_caption_model(weights_path: Path, hub_cache: Path) -> dict[str, Any]:
+def _load_pinned_caption_model(
+    weights_path: Path,
+    hub_cache: Path,
+    *,
+    torch_module: Any | None = None,
+    auto_processor: Any | None = None,
+    auto_config: Any | None = None,
+    auto_model: Any | None = None,
+) -> dict[str, Any]:
     _enable_offline_inference(hub_cache)
-    try:
-        import torch
-        from transformers import AutoConfig, AutoModelForCausalLM, AutoProcessor
-    except ImportError as exc:
-        raise OmniparserProviderError("torch_import_failed", f"Pinned caption runtime dependencies could not be imported: {exc}") from exc
-    if not torch.cuda.is_available():
+    if any(value is None for value in (torch_module, auto_processor, auto_config, auto_model)):
+        try:
+            import torch
+            from transformers import AutoConfig, AutoModelForCausalLM, AutoProcessor
+        except ImportError as exc:
+            raise OmniparserProviderError("torch_import_failed", f"Pinned caption runtime dependencies could not be imported: {exc}") from exc
+        torch_module = torch
+        auto_processor = AutoProcessor
+        auto_config = AutoConfig
+        auto_model = AutoModelForCausalLM
+    if not torch_module.cuda.is_available():
         raise OmniparserProviderError("runtime_preflight", "CUDA is unavailable for pinned caption model loading")
     try:
-        processor = AutoProcessor.from_pretrained(
+        processor = auto_processor.from_pretrained(
             FLORENCE_PROCESSOR_REPOSITORY,
             revision=FLORENCE_PROCESSOR_REVISION,
             trust_remote_code=True,
             local_files_only=True,
         )
-        config = AutoConfig.from_pretrained(
+        config = auto_config.from_pretrained(
             str(_pinned_caption_config_source(weights_path)),
             revision=FLORENCE_MODEL_REVISION,
+            code_revision=FLORENCE_MODEL_REVISION,
             trust_remote_code=True,
             local_files_only=True,
         )
-        model = AutoModelForCausalLM.from_pretrained(
+        model = auto_model.from_pretrained(
             str(_pinned_caption_config_source(weights_path)),
             config=config,
+            code_revision=FLORENCE_MODEL_REVISION,
             trust_remote_code=True,
             local_files_only=True,
-            torch_dtype=torch.float16,
+            torch_dtype=torch_module.float16,
         ).to("cuda")
     except (OSError, ValueError, RuntimeError) as exc:
         raise OmniparserProviderError("dependency_missing", f"Pinned offline Florence load failed: {exc}") from exc

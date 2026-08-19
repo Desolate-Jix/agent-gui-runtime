@@ -174,3 +174,59 @@ def test_license_provenance_records_the_root_cc_by_source_without_claiming_mit(t
     assert provenance["official_code"]["root_license"] == "CC-BY-4.0"
     assert provenance["official_code"]["status"] == "ambiguous"
     assert "MIT" not in provenance["official_code"]
+
+
+
+def test_pinned_caption_loader_passes_exact_external_code_revision_to_config_and_model(tmp_path) -> None:
+    weights = tmp_path / "weights"
+    (weights / "icon_caption_florence").mkdir(parents=True)
+    calls: list[tuple[str, object, dict[str, object]]] = []
+
+    class FakeCuda:
+        @staticmethod
+        def is_available() -> bool:
+            return True
+
+    class FakeTorch:
+        cuda = FakeCuda()
+        float16 = "float16"
+
+    class FakeProcessor:
+        @classmethod
+        def from_pretrained(cls, source, **kwargs):
+            calls.append(("processor", source, kwargs))
+            return "processor"
+
+    class FakeConfig:
+        @classmethod
+        def from_pretrained(cls, source, **kwargs):
+            calls.append(("config", source, kwargs))
+            return "config"
+
+    class FakeModel:
+        @classmethod
+        def from_pretrained(cls, source, **kwargs):
+            calls.append(("model", source, kwargs))
+
+            class Loaded:
+                def to(self, device):
+                    assert device == "cuda"
+                    return "model"
+
+            return Loaded()
+
+    result = runner._load_pinned_caption_model(
+        weights,
+        tmp_path / "hub",
+        torch_module=FakeTorch(),
+        auto_processor=FakeProcessor,
+        auto_config=FakeConfig,
+        auto_model=FakeModel,
+    )
+
+    assert result == {"model": "model", "processor": "processor"}
+    config_call = next(call for call in calls if call[0] == "config")
+    model_call = next(call for call in calls if call[0] == "model")
+    assert config_call[2]["code_revision"] == runner.FLORENCE_MODEL_REVISION
+    assert model_call[2]["code_revision"] == runner.FLORENCE_MODEL_REVISION
+    assert model_call[2]["local_files_only"] is True
