@@ -20,6 +20,9 @@ ERROR_CODES = {
     "invalid_bbox",
     "screenshot_sha_mismatch",
     "inference_failed",
+    "weights_hash_mismatch",
+    "image_read_failed",
+    "torch_import_failed",
 }
 
 

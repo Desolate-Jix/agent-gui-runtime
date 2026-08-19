@@ -33,7 +33,10 @@
     "installed_state": "probe_required",
     "probe_command": "tools/omniparser-v2.0.1/.venv/Scripts/python.exe scripts/run_omniparser_learn_smoke.py --input artifacts/demos/seek_three_interface_contact_sheet.png",
     "resource_group": "gpu_vision",
-    "minimum_free_gpu_gib": 8
+    "minimum_free_gpu_gib": 8,
+    "offline_inference_required": true,
+    "minimum_warm_repetitions": 3,
+    "weight_manifest_required": true
   },
   "official_code": {
     "repository": "https://github.com/microsoft/OmniParser.git",
@@ -45,5 +48,9 @@
     "code_path": "tools/omniparser-v2.0.1",
     "weights_path": "models/omniparser/v2.0.1/weights",
     "runtime_path": "tools/omniparser-v2.0.1/.venv"
+  },
+  "florence_offline_revisions": {
+    "processor": "5ca5edf5bd017b9919c05d08aebef5e4c7ac3bac",
+    "model": "f6c1a25888ffc1d945ee8a1a77ac833c7303d46e"
   }
 }

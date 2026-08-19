@@ -95,7 +95,13 @@ def test_learn_mode_model_profiles_separate_parser_and_grounding_roles() -> None
     assert omniparser["provider_contract"] == "screen_parser_result_v1"
     assert omniparser["runtime_probe"]["required"] is True
     assert omniparser["runtime_probe"]["installed_state"] == "probe_required"
+    assert omniparser["runtime_probe"]["offline_inference_required"] is True
+    assert omniparser["runtime_probe"]["minimum_warm_repetitions"] == 3
     assert omniparser["official_code"]["tag"] == "v.2.0.1"
+    assert omniparser["florence_offline_revisions"] == {
+        "processor": "5ca5edf5bd017b9919c05d08aebef5e4c7ac3bac",
+        "model": "f6c1a25888ffc1d945ee8a1a77ac833c7303d46e",
+    }
     assert len(omniparser["official_code"]["commit"]) == 40
     assert omniparser["expected_paths"]["code_path"].startswith("tools/")
     assert omniparser["expected_paths"]["weights_path"].startswith("models/")

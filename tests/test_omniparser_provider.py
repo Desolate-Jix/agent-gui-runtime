@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from hashlib import sha256
+from pathlib import Path
 
 import pytest
 
@@ -89,3 +90,87 @@ def test_sha256_file_binds_the_exact_screenshot_bytes(tmp_path) -> None:
     screenshot.write_bytes(b"privacy-audited-static-image")
 
     assert sha256_file(screenshot) == sha256(b"privacy-audited-static-image").hexdigest()
+
+
+import importlib.util
+
+
+_RUNNER_SPEC = importlib.util.spec_from_file_location(
+    "run_omniparser_learn_smoke",
+    Path("scripts/run_omniparser_learn_smoke.py"),
+)
+assert _RUNNER_SPEC is not None and _RUNNER_SPEC.loader is not None
+runner = importlib.util.module_from_spec(_RUNNER_SPEC)
+_RUNNER_SPEC.loader.exec_module(runner)
+
+
+def test_weight_manifest_rejects_a_hash_mismatch_before_inference(tmp_path) -> None:
+    weight = tmp_path / "icon_detect" / "model.pt"
+    weight.parent.mkdir()
+    weight.write_bytes(b"official-weight")
+
+    with pytest.raises(OmniparserProviderError, match="weights_hash_mismatch") as exc_info:
+        runner._verify_weight_manifest(
+            tmp_path,
+            {"icon_detect/model.pt": "0" * 64},
+        )
+
+    assert exc_info.value.code == "weights_hash_mismatch"
+
+
+def test_florence_offline_cache_requires_both_exact_revisions(tmp_path) -> None:
+    with pytest.raises(OmniparserProviderError, match="dependency_missing") as exc_info:
+        runner._require_florence_offline_assets(tmp_path)
+
+    assert exc_info.value.code == "dependency_missing"
+
+
+def test_preflight_rejects_a_missing_process_inspector() -> None:
+    with pytest.raises(OmniparserProviderError, match="dependency_missing") as exc_info:
+        runner._resident_compute_models(psutil_module=None, current_pid=42)
+
+    assert exc_info.value.code == "dependency_missing"
+
+
+def test_benchmark_mode_requires_three_warm_repetitions() -> None:
+    with pytest.raises(OmniparserProviderError, match="protocol_invalid"):
+        runner._validate_warm_repetitions(2)
+
+    assert runner._validate_warm_repetitions(3) == 3
+
+
+def test_per_run_metrics_include_element_interactivity_and_invalid_bbox_counts() -> None:
+    metrics = runner._element_metrics(
+        [
+            {"bbox": [0.1, 0.2, 0.3, 0.4], "interactivity": True},
+            {"bbox": [0.4, 0.2, 0.3, 0.5], "interactivity": False},
+        ]
+    )
+
+    assert metrics == {"element_count": 2, "interactive_count": 1, "invalid_bbox_count": 1}
+
+
+
+def test_pinned_caption_config_uses_local_weight_directory_with_exact_revision(tmp_path) -> None:
+    weights = tmp_path / "weights"
+    expected = weights / "icon_caption_florence"
+
+    assert runner._pinned_caption_config_source(weights) == expected
+
+
+
+def test_license_provenance_records_the_root_cc_by_source_without_claiming_mit(tmp_path) -> None:
+    code = tmp_path / "code"
+    weights = tmp_path / "weights"
+    (code).mkdir()
+    (weights / "icon_detect").mkdir(parents=True)
+    (weights / "icon_caption_florence").mkdir()
+    (code / "LICENSE").write_text("Attribution 4.0 International", encoding="utf-8")
+    (weights / "icon_detect" / "LICENSE").write_text("AGPL", encoding="utf-8")
+    (weights / "icon_caption_florence" / "LICENSE").write_text("MIT License", encoding="utf-8")
+
+    provenance = runner._license_provenance(code, weights)
+
+    assert provenance["official_code"]["root_license"] == "CC-BY-4.0"
+    assert provenance["official_code"]["status"] == "ambiguous"
+    assert "MIT" not in provenance["official_code"]
