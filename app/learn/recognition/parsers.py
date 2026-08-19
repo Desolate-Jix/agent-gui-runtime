@@ -18,6 +18,7 @@ def parse_existing_evidence_to_inventory(bundle: dict[str, Any]) -> list[dict[st
     items.extend(_parse_vision_regions(sources.get("vision") if isinstance(sources.get("vision"), dict) else {}, image_size))
     items.extend(_parse_calibrated_targets(sources.get("calibrated_targets") if isinstance(sources.get("calibrated_targets"), dict) else {}))
     items.extend(_parse_execute_candidate_result(sources.get("execute_candidate_result") if isinstance(sources.get("execute_candidate_result"), dict) else {}))
+    _attach_parser_candidate_contract(items, bundle=bundle, image_size=image_size)
     _attach_cross_evidence(items)
     _attach_parser_candidate_contract(items, bundle=bundle, image_size=image_size)
     return items
@@ -584,6 +585,18 @@ def _can_support_grounding(item: dict[str, Any]) -> bool:
         return False
     if str(item.get("item_type") or "").casefold() not in {"actionable", "form_field"}:
         return False
+    sources = item.get("source_evidence") if isinstance(item.get("source_evidence"), list) else []
+    if "omniparser" in {str(source).casefold() for source in sources}:
+        candidate = (
+            item.get("parser_candidate")
+            if isinstance(item.get("parser_candidate"), dict)
+            else {}
+        )
+        if (
+            str(candidate.get("schema_version") or "") != "parser_candidate_v1"
+            or parser_candidate_freshness_block(candidate)
+        ):
+            return False
     evidence = item.get("interactable_evidence") if isinstance(item.get("interactable_evidence"), dict) else {}
     return any(
         bool(evidence.get(key))

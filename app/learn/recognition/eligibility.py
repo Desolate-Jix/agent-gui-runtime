@@ -42,6 +42,16 @@ def evaluate_grounding_eligibility(item: dict[str, Any]) -> dict[str, Any]:
         if isinstance(item.get("parser_candidate"), dict)
         else None
     )
+    has_omniparser_source = "omniparser" in sources
+    if has_omniparser_source and (
+        not parser_candidate
+        or str(parser_candidate.get("schema_version") or "")
+        != "parser_candidate_v1"
+    ):
+        return _blocked(
+            "omniparser_requires_canonical_parser_candidate",
+            evidence_strength=_evidence_strength(sources, interactable),
+        )
     parser_candidate_block = (
         parser_candidate_freshness_block(parser_candidate)
         if parser_candidate
@@ -164,7 +174,10 @@ def parser_candidate_freshness_block(candidate: dict[str, Any]) -> str:
     )
     if _positive_int(image_size.get("width")) <= 0 or _positive_int(image_size.get("height")) <= 0:
         return "parser_candidate_invalid_image_size"
-    is_omniparser = str(candidate.get("source_type") or "").casefold() == "omniparser"
+    is_omniparser = (
+        str(candidate.get("source_type") or "").casefold() == "omniparser"
+        or str(candidate.get("provider") or "").casefold() == "omniparser"
+    )
     if is_omniparser and str(candidate.get("coordinate_space") or "") not in {
         "image_normalized_xyxy",
         "image_pixel_xyxy",

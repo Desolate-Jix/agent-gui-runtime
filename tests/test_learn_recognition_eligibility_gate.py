@@ -58,17 +58,45 @@ def test_eligibility_gate_allows_interactable_actions_but_not_as_authorization()
                 "evidence_level": "omniparser_element",
                 "interactable_evidence": {"omniparser_interactable": True},
             },
+            {
+                "item_id": "canonical_cover_letter",
+                "label": "Canonical cover letter",
+                "item_type": "form_field",
+                "role": "input",
+                "bbox": {"x": 10, "y": 20, "w": 200, "h": 80},
+                "source_evidence": ["omniparser"],
+                "evidence_level": "omniparser_interactable",
+                "interactable_evidence": {"omniparser_interactable": True},
+                "parser_candidate": {
+                    "schema_version": "parser_candidate_v1",
+                    "source_type": "omniparser",
+                    "provider_contract_version": "screen_parser_result_v1",
+                    "provider_status": "success",
+                    "provider": "omniparser",
+                    "profile_id": "omniparser_v2",
+                    "model_revision": "v.2.0.1",
+                    "capture_id": "capture-17",
+                    "source_run_id": "omni-run-17",
+                    "screenshot_sha256": "a" * 64,
+                    "coordinate_space": "image_pixel_xyxy",
+                    "image_size": {"width": 800, "height": 600},
+                    "current_image_size": {"width": 800, "height": 600},
+                    "bbox": {"x": 10, "y": 20, "w": 200, "h": 80},
+                    "freshness": {"same_screenshot": True, "stale": False},
+                },
+            },
         ]
     )
 
-    assert [item["grounding_eligible"] for item in gated] == [True, True]
-    assert [item["review_only"] for item in gated] == [False, False]
+    assert [item["grounding_eligible"] for item in gated] == [True, False, True]
+    assert [item["review_only"] for item in gated] == [False, True, False]
     assert gated[0]["evidence_strength"] == "single_interactable_source"
     assert gated[0]["eligible_for"] == ["roi_grounding"]
     assert gated[0]["artifact_is_authorization"] is False
     assert gated[0]["execute_binding_enabled"] is False
     assert gated[0]["real_action_requires_gate"] is True
-    assert gated[1]["evidence_strength"] == "single_interactable_source"
+    assert gated[1]["grounding_block_reason"] == "omniparser_requires_canonical_parser_candidate"
+    assert gated[2]["evidence_strength"] == "single_interactable_source"
 
 
 def test_eligibility_gate_marks_multi_source_and_calibrated_strength():

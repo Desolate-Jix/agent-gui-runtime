@@ -597,3 +597,57 @@ def test_omniparser_requires_canonical_provider_metadata_for_grounding() -> None
         assert item["parser_candidate"]["grounding_eligible"] is False
         assert item["parser_candidate"]["grounding_block_reason"] == expected_reason
         assert classification["accepted_for_grounding"] == []
+
+
+def test_invalid_omniparser_never_supplies_cross_evidence_to_vision() -> None:
+    invalid_cases = (
+        ("status", "failed"),
+        ("coordinate_space", "viewport_xyxy"),
+        ("capture_id", ""),
+    )
+    for field, value in invalid_cases:
+        bundle = _canonical_omniparser_bundle()
+        bundle["sources"]["omniparser"][field] = value
+        bundle["sources"]["vision"] = {
+            "regions": [
+                {
+                    "region_id": "vision_search",
+                    "label": "Search",
+                    "role": "button",
+                    "bbox": {"x": 100, "y": 160, "w": 100, "h": 40},
+                }
+            ]
+        }
+
+        items = parse_existing_evidence_to_inventory(bundle)
+        vision_item = next(item for item in items if item["item_id"] == "vision_search")
+        classification = classify_inventory_items(items)
+
+        assert vision_item["source_evidence"] == ["vision"]
+        assert vision_item["evidence_level"] == "semantic_region_only"
+        assert vision_item["interactable_evidence"]["cross_evidence_overlap"] is False
+        assert vision_item["metadata"].get("cross_evidence") is None
+        assert classification["accepted_for_grounding"] == []
+
+    valid_bundle = _canonical_omniparser_bundle()
+    valid_bundle["sources"]["vision"] = {
+        "regions": [
+            {
+                "region_id": "vision_search_valid",
+                "label": "Search",
+                "role": "button",
+                "bbox": {"x": 100, "y": 160, "w": 100, "h": 40},
+            }
+        ]
+    }
+    valid_items = parse_existing_evidence_to_inventory(valid_bundle)
+    valid_vision = next(
+        item for item in valid_items if item["item_id"] == "vision_search_valid"
+    )
+    valid_classification = classify_inventory_items(valid_items)
+
+    assert valid_vision["source_evidence"] == ["vision", "omniparser"]
+    assert valid_vision["interactable_evidence"]["cross_evidence_overlap"] is True
+    assert "Search" in {
+        item["label"] for item in valid_classification["accepted_for_grounding"]
+    }
