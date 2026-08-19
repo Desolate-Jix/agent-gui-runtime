@@ -90,7 +90,17 @@ def test_learn_mode_model_profiles_separate_parser_and_grounding_roles() -> None
     profiles = {path.stem: json.loads(path.read_text(encoding="utf-8")) for path in PROFILE_DIR.glob("learn_mode_*.json")}
 
     assert profiles["learn_mode_qwen3_vl_8b"]["grounding_role"] == "not_used_for_final_point"
-    assert profiles["learn_mode_omniparser_v2"]["parser_role"] == "ui_element_parser"
+    omniparser = profiles["learn_mode_omniparser_v2"]
+    assert omniparser["parser_role"] == "ui_element_parser"
+    assert omniparser["provider_contract"] == "screen_parser_result_v1"
+    assert omniparser["runtime_probe"]["required"] is True
+    assert omniparser["runtime_probe"]["installed_state"] == "probe_required"
+    assert omniparser["official_code"]["tag"] == "v.2.0.1"
+    assert len(omniparser["official_code"]["commit"]) == 40
+    assert omniparser["expected_paths"]["code_path"].startswith("tools/")
+    assert omniparser["expected_paths"]["weights_path"].startswith("models/")
+    assert omniparser["launchable"] is False
+    assert omniparser["download_status"] == "not_downloaded"
     assert profiles["learn_mode_uground_2b"]["grounding_role"] == "roi_point_grounding"
     assert profiles["learn_mode_uground_7b"]["grounding_role"] == "roi_point_grounding"
     assert profiles["learn_mode_showui_2b"]["coordinate_output"] == "normalized_0_1_point_requires_coordinate_transform"

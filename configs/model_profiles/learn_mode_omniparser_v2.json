@@ -26,5 +26,24 @@
   "execute_binding_enabled": false,
   "real_action_requires_gate": true,
   "final_submit_forbidden": true,
-  "notes": "Metadata-only provider candidate. Parser output is screen inventory evidence, not click authorization."
+  "notes": "Optional learn-only parser provider. The profile declares expected paths and a runtime probe, not installed-state truth. Output is review-only evidence and never click authorization.",
+  "provider_contract": "screen_parser_result_v1",
+  "runtime_probe": {
+    "required": true,
+    "installed_state": "probe_required",
+    "probe_command": "tools/omniparser-v2.0.1/.venv/Scripts/python.exe scripts/run_omniparser_learn_smoke.py --input artifacts/demos/seek_three_interface_contact_sheet.png",
+    "resource_group": "gpu_vision",
+    "minimum_free_gpu_gib": 8
+  },
+  "official_code": {
+    "repository": "https://github.com/microsoft/OmniParser.git",
+    "tag": "v.2.0.1",
+    "commit": "b0d5c9f5701f7e2be4771872e6e928da77759df3",
+    "license_url": "https://github.com/microsoft/OmniParser/blob/v.2.0.1/LICENSE"
+  },
+  "expected_paths": {
+    "code_path": "tools/omniparser-v2.0.1",
+    "weights_path": "models/omniparser/v2.0.1/weights",
+    "runtime_path": "tools/omniparser-v2.0.1/.venv"
+  }
 }
