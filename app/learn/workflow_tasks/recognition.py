@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 from copy import deepcopy
 from pathlib import Path
@@ -80,6 +81,11 @@ def run_recognition_task(
             "final_submit_forbidden": True,
             "real_action_requires_gate": True,
         }
+        provider_summary = _omniparser_provider_summary(
+            observe_bundle=observe_bundle,
+            result=result,
+        )
+        _attach_provider_summary_to_draft(result, provider_summary)
         model_provenance = _model_provenance(
             observe_bundle,
             project_root=root,
@@ -113,6 +119,7 @@ def run_recognition_task(
             "source_after_review": "mixed" if actual_model_call else "fixture_only",
             "counts_as_pure_model_generated": False,
             "model_provenance": model_provenance,
+            "provider_summary": provider_summary,
             "panel_learning_studio": {
                 "contract_version": "panel_learning_recognition_trial_v1",
                 "draft_graph_preview": True,
@@ -168,6 +175,7 @@ def run_recognition_task(
             "real_action_requires_gate": True,
             "safety": safety,
             "learn_all_targets": review_box_status,
+            "provider_summary": provider_summary,
             "summary": {
                 "app_name": task_input.app_name,
                 "state_hint": task_input.state_hint,
@@ -1001,6 +1009,177 @@ def _calibrated_target_grounding(
             "coordinate_source": _text(coordinate_source),
         },
     }
+
+
+def _attach_provider_summary_to_draft(
+    result: dict[str, Any],
+    provider_summary: dict[str, Any],
+) -> None:
+    """保留只读摘要，使加载后的草稿审阅仍可显示 provider 状态。"""
+    draft = result.get("learning_draft")
+    if not isinstance(draft, dict):
+        return
+    page_details = (
+        deepcopy(draft.get("page_details"))
+        if isinstance(draft.get("page_details"), dict)
+        else {}
+    )
+    page_details["provider_summary"] = deepcopy(provider_summary)
+    draft["page_details"] = page_details
+
+
+def _omniparser_provider_summary(
+    *,
+    observe_bundle: dict[str, Any],
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    """将 OmniParser 证据压缩为稳定的只读面板状态，绝不授予执行权限。"""
+    sources = (
+        observe_bundle.get("sources")
+        if isinstance(observe_bundle.get("sources"), dict)
+        else {}
+    )
+    provider_result = (
+        sources.get("omniparser")
+        if isinstance(sources.get("omniparser"), dict)
+        else {}
+    )
+    elements = (
+        provider_result.get("elements")
+        if isinstance(provider_result.get("elements"), list)
+        else []
+    )
+    profile_id = _text(provider_result.get("profile_id"))
+    model_revision = _text(provider_result.get("model_revision"))
+    capture_id = _text(provider_result.get("capture_id"))
+    source_run_id = _text(provider_result.get("source_run_id"))
+    screenshot_sha256 = _text(provider_result.get("screenshot_sha256"))
+    image_size = (
+        provider_result.get("image_size")
+        if isinstance(provider_result.get("image_size"), dict)
+        else {}
+    )
+    coordinate_space = _text(provider_result.get("coordinate_space"))
+    warnings: list[str] = []
+    if not provider_result:
+        warnings.append("provider_result_unavailable")
+    if provider_result and provider_result.get("contract_version") != "screen_parser_result_v1":
+        warnings.append("provider_contract_invalid")
+    for field, value in (
+        ("profile_id", profile_id),
+        ("model_revision", model_revision),
+        ("capture_id", capture_id),
+        ("source_run_id", source_run_id),
+        ("screenshot_sha256", screenshot_sha256),
+    ):
+        if not value:
+            warnings.append(f"missing_{field}")
+    if (
+        _positive_int(image_size.get("width")) <= 0
+        or _positive_int(image_size.get("height")) <= 0
+    ):
+        warnings.append("invalid_image_size")
+    if coordinate_space not in {"image_normalized_xyxy", "image_pixel_xyxy"}:
+        warnings.append("invalid_coordinate_space")
+
+    invalid_bbox_count = sum(
+        not _valid_provider_bbox(
+            item.get("bbox") if isinstance(item, dict) else None,
+            image_size=image_size,
+            coordinate_space=coordinate_space,
+        )
+        for item in elements
+    )
+    if invalid_bbox_count:
+        warnings.append("invalid_element_bbox")
+    grounding_eligible_count = min(
+        len(elements),
+        sum(
+            1
+            for item in _classification_items(result, "accepted_for_grounding")
+            if _has_omniparser_source(item)
+        ),
+    )
+    provider_error = (
+        deepcopy(provider_result.get("error"))
+        if isinstance(provider_result.get("error"), dict)
+        else None
+    )
+    return {
+        "contract_version": "learning_recognition_provider_summary_v1",
+        "provider": _text(provider_result.get("provider")) or "omniparser",
+        "provider_status": _text(provider_result.get("status")) or "not_available",
+        "profile_id": profile_id,
+        "model_revision": model_revision,
+        "capture_id_present": bool(capture_id),
+        "screenshot_sha256_present": bool(screenshot_sha256),
+        "source_run_id_present": bool(source_run_id),
+        "element_total": len(elements),
+        "interactive_evidence_count": sum(
+            1
+            for item in elements
+            if isinstance(item, dict) and bool(item.get("interactivity"))
+        ),
+        "grounding_eligible_count": grounding_eligible_count,
+        "review_only_count": max(len(elements) - grounding_eligible_count, 0),
+        "invalid_bbox_count": invalid_bbox_count,
+        "lineage_complete": not warnings,
+        "lineage_warnings": warnings,
+        "provider_error": provider_error,
+        "execution_authorized": False,
+    }
+
+
+def _classification_items(result: dict[str, Any], field: str) -> list[dict[str, Any]]:
+    classification = (
+        result.get("classification")
+        if isinstance(result.get("classification"), dict)
+        else {}
+    )
+    items = (
+        classification.get(field)
+        if isinstance(classification.get(field), list)
+        else []
+    )
+    return [item for item in items if isinstance(item, dict)]
+
+
+def _has_omniparser_source(item: dict[str, Any]) -> bool:
+    sources = item.get("source_evidence")
+    return isinstance(sources, list) and any(
+        _text(source).casefold() == "omniparser" for source in sources
+    )
+
+
+def _positive_int(value: Any) -> int:
+    return value if isinstance(value, int) and value > 0 else 0
+
+
+def _valid_provider_bbox(
+    bbox: Any,
+    *,
+    image_size: dict[str, Any],
+    coordinate_space: str,
+) -> bool:
+    if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+        return False
+    try:
+        x1, y1, x2, y2 = (float(value) for value in bbox)
+    except (TypeError, ValueError):
+        return False
+    if not all(math.isfinite(value) for value in (x1, y1, x2, y2)):
+        return False
+    max_x = (
+        1.0
+        if coordinate_space == "image_normalized_xyxy"
+        else float(_positive_int(image_size.get("width")))
+    )
+    max_y = (
+        1.0
+        if coordinate_space == "image_normalized_xyxy"
+        else float(_positive_int(image_size.get("height")))
+    )
+    return 0.0 <= x1 < x2 <= max_x and 0.0 <= y1 < y2 <= max_y
 
 
 def _recognition_summary(evidence: dict[str, Any]) -> str:

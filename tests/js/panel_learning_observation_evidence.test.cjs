@@ -53,3 +53,25 @@ test("learning observation evidence preserves actual model classification", () =
     classification,
   );
 });
+
+
+test("learning observation evidence preserves canonical OmniParser results from either observe shape", () => {
+  const topLevel = {
+    contract_version: "screen_parser_result_v1",
+    provider: "omniparser",
+    status: "success",
+    elements: [{ element_id: "omniparser_0001", interactivity: true }],
+  };
+  const fromTopLevel = loadEvidenceBuilder({ omniparser: topLevel })();
+  assert.deepEqual(JSON.parse(JSON.stringify(fromTopLevel.omniparser)), topLevel);
+
+  const nested = {
+    contract_version: "screen_parser_result_v1",
+    provider: "omniparser",
+    status: "failed",
+    error: { code: "weights_missing", details: "weights are unavailable" },
+  };
+  const fromNested = loadEvidenceBuilder({ sources: { omniparser: nested } })();
+  assert.deepEqual(JSON.parse(JSON.stringify(fromNested.omniparser)), nested);
+  assert.deepEqual(topLevel.elements, [{ element_id: "omniparser_0001", interactivity: true }]);
+});

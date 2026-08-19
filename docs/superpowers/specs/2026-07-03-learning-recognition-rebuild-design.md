@@ -345,3 +345,12 @@ The rebuild is not accepted until all are true:
 - Report clearly separates parser/tool pass, model-generated pass, assisted generation, and fixture pass.
 - No live submit, no live safe fill, no Execute authorization from learning artifacts.
 
+## OmniParser Shadow Integration Checkpoint (2026-08-19)
+
+`screen_parser_result_v1` is now a read-only optional parser input for learning recognition. The panel copies only a canonical latest observe result from either `omniparser` or `sources.omniparser` into observation evidence without rewriting the provider payload. Recognition emits `learning_recognition_provider_summary_v1` with provider state, profile/model revision, capture/SHA presence, element/interactivity/grounding/review-only/invalid-bbox counts, lineage warnings, provider error, and `execution_authorized=false`.
+
+The review UI presents these as four deliberately separate facts: provider success, candidates generated, grounding eligibility, and execution authorization. Provider failure or incomplete lineage remains visible; parser interactivity is never presented as click permission and the panel adds no parser Execute control.
+
+The only verified OmniParser smoke is the pinned offline artifact `D:\agent-gui-runtime\artifacts\omniparser-smoke\task2-round2-code-revision-final.json` (SHA-256 `dce1d24fbbf74d17292eebf600328e33815ca871f8a5bad6b741fa438b01ba5a`). It measured a cold run of `1520.17 ms`, warm P50/P95 of `463.84/465.58 ms`, and `43` elements (`35` interactive, `0` invalid bbox). Its input is a contact sheet only: it is not UI-accuracy evidence, live-capture evidence, or live-click evidence.
+
+License review remains intentionally unresolved: the OmniParser repository root states CC-BY-4.0 while its README badge says MIT; detector licensing is AGPL and caption licensing is MIT. Any future use must enforce the exact component manifest rather than treating this checkpoint as a blanket license decision.

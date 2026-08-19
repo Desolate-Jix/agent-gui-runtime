@@ -73,6 +73,7 @@ let seekApplicationEvidence = null;
 let replayAppProfile = null;
 let replayAgentPrompt = null;
 let learningDraftReview = null;
+let learningDraftProviderSummary = null;
 let learningDraftReviewLoadPromise = null;
 let learningDraftReviewLoadSourcePath = "";
 let learningDraftReviewLoadRequestToken = 0;
@@ -10064,6 +10065,14 @@ function buildLearningDraftObservationEvidence() {
     : result.interface_classification && typeof result.interface_classification === "object"
       ? result.interface_classification
       : {};
+  const omniparser = [
+    observeResult.omniparser,
+    nestedGet(observeResult, ["sources", "omniparser"]),
+  ].find((candidate) => (
+    candidate
+    && typeof candidate === "object"
+    && candidate.contract_version === "screen_parser_result_v1"
+  ));
   const hasScreenMapEvidence = screenMapEvidenceCount(screenMap) > 0;
   const hasCalibrationCandidates = calibrationEvidenceTargets.length > 0;
   const hasModelCalibrationEvidence = vistaValidatedCount > 0;
@@ -10112,6 +10121,7 @@ function buildLearningDraftObservationEvidence() {
     screen_summary: result.screen_summary || nestedGet(result, ["screen_map", "summary", "screen_summary"]) || nestedGet(result, ["screen_reading", "screen_summary"]) || observeResult.screen_summary || nestedGet(observeResult, ["screen_map", "summary", "screen_summary"]) || nestedGet(observeResult, ["screen_reading", "screen_summary"]) || "",
     interface_classification: interfaceClassification,
     screen_map: screenMap,
+    ...(omniparser ? { omniparser } : {}),
     coordinate_overlay_path: result.coordinate_overlay_path || nestedGet(result, ["learn_all_targets", "overlay_path"]) || "",
     coordinate_overlay: {
       contract_version: String(coordinateOverlay.contract_version || ""),
@@ -14031,7 +14041,10 @@ async function applyLearningDraftTrialResponse(response, options = {}) {
     }
     setLearningTrialResultPath(trialPath);
     setLearningDraftReviewSourcePath(trialPath);
-    await loadLearningDraftReview({ skipResponse: true });
+    await loadLearningDraftReview({
+      skipResponse: true,
+      providerSummary: data.provider_summary,
+    });
   }
   renderResponse({
     success: true,
@@ -14739,6 +14752,33 @@ function renderScreenUnderstandingEvidenceIntegrity(preview) {
         ${rows}
       </ul>
     </div>`;
+}
+
+function renderLearningDraftProviderSummary(summary) {
+  const panel = $("learningDraftProviderSummary");
+  const target = $("learningDraftProviderSummaryBody");
+  if (!panel || !target) return;
+  if (!summary || typeof summary !== "object") {
+    panel.hidden = true;
+    target.innerHTML = "";
+    return;
+  }
+  const warnings = Array.isArray(summary.lineage_warnings) ? summary.lineage_warnings : [];
+  const providerError = summary.provider_error && typeof summary.provider_error === "object"
+    ? `${summary.provider_error.code || "provider_error"}: ${summary.provider_error.details || ""}`.trim()
+    : "";
+  const rows = [
+    ["Provider success", `status=${summary.provider_status || "unknown"} �� provider=${summary.provider || "omniparser"}`],
+    ["Candidates generated", `elements=${Number(summary.element_total || 0)} �� interactive_evidence=${Number(summary.interactive_evidence_count || 0)}`],
+    ["Grounding eligibility", `eligible=${Number(summary.grounding_eligible_count || 0)} �� review_only=${Number(summary.review_only_count || 0)} �� invalid_bbox=${Number(summary.invalid_bbox_count || 0)}`],
+    ["Execution authorization", `authorized=${summary.execution_authorized === true ? "true" : "false"} �� no execution action available`],
+    ["Lineage", `complete=${summary.lineage_complete === true ? "true" : "false"} �� capture_present=${summary.capture_id_present === true ? "true" : "false"} �� sha_present=${summary.screenshot_sha256_present === true ? "true" : "false"}${warnings.length ? ` �� warnings=${warnings.join(",")}` : ""}`],
+    ["Provider revision", `profile=${summary.profile_id || "-"} �� model=${summary.model_revision || "-"}`],
+  ];
+  panel.hidden = false;
+  target.innerHTML = `<div class="learning-review-safety">${rows.map(([label, value]) => (
+    `<span><strong>${escapeHtml(label)}</strong>${escapeHtml(value)}</span>`
+  )).join("")}</div>${providerError ? `<p class="trace-idle"><strong>Provider error:</strong> ${escapeHtml(providerError)}</p>` : ""}`;
 }
 
 function renderScreenUnderstandingPreview(preview) {
@@ -19358,6 +19398,11 @@ function renderLearningDraftReview(review) {
       `<span><strong>${escapeHtml(key)}</strong>${escapeHtml(String(value))}</span>`
     )).join("")}</div>`;
   }
+  renderLearningDraftProviderSummary(
+    review?.provider_summary
+    || review?.draft?.page_details?.provider_summary
+    || learningDraftProviderSummary,
+  );
   renderScreenUnderstandingPreview(review?.screen_understanding_preview);
   renderLearningDraftScreenshotPanel(review);
   renderLearningDraftManualEditPanel(review);
@@ -19366,6 +19411,7 @@ function renderLearningDraftReview(review) {
 
 function clearLearningDraftReviewDisplay(reason = "", options = {}) {
   learningDraftReview = null;
+  learningDraftProviderSummary = null;
   delete document.body.dataset.learningDraftReviewOpen;
   const reviewPanel = $("learningDraftReviewPanel");
   if (reviewPanel) reviewPanel.hidden = true;
@@ -19624,6 +19670,9 @@ async function loadLearningDraftReview(options = {}) {
     clearLearningDraftReviewDisplay(`loading · ${sourcePath}`, {
       preserveWorkflowReview: options.skipWorkflowReview === true,
     });
+    learningDraftProviderSummary = options.providerSummary && typeof options.providerSummary === "object"
+      ? options.providerSummary
+      : null;
     try {
       const response = await api("POST", "/panel/load_learning_draft_review", {
         source_path: sourcePath,

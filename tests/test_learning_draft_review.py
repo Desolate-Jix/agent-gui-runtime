@@ -5823,3 +5823,102 @@ def test_default_learning_draft_demo_artifacts_load() -> None:
         assert len(review["draft"]["states"]) == 1
         assert len(review["draft"]["regions"]) == 3
         assert len(review["draft"]["action_templates"]) == 3
+
+
+
+def test_recognition_task_exposes_read_only_omniparser_provider_summary(tmp_path: Path) -> None:
+    from app.learn.workflow_contracts import RecognitionTaskInput
+    from app.learn.workflow_tasks.recognition import run_recognition_task
+
+    parser_result = {
+        "contract_version": "screen_parser_result_v1",
+        "provider": "omniparser",
+        "status": "success",
+        "profile_id": "omniparser_v2",
+        "model_revision": "v.2.0.1",
+        "capture_id": "capture-17",
+        "source_run_id": "omni-run-17",
+        "screenshot_sha256": "a" * 64,
+        "image_size": {"width": 800, "height": 600},
+        "coordinate_space": "image_normalized_xyxy",
+        "elements": [
+            {"element_id": "omniparser_0001", "interactivity": True, "bbox": [0.1, 0.1, 0.2, 0.2]},
+            {"element_id": "omniparser_0002", "interactivity": False, "bbox": [0.3, 0.3, 0.4, 0.4]},
+        ],
+        "timing": {},
+        "resource_usage": {},
+        "provenance": {"runner": "local_smoke"},
+    }
+
+    saved_payload = {}
+    result = run_recognition_task(
+        RecognitionTaskInput(
+            app_name="sample_app",
+            observation_evidence={
+                "screen_size": {"width": 800, "height": 600},
+                "capture_id": "capture-17",
+                "source_run_id": "omni-run-17",
+                "screenshot_sha256": "a" * 64,
+                "omniparser": parser_result,
+            },
+        ),
+        project_root=tmp_path,
+        trial_builder=lambda **_kwargs: {
+            "status": "ready",
+            "screen_inventory": [],
+            "classification": {
+                "summary": {},
+                "accepted_for_grounding": [{"source_evidence": ["omniparser"]}],
+            },
+            "learning_draft": {
+                "workflow_draft": {"states": [], "action_templates": [], "verification_rules": []},
+                "interface_draft": {"regions": []},
+                "blockers": [],
+                "safety": {},
+            },
+        },
+        grounding_adapter=lambda **_kwargs: {},
+        trial_saver=lambda payload, *, app_name, project_root: (
+            saved_payload.update(payload) or f"artifacts/{app_name}/trial.json"
+        ),
+        trace_writer=lambda **_kwargs: "logs/traces/recognition.json",
+    )
+
+    summary = result.payload["provider_summary"]
+    assert summary["contract_version"] == "learning_recognition_provider_summary_v1"
+    assert summary["provider_status"] == "success"
+    assert summary["profile_id"] == "omniparser_v2"
+    assert summary["model_revision"] == "v.2.0.1"
+    assert summary["capture_id_present"] is True
+    assert summary["screenshot_sha256_present"] is True
+    assert summary["element_total"] == 2
+    assert summary["interactive_evidence_count"] == 1
+    assert summary["grounding_eligible_count"] == 1
+    assert summary["review_only_count"] == 1
+    assert summary["invalid_bbox_count"] == 0
+    assert summary["lineage_complete"] is True
+    assert summary["lineage_warnings"] == []
+    assert summary["provider_error"] is None
+    assert summary["execution_authorized"] is False
+    assert saved_payload["learning_draft"]["page_details"]["provider_summary"] == summary
+
+    from app.learn.workflow_tasks.recognition import _omniparser_provider_summary
+
+    failed_summary = _omniparser_provider_summary(
+        observe_bundle={
+            "sources": {
+                "omniparser": {
+                    "contract_version": "screen_parser_result_v1",
+                    "provider": "omniparser",
+                    "status": "failed",
+                    "error": {"code": "weights_missing", "details": "weights are unavailable"},
+                }
+            }
+        },
+        result={},
+    )
+    assert failed_summary["provider_status"] == "failed"
+    assert failed_summary["provider_error"]["code"] == "weights_missing"
+    assert failed_summary["lineage_complete"] is False
+    assert "missing_screenshot_sha256" in failed_summary["lineage_warnings"]
+    assert failed_summary["execution_authorized"] is False
