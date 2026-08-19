@@ -479,3 +479,72 @@ def test_learn_task_worker_subprocess_does_not_load_panel_api() -> None:
     assert report["api_modules"] == []
     assert all(item["success"] is True for item in report["results"])
     assert all(item["panel_loaded"] is False for item in report["results"])
+
+
+def test_recognition_task_forwards_omniparser_as_immutable_provider_source(tmp_path) -> None:
+    from app.learn.workflow_contracts import RecognitionTaskInput
+    from app.learn.workflow_tasks.recognition import run_recognition_task
+
+    captured_bundle = {}
+    parser_result = {
+        "contract_version": "screen_parser_result_v1",
+        "provider": "omniparser",
+        "status": "success",
+        "profile_id": "omniparser_v2",
+        "model_revision": "v.2.0.1",
+        "capture_id": "capture-17",
+        "source_run_id": "omni-run-17",
+        "screenshot_sha256": "a" * 64,
+        "image_size": {"width": 800, "height": 600},
+        "coordinate_space": "image_normalized_xyxy",
+        "elements": [],
+        "timing": {},
+        "resource_usage": {},
+        "provenance": {"runner": "local_smoke"},
+    }
+
+    result = run_recognition_task(
+        RecognitionTaskInput(
+            app_name="sample_app",
+            state_hint="home",
+            observation_evidence={
+                "screen_size": {"width": 800, "height": 600},
+                "capture_id": "capture-17",
+                "screenshot_sha256": "a" * 64,
+                "omniparser": parser_result,
+            },
+        ),
+        project_root=tmp_path,
+        trial_builder=lambda **kwargs: (
+            captured_bundle.update(kwargs["observe_bundle"])
+            or {
+                "status": "ready",
+                "screen_inventory": [],
+                "classification": {"summary": {}},
+                "learning_draft": {
+                    "workflow_draft": {
+                        "states": [],
+                        "action_templates": [],
+                        "verification_rules": [],
+                    },
+                    "interface_draft": {"regions": []},
+                    "blockers": [],
+                    "safety": {},
+                },
+            }
+        ),
+        grounding_adapter=lambda **_kwargs: {},
+        trial_saver=lambda _payload, *, app_name, project_root: (
+            f"artifacts/{app_name}/trial.json"
+        ),
+        trace_writer=lambda **_kwargs: "logs/traces/recognition.json",
+    )
+
+    assert result.outcome == "completed"
+    source = captured_bundle["sources"]["omniparser"]
+    assert source == parser_result
+    assert source is not parser_result
+    assert captured_bundle["capture_id"] == "capture-17"
+    assert captured_bundle["screenshot_sha256"] == "a" * 64
+    assert source["model_revision"] == "v.2.0.1"
+    assert source["provenance"] == {"runner": "local_smoke"}

@@ -39,6 +39,16 @@ def observe_bundle_from_trace_result(result: dict[str, Any], *, trace_path: Path
             "width": _int(image_size.get("width")),
             "height": _int(image_size.get("height")),
         },
+        "capture_id": str(result.get("capture_id") or nested_bundle.get("capture_id") or ""),
+        "source_run_id": str(result.get("source_run_id") or nested_bundle.get("source_run_id") or ""),
+        "screenshot_sha256": str(
+            result.get("screenshot_sha256")
+            or result.get("image_sha256")
+            or nested_bundle.get("screenshot_sha256")
+            or nested_bundle.get("image_sha256")
+            or ""
+        ),
+        "coordinate_space": str(result.get("coordinate_space") or nested_bundle.get("coordinate_space") or ""),
         "source_trace_path": str(trace_path),
     }
     nested_sources = (
@@ -92,6 +102,17 @@ def stage1_inventory_from_trace_result(result: dict[str, Any]) -> list[dict[str,
     items.extend(_items_from_observe_screen_inventory(screen_inventory))
     if isinstance(screen_inventory_value, list):
         items.extend(_items_from_screen_inventory_list(screen_inventory_value))
+    sources = (
+        nested_bundle.get("sources")
+        if isinstance(nested_bundle.get("sources"), dict)
+        else {}
+    )
+    items.extend(
+        _stage1_items_from_omniparser(
+            sources.get("omniparser") if isinstance(sources.get("omniparser"), dict) else {},
+            image_size=image_size,
+        )
+    )
     screen_map = result.get("screen_map") if isinstance(result.get("screen_map"), dict) else {}
     for index, section in enumerate(screen_map.get("sections") if isinstance(screen_map.get("sections"), list) else []):
         if not isinstance(section, dict):
@@ -178,6 +199,89 @@ def stage1_inventory_from_trace_result(result: dict[str, Any]) -> list[dict[str,
             )
         )
     return [item for item in items if item.get("bbox")]
+
+
+def _stage1_items_from_omniparser(
+    source: dict[str, Any],
+    *,
+    image_size: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if str(source.get("status") or "success").casefold() != "success":
+        return []
+    elements = source.get("elements")
+    if not isinstance(elements, list):
+        elements = source.get("parsed_content_list") if isinstance(source.get("parsed_content_list"), list) else []
+    source_size = source.get("image_size") if isinstance(source.get("image_size"), dict) else image_size
+    width = _int(source_size.get("width"))
+    height = _int(source_size.get("height"))
+    lineage = {
+        "provider": str(source.get("provider") or "omniparser"),
+        "model_revision": str(source.get("model_revision") or ""),
+        "capture_id": str(source.get("capture_id") or ""),
+        "source_run_id": str(source.get("source_run_id") or ""),
+        "screenshot_sha256": str(source.get("screenshot_sha256") or ""),
+        "coordinate_space": str(source.get("coordinate_space") or ""),
+    }
+    items: list[dict[str, Any]] = []
+    for index, element in enumerate(elements):
+        if not isinstance(element, dict):
+            continue
+        item_id = str(element.get("element_id") or element.get("id") or f"omniparser_element_{index + 1}").strip()
+        label = str(
+            element.get("content")
+            or element.get("label")
+            or element.get("text")
+            or item_id
+        ).strip()
+        bbox = _omniparser_bbox(
+            element.get("bbox"),
+            width=width,
+            height=height,
+        )
+        if not label or not bbox.get("w") or not bbox.get("h"):
+            continue
+        items.append(
+            {
+                "item_id": item_id,
+                "label": label,
+                "role": str(element.get("type") or element.get("role") or "element"),
+                "item_type": "review_only",
+                "bbox": bbox,
+                "review_only": True,
+                "grounding_eligible": False,
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+                "real_action_requires_gate": True,
+                "source_evidence": ["omniparser"],
+                "metadata": {
+                    "source": "omniparser.stage1_projection",
+                    "provider_source": str(element.get("source") or ""),
+                    "raw_type": str(element.get("type") or element.get("role") or ""),
+                    "parser_lineage": deepcopy(lineage),
+                },
+            }
+        )
+    return items
+
+
+def _omniparser_bbox(value: Any, *, width: int, height: int) -> dict[str, int]:
+    if isinstance(value, dict):
+        return _bbox(value)
+    if not isinstance(value, list) or len(value) < 4:
+        return {}
+    try:
+        x1, y1, x2, y2 = (float(part) for part in value[:4])
+    except (TypeError, ValueError):
+        return {}
+    if width > 0 and height > 0 and all(0.0 <= part <= 1.0 for part in (x1, y1, x2, y2)):
+        x1, x2 = x1 * width, x2 * width
+        y1, y2 = y1 * height, y2 * height
+    return {
+        "x": max(0, _int(min(x1, x2))),
+        "y": max(0, _int(min(y1, y2))),
+        "w": max(0, _int(abs(x2 - x1))),
+        "h": max(0, _int(abs(y2 - y1))),
+    }
 
 
 def _items_from_observe_screen_inventory(screen_inventory: dict[str, Any]) -> list[dict[str, Any]]:

@@ -27,6 +27,10 @@ def test_ocr_parser_outputs_readable_non_click_items():
 
 def test_uia_parser_preserves_invokable_evidence_without_authorizing_click():
     bundle = {
+        "screen_size": {"width": 1000, "height": 800},
+        "capture_id": "capture-cross",
+        "source_run_id": "cross-run",
+        "screenshot_sha256": "e" * 64,
         "sources": {
             "uia": {
                 "controls": [
@@ -53,6 +57,7 @@ def test_uia_parser_preserves_invokable_evidence_without_authorizing_click():
 def test_vision_parser_converts_model_diagonal_to_bbox():
     bundle = {
         "screenshot_sha256": "a" * 64,
+        "capture_id": "capture-parser-1",
         "source_run_id": "parser_run_1",
         "coordinate_space": "image",
         "screen_size": {"width": 1400, "height": 900},
@@ -132,6 +137,10 @@ def test_vision_parser_preserves_locator_descriptions_for_task_cards():
 
 def test_vision_region_with_uia_overlap_becomes_cross_evidence_grounded():
     bundle = {
+        "screen_size": {"width": 1000, "height": 800},
+        "capture_id": "capture-cross",
+        "source_run_id": "cross-run",
+        "screenshot_sha256": "e" * 64,
         "sources": {
             "uia": {
                 "controls": [
@@ -216,8 +225,18 @@ def test_large_semantic_container_over_small_button_stays_review_only():
 def test_omniparser_parser_converts_normalized_bbox_and_interactivity():
     bundle = {
         "screen_size": {"width": 1000, "height": 800},
+        "capture_id": "capture-omni-search",
+        "source_run_id": "omni-run-search",
+        "screenshot_sha256": "c" * 64,
         "sources": {
             "omniparser": {
+                "provider": "omniparser",
+                "model_revision": "v.2.0.1",
+                "capture_id": "capture-omni-search",
+                "source_run_id": "omni-run-search",
+                "screenshot_sha256": "c" * 64,
+                "image_size": {"width": 1000, "height": 800},
+                "coordinate_space": "image_normalized_xyxy",
                 "parsed_content_list": [
                     {
                         "type": "icon",
@@ -248,8 +267,18 @@ def test_omniparser_parser_converts_normalized_bbox_and_interactivity():
 def test_omniparser_parser_treats_textarea_as_form_field():
     bundle = {
         "screen_size": {"width": 1000, "height": 800},
+        "capture_id": "capture-omni-textarea",
+        "source_run_id": "omni-run-textarea",
+        "screenshot_sha256": "d" * 64,
         "sources": {
             "omniparser": {
+                "provider": "omniparser",
+                "model_revision": "v.2.0.1",
+                "capture_id": "capture-omni-textarea",
+                "source_run_id": "omni-run-textarea",
+                "screenshot_sha256": "d" * 64,
+                "image_size": {"width": 1000, "height": 800},
+                "coordinate_space": "image_normalized_xyxy",
                 "parsed_content_list": [
                     {
                         "type": "textarea",
@@ -275,6 +304,10 @@ def test_omniparser_parser_treats_textarea_as_form_field():
 
 def test_calibrated_target_parser_accepts_only_validated_grounding_evidence():
     bundle = {
+        "screen_size": {"width": 1400, "height": 900},
+        "capture_id": "capture-calibrated",
+        "source_run_id": "calibrated-run",
+        "screenshot_sha256": "f" * 64,
         "sources": {
             "calibrated_targets": {
                 "source_trace_path": "logs/traces/vision/deep.json",
@@ -323,6 +356,10 @@ def test_calibrated_target_parser_accepts_only_validated_grounding_evidence():
 
 def test_execute_candidate_result_parser_is_learn_only_interactable_evidence():
     bundle = {
+        "screen_size": {"width": 800, "height": 600},
+        "capture_id": "capture-execute",
+        "source_run_id": "execute-run",
+        "screenshot_sha256": "g" * 64,
         "sources": {
             "execute_candidate_result": {
                 "source_trace_path": "logs/traces/vision/recognition-plan.json",
@@ -356,3 +393,78 @@ def test_execute_candidate_result_parser_is_learn_only_interactable_evidence():
     assert items[0]["click_candidate"] is False
     assert items[0]["artifact_is_authorization"] is False
     assert classification["accepted_for_grounding"][0]["label"] == "Home"
+
+
+def test_omniparser_parser_requires_fresh_current_screenshot_identity() -> None:
+    matching_bundle = {
+        "screen_size": {"width": 1000, "height": 800},
+        "capture_id": "capture-17",
+        "screenshot_sha256": "a" * 64,
+        "sources": {
+            "omniparser": {
+                "contract_version": "screen_parser_result_v1",
+                "provider": "omniparser",
+                "model_revision": "v.2.0.1",
+                "capture_id": "capture-17",
+                "source_run_id": "omni-run-17",
+                "screenshot_sha256": "a" * 64,
+                "image_size": {"width": 1000, "height": 800},
+                "coordinate_space": "image_normalized_xyxy",
+                "elements": [
+                    {
+                        "element_id": "omni_search",
+                        "type": "icon",
+                        "content": "Search",
+                        "bbox": [0.1, 0.2, 0.2, 0.25],
+                        "interactivity": True,
+                    }
+                ],
+            }
+        },
+    }
+
+    matching_item = parse_existing_evidence_to_inventory(matching_bundle)[0]
+    matching_classification = classify_inventory_items([matching_item])
+
+    assert matching_item["parser_candidate"]["provider"] == "omniparser"
+    assert matching_item["parser_candidate"]["model_revision"] == "v.2.0.1"
+    assert matching_item["parser_candidate"]["capture_id"] == "capture-17"
+    assert matching_item["parser_candidate"]["freshness"] == {
+        "same_screenshot": True,
+        "capture_time": "",
+        "stale": False,
+    }
+    assert matching_classification["accepted_for_grounding"][0]["label"] == "Search"
+
+    stale_bundle = {
+        **matching_bundle,
+        "sources": {
+            "omniparser": {
+                **matching_bundle["sources"]["omniparser"],
+                "screenshot_sha256": "b" * 64,
+                "stale": True,
+            }
+        },
+    }
+    stale_item = parse_existing_evidence_to_inventory(stale_bundle)[0]
+    stale_classification = classify_inventory_items([stale_item])
+
+    assert stale_item["parser_candidate"]["freshness"]["same_screenshot"] is False
+    assert stale_item["parser_candidate"]["freshness"]["stale"] is True
+    assert stale_classification["needs_human_review"][0]["grounding_eligible"] is False
+    assert stale_classification["needs_human_review"][0]["grounding_block_reason"] == "parser_candidate_stale"
+
+
+def test_freshness_gate_does_not_change_legacy_item_without_parser_candidate() -> None:
+    legacy_item = {
+        "item_id": "legacy_uia",
+        "label": "Search",
+        "item_type": "actionable",
+        "role": "button",
+        "source_evidence": ["uia"],
+        "interactable_evidence": {"uia_invokable": True},
+    }
+
+    classification = classify_inventory_items([legacy_item])
+
+    assert classification["accepted_for_grounding"][0]["label"] == "Search"

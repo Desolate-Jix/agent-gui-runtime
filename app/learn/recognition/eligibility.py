@@ -37,6 +37,12 @@ def evaluate_grounding_eligibility(item: dict[str, Any]) -> dict[str, Any]:
     interactable = item.get("interactable_evidence") if isinstance(item.get("interactable_evidence"), dict) else {}
     open_detail_card = _looks_like_open_detail_card(item, interactable=interactable)
 
+    parser_candidate_block = _parser_candidate_freshness_block(item)
+    if parser_candidate_block:
+        return _blocked(
+            parser_candidate_block,
+            evidence_strength=_evidence_strength(sources, interactable),
+        )
     if _surface_zone(item) == "browser_chrome":
         return _blocked("browser_chrome_not_page_surface", evidence_strength=_evidence_strength(sources, interactable))
     if _looks_like_danger_action(label) or item_type == "danger_zone":
@@ -120,6 +126,72 @@ def summarize_grounding_eligibility(items: list[dict[str, Any]]) -> dict[str, An
             "Execute authorization, PathGraph promotion, or a recognition accuracy metric"
         ),
     }
+
+
+def _parser_candidate_freshness_block(item: dict[str, Any]) -> str:
+    candidate = (
+        item.get("parser_candidate")
+        if isinstance(item.get("parser_candidate"), dict)
+        else None
+    )
+    if not candidate or str(candidate.get("schema_version") or "") != "parser_candidate_v1":
+        return ""
+    freshness = (
+        candidate.get("freshness")
+        if isinstance(candidate.get("freshness"), dict)
+        else {}
+    )
+    if bool(freshness.get("stale")):
+        return "parser_candidate_stale"
+    if not (
+        str(candidate.get("screenshot_sha256") or "").strip()
+        and str(candidate.get("capture_id") or "").strip()
+        and str(candidate.get("source_run_id") or "").strip()
+    ):
+        return "parser_candidate_missing_current_screenshot_identity"
+    if not bool(freshness.get("same_screenshot")):
+        return "parser_candidate_screenshot_mismatch"
+    image_size = (
+        candidate.get("image_size")
+        if isinstance(candidate.get("image_size"), dict)
+        else {}
+    )
+    if _positive_int(image_size.get("width")) <= 0 or _positive_int(image_size.get("height")) <= 0:
+        return "parser_candidate_invalid_image_size"
+    bbox = candidate.get("bbox") if isinstance(candidate.get("bbox"), dict) else {}
+    if not _valid_bbox(bbox, image_size=image_size):
+        return "parser_candidate_invalid_bbox"
+    if str(candidate.get("source_type") or "").casefold() == "omniparser":
+        if not (
+            str(candidate.get("provider") or "").strip()
+            and str(candidate.get("model_revision") or "").strip()
+        ):
+            return "parser_candidate_missing_provider_or_model_revision"
+    return ""
+
+
+def _positive_int(value: Any) -> int:
+    try:
+        return int(round(float(value)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _valid_bbox(bbox: dict[str, Any], *, image_size: dict[str, Any]) -> bool:
+    width = _positive_int(image_size.get("width"))
+    height = _positive_int(image_size.get("height"))
+    x = _positive_int(bbox.get("x"))
+    y = _positive_int(bbox.get("y"))
+    box_width = _positive_int(bbox.get("w", bbox.get("width")))
+    box_height = _positive_int(bbox.get("h", bbox.get("height")))
+    return (
+        box_width > 0
+        and box_height > 0
+        and x >= 0
+        and y >= 0
+        and x + box_width <= width
+        and y + box_height <= height
+    )
 
 
 def _blocked(reason: str, *, evidence_strength: str) -> dict[str, Any]:

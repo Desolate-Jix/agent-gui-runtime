@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
 
@@ -289,6 +290,13 @@ def _build_observe_bundle(task_input: RecognitionTaskInput) -> dict[str, Any]:
             sources["vision"]["regions"] = candidates
         if interface_classification:
             sources["vision"]["interface_classification"] = interface_classification
+    omniparser = (
+        evidence.get("omniparser")
+        if isinstance(evidence.get("omniparser"), dict)
+        else {}
+    )
+    if omniparser:
+        sources["omniparser"] = deepcopy(omniparser)
     if review_boxes:
         ocr_boxes = [
             item for item in review_boxes if item.get("role") == "ocr_text_review_only"
@@ -314,6 +322,12 @@ def _build_observe_bundle(task_input: RecognitionTaskInput) -> dict[str, Any]:
         "app_name": task_input.app_name,
         "state_hint": task_input.state_hint,
         "screen_size": screen_size,
+        "capture_id": _text(evidence.get("capture_id")),
+        "source_run_id": _text(evidence.get("source_run_id") or evidence.get("run_id")),
+        "screenshot_sha256": _text(
+            evidence.get("screenshot_sha256") or evidence.get("image_sha256")
+        ),
+        "coordinate_space": _text(evidence.get("coordinate_space")),
         "image_path": _text(
             evidence.get("current_image_path") or evidence.get("image_path")
         ),

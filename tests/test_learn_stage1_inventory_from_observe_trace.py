@@ -245,3 +245,53 @@ def test_stage1_localization_merges_same_family_duplicate_structure_regions() ->
     assert main["item_ids"] == ["main_1", "main_2"]
     assert top["merge_policy"] == "same_family_high_overlap_before_stage1_gate"
     assert main["merged_zone_ids"] == ["main_content", "primary_area"]
+
+
+def test_stage1_projects_omniparser_elements_as_review_only_with_lineage() -> None:
+    result = {
+        "observe_bundle": {
+            "screen_size": {"width": 1000, "height": 800},
+            "capture_id": "capture-17",
+            "screenshot_sha256": "a" * 64,
+            "sources": {
+                "omniparser": {
+                    "contract_version": "screen_parser_result_v1",
+                    "provider": "omniparser",
+                    "model_revision": "v.2.0.1",
+                    "capture_id": "capture-17",
+                    "source_run_id": "omni-run-17",
+                    "screenshot_sha256": "a" * 64,
+                    "image_size": {"width": 1000, "height": 800},
+                    "coordinate_space": "image_normalized_xyxy",
+                    "elements": [
+                        {
+                            "element_id": "omni_search",
+                            "type": "icon",
+                            "content": "Search",
+                            "bbox": [0.1, 0.2, 0.2, 0.25],
+                            "interactivity": True,
+                            "source": "box_yolo_content_yolo",
+                        }
+                    ],
+                }
+            },
+        }
+    }
+
+    items = _stage1_inventory_from_trace_result(result)
+
+    assert len(items) == 1
+    assert items[0]["item_id"] == "omni_search"
+    assert items[0]["bbox"] == {"x": 100, "y": 160, "w": 100, "h": 40}
+    assert items[0]["review_only"] is True
+    assert items[0]["grounding_eligible"] is False
+    assert items[0]["artifact_is_authorization"] is False
+    assert items[0]["execute_binding_enabled"] is False
+    assert items[0]["metadata"]["parser_lineage"] == {
+        "provider": "omniparser",
+        "model_revision": "v.2.0.1",
+        "capture_id": "capture-17",
+        "source_run_id": "omni-run-17",
+        "screenshot_sha256": "a" * 64,
+        "coordinate_space": "image_normalized_xyxy",
+    }

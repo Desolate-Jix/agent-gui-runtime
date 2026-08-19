@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from app.learn.recognition.bbox_alignment import bbox_numbers, bbox_overlap, cross_evidence_overlap_is_acceptable
@@ -282,21 +283,132 @@ def _image_size_from_bundle(bundle: dict[str, Any]) -> dict[str, int]:
 
 
 def _attach_parser_candidate_contract(items: list[dict[str, Any]], *, bundle: dict[str, Any], image_size: dict[str, int]) -> None:
-    context = {
-        "source_run_id": _first_text(bundle.get("source_run_id"), bundle.get("run_id"), bundle.get("trace_id")),
-        "screenshot_sha256": _screenshot_sha256_from_bundle(bundle),
-        "coordinate_space": _first_text(bundle.get("coordinate_space"), "image"),
-        "image_size": {"width": _int_or_zero(image_size.get("width")), "height": _int_or_zero(image_size.get("height"))},
-        "window_rect": _window_rect_from_bundle(bundle),
-        "raw_payload_path": _first_text(bundle.get("raw_payload_path"), bundle.get("observe_bundle_path")),
-        "capture_time": _first_text(bundle.get("capture_time"), bundle.get("timestamp")),
-        "stale": bool(bundle.get("stale")),
-    }
-    context["same_screenshot"] = bool(context["screenshot_sha256"]) and not bool(context["stale"])
+    sources = bundle.get("sources") if isinstance(bundle.get("sources"), dict) else {}
+    omniparser = sources.get("omniparser") if isinstance(sources.get("omniparser"), dict) else {}
+    current_screenshot_sha256 = _screenshot_sha256_from_bundle(bundle)
+    current_capture_id = _first_text(bundle.get("capture_id"))
     for item in items:
-        if isinstance(item, dict):
-            item["parser_candidate"] = build_parser_candidate_evidence(item=item, source_context=context)
+        if not isinstance(item, dict):
+            continue
+        item_sources = item.get("source_evidence") if isinstance(item.get("source_evidence"), list) else []
+        is_omniparser = "omniparser" in {str(value).casefold() for value in item_sources}
+        source = omniparser if is_omniparser else bundle
+        source_screenshot_sha256 = _first_text(
+            source.get("screenshot_sha256"),
+            source.get("image_sha256"),
+        )
+        source_capture_id = _first_text(source.get("capture_id"))
+        source_image_size = (
+            source.get("image_size")
+            if isinstance(source.get("image_size"), dict)
+            else image_size
+        )
+        stale = bool(source.get("stale") or bundle.get("stale"))
+        context = {
+            "source_run_id": _first_text(
+                source.get("source_run_id"),
+                source.get("run_id"),
+                bundle.get("source_run_id"),
+                bundle.get("run_id"),
+                bundle.get("trace_id"),
+            ),
+            "screenshot_sha256": source_screenshot_sha256,
+            "coordinate_space": _first_text(
+                source.get("coordinate_space"),
+                bundle.get("coordinate_space"),
+                "image",
+            ),
+            "image_size": {
+                "width": _int_or_zero(source_image_size.get("width")),
+                "height": _int_or_zero(source_image_size.get("height")),
+            },
+            "window_rect": _window_rect_from_bundle(bundle),
+            "raw_payload_path": _first_text(
+                source.get("raw_payload_path"),
+                bundle.get("raw_payload_path"),
+                bundle.get("observe_bundle_path"),
+            ),
+            "capture_time": _first_text(source.get("capture_time"), bundle.get("capture_time"), bundle.get("timestamp")),
+            "stale": stale,
+            "same_screenshot": (
+                bool(current_screenshot_sha256)
+                and bool(current_capture_id)
+                and source_screenshot_sha256 == current_screenshot_sha256
+                and source_capture_id == current_capture_id
+                and not stale
+            ),
+        }
+        candidate = build_parser_candidate_evidence(item=item, source_context=context)
+        candidate["capture_id"] = source_capture_id
+        candidate["provider"] = _first_text(
+            source.get("provider"),
+            "omniparser" if is_omniparser else _candidate_provider(item_sources),
+        )
+        candidate["model_revision"] = _first_text(
+            source.get("model_revision"),
+            source.get("provider_model_revision"),
+        )
+        candidate["profile_id"] = _first_text(source.get("profile_id"))
+        candidate["provenance"] = deepcopy(
+            source.get("provenance")
+            if isinstance(source.get("provenance"), dict)
+            else {}
+        )
+        freshness_block = _parser_candidate_freshness_block(candidate)
+        if freshness_block:
+            candidate["review_only"] = True
+            candidate["grounding_eligible"] = False
+            candidate["grounding_block_reason"] = freshness_block
+        item["parser_candidate"] = candidate
 
+
+def _parser_candidate_freshness_block(candidate: dict[str, Any]) -> str:
+    freshness = (
+        candidate.get("freshness")
+        if isinstance(candidate.get("freshness"), dict)
+        else {}
+    )
+    if bool(freshness.get("stale")):
+        return "parser_candidate_stale"
+    if not (
+        _first_text(candidate.get("screenshot_sha256"))
+        and _first_text(candidate.get("capture_id"))
+        and _first_text(candidate.get("source_run_id"))
+    ):
+        return "parser_candidate_missing_current_screenshot_identity"
+    if not bool(freshness.get("same_screenshot")):
+        return "parser_candidate_screenshot_mismatch"
+    image_size = candidate.get("image_size") if isinstance(candidate.get("image_size"), dict) else {}
+    if _int_or_zero(image_size.get("width")) <= 0 or _int_or_zero(image_size.get("height")) <= 0:
+        return "parser_candidate_invalid_image_size"
+    bbox = candidate.get("bbox") if isinstance(candidate.get("bbox"), dict) else {}
+    x = _int_or_zero(bbox.get("x"))
+    y = _int_or_zero(bbox.get("y"))
+    width = _int_or_zero(bbox.get("w", bbox.get("width")))
+    height = _int_or_zero(bbox.get("h", bbox.get("height")))
+    if (
+        width <= 0
+        or height <= 0
+        or x < 0
+        or y < 0
+        or x + width > _int_or_zero(image_size.get("width"))
+        or y + height > _int_or_zero(image_size.get("height"))
+    ):
+        return "parser_candidate_invalid_bbox"
+    if str(candidate.get("source_type") or "").casefold() == "omniparser" and not (
+        _first_text(candidate.get("provider"))
+        and _first_text(candidate.get("model_revision"))
+    ):
+        return "parser_candidate_missing_provider_or_model_revision"
+    return ""
+
+
+def _candidate_provider(sources: list[Any]) -> str:
+    for source in sources:
+        value = str(source or "").strip()
+        if value:
+            return value
+    return "unknown"
 
 def _screenshot_sha256_from_bundle(bundle: dict[str, Any]) -> str:
     screenshot = bundle.get("screenshot") if isinstance(bundle.get("screenshot"), dict) else {}
