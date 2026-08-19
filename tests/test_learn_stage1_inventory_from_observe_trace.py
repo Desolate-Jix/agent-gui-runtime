@@ -257,8 +257,12 @@ def test_stage1_projects_omniparser_elements_as_review_only_with_lineage() -> No
                 "omniparser": {
                     "contract_version": "screen_parser_result_v1",
                     "provider": "omniparser",
+                    "status": "success",
+                    "profile_id": "omniparser_v2",
                     "model_revision": "v.2.0.1",
                     "capture_id": "capture-17",
+                    "stale": False,
+                    "provenance": {"runner": "local_smoke"},
                     "source_run_id": "omni-run-17",
                     "screenshot_sha256": "a" * 64,
                     "image_size": {"width": 1000, "height": 800},
@@ -294,4 +298,9 @@ def test_stage1_projects_omniparser_elements_as_review_only_with_lineage() -> No
         "source_run_id": "omni-run-17",
         "screenshot_sha256": "a" * 64,
         "coordinate_space": "image_normalized_xyxy",
+        "profile_id": "omniparser_v2",
+        "image_size": {"width": 1000, "height": 800},
+        "provenance": {"runner": "local_smoke"},
+        "status": "success",
+        "stale": False,
     }

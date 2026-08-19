@@ -37,7 +37,18 @@ def evaluate_grounding_eligibility(item: dict[str, Any]) -> dict[str, Any]:
     interactable = item.get("interactable_evidence") if isinstance(item.get("interactable_evidence"), dict) else {}
     open_detail_card = _looks_like_open_detail_card(item, interactable=interactable)
 
-    parser_candidate_block = _parser_candidate_freshness_block(item)
+    parser_candidate = (
+        item.get("parser_candidate")
+        if isinstance(item.get("parser_candidate"), dict)
+        else None
+    )
+    parser_candidate_block = (
+        parser_candidate_freshness_block(parser_candidate)
+        if parser_candidate
+        and str(parser_candidate.get("schema_version") or "")
+        == "parser_candidate_v1"
+        else ""
+    )
     if parser_candidate_block:
         return _blocked(
             parser_candidate_block,
@@ -128,14 +139,9 @@ def summarize_grounding_eligibility(items: list[dict[str, Any]]) -> dict[str, An
     }
 
 
-def _parser_candidate_freshness_block(item: dict[str, Any]) -> str:
-    candidate = (
-        item.get("parser_candidate")
-        if isinstance(item.get("parser_candidate"), dict)
-        else None
-    )
-    if not candidate or str(candidate.get("schema_version") or "") != "parser_candidate_v1":
-        return ""
+def parser_candidate_freshness_block(candidate: dict[str, Any]) -> str:
+    """Return the fail-closed reason for a parser candidate, if any."""
+
     freshness = (
         candidate.get("freshness")
         if isinstance(candidate.get("freshness"), dict)
@@ -158,17 +164,46 @@ def _parser_candidate_freshness_block(item: dict[str, Any]) -> str:
     )
     if _positive_int(image_size.get("width")) <= 0 or _positive_int(image_size.get("height")) <= 0:
         return "parser_candidate_invalid_image_size"
+    is_omniparser = str(candidate.get("source_type") or "").casefold() == "omniparser"
+    if is_omniparser and str(candidate.get("coordinate_space") or "") not in {
+        "image_normalized_xyxy",
+        "image_pixel_xyxy",
+    }:
+        return "parser_candidate_invalid_coordinate_space"
     bbox = candidate.get("bbox") if isinstance(candidate.get("bbox"), dict) else {}
     if not _valid_bbox(bbox, image_size=image_size):
         return "parser_candidate_invalid_bbox"
-    if str(candidate.get("source_type") or "").casefold() == "omniparser":
-        if not (
-            str(candidate.get("provider") or "").strip()
-            and str(candidate.get("model_revision") or "").strip()
-        ):
-            return "parser_candidate_missing_provider_or_model_revision"
+    if not is_omniparser:
+        return ""
+    if str(candidate.get("provider_status") or "").casefold() != "success":
+        return "parser_provider_not_success"
+    if str(candidate.get("provider_contract_version") or "") != "screen_parser_result_v1":
+        return "parser_candidate_legacy_provider_contract"
+    if str(candidate.get("provider") or "").casefold() != "omniparser":
+        return "parser_candidate_invalid_provider"
+    if not (
+        str(candidate.get("model_revision") or "").strip()
+        and str(candidate.get("profile_id") or "").strip()
+    ):
+        return "parser_candidate_missing_provider_or_model_revision"
+    current_image_size = (
+        candidate.get("current_image_size")
+        if isinstance(candidate.get("current_image_size"), dict)
+        else {}
+    )
+    if (
+        _positive_int(current_image_size.get("width")) <= 0
+        or _positive_int(current_image_size.get("height")) <= 0
+    ):
+        return "parser_candidate_invalid_current_image_size"
+    if (
+        _positive_int(image_size.get("width"))
+        != _positive_int(current_image_size.get("width"))
+        or _positive_int(image_size.get("height"))
+        != _positive_int(current_image_size.get("height"))
+    ):
+        return "parser_candidate_image_size_mismatch"
     return ""
-
 
 def _positive_int(value: Any) -> int:
     try:

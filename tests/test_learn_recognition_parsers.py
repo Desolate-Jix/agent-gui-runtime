@@ -230,7 +230,10 @@ def test_omniparser_parser_converts_normalized_bbox_and_interactivity():
         "screenshot_sha256": "c" * 64,
         "sources": {
             "omniparser": {
+                "contract_version": "screen_parser_result_v1",
                 "provider": "omniparser",
+                "status": "success",
+                "profile_id": "omniparser_v2",
                 "model_revision": "v.2.0.1",
                 "capture_id": "capture-omni-search",
                 "source_run_id": "omni-run-search",
@@ -272,7 +275,10 @@ def test_omniparser_parser_treats_textarea_as_form_field():
         "screenshot_sha256": "d" * 64,
         "sources": {
             "omniparser": {
+                "contract_version": "screen_parser_result_v1",
                 "provider": "omniparser",
+                "status": "success",
+                "profile_id": "omniparser_v2",
                 "model_revision": "v.2.0.1",
                 "capture_id": "capture-omni-textarea",
                 "source_run_id": "omni-run-textarea",
@@ -404,6 +410,8 @@ def test_omniparser_parser_requires_fresh_current_screenshot_identity() -> None:
             "omniparser": {
                 "contract_version": "screen_parser_result_v1",
                 "provider": "omniparser",
+                "status": "success",
+                "profile_id": "omniparser_v2",
                 "model_revision": "v.2.0.1",
                 "capture_id": "capture-17",
                 "source_run_id": "omni-run-17",
@@ -468,3 +476,124 @@ def test_freshness_gate_does_not_change_legacy_item_without_parser_candidate() -
     classification = classify_inventory_items([legacy_item])
 
     assert classification["accepted_for_grounding"][0]["label"] == "Search"
+
+
+def _canonical_omniparser_bundle(*, coordinate_space="image_normalized_xyxy"):
+    return {
+        "screen_size": {"width": 1000, "height": 800},
+        "capture_id": "capture-canonical",
+        "source_run_id": "current-run",
+        "screenshot_sha256": "h" * 64,
+        "sources": {
+            "omniparser": {
+                "contract_version": "screen_parser_result_v1",
+                "provider": "omniparser",
+                "status": "success",
+                "profile_id": "omniparser_v2",
+                "model_revision": "v.2.0.1",
+                "capture_id": "capture-canonical",
+                "source_run_id": "omni-run-canonical",
+                "screenshot_sha256": "h" * 64,
+                "image_size": {"width": 1000, "height": 800},
+                "coordinate_space": coordinate_space,
+                "elements": [
+                    {
+                        "element_id": "canonical_search",
+                        "type": "icon",
+                        "content": "Search",
+                        "bbox": [0.1, 0.2, 0.2, 0.25],
+                        "interactivity": True,
+                    }
+                ],
+                "timing": {},
+                "resource_usage": {},
+                "provenance": {},
+            }
+        },
+    }
+
+
+def test_omniparser_failed_provider_result_never_enters_grounding() -> None:
+    bundle = _canonical_omniparser_bundle()
+    bundle["sources"]["omniparser"]["status"] = "failed"
+
+    item = parse_existing_evidence_to_inventory(bundle)[0]
+    classification = classify_inventory_items([item])
+
+    assert item["parser_candidate"]["grounding_eligible"] is False
+    assert item["parser_candidate"]["grounding_block_reason"] == "parser_provider_not_success"
+    assert classification["accepted_for_grounding"] == []
+    assert classification["needs_human_review"][0]["grounding_block_reason"] == "parser_provider_not_success"
+
+
+def test_omniparser_pixel_bbox_does_not_expand_as_normalized_coordinates() -> None:
+    bundle = _canonical_omniparser_bundle(coordinate_space="image_pixel_xyxy")
+    bundle["sources"]["omniparser"]["elements"][0]["bbox"] = [0, 0, 1, 1]
+
+    item = parse_existing_evidence_to_inventory(bundle)[0]
+    classification = classify_inventory_items([item])
+
+    assert item["bbox"] == {"x": 0, "y": 0, "w": 1, "h": 1}
+    assert item["parser_candidate"]["coordinate_space"] == "image_pixel_xyxy"
+    assert classification["accepted_for_grounding"] == []
+
+
+def test_omniparser_unknown_or_missing_coordinate_space_is_review_only() -> None:
+    for coordinate_space in ("", "viewport_xyxy"):
+        bundle = _canonical_omniparser_bundle(coordinate_space=coordinate_space)
+
+        item = parse_existing_evidence_to_inventory(bundle)[0]
+        classification = classify_inventory_items([item])
+
+        assert item["parser_candidate"]["grounding_eligible"] is False
+        assert item["parser_candidate"]["grounding_block_reason"] == "parser_candidate_invalid_coordinate_space"
+        assert classification["accepted_for_grounding"] == []
+
+
+def test_omniparser_requires_complete_current_lineage_and_matching_image_size() -> None:
+    for missing_key in ("screenshot_sha256", "capture_id", "source_run_id"):
+        bundle = _canonical_omniparser_bundle()
+        bundle["sources"]["omniparser"][missing_key] = ""
+
+        item = parse_existing_evidence_to_inventory(bundle)[0]
+        classification = classify_inventory_items([item])
+
+        assert item["parser_candidate"]["grounding_eligible"] is False
+        assert item["parser_candidate"]["grounding_block_reason"] == "parser_candidate_missing_current_screenshot_identity"
+        assert classification["accepted_for_grounding"] == []
+
+    mismatch_bundle = _canonical_omniparser_bundle()
+    mismatch_bundle["sources"]["omniparser"]["screenshot_sha256"] = "i" * 64
+    mismatch_item = parse_existing_evidence_to_inventory(mismatch_bundle)[0]
+    mismatch_classification = classify_inventory_items([mismatch_item])
+
+    assert mismatch_item["parser_candidate"]["freshness"]["stale"] is False
+    assert mismatch_item["parser_candidate"]["grounding_block_reason"] == "parser_candidate_screenshot_mismatch"
+    assert mismatch_classification["accepted_for_grounding"] == []
+
+    wrong_size_bundle = _canonical_omniparser_bundle()
+    wrong_size_bundle["sources"]["omniparser"]["image_size"] = {"width": 900, "height": 800}
+    wrong_size_item = parse_existing_evidence_to_inventory(wrong_size_bundle)[0]
+    wrong_size_classification = classify_inventory_items([wrong_size_item])
+
+    assert wrong_size_item["parser_candidate"]["grounding_block_reason"] == "parser_candidate_image_size_mismatch"
+    assert wrong_size_classification["accepted_for_grounding"] == []
+
+
+def test_omniparser_requires_canonical_provider_metadata_for_grounding() -> None:
+    cases = (
+        ("provider", "", "parser_candidate_invalid_provider"),
+        ("model_revision", "", "parser_candidate_missing_provider_or_model_revision"),
+        ("profile_id", "", "parser_candidate_missing_provider_or_model_revision"),
+        ("contract_version", "", "parser_candidate_legacy_provider_contract"),
+    )
+    for field, value, expected_reason in cases:
+        bundle = _canonical_omniparser_bundle()
+        bundle["sources"]["omniparser"][field] = value
+
+        item = parse_existing_evidence_to_inventory(bundle)[0]
+        classification = classify_inventory_items([item])
+
+        assert item["parser_candidate"]["grounding_eligible"] is False
+        assert item["parser_candidate"]["grounding_block_reason"] == expected_reason
+        assert classification["accepted_for_grounding"] == []

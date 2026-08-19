@@ -215,12 +215,21 @@ def _stage1_items_from_omniparser(
     width = _int(source_size.get("width"))
     height = _int(source_size.get("height"))
     lineage = {
-        "provider": str(source.get("provider") or "omniparser"),
+        "provider": str(source.get("provider") or ""),
+        "profile_id": str(source.get("profile_id") or ""),
         "model_revision": str(source.get("model_revision") or ""),
         "capture_id": str(source.get("capture_id") or ""),
         "source_run_id": str(source.get("source_run_id") or ""),
         "screenshot_sha256": str(source.get("screenshot_sha256") or ""),
+        "image_size": deepcopy(source_size),
         "coordinate_space": str(source.get("coordinate_space") or ""),
+        "provenance": deepcopy(
+            source.get("provenance")
+            if isinstance(source.get("provenance"), dict)
+            else {}
+        ),
+        "status": str(source.get("status") or ""),
+        "stale": bool(source.get("stale")),
     }
     items: list[dict[str, Any]] = []
     for index, element in enumerate(elements):
@@ -237,6 +246,7 @@ def _stage1_items_from_omniparser(
             element.get("bbox"),
             width=width,
             height=height,
+            coordinate_space=lineage["coordinate_space"],
         )
         if not label or not bbox.get("w") or not bbox.get("h"):
             continue
@@ -264,7 +274,15 @@ def _stage1_items_from_omniparser(
     return items
 
 
-def _omniparser_bbox(value: Any, *, width: int, height: int) -> dict[str, int]:
+def _omniparser_bbox(
+    value: Any,
+    *,
+    width: int,
+    height: int,
+    coordinate_space: str,
+) -> dict[str, int]:
+    if coordinate_space not in {"image_normalized_xyxy", "image_pixel_xyxy"}:
+        return {}
     if isinstance(value, dict):
         return _bbox(value)
     if not isinstance(value, list) or len(value) < 4:
@@ -273,7 +291,7 @@ def _omniparser_bbox(value: Any, *, width: int, height: int) -> dict[str, int]:
         x1, y1, x2, y2 = (float(part) for part in value[:4])
     except (TypeError, ValueError):
         return {}
-    if width > 0 and height > 0 and all(0.0 <= part <= 1.0 for part in (x1, y1, x2, y2)):
+    if coordinate_space == "image_normalized_xyxy":
         x1, x2 = x1 * width, x2 * width
         y1, y2 = y1 * height, y2 * height
     return {

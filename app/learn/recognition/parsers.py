@@ -5,6 +5,7 @@ from typing import Any
 
 from app.learn.recognition.bbox_alignment import bbox_numbers, bbox_overlap, cross_evidence_overlap_is_acceptable
 from app.learn.recognition.contracts import build_inventory_item, build_parser_candidate_evidence
+from app.learn.recognition.eligibility import parser_candidate_freshness_block
 
 
 def parse_existing_evidence_to_inventory(bundle: dict[str, Any]) -> list[dict[str, Any]]:
@@ -88,6 +89,12 @@ def _parse_omniparser_elements(source: dict[str, Any], image_size: dict[str, int
     elements = source.get("parsed_content_list")
     if not isinstance(elements, list):
         elements = source.get("elements") if isinstance(source.get("elements"), list) else []
+    source_image_size = (
+        source.get("image_size")
+        if isinstance(source.get("image_size"), dict)
+        else image_size
+    )
+    coordinate_space = _first_text(source.get("coordinate_space"))
     items: list[dict[str, Any]] = []
     for index, element in enumerate(elements):
         if not isinstance(element, dict):
@@ -104,7 +111,11 @@ def _parse_omniparser_elements(source: dict[str, Any], image_size: dict[str, int
                 label=label,
                 item_type=_item_type_from_omniparser(role, interactable),
                 role=_role_from_omniparser(role),
-                bbox=_bbox_from_item(element, image_size=image_size),
+                bbox=_bbox_from_item(
+                    element,
+                    image_size=source_image_size,
+                    coordinate_space=coordinate_space,
+                ),
                 source_evidence=["omniparser"],
                 evidence_level="omniparser_interactable" if interactable else "omniparser_element",
                 interactable_evidence={"omniparser_interactable": interactable},
@@ -250,12 +261,21 @@ def _parse_execute_candidate_result(source: dict[str, Any]) -> list[dict[str, An
     return items
 
 
-def _bbox_from_item(item: dict[str, Any], *, image_size: dict[str, int] | None = None) -> dict[str, Any]:
+def _bbox_from_item(
+    item: dict[str, Any],
+    *,
+    image_size: dict[str, Any] | None = None,
+    coordinate_space: str | None = None,
+) -> dict[str, Any]:
     value = item.get("bbox") or item.get("bounding_box") or item.get("bounds") or item.get("rect") or {}
     if isinstance(value, dict) and value:
         return value
     if isinstance(value, list) and len(value) >= 4:
-        return _bbox_from_sequence(value, image_size=image_size or {})
+        return _bbox_from_sequence(
+            value,
+            image_size=image_size or {},
+            coordinate_space=coordinate_space,
+        )
     diagonal = item.get("diagonal")
     if isinstance(diagonal, dict):
         x1 = _int_or_zero(diagonal.get("x1"))
@@ -305,18 +325,22 @@ def _attach_parser_candidate_contract(items: list[dict[str, Any]], *, bundle: di
         )
         stale = bool(source.get("stale") or bundle.get("stale"))
         context = {
-            "source_run_id": _first_text(
-                source.get("source_run_id"),
-                source.get("run_id"),
-                bundle.get("source_run_id"),
-                bundle.get("run_id"),
-                bundle.get("trace_id"),
+            "source_run_id": (
+                _first_text(source.get("source_run_id"), source.get("run_id"))
+                if is_omniparser
+                else _first_text(
+                    source.get("source_run_id"),
+                    source.get("run_id"),
+                    bundle.get("source_run_id"),
+                    bundle.get("run_id"),
+                    bundle.get("trace_id"),
+                )
             ),
             "screenshot_sha256": source_screenshot_sha256,
-            "coordinate_space": _first_text(
-                source.get("coordinate_space"),
-                bundle.get("coordinate_space"),
-                "image",
+            "coordinate_space": (
+                _first_text(source.get("coordinate_space"))
+                if is_omniparser
+                else _first_text(source.get("coordinate_space"), bundle.get("coordinate_space"), "image")
             ),
             "image_size": {
                 "width": _int_or_zero(source_image_size.get("width")),
@@ -340,67 +364,33 @@ def _attach_parser_candidate_contract(items: list[dict[str, Any]], *, bundle: di
         }
         candidate = build_parser_candidate_evidence(item=item, source_context=context)
         candidate["capture_id"] = source_capture_id
-        candidate["provider"] = _first_text(
-            source.get("provider"),
-            "omniparser" if is_omniparser else _candidate_provider(item_sources),
+        candidate["provider"] = (
+            _first_text(source.get("provider"))
+            if is_omniparser
+            else _first_text(source.get("provider"), _candidate_provider(item_sources))
         )
         candidate["model_revision"] = _first_text(
             source.get("model_revision"),
             source.get("provider_model_revision"),
         )
         candidate["profile_id"] = _first_text(source.get("profile_id"))
+        candidate["provider_contract_version"] = _first_text(source.get("contract_version"))
+        candidate["provider_status"] = _first_text(source.get("status"))
+        candidate["current_image_size"] = {
+            "width": _int_or_zero(image_size.get("width")),
+            "height": _int_or_zero(image_size.get("height")),
+        }
         candidate["provenance"] = deepcopy(
             source.get("provenance")
             if isinstance(source.get("provenance"), dict)
             else {}
         )
-        freshness_block = _parser_candidate_freshness_block(candidate)
+        freshness_block = parser_candidate_freshness_block(candidate)
         if freshness_block:
             candidate["review_only"] = True
             candidate["grounding_eligible"] = False
             candidate["grounding_block_reason"] = freshness_block
         item["parser_candidate"] = candidate
-
-
-def _parser_candidate_freshness_block(candidate: dict[str, Any]) -> str:
-    freshness = (
-        candidate.get("freshness")
-        if isinstance(candidate.get("freshness"), dict)
-        else {}
-    )
-    if bool(freshness.get("stale")):
-        return "parser_candidate_stale"
-    if not (
-        _first_text(candidate.get("screenshot_sha256"))
-        and _first_text(candidate.get("capture_id"))
-        and _first_text(candidate.get("source_run_id"))
-    ):
-        return "parser_candidate_missing_current_screenshot_identity"
-    if not bool(freshness.get("same_screenshot")):
-        return "parser_candidate_screenshot_mismatch"
-    image_size = candidate.get("image_size") if isinstance(candidate.get("image_size"), dict) else {}
-    if _int_or_zero(image_size.get("width")) <= 0 or _int_or_zero(image_size.get("height")) <= 0:
-        return "parser_candidate_invalid_image_size"
-    bbox = candidate.get("bbox") if isinstance(candidate.get("bbox"), dict) else {}
-    x = _int_or_zero(bbox.get("x"))
-    y = _int_or_zero(bbox.get("y"))
-    width = _int_or_zero(bbox.get("w", bbox.get("width")))
-    height = _int_or_zero(bbox.get("h", bbox.get("height")))
-    if (
-        width <= 0
-        or height <= 0
-        or x < 0
-        or y < 0
-        or x + width > _int_or_zero(image_size.get("width"))
-        or y + height > _int_or_zero(image_size.get("height"))
-    ):
-        return "parser_candidate_invalid_bbox"
-    if str(candidate.get("source_type") or "").casefold() == "omniparser" and not (
-        _first_text(candidate.get("provider"))
-        and _first_text(candidate.get("model_revision"))
-    ):
-        return "parser_candidate_missing_provider_or_model_revision"
-    return ""
 
 
 def _candidate_provider(sources: list[Any]) -> str:
@@ -431,11 +421,26 @@ def _window_rect_from_bundle(bundle: dict[str, Any]) -> dict[str, int]:
     }
 
 
-def _bbox_from_sequence(value: list[Any], *, image_size: dict[str, int]) -> dict[str, int]:
+def _bbox_from_sequence(
+    value: list[Any],
+    *,
+    image_size: dict[str, Any],
+    coordinate_space: str | None = None,
+) -> dict[str, int]:
     numbers = [_float_or_zero(item) for item in value[:4]]
     width = _int_or_zero(image_size.get("width"))
     height = _int_or_zero(image_size.get("height"))
-    if width > 0 and height > 0 and all(0 <= item <= 1 for item in numbers):
+    if coordinate_space == "image_normalized_xyxy":
+        x1, y1, x2, y2 = numbers
+        x1 *= width
+        x2 *= width
+        y1 *= height
+        y2 *= height
+    elif coordinate_space == "image_pixel_xyxy":
+        x1, y1, x2, y2 = numbers
+    elif coordinate_space is not None:
+        return {}
+    elif width > 0 and height > 0 and all(0 <= item <= 1 for item in numbers):
         x1, y1, x2, y2 = numbers
         x1 *= width
         x2 *= width
