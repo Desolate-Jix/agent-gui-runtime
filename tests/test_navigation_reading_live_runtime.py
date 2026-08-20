@@ -437,12 +437,14 @@ def test_runtime_adapter_uses_dry_run_approval_before_real_click() -> None:
 
     assert len(calls) == 2
     assert calls[0][1]["dry_run"] is True
+    assert calls[0][1]["max_execution_attempts"] == 2
     assert calls[0][1]["goal"] == "Open the Atlas report"
     assert calls[0][1]["metadata"]["forbid_final_submit"] is True
     assert calls[0][1]["metadata"]["surface_context"] == "job_detail_apply_entry"
     assert calls[0][1]["metadata"]["source_interface_id"] == "job_detail"
     assert calls[0][1]["metadata"]["active_flow_started"] is False
     assert calls[1][1]["dry_run"] is False
+    assert calls[1][1]["max_execution_attempts"] == 2
     assert result["gate_result"]["allowed"] is True
     assert result["action_executed"] is True
     assert result["post_action_verified"] is True
@@ -642,6 +644,8 @@ def test_runtime_adapter_propagates_valid_replay_envelope_lineage_and_server_evi
     assert len(calls) == 2
     assert calls[0][1]["metadata"]["replay_context"] == context
     assert calls[1][1]["metadata"]["replay_context"] == context
+    assert calls[0][1]["max_execution_attempts"] == 1
+    assert calls[1][1]["max_execution_attempts"] == 1
     assert result["replay_context"] == context
     assert result["source_freshness"] == {
         "capture_id": "capture-list",

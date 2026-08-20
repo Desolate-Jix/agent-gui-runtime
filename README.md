@@ -84,7 +84,9 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 2. 后端已提供 `POST /panel/compile_reviewed_workflow_asset`、`/panel/publish_reviewed_workflow_asset` 和 `/panel/preview_reviewed_workflow_replay`：源工作流和资产均由服务端解析；发布前即时重编译并以 CAS revision/最终 SHA 做保护；预览为只读、非授权且必须提供 current observation，不会捕获屏幕或调用 action API。
 3. 现有面板已提供明确的 Compile → CAS Publish → read-only Preview 控件：操作绑定已保存且 SHA 精确匹配的工作流，并要求 current observation；工作流编辑或切换会使状态失效，且不授予 action/capture 授权。纯离线 synthetic SEEK 三状态 E2E 已完成（首页 → 详情 → 申请入口停止），使用真实 compiler/CAS、面板 API、replay coordinator 和 navigation adapter envelope，仅替换依赖为 fake；已覆盖错误 origin、stale、ambiguous 和 recovery 负例，但没有真实 GUI、网络或 action。下一步是受控本地面板/current-observation smoke，经操作者批准后再做真实外部窗口 Demo；v2 当前仍不覆盖 `read`/`scroll` 的可执行回放。
 4. 做通用窗口/坐标映射、长截图和滚动容器回放的性能基线；以可验证的稳定性优先，不把 OmniParser 当作授权层。
-5. 用同一组流程比较裸 Agent 与 runtime：成功率、误点击、停止质量、恢复时间、延迟和证据完整性。
+5. 已新增外部 checksum manifest 固定的纯离线合同基准：用不可变的 recorded Bare events 与 Runtime replay 比较分类、停止质量、有限恢复、延迟和派生 evidence digest。它不是实时 Bare Agent、模型能力、感知准确率或真实点击成功率测试。
+
+生产级 live replay orchestrator 和服务器采集 current observation 的接线仍未完成；当前 preview 不能执行。Replay 模式已把单次动作请求限制为一次 attempt，`read`、`scroll`、`fill_field`、`continue_next_step`、上传和所有 final-submit 类动作仍 fail closed。本里程碑没有合入 recovery-feedback 持久化权威层，恢复证据仅来自结构化 `recovery_decision_v1` 和离线回放报告。
 
 ## 发布信息
 

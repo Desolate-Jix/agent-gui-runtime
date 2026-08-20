@@ -123,7 +123,7 @@ open_external_apply
 - destination mismatch、foreground change、unexpected origin：立即 safe stop 并返回人工审核；
 - recovery 次数固定上限 1。
 
-所有失败输出结构化 `recovery_decision_v1`，并持久化 review feedback lineage。
+所有失败输出结构化、非授权的 `recovery_decision_v1`。本里程碑不建立 recovery-feedback 持久化权威层；只有在 server-issued selection、证据绑定、junction-safe publication 和跨进程 single-writer 都被证明后才能增加该层。
 
 ## Registry
 
@@ -133,7 +133,6 @@ v2 使用独立目录：
 runtime_state/reviewed-workflow-assets-v2/
   objects/<sha256>.json
   registry.json
-  recovery-feedback/<asset_id>/*.json
 ```
 
 Registry 使用 `expected_registry_revision` CAS。对象不可原地修改；重复发布同一 hash 幂等，语义改变生成新对象和 revision event。
@@ -148,6 +147,8 @@ Registry 使用 `expected_registry_revision` CAS。对象不可原地修改；�
 - replay：只接受已发布对象，仍必须经过 current capture、grounding、Gate 和 post verification。
 
 面板复用现有 workflow graph/evidence/step audit，只增加 v2 状态、hash、blocked reason、Compile、Publish 和 Replay Preview，不创建第二套前端权威状态。
+
+当前面板接线和纯离线合成 SEEK E2E 已完成；生产 current-observation capture 与 live execute orchestrator 仍缺失。Preview 不能执行，replay adapter 的每次 action request 只允许一个 attempt。
 
 ## SEEK MVP
 
@@ -167,3 +168,5 @@ homepage --open_detail--> detail --open_apply_flow--> apply_entry_stop_boundary
 4. Approved plan capture lineage 不一致时不会点击。
 5. 面板可显示 compile/publish/preview 状态和 node/edge evidence。
 6. 合成 SEEK 三状态路径通过端到端测试，所有危险动作保持 blocked。
+
+当前 1–6 已在纯离线合同范围满足。真实 GUI replay 不属于该完成判据；`read`、`scroll`、fill、upload、Continue 和 final-submit 继续 fail closed，直到生产 orchestrator 和对应 effect contract 完成。

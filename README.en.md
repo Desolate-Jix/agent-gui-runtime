@@ -83,7 +83,10 @@ The reusable runtime contract comes before site-specific patches: candidates car
 1. The `reviewed_workflow_asset_v2` contract, immutable CAS store, semantic compiler, verified replay coordinator, and bounded recovery path are implemented; old content is not migrated.
 2. Backend APIs and panel controls now support `Compile → CAS Publish → read-only Preview`; source workflows and assets are resolved and verified server-side, and preview never captures the screen or calls the action API.
 3. A synthetic three-state SEEK E2E path (home → detail → application entry stop) is verified with the real compiler, CAS, panel API, replay coordinator, and navigation adapter envelope. It uses fakes for external dependencies and makes no real GUI, network, or action claim; controlled local current-observation smoke is next.
-4. Benchmark generic window/coordinate mapping, long screenshots, and scroll-container replay; `read`/`scroll` executable replay remains deferred until a typed effect verifier exists. Compare Bare Agent and Runtime on success, misclicks, stop quality, recovery time, latency, and evidence completeness.
+4. Benchmark generic window/coordinate mapping, long screenshots, and scroll-container replay; executable `read`/`scroll` remains deferred until a typed effect verifier exists.
+5. An externally checksum-pinned offline contract benchmark now compares immutable recorded Bare events with Runtime replay classification, stop quality, bounded recovery, latency, and derived evidence digests. It is not a live Bare Agent, model capability, perception-accuracy, or real-click success benchmark.
+
+Production live replay orchestration and server-side current-observation capture are still missing; Preview cannot execute. Replay requests are limited to one action attempt, while `read`, `scroll`, `fill_field`, `continue_next_step`, upload, and every final-submit class remain fail closed. This milestone does not include an authoritative recovery-feedback persistence store; recovery evidence remains the structured `recovery_decision_v1` plus offline replay reports.
 
 ## Release information
 

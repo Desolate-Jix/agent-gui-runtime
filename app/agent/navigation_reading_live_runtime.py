@@ -317,7 +317,7 @@ class RuntimeNavigationOperationAdapter:
             "app_name": self._app_name,
             "capture_live": True,
             "enable_post_click_verification": True,
-            "max_execution_attempts": 2,
+            "max_execution_attempts": 1 if replay_context is not None else 2,
             "dry_run": True,
             "metadata": {
                 "forbid_final_submit": True,
