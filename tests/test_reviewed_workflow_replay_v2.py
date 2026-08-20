@@ -104,6 +104,7 @@ def _operation(selection: dict) -> dict:
             "trace_path": "logs/traces/capture-1.json",
         },
         "replay_context": {
+            "contract_version": "reviewed_workflow_replay_execution_context_v1",
             "asset_content_sha256": selection["asset_content_sha256"],
             "transition_id": selection["transition_id"],
             "selection_sha256": selection["selection_sha256"],
@@ -453,6 +454,15 @@ def test_post_rejects_forged_selection_old_capture_wrong_state_and_operation_sho
     unbound = _operation(selection)
     unbound.pop("replay_context")
     assert verify_transition_result(asset, selection, unbound, _observation(asset, "capture-2", "d" * 64, "anchor_detail"))["failure_code"] == "operation_lineage_mismatch"
+    missing_replay_contract = _operation(selection)
+    missing_replay_contract["replay_context"].pop("contract_version")
+    assert verify_transition_result(asset, selection, missing_replay_contract, _observation(asset, "capture-2", "d" * 64, "anchor_detail"))["failure_code"] == "operation_lineage_mismatch"
+    wrong_replay_contract = _operation(selection)
+    wrong_replay_contract["replay_context"]["contract_version"] = "forged_replay_context"
+    assert verify_transition_result(asset, selection, wrong_replay_contract, _observation(asset, "capture-2", "d" * 64, "anchor_detail"))["failure_code"] == "operation_lineage_mismatch"
+    extra_replay_context = _operation(selection)
+    extra_replay_context["replay_context"]["extra"] = "forged"
+    assert verify_transition_result(asset, selection, extra_replay_context, _observation(asset, "capture-2", "d" * 64, "anchor_detail"))["failure_code"] == "operation_lineage_mismatch"
     no_plan = _operation(selection)
     no_plan["approved_plan_id"] = ""
     assert verify_transition_result(asset, selection, no_plan, _observation(asset, "capture-2", "d" * 64, "anchor_detail"))["failure_code"] == "operation_lineage_mismatch"

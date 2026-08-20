@@ -561,6 +561,7 @@ def verify_transition_result(
         return _failure("transition_verification_v1", "operation_lineage_mismatch", state_advanced=False)
     replay_context = operation_result.get("replay_context")
     expected_replay_context = {
+        "contract_version": "reviewed_workflow_replay_execution_context_v1",
         "asset_content_sha256": selection["asset_content_sha256"],
         "transition_id": selection["transition_id"],
         "selection_sha256": selection["selection_sha256"],
