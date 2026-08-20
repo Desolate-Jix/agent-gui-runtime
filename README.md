@@ -1,6 +1,6 @@
 # agent-gui-runtime
 
-**版本 0.2.0 · Windows GUI Agent Runtime**
+**版本 0.3.0 · Windows GUI Agent Runtime**
 
 [English](README.en.md)
 
@@ -88,7 +88,7 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 ## 发布信息
 
-- 版本：`0.2.0`
+- 版本：`0.3.0`
 - 根项目许可证：[`ISC`](LICENSE)。
 - 可选第三方组件的许可和获取边界：[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 - 本版本变更：[`CHANGELOG.md`](CHANGELOG.md)。

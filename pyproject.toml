@@ -1,6 +1,6 @@
 [project]
 name = "agent-gui-runtime"
-version = "0.2.0"
+version = "0.3.0"
 license = { file = "LICENSE" }
 description = "Local Windows GUI automation runtime for AI agents"
 readme = "README.md"

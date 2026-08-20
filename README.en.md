@@ -1,6 +1,6 @@
 # agent-gui-runtime
 
-**Version 0.2.0 · Windows GUI Agent Runtime**
+**Version 0.3.0 · Windows GUI Agent Runtime**
 
 [中文](README.md)
 
@@ -80,14 +80,14 @@ The reusable runtime contract comes before site-specific patches: candidates car
 
 ## Next mainline
 
-1. Add `reviewed_workflow_asset_v2` for immutable, traceable reviewed assets containing semantic states, transitions, preconditions, expected effects, verification, and recovery; do not migrate old content.
-2. Connect `Learning → Review → Publish → Verified Replay` for the SEEK home entry path and emit fresh-capture and post-action evidence for every replay.
-3. Benchmark generic window/coordinate mapping, long screenshots, and scroll-container replay; prioritize verifiable stability rather than treating OmniParser as an authorization layer.
-4. Compare Bare Agent and Runtime on success, misclicks, stop quality, recovery time, latency, and evidence completeness.
+1. The `reviewed_workflow_asset_v2` contract, immutable CAS store, semantic compiler, verified replay coordinator, and bounded recovery path are implemented; old content is not migrated.
+2. Backend APIs and panel controls now support `Compile → CAS Publish → read-only Preview`; source workflows and assets are resolved and verified server-side, and preview never captures the screen or calls the action API.
+3. A synthetic three-state SEEK E2E path (home → detail → application entry stop) is verified with the real compiler, CAS, panel API, replay coordinator, and navigation adapter envelope. It uses fakes for external dependencies and makes no real GUI, network, or action claim; controlled local current-observation smoke is next.
+4. Benchmark generic window/coordinate mapping, long screenshots, and scroll-container replay; `read`/`scroll` executable replay remains deferred until a typed effect verifier exists. Compare Bare Agent and Runtime on success, misclicks, stop quality, recovery time, latency, and evidence completeness.
 
 ## Release information
 
-- Version: `0.2.0`
+- Version: `0.3.0`
 - Root project license: [`ISC`](LICENSE).
 - Optional third-party component boundaries: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 - Changes: [`CHANGELOG.md`](CHANGELOG.md).
